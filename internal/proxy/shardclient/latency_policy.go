@@ -77,7 +77,7 @@ func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBal
 				excludeNodes.Clear()
 			}
 		}
-		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes)
+		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes, false)
 	}
 	node, selected, err := trySelectNode(true)
 	if err != nil {
@@ -88,7 +88,7 @@ func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBal
 
 // selectCandidate never performs a coordinator RPC or clears exclusions. Its
 // selection and workload reservation both belong to the calling goroutine.
-func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet) (_ NodeInfo, _ bool, err error) {
+func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet, forHedge bool) (_ NodeInfo, _ bool, err error) {
 	log := mlog.With(mlog.FieldCollectionID(workload.CollectionID), mlog.String("channelName", workload.Channel))
 	shardLeaders = FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
 	if len(shardLeaders) == 0 && workload.ResourceGroup != "" {
@@ -144,6 +144,8 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	var targetNodeID int64
 	if lw != nil {
 		targetNodeID, err = lw.SelectNodeForKey(ctx, statsKey(workload), nodes)
+	} else if roundRobin, ok := balancer.(*RoundRobinBalancer); ok && forHedge {
+		targetNodeID = roundRobin.selectHedgeNode(nodes)
 	} else {
 		targetNodeID, err = balancer.SelectNode(ctx, nodes, workload.Nq)
 	}
@@ -159,16 +161,13 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
-// selectAfterOverload makes one selection from the cached topology. The balancer
-// checks current heartbeat health; failure must not enter refreshing retries.
-func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
-	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
-	if err != nil {
-		return NodeInfo{}, false, err
-	}
+// selectAfterOverload uses the request's captured leader snapshot. No cache lookup
+// occurs here: even a cache-preferred lookup refreshes on a miss. The captured
+// balancer still checks heartbeat health and the request's routing scope.
+func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, leaders []NodeInfo, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	// Failover candidates must pass the captured balancer's health check.
 	workload.PreferredNodeID = 0
-	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded)
+	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded, false)
 }
 
 // executeOverloadAware wraps a single retry attempt so overload refusals switch
@@ -188,7 +187,7 @@ func (lb *LBPolicyImpl) executeOverloadAware(
 			if !again || !*refused || ctx.Err() != nil {
 				return again, err
 			}
-			if !workload.Hedgeable || *extraUsed {
+			if *extraUsed || !workload.Hedgeable && !workload.OverloadRetryable {
 				return false, *overloadErr
 			}
 			*extraUsed = true
@@ -201,6 +200,7 @@ func (lb *LBPolicyImpl) executeOverloadAware(
 func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload ChannelWorkload, balancer LBBalancer, lw *LatencyWeightedBalancer) error {
 	excludeNodes := typeutil.NewUniqueSet()
 	var lastErr error
+	var leaders []NodeInfo
 	var overloadErr error
 	refused := false
 	extraUsed := false
@@ -210,7 +210,7 @@ func (lb *LBPolicyImpl) executeWeightedWithRetry(ctx context.Context, workload C
 		var selected bool
 		var err error
 		if overloadErr != nil {
-			node, selected, err = lb.selectAfterOverload(ctx, balancer, lw, workload, &excludeNodes)
+			node, selected, err = lb.selectAfterOverload(ctx, balancer, lw, workload, leaders, &excludeNodes)
 			if err != nil {
 				return false, overloadErr
 			}

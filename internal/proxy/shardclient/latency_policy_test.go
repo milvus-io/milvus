@@ -106,18 +106,18 @@ func TestLatencyCandidateRetainsResourceGroupScope(t *testing.T) {
 	}
 	work := ChannelWorkload{Channel: hedgeTestChannel, ResourceGroup: "group-b", PreferredNodeID: 1}
 	excluded := typeutil.NewUniqueSet(int64(2))
-	node, selected, err := h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded)
+	node, selected, err := h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded, false)
 	require.NoError(t, err)
 	require.True(t, selected)
 	require.EqualValues(t, 3, node.NodeID)
 	h.balancer.ReleaseSelection(statsKey(work), node.NodeID)
 	excluded.Insert(3)
-	_, _, err = h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded)
+	_, _, err = h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded, false)
 	require.ErrorIs(t, err, merr.ErrChannelNotAvailable)
 	require.True(t, excluded.Contain(2))
 	require.True(t, excluded.Contain(3), "hedge candidate selection must not clear exclusions")
 	work.ResourceGroup = "missing"
-	_, _, err = h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded)
+	_, _, err = h.policy.selectCandidate(context.Background(), h.balancer, h.balancer, work, leaders, &excluded, false)
 	require.ErrorIs(t, err, merr.ErrCollectionNotFullyLoaded)
 }
 

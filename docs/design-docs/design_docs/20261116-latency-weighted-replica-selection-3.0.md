@@ -227,11 +227,11 @@ overloaded, and a task that waited longer than its limit by the time it leaves
 the queue is refused then. `milvus_querynode_read_task_queue_duration{outcome="overloaded"}`
 counts refused tasks.
 
-**One extra attempt, then the refusal goes to the client.** A `Hedgeable` read
+**One extra attempt, then the refusal goes to the client.** A `Hedgeable` or `OverloadRetryable` read
 gets at most one extra attempt on another replica across hedging and overload
 failover combined. Either the first replica refuses it as overloaded and it
-moves to another replica at once (bypassing policy retry backoff and hedge
-delay), or the hedge delay fires and uses that slot. A second overload refusal
+moves to another replica from the request's captured leader snapshot at once
+(bypassing policy retry backoff and hedge delay), or the hedge delay fires and uses that slot. A second overload refusal
 ends the request immediately with `ErrServiceTooManyRequests` without trying a
 third replica or refreshing shard leaders. Non-overload replica failures (down
 node, broken connection) do not consume the extra-attempt slot. This applies
@@ -261,19 +261,56 @@ rollout or snapshot-divergence reproduction is claimed.
 Requery channels skipped locally are filtered before replica selection. They
 create no replica observations or hedge-delay samples. A request that expires
 while acquiring a client also releases selection accounting without recording
-a replica failure. System errors already observed from an attempt take
+a replica failure. `ClientBase` marks local context failures only when it has
+not entered any RPC callback, including expiry after the shard client was
+acquired. This marker preserves the original context error and releases selection
+accounting without recording replica failure penalties. Search/Query callbacks
+also avoid invalidating the shard cache for this local failure.
+After callback entry, a deadline failure remains replica feedback because the
+client cannot establish whether the request was dispatched. System errors already observed from an attempt take
 precedence over a later sibling cancellation; InputError keeps its precedence.
 
 Queue wait is checked again when a worker starts, before `PreExecute` and
 `Execute`, including time blocked handing off to the worker pool. The
 `scheduled` queue-duration observation is recorded at that point. Rejection
 occurs when the worker becomes available; queue budgets do not install timers.
-Searches with a positive queue budget merge only when their absolute queue
-expiry times match. This preserves the expiry when cancellation promotes a
-surviving member, at the cost of fewer merge opportunities under queue limits.
+Compatible legacy Searches may merge with different queue budgets. Each original
+request retains its enqueue time and captured queue limit. At dequeue and worker
+start, cancellation, deadline expiry, and queue-budget expiry remove only the
+affected members; surviving members retain their own budgets after owner
+promotion. Existing NQ, request compatibility, and deadline-gap merge rules still
+apply. Queue-duration observations remain per scheduler entry: a partially
+pruned group does not add a separate observation for every rejected member.
 
 Unknown replica latency uses the candidate fallback before applying the current
 failure penalty. A recent penalty still suppresses a replica with no successes;
 a small decayed penalty cannot make an unknown replica appear faster than the
 fallback. Hedge-delay samples continue to be collected while hedging is disabled
 so live enabling can use the observed workload latency.
+
+## Default behavior and retry capability
+
+With `maxQueueWaitRatio=0` and `proxy.hedging.enabled=false`, the new queue wait
+limit and concurrent hedging are off. Overload fail-fast and one serial alternate
+attempt are still active, including existing queue-capacity refusals. Compared
+with the old retry loop, this can return a refusal sooner and avoids repeated
+work against overloaded replicas. It can also reject a request that might have
+succeeded after a longer wait; disabling hedging does not restore the old overload
+retry behavior. No leader-cache lookup or coordinator refresh is performed for
+this extra attempt, even if another request invalidated the cache.
+
+`Hedgeable` permits concurrent attempts and requires isolated publication through
+`CommitAttempt`. `OverloadRetryable` permits only one serial failover after a
+refusal and requires the callback to have published no results or writes on that
+failure. Search and Query already meet the stronger hedging contract; GetStatistics, Highlight, and RunAnalyzer
+opt into serial failover without concurrent execution. This capability does not
+enroll an RPC in the QueryNode read scheduler; RunAnalyzer currently calls the
+analyzer directly. Delete-by-expression does
+not opt in: its Query stream can already have produced DeleteTasks before a later
+receive fails, so restarting the whole callback could repeat writes. Requests
+without either capability propagate an overload refusal immediately.
+
+Round-robin hedges use an independent cursor. A hedge selecting the sole
+alternative no longer advances the primary cursor and biases subsequent serial
+requests toward the slow replica. This does not impose deterministic iteration
+order on the candidate map or change LookAside workload accounting.

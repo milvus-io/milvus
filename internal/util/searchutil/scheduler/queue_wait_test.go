@@ -238,16 +238,16 @@ func TestQueueBudgetCheckedAfterWorkerWait(t *testing.T) {
 	s.gpuPool.Release()
 }
 
-func TestMergePreservesAbsoluteQueueExpiry(t *testing.T) {
+func TestMergeAllowsDifferentQueueBudgets(t *testing.T) {
 	setQueueWait(t, "0.1", "1s")
 	now := time.Now()
 	for _, budgets := range []struct {
 		owner, incoming time.Duration
 		merge           bool
 	}{
-		{100 * time.Millisecond, 30 * time.Millisecond, false},
+		{100 * time.Millisecond, 30 * time.Millisecond, true},
 		{100 * time.Millisecond, 20 * time.Millisecond, true},
-		{0, 20 * time.Millisecond, false},
+		{0, 20 * time.Millisecond, true},
 		{0, 0, true},
 	} {
 		q := newMergeTaskQueue("")
@@ -262,22 +262,38 @@ func TestMergePreservesAbsoluteQueueExpiry(t *testing.T) {
 	}
 }
 
+type queueBudgetTestTask struct {
+	Task
+	budget      QueueBudget
+	pruneQueued func(time.Time) (Task, int, error)
+}
+
+func (t *queueBudgetTestTask) SetQueueBudget(b QueueBudget) { t.budget = b }
+func (t *queueBudgetTestTask) QueueBudget() QueueBudget     { return t.budget }
+func (t *queueBudgetTestTask) PruneQueued(now time.Time) (Task, int, error) {
+	if t.pruneQueued != nil {
+		return t.pruneQueued(now)
+	}
+	return t, 0, nil
+}
+
 func TestQueueBudgetAfterCanceledOwnerPromotion(t *testing.T) {
 	setQueueWait(t, "0.1", "1s")
 	s := newScheduler(newFIFOPolicy()).(*scheduler)
 	defer s.Stop()
 	now := time.Now()
-	survivor := newMockTask(mockTaskConfig{nq: 2, executeCost: time.Millisecond})
-	owner := newMockTask(mockTaskConfig{nq: 5, prune: func() (Task, int, error) {
-		return survivor, 1, context.Canceled
-	}})
+	survivor := &queueBudgetTestTask{Task: newMockTask(mockTaskConfig{nq: 2, executeCost: time.Millisecond})}
+	// Capture the survivor's own enqueue budget before it joins a group.
+	newQueuedTask(survivor, now.Add(200*time.Millisecond))
+	require.Equal(t, QueueBudget{EnqueueTime: now.Add(200 * time.Millisecond), MaxWait: time.Second}, survivor.QueueBudget())
+	owner := &queueBudgetTestTask{Task: newMockTask(mockTaskConfig{nq: 5}), pruneQueued: func(time.Time) (Task, int, error) { return survivor, 1, context.Canceled }}
 	require.NoError(t, addAt(s, owner, now))
 	next, nq, _ := s.setupExecListener(nil, now.Add(500*time.Millisecond))
 	require.Same(t, survivor, next.Task)
 	require.EqualValues(t, 5, nq)
-	require.NoError(t, next.Task.Context().Err())
+	require.Equal(t, survivor.QueueBudget().EnqueueTime, next.enqueueTime)
 	s.updateWaitingTaskCounter(-1, -nq)
 	require.Zero(t, s.GetWaitingTaskTotalNQ())
-	require.False(t, next.overloaded(now.Add(900*time.Millisecond)))
-	require.True(t, next.overloaded(now.Add(1100*time.Millisecond)))
+	require.False(t, next.overloaded(now.Add(1100*time.Millisecond)), "owner expiry must not shorten survivor budget")
+	require.True(t, next.overloaded(now.Add(1300*time.Millisecond)), "promotion must not restart survivor wait")
 }

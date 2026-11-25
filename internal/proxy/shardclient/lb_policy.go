@@ -51,19 +51,13 @@ type ChannelWorkload struct {
 	PreferredNodeID int64
 	// StatsClass separates latency observations by request kind and consistency.
 	StatsClass string
-	// Hedgeable tells that the request may get one extra attempt on another
-	// replica, and one only: a hedge when its attempt on the first replica is
-	// slow, or an attempt that takes its place when the first replica refuses
-	// it as overloaded. When that attempt is refused too, the request ends
-	// with the refusal. Exec must call CommitAttempt before it publishes a
-	// result, as two attempts of the channel may run at once.
-	//
-	// Without it a refusal ends the request at once. The Proxy sets it for
-	// searches and queries at every consistency level.
-	//
-	// A replica that fails otherwise (it is down, the connection breaks) is
-	// not concerned: the request moves on to the other replicas as before.
+	// Hedgeable allows a concurrent speculative attempt. Exec must publish
+	// through CommitAttempt. Hedging and overload failover share one extra slot.
 	Hedgeable bool
+	// OverloadRetryable allows one serial failover after an overload refusal,
+	// without allowing concurrent execution. Exec must not publish partial
+	// results or perform writes before returning an overload error.
+	OverloadRetryable bool
 	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
 	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
 	// the candidates of this one channel only -- the channel itself is still
@@ -86,14 +80,15 @@ type ChannelWorkload struct {
 
 type CollectionWorkLoad struct {
 	// SkipChannel omits requery channels with no hits before replica selection.
-	SkipChannel    func(string) bool
-	Db             string
-	CollectionName string
-	CollectionID   int64
-	Nq             int64
-	Exec           ExecuteFunc
-	StatsClass     string
-	Hedgeable      bool
+	SkipChannel       func(string) bool
+	Db                string
+	CollectionName    string
+	CollectionID      int64
+	Nq                int64
+	Exec              ExecuteFunc
+	StatsClass        string
+	Hedgeable         bool
+	OverloadRetryable bool
 	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates,
 	// through ForChannel. The fan-out itself stays unscoped: every shard is
 	// visited, and a shard the group cannot serve fails its channel rather
@@ -110,16 +105,17 @@ type CollectionWorkLoad struct {
 // sources; the caller keeps whatever it did before.
 func (w CollectionWorkLoad) ForChannel(channel string, preferredNodeID int64) ChannelWorkload {
 	return ChannelWorkload{
-		Db:              w.Db,
-		CollectionName:  w.CollectionName,
-		CollectionID:    w.CollectionID,
-		Channel:         channel,
-		Nq:              w.Nq,
-		Exec:            w.Exec,
-		PreferredNodeID: preferredNodeID,
-		ResourceGroup:   w.ResourceGroup,
-		StatsClass:      w.StatsClass,
-		Hedgeable:       w.Hedgeable,
+		Db:                w.Db,
+		CollectionName:    w.CollectionName,
+		CollectionID:      w.CollectionID,
+		Channel:           channel,
+		Nq:                w.Nq,
+		Exec:              w.Exec,
+		PreferredNodeID:   preferredNodeID,
+		ResourceGroup:     w.ResourceGroup,
+		StatsClass:        w.StatsClass,
+		Hedgeable:         w.Hedgeable,
+		OverloadRetryable: w.OverloadRetryable,
 	}
 }
 
@@ -437,7 +433,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		var targetNode NodeInfo
 		var selectedByBalancer bool
 		if overloadErr != nil {
-			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, nil, workload, &excludeNodes)
+			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, nil, workload, shardLeaders, &excludeNodes)
 			if err != nil {
 				return false, overloadErr
 			}
@@ -526,7 +522,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// Check the caller context: a gRPC cancellation error does not
 			// unwrap to context.Canceled. Internal cancellation and deadline
 			// expiry keep the existing blacklist policy.
-			if errors.Is(ctx.Err(), context.Canceled) {
+			if errors.Is(ctx.Err(), context.Canceled) || grpcclient.IsRequestNotDispatched(err) {
 				return false, err
 			}
 			// An input error is the request's own fault: re-dispatching it to

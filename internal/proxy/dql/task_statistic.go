@@ -281,11 +281,12 @@ func (g *GetStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		g.resultBuf = typeutil.NewConcurrentSet[*internalpb.GetStatisticsResponse]()
 	}
 	err := g.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             g.request.GetDbName(),
-		CollectionID:   g.CollectionID,
-		CollectionName: g.collectionName,
-		Nq:             1,
-		Exec:           g.getStatisticsShard,
+		OverloadRetryable: true,
+		Db:                g.request.GetDbName(),
+		CollectionID:      g.CollectionID,
+		CollectionName:    g.collectionName,
+		Nq:                1,
+		Exec:              g.getStatisticsShard,
 	})
 	if err != nil {
 		return errors.Wrap(err, "failed to statistic")

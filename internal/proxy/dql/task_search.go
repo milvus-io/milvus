@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1667,7 +1668,7 @@ func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
-		if !errors.Is(ctx.Err(), context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
 			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return err

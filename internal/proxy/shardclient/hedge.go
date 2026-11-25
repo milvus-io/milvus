@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -241,7 +242,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				continue
 			}
 			start := time.Now()
-			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded)
+			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded, true)
 			if err != nil {
 				if !candidates.refreshed {
 					lookup(true)
@@ -279,14 +280,14 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 			} else {
 				excludeNodes.Insert(r.node)
-				if lw == nil && !errors.Is(ctx.Err(), context.Canceled) && !(r.getClientErr && ctx.Err() != nil) {
+				if lw == nil && !errors.Is(ctx.Err(), context.Canceled) && (!r.getClientErr || ctx.Err() == nil) && !grpcclient.IsRequestNotDispatched(r.err) {
 					if r.getClientErr || !merr.IsRetryableErr(r.err) {
 						lb.blacklist.Add(workload.Channel, r.node)
 					} else if requestExcludedNodes != nil {
 						requestExcludedNodes.Insert(r.node)
 					}
 				}
-				if lastErr == nil || !(merr.IsCanceledOrTimeout(r.err) || status.Code(r.err) == codes.Canceled || status.Code(r.err) == codes.DeadlineExceeded) {
+				if lastErr == nil || (!merr.IsCanceledOrTimeout(r.err) && status.Code(r.err) != codes.Canceled && status.Code(r.err) != codes.DeadlineExceeded) {
 					lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
 				}
 				if isOverloadErr(r.err) {

@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -1231,7 +1232,7 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		if !errors.Is(ctx.Err(), context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
 			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return err

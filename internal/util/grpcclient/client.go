@@ -575,6 +575,7 @@ func (c *ClientBase[T]) checkNodeSessionExist(ctx context.Context) bool {
 func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	log := mlog.With(mlog.String("client_role", c.GetRole()))
 	var ret any
+	dispatched := false
 	var mismatched *clientConnWrapper[T]
 	attempts := retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))
 	failFastOnConnectionError, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
@@ -600,7 +601,12 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		}
 
 		wrapper.Pin()
+		if err := ctx.Err(); err != nil {
+			wrapper.Unpin()
+			return false, err
+		}
 		var err error
+		dispatched = true
 		ret, err = caller(wrapper.client)
 		wrapper.Unpin()
 
@@ -684,6 +690,9 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	// default value list: MaxAttempts 10, InitialBackoff 0.2s, MaxBackoff 10s
 	// and consume 42.6s if all retry failed
 	if err != nil {
+		if !dispatched && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return generic.Zero[T](), &requestNotDispatchedError{cause: err}
+		}
 		// make the error more friendly to user
 		if IsCrossClusterRoutingErr(err) {
 			err = merr.ErrServiceUnavailable
@@ -698,7 +707,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 // Call does a grpc call
 func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	if !funcutil.CheckCtxValid(ctx) {
-		return generic.Zero[T](), ctx.Err()
+		return generic.Zero[T](), &requestNotDispatchedError{cause: ctx.Err()}
 	}
 
 	ret, err := c.call(ctx, caller)
