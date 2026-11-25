@@ -240,8 +240,14 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		key := paramtable.Get().CommonCfg.GroupByMaxGroups.Key
 		paramtable.Get().Save(key, "2")
 		defer paramtable.Get().Reset(key)
+		msg, err = pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
+		require.NoError(t, err)
+		colors = msg[PipelineOutput].(*internalpb.RetrieveResults).GetFieldsData()[0].GetScalars().GetStringData().GetData()
+		assert.Equal(t, []string{"blue", "green"}, colors)
+
+		paramtable.Get().Save(key, "1")
 		_, err = pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
-		require.ErrorContains(t, err, "too many groups (3)")
+		require.ErrorContains(t, err, "too many groups (2)")
 	})
 
 	t.Run("group by order by", func(t *testing.T) {

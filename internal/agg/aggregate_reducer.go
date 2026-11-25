@@ -1,7 +1,9 @@
 package agg
 
 import (
+	"container/heap"
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -17,6 +19,7 @@ type GroupAggReducer struct {
 	groupByFieldIds []int64
 	aggregates      []*planpb.Aggregate
 	groupLimit      int64
+	keyOrder        []GroupKeyOrder
 	schema          *schemapb.CollectionSchema
 	layout          func() (*aggregationLayout, error)
 }
@@ -29,10 +32,17 @@ type aggregationLayout struct {
 }
 
 func NewGroupAggReducer(groupByFieldIds []int64, aggregates []*planpb.Aggregate, groupLimit int64, schema *schemapb.CollectionSchema) *GroupAggReducer {
+	return NewOrderedGroupAggReducer(groupByFieldIds, aggregates, groupLimit, schema, nil)
+}
+
+// NewOrderedGroupAggReducer creates a grouped reducer that retains at most
+// groupLimit keys according to keyOrder when groupLimit > 0 and keyOrder is set.
+func NewOrderedGroupAggReducer(groupByFieldIds []int64, aggregates []*planpb.Aggregate, groupLimit int64, schema *schemapb.CollectionSchema, keyOrder []GroupKeyOrder) *GroupAggReducer {
 	reducer := &GroupAggReducer{
 		groupByFieldIds: groupByFieldIds,
 		aggregates:      aggregates,
 		groupLimit:      groupLimit,
+		keyOrder:        keyOrder,
 		schema:          schema,
 	}
 	reducer.layout = sync.OnceValues(reducer.prepareLayout)
@@ -338,15 +348,20 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 type GroupAggBuffer struct {
 	reducer          *GroupAggReducer      // Aggregation definitions and group limit for this buffer.
 	hashValsMap      map[uint64]*Bucket    // Accumulated group values and aggregate state by hash.
+	keyHeap          *groupTopKHeap        // Bounded max-heap when retaining top-K keys in GroupKeyOrder.
 	firstFieldData   []*schemapb.FieldData // Empty output column templates from the first partial.
 	totalGroupCount  int64                 // Number of distinct groups accumulated.
 	allRetrieveCount int64                 // Retrieve count summed across merged partials.
-	limitReached     bool                  // Whether the configured group limit has been reached.
+	limitReached     bool                  // Whether the configured unordered group limit has been reached.
 }
 
 // NewBuffer creates a grouped output Buffer for one merge or ReduceStream.
 func (reducer *GroupAggReducer) NewBuffer() *GroupAggBuffer {
-	return &GroupAggBuffer{reducer: reducer, hashValsMap: make(map[uint64]*Bucket)}
+	buf := &GroupAggBuffer{reducer: reducer, hashValsMap: make(map[uint64]*Bucket)}
+	if reducer.groupLimit > 0 && len(reducer.keyOrder) > 0 {
+		buf.keyHeap = &groupTopKHeap{order: reducer.keyOrder}
+	}
+	return buf
 }
 
 // Merge accumulates grouped partial results without assembling the output.
@@ -431,54 +446,111 @@ func (buffer *GroupAggBuffer) Merge(results []*PartialAggregationResult) error {
 			}
 		}
 
+		aggScratch := &FieldValue{}
 		for row := 0; row < rowCount; row++ {
-			rowFieldValues := make([]*FieldValue, outputColumnCount)
 			var hashVal uint64
-			for col := 0; col < outputColumnCount; col++ {
-				if col < numGroupingKeys {
-					if col > 0 {
-						hashVal = typeutil2.HashMix(hashVal, hashers[col].Hash(row))
-					} else {
-						hashVal = hashers[col].Hash(row)
-					}
-					if hashers[col].IsNullAt(row) {
-						rowFieldValues[col] = NewNullFieldValue()
-					} else {
-						rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
-					}
-				} else if accumulators[col-numGroupingKeys].IsNullAt(row) {
-					rowFieldValues[col] = NewNullFieldValue()
+			for col := 0; col < numGroupingKeys; col++ {
+				if col > 0 {
+					hashVal = typeutil2.HashMix(hashVal, hashers[col].Hash(row))
 				} else {
-					rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
+					hashVal = hashers[col].Hash(row)
 				}
 			}
 
-			newRow := NewRow(rowFieldValues)
 			bucket := buffer.hashValsMap[hashVal]
-			if bucket == nil {
-				if buffer.limitReached {
+			rowIndex := NONE
+			if bucket != nil {
+				rowIndex = bucket.FindByAccessors(hashers, row)
+			}
+			if rowIndex != NONE {
+				if err := accumulateFromAccessors(bucket.RowAt(rowIndex), numGroupingKeys, accumulators, row, aggs, aggScratch); err != nil {
+					return err
+				}
+				continue
+			}
+
+			if buffer.limitReached {
+				continue
+			}
+			if buffer.keyHeap != nil && buffer.totalGroupCount >= buffer.reducer.groupLimit {
+				worst := buffer.keyHeap.entries[0]
+				if compareAccessorToRow(hashers, row, worst.row, buffer.keyHeap.order) >= 0 {
 					continue
 				}
-				bucket = NewBucket()
-				bucket.AddRow(newRow)
-				buffer.hashValsMap[hashVal] = bucket
-				buffer.totalGroupCount++
-				buffer.limitReached = buffer.reducer.groupLimit != -1 && buffer.totalGroupCount >= buffer.reducer.groupLimit
-			} else if rowIndex := bucket.Find(newRow, numGroupingKeys); rowIndex == NONE {
-				if buffer.limitReached {
-					continue
+				if evictBucket := buffer.hashValsMap[worst.hashVal]; evictBucket != nil {
+					evictBucket.RemoveRow(worst.row)
+					if evictBucket.RowCount() == 0 {
+						delete(buffer.hashValsMap, worst.hashVal)
+					}
 				}
-				bucket.AddRow(newRow)
-				buffer.totalGroupCount++
-				buffer.limitReached = buffer.reducer.groupLimit != -1 && buffer.totalGroupCount >= buffer.reducer.groupLimit
-			} else if err := bucket.Accumulate(newRow, rowIndex, numGroupingKeys, aggs); err != nil {
-				return err
+				buffer.totalGroupCount--
+				if hashVal == worst.hashVal {
+					// Re-fetch in case evicting worst deleted the bucket for hashVal.
+					bucket = buffer.hashValsMap[hashVal]
+				}
+				newRow := buildGroupRow(hashers, accumulators, row)
+				buffer.insertGroupRow(hashVal, bucket, newRow)
+				buffer.keyHeap.entries[0] = groupHeapEntry{hashVal: hashVal, row: newRow}
+				heap.Fix(buffer.keyHeap, 0)
+			} else {
+				newRow := buildGroupRow(hashers, accumulators, row)
+				buffer.insertGroupRow(hashVal, bucket, newRow)
+				if buffer.keyHeap != nil {
+					heap.Push(buffer.keyHeap, groupHeapEntry{hashVal: hashVal, row: newRow})
+				} else {
+					buffer.limitReached = buffer.reducer.groupLimit != -1 && buffer.totalGroupCount >= buffer.reducer.groupLimit
+				}
 			}
 			if buffer.totalGroupCount > maxGroupByGroups {
 				return merr.WrapErrParameterInvalidMsg("GROUP BY produced too many groups (%d). "+
 					"Add filters or increase common.groupBy.maxGroups (current: %d)",
 					buffer.totalGroupCount, maxGroupByGroups)
 			}
+		}
+	}
+	return nil
+}
+
+func (buffer *GroupAggBuffer) insertGroupRow(hashVal uint64, bucket *Bucket, row *Row) {
+	if bucket == nil {
+		bucket = NewBucket()
+		buffer.hashValsMap[hashVal] = bucket
+	}
+	bucket.AddRow(row)
+	buffer.totalGroupCount++
+}
+
+func buildGroupRow(hashers, accumulators []FieldAccessor, row int) *Row {
+	numKeys := len(hashers)
+	values := make([]*FieldValue, numKeys+len(accumulators))
+	for col, acc := range hashers {
+		if acc.IsNullAt(row) {
+			values[col] = NewNullFieldValue()
+		} else {
+			values[col] = NewFieldValue(acc.ValAt(row))
+		}
+	}
+	for i, acc := range accumulators {
+		if acc.IsNullAt(row) {
+			values[numKeys+i] = NewNullFieldValue()
+		} else {
+			values[numKeys+i] = NewFieldValue(acc.ValAt(row))
+		}
+	}
+	return NewRow(values)
+}
+
+func accumulateFromAccessors(target *Row, numKeys int, accumulators []FieldAccessor, row int, aggs []AggregateBase, scratch *FieldValue) error {
+	for i, op := range aggs {
+		acc := accumulators[i]
+		if acc.IsNullAt(row) {
+			scratch.SetNull()
+		} else {
+			scratch.val = acc.ValAt(row)
+			scratch.isNull = false
+		}
+		if err := op.Update(target.FieldValueAt(numKeys+i), scratch); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -491,6 +563,19 @@ func (buffer *GroupAggBuffer) Result() (*PartialAggregationResult, error) {
 	}
 	reducedResult := newPartialAggregationResult(nil, buffer.allRetrieveCount)
 	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(buffer.firstFieldData, buffer.totalGroupCount)
+	if buffer.keyHeap != nil {
+		sorted := slices.Clone(buffer.keyHeap.entries)
+		slices.SortFunc(sorted, func(a, b groupHeapEntry) int {
+			return compareRowsByOrder(a.row, b.row, buffer.keyHeap.order)
+		})
+		colCount := len(reducedResult.GetFieldDatas())
+		for _, entry := range sorted {
+			if err := AssembleSingleRow(colCount, entry.row, reducedResult.GetFieldDatas()); err != nil {
+				return nil, err
+			}
+		}
+		return reducedResult, nil
+	}
 	for _, bucket := range buffer.hashValsMap {
 		if err := AssembleBucket(bucket, reducedResult.GetFieldDatas()); err != nil {
 			return nil, err
