@@ -2306,26 +2306,9 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 }
 
 // searchRequestNq returns the number of query rows of a search request as it
-// arrives, before any task has looked at it. The nq field is optional -- older
-// clients and the RESTful API leave it at 0 -- so a request that does not
-// declare it is counted by what it carries: the rows of its placeholder group,
-// or its primary keys when it searches by primary key. Reading the field alone
-// lets such a request through the rate limiter uncharged and lists it with
-// nq 0.
-//
-// A malformed placeholder group counts as 0 here; the search task rejects it.
+// arrives, whether or not the request declares nq.
 func searchRequestNq(req *milvuspb.SearchRequest) int64 {
-	if nq := req.GetNq(); nq != 0 {
-		return nq
-	}
-	if ids := req.GetIds(); ids != nil {
-		return int64(typeutil.GetSizeOfIDs(ids))
-	}
-	rows, err := funcutil.CountPlaceholderGroupValues(req.GetPlaceholderGroup())
-	if err != nil {
-		return 0
-	}
-	return rows
+	return requestutil.SearchRequestNq(req)
 }
 
 // hybridSearchRequestNq is searchRequestNq summed over the sub-requests.
