@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // newGroupMember builds a standalone search task compatible with every other
@@ -481,4 +482,63 @@ func TestPruneCanceledPreservesStreamingSearchTask(t *testing.T) {
 	require.ErrorIs(t, cause, context.Canceled)
 	require.ErrorIs(t, waitResult(t, &task.SearchTask), context.Canceled)
 	assertNotNotified(t, &task.SearchTask)
+}
+
+func TestPruneQueuedKeepsIndividualMemberBudgets(t *testing.T) {
+	for _, expireOwner := range []bool{false, true} {
+		t.Run(fmt.Sprint(expireOwner), func(t *testing.T) {
+			at := time.Now()
+			owner := newGroupMember(context.Background(), 2)
+			member := newGroupMember(context.Background(), 3)
+			owner.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at, MaxWait: 200 * time.Millisecond})
+			member.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at.Add(10 * time.Millisecond), MaxWait: 20 * time.Millisecond})
+			want, rejected := owner, member
+			if expireOwner {
+				owner.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at, MaxWait: 20 * time.Millisecond})
+				member.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at.Add(10 * time.Millisecond), MaxWait: 200 * time.Millisecond})
+				want, rejected = member, owner
+			}
+			budget := want.QueueBudget()
+			wantNQ := want.NQ()
+			require.True(t, owner.Merge(member))
+			pruned, dropped, cause := owner.PruneQueued(at.Add(100 * time.Millisecond))
+			require.Same(t, want, pruned)
+			require.Equal(t, 1, dropped)
+			require.ErrorIs(t, cause, merr.ErrServiceTooManyRequests)
+			require.ErrorIs(t, waitResult(t, rejected), merr.ErrServiceTooManyRequests)
+			require.Equal(t, budget, want.QueueBudget(), "promotion must not reset queue age")
+			require.Equal(t, wantNQ, want.NQ())
+			assertNotNotified(t, want)
+			pruned, dropped, cause = want.PruneQueued(at.Add(time.Second))
+			require.Nil(t, pruned)
+			require.Equal(t, 1, dropped)
+			require.ErrorIs(t, cause, merr.ErrServiceTooManyRequests)
+			require.ErrorIs(t, waitResult(t, want), merr.ErrServiceTooManyRequests)
+		})
+	}
+}
+
+func TestPruneQueuedCancellationDeadlineAndUnlimitedMember(t *testing.T) {
+	at := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	owner := newGroupMember(ctx, 2)
+	deadlineCtx, stop := context.WithDeadline(context.Background(), at.Add(time.Hour))
+	defer stop()
+	expired := newGroupMember(deadlineCtx, 3)
+	unlimited := newGroupMember(context.Background(), 5)
+	for _, member := range []*SearchTask{owner, expired} {
+		member.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at, MaxWait: time.Minute})
+	}
+	unlimited.SetQueueBudget(scheduler.QueueBudget{EnqueueTime: at.Add(time.Second)})
+	require.True(t, owner.Merge(expired))
+	require.True(t, owner.Merge(unlimited))
+	cancel()
+	pruned, dropped, _ := owner.PruneQueued(at.Add(2 * time.Hour))
+	require.Same(t, unlimited, pruned)
+	require.Equal(t, 2, dropped)
+	require.ErrorIs(t, waitResult(t, owner), context.Canceled)
+	require.ErrorIs(t, waitResult(t, expired), context.DeadlineExceeded)
+	require.EqualValues(t, 5, unlimited.NQ())
+	assertNotNotified(t, unlimited)
 }

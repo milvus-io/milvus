@@ -53,19 +53,13 @@ type ChannelWorkload struct {
 	// replica: the request kind and consistency level, e.g. "search/Strong".
 	// Balancers that learn from outcomes keep statistics per channel and class.
 	StatsClass string
-	// Hedgeable tells that the request may get one extra attempt on another
-	// replica, and one only: a hedge when its attempt on the first replica is
-	// slow, or an attempt that takes its place when the first replica refuses
-	// it as overloaded. When that attempt is refused too, the request ends
-	// with the refusal. Exec must call CommitAttempt before it publishes a
-	// result, as two attempts of the channel may run at once.
-	//
-	// Without it a refusal ends the request at once. The Proxy sets it for
-	// searches and queries at every consistency level.
-	//
-	// A replica that fails otherwise (it is down, the connection breaks) is
-	// not concerned: the request moves on to the other replicas as before.
+	// Hedgeable allows a concurrent speculative attempt. Exec must publish
+	// through CommitAttempt. Hedging and overload failover share one extra slot.
 	Hedgeable bool
+	// OverloadRetryable allows one serial failover after an overload refusal,
+	// without allowing concurrent execution. Exec must not publish partial
+	// results or perform writes before returning an overload error.
+	OverloadRetryable bool
 }
 
 type CollectionWorkLoad struct {
@@ -78,8 +72,9 @@ type CollectionWorkLoad struct {
 	Exec           ExecuteFunc
 	PreferredNodes map[string]int64
 	// StatsClass and Hedgeable: see ChannelWorkload.
-	StatsClass string
-	Hedgeable  bool
+	StatsClass        string
+	Hedgeable         bool
+	OverloadRetryable bool
 }
 
 type LBPolicy interface {
@@ -218,7 +213,7 @@ func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBal
 				excludeNodes.Clear()
 			}
 		}
-		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes)
+		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes, false)
 	}
 	node, selected, err := trySelectNode(true)
 	if err != nil {
@@ -229,7 +224,7 @@ func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBal
 
 // selectCandidate never performs a coordinator RPC or clears exclusions. Its
 // selection and workload reservation both belong to the calling goroutine.
-func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet) (_ NodeInfo, _ bool, err error) {
+func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, shardLeaders []NodeInfo, excludeNodes *typeutil.UniqueSet, forHedge bool) (_ NodeInfo, _ bool, err error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", workload.CollectionID), zap.String("channelName", workload.Channel))
 	candidateNodes := make(map[int64]NodeInfo)
 	serviceableNodes := make(map[int64]NodeInfo)
@@ -280,6 +275,8 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	var targetNodeID int64
 	if lw != nil {
 		targetNodeID, err = lw.SelectNodeForKey(ctx, statsKey(workload), nodes)
+	} else if roundRobin, ok := balancer.(*RoundRobinBalancer); ok && forHedge {
+		targetNodeID = roundRobin.selectHedgeNode(nodes)
 	} else {
 		targetNodeID, err = balancer.SelectNode(ctx, nodes, workload.Nq)
 	}
@@ -295,16 +292,13 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
-// selectAfterOverload makes one selection from the cached topology. The balancer
-// checks current heartbeat health; failure must not enter refreshing retries.
-func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
-	leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
-	if err != nil {
-		return NodeInfo{}, false, err
-	}
+// selectAfterOverload uses the request's captured leader snapshot. No cache lookup
+// occurs here: even a cache-preferred lookup refreshes on a miss. The captured
+// balancer still checks heartbeat health and the request's routing scope.
+func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, leaders []NodeInfo, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	// Failover candidates must pass the captured balancer's health check.
 	workload.PreferredNodeID = 0
-	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded)
+	return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excluded, false)
 }
 
 // ExecuteWithRetry will choose a qn to execute the workload, and retry if failed, until reach the max retryTimes.
@@ -314,6 +308,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		zap.String("channelName", workload.Channel),
 	)
 	var lastErr error
+	var shardLeaders []NodeInfo
 	balancer, lw := snapshotBalancer(lb.getBalancer())
 	excludeNodes := typeutil.NewUniqueSet()
 	// Under every policy, a replica that refuses the request as overloaded is
@@ -332,7 +327,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		var selectedByBalancer bool
 		var err error
 		if overloadErr != nil {
-			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, lw, workload, &excludeNodes)
+			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, lw, workload, shardLeaders, &excludeNodes)
 			if err != nil {
 				return false, overloadErr
 			}
@@ -431,7 +426,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// replica is left: it is not tried on a third replica, nor are
 			// the shard leaders refreshed to go around again, which would
 			// add to the queues that refused it. The client may try again.
-			if !workload.Hedgeable || extraUsed {
+			if extraUsed || !workload.Hedgeable && !workload.OverloadRetryable {
 				return false, overloadErr
 			}
 			// The extra attempt takes the place of the refused one. The
@@ -489,15 +484,16 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:              workload.Db,
-			CollectionName:  workload.CollectionName,
-			CollectionID:    workload.CollectionID,
-			Channel:         channelList[0],
-			Nq:              workload.Nq,
-			Exec:            workload.Exec,
-			PreferredNodeID: preferredNodeID(workload, channelList[0]),
-			StatsClass:      workload.StatsClass,
-			Hedgeable:       workload.Hedgeable,
+			Db:                workload.Db,
+			CollectionName:    workload.CollectionName,
+			CollectionID:      workload.CollectionID,
+			Channel:           channelList[0],
+			Nq:                workload.Nq,
+			Exec:              workload.Exec,
+			PreferredNodeID:   preferredNodeID(workload, channelList[0]),
+			StatsClass:        workload.StatsClass,
+			Hedgeable:         workload.Hedgeable,
+			OverloadRetryable: workload.OverloadRetryable,
 		})
 	}
 
@@ -508,15 +504,16 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-				Db:              workload.Db,
-				CollectionName:  workload.CollectionName,
-				CollectionID:    workload.CollectionID,
-				Channel:         channel,
-				Nq:              workload.Nq,
-				Exec:            workload.Exec,
-				PreferredNodeID: preferredNodeID(workload, channel),
-				StatsClass:      workload.StatsClass,
-				Hedgeable:       workload.Hedgeable,
+				Db:                workload.Db,
+				CollectionName:    workload.CollectionName,
+				CollectionID:      workload.CollectionID,
+				Channel:           channel,
+				Nq:                workload.Nq,
+				Exec:              workload.Exec,
+				PreferredNodeID:   preferredNodeID(workload, channel),
+				StatsClass:        workload.StatsClass,
+				Hedgeable:         workload.Hedgeable,
+				OverloadRetryable: workload.OverloadRetryable,
 			})
 		})
 	}
@@ -534,15 +531,16 @@ func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload Collecti
 	// let every request could retry at least twice, which could retry after update shard leader cache
 	for _, channel := range channelList {
 		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
-			Db:              workload.Db,
-			CollectionName:  workload.CollectionName,
-			CollectionID:    workload.CollectionID,
-			Channel:         channel,
-			Nq:              workload.Nq,
-			Exec:            workload.Exec,
-			PreferredNodeID: preferredNodeID(workload, channel),
-			StatsClass:      workload.StatsClass,
-			Hedgeable:       workload.Hedgeable,
+			Db:                workload.Db,
+			CollectionName:    workload.CollectionName,
+			CollectionID:      workload.CollectionID,
+			Channel:           channel,
+			Nq:                workload.Nq,
+			Exec:              workload.Exec,
+			PreferredNodeID:   preferredNodeID(workload, channel),
+			StatsClass:        workload.StatsClass,
+			Hedgeable:         workload.Hedgeable,
+			OverloadRetryable: workload.OverloadRetryable,
 		})
 	}
 	// An empty leader list here is a transient routing-cache state (leaders are

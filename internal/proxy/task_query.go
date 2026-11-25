@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -758,7 +759,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		log.Warn("QueryNode query return error", zap.Error(err))
 		// Caller cancellation says nothing about the shard location. Deadlines
 		// and transport failures with an active caller retain cache refresh.
-		if !errors.Is(ctx.Err(), context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
 			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return err

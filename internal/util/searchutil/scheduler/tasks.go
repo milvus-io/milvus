@@ -105,11 +105,15 @@ func (t *queuedTask) countedNQ() int64 {
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
-	return &queuedTask{
+	queued := &queuedTask{
 		Task:        task,
 		enqueueTime: enqueueTime,
 		maxWait:     maxQueueWait(task, enqueueTime),
 	}
+	if member, ok := task.(QueueBudgetTask); ok {
+		member.SetQueueBudget(QueueBudget{EnqueueTime: enqueueTime, MaxWait: queued.maxWait})
+	}
+	return queued
 }
 
 // maxQueueWait returns how long task may wait in the queue: maxQueueWaitRatio

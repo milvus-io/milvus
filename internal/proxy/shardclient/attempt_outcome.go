@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -75,7 +76,7 @@ func classifyAttempt(ctx context.Context, start, now time.Time, err error) (atte
 	if merr.GetErrorType(err) == merr.InputError || isOverloadErr(err) {
 		return attemptIgnored, 0
 	}
-	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, errAttemptNotDispatched) {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, errAttemptNotDispatched) || grpcclient.IsRequestNotDispatched(err) {
 		return attemptIgnored, 0
 	}
 	return attemptFailed, attemptTimeout(ctx, start, elapsed)

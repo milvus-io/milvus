@@ -27,6 +27,8 @@ import (
 
 type RoundRobinBalancer struct {
 	idx atomic.Int64
+	// Speculative attempts must not advance the cursor used by primary requests.
+	hedgeIdx atomic.Int64
 }
 
 func NewRoundRobinBalancer() *RoundRobinBalancer {
@@ -52,3 +54,8 @@ func (b *RoundRobinBalancer) UpdateCostMetrics(node int64, cost *internalpb.Cost
 func (b *RoundRobinBalancer) Start(ctx context.Context) {}
 
 func (b *RoundRobinBalancer) Close() {}
+
+// selectHedgeNode receives the nonempty candidate set checked by selectCandidate.
+func (b *RoundRobinBalancer) selectHedgeNode(availableNodes []int64) int64 {
+	return availableNodes[int(b.hedgeIdx.Inc())%len(availableNodes)]
+}

@@ -151,14 +151,6 @@ func canMergeDeadline(task *queuedTask, other *queuedTask, maxDeadlineMergeGap t
 	return otherDeadline.Sub(deadline) <= maxDeadlineMergeGap
 }
 
-// canMergeQueueWait keeps every member's queue expiry valid if the owner changes.
-func canMergeQueueWait(owner, incoming *queuedTask) bool {
-	if owner.maxWait == 0 || incoming.maxWait == 0 {
-		return owner.maxWait == incoming.maxWait
-	}
-	return owner.enqueueTime.Add(owner.maxWait).Equal(incoming.enqueueTime.Add(incoming.maxWait))
-}
-
 // tryMerge try to a new task to any task in queue.
 func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio float64, maxDeadlineMergeGap time.Duration) bool {
 	mergeTask := tryIntoMergeTask(task.Task)
@@ -177,8 +169,7 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 		if taskInQueue := tryIntoMergeTask(taskInQueue.Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
 			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
-				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap) &&
-				canMergeQueueWait(q.tasks[i], task)) &&
+				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap)) &&
 				taskInQueue.MergeWith(mergeTask) {
 				return true
 			}

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -1176,7 +1177,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		log.Warn("QueryNode search return error", zap.Error(err))
 		// Caller cancellation says nothing about the shard location. Deadlines
 		// and transport failures with an active caller retain cache refresh.
-		if !errors.Is(ctx.Err(), context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
 			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return err

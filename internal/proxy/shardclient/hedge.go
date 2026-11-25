@@ -239,7 +239,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				continue
 			}
 			start := time.Now()
-			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded)
+			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded, true)
 			if err != nil {
 				if !candidates.refreshed {
 					lookup(true)
@@ -277,7 +277,7 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				}
 			} else {
 				excludeNodes.Insert(r.node)
-				if lastErr == nil || !(merr.IsCanceledOrTimeout(r.err) || status.Code(r.err) == codes.Canceled || status.Code(r.err) == codes.DeadlineExceeded) {
+				if lastErr == nil || (!merr.IsCanceledOrTimeout(r.err) && status.Code(r.err) != codes.Canceled && status.Code(r.err) != codes.DeadlineExceeded) {
 					lastErr = merr.Wrapf(r.err, "failed to search/query delegator %d for channel %s", r.node, workload.Channel)
 				}
 				if isOverloadErr(r.err) {

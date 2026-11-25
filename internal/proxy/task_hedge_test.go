@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -73,7 +74,7 @@ func (m *hedgeTaskManager) GetClient(context.Context, shardclient.NodeInfo) (typ
 
 func TestReadShardCancellationCacheInvalidation(t *testing.T) {
 	for _, kind := range []string{"search", "query"} {
-		for _, scenario := range []string{"caller_canceled", "deadline", "remote_canceled", "unavailable"} {
+		for _, scenario := range []string{"caller_canceled", "deadline", "local_deadline", "remote_canceled", "unavailable"} {
 			t.Run(kind+"/"+scenario, func(t *testing.T) {
 				ctx := context.Background()
 				var cancel context.CancelFunc
@@ -81,12 +82,19 @@ func TestReadShardCancellationCacheInvalidation(t *testing.T) {
 				case "caller_canceled":
 					ctx, cancel = context.WithCancel(ctx)
 					cancel()
-				case "deadline":
+				case "deadline", "local_deadline":
 					ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
 					defer cancel()
 				}
 				rpcErr := status.Error(codes.Canceled, "remote request stopped")
 				switch scenario {
+				case "local_deadline":
+					base := &grpcclient.ClientBase[types.QueryNodeClient]{}
+					_, rpcErr = base.Call(ctx, func(types.QueryNodeClient) (any, error) {
+						t.Fatal("expired request reached the RPC callback")
+						return nil, nil
+					})
+					require.True(t, grpcclient.IsRequestNotDispatched(rpcErr))
 				case "deadline":
 					rpcErr = status.Error(codes.DeadlineExceeded, "request timed out")
 				case "unavailable":
@@ -106,7 +114,7 @@ func TestReadShardCancellationCacheInvalidation(t *testing.T) {
 					err = task.queryShard(ctx, 1, client, "ch")
 				}
 				require.ErrorIs(t, err, rpcErr)
-				if scenario == "caller_canceled" {
+				if scenario == "caller_canceled" || scenario == "local_deadline" {
 					require.Zero(t, manager.invalidations.Load())
 				} else {
 					require.EqualValues(t, 1, manager.invalidations.Load())
@@ -123,6 +131,7 @@ func TestReadShardPreservesStatusClassification(t *testing.T) {
 			merr.WrapErrCollectionNotLoaded(42),
 			merr.WrapErrChannelNotAvailable("ch", "delegator not ready"),
 			merr.WrapErrChannelTSafeStalled("ch", "consumer stalled"),
+			merr.WrapErrTooManyRequests(200, "read task queue"),
 		} {
 			t.Run(kind+"/"+sourceErr.Error(), func(t *testing.T) {
 				wireStatus := merr.Status(sourceErr)

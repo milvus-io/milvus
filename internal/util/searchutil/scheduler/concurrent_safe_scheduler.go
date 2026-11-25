@@ -278,25 +278,25 @@ func (s *scheduler) exec() {
 		}
 
 		s.getPool(queued.Task).Submit(func() (any, error) {
-			// Drop the task, or the canceled members of a merged group, if the
-			// cancellation happened between dequeue and execution. Members that
+			// Drop members canceled or past their individual deadline/queue budget
+			// between dequeue and execution. Members that
 			// are dropped here have already been completed with their own
 			// context error; the survivors keep running. The cause is logged
 			// because it is what tells a client that went away from a request
 			// that ran out of time.
-			survivor, dropped, cause := pruneCanceled(queued.Task)
+			now := time.Now()
+			survivor, dropped, cause := queued.prune(now)
 			if dropped > 0 {
 				if survivor == nil {
-					log.Ctx(queued.Context()).Warn("task canceled before executing", zap.Error(cause))
-					s.recordReadTaskQueueDuration(queued, time.Now(), readTaskQueueOutcomeExpired)
+					log.Ctx(queued.Context()).Warn("task discarded before executing", zap.Error(cause))
+					s.recordReadTaskQueueDuration(queued, time.Now(), prunedQueueOutcome(cause))
 					return nil, cause
 				}
-				log.Ctx(queued.Context()).Warn("canceled requests dropped from a search group before executing",
+				log.Ctx(queued.Context()).Warn("requests dropped from a search group before executing",
 					zap.Int("dropped", dropped), zap.Error(cause))
 			}
 			queued.Task = survivor
 			t := survivor
-			now := time.Now()
 			if queued.cleanupReady(now) {
 				s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeExpired)
 				finishExpiredTask(queued)
@@ -368,24 +368,23 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			// Remember the NQ the counters were credited with before any
 			// member is pruned away.
 			lastWaitingTask.accountedNQ = lastWaitingTask.NQ()
-			// A canceled task is dropped; a merged group loses only its
-			// canceled members and goes on with the rest. Dropped members
-			// are completed with their own context error.
-			survivor, dropped, cause := pruneCanceled(lastWaitingTask.Task)
+			// A merged group loses only members canceled or past their individual
+			// deadline/queue budget. Dropped members receive their own error.
+			survivor, dropped, cause := lastWaitingTask.prune(now)
 			if dropped > 0 {
 				// Said here as well as before execution, so that a request
 				// whose client sees a cancellation can be found in the log
 				// whichever of the two points dropped it.
 				if survivor == nil {
-					log.Ctx(lastWaitingTask.Context()).Warn("task canceled before it left the queue", zap.Error(cause))
+					log.Ctx(lastWaitingTask.Context()).Warn("task discarded before it left the queue", zap.Error(cause))
 				} else {
-					log.Ctx(lastWaitingTask.Context()).Warn("canceled requests dropped from a search group as it left the queue",
+					log.Ctx(lastWaitingTask.Context()).Warn("requests dropped from a search group as it left the queue",
 						zap.Int("dropped", dropped), zap.Error(cause))
 				}
 			}
 			if survivor == nil {
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
-				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, prunedQueueOutcome(cause))
 				lastWaitingTask = nil
 				continue
 			}
@@ -424,6 +423,13 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	return lastWaitingTask, nq, execChan
 }
 
+func prunedQueueOutcome(cause error) string {
+	if errors.Is(cause, merr.ErrServiceTooManyRequests) {
+		return readTaskQueueOutcomeOverloaded
+	}
+	return readTaskQueueOutcomeExpired
+}
+
 func finishExpiredTask(task *queuedTask) {
 	if g, ok := task.Task.(ExpirableGroup); ok {
 		g.FinishExpired()
@@ -444,8 +450,12 @@ func finishUnrunTask(task *queuedTask, err error) {
 // for longer than it may. waited is how long the task that leaves the queue
 // next has waited: the refused task itself, or the one it would queue behind.
 func overloadedError(task *queuedTask, waited time.Duration) error {
+	return queueOverloadedError(task.maxWait, waited)
+}
+
+func queueOverloadedError(maxWait, waited time.Duration) error {
 	return merr.WrapErrTooManyRequests(
-		int32(task.maxWait.Milliseconds()),
+		int32(maxWait.Milliseconds()),
 		fmt.Sprintf("read tasks wait %s in the queue, limit by %s and %s",
 			waited,
 			paramtable.Get().QueryNodeCfg.MaxQueueWaitRatio.Key,
