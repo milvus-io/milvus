@@ -86,6 +86,9 @@ type Loader interface {
 	// ReserveLoadResourceWithSchema reserves memory and storage for segment loading. The
 	// returned reservation must be released after the load attempt finishes.
 	ReserveLoadResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error)
+	// ReserveLoadResourceWithStatus also returns competing reservations observed
+	// by the same admission check, so callers can distinguish load contention.
+	ReserveLoadResourceWithStatus(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, LoadResource, error)
 
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
@@ -579,11 +582,16 @@ func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, sche
 }
 
 func (loader *segmentLoader) ReserveLoadResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
+	reservation, _, err := loader.ReserveLoadResourceWithStatus(ctx, schema, infos...)
+	return reservation, err
+}
+
+func (loader *segmentLoader) ReserveLoadResourceWithStatus(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, LoadResource, error) {
 	result, err := loader.requestResourceWithSchema(ctx, schema, infos...)
 	if err != nil {
-		return nil, err
+		return nil, result.CommittedResource, err
 	}
-	return &loadResourceReservation{loader: loader, result: result}, nil
+	return &loadResourceReservation{loader: loader, result: result}, result.CommittedResource, nil
 }
 
 // freeRequestResource returns request memory & storage usage request.

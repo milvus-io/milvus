@@ -159,6 +159,21 @@ message ClusteredPartitionStats {
 message QueryViewOfQueryNode {
     int64 node_id = 1;
     repeated QueryViewOfPartition partitions = 2;
+    // QN report only: explicitly failed preparation requirements for this View.
+    // Absence is not failure; other segments may still be preparing or awaiting
+    // readiness notification. Empty on reports without specific failure facts.
+    repeated SegmentPerparingFailure failed_segments = 3;
+}
+
+message SegmentPerparingFailure {
+    enum Reason {
+        Unknown = 0;
+        MemoryLimitExceeded = 1;
+        DiskLimitExceeded = 2;
+        ResourceReservationFailed = 3;
+    }
+    int64 segment_id = 1;
+    Reason reason = 2;
 }
 
 // QueryViewVersion is ordered lexicographically by

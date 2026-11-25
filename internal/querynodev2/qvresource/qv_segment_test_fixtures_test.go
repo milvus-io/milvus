@@ -98,11 +98,8 @@ type fakeQVResourceLoader struct {
 	err         error
 }
 
-func (l *fakeQVResourceLoader) ReserveLoadResourceWithSchema(_ context.Context, _ *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, error) {
-	if len(infos) > 0 {
-		l.info = infos[0]
-	}
-	return l.reservation, l.err
+func (*fakeQVResourceLoader) ReserveLoadResourceWithStatus(context.Context, *schemapb.CollectionSchema, ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, segments.LoadResource, error) {
+	panic("patch ReserveLoadResourceWithStatus with mockey")
 }
 
 type fakeQVResourceReservation struct {

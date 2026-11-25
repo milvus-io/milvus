@@ -37,15 +37,16 @@ type LoadInfoRefProvider interface {
 //
 // Thread-safety: All methods are thread-safe.
 type ShardViewManager struct {
-	ctx              context.Context // lifecycle context used by callbacks and event observation
-	mu               sync.Mutex
-	shardID          qviews.ShardID
-	eventSubmitter   dirtyViewEventSubmitter
-	observe          func(qviews.ShardID, *ShardViewManager, *ShardStats)
-	onReleasedEmpty  func(qviews.ShardID, *ShardViewManager)
-	prepareBackoff   preparationBackoff
-	releaseRequested bool
-	closed           bool // Failed recovery: ignore late sync callbacks.
+	ctx                 context.Context // lifecycle context used by callbacks and event observation
+	mu                  sync.Mutex
+	shardID             qviews.ShardID
+	eventSubmitter      dirtyViewEventSubmitter
+	observe             func(qviews.ShardID, *ShardViewManager, *ShardStats)
+	onReleasedEmpty     func(qviews.ShardID, *ShardViewManager)
+	prepareBackoff      preparationBackoff
+	preparationFailures map[int64]map[ResourceKey]qviews.QueryViewVersion
+	releaseRequested    bool
+	closed              bool // Failed recovery: ignore late sync callbacks.
 
 	// All active views keyed by version for O(1) lookup.
 	views map[qviews.QueryViewVersion]*CoordQueryViewStateMachine
@@ -235,9 +236,10 @@ func (m *ShardViewManager) Stats() *ShardStats {
 
 func (m *ShardViewManager) statsLocked() *ShardStats {
 	stats := &ShardStats{
-		Segments:   make(map[int64]*SegmentStats),
-		Resources:  make(map[int64]map[ResourceKey]struct{}),
-		UpBySchema: make(map[int32]SchemaUpView),
+		Segments:        make(map[int64]*SegmentStats),
+		Resources:       make(map[int64]map[ResourceKey]struct{}),
+		FailedResources: cloneFailedResources(m.preparationFailures),
+		UpBySchema:      make(map[int32]SchemaUpView),
 	}
 	resident := make(map[int64]struct{})
 
@@ -274,6 +276,7 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 		}
 
 		fillSegments(stats.Segments, sm.View().GetQueryNode(), baseState, sm.QNReadySegments())
+		stats.FailedResources = fillFailedResources(stats.FailedResources, sm)
 		// A failed view still protects successfully loaded segments until
 		// replacement acquires them. Never infer readiness for unfinished loads.
 		if sm.State() != qviews.QueryViewStateDown && sm.View().GetMeta().GetLoadInfoVersion() != 0 {
@@ -509,6 +512,7 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 		view.Meta.TransformStartAfterTimetick = m.views[*source].View().GetMeta().GetTransformStartAfterTimetick()
 	}
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
+	retainFailedResources(m.preparationFailures, sm)
 	sm.releaseLoadInfo = releaseLoadInfo
 	sm.preparation = preparation
 	if preparation != nil {
@@ -648,6 +652,9 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 		}
 		sm.completePreparation(nil)
 		m.prepareBackoff.onUp(sm.Version())
+		if !m.prepareBackoff.failed {
+			m.preparationFailures = nil
+		}
 		m.downOlderUpView(sm)
 		m.refreshNewestUpLocked()
 		m.advanceUnrecoverableToDropping()
@@ -836,6 +843,9 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 		if (before == qviews.QueryViewStatePreparing || before == qviews.QueryViewStateReady) &&
 			sm.State() == qviews.QueryViewStateUnrecoverable {
 			m.prepareBackoff.onFailure(version, time.Now())
+		}
+		if sm.State() == qviews.QueryViewStateUnrecoverable {
+			m.preparationFailures = fillFailedResources(m.preparationFailures, sm)
 		}
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewReportAppliedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{

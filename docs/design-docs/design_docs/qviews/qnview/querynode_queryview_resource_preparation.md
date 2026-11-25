@@ -244,7 +244,7 @@ preparation uses a separate exponential sequence per View, starting at 100 ms
 and sharing the same doubling, jitter and hard 5 s limit. It spans the complete
 dependency attempt: a successful collection acquisition followed by a failed
 buffer preparation must not reset the delay. A new View starts a new sequence.
-Neither retry path has an elapsed-time cutoff while its requirement is live;
+Neither general retry path has an elapsed-time cutoff while its requirement is live;
 Release and context cancellation interrupt waits promptly. Every retry selects work from current
 requirements and accepted metadata; it does not indefinitely execute an
 obsolete captured target.
@@ -254,6 +254,36 @@ required data fail the affected preparation bindings through OnUnrecoverable.
 Unrelated successfully prepared resources remain referenced for reuse until
 Release. Withdrawal and shutdown cancel their own work without reporting a new
 preparation failure for a replacement View.
+
+Segment admission distinguishes outstanding loader reservations from sustained
+capacity rejection. The loader returns the competing memory/disk reservation
+snapshot from the same admission check. While competing reservations exist,
+capacity rejection retries locally. Without competing reservations, memory,
+disk and caching-layer reservation failures start a five-second grace window.
+A rejection observed after that window fails only the affected View through
+`OnUnrecoverable`; successful admission, a competing reservation, or a different
+admission error resets the window. This does not classify capacity errors as
+Input errors or impose a timeout on metadata, I/O, or native loading.
+
+The failure callback carries the exact rejected Segment ID and an enum reason.
+The QN includes these facts in `QueryViewOfQueryNode.failed_segments` as
+`SegmentPerparingFailure` entries, alongside the existing Unrecoverable state.
+Memory, disk and caching-layer reservation rejection have separate reasons.
+Readiness and failure lists are independent positive facts: a Segment absent
+from both may still be loading, catching up after releasing its reservation, or
+awaiting its Ready callback. Never infer failure from the Ready-list complement.
+Failure facts are captured with the state transition and repeated on reconnect.
+Empty lists add no protobuf wire bytes; old reports or unknown reasons do not
+provide a capacity failure fact.
+
+Coordinator retains explicitly rejected QN requirements separately from successful
+resource facts, keyed by node, partition, segment, DataVersion and LoadInfoVersion.
+Replacement prefers an unfailed eligible node in the same Replica/RG. Failed
+requirements survive failed-View retirement until the loading identity changes
+or a newer View becomes Up. If every eligible node has rejected a requirement,
+retry the least recently failed placement with the existing preparation backoff.
+Replacement still acquires resources before old references are released, and
+serving Up coverage is retired only after replacement reaches Up.
 
 ## 6. Physical preparation and sharing
 

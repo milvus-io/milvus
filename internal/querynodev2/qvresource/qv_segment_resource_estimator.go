@@ -10,7 +10,7 @@ import (
 )
 
 type qvSegmentResourceLoader interface {
-	ReserveLoadResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, error)
+	ReserveLoadResourceWithStatus(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (segments.LoadResourceReservation, segments.LoadResource, error)
 }
 
 type queryViewSegmentResourceEstimator struct {
@@ -21,6 +21,7 @@ func newQueryViewSegmentResourceEstimator(loader qvSegmentResourceLoader) *query
 	return &queryViewSegmentResourceEstimator{loader: loader}
 }
 
-func (e *queryViewSegmentResourceEstimator) Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection qnview.CollectionRuntime) (qnview.ResourceReservation, error) {
-	return e.loader.ReserveLoadResourceWithSchema(ctx, collection.Schema(), info)
+func (e *queryViewSegmentResourceEstimator) Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection qnview.CollectionRuntime) (qnview.ResourceReservation, bool, error) {
+	reservation, competing, err := e.loader.ReserveLoadResourceWithStatus(ctx, collection.Schema(), info)
+	return reservation, competing.MemorySize > 0 || competing.DiskSize > 0, err
 }

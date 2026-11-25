@@ -49,7 +49,9 @@ type lazyQNSegmentManager struct {
 func (m *lazyQNSegmentManager) Acquire(req qnview.AcquireSegments) {
 	manager := m.get()
 	if manager == nil {
-		m.submitCallback(req.OnUnrecoverable)
+		if req.OnUnrecoverable != nil {
+			m.submitCallback(func() { req.OnUnrecoverable() })
+		}
 		return
 	}
 	manager.Acquire(req)

@@ -36,6 +36,8 @@ type CoordQueryViewStateMachine struct {
 	// Per-QN ready segment IDs reported during Preparing.
 	// Used by Balancer/Manager for progress tracking and decision-making.
 	qnReadySegments map[int64][]int64
+	// Explicit report facts; an absent entry says nothing about preparation.
+	qnPreparationFailures map[int64]map[int64]viewpb.SegmentPerparingFailure_Reason
 
 	// Pending external effects, atomically drained through ShardViewManager by
 	// the Coordinator flush scheduler.
@@ -447,13 +449,13 @@ func (sm *CoordQueryViewStateMachine) updateNodeState(report qviews.QueryViewAtW
 	switch n := report.WorkNode().(type) {
 	case qviews.QueryNode:
 		sm.qnStates[n.ID] = report.State()
-		sm.updateQNReadySegments(n.ID, report)
+		sm.updateQNPreparation(n.ID, report)
 	case qviews.StreamingNode:
 		sm.snState = report.State()
 	}
 }
 
-func (sm *CoordQueryViewStateMachine) updateQNReadySegments(nodeID int64, report qviews.QueryViewAtWorkNode) {
+func (sm *CoordQueryViewStateMachine) updateQNPreparation(nodeID int64, report qviews.QueryViewAtWorkNode) {
 	qnReport, ok := report.(*qviews.QueryViewAtQueryNode)
 	if !ok {
 		return
@@ -463,6 +465,22 @@ func (sm *CoordQueryViewStateMachine) updateQNReadySegments(nodeID int64, report
 		readySegs = append(readySegs, p.ReadySegmentIds...)
 	}
 	sm.qnReadySegments[nodeID] = readySegs
+	sm.updateQNPreparationFailures(nodeID, qnReport.ViewOfQueryNode().GetFailedSegments())
+}
+
+func (sm *CoordQueryViewStateMachine) updateQNPreparationFailures(nodeID int64, failures []*viewpb.SegmentPerparingFailure) {
+	if len(failures) == 0 {
+		delete(sm.qnPreparationFailures, nodeID)
+		return
+	}
+	if sm.qnPreparationFailures == nil {
+		sm.qnPreparationFailures = make(map[int64]map[int64]viewpb.SegmentPerparingFailure_Reason)
+	}
+	reasons := make(map[int64]viewpb.SegmentPerparingFailure_Reason, len(failures))
+	for _, failure := range failures {
+		reasons[failure.GetSegmentId()] = failure.GetReason()
+	}
+	sm.qnPreparationFailures[nodeID] = reasons
 }
 
 func (sm *CoordQueryViewStateMachine) isSNReport(report qviews.QueryViewAtWorkNode) bool {

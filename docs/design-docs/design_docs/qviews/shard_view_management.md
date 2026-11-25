@@ -360,6 +360,22 @@ teardown can unload them. ShardStats now publishes per-view assignments/rows and
 evidence separately from merged segment statistics. Concrete node-side sharing
 remains an injected resource-manager contract.
 
+`ShardStats.FailedResources` is derived only from explicitly reported
+`QueryViewOfQueryNode.failed_segments` with a known capacity reason, on QNs
+reporting Unrecoverable. The manager checks the Segment against that QN's View
+assignment and retains the exact loading identity and latest failed View version.
+It must not infer failure from missing readiness: other QNs and unreported
+siblings may still succeed. Generic/legacy Unrecoverable reports and unknown
+future reasons retain the lifecycle transition without creating a capacity
+penalty. Failure snapshots are copied before publication and retained across
+replacement cleanup; new loading identities or a newer successful Up clear them.
+An absent failure snapshot stays nil; publication does not allocate an empty
+failure map. The map is created only when an explicit capacity fact is accepted.
+Allocation reads the failure snapshot and loading identity once per mandatory
+shard from its pinned collection. Segment/candidate loops use value lookups,
+without channel parsing or version-pointer allocations. Optional optimization
+does not consult failure history.
+
 1. Under the manager lock, reject a released/closed manager or a DataVersion
    older than any resident view.
 2. Unlock, build the view, and acquire its exact DataView reference. Acquisition

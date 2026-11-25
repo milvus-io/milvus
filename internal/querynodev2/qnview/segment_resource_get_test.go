@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -118,7 +119,7 @@ func TestSegmentResourceExternalManifestMismatch(t *testing.T) {
 		}).Build()
 		failed := make(chan struct{}, 1)
 		req := f.request(1, 1, 1)
-		req.OnUnrecoverable = func() { failed <- struct{}{} }
+		req.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { failed <- struct{}{} }
 		f.manager.Acquire(req)
 		select {
 		case <-failed:

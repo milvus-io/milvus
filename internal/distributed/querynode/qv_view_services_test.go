@@ -41,7 +41,11 @@ func TestLazyQNSegmentManagerNilCallbacksUseNodeScheduler(t *testing.T) {
 	mgr := &lazyQNSegmentManager{scheduler: scheduler}
 	unrecoverable := make(chan struct{}, 1)
 	dropped := make(chan struct{}, 1)
-	mgr.Acquire(qnview.AcquireSegments{OnUnrecoverable: func() { unrecoverable <- struct{}{} }})
+	mgr.Acquire(qnview.AcquireSegments{OnUnrecoverable: func(failures ...*viewpb.SegmentPerparingFailure) {
+		assert.Empty(t, failures, "an unavailable runtime has no segment capacity failure")
+		unrecoverable <- struct{}{}
+	}})
+	mgr.Acquire(qnview.AcquireSegments{})
 	mgr.Release(qnview.ReleaseSegments{OnDropped: func() { dropped <- struct{}{} }})
 
 	select {
@@ -75,6 +79,25 @@ func TestRegisterQueryViewServers(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = services["milvus.proto.view.ViewQueryService"]
 	assert.True(t, ok)
+}
+
+func TestLazyQNSegmentManagerForwardsPreparationFailure(t *testing.T) {
+	mockey.PatchConvey("initialized runtime preserves the exact segment failure", t, func() {
+		resources := &qnview.SegmentResourceManager{}
+		failure := &viewpb.SegmentPerparingFailure{SegmentId: 123, Reason: viewpb.SegmentPerparingFailure_MemoryLimitExceeded}
+		acquired := mockey.Mock((*qnview.SegmentResourceManager).Acquire).To(func(_ *qnview.SegmentResourceManager, req qnview.AcquireSegments) {
+			req.OnUnrecoverable(failure)
+		}).Build()
+		mgr := &lazyQNSegmentManager{manager: resources}
+		called := false
+		mgr.Acquire(qnview.AcquireSegments{OnUnrecoverable: func(failures ...*viewpb.SegmentPerparingFailure) {
+			called = true
+			require.Len(t, failures, 1)
+			assert.Equal(t, failure, failures[0])
+		}})
+		assert.True(t, called)
+		assert.EqualValues(t, 1, acquired.Times())
+	})
 }
 
 type noopQNSegmentManager struct{}
