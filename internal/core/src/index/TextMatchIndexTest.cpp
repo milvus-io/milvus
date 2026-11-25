@@ -34,6 +34,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/FieldData.h"
 #include "common/IndexMeta.h"
 #include "common/Schema.h"
 #include "common/Slice.h"
@@ -484,6 +485,82 @@ TEST(TextMatch, RawSealedFinalizationMaterializesOnlyWhenNeeded) {
     EXPECT_TRUE(valid[1]);
     auto no_nulls = all_valid->IsNull();
     EXPECT_EQ(no_nulls.count(), 0);
+}
+
+TEST(TextMatch, ArrayElementDocumentsSurviveUploadAndLoad) {
+    for (bool native : {false, true}) {
+        SCOPED_TRACE(native);
+        auto ctx = CreateTextMatchTestFileManagerContext(
+            native ? 1032 : 1031, proto::schema::DataType::Array);
+        auto& field = ctx.fieldDataMeta.field_schema;
+        field.set_name("reviews[body]");
+        field.set_element_type(proto::schema::DataType::VarChar);
+        field.set_element_nullable(true);
+        field.set_nullable(true);
+        proto::schema::TypeSchema type;
+        type.mutable_array_element()->set_leaf_type(
+            proto::schema::DataType::VarChar);
+        type.mutable_array_element()->set_nullable(true);
+        auto make_batch = [&](const std::vector<ScalarFieldProto>& rows,
+                              uint8_t validity) -> FieldDataPtr {
+            if (native) {
+                auto batch = std::make_shared<FieldData<ArrayValue>>(
+                    type, true, rows.size());
+                std::vector<ArrayValue> values;
+                for (const auto& row : rows) {
+                    values.emplace_back(row, type);
+                }
+                batch->FillFieldData(values.data(), &validity, rows.size(), 0);
+                return batch;
+            }
+            auto batch = storage::CreateFieldData(
+                DataType::ARRAY, DataType::VARCHAR, true, 1, rows.size());
+            std::vector<Array> values;
+            for (const auto& row : rows) {
+                values.emplace_back(row, true);
+            }
+            batch->FillFieldData(values.data(), &validity, rows.size(), 0);
+            return batch;
+        };
+        ScalarFieldProto split, empty, phrase;
+        empty.mutable_string_data();
+        for (const auto* word : {"new", "york"}) {
+            split.mutable_string_data()->add_data(word);
+            split.add_valid_data(true);
+        }
+        for (const auto* word : {"new york", ""}) {
+            phrase.mutable_string_data()->add_data(word);
+        }
+        phrase.add_valid_data(true);
+        phrase.add_valid_data(false);
+        index::TextMatchIndex builder(ctx,
+                                      index::TANTIVY_INDEX_LATEST_VERSION,
+                                      "milvus_tokenizer",
+                                      "{}",
+                                      "");
+        builder.BuildWithFieldData({make_batch({split, empty}, 0b01),
+                                    make_batch({empty, phrase}, 0b11)});
+        auto stats = builder.Upload({});
+        std::vector<std::string> files;
+        for (const auto& file : stats->GetSerializedIndexFileInfo()) {
+            files.push_back(file.file_name);
+        }
+        storage::DiskFileManagerImpl manager(ctx);
+        Config config;
+        config[index::INDEX_FILES] = files;
+        config[STATS_BASE_PATH_KEY] = manager.GetRemoteTextLogPrefix();
+        index::TextMatchIndex loaded(ctx);
+        loaded.Load(config);
+        loaded.RegisterAnalyzer("milvus_tokenizer", "{}");
+        const auto hits = loaded.PhraseMatchQuery("new york", 99);
+        const auto valid = loaded.IsNotNull();
+        ASSERT_EQ(hits.size(), 4);
+        ASSERT_EQ(valid.size(), 4);
+        EXPECT_EQ(hits.count(), 1);
+        EXPECT_TRUE(hits[2]);
+        EXPECT_EQ(valid.count(), 3);
+        EXPECT_FALSE(valid[3]);
+    }
 }
 
 TEST(TextMatch, V2LoadFinalizesValidityBitmap) {

@@ -3083,7 +3083,7 @@ func Test_appendConsistecyLevel(t *testing.T) {
 
 // A stored struct sub-field may carry enable_match or enable_analyzer: earlier
 // versions accepted them. Restoring such a collection from a snapshot
-// (preserveFieldID) must succeed; a new collection is still rejected.
+// (preserveFieldID) must succeed. A new match-enabled field requires an analyzer.
 func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.T) {
 	buildTask := func(key string, preserveFieldID bool) createCollectionTask {
 		collectionName := funcutil.GenRandomStr()
@@ -3128,8 +3128,12 @@ func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.
 		t.Run(key+" new collection", func(t *testing.T) {
 			task := buildTask(key, false)
 			err := task.prepareSchema(context.TODO())
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.ErrorContains(t, err, key+" is not supported on struct sub-field s[tag]")
+			if key == common.EnableMatchKey {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorContains(t, err, "requires enable_analyzer")
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

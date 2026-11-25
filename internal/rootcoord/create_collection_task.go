@@ -205,7 +205,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
 			return err
 		}
-		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+		if err := schemautil.ValidateStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
 			return err
 		}
 	}
@@ -950,7 +950,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
 	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range collSchema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(collSchema) {
 		if err := validateAnalyzer(collSchema, field, &analyzerInfos); err != nil {
 			return nil, err
 		}

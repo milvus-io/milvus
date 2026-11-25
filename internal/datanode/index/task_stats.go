@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -583,10 +584,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 		}
 	}
 
-	for _, field := range st.req.GetSchema().GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(st.req.GetSchema()) {
 		field := field
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableMatch() {
+		if !schemautil.BuildTextStats(field) {
 			continue
 		}
 		log.Info(ctx, "field enable match, ready to create text index", mlog.Int64("field id", field.GetFieldID()))

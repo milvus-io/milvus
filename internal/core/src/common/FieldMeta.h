@@ -250,6 +250,9 @@ class FieldMeta {
     }
 
     bool
+    is_struct_varchar() const;
+
+    bool
     enable_match() const;
 
     bool
