@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1393,6 +1394,21 @@ func (suite *ServiceSuite) TestGetMetrics() {
 	})
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestLegacyMetadataMetrics() {
+	for _, request := range []map[string]string{
+		{metricsinfo.MetricTypeKey: metricsinfo.DistKey},
+		{metricsinfo.MetricTypeKey: metricsinfo.TargetKey},
+		{metricsinfo.MetricTypeKey: metricsinfo.TargetKey, metricsinfo.MetricRequestParamTargetScopeKey: strconv.Itoa(int(meta.NextTarget))},
+		{metricsinfo.MetricTypeKey: metricsinfo.ResourceGroupKey},
+	} {
+		payload, err := json.Marshal(request)
+		suite.Require().NoError(err)
+		resp, err := suite.server.GetMetrics(context.Background(), &milvuspb.GetMetricsRequest{Request: string(payload)})
+		suite.Require().NoError(merr.CheckRPCCall(resp, err))
+		suite.True(json.Valid([]byte(resp.GetResponse())), "legacy metadata metrics must remain valid JSON: %v", request)
+	}
 }
 
 func (suite *ServiceSuite) TestGetReplicas() {

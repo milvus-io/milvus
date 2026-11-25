@@ -1231,3 +1231,29 @@ func TestCheckReplicasServiceable(t *testing.T) {
 		assert.Empty(t, errs)
 	})
 }
+
+// Retain the active FileResource dependency while deleting legacy observers.
+type fileResourceObserverForTest struct{ FileResourceObserver }
+
+func (*fileResourceObserverForTest) InitQueryCoord(*session.NodeManager, session.Cluster) {
+	panic("patch with mockey")
+}
+
+func TestInitObserverRetainsFileResource(t *testing.T) {
+	nodes := session.NewNodeManager()
+	cluster := session.NewCluster(nodes, nil)
+	defer cluster.Stop()
+	observer := &fileResourceObserverForTest{}
+	called := false
+	patch := mockey.Mock((*fileResourceObserverForTest).InitQueryCoord).To(func(actual *fileResourceObserverForTest, manager *session.NodeManager, client session.Cluster) {
+		assert.Same(t, observer, actual)
+		assert.Same(t, nodes, manager)
+		assert.Same(t, cluster, client)
+		called = true
+	}).Build()
+	defer patch.UnPatch()
+	server := &Server{ctx: t.Context(), nodeMgr: nodes, cluster: cluster, fileResourceObserver: observer}
+	server.initObserver()
+	assert.True(t, called)
+	assert.NotNil(t, server.resourceObserver)
+}
