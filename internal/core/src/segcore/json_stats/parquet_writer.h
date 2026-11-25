@@ -104,7 +104,8 @@ struct TableStatsInfo {
 arrow::Status
 AppendJsonStatsValueToBuilder(
     const std::string& value,
-    const std::shared_ptr<arrow::ArrayBuilder>& builder);
+    const std::shared_ptr<arrow::ArrayBuilder>& builder,
+    bool is_null = false);
 
 class ColumnGroupingStrategy {
  public:
@@ -195,7 +196,9 @@ class JsonStatsParquetWriter {
     Init(ParquetWriteContext context);
 
     void
-    AppendValue(const std::string& key, const std::string& value);
+    AppendValue(const std::string& key,
+                const std::string& value,
+                bool is_null = false);
 
     void
     AppendRow(const std::map<std::string, std::string>& row_data);

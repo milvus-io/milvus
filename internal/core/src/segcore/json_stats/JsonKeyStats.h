@@ -344,6 +344,22 @@ class JsonKeyStats {
         return processed_size;
     }
 
+    // Legacy typed string columns cannot distinguish empty strings from null.
+    // Predicates on those paths (including EXISTS on an ancestor) must use raw
+    // JSON until the stats are rebuilt. Shared BSON strings are lossless.
+    bool
+    CanUseForPath(const std::string& pointer) {
+        if (preserves_empty_strings_) {
+            return true;
+        }
+        for (const auto& field : GetShreddingFieldsWithPrefix(pointer)) {
+            if (shred_field_data_type_map_.at(field) == JSONType::STRING) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::set<std::string>
     GetShreddingFields(const std::string& pointer) {
         std::set<std::string> fields;
@@ -709,6 +725,7 @@ class JsonKeyStats {
 
     // Meta file for storing layout type map and other metadata
     JsonStatsMeta json_stats_meta_;
+    bool preserves_empty_strings_{false};
     int64_t meta_file_size_{0};
 
     // Friend accessor for unit tests to call private methods safely.

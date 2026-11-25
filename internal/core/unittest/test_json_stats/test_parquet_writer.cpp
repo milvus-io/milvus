@@ -268,3 +268,20 @@ TEST_F(ParquetWriterFactoryTest,
 }
 
 }  // namespace milvus::index
+
+namespace milvus::index {
+TEST(JsonStatsArrowBuilderTest, EmptyStringIsDistinctFromNull) {
+    auto builder = std::make_shared<arrow::StringBuilder>();
+    ASSERT_TRUE(AppendJsonStatsValueToBuilder("", builder).ok());
+    ASSERT_TRUE(AppendJsonStatsValueToBuilder("", builder, true).ok());
+    ASSERT_TRUE(AppendJsonStatsValueToBuilder("x", builder).ok());
+    std::shared_ptr<arrow::Array> result;
+    ASSERT_TRUE(builder->Finish(&result).ok());
+    auto strings = std::static_pointer_cast<arrow::StringArray>(result);
+    ASSERT_EQ(strings->length(), 3);
+    EXPECT_TRUE(strings->IsValid(0));
+    EXPECT_EQ(strings->GetString(0), "");
+    EXPECT_TRUE(strings->IsNull(1));
+    EXPECT_EQ(strings->GetString(2), "x");
+}
+}  // namespace milvus::index

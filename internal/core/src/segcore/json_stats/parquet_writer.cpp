@@ -188,7 +188,8 @@ JsonStatsParquetWriter::AppendSharedRow(const uint8_t* data, size_t length) {
 
 void
 JsonStatsParquetWriter::AppendValue(const std::string& key,
-                                    const std::string& value) {
+                                    const std::string& value,
+                                    bool is_null) {
     auto it = builders_map_.find(key);
     if (it == builders_map_.end()) {
         ThrowInfo(
@@ -196,7 +197,7 @@ JsonStatsParquetWriter::AppendValue(const std::string& key,
     }
 
     auto& builder = it->second;
-    auto ast = AppendJsonStatsValueToBuilder(value, builder);
+    auto ast = AppendJsonStatsValueToBuilder(value, builder, is_null);
     if (!ast.ok()) {
         ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
                   "failed to append data to builder");
@@ -294,10 +295,11 @@ JsonStatsParquetWriter::AppendRecordBatch(
 arrow::Status
 AppendJsonStatsValueToBuilder(
     const std::string& value,
-    const std::shared_ptr<arrow::ArrayBuilder>& builder) {
+    const std::shared_ptr<arrow::ArrayBuilder>& builder,
+    bool is_null) {
     auto type_id = builder->type()->id();
 
-    if (value.empty()) {
+    if (is_null) {
         return builder->AppendNull();
     }
 

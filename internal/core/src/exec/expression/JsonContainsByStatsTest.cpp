@@ -1606,7 +1606,7 @@ TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
               -17);
 }
 
-TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
+TEST(JsonContainsByStatsTest, GroupByReaderPreservesEmptyStrings) {
     auto schema = std::make_shared<Schema>();
     auto field = schema->AddDebugField("json", DataType::JSON);
     const std::vector<std::string> documents{
@@ -1622,7 +1622,8 @@ TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
                                           1);
     auto reader = stats->CreateShreddingReader("/s", JSONType::STRING, 4);
     ASSERT_NE(reader, nullptr);
-    EXPECT_FALSE(reader->Get(nullptr, 0).has_value());
+    ASSERT_TRUE(reader->Get(nullptr, 0).has_value());
+    EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 0)), "");
     ASSERT_TRUE(reader->Get(nullptr, 1).has_value());
     EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 1)), "value");
     EXPECT_FALSE(reader->Get(nullptr, 2).has_value());
@@ -2052,5 +2053,135 @@ TEST(JsonStatsExecPathTest, TypedArrayIndexWinsOverJsonStatsForContains) {
 
         EXPECT_EQ(ContainsPath(ContainsInt(f, 9007199254740993), f),
                   exec::ExprExecPath::JsonStats);
+    }
+}
+
+TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
+    const std::vector<std::string> raw = {R"({"k":"","n":1})",
+                                          R"({"k":"x","n":2})",
+                                          R"({"k":"","n":3})",
+                                          R"({"k":null,"n":4})",
+                                          R"({"n":5})",
+                                          R"({"k":7,"n":6})",
+                                          R"({"k":"y","n":7})",
+                                          R"({"k":"","n":8})",
+                                          R"({"k":"z","n":9})",
+                                          R"({"k":"w","n":10})"};
+    const std::vector<uint8_t> valid{0b01111111, 0b00000011};
+    auto schema = std::make_shared<Schema>();
+    auto fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto make_segment = [&] {
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(raw, valid));
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(
+            PrepareSingleFieldInsertBinlog(0, 0, 0, fid.get(), {field}, cm));
+        return segment;
+    };
+    auto raw_segment = make_segment();
+    for (bool legacy : {false, true}) {
+        SCOPED_TRACE(legacy ? "legacy stats" : "new stats");
+        auto input = raw;
+        if (legacy) {
+            // Reproduce the old physical representation: empty strings became
+            // null in /k_STRING, while the original JSON remains unchanged.
+            input[0] = R"({"k":null,"n":1})";
+            input[2] = R"({"k":null,"n":3})";
+        }
+        auto built = BuildJsonStatsIndex(input,
+                                         fid,
+                                         TestLocalPath,
+                                         1600 + legacy,
+                                         2600 + legacy,
+                                         3600 + legacy,
+                                         fid.get(),
+                                         5600 + legacy,
+                                         1,
+                                         &valid);
+        if (legacy) {
+            const auto path =
+                built.stats_base_path + "/" + JSON_STATS_META_FILE_NAME;
+            auto cm = built.ctx.chunkManagerPtr;
+            std::string content(cm->Size(path), '\0');
+            cm->Read(path, content.data(), content.size());
+            auto meta = nlohmann::json::parse(content);
+            meta.erase(META_KEY_PRESERVES_EMPTY_STRINGS);
+            content = meta.dump();
+            cm->Write(path, content.data(), content.size());
+        }
+        auto stats = LoadBuiltJsonStatsIndex(built);
+        ASSERT_FALSE(stats->GetShreddingField("/k", JSONType::STRING).empty());
+        EXPECT_EQ(stats->CanUseForPath("/k"), !legacy);
+        EXPECT_TRUE(stats->CanUseForPath("/n"));
+        EXPECT_TRUE(stats->CanUseForPath("/key"));
+        EXPECT_EQ(stats->CanUseForPath(""), !legacy);
+        auto segment = make_segment();
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(fid,
+                                       MakeTestJsonStatsSlot(std::move(stats)));
+
+        auto check = [&](const expr::TypedExprPtr& filter) {
+            auto plan = std::make_shared<plan::FilterBitsNode>(
+                DEFAULT_PLANNODE_ID, filter);
+            auto expected = milvus::test::gen_filter_res(
+                plan.get(), raw_segment.get(), raw.size(), MAX_TIMESTAMP);
+            auto actual = milvus::test::gen_filter_res(
+                plan.get(), segment.get(), raw.size(), MAX_TIMESTAMP);
+            ASSERT_EQ(actual->size(), expected->size());
+            TargetBitmapView ev(expected->GetValidRawData(), expected->size());
+            TargetBitmapView av(actual->GetValidRawData(), actual->size());
+            TargetBitmapView er(expected->GetRawData(), expected->size());
+            TargetBitmapView ar(actual->GetRawData(), actual->size());
+            for (size_t i = 0; i < raw.size(); ++i) {
+                EXPECT_EQ(av[i], ev[i]) << "validity, row " << i;
+                if (ev[i]) {
+                    EXPECT_EQ(ar[i], er[i]) << "result, row " << i;
+                }
+            }
+        };
+        auto column = expr::ColumnInfo(fid, DataType::JSON, {"k"});
+        check(std::make_shared<expr::ExistsExpr>(column));
+        proto::plan::GenericValue empty;
+        empty.set_string_val("");
+        auto probe = std::make_shared<expr::UnaryRangeFilterExpr>(
+            column,
+            proto::plan::OpType::Equal,
+            empty,
+            std::vector<proto::plan::GenericValue>());
+        exec::PhyUnaryRangeFilterExpr physical({},
+                                               probe,
+                                               "empty-string-path",
+                                               nullptr,
+                                               segment.get(),
+                                               raw.size(),
+                                               raw.size(),
+                                               0);
+        EXPECT_EQ(physical.GetExecPath(),
+                  legacy ? exec::ExprExecPath::RawData
+                         : exec::ExprExecPath::JsonStats);
+        for (const auto* text : {"", "x"}) {
+            proto::plan::GenericValue value;
+            value.set_string_val(text);
+            for (auto op : {proto::plan::OpType::Equal,
+                            proto::plan::OpType::NotEqual,
+                            proto::plan::OpType::LessThan,
+                            proto::plan::OpType::GreaterEqual}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "value=" << text << " op=" << op);
+                check(std::make_shared<expr::UnaryRangeFilterExpr>(
+                    column,
+                    op,
+                    value,
+                    std::vector<proto::plan::GenericValue>()));
+            }
+            check(std::make_shared<expr::TermFilterExpr>(
+                column, std::vector<proto::plan::GenericValue>{value}, false));
+            check(std::make_shared<expr::BinaryRangeFilterExpr>(
+                column, value, value, true, true));
+        }
     }
 }

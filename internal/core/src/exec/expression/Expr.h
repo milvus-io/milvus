@@ -60,6 +60,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 namespace milvus {
 namespace exec {
 
@@ -4200,6 +4201,18 @@ class SegmentExpr : public Expr {
     FallbackToJsonStatsIfEligible() {
         if (exec_path_ == ExprExecPath::RawData &&
             SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            // Numeric/bool predicates never read shredded string columns.
+            // Preserve their pin-free path selection. String predicates and
+            // EXISTS (which has no comparison value) need the capability check.
+            if (IsStringDataType(value_type_) ||
+                value_type_ == DataType::NONE) {
+                auto stats = segment_->GetJsonStats(op_ctx_, field_id_);
+                if (stats == nullptr ||
+                    !stats->CanUseForPath(
+                        milvus::Json::pointer(nested_path_))) {
+                    return;
+                }
+            }
             exec_path_ = ExprExecPath::JsonStats;
         }
     }

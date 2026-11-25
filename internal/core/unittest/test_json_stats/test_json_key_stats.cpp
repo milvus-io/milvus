@@ -3158,3 +3158,36 @@ TEST_F(JsonKeyStatsUploadLoadTest, TestLackBinlogRowsMultipleSharedKeys) {
             << " should not have '/always' in shared";
     }
 }
+
+TEST(JsonStatsMaterializeTest, EmptyStringsSurviveSerialAndParallelWriters) {
+    const std::map<JsonKey, JsonKeyLayoutType> types = {
+        {JsonKey("/k", JSONType::STRING), JsonKeyLayoutType::DYNAMIC},
+        {JsonKey("/k", JSONType::NONE), JsonKeyLayoutType::SHARED},
+        {JsonKey("/k", JSONType::INT64), JsonKeyLayoutType::SHARED},
+    };
+    auto data = CreateNullableMaterializeJsonFieldData(
+        {R"({"k":""})",
+         R"({"k":"x"})",
+         R"({})",
+         R"({"k":null})",
+         R"({"k":1})",
+         R"({"k":""})"},
+        {true, true, true, true, true, false});
+    auto ranges = CreateJsonStatsRowRanges({data}, 2);
+    for (bool parallel : {false, true}) {
+        SCOPED_TRACE(parallel ? "parallel" : "serial");
+        auto snapshot =
+            BuildMaterializeSnapshot(ranges, types, {}, true, parallel);
+        auto column = snapshot.parquet.table->GetColumnByName(
+            JsonKey("/k", JSONType::STRING).ToColumnName());
+        ASSERT_NE(column, nullptr);
+        ASSERT_EQ(column->length(), 6);
+        auto empty = column->GetScalar(0).ValueOrDie();
+        EXPECT_TRUE(empty->is_valid);
+        EXPECT_EQ(empty->ToString(), "");
+        EXPECT_EQ(column->GetScalar(1).ValueOrDie()->ToString(), "x");
+        for (int row = 2; row < 6; ++row) {
+            EXPECT_FALSE(column->GetScalar(row).ValueOrDie()->is_valid) << row;
+        }
+    }
+}
