@@ -608,10 +608,26 @@ func (m *ShardViewManager) RequestRelease(ctx context.Context) error {
 
 // RequestReleaseWithControl adds explicit collection teardown policy without
 // changing the ordinary balancer retirement contract.
-func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, control *viewpb.QueryViewControl) (retErr error) {
+func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, control *viewpb.QueryViewControl) error {
+	return m.requestRelease(ctx, control, nil)
+}
+
+// RequestReplicaRetirement keeps the old view until its replacement can serve
+// the public read schema. The readiness predicate only reads published snapshots.
+func (m *ShardViewManager) RequestReplicaRetirement(ctx context.Context, schema int32, ready func() bool) error {
+	return m.requestRelease(ctx, nil, func() bool {
+		return m.publishedSchema != nil && *m.publishedSchema == schema && ready()
+	})
+}
+
+func (m *ShardViewManager) requestRelease(ctx context.Context, control *viewpb.QueryViewControl, allowed func() bool) (retErr error) {
 	timer := releaseDuration.Begin()
 	defer timer.EndError(&retErr)
 	m.mu.Lock()
+	if allowed != nil && !allowed() {
+		m.mu.Unlock()
+		return nil
+	}
 	m.releaseRequested = true
 
 	for _, sm := range m.views {

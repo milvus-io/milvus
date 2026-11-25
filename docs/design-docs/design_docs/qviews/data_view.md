@@ -626,6 +626,11 @@ does not extend the persisted DataView protocol. After restart, absent statistic
 are initialized from the recovery projection and the current cost, using a new
 immutable entry. It does not preserve pre-restart cost estimates on disk.
 
+At native publication, each shard indexes its segments across partitions by descending
+logical size, breaking ties by ascending segment ID. The index shares the partition
+segment objects and leaves the wire order unchanged. A new native version builds its
+own index.
+
 Balancer policy consumes logical sizes exclusively: selected target baselines,
 RG demand, shard/collection concentration, fanout, candidate ordering, migration
 and loading cost, manual movement, and published-view recovery. QueryView

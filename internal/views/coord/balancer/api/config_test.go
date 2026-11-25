@@ -24,7 +24,6 @@ func TestIncrementalProfileValidation(t *testing.T) {
 		func(c *BalanceConfig) { c.ResourceGroupAbsoluteTolerance = 0 },
 		func(c *BalanceConfig) { c.TargetLogicalSizePerNode = 0 },
 		func(c *BalanceConfig) { c.MinScoreGain = 0 },
-		func(c *BalanceConfig) { c.MaxCandidateEvaluationsPerShard = 0 },
 		func(c *BalanceConfig) { c.ReconcileInterval = 0 },
 	} {
 		cfg := DefaultBalanceConfig()

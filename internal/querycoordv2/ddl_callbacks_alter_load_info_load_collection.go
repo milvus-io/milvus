@@ -261,83 +261,27 @@ func (s *Server) generateQViewsReplicaConfigs(
 	current *loadmgr.LoadConfig,
 	expected qviewsExpectedLoadConfig,
 ) ([]*messagespb.LoadReplicaConfig, error) {
-	existingReplicaNum := make(map[string]int)
-	redundantReplicas := make([]int64, 0)
-	replicaConfigs := make([]*messagespb.LoadReplicaConfig, 0)
-	currentReplicas := sortedReplicaAssignments(current)
-	for _, replica := range currentReplicas {
-		rgName := replica.ResourceGroup
-		if existingReplicaNum[rgName] >= expected.ReplicaNumber[rgName] {
-			redundantReplicas = append(redundantReplicas, replica.ReplicaID)
-			continue
-		}
-		replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replica.ReplicaID, rgName, replica.Priority))
-		existingReplicaNum[rgName]++
+	replicas, err := loadmgr.ReconcileReplicas(current.SortedReplicas(), expected.ReplicaNumber, expected.Priority, s.idAllocator)
+	if err != nil {
+		return nil, err
 	}
-
-	rgNames := lo.Keys(expected.ReplicaNumber)
-	sort.Strings(rgNames)
-	for _, rgName := range rgNames {
-		for i := existingReplicaNum[rgName]; i < expected.ReplicaNumber[rgName]; i++ {
-			if len(redundantReplicas) > 0 {
-				replicaID := redundantReplicas[0]
-				redundantReplicas = redundantReplicas[1:]
-				replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replicaID, rgName, expected.Priority))
-				continue
-			}
-			replicaID, err := s.idAllocator()
-			if err != nil {
-				return nil, err
-			}
-			replicaConfigs = append(replicaConfigs, newLoadReplicaConfig(replicaID, rgName, expected.Priority))
-		}
-	}
-	sort.Slice(replicaConfigs, func(i, j int) bool {
-		return replicaConfigs[i].GetReplicaId() < replicaConfigs[j].GetReplicaId()
-	})
-	return replicaConfigs, nil
-}
-
-func newLoadReplicaConfig(replicaID int64, rgName string, priority commonpb.LoadPriority) *messagespb.LoadReplicaConfig {
-	return &messagespb.LoadReplicaConfig{
-		ReplicaId:         replicaID,
-		ResourceGroupName: rgName,
-		Priority:          priority,
-	}
+	return loadmgr.ReplicasToMessage(replicas), nil
 }
 
 func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.AlterLoadConfigMessageHeader {
 	if cfg == nil {
 		return nil
 	}
-	replicas := lo.Map(sortedReplicaAssignments(cfg), func(replica *loadmgr.ReplicaAssignment, _ int) *messagespb.LoadReplicaConfig {
-		return &messagespb.LoadReplicaConfig{
-			ReplicaId:         replica.ReplicaID,
-			ResourceGroupName: replica.ResourceGroup,
-			Priority:          replica.Priority,
-		}
-	})
 	return &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     cfg.DbID,
 		CollectionId:             cfg.CollectionID,
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
 		LoadFields:               loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.LoadFields)),
 		RequiredFields:           loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.RequiredFields)),
-		Replicas:                 replicas,
+		Replicas:                 loadmgr.ReplicasToMessage(cfg.SortedReplicas()),
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
 		AutoLoad:                 cfg.AutoLoad,
 	}
-}
-
-func sortedReplicaAssignments(cfg *loadmgr.LoadConfig) []*loadmgr.ReplicaAssignment {
-	if cfg == nil {
-		return nil
-	}
-	replicas := append([]*loadmgr.ReplicaAssignment{}, cfg.Replicas...)
-	sort.Slice(replicas, func(i, j int) bool {
-		return replicas[i].ReplicaID < replicas[j].ReplicaID
-	})
-	return replicas
 }
 
 func generateQViewsLoadFields(loadedFields []int64, fieldIndexID map[int64]int64) []*messagespb.LoadFieldConfig {

@@ -11,8 +11,6 @@ import (
 
 const scoreEpsilon = 1e-9
 
-type searchCursor struct{ next, remaining int }
-
 type placementScore struct{ global, local, fanout float64 }
 
 func (s placementScore) energy(c *BalanceConfig) float64 {
@@ -80,7 +78,7 @@ type allocationContext struct {
 	fanout                                       int
 }
 
-func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]int64, entries []*SegmentDataView) *allocationContext {
+func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]int64, entries []*SegmentDataView, previousFanout int) *allocationContext {
 	c := p.collectionForShard(id)
 	replica := findReplica(c.LoadConfig(), id.ReplicaID)
 	nodes, _ := p.TargetNodes(id)
@@ -107,8 +105,7 @@ func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]
 	if p.recovery != nil && p.recovery.shardID == id {
 		shardRows = p.recovery.shard.LogicalSize
 	}
-	ctx.fanout = preferredFanout(p.fanouts[id], len(nodes), len(entries), shardRows, cfg)
-	p.fanouts[id] = ctx.fanout
+	ctx.fanout = preferredFanout(previousFanout, len(nodes), len(entries), shardRows, cfg)
 	if ctx.fanout > 0 {
 		ctx.shardLimit = (1 + cfg.ConcentrationRelativeTolerance) * float64(shardRows) / float64(ctx.fanout)
 	}
@@ -227,47 +224,64 @@ func (ctx *allocationContext) assign(segments []*SegmentDataView, node int64) {
 	}
 }
 
-// Search cycles over compound and individual candidates without starving the
-// tail when its work budget is smaller than the candidate space.
-func (ctx *allocationContext) optimize(entries []*SegmentDataView, cursor *searchCursor) bool {
-	if len(entries) == 0 || len(ctx.nodes) == 0 {
-		return false
+// optimize considers compound moves before individual segments. Entries are
+// in publication order (largest first), including after partition filtering.
+func (ctx *allocationContext) optimize(entries []*SegmentDataView) {
+	if len(entries) == 0 || len(ctx.nodes) < 2 {
+		return
 	}
-	groups := [][]*SegmentDataView{entries}
 	byNode := make(map[int64][]*SegmentDataView)
 	for _, segment := range entries {
 		node := ctx.assignments[segment.SegmentID]
 		byNode[node] = append(byNode[node], segment)
 	}
+
+	ctx.tryMoves(entries)
 	for _, node := range ctx.nodes {
 		if group := byNode[node]; len(group) > 0 {
-			groups = append(groups, group)
+			ctx.tryMoves(group)
 		}
 	}
+	for i, segment := range entries {
+		if (i == 0 || segment.LogicalSize != entries[i-1].LogicalSize) &&
+			ctx.singleMoveGainBound(segment.LogicalSize) <= ctx.config.MinScoreGain {
+			break
+		}
+		ctx.tryMoves(entries[i : i+1])
+	}
+}
 
-	total := (len(groups) + len(entries)) * len(ctx.nodes)
-	if cursor.remaining <= 0 || cursor.remaining > total {
-		cursor.remaining = total
-	}
-	cursor.next %= total
-	limit := min(cursor.remaining, int(ctx.config.MaxCandidateEvaluationsPerShard))
-	for i := 0; i < limit; i++ {
-		index := cursor.next
-		group, destination := index/len(ctx.nodes), ctx.nodes[index%len(ctx.nodes)]
-		var segments []*SegmentDataView
-		if group < len(groups) {
-			segments = groups[group]
-		} else {
-			segments = entries[group-len(groups) : group-len(groups)+1]
-		}
+func (ctx *allocationContext) tryMoves(segments []*SegmentDataView) {
+	for _, destination := range ctx.nodes {
 		gain, global := ctx.evaluate(segments, destination)
 		if global >= -scoreEpsilon && gain > ctx.config.MinScoreGain {
 			ctx.assign(segments, destination)
 		}
-		cursor.next = (cursor.next + 1) % total
 	}
-	cursor.remaining -= limit
-	return cursor.remaining > 0
+}
+
+// singleMoveGainBound bounds the gain from any single move of at most size
+// at the current placement. Only two nodes can improve the RG penalty, only
+// the source can improve concentration, and at most one node can close.
+// Omitting nonnegative move/load costs makes the bound conservative.
+func (ctx *allocationContext) singleMoveGainBound(size int64) float64 {
+	var global, local float64
+	for _, node := range ctx.nodes {
+		rows := ctx.rows[node]
+		before := ctx.nodeScore(node, rows)
+		low := rows - min(size, rows)
+		load := ctx.base[node] + rows
+		// Saturate the hypothetical increase for destinations already full.
+		high := load + min(size, math.MaxInt64-max(int64(0), load))
+		nearest := min(max(ctx.mean, float64(ctx.base[node]+low)), float64(high))
+		global = max(global, before.global-bandPenalty(nearest, ctx.mean, ctx.tolerance))
+		local = max(local, before.local-ctx.nodeScore(node, low).local)
+	}
+	bound := ctx.config.ResourceGroupWeight*(2*global) + local
+	if ctx.opened > ctx.fanout {
+		bound += ctx.config.FanoutWeight * float64(ctx.config.TargetLogicalSizePerNode)
+	}
+	return bound
 }
 
 func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {

@@ -45,7 +45,6 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		{&p.BalancerResourceGroupAbsoluteTolerance, &value.ResourceGroupAbsoluteTolerance},
 		{&p.BalancerShardBatchSize, &value.ShardBatchSize},
 		{&p.BalancerTargetLogicalSizePerNode, &value.TargetLogicalSizePerNode},
-		{&p.BalancerMaxCandidateEvaluationsPerShard, &value.MaxCandidateEvaluationsPerShard},
 	} {
 		parsed, err := strconv.ParseInt(field.item.GetValue(), 10, 64)
 		if err != nil {
@@ -95,7 +94,6 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 		p.BalancerResourceGroupAbsoluteTolerance.Key,
 		p.BalancerTargetLogicalSizePerNode.Key,
 		p.BalancerMinScoreGain.Key,
-		p.BalancerMaxCandidateEvaluationsPerShard.Key,
 	}
 
 	var mu sync.Mutex

@@ -47,8 +47,6 @@ type planningContext struct {
 	config         *BalanceConfig
 	targets        map[int64][]int64
 	replicaDelta   map[int64]map[int64]int64
-	fanouts        map[qviews.ShardID]int
-	search         map[qviews.ShardID]*searchCursor
 }
 
 func newPlanningContext(reader balancercache.Reader) *planningContext {
@@ -208,7 +206,13 @@ func (p *planningContext) CurrentSize(id qviews.ShardID) map[int64]int64 {
 func (p *planningContext) refreshTargetInputs() {
 	p.groups = make(map[string][]int64)
 	p.groupEntries = make(map[string]*balancercache.ResourceGroupEntry)
-	p.collections = make(map[int64]*balancercache.CollectionEntry)
+	// Refresh target accounting without switching an in-flight plan to a
+	// different load (and hence different planning handles).
+	for id, pinned := range p.collections {
+		if current := p.Reader.GetCollection(id); pinned != nil && pinned.SameLoad(current) {
+			p.collections[id] = current
+		}
+	}
 	p.nodeEntries = make(map[int64]*balancercache.NodeEntry)
 	p.nodes = make(map[int64]*BalanceNode)
 	p.RangeNodeIDs(func(id int64) bool {

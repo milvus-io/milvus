@@ -33,9 +33,10 @@ reconciliation does not pull manager snapshots or rebuild the row-count ledger.
 
 The consistency contract is object-local:
 
-- A published object and everything reachable through its read API are
-  immutable. Readers may retain it without holding a lock and must not mutate
-  it. Writers replace objects using copy-on-write and structural sharing.
+- Published collection, shard and node facts are immutable. Readers can retain
+  them without holding a lock. Writers replace facts using copy-on-write and
+  structural sharing. A collection also pins a separately synchronized planning
+  handle for its load membership.
 - One `Get` returns a complete object version. Separate reads may observe
   different publication times, including different fields' source versions in
   a Collection entry. There is no global version barrier or global transaction.
@@ -235,7 +236,18 @@ starting any prediction.
 The first version does not lazily introduce new node baselines after accepting
 candidates; doing so would require rebasing all earlier accepted replacements.
 The cache refactor eliminates repeated actual-state aggregation and deep
-copies, not segment sorting, candidate scoring, or all shard-by-node traversal.
+copies. Candidate scoring and shard-by-node traversal remain on the planning path.
+
+The collection counts desired shards whose latest Up matches the current load
+and schema versions and covers the current DataVersion. Config and DataView
+publication rebuild the count during the existing target scan. Each shard
+publication adjusts only its own contribution. Completing the desired set
+wakes the collection if removed replicas still have resident views. Before
+retirement, the Balancer checks live node membership against the aggregate Up
+footprints. The manager rechecks the public schema and the Balancer's live
+readiness predicate under its lock. Source replay rebuilds the count after a
+restart.
+
 
 ## 5. Source hooks and publication
 
@@ -477,7 +489,7 @@ planner comparison.
 
 ## Replica placement facts
 
-See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. Desired target layouts are owned by the default policy, never published as actual cache facts.
+See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. The cache owns a separate planning handle for each load. Its RG layouts and per-replica fanout history are updated without publishing new collection facts. Removing a replica detaches its history. Releasing a collection detaches the entire handle, so in-flight planners can finish on the old load.
 
 ## Selected target and reuse accounting
 
@@ -524,12 +536,7 @@ or restores the removed contribution on failure or optional rejection. Releases
 only subtract. No candidate retains the batch map after allocation, and no
 speculative update touches a published cache object.
 
-An allocation result contains the final assignments, row contributions and a
-private sorted slice of immutable Segment metadata. Only admitted candidates
-materialize the nested builder assignments and native Manifest/partition-stats
-metadata. Unchanged optional candidates keep their continuation cursor without
-constructing a builder or an intermediate DataView protobuf. Sorting and the
-optional search rollback still use their own private copies.
+An allocation result references the shard's published size-ordered segment index or a filtered slice for a partial load. Only admitted candidates materialize builder assignments and native Manifest/partition-stats metadata. Optional rollback uses private assignment state.
 
 Target refresh reuses one call-local contribution map while visiting resident
 shards. An unchanged target pointer and equal contribution map preserve the old

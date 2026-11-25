@@ -21,7 +21,7 @@ type BalancePolicy interface {
 
 // BalancePlan is the complete set of actions to execute for one reconcile
 // batch. The Balancer applies Prepares (via AddPreparing) and Releases (via
-// RequestRelease) in an unspecified order; both are idempotent operations on
+// RequestReplicaRetirement) in an unspecified order; both are idempotent operations on
 // the per-shard ShardViewManager.
 //
 // A shard listed in neither Prepares nor Releases is implicitly a no-op for
@@ -29,15 +29,12 @@ type BalancePolicy interface {
 type BalancePlan struct {
 	// RescanCollections identifies changed layouts for incremental discovery.
 	RescanCollections []int64
-	// Continues contains unfinished bounded searches, not allocation failures.
-	Continues []qviews.ShardID
 	// Retries could not be allocated because desired inputs or eligible nodes were unavailable.
 	Retries []qviews.ShardID
 	// Prepares lists shards that should receive a new Preparing view.
 	// The value is the builder the Balancer passes to AddPreparing.
 	Prepares map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder
 
-	// Releases lists shards whose existing views should be released
-	// (replica removed or a suspended replica can safely drain).
+	// Releases lists shards of replicas removed from a loaded collection.
 	Releases []qviews.ShardID
 }

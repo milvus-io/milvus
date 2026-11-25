@@ -82,10 +82,14 @@ func (c *Cache) replaceDemand(old, next *CollectionEntry) {
 
 // PublishReplicaActivity publishes only the retained layout's active selector,
 // never speculative segment assignments. It is a no-op for an unchanged layout.
-func (c *Cache) PublishReplicaActivity(collection int64, active map[int64]bool) bool {
-	slot := c.lockCollection(collection)
-	defer c.finishCollection(collection, slot)
+func (c *Cache) PublishReplicaActivity(planned *CollectionEntry, active map[int64]bool) bool {
+	slot := c.lockCollection(planned.id)
+	defer c.finishCollection(planned.id, slot)
 	next := *slot.value.Load()
+	// An older Plan can finish after a release or replica replacement.
+	if !planned.SameLoad(&next) {
+		return false
+	}
 	var suspended immutableIndex[bool]
 	for replica, enabled := range active {
 		if !enabled {
@@ -171,7 +175,11 @@ func (c *Cache) refreshTargets(entry *CollectionEntry, fallback map[int64]int64)
 	// Scratch belongs only to this publication. Changed shards receive their own
 	// map; unchanged shards retain their immutable object and index path.
 	rows := make(map[int64]int64)
+	entry.currentUps = 0
 	entry.shards.each(func(old *ShardEntry) bool {
+		if entry.currentUp(old.id, old.stats) {
+			entry.currentUps++
+		}
 		clear(rows)
 		c.refreshShardTarget(entry, old, fallback, rows)
 		return true

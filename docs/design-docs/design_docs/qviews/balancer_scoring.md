@@ -2,7 +2,7 @@
 
 **Status: first implementation in this branch.** Incremental scoring, selected
 target accounting, protected partial-resource reuse evidence, dynamic scoring
-configuration, and per-shard search continuations are implemented. QueryCoord
+configuration, and size-ordered per-shard optimization are implemented. QueryCoord
 wires production cache sources; the existing QV readiness manager synchronously
 retains pending view references as described in the handler design.
 Fair bounded batch discovery, migration/loading budgets, and execution throttles
@@ -33,7 +33,7 @@ is owned upstream; the policy does not move data across an RG boundary to fix
 skew. A node reassignment invalidates both affected RGs.
 
 Preserve collection/RG replica node quotas, stable target ownership, eventual
-physical isolation, shortage suspension, and last-serving-cover protection.
+physical isolation, shortage suspension, and retention of existing views.
 QueryNode replicas remain the scope. StreamingNode replica placement, new RPCs,
 AnchorHash, and persistent Segment Groups are excluded.
 
@@ -183,7 +183,6 @@ The following keys are relative to `queryView.balancer`. The definitions in
 | `reconcileInterval` | `1m` | Positive duration with a unit; controls periodic reconciliation independently of events |
 | `optimization.enabled` | `true` | Enables optional optimization; mandatory recovery and version updates remain active |
 | `optimization.minScoreGain` | `1` | Higher values suppress small net improvements |
-| `optimization.maxCandidateEvaluationsPerShard` | `100000` | Lower values yield optional search earlier and schedule continuations |
 | `scoring.targetLogicalSizePerNode` | `100000` | Concentration scale Q in logical-size units; higher values favor fewer participants |
 | `scoring.resourceGroup.weight` | `1` | Higher values favor reducing RG logical-size skew |
 | `scoring.resourceGroup.relativeTolerance` | `0.1` | Higher values widen the RG balance band relative to mean demand |
@@ -247,8 +246,12 @@ loading prices discourage expensive candidates.
 
 Keep Must before Optional, descending shard rows within the selected classes,
 and shared projected loads. Merge accepted changes into one final QueryView per
-changed shard. Plan the complete selected batch before applying it. Per-shard Optional
-search is bounded; collection batch size is not yet bounded. Speculative
+changed shard. Plan the complete selected batch before applying it. Within each shard,
+evaluate compound moves first. Before evaluating a smaller segment size, bound the
+possible gain of any remaining single move: only its source can reduce concentration,
+two nodes can reduce RG penalties, and at most one excess node can close. Stop when
+this upper bound is at or below MinScoreGain. A rejected large move alone cannot rule
+out a profitable smaller one. Speculative
 segment candidates never update cache facts. Healthy accepted Preparing targets remain
 stable while loading, unless topology or intent requires replacement.
 
@@ -368,7 +371,7 @@ An explicitly restricted collection batch cannot fix a problem requiring moves
 outside that scope. Periodic coverage supplies opportunities, not proof that a
 weighted greedy policy reaches a globally optimal placement.
 
-Bound Optional candidate evaluations, moved rows, additional loading rows,
+Bound execution work such as moved rows, additional loading rows,
 changed shards, and concurrent destination loading. An indivisible item larger
 than the per-pass budget requires accumulated credit or an explicit oversized
 item allowance; otherwise it can starve forever. Required recovery has separate
@@ -392,7 +395,7 @@ for enormous shards would require separate resumable/materialization work.
 Node loss cannot wait indefinitely for a presumed rolling replacement. Existing
 NodeInfo has no maintenance/replacement identity; such scenario-specific control
 requires a separate upstream contract. Preserve the current shortage suspension
-and last-serving-cover behavior in all cases.
+and retain existing views for replicas waiting for a target.
 
 ## 7. Guarantees, Delivery, and Verification
 
@@ -409,8 +412,7 @@ Delivery stages:
 
 1. Implemented: per-view target accounting, protected per-segment reuse evidence,
    objective deltas, incremental single-shard candidates, final gain acceptance,
-   and resumable per-shard Optional search. A continuation has its own plan field;
-   it does not become an allocation failure or retry backoff.
+   and size-ordered Optional search with a gain upper bound.
 2. Follow-up: fair bounded batch discovery, migration/loading budgets, and
    execution concurrency throttles.
 3. Calibration using reproducible event sequences; add multi-view exchanges or
@@ -446,13 +448,14 @@ planning, layout, and controller), its `cache/` and `api/` subpackages,
 ### 7.1 Cost of the First Implementation
 
 Each batch pins O(M) node entries. Desired row summaries and selected target
-contributions are maintained on publication. Each selected shard scans/copies node scalars in O(M), sorts its S
-segments and builds exact-compatible reuse evidence across its N target nodes,
-then evaluates candidate deltas. A one-segment delta touches at most two nodes;
-a whole-shard or source-node candidate also scans its member segments. Thus the
-candidate-count limit is not a CPU-time limit. The full candidate sweep includes
-O(S * N) member work; complete changed-view materialization is O(S), even when
-the search cursor resumes a small slice. Cross-collection load is read from node
+contributions are maintained on publication. DataView publication sorts one pointer
+index per shard by descending LogicalSize and ascending SegmentID. Placement shares
+this index for full loads and filters it in order for partial loads. Each selected
+shard reads node scalars in O(M) and builds compatible reuse evidence across its N
+target nodes. A single-segment candidate touches at most two nodes. Compound
+candidates scan their member segments, so worst-case candidate evaluation still takes
+O(S * N) for S loaded segments. A changed view requires O(S) materialization.
+Cross-collection load is read from node
 and RG summaries, without scanning unselected segment membership.
 
 Target aggregates count logical replica placements, not deduplicated physical

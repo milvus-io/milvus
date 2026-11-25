@@ -80,6 +80,9 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		if cfg == nil {
 			continue
 		}
+		if nodes, known := p.TargetNodes(id); known && len(nodes) == 0 {
+			continue
+		}
 		manager := b.viewRegistry.Get(id)
 		if manager == nil || configForShard(b.cache, id) != cfg {
 			continue

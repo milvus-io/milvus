@@ -108,15 +108,16 @@ func TestDiscoveryEmptyCollectionsYieldAndPruneLayout(t *testing.T) {
 	c := scanTestCache(make([]int, scanSlotBudget+1)...)
 	t.Cleanup(c.Close)
 	b := NewDefaultBalancer(c, nil, nil, nil)
-	policy := b.policy.(*DefaultBalancePolicy)
-	policy.layouts.domains = map[int64]map[string]*replicaLayout{1: {}, 2: {}}
+	for _, id := range []int64{1, 2} {
+		c.GetCollection(id).Planning().StoreLayout("rg1", &balancercache.ReplicaLayout{})
+	}
 	b.Trigger()
 	require.Zero(t, b.dispatch(anySource))
 	c.PublishLoadConfig(1, nil, 2)
+	require.Nil(t, c.GetCollection(1).Planning().Layout("rg1"))
 	c.PublishDataView(1, nil)
 	require.Zero(t, b.dispatch(anySource))
-	require.NotContains(t, policy.layouts.domains, int64(1))
-	require.Contains(t, policy.layouts.domains, int64(2))
+	require.NotNil(t, c.GetCollection(2).Planning().Layout("rg1"))
 	for b.dispatch(anySource) >= 0 {
 	}
 }

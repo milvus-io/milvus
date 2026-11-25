@@ -113,7 +113,7 @@ func TestBalanceSimulationTopology(t *testing.T) {
 					s.node(n+20, "rg1", true, false)
 					s.settle(fmt.Sprintf("rolling_add_%d", n+20), nil, batch, 40)
 				}
-				s.policy = NewDefaultBalancePolicy()
+				s.restart()
 				s.settle("policy_restart", nil, batch, 40)
 			})
 		}
@@ -265,7 +265,7 @@ func TestBalanceSimulationPreparingAndApply(t *testing.T) {
 	}
 }
 
-func TestBalanceSimulationConfigAndBudget(t *testing.T) {
+func TestBalanceSimulationConfig(t *testing.T) {
 	for _, price := range []float64{0, 0.1, 1} {
 		t.Run(fmt.Sprintf("price_%g", price), func(t *testing.T) {
 			s := newBalanceSimulation(t, 2)
@@ -277,19 +277,6 @@ func TestBalanceSimulationConfigAndBudget(t *testing.T) {
 			s.cache.UpdateBalanceConfig(cfg)
 			s.node(3, "rg1", true, false)
 			s.settle("expand_with_price", nil, 0, 40)
-		})
-	}
-	for _, budget := range []int64{1, 8, 100000} {
-		t.Run(fmt.Sprintf("budget_%d", budget), func(t *testing.T) {
-			s := newBalanceSimulation(t, 2)
-			simulationPopulate(s, 1, 1, 1, 6, "uniform", 1)
-			s.settle("initial", nil, 0, 20)
-			cfg := DefaultBalanceConfig()
-			cfg.MaxCandidateEvaluationsPerShard = budget
-			s.cache.UpdateBalanceConfig(cfg)
-			s.node(3, "rg1", true, false)
-			r := s.settle("expand", nil, 0, 300)
-			require.Equal(t, "stable_in_band", r.Outcome)
 		})
 	}
 	t.Run("auto_balance", func(t *testing.T) {

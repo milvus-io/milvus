@@ -38,9 +38,9 @@ type simulationView struct {
 type (
 	simulationShard    struct{ up, preparing, failed *simulationView }
 	simulationCounters struct {
-		Calls, Prepares, Releases, Rejected, Retries, Continuations int
-		MovedRows, LoadRows                                         int64
-		PlanMS                                                      float64
+		Calls, Prepares, Releases, Rejected, Retries int
+		MovedRows, LoadRows                          int64
+		PlanMS                                       float64
 	}
 )
 
@@ -72,6 +72,25 @@ func newBalanceSimulation(t *testing.T, nodeCount int) *balanceSimulation {
 		s.node(int64(n), "rg1", true, false)
 	}
 	return s
+}
+
+// A restarted coordinator rebuilds its planning state from source facts.
+func (s *balanceSimulation) restart() {
+	old := s.cache
+	s.cache = balancercache.New(old.GetBalanceConfig())
+	for id, node := range s.nodes {
+		s.cache.PublishNode(id, node)
+	}
+	for id := range old.RangeCollectionIDs {
+		c := old.GetCollection(id)
+		s.cache.PublishLoadConfig(id, c.LoadConfig(), c.ConfigVersion())
+		s.cache.PublishDataView(id, c.DataView())
+		for shard := range c.RangeShards {
+			s.cache.PublishShard(shard.ID(), shard.Stats())
+		}
+	}
+	old.Close()
+	s.policy = NewDefaultBalancePolicy()
 }
 
 func (s *balanceSimulation) node(id int64, group string, alive, stopping bool) {
@@ -250,7 +269,6 @@ func (s *balanceSimulation) step(collections []int64, cap int, complete bool) *B
 	plan := s.policy.Plan(s.cache, dirty)
 	s.counters.PlanMS += float64(time.Since(started).Nanoseconds()) / 1e6
 	s.counters.Calls++
-	s.counters.Continuations += len(plan.Continues)
 	s.counters.Retries += len(plan.Retries)
 	for _, id := range plan.Releases {
 		delete(s.views, id)
@@ -292,7 +310,7 @@ func (s *balanceSimulation) step(collections []int64, cap int, complete bool) *B
 		}
 		s.sequence++
 		next := &simulationView{assignments: assignments, rows: map[int64]int64{}, ready: map[int64]bool{}, version: qviews.QueryViewVersion{DataVersion: builder.DataVersion(), QueryVersion: s.sequence}, loadVersion: c.ConfigVersion()}
-		target := s.policy.layouts.domains[collection][findReplica(c.LoadConfig(), id.ReplicaID).ResourceGroup].targets[id.ReplicaID]
+		target := c.Planning().Layout(findReplica(c.LoadConfig(), id.ReplicaID).ResourceGroup).Targets[id.ReplicaID]
 		for seg, node := range assignments {
 			info, ok := c.DataView().Segment(seg)
 			require.True(s.t, ok)
@@ -354,11 +372,11 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 		}
 		for _, r := range c.LoadConfig().Replicas {
 			sample.DesiredReplicas++
-			layout := s.policy.layouts.domains[id][r.ResourceGroup]
+			layout := c.Planning().Layout(r.ResourceGroup)
 			if layout == nil {
 				continue
 			}
-			targets := layout.targets[r.ReplicaID]
+			targets := layout.Targets[r.ReplicaID]
 			if len(targets) == 0 {
 				sample.SuspendedReplicas++
 				continue
@@ -406,7 +424,7 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 				sample.ActiveShards++
 				sample.FanoutMean += float64(len(rows))
 				sample.FanoutMax = max(sample.FanoutMax, len(rows))
-				k := s.policy.fanouts[sid]
+				k := c.Planning().Replica(sid.ReplicaID).Fanout(sid.VChannel)
 				sample.ExcessFanout += max(0, len(rows)-k)
 				if sh.LogicalSize > 0 && k > 0 {
 					for _, n := range rows {
@@ -477,7 +495,7 @@ func (s *balanceSimulation) sample(check bool) simulationSample {
 }
 
 func simulationCounterDelta(a, b simulationCounters) simulationCounters {
-	return simulationCounters{Calls: a.Calls - b.Calls, Prepares: a.Prepares - b.Prepares, Releases: a.Releases - b.Releases, Rejected: a.Rejected - b.Rejected, Retries: a.Retries - b.Retries, Continuations: a.Continuations - b.Continuations, MovedRows: a.MovedRows - b.MovedRows, LoadRows: a.LoadRows - b.LoadRows, PlanMS: a.PlanMS - b.PlanMS}
+	return simulationCounters{Calls: a.Calls - b.Calls, Prepares: a.Prepares - b.Prepares, Releases: a.Releases - b.Releases, Rejected: a.Rejected - b.Rejected, Retries: a.Retries - b.Retries, MovedRows: a.MovedRows - b.MovedRows, LoadRows: a.LoadRows - b.LoadRows, PlanMS: a.PlanMS - b.PlanMS}
 }
 
 func (s *balanceSimulation) settle(phase string, scope []int64, batch, limit int) simulationResult {
@@ -491,17 +509,16 @@ func (s *balanceSimulation) settle(phase string, scope []int64, batch, limit int
 	before := s.counters
 	idle := 0
 	for sweep := 0; sweep < limit; sweep++ {
-		busy, continuing := false, false
+		busy := false
 		for start := 0; start < len(scope); start += batch {
 			p := s.step(scope[start:min(start+batch, len(scope))], -1, true)
 			busy = busy || len(p.Prepares)+len(p.Releases)+len(p.Retries) > 0
-			continuing = continuing || len(p.Continues) > 0
 		}
 		result.Sweeps++
 		result.Trace = append(result.Trace, s.sample(false))
 		if busy {
 			idle = 0
-		} else if !continuing {
+		} else {
 			idle++
 		}
 		if idle >= 2 {

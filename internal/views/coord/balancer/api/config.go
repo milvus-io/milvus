@@ -32,9 +32,8 @@ type BalanceConfig struct {
 	ReconcileInterval time.Duration
 	ShardBatchSize    int64
 
-	OptimizationEnabled             bool
-	MinScoreGain                    float64
-	MaxCandidateEvaluationsPerShard int64
+	OptimizationEnabled bool
+	MinScoreGain        float64
 
 	TargetLogicalSizePerNode       int64
 	ResourceGroupWeight            float64
@@ -56,7 +55,7 @@ func DefaultBalanceConfig() *BalanceConfig {
 		MoveCostPerUnit: 0.02, LoadCostPerUnit: 0.08,
 		ResourceGroupRelativeTolerance: 0.1, ConcentrationRelativeTolerance: 0.1, FanoutHysteresis: 0.1,
 		ResourceGroupAbsoluteTolerance: 100_000, TargetLogicalSizePerNode: 100_000,
-		MinScoreGain: 1, MaxCandidateEvaluationsPerShard: 100_000,
+		MinScoreGain: 1,
 	}
 }
 
@@ -73,5 +72,5 @@ func (c *BalanceConfig) Valid() bool {
 	sum := c.ResourceGroupWeight + c.ShardConcentrationWeight + c.CollectionConcentrationWeight + c.FanoutWeight
 	return sum > 0 && !math.IsInf(sum, 0) && c.ResourceGroupRelativeTolerance < 1 && c.FanoutHysteresis < 1 &&
 		c.ResourceGroupAbsoluteTolerance > 0 && c.TargetLogicalSizePerNode > 0 && c.MinScoreGain > 0 &&
-		c.MaxCandidateEvaluationsPerShard > 0 && c.ReconcileInterval > 0 && c.ShardBatchSize > 0
+		c.ReconcileInterval > 0 && c.ShardBatchSize > 0
 }

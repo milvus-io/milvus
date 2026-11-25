@@ -130,9 +130,8 @@ balance pass or rewrites existing snapshots. See the [DataView cost model](data_
 
 `queryView.balancer.reconcileInterval` controls periodic scans.
 `queryView.balancer.shardBatchSize` is a positive integer applied on the next dequeue. The
-`optimization` group contains `enabled`, `minScoreGain` and
-`maxCandidateEvaluationsPerShard`; these affect optional placement improvements,
-not mandatory recovery and release. `minScoreGain` is the net weighted score
+`optimization` group contains `enabled` and `minScoreGain` for optional placement
+improvements. `minScoreGain` is the net weighted score
 gain after movement and loading costs.
 
 The `scoring` group separates `resourceGroup` load-band weights/tolerances,

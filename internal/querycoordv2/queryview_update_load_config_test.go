@@ -20,6 +20,8 @@ import (
 
 func TestQueryViewUpdateLoadConfig(t *testing.T) {
 	s, _ := newHandoffServer(t)
+	nextID := int64(13)
+	s.idAllocator = func() (int64, error) { nextID++; return nextID, nil }
 	s.meta = &meta.Meta{ReplicaManager: &meta.ReplicaManager{}, ResourceManager: &meta.ResourceManager{}}
 	s.qviewsRuntime.loadManager = loadmgr.NewCollectionLoadManager(s.qviewsRuntime.loadConfigStore, nil, qviewsReplicaResources{ResourceManager: s.meta.ResourceManager, allocateID: func() (int64, error) { return s.idAllocator() }})
 	store := s.qviewsRuntime.loadConfigStore
@@ -42,7 +44,9 @@ func TestQueryViewUpdateLoadConfig(t *testing.T) {
 	require.Equal(t, cfg.RequiredFields, store.GetConfig(1).RequiredFields)
 	require.Equal(t, cfg.PartitionIDs, store.GetConfig(1).PartitionIDs)
 	require.True(t, store.GetConfig(1).UserSpecifiedReplicaMode)
-	require.Equal(t, "b", store.GetConfig(1).Replicas[1].ResourceGroup)
+	require.EqualValues(t, 13, store.GetConfig(1).Replicas[1].ReplicaID)
+	require.EqualValues(t, 14, store.GetConfig(1).Replicas[2].ReplicaID)
+	require.Equal(t, "b", store.GetConfig(1).Replicas[2].ResourceGroup)
 	require.NoError(t, s.updateLoadConfig(t.Context(), []int64{1}, 3, []string{"b", "a", "b"}))
 
 	params := paramtable.Get()

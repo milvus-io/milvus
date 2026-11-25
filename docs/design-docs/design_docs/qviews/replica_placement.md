@@ -30,8 +30,7 @@ For R > 0, the following quota rules apply, including when N < R:
 - Targets constrain new views. Existing views may remain outside their targets
   until safe replacement and cleanup complete.
 
-When N < R, the scheduler temporarily suspends excess replicas instead of
-maintaining all replicas through permanent node sharing. Since floor(N/R)=0,
+When N < R, the scheduler suspends new placement for excess replicas. Since floor(N/R)=0,
 exactly N replicas receive one node each; the remaining R-N replicas receive a
 zero quota. Desired LoadConfig, ReplicaID, and resource group membership remain
 unchanged. Replicas are restored automatically when nodes recover. Active means
@@ -46,28 +45,26 @@ Ordinary view progress does not trigger reelection of the Active set. During a
 resource shortage, do not rotate replicas for fairness: that would repeatedly
 suspend healthy replicas.
 
-A zero quota is a target state and does not require immediate destruction of
-existing views. A replica moves through Draining to Suspended: first ensure
-that a retained replica can serve the corresponding shard, then release the
-suspended replica through the existing view lifecycle. Retain an existing
-healthy view temporarily if it is the only serving coverage for a shard;
-shrinking the Active set must not cause an outage. Views that cannot serve do
-not need to wait for this barrier. Temporary node sharing is allowed during
-this handover.
+A desired replica with zero target nodes waits for a topology change. Its
+existing Up view keeps its version, including when another replica can serve
+the shard. The Balancer skips ordinary placement and published-schema recovery
+for this replica. QueryNode failure reports still drive the view state machine.
+Queries that need a failed QN depend on another serving placement for coverage.
 
-When N = 0, no valid new placement exists for nonempty data. Preserve lifecycle
-state and wait for node events or retries without generating invalid targets.
-When R = 0, discard targets and clean up residual views.
+When the replica has a target again, the Balancer evaluates its current view
+and prepares a replacement if needed. The normal handoff retires the old Up.
+Each newly allocated ReplicaID belongs to one RG for its lifetime. A cross-RG
+transfer keeps the IDs that still fit in each group and allocates fresh IDs for
+the deficits. Existing WAL records replay their recorded assignments.
 
-Allocation eligibility and existing serving coverage are separate: an Alive
-but Stopping QN cannot receive new placements, but its existing Up views still
-count as serving coverage. With N = 0, the balancer does not release Up,
-Preparing, or Unrecoverable views merely because their target sets are empty.
-Actual node-failure reports continue to drive the QueryView state machine;
-retaining lifecycle state does not assert that a failed node can serve queries.
-When eligible nodes return, prepare replacements and let the existing lifecycle
-perform handoff or recovery. Explicit unload or replica removal still releases
-residual views even when the resource group has no eligible nodes.
+When a loaded collection removes a replica, its resident views stay until every
+desired replica has an Up for every DataView vchannel at the current
+LoadInfoVersion and schema, covering the current DataVersion. The QNs serving
+those views must be alive, eligible, and in their replica's RG. This also
+applies to simple scale-down. A missing destination can delay retirement
+indefinitely. Discovery can continue to advertise existing Up views during
+this interval. An explicit collection unload tears down all resident views
+immediately through the ordinary DDL release path.
 
 Feasibility still requires target nodes to load the data. The current interfaces
 provide no capacity admission control, so node count alone cannot guarantee
@@ -81,9 +78,12 @@ of an existing serving Up view.
 
 ## 2. State and Interfaces
 
-DefaultBalancePolicy owns LayoutManager under its mutex and retains targets
-across reconciles. The Balancer's reconcileMu serializes planning and execution.
-The cache stores facts only.
+The balancer cache attaches planning state to each loaded collection. A planner
+pins the handle with its immutable collection facts. Replica membership changes
+preserve surviving shard histories and seed each new RG layout from overlapping
+owners. Withdrawal detaches the handle, including when a DataView or residual
+manager keeps the collection entry alive. The reconcile worker serializes
+planning and published-schema recovery using these pinned handles.
 
 ```go
 type CollectionLayout struct {
@@ -304,11 +304,8 @@ lost or ineligible nodes. A healthy Preparing view outside its new target may
 finish first, then converge through a subsequent Must migration. An early
 return must not indefinitely prevent convergence.
 
-Classification handles quota=0 before the rule "desired exists but no Up ->
-Must." With no existing views, emit NoOp; otherwise RequestRelease subject to
-the serving handover barrier. Suspension is not an allocation failure and must
-not enter the normal failure retry queue. The next reconcile must not issue
-AddPreparing merely because LoadConfig still contains the replica. The
+A desired replica with zero quota produces no Prepare, Release, or allocation
+retry for its shards, regardless of their existing views. The
 Balancer's internal target node sets represent suspension; do not write it
 back to LoadConfigStore or notify CollectionLoadManager. When the quota becomes
 positive again, trigger all desired shards for that replica and restore service
@@ -351,8 +348,9 @@ across shards.
   load each shard and restore service after Up. Loading failures preserve
   existing serving views and retry the same target rather than repeatedly
   switching layouts.
-- Convergence assumes that topology and intent eventually stabilize, target
-  resources can be loaded, and retries and cleanup eventually progress. Under
+- Convergence assumes each desired replica eventually receives a target,
+  topology and intent stabilize, resources can be loaded, and retries and
+  cleanup eventually progress. Under
   these assumptions, fixed targets, Must migrations, and old-reference cleanup
   provide eventual physical isolation.
 
@@ -372,8 +370,8 @@ or loading requirements; completing targets with a zero optimization budget;
 and preserving large RowNum differences without saturation normalization.
 
 **Lifecycle:** Active=min(N,R) with excess replicas Suspended and desired state
-unchanged; no rotation of healthy Active replicas; no repeated Prepare/Retry
-for suspended replicas; protection of the last serving cover; no suspension
+unchanged; no rotation of healthy Active replicas; suspended replicas retain
+their Up version through repeated reconciliation; no suspension
 updates back to load configuration management; automatic restoration of the
 original ReplicaID when nodes recover; migrations without spare nodes;
 partial Apply; healthy Preparing views outside targets and Preparing views on
@@ -391,8 +389,8 @@ Implementation choices: readiness and an exact match of
 credit. Compatible resources across DataVersions do not receive credit yet;
 this conservative estimate avoids incorrect reuse without materialization
 identity evidence. The first version disables the optional local improvement
-pass. The default policy's dedicated LayoutManager retains target layouts and
-serializes Plan; the custom policy interface remains unchanged.
+pass. The default policy computes target layouts and records them in the pinned
+collection planning state.
 
 The view and cache component implementation introduces neither new RPCs nor
 replica node lists. Targets are retained as immutable layout objects without
@@ -413,9 +411,8 @@ Quota-preserving owner exchanges are a separate possible follow-up, not an
 implicit fallback of the segment scorer.
 
 Target load, physical occupancy, and reusable resources have separate lifetimes.
-Suspension removes active demand without deleting desired LoadConfig or early
-releasing the last serving cover. The target-accounting publisher must observe
-layout-derived active/release decisions in addition to per-view facts. A failed
+Suspension removes active demand and preserves desired LoadConfig and existing
+views. The target-accounting publisher must observe layout activity in addition to per-view facts. A failed
 Prepare's protected ready segments may remain reusable; invalidating that
 Prepare's target must not erase them. See the
 [partial-resource handover contract](balancer_scoring.md#51-failure-does-not-erase-partial-success).

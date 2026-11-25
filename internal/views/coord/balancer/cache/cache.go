@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // Reader returns immutable objects. Separate calls need not observe one instant.
-// Returned objects and all their descendants are read-only.
+// Published facts are read-only. Replica planning handles have their own lifetime and synchronization.
 type Reader interface {
 	GetCollection(int64) *CollectionEntry
 	GetNode(int64) *NodeEntry
@@ -29,6 +30,8 @@ type CollectionEntry struct {
 	id            int64
 	config        *loadmgr.LoadConfig
 	configVersion uint64
+	currentUps    int // Desired shards Up at the current load, schema and data versions.
+	planning      *CollectionPlanning
 	data          *api.CollectionDataView
 	shards        immutableIndex[*ShardEntry]
 	placements    immutableIndex[*PlacementNode]
@@ -49,6 +52,34 @@ func (c *CollectionEntry) DataView() *api.CollectionDataView { return c.data }
 func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 	shard, _ := c.shards.getShard(id)
 	return shard
+}
+
+func (c *CollectionEntry) currentUp(id qviews.ShardID, stats *coordview.ShardStats) bool {
+	return stats != nil && stats.UpVersion != nil && stats.UpLoadInfoVersion == c.configVersion &&
+		c.planning.Replica(id.ReplicaID) != nil && c.data != nil && c.data.Shard(id.VChannel) != nil &&
+		stats.UpSchemaVersion == c.data.SchemaVersion && stats.UpVersion.DataVersion.GTE(c.data.DataVersion)
+}
+
+func (c *CollectionEntry) allCurrentUp() bool {
+	return c.currentUps > 0 && c.currentUps == len(c.config.Replicas)*len(c.data.Shards)
+}
+
+// CanRetireReplicas checks the complete desired placement against live topology.
+// Placement footprints aggregate all shard Up references by node and replica.
+func (c *CollectionEntry) CanRetireReplicas(reader Reader) bool {
+	if !c.allCurrentUp() {
+		return false
+	}
+	for node := range c.RangePlacementNodes {
+		n := reader.GetNode(node.ID())
+		for ref := range node.RangeReplicas {
+			if r := c.planning.Replica(ref.ReplicaID); r != nil && ref.Up > 0 &&
+				(n == nil || !n.info.Alive || n.info.Stopping || n.info.ResourceGroup != r.group) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (c *CollectionEntry) MaybeUped(id qviews.ShardID) bool {
@@ -396,13 +427,24 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 		}
 	}
 	c.mu.Unlock()
+	membershipChanged := previous.config != nil && (cfg == nil || !slices.EqualFunc(previous.config.Replicas, cfg.Replicas, func(a, b *loadmgr.ReplicaAssignment) bool {
+		return a.ReplicaID == b.ReplicaID && a.ResourceGroup == b.ResourceGroup
+	}))
 	if cfg == nil {
+		next.planning = nil
 		next.releasedUpShards = immutableIndex[bool]{}
-	} else if next.releasedUpShards.len() > 0 {
-		for _, replica := range next.config.Replicas {
+		next.suspended = immutableIndex[bool]{}
+	} else if previous.config == nil || membershipChanged {
+		next.planning = previous.planning.withMembership(cfg)
+	}
+	if cfg != nil && membershipChanged && (next.suspended.len() > 0 || next.releasedUpShards.len() > 0) {
+		for _, replica := range previous.config.Replicas {
 			if !hasReplica(cfg, replica.ReplicaID) {
 				prefix := idKey(replica.ReplicaID)
-				next.releasedUpShards.tree, _ = next.releasedUpShards.tree.DeletePrefix(prefix[:])
+				next.suspended = next.suspended.remove(prefix[:])
+				if next.releasedUpShards.tree != nil {
+					next.releasedUpShards.tree, _ = next.releasedUpShards.tree.DeletePrefix(prefix[:])
+				}
 			}
 		}
 	}
@@ -485,8 +527,15 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	if old != nil && old.stats == stats {
 		return
 	}
+	wasReady := next.allCurrentUp()
+	if next.currentUp(id, stats) {
+		next.currentUps++
+	}
 	var previous ShardSizeStats
 	if old != nil {
+		if next.currentUp(id, old.stats) {
+			next.currentUps--
+		}
 		previous = old.rows
 		for segmentID := range old.stats.Segments {
 			slot.uses[segmentID]--
@@ -543,6 +592,14 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		delete(c.replicas, id.ReplicaID)
 	}
 	c.mu.Unlock()
+	if !wasReady && next.allCurrentUp() {
+		for resident := range slot.replicaUses {
+			if next.planning.Replica(resident) == nil {
+				c.changed(api.TriggerScope{DirtyCollections: []int64{collectionID}})
+				break
+			}
+		}
+	}
 	if old != nil && stats != nil {
 		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
 			return

@@ -249,7 +249,6 @@ func (w *scopeWalk) emit(id qviews.ShardID) bool {
 func (w *scopeWalk) visitCollection(id int64) bool {
 	c := w.balancer.cache.GetCollection(id)
 	if c == nil || c.LoadConfig() == nil {
-		w.balancer.pruneLayout(id)
 		return w.step()
 	}
 	cfg, data := c.LoadConfig(), c.DataView()
@@ -326,16 +325,6 @@ func (w *scopeWalk) visitScope(scope TriggerScope) bool {
 		}
 		if !w.flush() {
 			return false
-		}
-	}
-}
-
-func (b *DefaultBalancer) pruneLayout(collection int64) {
-	if p, ok := b.policy.(*DefaultBalancePolicy); ok {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		if c := b.cache.GetCollection(collection); c == nil || c.LoadConfig() == nil {
-			delete(p.layouts.domains, collection)
 		}
 	}
 }

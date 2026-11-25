@@ -280,16 +280,6 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	reader.boundedBatch = true
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	plan := b.policy.Plan(reader, dirty)
-	if plan != nil {
-		// A suspended replica may shed serving capacity, but must retain the
-		// published schema's recovery base while a newer schema is pending.
-		// Otherwise resuming it can only plan the unmaterialized target. An
-		// explicit release/removal still tears down its complete obligation.
-		plan.Releases = slices.DeleteFunc(plan.Releases, func(id qviews.ShardID) bool {
-			cfg, manager := reader.ConfigForShard(id), b.viewRegistry.Get(id)
-			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.targetSchemaVersion(cfg.CollectionID)) != nil
-		})
-	}
 	applyErr := b.apply(ctx, reader, plan, dirty)
 	recoveryErr := b.recoverPublishedSchemas(ctx, reader, dirty)
 	return errors.CombineErrors(err, errors.CombineErrors(applyErr, recoveryErr))
@@ -305,11 +295,14 @@ func (b *DefaultBalancer) apply(ctx context.Context, reader *planningContext, pl
 	// submits one ordered shard event; the scheduler still coalesces pending work.
 	for _, shardID := range plan.Releases {
 		mgr := b.viewRegistry.Get(shardID)
-		planned, live := reader.collectionForShard(shardID), collectionForShard(b.cache, shardID)
-		if mgr == nil || planned == nil || live == nil || planned.LoadConfig() != live.LoadConfig() {
+		planned := reader.collectionForShard(shardID)
+		if mgr == nil || planned == nil || planned.DataView() == nil {
 			continue
 		}
-		result = errors.CombineErrors(result, mgr.RequestRelease(ctx))
+		result = errors.CombineErrors(result, mgr.RequestReplicaRetirement(ctx, planned.DataView().SchemaVersion, func() bool {
+			live := b.cache.GetCollection(planned.ID())
+			return planned.SameLoad(live) && planned.DataView() == live.DataView() && live.Planning().Replica(shardID.ReplicaID) == nil && live.CanRetireReplicas(b.cache)
+		}))
 	}
 	for _, shardID := range dirty {
 		builder := plan.Prepares[shardID]
@@ -329,9 +322,6 @@ func (b *DefaultBalancer) apply(ctx context.Context, reader *planningContext, pl
 	if len(plan.RescanCollections) > 0 {
 		b.discovery.layout(plan.RescanCollections, dirty)
 	}
-	if len(plan.Continues) > 0 {
-		b.Trigger(TriggerScope{DirtyShards: plan.Continues})
-	}
 	if len(plan.Retries) > 0 {
 		result = errors.CombineErrors(result, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))
 	}
@@ -349,12 +339,12 @@ func (b *DefaultBalancer) readSchemaVersions(ctx context.Context, reader *planni
 	var result error
 	ready := make([]qviews.ShardID, 0, len(dirty))
 	for _, shard := range dirty {
-		cfg := reader.ConfigForShard(shard)
-		if cfg == nil {
-			ready = append(ready, shard) // Releases need no schema.
+		collection := reader.collectionForShard(shard)
+		if collection == nil || collection.LoadConfig() == nil {
+			ready = append(ready, shard)
 			continue
 		}
-		id := cfg.CollectionID
+		id := collection.ID()
 		if _, read := reader.schemaVersions[id]; !read && failed[id] == nil {
 			version, err := b.schemaVersion(ctx, id)
 			if err != nil {

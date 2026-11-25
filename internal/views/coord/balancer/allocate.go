@@ -3,7 +3,6 @@ package balancer
 import (
 	"maps"
 	"math"
-	"sort"
 
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -16,7 +15,6 @@ type allocationResult struct {
 	entries      []*SegmentDataView
 	assignments  map[int64]int64
 	rowsByNode   map[int64]int64
-	more         bool
 }
 
 // allocate produces a complete candidate for shardID against the supplied
@@ -35,28 +33,25 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	if desired == nil || shard == nil {
 		return nil
 	}
-	var entries []*SegmentDataView
 	collection := p.collectionForShard(shardID)
-	// Published-schema recovery must preserve its historical membership even
-	// when the current desired config has already released some partitions.
+	entries := shard.SegmentsBySize
+	// Published-schema recovery uses every segment of the retained view.
 	retained := p.recovery != nil && p.recovery.shardID == shardID
-	allPartitions := retained || collection.LoadsAllPartitions()
-	if allPartitions {
-		entries = make([]*SegmentDataView, 0, shard.SegmentCount)
-	}
-	for _, part := range shard.Partitions {
-		if !allPartitions && !collection.LoadsPartition(part.PartitionID) {
-			continue
+	if !retained && !collection.LoadsAllPartitions() {
+		var loaded []*SegmentDataView
+		for _, segment := range entries {
+			if collection.LoadsPartition(segment.PartitionID) {
+				loaded = append(loaded, segment)
+			}
 		}
-		entries = append(entries, part.Segments...)
+		entries = loaded
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].LogicalSize != entries[j].LogicalSize {
-			return entries[i].LogicalSize > entries[j].LogicalSize
-		}
-		return entries[i].SegmentID < entries[j].SegmentID
-	})
-	ctx := newAllocationContext(p, shardID, baseRows, entries)
+	replica := collection.Planning().Replica(shardID.ReplicaID)
+	previous := replica.Fanout(shardID.VChannel)
+	ctx := newAllocationContext(p, shardID, baseRows, entries, previous)
+	if ctx.fanout != previous {
+		replica.StoreFanout(shardID.VChannel, ctx.fanout)
+	}
 	if len(entries) > 0 && len(ctx.nodes) == 0 {
 		return nil
 	}
@@ -86,16 +81,10 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		}
 		ctx.assign([]*SegmentDataView{segment}, best)
 	}
-	more := false
 	if optional {
 		before := ctx.score()
 		baseline := maps.Clone(ctx.assignments)
-		cursor := p.search[shardID]
-		if cursor == nil {
-			cursor = &searchCursor{}
-			p.search[shardID] = cursor
-		}
-		more = ctx.optimize(entries, cursor)
+		ctx.optimize(entries)
 		after := ctx.score()
 		if after.global > before.global+scoreEpsilon || before.energy(ctx.config)-after.energy(ctx.config)-ctx.migrationCost(baseline) <= ctx.config.MinScoreGain {
 			ctx.assignments = baseline
@@ -112,11 +101,11 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 			}
 		}
 	}
-	return &allocationResult{collectionID: desired.CollectionID, shard: shard, entries: entries, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
+	return &allocationResult{collectionID: desired.CollectionID, shard: shard, entries: entries, assignments: ctx.assignments, rowsByNode: ctx.rows}
 }
 
-// materialize is called only for submitted candidates. The private sorted slice
-// retains immutable segment metadata; no native DataView protobuf is needed.
+// materialize is called only for submitted candidates. The sorted slice
+// shares immutable segment metadata; no native DataView protobuf is needed.
 func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardID) *qviews.QueryViewAtCoordBuilder {
 	assignments := make(map[int64]map[int64][]int64)
 	manifests := make(map[int64]int64, len(r.entries))

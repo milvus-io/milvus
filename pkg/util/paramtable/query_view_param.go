@@ -18,28 +18,27 @@ package paramtable
 
 // queryViewConfig owns QueryView execution and placement configuration.
 type queryViewConfig struct {
-	IDFLazyLoadSealedStats                  ParamItem `refreshable:"true"`
-	IDFSealedStatsLoadConcurrencyRatio      ParamItem `refreshable:"true"`
-	LeaseDuration                           ParamItem `refreshable:"false"`
-	LogicalSizeSource                       ParamItem `refreshable:"false"`
-	LogicalSizeBytesPerUnit                 ParamItem `refreshable:"false"`
-	LogicalSizeSegmentBaseCost              ParamItem `refreshable:"true"`
-	BalancerReconcileInterval               ParamItem `refreshable:"true"`
-	BalancerShardBatchSize                  ParamItem `refreshable:"true"`
-	BalancerOptimizationEnabled             ParamItem `refreshable:"true"`
-	BalancerMinScoreGain                    ParamItem `refreshable:"true"`
-	BalancerMaxCandidateEvaluationsPerShard ParamItem `refreshable:"true"`
-	BalancerTargetLogicalSizePerNode        ParamItem `refreshable:"true"`
-	BalancerResourceGroupWeight             ParamItem `refreshable:"true"`
-	BalancerResourceGroupRelativeTolerance  ParamItem `refreshable:"true"`
-	BalancerResourceGroupAbsoluteTolerance  ParamItem `refreshable:"true"`
-	BalancerShardConcentrationWeight        ParamItem `refreshable:"true"`
-	BalancerCollectionConcentrationWeight   ParamItem `refreshable:"true"`
-	BalancerConcentrationRelativeTolerance  ParamItem `refreshable:"true"`
-	BalancerFanoutWeight                    ParamItem `refreshable:"true"`
-	BalancerFanoutHysteresis                ParamItem `refreshable:"true"`
-	BalancerMoveCostPerUnit                 ParamItem `refreshable:"true"`
-	BalancerLoadCostPerUnit                 ParamItem `refreshable:"true"`
+	IDFLazyLoadSealedStats                 ParamItem `refreshable:"true"`
+	IDFSealedStatsLoadConcurrencyRatio     ParamItem `refreshable:"true"`
+	LeaseDuration                          ParamItem `refreshable:"false"`
+	LogicalSizeSource                      ParamItem `refreshable:"false"`
+	LogicalSizeBytesPerUnit                ParamItem `refreshable:"false"`
+	LogicalSizeSegmentBaseCost             ParamItem `refreshable:"true"`
+	BalancerReconcileInterval              ParamItem `refreshable:"true"`
+	BalancerShardBatchSize                 ParamItem `refreshable:"true"`
+	BalancerOptimizationEnabled            ParamItem `refreshable:"true"`
+	BalancerMinScoreGain                   ParamItem `refreshable:"true"`
+	BalancerTargetLogicalSizePerNode       ParamItem `refreshable:"true"`
+	BalancerResourceGroupWeight            ParamItem `refreshable:"true"`
+	BalancerResourceGroupRelativeTolerance ParamItem `refreshable:"true"`
+	BalancerResourceGroupAbsoluteTolerance ParamItem `refreshable:"true"`
+	BalancerShardConcentrationWeight       ParamItem `refreshable:"true"`
+	BalancerCollectionConcentrationWeight  ParamItem `refreshable:"true"`
+	BalancerConcentrationRelativeTolerance ParamItem `refreshable:"true"`
+	BalancerFanoutWeight                   ParamItem `refreshable:"true"`
+	BalancerFanoutHysteresis               ParamItem `refreshable:"true"`
+	BalancerMoveCostPerUnit                ParamItem `refreshable:"true"`
+	BalancerLoadCostPerUnit                ParamItem `refreshable:"true"`
 }
 
 func (p *queryViewConfig) init(base *BaseTable) {
@@ -138,15 +137,6 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Doc:          "Positive minimum net weighted score gain after movement and loading costs for optional optimization. Increase to reject marginal moves; decrease to accept smaller improvements.",
 	}
 	p.BalancerMinScoreGain.Init(base.mgr)
-
-	p.BalancerMaxCandidateEvaluationsPerShard = ParamItem{
-		Key:          "queryView.balancer.optimization.maxCandidateEvaluationsPerShard",
-		Version:      "3.0.0",
-		DefaultValue: "100000",
-		Export:       true,
-		Doc:          "Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.",
-	}
-	p.BalancerMaxCandidateEvaluationsPerShard.Init(base.mgr)
 
 	p.BalancerTargetLogicalSizePerNode = ParamItem{
 		Key:          "queryView.balancer.scoring.targetLogicalSizePerNode",

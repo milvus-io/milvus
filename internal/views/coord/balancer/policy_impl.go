@@ -9,14 +9,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// DefaultBalancePolicy retains target layouts across batches. Actual facts and
-// row predictions remain in the cache and call-local planning context respectively.
+// DefaultBalancePolicy computes placements against the cache and its pinned planning state.
 type DefaultBalancePolicy struct {
 	feedback ViewFeedbackReader
 	mu       sync.Mutex
-	layouts  layoutManager
-	fanouts  map[qviews.ShardID]int
-	search   map[qviews.ShardID]*searchCursor
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
@@ -47,26 +43,16 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 	snap := newPlanningContext(reader)
 	snap.feedback = p.feedback
-	selected := len(dirty)
-	dirty = p.layouts.prepare(snap, dirty)
+	dirty = prepareLayouts(snap, dirty)
 	plan.RescanCollections = snap.changedLayouts
-	if p.fanouts == nil {
-		p.fanouts = make(map[qviews.ShardID]int)
-		p.search = make(map[qviews.ShardID]*searchCursor)
-	}
-	snap.fanouts, snap.search = p.fanouts, p.search
 
 	var candidates []balanceCandidate
 	seen := make(map[qviews.ShardID]struct{}, len(dirty))
-	for i, shardID := range dirty {
+	for _, shardID := range dirty {
 		if _, ok := seen[shardID]; ok {
 			continue
 		}
 		seen[shardID] = struct{}{}
-		if snap.boundedBatch && i >= selected {
-			plan.Continues = append(plan.Continues, shardID)
-			continue
-		}
 
 		// Layout publication can refresh cached inputs. A concurrently loaded
 		// collection may not have been included in this pass's metadata read.
@@ -100,13 +86,6 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 
 	projectedRows := initialProjectedRows(snap.NodesMap())
-	for _, shardID := range plan.Releases {
-		subtractRows(projectedRows, currentShardRows(snap, shardID))
-		snap.acceptRows(shardID, nil)
-		delete(p.fanouts, shardID)
-		delete(p.search, shardID)
-	}
-
 	for _, candidate := range candidates {
 		oldRows := currentShardRows(snap, candidate.shardID)
 		subtractRows(projectedRows, oldRows)
@@ -115,9 +94,6 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 			addRows(projectedRows, oldRows)
 			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
-		}
-		if result.more {
-			plan.Continues = append(plan.Continues, candidate.shardID)
 		}
 		if candidate.optional && assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
 			addRows(projectedRows, oldRows)

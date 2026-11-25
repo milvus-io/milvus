@@ -27,8 +27,9 @@ func TestQueryViewReplicaAllocationWithoutLegacyManager(t *testing.T) {
 	}}
 	replicas, err = s.generateQViewsReplicaConfigs(t.Context(), current, qviewsExpectedLoadConfig{ReplicaNumber: map[string]int{"other": 2}})
 	require.NoError(t, err)
-	require.EqualValues(t, 102, allocated, "moving replicas reuses persisted IDs")
-	require.EqualValues(t, 101, replicas[0].ReplicaId)
+	require.EqualValues(t, 104, allocated)
+	require.EqualValues(t, 103, replicas[0].ReplicaId)
+	require.EqualValues(t, 104, replicas[1].ReplicaId)
 	require.Equal(t, "other", replicas[0].ResourceGroupName)
 }
 

@@ -14,21 +14,8 @@ const (
 	layoutResourceBudget = 1_000_000
 )
 
-type replicaLayout struct {
-	replicas, nodes []int64
-	owners          map[int64]int64
-	targets         map[int64][]int64
-}
-type layoutManager struct {
-	domains map[int64]map[string]*replicaLayout
-}
-
-// prepare pins targets across progress callbacks and failed/partial Apply. Only
-// desired replica membership and eligible topology invalidate a domain.
-func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qviews.ShardID {
-	if m.domains == nil {
-		m.domains = make(map[int64]map[string]*replicaLayout)
-	}
+// prepareLayouts reuses each pinned collection's targets across batches.
+func prepareLayouts(p *planningContext, dirty []qviews.ShardID) []qviews.ShardID {
 	collections := make(map[int64]*balancercache.CollectionEntry)
 	for _, id := range dirty {
 		if c := p.collectionForShard(id); c != nil {
@@ -43,32 +30,18 @@ func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qv
 			}
 		}
 		changed := false
-		domains := m.domains[id]
-		if domains == nil {
-			domains = make(map[string]*replicaLayout)
-			m.domains[id] = domains
-		}
-		for group := range domains {
-			if _, ok := groups[group]; !ok {
-				delete(domains, group)
-				changed = true
-			}
-		}
-		if len(groups) == 0 {
-			delete(m.domains, id)
-		}
 		for group, replicas := range groups {
 			slices.Sort(replicas)
 			nodes := slices.Clone(p.CandidateNodes(group))
 			slices.Sort(nodes)
-			previous := domains[group]
+			previous := c.Planning().Layout(group)
 			layout := previous
-			if previous == nil || !slices.Equal(previous.nodes, nodes) || !slices.Equal(previous.replicas, replicas) {
+			if previous == nil || !slices.Equal(previous.Nodes, nodes) || !slices.Equal(previous.Replicas, replicas) {
 				layout = buildReplicaLayout(c, previous, replicas, nodes)
-				domains[group] = layout
+				c.Planning().StoreLayout(group, layout)
 				changed = true
 			}
-			for replica, nodes := range layout.targets {
+			for replica, nodes := range layout.Targets {
 				p.targets[replica] = nodes
 			}
 		}
@@ -88,52 +61,38 @@ func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qv
 		}
 	}
 	if publisher, ok := p.Reader.(interface {
-		PublishReplicaActivity(int64, map[int64]bool) bool
+		PublishReplicaActivity(*balancercache.CollectionEntry, map[int64]bool) bool
 	}); ok {
 		changed := false
-		for id, c := range collections {
+		for _, c := range collections {
 			active := make(map[int64]bool)
 			if c.LoadConfig() != nil {
 				for _, r := range c.LoadConfig().Replicas {
 					active[r.ReplicaID] = len(p.targets[r.ReplicaID]) > 0
 				}
 			}
-			changed = publisher.PublishReplicaActivity(id, active) || changed
+			changed = publisher.PublishReplicaActivity(c, active) || changed
 		}
 		if changed {
 			p.refreshTargetInputs()
 		}
 	}
 
-	// A newly Up survivor can unblock a suspended sibling's drain immediately.
-	initial := len(dirty)
-	for _, id := range dirty[:initial] {
-		if len(p.targets[id.ReplicaID]) == 0 {
-			continue // Only an active sibling can unblock a suspended replica.
-		}
-		if c := p.collectionForShard(id); c != nil && c.LoadConfig() != nil {
-			for _, r := range c.LoadConfig().Replicas {
-				if nodes, known := p.targets[r.ReplicaID]; known && len(nodes) == 0 {
-					dirty = append(dirty, qviews.ShardID{ReplicaID: r.ReplicaID, VChannel: id.VChannel})
-				}
-			}
-		}
-	}
 	return dirty
 }
 
-func buildReplicaLayout(c *balancercache.CollectionEntry, previous *replicaLayout, replicas, nodes []int64) *replicaLayout {
-	layout := &replicaLayout{replicas: replicas, nodes: nodes, owners: make(map[int64]int64), targets: make(map[int64][]int64)}
+func buildReplicaLayout(c *balancercache.CollectionEntry, previous *balancercache.ReplicaLayout, replicas, nodes []int64) *balancercache.ReplicaLayout {
+	layout := &balancercache.ReplicaLayout{Replicas: replicas, Nodes: nodes, Owners: make(map[int64]int64), Targets: make(map[int64][]int64)}
 	counts := make(map[int64]int, len(replicas))
 	for _, r := range replicas {
 		counts[r] = 0
-		layout.targets[r] = nil
+		layout.Targets[r] = nil
 	}
 	for _, n := range nodes {
 		var owner int64
 		found := false
 		if previous != nil {
-			owner, found = previous.owners[n]
+			owner, found = previous.Owners[n]
 			if _, valid := counts[owner]; !valid {
 				found = false
 			}
@@ -150,7 +109,7 @@ func buildReplicaLayout(c *balancercache.CollectionEntry, previous *replicaLayou
 			})
 		}
 		if found {
-			layout.owners[n] = owner
+			layout.Owners[n] = owner
 			counts[owner]++
 		}
 	}
@@ -171,8 +130,8 @@ func buildReplicaLayout(c *balancercache.CollectionEntry, previous *replicaLayou
 			return ga
 		}
 		if previous != nil {
-			oldBase := len(previous.nodes) / len(previous.replicas)
-			pa, pb := len(previous.targets[a]) > oldBase, len(previous.targets[b]) > oldBase
+			oldBase := len(previous.Nodes) / len(previous.Replicas)
+			pa, pb := len(previous.Targets[a]) > oldBase, len(previous.Targets[b]) > oldBase
 			if pa != pb {
 				return pa
 			}
@@ -191,21 +150,21 @@ func buildReplicaLayout(c *balancercache.CollectionEntry, previous *replicaLayou
 	}
 	var free []int64
 	for _, n := range nodes {
-		if _, ok := layout.owners[n]; !ok {
+		if _, ok := layout.Owners[n]; !ok {
 			free = append(free, n)
 		}
 	}
 	assignLayoutNodes(c, layout, counts, quotas, free, false)
 	var donors []int64
 	for _, n := range nodes {
-		if counts[layout.owners[n]] > quotas[layout.owners[n]] {
+		if counts[layout.Owners[n]] > quotas[layout.Owners[n]] {
 			donors = append(donors, n)
 		}
 	}
 	assignLayoutNodes(c, layout, counts, quotas, donors, true)
 	for _, n := range nodes {
-		r := layout.owners[n]
-		layout.targets[r] = append(layout.targets[r], n)
+		r := layout.Owners[n]
+		layout.Targets[r] = append(layout.Targets[r], n)
 	}
 	return layout
 }
@@ -242,9 +201,9 @@ type layoutEdge struct {
 	tie           uint64
 }
 
-func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, counts, quotas map[int64]int, candidates []int64, transfer bool) {
+func assignLayoutNodes(c *balancercache.CollectionEntry, layout *balancercache.ReplicaLayout, counts, quotas map[int64]int, candidates []int64, transfer bool) {
 	var receivers []int64
-	for _, r := range layout.replicas {
+	for _, r := range layout.Replicas {
 		if counts[r] < quotas[r] {
 			receivers = append(receivers, r)
 		}
@@ -256,7 +215,7 @@ func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, 
 		if counts[replica] >= quotas[replica] {
 			return false
 		}
-		owner, assigned := layout.owners[node]
+		owner, assigned := layout.Owners[node]
 		if transfer {
 			if counts[owner] <= quotas[owner] {
 				return false
@@ -265,12 +224,12 @@ func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, 
 		} else if assigned {
 			return false
 		}
-		layout.owners[node] = replica
+		layout.Owners[node] = replica
 		counts[replica]++
 		return true
 	}
 	resources := 0
-	for _, node := range layout.nodes {
+	for _, node := range layout.Nodes {
 		if n := c.PlacementNode(node); n != nil {
 			resources += n.ResourceCount()
 		}
@@ -290,8 +249,8 @@ func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, 
 		return
 	}
 	cover := make(map[int64]map[coordview.ResourceKey]int)
-	for _, node := range layout.nodes {
-		owner, ok := layout.owners[node]
+	for _, node := range layout.Nodes {
+		owner, ok := layout.Owners[node]
 		if !ok {
 			continue
 		}
@@ -319,7 +278,7 @@ func assignLayoutNodes(c *balancercache.CollectionEntry, layout *replicaLayout, 
 					if rows < 0 {
 						return true
 					}
-					if transfer && cover[layout.owners[node]][key] == 1 {
+					if transfer && cover[layout.Owners[node]][key] == 1 {
 						cost += float64(rows)
 					}
 					if cover[receiver][key] == 0 {

@@ -320,8 +320,7 @@ loadmgr.CollectionLoadManager
 #### Replica suspension boundary
 
 Suspension is an internal Balancer layout decision: a zero-quota replica stops
-receiving Preparing views and releases existing views once the last-serving-cover
-barrier permits it. Desired load config remains unchanged. Balancer does not
+receiving new placements and keeps its existing views until it has targets again. Desired load config remains unchanged. Balancer does not
 publish discovery state or notify CollectionLoadManager about suspension.
 Service discovery follows QueryView lifecycle state through the existing
 Registry notifications and view synchronization transports.
@@ -531,7 +530,7 @@ This section records the historical normalized-score algorithm. The replacement 
 quantitative example are in [Incremental Score-Based Balancing](balancer_scoring.md#3-placement-objective).
 
 The default policy first repairs/reuses collection/RG layouts as described in
-[Replica Placement](replica_placement.md), retaining targets across calls. It
+[Replica Placement](replica_placement.md), using the planning state pinned with each collection. It
 then organizes shard work into three phases and processes all dirty shards
 in one batch so decisions across shards remain coordinated.
 
@@ -582,18 +581,16 @@ Return BalancePlan { Prepares, Releases }
 ### 3.1 Phase 1: Classify
 
 Compare desired state, actual state and the retained target layout. Before
-ordinary classification, a zero-quota replica drains after protecting the last
-serving cover; it never retries allocation. If its resource group has no
-eligible QNs at all, preserve lifecycle state and wait for topology changes
-instead of releasing views. Stopping prevents new allocation but does not by
-itself invalidate an existing Up view's serving coverage. Explicit unload or
-replica removal still takes precedence. An
+ordinary classification, a desired replica with zero target nodes keeps its
+existing views and waits for a topology change. This also applies when other
+replicas in the same resource group have healthy Up views. Stopping prevents new allocation but does not by
+itself invalidate an existing Up view's serving coverage. Explicit collection unload takes precedence. An
 in-flight view on a lost/ineligible node is replaceable. An Up view outside
 its active target requires Must convergence. For other dirty shards:
 
 | Condition (checked in order) | Action |
 |---|---|
-| Replica removed from a loaded collection, current exists | **Release** |
+| Replica removed from a loaded collection, current exists | **Release** once the entire desired placement is serving the current requirements |
 | Collection load intent withdrawn | **None** (DDL owns cleanup) |
 | Desired present, no Up view, Preparing exists | **None** (avoid stacking) |
 | Desired present, no Up view or only Unrecoverable state | **Must** (initial load or post-Unrecoverable) |
@@ -795,9 +792,8 @@ do not decide whether a placement is economically worthwhile.
 
 ### 3.4 Computation and Cost Boundaries
 
-The cache moves actual-state aggregation to publication. It does not change
-candidate allocation: collecting/sorting desired segments costs `O(S log S)`
-and evaluating eligible nodes normally costs `O(S*N)` per allocated shard.
+DataView publication builds the size-ordered shard index in `O(S log S)`. Planning
+scans the index in order and evaluates eligible nodes in `O(S*N)` per allocated shard.
 Overlapping placement copies can add stickiness-scan work. FanoutBudget remains
 a score, not a hard cap on candidate enumeration. A stable optional shard may
 still require a full allocation before assignment equality suppresses emission.
@@ -811,7 +807,7 @@ The target reconcile work is:
 | Establish node baselines | `O(M)` retained references/scalars; no global consistency requirement |
 | Replace candidate contributions | Read the pinned node's contribution index; lookup cost depends on its shared representation |
 | Calculate ReferenceRows | Sum predicted eligible-node loads once per candidate |
-| Allocate segments | Existing segment sort and node scoring |
+| Allocate segments | Published segment order and node scoring |
 | Return accepted plans | Memory proportional to accepted segment assignments |
 
 RG candidate indexes are maintained when topology changes. No reconcile scans
@@ -938,9 +934,9 @@ merged under its cache lock; published descendants remain immutable.
 | Component | Responsibility | State |
 |---|---|---|
 | Balancer | Resolve queued scopes, call Policy, apply/requeue | Work queue |
-| BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable objects, aggregate contribution indexes |
+| BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable facts, aggregate contributions, load-scoped planning handles |
 | PlanningContext | Reuse per-object reads and coordinate batch predictions | References, candidate-local data, accepted deltas |
-| BalancePolicy | Classify, order, allocate, compare | Retained replica target layouts |
+| BalancePolicy | Classify, order, allocate, compare | Batch inputs and predictions |
 | CollectionLoadManager | Desired load lifecycle through LoadConfigStore | Existing store |
 | ShardViewRegistry | Actual manager lifecycle and source publication | Resident managers |
 | ShardViewManager | QueryView state and placement/statistics publication | Per-shard state machines and DataViewRefs |
@@ -967,7 +963,7 @@ and waits for initial node discovery before the cache readiness barrier opens.
 
 The first [incremental scoring implementation](balancer_scoring.md) includes
 target accounting, partial-resource reuse evidence, gain acceptance, and
-per-shard search continuations. Fair bounded batch discovery and migration/loading
+size-ordered single-segment search. Fair bounded batch discovery and migration/loading
 budgets remain follow-up work. Defaults require further production calibration.
 
 Further work beyond that first policy implementation includes bounded
@@ -1082,7 +1078,7 @@ The work for one allocated shard in the current implementation is:
 | Classify the shard and calculate its row size | `O(P_i + S_i)` |
 | Remove the current shard contribution from projected rows | `O(M + P_i)` |
 | Resolve the shard's replica assignment | `O(R_i)` |
-| Collect and sort desired segments | `O(S_i log S_i)` |
+| Read published segment order, filtering partitions when needed | linear in shard segments visited |
 | Build and sort the eligible-node set and fixed `ReferenceRows` | `O(M + G_i log G_i)` |
 | Evaluate every eligible node for every segment | normally `O(S_i * N_i)`, strict worst case `O(N_i * (S_i + P_i))` |
 | Compare an optional candidate with the current assignment | `O(P_i + S_i)` |
@@ -1116,7 +1112,7 @@ O(
   + sum over all dirty shards of (S_i + P_i)
   + sum over allocated shards of (
         R_i
-      + S_i log S_i
+      + S_i
       + G_i log G_i
       + N_i * (S_i + P_i)
     )
@@ -1141,7 +1137,7 @@ O(
   + sum over all dirty shards of (S_i + P_i)
   + sum over allocated shards of (
         R_i
-      + S_i log S_i
+      + S_i
       + G_i log G_i
       + S_i * N_i
     )
@@ -1153,12 +1149,11 @@ With uniform upper bounds of `S` desired segments, `R` replica assignments,
 this is:
 
 ```text
-O(K + D log D + D * (M + R + S + S log S + G log G + S * N))
+O(K + D log D + D * (M + R + S + G log G + S * N))
 ```
 
 The shard-allocation core is therefore
-`O(S log S + S * N) = O(S * (log S + N))` in steady state. Segment sorting
-dominates when `log S > N`; candidate scoring dominates when `N > log S`.
+`O(S * N)` in steady state. Segment sorting is paid once per native DataView publication.
 Normalized scoring and fanout tracking add only constant work to each
 segment-node comparison. The design deliberately avoids enumerating complete
 placements, whose search space would be `N^S`.
@@ -1234,7 +1229,7 @@ collections or user-specified placement unless force override is enabled.
 Replica counts are compared per resource group, including repeated group names.
 The explicit UpdateLoadConfig RPC uses the same AlterLoadConfig broadcast and
 ordered callback. Updates preserve partitions, field requirements and user
-intent, retain/reuse replica IDs where possible, and return after durable config
+intent, retain replica IDs within their original RG, allocate fresh IDs in a destination RG, and return after durable config
 application. They do not wait for QueryView Up while holding up updates to other
 collections; shared load readiness reports asynchronous convergence. No legacy
 replica promotion or Target/Distribution observer participates.
@@ -1341,7 +1336,7 @@ permanent pin and does not assert that retained old-view resources are gone.
 
 Explicit collection release sends `preempt_serving_lease` through
 `ShardViewRegistry.RequestCollectionRelease`, including for already-Down views.
-Replica scale-down and suspension retain the ordinary serving lease.
+Replica scale-down retains the ordinary serving lease.
 A prepare validates its planned LoadInfoVersion and replica membership against
 current intent while the registry lock orders manager registration with the
 release snapshot. A previously admitted manager rejects preparation once marked

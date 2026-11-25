@@ -34,3 +34,18 @@ func TestPublishedCollectionIndexesAndSummaries(t *testing.T) {
 	require.False(t, ok)
 	require.Empty(t, coll.Shard("v1").Partitions)
 }
+
+func TestShardSegmentsBySizeAcrossPartitions(t *testing.T) {
+	a := &SegmentDataView{SegmentID: 2, LogicalSize: 20}
+	b := &SegmentDataView{SegmentID: 5, LogicalSize: 50}
+	c := &SegmentDataView{SegmentID: 1, LogicalSize: 20}
+	shard := &ShardDataView{Partitions: []*PartitionDataView{
+		{PartitionID: 11, Segments: []*SegmentDataView{a, nil, b}},
+		{PartitionID: 12, Segments: []*SegmentDataView{c}},
+	}}
+	PrepareCollectionDataView(&CollectionDataView{Shards: []*ShardDataView{shard}})
+	require.Equal(t, []*SegmentDataView{b, c, a}, shard.SegmentsBySize)
+	require.Same(t, b, shard.SegmentsBySize[0])
+	require.Equal(t, []*SegmentDataView{a, nil, b}, shard.Partitions[0].Segments)
+	require.Equal(t, len(shard.SegmentsBySize), shard.SegmentCount)
+}

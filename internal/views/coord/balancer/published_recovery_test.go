@@ -46,6 +46,8 @@ func TestBalancerRecoversOnlyLatestView(t *testing.T) {
 	require.NoError(t, controller.Reconcile(t.Context()))
 	manager := registry.Get(id)
 	require.Eventually(t, func() bool { return manager.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	history := cache.GetCollection(1).Planning().Replica(id.ReplicaID)
+	require.Positive(t, history.Fanout(id.VChannel))
 	old := *manager.Stats().UpVersion
 	manager.PublishSchema(0)
 	latest.Store(1)
@@ -53,9 +55,17 @@ func TestBalancerRecoversOnlyLatestView(t *testing.T) {
 	// QN must recover the published base despite target admission being gated.
 	cache.PublishNode(1, nil)
 	controller.Trigger()
-	require.Error(t, controller.Reconcile(t.Context()), "recovery without eligible nodes must remain retriable")
-	require.Equal(t, old, manager.Stats().UpBySchema[0].Version, "failed allocation must retain the published base")
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Equal(t, old, manager.Stats().UpBySchema[0].Version, "waiting for a target must retain the published base")
+	require.Equal(t, 1, history.Fanout(id.VChannel), "waiting for a target preserves the previous allocation")
 	cache.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
+	// Once a target exists, a failed allocation must surface for retry.
+	mockey.PatchConvey("allocation failure after topology recovery", t, func() {
+		mockey.Mock(allocate).Return(nil).Build()
+		controller.Trigger()
+		require.Error(t, controller.Reconcile(t.Context()))
+		require.Equal(t, old, manager.Stats().UpBySchema[0].Version)
+	})
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.Eventually(t, func() bool {
@@ -64,16 +74,8 @@ func TestBalancerRecoversOnlyLatestView(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 	require.Equal(t, old.DataVersion, manager.Stats().UpBySchema[0].Version.DataVersion)
 	require.EqualValues(t, 0, manager.Stats().PreparingSchemaVersion)
+	require.Equal(t, 1, history.Fanout(id.VChannel), "published recovery updated the same replica history")
 	old = manager.Stats().UpBySchema[0].Version
-	// A capacity-degraded layout can ask a suspended replica to drain while
-	// its LoadConfig remains present. That must not erase the only old-schema
-	// base before the pending target is materialized and published.
-	drain := mockey.Mock((*DefaultBalancePolicy).Plan).Return(&BalancePlan{Releases: []qviews.ShardID{id}}).Build()
-	controller.Trigger()
-	require.NoError(t, controller.Reconcile(t.Context()))
-	drain.UnPatch()
-	require.NotNil(t, manager.PublishedRecovery(1))
-	require.Contains(t, manager.Stats().UpBySchema, int32(0))
 	data = cacheData(1, id.VChannel, 100)
 	data.SchemaVersion = 1
 	data.DataVersion.CompactVersion = 1

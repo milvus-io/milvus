@@ -57,8 +57,8 @@ func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 	// The collection has a newer contribution than the pinned node. Each
 	// objective must subtract the contribution from its own aggregate version.
 	p.targets[10] = []int64{1}
-	p.fanouts = make(map[qviews.ShardID]int)
-	ctx := newAllocationContext(p, shard, map[int64]int64{1: 0}, []*SegmentDataView{{SegmentID: 1000, PartitionID: 1, LogicalSize: 100}})
+
+	ctx := newAllocationContext(p, shard, map[int64]int64{1: 0}, []*SegmentDataView{{SegmentID: 1000, PartitionID: 1, LogicalSize: 100}}, 0)
 	require.Zero(t, ctx.collectionBase[1])
 	p.acceptRows(shard, map[int64]int64{1: 50})
 	require.Equal(t, int64(10), p.replicaDelta[10][1])

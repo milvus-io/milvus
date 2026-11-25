@@ -175,7 +175,7 @@ func TestAutoLoadPriorityAfterShardManagerRemoval(t *testing.T) {
 	require.EqualValues(t, 12, priority())
 	c.PublishShard(id, &coordview.ShardStats{MaybeUped: true})
 	require.EqualValues(t, 2, priority())
-	c.PublishShard(id, nil) // A suspended replica can lose its manager while still desired.
+	c.PublishShard(id, nil) // Remember earlier Up across manager retirement while still desired.
 	require.EqualValues(t, 2, priority())
 	c.PublishShard(id, &coordview.ShardStats{})
 	require.EqualValues(t, 2, priority())

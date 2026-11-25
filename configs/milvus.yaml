@@ -1775,7 +1775,6 @@ queryView:
     optimization:
       enabled: true # Enables optional placement optimization. Disable to stop optional movement; mandatory recovery, version updates and releases continue independently of queryCoord.autoBalance.
       minScoreGain: 1 # Positive minimum net weighted score gain after movement and loading costs for optional optimization. Increase to reject marginal moves; decrease to accept smaller improvements.
-      maxCandidateEvaluationsPerShard: 100000 # Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.
     scoring:
       targetLogicalSizePerNode: 100000 # Positive concentration scale in logical size units for preferred shard fanout and the collection concentration floor. Increase to favor fewer participants; decrease to favor spreading. Not a capacity limit.
       resourceGroup:

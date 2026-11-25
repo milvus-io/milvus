@@ -50,13 +50,9 @@ func replicaIn(id int64, collectionID int64, rgName string) *meta.Replica {
 	})
 }
 
-// A request that asks for a replica in rg_1 and leaves rg_0 at zero does not
-// merely drop rg_0's replica: it reuses that very replica for rg_1. The
-// resulting record says the replica lives in rg_1 and never mentions rg_0,
-// which is why the placement has to be completed before the record is built
-// and cannot be repaired afterwards.
-func TestGenerateReplicasTransfersWhenAResourceGroupIsLeftAtZero(t *testing.T) {
+func TestGenerateReplicasAllocatesNewIDWhenChangingGroup(t *testing.T) {
 	req := &AlterLoadConfigRequest{
+		Meta: meta.NewMeta(func() (int64, error) { return 99, nil }, nil, session.NewNodeManager(), metacache.NewMetaStore(nil)),
 		Current: CurrentLoadConfig{
 			Replicas: map[int64]*meta.Replica{1: replicaIn(1, 7, "rg_0")},
 		},
@@ -69,10 +65,8 @@ func TestGenerateReplicasTransfersWhenAResourceGroupIsLeftAtZero(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, got, 1)
-	assert.Equal(t, int64(1), got[0].GetReplicaId(),
-		"the existing replica is reused, not left alone")
-	assert.Equal(t, "rg_1", got[0].GetResourceGroupName(),
-		"and it is moved out of the resource group the request left at zero")
+	assert.Equal(t, int64(99), got[0].GetReplicaId())
+	assert.Equal(t, "rg_1", got[0].GetResourceGroupName())
 }
 
 // The cumulative shape the seam produces: rg_0 keeps the replica it holds and

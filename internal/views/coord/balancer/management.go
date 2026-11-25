@@ -49,15 +49,13 @@ func (b *DefaultBalancer) placementLocked(collectionID int64) (*CollectionPlacem
 		return result, nil
 	}
 	result.Config, result.ConfigVersion = c.LoadConfig(), c.ConfigVersion()
-	policy, ok := b.policy.(*DefaultBalancePolicy)
+	_, ok := b.policy.(*DefaultBalancePolicy)
 	if !ok {
 		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "balance policy does not expose replica placement")
 	}
-	policy.mu.Lock()
-	defer policy.mu.Unlock()
 	reader := newPlanningContext(b.cache)
 	for _, replica := range result.Config.Replicas {
-		layout := policy.layouts.domains[collectionID][replica.ResourceGroup]
+		layout := c.Planning().Layout(replica.ResourceGroup)
 		if layout == nil {
 			result.LayoutReady = false
 			continue
@@ -71,11 +69,11 @@ func (b *DefaultBalancer) placementLocked(collectionID int64) (*CollectionPlacem
 			}
 		}
 		slices.Sort(replicas)
-		if !slices.Equal(nodes, layout.nodes) || !slices.Equal(replicas, layout.replicas) {
+		if !slices.Equal(nodes, layout.Nodes) || !slices.Equal(replicas, layout.Replicas) {
 			result.LayoutReady = false
 			continue
 		}
-		result.Nodes[replica.ReplicaID] = slices.Clone(layout.targets[replica.ReplicaID])
+		result.Nodes[replica.ReplicaID] = slices.Clone(layout.Targets[replica.ReplicaID])
 	}
 	c.RangeShards(func(s *cache.ShardEntry) bool { result.Shards[s.ID()] = s.Stats(); return true })
 	return result, nil
