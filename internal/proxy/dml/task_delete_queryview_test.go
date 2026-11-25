@@ -35,7 +35,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			values := []any{int64(1), int64(2), int64(3)}
 			if scenario == "varchar" {
 				pkType = schemapb.DataType_VarChar
-				values = []any{"a", "b", "c"}
+				values = []any{"a", "文", "é"}
 			}
 			schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Version: 7, Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: pkType},
@@ -184,8 +184,14 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				require.EqualValues(t, 12, runner.AllQueryCnt())
 				require.EqualValues(t, 40, runner.ScannedRemoteBytes())
 				require.EqualValues(t, 60, runner.ScannedTotalBytes())
+				if scenario == "int64" {
+					require.EqualValues(t, 24, runner.WriteBytes())
+				} else {
+					require.EqualValues(t, len("a文é"), runner.WriteBytes())
+				}
 			} else {
 				require.Zero(t, runner.Result().GetDeleteCnt())
+				require.Zero(t, runner.WriteBytes())
 			}
 			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" || scenario == "zero_hits" || scenario == "missing_usage" {
 				require.Zero(t, limitCalls)

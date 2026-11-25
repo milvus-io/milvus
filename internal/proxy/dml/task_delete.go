@@ -314,6 +314,7 @@ type DeleteRunner struct {
 
 	allQueryCnt atomic.Int64
 	sessionTS   atomic.Uint64
+	writeBytes  atomic.Int64
 
 	scannedRemoteBytes atomic.Int64
 	scannedTotalBytes  atomic.Int64
@@ -340,7 +341,7 @@ func (dr *DeleteRunner) SetViewQueryClient(client queryclient.Client) {
 	dr.viewQueryClient = client
 }
 
-// EnableQueryReadUsage opts this request into planned query metering.
+// EnableQueryReadUsage opts this request into planned reads and delete bytes.
 func (dr *DeleteRunner) EnableQueryReadUsage() {
 	dr.queryUsage = &querymeter.ReadUsageAccumulator{}
 }
@@ -350,6 +351,10 @@ func (dr *DeleteRunner) QueryReadBytes() (int64, bool) {
 		return 0, false
 	}
 	return dr.queryUsage.Bytes()
+}
+
+func (dr *DeleteRunner) WriteBytes() int64 {
+	return dr.writeBytes.Load()
 }
 
 // Result returns the mutation result after execution.
@@ -635,6 +640,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 		var allQueryCnt int64
 		var scannedRemoteBytes int64
 		var scannedTotalBytes int64
+		var writeBytes int64
 		// wait all task finish
 		var sessionTS uint64
 		for task := range taskCh {
@@ -647,6 +653,9 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				return err
 			}
 			dr.count.Add(task.count)
+			if dr.queryUsage != nil {
+				writeBytes += primaryKeyBytes(task.primaryKeys)
+			}
 			allQueryCnt += task.allQueryCnt
 			scannedRemoteBytes += task.storageCost.ScannedRemoteBytes
 			scannedTotalBytes += task.storageCost.ScannedTotalBytes
@@ -659,6 +668,9 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 		if receiveErr != nil {
 			return receiveErr
 		}
+		// A shard retry can repeat a prefix appended by a failed stream.
+		// Meter the keys in the completed stream once.
+		dr.writeBytes.Add(writeBytes)
 		dr.allQueryCnt.Add(allQueryCnt)
 		dr.sessionTS.Store(sessionTS)
 		dr.scannedRemoteBytes.Add(scannedRemoteBytes)
@@ -924,6 +936,9 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	if err == nil {
 		dr.result.DeleteCnt = task.count
 		dr.result.Timestamp = task.sessionTS
+		if dr.queryUsage != nil {
+			dr.writeBytes.Add(primaryKeyBytes(pk))
+		}
 	}
 	return err
 }

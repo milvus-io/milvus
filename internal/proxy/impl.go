@@ -2485,10 +2485,12 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	collectionName := request.CollectionName
 	report := map[string]any{hookutil.SuccessCntKey: successCnt}
-	if readBytes, metered := dr.QueryReadBytes(); metered {
-		report[hookutil.BytesKey] = readBytes
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = dr.WriteBytes()
+		if readBytes, metered := dr.QueryReadBytes(); metered {
+			report[hookutil.BytesKey] = readBytes
+		}
 	} else {
-		usageReporter = nil
 		report[hookutil.RelatedCntKey] = dr.AllQueryCnt()
 	}
 	reportMutationUsage(ctx, dr.Result().GetStatus(), usageReporter, hookutil.OpTypeDelete, dbName, report)

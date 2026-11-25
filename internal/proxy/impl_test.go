@@ -52,9 +52,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1718,8 +1720,17 @@ func TestProxy_Delete(t *testing.T) {
 	}
 	paramtable.Init()
 
-	t.Run("delete run failed", func(t *testing.T) {
+	t.Run("report only successful delete", func(t *testing.T) {
 		streaming.SetupNoopWALForTest()
+		oldRateCollector := rateCol
+		var err error
+		rateCol, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, false)
+		require.NoError(t, err)
+		t.Cleanup(func() { rateCol = oldRateCollector })
+		oldReporter := extension.RequestUsageReporter()
+		reporter := &queryUsageReporter{}
+		extension.SetRequestUsageReporter(reporter)
+		t.Cleanup(func() { extension.SetRequestUsageReporter(oldReporter) })
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -1774,6 +1785,16 @@ func TestProxy_Delete(t *testing.T) {
 		resp, err := node.Delete(ctx, req)
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp.GetStatus()))
+		require.Empty(t, reporter.reports)
+
+		resp, err = node.Delete(ctx, req)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, reporter.reports, 1)
+		report := reporter.reports[0].(map[string]any)
+		require.Equal(t, hookutil.OpTypeDelete, report[hookutil.OpTypeKey])
+		require.EqualValues(t, 24, report[hookutil.WriteBytesKey])
+		require.NotContains(t, report, hookutil.BytesKey)
 	})
 }
 

@@ -30,7 +30,9 @@ Each sub-search follows the Search column rules using its own effective NQ. Work
 
 ## Delete by filter
 
-The internal lookup counts the planned predicate columns for every selected segment, including when no rows match. A primary-key delete that can build its mutation directly has no query read. A successful Delete reports the lookup bytes together with its existing write inputs under `msg_type=delete` on `milvus_proxy_report_value`. Internal lookup rows do not go to the client and contribute no returned-value bytes.
+The internal lookup counts the planned predicate columns for every selected segment, including when no rows match. A primary-key delete that can build its mutation directly has no query read. Internal lookup rows do not go to the client and contribute no returned-value bytes.
+
+A successful Delete reports the lookup `bytes` and the logical `write_bytes` of its delete keys under `msg_type=delete` on `milvus_proxy_report_value`. A direct delete uses the supplied keys. A filter delete uses the keys from the completed lookup sent for deletion. No matches yield zero write bytes. INT64 keys count as eight bytes each, and VARCHAR keys count their UTF-8 bytes.
 
 ## Partial Upsert
 
