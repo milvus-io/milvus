@@ -288,8 +288,7 @@ func TestAnalyzerLocalResourceDirs(t *testing.T) {
 	analyzer, err := NewAnalyzer(stopParams(stopWords), "")
 	require.NoError(t, err)
 	defer analyzer.Destroy()
-	tokenStream, err := analyzer.NewTokenStream("the cat and the dog")
-	require.NoError(t, err)
+	tokenStream := analyzer.NewTokenStream("the cat and the dog")
 	defer tokenStream.Destroy()
 	tokens := []string{}
 	for tokenStream.Advance() {
