@@ -21,10 +21,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/protobuf/proto"
 
@@ -1061,34 +1063,133 @@ func autoGenDynamicFieldData(schema *schemapb.CollectionSchema, data [][]byte) *
 	return fd
 }
 
+// verifyDynamicFieldDataWithUnmarshal preserves the existing encoding/json behavior for
+// invalid or uncommon inputs that cannot use the allocation-optimized path.
+func verifyDynamicFieldDataWithUnmarshal(schema *schemapb.CollectionSchema, rowData []byte, skipStaticFieldNameCheck bool) error {
+	jsonData := make(map[string]interface{})
+	if err := json.Unmarshal(rowData, &jsonData); err != nil {
+		mlog.Info(context.TODO(), "insert invalid dynamic data, milvus only support json map",
+			mlog.ByteString("data", rowData),
+			mlog.Err(err),
+		)
+		return merr.WrapErrParameterInvalidMsg("invalid dynamic field data, only json map is supported: %s", err.Error())
+	}
+	if _, ok := jsonData[common.MetaFieldName]; ok {
+		return merr.WrapErrParameterInvalidMsg("cannot set json key to: %s", common.MetaFieldName)
+	}
+	if !skipStaticFieldNameCheck {
+		for _, field := range schema.GetFields() {
+			if common.IsSystemField(field.GetFieldID()) {
+				continue
+			}
+			if _, ok := jsonData[field.GetName()]; ok {
+				mlog.Info(context.TODO(), "dynamic field name include the static field name", mlog.String("fieldName", field.GetName()))
+				return merr.WrapErrParameterInvalidMsg("dynamic field name cannot include the static field name: %s", field.GetName())
+			}
+		}
+	}
+	return nil
+}
+
+// validDynamicFieldJSONNumbers preserves the float64 range checks performed
+// when encoding/json unmarshals arbitrary JSON values into interface{}.
+func validDynamicFieldJSONNumbers(value gjson.Result) bool {
+	switch value.Type {
+	case gjson.Number:
+		_, err := strconv.ParseFloat(value.Raw, 64)
+		return err == nil
+	case gjson.JSON:
+		valid := true
+		value.ForEach(func(_, child gjson.Result) bool {
+			valid = validDynamicFieldJSONNumbers(child)
+			return valid
+		})
+		return valid
+	default:
+		return true
+	}
+}
+
 func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, skipStaticFieldNameCheck bool) error {
+	var staticFieldIndexes map[string]int
+	staticFieldCount := len(schema.GetFields())
+
 	for _, field := range insertMsg.FieldsData {
 		if field.GetFieldName() == common.MetaFieldName {
 			if !schema.EnableDynamicField {
 				return merr.WrapErrParameterInvalidMsg("without dynamic schema enabled, the field name cannot be set to %s", common.MetaFieldName)
 			}
 			for _, rowData := range field.GetScalars().GetJsonData().GetData() {
-				jsonData := make(map[string]interface{})
-				if err := json.Unmarshal(rowData, &jsonData); err != nil {
-					mlog.Info(context.TODO(), "insert invalid dynamic data, milvus only support json map",
-						mlog.ByteString("data", rowData),
-						mlog.Err(err),
-					)
-					return merr.WrapErrParameterInvalidMsg("invalid dynamic field data, only json map is supported: %s", err.Error())
+				if !utf8.Valid(rowData) || !json.Valid(rowData) {
+					if err := verifyDynamicFieldDataWithUnmarshal(schema, rowData, skipStaticFieldNameCheck); err != nil {
+						return err
+					}
+					continue
 				}
-				if _, ok := jsonData[common.MetaFieldName]; ok {
-					return merr.WrapErrParameterInvalidMsg("cannot set json key to: %s", common.MetaFieldName)
+
+				jsonData := gjson.ParseBytes(rowData)
+				// Unmarshalling JSON null into a map succeeds and produces a nil map,
+				// so retain that compatibility while avoiding map materialization.
+				if jsonData.Type == gjson.Null {
+					continue
 				}
-				if !skipStaticFieldNameCheck {
-					for _, f := range schema.GetFields() {
-						if common.IsSystemField(f.GetFieldID()) {
-							continue
-						}
-						if _, ok := jsonData[f.GetName()]; ok {
-							mlog.Info(context.TODO(), "dynamic field name include the static field name", mlog.String("fieldName", f.GetName()))
-							return merr.WrapErrParameterInvalidMsg("dynamic field name cannot include the static field name: %s", f.GetName())
+				if !jsonData.IsObject() {
+					if err := verifyDynamicFieldDataWithUnmarshal(schema, rowData, skipStaticFieldNameCheck); err != nil {
+						return err
+					}
+					continue
+				}
+
+				containsMetaField := false
+				requireUnmarshalFallback := false
+				staticFieldIndex := staticFieldCount
+				staticFieldName := ""
+				jsonData.ForEach(func(key, value gjson.Result) bool {
+					fieldName := key.Str
+					// Keep encoding/json's key decoding for escaped names, including
+					// malformed surrogate pairs that it replaces with U+FFFD.
+					if strings.Contains(key.Raw, `\`) || !validDynamicFieldJSONNumbers(value) {
+						requireUnmarshalFallback = true
+						return false
+					}
+					if fieldName == common.MetaFieldName {
+						containsMetaField = true
+						return true
+					}
+					if skipStaticFieldNameCheck {
+						return true
+					}
+
+					if staticFieldIndexes == nil {
+						staticFieldIndexes = make(map[string]int, staticFieldCount)
+						for index, field := range schema.GetFields() {
+							if common.IsSystemField(field.GetFieldID()) {
+								continue
+							}
+							if _, ok := staticFieldIndexes[field.GetName()]; !ok {
+								staticFieldIndexes[field.GetName()] = index
+							}
 						}
 					}
+					if index, ok := staticFieldIndexes[fieldName]; ok && index < staticFieldIndex {
+						staticFieldIndex = index
+						staticFieldName = fieldName
+					}
+					return true
+				})
+
+				if requireUnmarshalFallback {
+					if err := verifyDynamicFieldDataWithUnmarshal(schema, rowData, skipStaticFieldNameCheck); err != nil {
+						return err
+					}
+					continue
+				}
+				if containsMetaField {
+					return merr.WrapErrParameterInvalidMsg("cannot set json key to: %s", common.MetaFieldName)
+				}
+				if staticFieldIndex < staticFieldCount {
+					mlog.Info(context.TODO(), "dynamic field name include the static field name", mlog.String("fieldName", staticFieldName))
+					return merr.WrapErrParameterInvalidMsg("dynamic field name cannot include the static field name: %s", staticFieldName)
 				}
 			}
 		}
