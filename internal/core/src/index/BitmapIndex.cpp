@@ -1439,8 +1439,7 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     // V3 format: meta is in __meta__ entry
     auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
-    is_nested_index_ =
-        reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, false);
+    is_nested_index_ = reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, false);
     valid_bitset_ =
         TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
     bool rebuild_validity_from_postings =

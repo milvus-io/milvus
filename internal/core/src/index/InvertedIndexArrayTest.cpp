@@ -646,16 +646,14 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
     Config build_cfg;
     build_cfg["is_array"] = true;
     build_cfg["is_nested_index"] = true;
-    build_index->BuildWithRawDataForUT(
-        arrays.size(), arrays.data(), build_cfg);
+    build_index->BuildWithRawDataForUT(arrays.size(), arrays.data(), build_cfg);
     auto stats = build_index->UploadUnified({});
     ASSERT_EQ(stats->GetIndexFiles().size(), 1);
     const std::string packed_path = stats->GetIndexFiles()[0];
 
     storage::MemFileManagerImpl fm(ctx);
     auto input = fm.OpenInputStream(packed_path);
-    auto reader =
-        storage::IndexEntryReader::Open(input, input->Size(), 1);
+    auto reader = storage::IndexEntryReader::Open(input, input->Size(), 1);
     ASSERT_NE(reader, nullptr);
     ASSERT_TRUE(reader->HasMeta("is_nested"));
     EXPECT_TRUE(reader->GetMeta<bool>("is_nested"));
@@ -668,8 +666,7 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
             continue;
         }
         auto entry = reader->ReadEntry(entry_name);
-        writer->WriteEntry(
-            entry_name, entry.data.data(), entry.data.size());
+        writer->WriteEntry(entry_name, entry.data.data(), entry.data.size());
     }
     writer->PutMeta("file_names",
                     reader->GetMeta<std::vector<std::string>>("file_names"));
@@ -683,8 +680,7 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
     {
         Config cfg;
         cfg["index_files"] = std::vector<std::string>{stripped_path};
-        cfg[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
         cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
             milvus::index::TANTIVY_INDEX_LATEST_VERSION,
@@ -700,8 +696,7 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
     {
         Config cfg;
         cfg["index_files"] = std::vector<std::string>{stripped_path};
-        cfg[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
         cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 4;
         auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
             milvus::index::TANTIVY_INDEX_LATEST_VERSION,
@@ -717,8 +712,7 @@ TEST(ArrayInvertedIndexRegression, V3PublishesNestedMetadataAndVersionGate) {
     {
         Config cfg;
         cfg["index_files"] = std::vector<std::string>{packed_path};
-        cfg[milvus::LOAD_PRIORITY] =
-            milvus::proto::common::LoadPriority::HIGH;
+        cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
         cfg[milvus::index::SCALAR_INDEX_ENGINE_VERSION] = 3;
         auto loaded = std::make_unique<index::InvertedIndexTantivy<int64_t>>(
             milvus::index::TANTIVY_INDEX_LATEST_VERSION,

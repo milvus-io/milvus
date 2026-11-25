@@ -108,9 +108,10 @@ IsCompatibleLegacyNestedScalarIndex(
             input,
             input->Size(),
             file_manager_context.fieldDataMeta.collection_id);
-        AssertInfo(reader != nullptr,
-                   "failed to open IndexEntryReader for packed scalar index: {}",
-                   index_files[0]);
+        AssertInfo(
+            reader != nullptr,
+            "failed to open IndexEntryReader for packed scalar index: {}",
+            index_files[0]);
 
         auto physical_type = milvus::index::ScalarIndexType::NONE;
         if (index_info.index_type == milvus::index::HYBRID_INDEX_TYPE) {
@@ -141,7 +142,8 @@ IsCompatibleLegacyNestedScalarIndex(
         return true;
     }
 
-    if (index_files.empty() || file_manager_context.chunkManagerPtr == nullptr) {
+    if (index_files.empty() ||
+        file_manager_context.chunkManagerPtr == nullptr) {
         return true;
     }
 

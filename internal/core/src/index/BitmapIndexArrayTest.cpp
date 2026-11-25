@@ -1942,9 +1942,9 @@ TEST(BitmapIndexArrayNestedTest,
         auto bin = build_bitmap->Serialize({});
         auto meta_buf = bin.GetByName(index::BITMAP_INDEX_META);
         ASSERT_NE(meta_buf, nullptr);
-        auto node = YAML::Load(std::string(
-            reinterpret_cast<const char*>(meta_buf->data.get()),
-            meta_buf->size));
+        auto node = YAML::Load(
+            std::string(reinterpret_cast<const char*>(meta_buf->data.get()),
+                        meta_buf->size));
         node.remove("is_nested_index");
         const auto stripped_meta = YAML::Dump(node);
         std::shared_ptr<uint8_t[]> stripped_buf(
@@ -2004,15 +2004,15 @@ TEST(BitmapIndexArrayNestedTest,
                 continue;
             }
             auto entry = reader->ReadEntry(entry_name);
-            writer->WriteEntry(entry_name, entry.data.data(), entry.data.size());
+            writer->WriteEntry(
+                entry_name, entry.data.data(), entry.data.size());
         }
         writer->PutMeta(index::BITMAP_INDEX_LENGTH,
                         reader->GetMeta<size_t>(index::BITMAP_INDEX_LENGTH));
         writer->PutMeta(index::BITMAP_INDEX_NUM_ROWS,
                         reader->GetMeta<size_t>(index::BITMAP_INDEX_NUM_ROWS));
-        writer->PutMeta(
-            index::INDEX_TYPE,
-            static_cast<uint8_t>(index::ScalarIndexType::BITMAP));
+        writer->PutMeta(index::INDEX_TYPE,
+                        static_cast<uint8_t>(index::ScalarIndexType::BITMAP));
         writer->Finish();
         const std::string stripped_path =
             fm.GetRemoteIndexObjectPrefix() + "/" + stripped_name;
@@ -2020,8 +2020,8 @@ TEST(BitmapIndexArrayNestedTest,
         storage::FileManagerContext load_ctx(
             field_meta, index_meta, chunk_manager, fs);
         load_ctx.set_for_loading_index(true);
-        auto loaded =
-            std::make_unique<index::HybridScalarIndex<int32_t>>(7, load_ctx, true);
+        auto loaded = std::make_unique<index::HybridScalarIndex<int32_t>>(
+            7, load_ctx, true);
         Config cfg;
         cfg["index_files"] = std::vector<std::string>{stripped_path};
         cfg[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
@@ -2035,9 +2035,8 @@ TEST(BitmapIndexArrayNestedTest,
 TEST(BitmapIndexArrayNestedTest,
      LoadIndexDataSkipsLegacyStructSubFieldIndexesAndAcceptsCompatible) {
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto chunk_manager =
-        storage::RemoteChunkManagerSingleton::GetInstance()
-            .GetRemoteChunkManager();
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
     ASSERT_NE(chunk_manager, nullptr);
 
     proto::schema::FieldSchema struct_schema;
@@ -2069,8 +2068,7 @@ TEST(BitmapIndexArrayNestedTest,
             fm.GetRemoteIndexObjectPrefix() + "/" + filename;
         created_files.push_back(remote_path);
         return std::pair<std::string, int64_t>{
-            remote_path,
-            static_cast<int64_t>(writer->GetTotalBytesWritten())};
+            remote_path, static_cast<int64_t>(writer->GetTotalBytesWritten())};
     };
 
     struct Case {
@@ -2246,11 +2244,10 @@ TEST(BitmapIndexArrayNestedTest,
         info.num_rows = 10;
         info.warmup_policy = "disable";
         info.index_files = {path};
-        info.index_params = {
-            {index::INDEX_TYPE, tc.index_type},
-            {index::SCALAR_INDEX_ENGINE_VERSION,
-             std::to_string(tc.scalar_version)},
-            {milvus::LOAD_PRIORITY, "HIGH"}};
+        info.index_params = {{index::INDEX_TYPE, tc.index_type},
+                             {index::SCALAR_INDEX_ENGINE_VERSION,
+                              std::to_string(tc.scalar_version)},
+                             {milvus::LOAD_PRIORITY, "HIGH"}};
 
         tracer::TraceContext trace_ctx{};
         segcore::LoadIndexData(trace_ctx, &info);
@@ -2283,10 +2280,9 @@ TEST(BitmapIndexArrayNestedTest,
         info.num_rows = 10;
         info.warmup_policy = "disable";
         info.index_files = {path};
-        info.index_params = {
-            {index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
-            {index::SCALAR_INDEX_ENGINE_VERSION, "3"},
-            {milvus::LOAD_PRIORITY, "HIGH"}};
+        info.index_params = {{index::INDEX_TYPE, index::BITMAP_INDEX_TYPE},
+                             {index::SCALAR_INDEX_ENGINE_VERSION, "3"},
+                             {milvus::LOAD_PRIORITY, "HIGH"}};
         tracer::TraceContext trace_ctx{};
         segcore::LoadIndexData(trace_ctx, &info);
         EXPECT_FALSE(info.skipped);
@@ -2297,9 +2293,8 @@ TEST(BitmapIndexArrayNestedTest,
 TEST(BitmapIndexArrayNestedTest,
      LoadIndexDataV1V2SkipsLegacyStructSubFieldIndexesAndAcceptsCompatible) {
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    auto chunk_manager =
-        storage::RemoteChunkManagerSingleton::GetInstance()
-            .GetRemoteChunkManager();
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
     ASSERT_NE(chunk_manager, nullptr);
 
     proto::schema::FieldSchema struct_schema;
@@ -2343,14 +2338,15 @@ TEST(BitmapIndexArrayNestedTest,
     const std::string yaml_no_nested =
         "bitmap_index_length: 1\nbitmap_index_num_rows: 10\n";
     const std::string yaml_nested_false =
-        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: false\n";
+        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: "
+        "false\n";
     const std::string yaml_nested_true =
-        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: true\n";
-    const std::string json_nested_true =
-        nlohmann::json{{index::BITMAP_INDEX_LENGTH, 1},
-                       {index::BITMAP_INDEX_NUM_ROWS, 10},
-                       {"is_nested_index", true}}
-            .dump();
+        "bitmap_index_length: 1\nbitmap_index_num_rows: 10\nis_nested_index: "
+        "true\n";
+    const std::string json_nested_true = nlohmann::json{
+        {index::BITMAP_INDEX_LENGTH, 1},
+        {index::BITMAP_INDEX_NUM_ROWS, 10},
+        {"is_nested_index", true}}.dump();
 
     const std::vector<LegacyCase> cases = {
         {"hybrid_bitmap_missing_meta",
@@ -2477,7 +2473,8 @@ TEST(BitmapIndexArrayNestedTest,
         const int64_t id = 3200 + static_cast<int64_t>(i);
         storage::FieldDataMeta fm_meta{1, 2, 3, 101, schema};
         storage::IndexMeta idx_meta{3, 101, id, id};
-        storage::FileManagerContext case_ctx(fm_meta, idx_meta, chunk_manager, fs);
+        storage::FileManagerContext case_ctx(
+            fm_meta, idx_meta, chunk_manager, fs);
         storage::MemFileManagerImpl case_fm(case_ctx);
 
         knowhere::BinarySet bin;
@@ -2523,10 +2520,9 @@ TEST(BitmapIndexArrayNestedTest,
         info.num_rows = 10;
         info.warmup_policy = "disable";
         info.index_files = std::move(remote_files);
-        info.index_params = {
-            {index::INDEX_TYPE, tc.index_type},
-            {index::SCALAR_INDEX_ENGINE_VERSION, "2"},
-            {milvus::LOAD_PRIORITY, "HIGH"}};
+        info.index_params = {{index::INDEX_TYPE, tc.index_type},
+                             {index::SCALAR_INDEX_ENGINE_VERSION, "2"},
+                             {milvus::LOAD_PRIORITY, "HIGH"}};
 
         tracer::TraceContext trace_ctx{};
         segcore::LoadIndexData(trace_ctx, &info);
