@@ -13524,7 +13524,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Elapsed seconds from index task construction to successful completion, including queue time.",
+          "description": "Elapsed seconds from index task construction to the end of the reported attempt, including queue time.",
           "fieldConfig": {
             "defaults": {
               "unit": "s"
@@ -13593,7 +13593,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Build Index Latency",
+          "title": "Index Task Total Latency",
           "tooltip": {
             "shared": true,
             "sort": 0,

@@ -340,7 +340,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "build_index_latency",
-			Help:      "Elapsed seconds from index task construction to successful completion, including queue time",
+			Help:      "Elapsed seconds from index task construction to the end of the reported attempt, including queue time",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
