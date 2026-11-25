@@ -169,11 +169,14 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
-	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
-	C.SetExprResCacheEnable(cExprResCacheEnabled)
-
 	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// SetExprResCacheConfig enables the cache after successful setup.
 		UpdateExprResCacheConfig()
+	} else {
+		UpdateExprResCacheEnable(false)
+	}
+	if err := registerExprCacheFlightConfig(ctx, paramtable.Get(), applyExprCacheFlightConfig); err != nil {
+		return err
 	}
 
 	cLoadFieldDataCellTargetSizeBytes := C.int64_t(paramtable.Get().QueryNodeCfg.LoadFieldDataCellTargetSizeBytes.GetAsInt64())

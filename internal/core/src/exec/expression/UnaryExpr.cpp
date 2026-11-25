@@ -2342,6 +2342,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         // across requests; a null cache segment bypasses both reads and writes.
         const auto* cache_segment =
             segment_->type() == SegmentType::Sealed ? segment_ : nullptr;
+        const ExprCacheFlightOptions flight_options{
+            op_ctx_ ? &op_ctx_->cancellation_token : nullptr};
         auto cached = exec::ExprCacheHelper::GetOrCompute(
             cache_segment,
             snapshot_,
@@ -2386,7 +2388,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                 return {std::move(res), std::move(valid_res)};
             },
             enable_sub_expr_cache_write_,
-            feature_recorder_);
+            feature_recorder_,
+            &flight_options);
         cached_match_res_ = cached.result;
         cached_index_chunk_valid_res_ = cached.valid;
     }

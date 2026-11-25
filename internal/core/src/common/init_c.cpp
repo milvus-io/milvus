@@ -31,6 +31,7 @@
 #include "common/Common.h"
 #include "common/Tracer.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ExprCacheFlight.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
@@ -139,6 +140,29 @@ SetLogLevel(const char* level) {
 void
 SetExprResCacheEnable(bool val) {
     milvus::exec::ExprResCacheManager::SetEnabled(val);
+}
+
+bool
+SetExprResCacheSingleFlightConfig(bool enabled,
+                                  int64_t max_wait_ms,
+                                  int64_t max_flights,
+                                  int64_t max_waiters,
+                                  int64_t max_waiters_per_key) {
+    try {
+        milvus::exec::ExprCacheFlightConfig config;
+        config.enabled = enabled;
+        config.max_wait_ms = max_wait_ms;
+        config.max_flights = max_flights > 0 ? max_flights : 0;
+        config.max_waiters = max_waiters > 0 ? max_waiters : 0;
+        config.max_waiters_per_key =
+            max_waiters_per_key > 0 ? max_waiters_per_key : 0;
+        return milvus::exec::ExprResCacheManager::Instance()
+            .Flights()
+            .Configure(config);
+    } catch (...) {
+        // Never unwind across C; the caller reports a failed configuration.
+        return false;
+    }
 }
 
 void

@@ -35,6 +35,7 @@
 
 namespace milvus {
 namespace exec {
+class ExprCacheFlightCoordinator;
 
 // Forward declarations for backend types
 class EntryPool;
@@ -217,6 +218,17 @@ class ExprResCacheManager {
  public:
     static ExprResCacheManager&
     Instance();
+    ~ExprResCacheManager();
+
+    ExprCacheFlightCoordinator&
+    Flights() {
+        return *flights_;
+    }
+
+    uint64_t
+    ConfigEpoch() const {
+        return config_epoch_.load(std::memory_order_acquire);
+    }
     static void
     SetEnabled(bool enabled);
     static bool
@@ -303,7 +315,8 @@ class ExprResCacheManager {
     // Retire the token and detach under the cache lock. Online publication
     // must first Retire() the token under its PublishLease, then call this
     // after releasing the lease: even acquiring the cache lock can wait for
-    // unrelated I/O. No allocation on the retirement path.
+    // unrelated I/O. Tokens that never registered backend use skip that lock.
+    // No allocation on the retirement path.
     struct RetiredGeneration {
         EntryPool::RetiredEntries memory;
         std::unique_ptr<DiskSlotFile> disk;
@@ -364,6 +377,7 @@ class ExprResCacheManager {
     SyncDiskUsageMetrics(size_t disk_bytes);
 
     friend class ExprCacheTestPeer;
+    friend class ExprCacheFlightTestPeer;
     // The test peer can suspend/fail a real hit before decoding or disk I/O.
     // Public callers use the overload without a callback.
     LookupResult
@@ -407,6 +421,8 @@ class ExprResCacheManager {
         materialization_budget_;
     std::atomic<uint64_t> config_epoch_{1};
     std::atomic<size_t> reported_disk_bytes_{0};
+    // Independent of backend/state locks; destroyed before the cache budgets.
+    std::unique_ptr<ExprCacheFlightCoordinator> flights_;
 };
 
 }  // namespace exec

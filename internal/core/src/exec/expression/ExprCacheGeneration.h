@@ -35,20 +35,47 @@ class ExprCacheGeneration {
     const uint64_t id;
 
     // Logical retirement must not wait for backend locks or unrelated I/O.
-    // Backend detachment separately drains operations that already passed
-    // IsRetired() by taking the manager's exclusive state lock.
-    void
+    // Returns whether backend resources may exist. This bit stays set across
+    // repeated retirement, Clear, and disable/re-enable. A false return closes
+    // registration permanently, so cleanup can skip the manager's state lock.
+    bool
     Retire() noexcept {
-        retired_.store(true, std::memory_order_release);
+        return (state_.fetch_or(kRetired, std::memory_order_acq_rel) &
+                kBackendUsed) != 0;
+    }
+
+    // Call under the manager's shared state lock, before creating any backend
+    // entries or per-generation metadata. First use and retirement share one
+    // atomic modification order: either retirement rejects the write, or it
+    // observes kBackendUsed and drains this writer using the exclusive lock.
+    bool
+    TryUseBackend() noexcept {
+        auto state = state_.load(std::memory_order_acquire);
+        for (;;) {
+            if (state & kRetired) {
+                return false;
+            }
+            if (state & kBackendUsed) {
+                return true;
+            }
+            if (state_.compare_exchange_weak(state,
+                                             state | kBackendUsed,
+                                             std::memory_order_acq_rel,
+                                             std::memory_order_acquire)) {
+                return true;
+            }
+        }
     }
 
     bool
     IsRetired() const noexcept {
-        return retired_.load(std::memory_order_acquire);
+        return (state_.load(std::memory_order_acquire) & kRetired) != 0;
     }
 
  private:
-    std::atomic<bool> retired_{false};
+    static constexpr uint8_t kRetired = 1;
+    static constexpr uint8_t kBackendUsed = 2;
+    std::atomic<uint8_t> state_{0};
 };
 
 using ExprCacheGenerationPtr = std::shared_ptr<ExprCacheGeneration>;

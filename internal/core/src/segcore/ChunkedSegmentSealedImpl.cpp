@@ -2489,8 +2489,11 @@ ChunkedSegmentSealedImpl::PublishStateOnline(
         current->expr_cache_generation->Retire();
         PublishState(publish_lease, state);
     }
-    auto retired = exec::ExprResCacheManager::Instance().RetireGeneration(
-        id_, current->expr_cache_generation);
+    // Publication is committed; optional cache cleanup must not report failure.
+    exec::RunExprCacheBestEffort([&] {
+        auto retired = exec::ExprResCacheManager::Instance().RetireGeneration(
+            id_, current->expr_cache_generation);
+    });
 }
 
 void

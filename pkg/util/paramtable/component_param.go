@@ -4904,16 +4904,21 @@ type queryNodeConfig struct {
 	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
 
 	// expr cache
-	ExprResCacheEnabled                 ParamItem `refreshable:"true"`
-	ExprResCacheMode                    ParamItem `refreshable:"true"`
-	ExprResCacheMinEvalDurationUs       ParamItem `refreshable:"true"`
-	ExprResCacheAdmissionThreshold      ParamItem `refreshable:"true"`
-	ExprResCacheMaterializationMaxBytes ParamItem `refreshable:"true"`
-	ExprResCacheMemMaxBytes             ParamItem `refreshable:"true"`
-	ExprResCacheMemCompressionEnabled   ParamItem `refreshable:"true"`
-	ExprResCacheMemEnableGrowing        ParamItem `refreshable:"true"`
-	ExprResCacheDiskMaxBytes            ParamItem `refreshable:"true"`
-	ExprResCacheDiskMaxFileSizeBytes    ParamItem `refreshable:"true"`
+	ExprResCacheEnabled                      ParamItem `refreshable:"true"`
+	ExprResCacheMode                         ParamItem `refreshable:"true"`
+	ExprResCacheMinEvalDurationUs            ParamItem `refreshable:"true"`
+	ExprResCacheAdmissionThreshold           ParamItem `refreshable:"true"`
+	ExprResCacheMaterializationMaxBytes      ParamItem `refreshable:"true"`
+	ExprResCacheMemMaxBytes                  ParamItem `refreshable:"true"`
+	ExprResCacheMemCompressionEnabled        ParamItem `refreshable:"true"`
+	ExprResCacheMemEnableGrowing             ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxBytes                 ParamItem `refreshable:"true"`
+	ExprResCacheDiskMaxFileSizeBytes         ParamItem `refreshable:"true"`
+	ExprResCacheSingleFlightEnabled          ParamItem `refreshable:"true"`
+	ExprResCacheSingleFlightMaxWaitMs        ParamItem `refreshable:"true"`
+	ExprResCacheSingleFlightMaxFlights       ParamItem `refreshable:"true"`
+	ExprResCacheSingleFlightMaxWaiters       ParamItem `refreshable:"true"`
+	ExprResCacheSingleFlightMaxWaitersPerKey ParamItem `refreshable:"true"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -6475,6 +6480,28 @@ user-task-polling:
 		Export:       true,
 	}
 	p.ExprResCacheEnabled.Init(base.mgr)
+
+	for _, item := range []struct {
+		param *ParamItem
+		name  string
+		value string
+		doc   string
+	}{
+		{&p.ExprResCacheSingleFlightEnabled, "enabled", "false", "Coalesce concurrent sealed full-row expression cache misses; requires exprCache.enabled"},
+		{&p.ExprResCacheSingleFlightMaxWaitMs, "maxWaitMs", "1000", "Maximum synchronous single-flight wait in milliseconds (1-60000); timeout falls back to computation"},
+		{&p.ExprResCacheSingleFlightMaxFlights, "maxFlights", "1024", "Maximum live single-flight records, including detached records held by readers"},
+		{&p.ExprResCacheSingleFlightMaxWaiters, "maxWaiters", "64", "Maximum concurrent single-flight followers per process; tune below the available query worker capacity"},
+		{&p.ExprResCacheSingleFlightMaxWaitersPerKey, "maxWaitersPerKey", "8", "Maximum concurrent single-flight followers per expression snapshot"},
+	} {
+		*item.param = ParamItem{
+			Key:          "queryNode.exprCache.singleFlight." + item.name,
+			Version:      "3.0.0",
+			DefaultValue: item.value,
+			Doc:          item.doc,
+			Export:       true,
+		}
+		item.param.Init(base.mgr)
+	}
 
 	p.ExprResCacheMode = ParamItem{
 		Key:          "queryNode.exprCache.mode",

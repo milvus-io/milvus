@@ -94,6 +94,15 @@ LogOpenSSLFIPSStatus();
 void
 SetExprResCacheEnable(bool val);
 
+// Independent of cache backend configuration; changing these settings does
+// not clear cached results. Invalid limits disable single-flight only.
+bool
+SetExprResCacheSingleFlightConfig(bool enabled,
+                                  int64_t max_wait_ms,
+                                  int64_t max_flights,
+                                  int64_t max_waiters,
+                                  int64_t max_waiters_per_key);
+
 void
 SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
                       const char* disk_base_path,  // disk mode: file path
