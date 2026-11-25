@@ -103,6 +103,7 @@ message SegmentIndex {
     // COLLECTION_ROOTED (1): index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     // SEGMENT_ROOTED (2): <manifest base>/_index/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
+    bool legacy_row_domain = 23;
 }
 
 message RegisterNodeRequest {

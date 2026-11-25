@@ -109,6 +109,7 @@ constexpr const char* WARMUP = "warmup";
 constexpr const char* INDEX_FILES = "index_files";
 constexpr const char* INDEX_SIZE = "index_size";
 constexpr const char* ENABLE_OFFSET_CACHE = "indexoffsetcache.enabled";
+constexpr const char* LEGACY_ROW_DOMAIN_KEY = "legacy_row_domain";
 
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";

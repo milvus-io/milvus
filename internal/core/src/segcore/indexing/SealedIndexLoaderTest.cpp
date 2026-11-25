@@ -289,10 +289,14 @@ TEST_F(SealedIndexLoaderTest,
     auto write_v3 = [&](const std::string& file_name,
                         const storage::Artifact& artifact,
                         std::optional<index::ScalarIndexType> hybrid_selector,
-                        bool strip_is_nested) {
+                        bool strip_is_nested,
+                        std::optional<bool> override_is_nested = std::nullopt) {
         index::test::TestArtifactData data = index::test::SerializeV3(artifact);
         if (strip_is_nested) {
             data.metadata.erase("is_nested");
+        }
+        if (override_is_nested.has_value()) {
+            data.metadata["is_nested"] = *override_is_nested;
         }
         if (hybrid_selector.has_value()) {
             data.metadata[index::INDEX_TYPE] =
@@ -364,7 +368,7 @@ TEST_F(SealedIndexLoaderTest,
          std::nullopt,
          3,
          true,
-         true},
+         false},
         {"LegacyInvertedV4",
          index::INVERTED_INDEX_TYPE,
          index::families::kInverted,
@@ -443,6 +447,48 @@ TEST_F(SealedIndexLoaderTest,
         auto reader = index->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->CoordDomain(), index::Domain::Row);
+    }
+
+    // 3. V3 INVERTED with explicit is_nested=false (written by 2.6 stepping-stone)
+    // must be skipped even at scalar_version=3.
+    {
+        auto artifact = build_artifact(index::families::kInverted, true);
+        const auto [remote_file, bytes] = write_v3("SteppingStoneInvertedV3.v3",
+                                                   *artifact,
+                                                   std::nullopt,
+                                                   false,
+                                                   false);
+        auto info = Info();
+        info.index_files = {remote_file};
+        info.index_size = bytes;
+        info.index_params[index::INDEX_TYPE] = index::INVERTED_INDEX_TYPE;
+        info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+        Config config(info.index_params);
+        config["nested"] = true;
+        SealedIndexLoader loader(
+            &info, tracer::TraceContext{}, context_, config);
+        EXPECT_TRUE(loader.IsSkipped());
+        EXPECT_EQ(loader.CreateIndex(nullptr), nullptr);
+    }
+
+    // 4. Any index marked legacy_row_domain=true skips before any S3/disk I/O.
+    for (const auto& index_type : {index::BITMAP_INDEX_TYPE,
+                                   index::ASCENDING_SORT,
+                                   index::INVERTED_INDEX_TYPE,
+                                   index::HYBRID_INDEX_TYPE}) {
+        SCOPED_TRACE(index_type);
+        auto info = Info();
+        info.index_files = {"nonexistent/should_not_open_s3.v3"};
+        info.index_size = 0;
+        info.index_params[index::INDEX_TYPE] = index_type;
+        info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+        info.index_params[index::LEGACY_ROW_DOMAIN_KEY] = "true";
+        Config config(info.index_params);
+        config["nested"] = true;
+        SealedIndexLoader loader(
+            &info, tracer::TraceContext{}, context_, config);
+        EXPECT_TRUE(loader.IsSkipped());
+        EXPECT_EQ(loader.CreateIndex(nullptr), nullptr);
     }
 }
 

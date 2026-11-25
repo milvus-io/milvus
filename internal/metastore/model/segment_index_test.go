@@ -104,3 +104,17 @@ func TestSegmentIndex_ManifestPublishedIsProcessLocal(t *testing.T) {
 	assert.Equal(t, original.BuildID, restored.BuildID)
 	assert.False(t, restored.ManifestPublished, "catalog reload must not inherit manifest placement")
 }
+
+func TestSegmentIndex_LegacyRowDomain(t *testing.T) {
+	original := &SegmentIndex{
+		CollectionID:    100,
+		BuildID:         1000,
+		LegacyRowDomain: true,
+	}
+	pb := MarshalSegmentIndexModel(original)
+	assert.True(t, pb.GetLegacyRowDomain())
+	restored := UnmarshalSegmentIndexModel(pb)
+	assert.True(t, restored.LegacyRowDomain)
+	cloned := CloneSegmentIndex(original)
+	assert.True(t, cloned.LegacyRowDomain)
+}

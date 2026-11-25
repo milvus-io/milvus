@@ -2760,6 +2760,42 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
 	})
 
+	t.Run("get legacy row domain segment index infos", func(t *testing.T) {
+		segIdx1.Insert(indexID, &model.SegmentIndex{
+			SegmentID:       segID,
+			CollectionID:    collID,
+			PartitionID:     partID,
+			NumRows:         10000,
+			IndexID:         indexID,
+			BuildID:         buildID,
+			IndexVersion:    1,
+			IndexState:      commonpb.IndexState_Finished,
+			CreatedUTCTime:  createTS,
+			LegacyRowDomain: true,
+		})
+		defer segIdx1.Insert(indexID, &model.SegmentIndex{
+			SegmentID:           segID,
+			CollectionID:        collID,
+			PartitionID:         partID,
+			NumRows:             10000,
+			IndexID:             indexID,
+			BuildID:             buildID,
+			IndexVersion:        1,
+			IndexState:          commonpb.IndexState_Finished,
+			CreatedUTCTime:      createTS,
+			IndexFileKeys:       nil,
+			IndexSerializedSize: 0,
+			WriteHandoff:        false,
+		})
+		resp, err := s.GetIndexInfos(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		infos := resp.GetSegmentInfo()[segID].GetIndexInfos()
+		if assert.Len(t, infos, 1) {
+			assert.Contains(t, infos[0].GetIndexParams(), &commonpb.KeyValuePair{Key: common.LegacyRowDomainKey, Value: "true"})
+		}
+	})
+
 	for _, tc := range []struct {
 		name       string
 		version    indexpb.IndexStorePathVersion

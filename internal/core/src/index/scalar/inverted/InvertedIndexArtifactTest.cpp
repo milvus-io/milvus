@@ -396,8 +396,9 @@ TEST(InvertedIndexArtifactTest,
                        options,
                        TestIndexCacheConfig()});
         };
-        ExpectSegcoreError(ErrorCode::DataFormatBroken,
-                           [&] { static_cast<void>(open_with_version(3)); });
+        auto loaded_v3 = open_with_version(3);
+        ASSERT_NE(loaded_v3, nullptr);
+        EXPECT_EQ(loaded_v3->Metadata().domain, Domain::Element);
         auto loaded = open_with_version(4);
         ASSERT_NE(loaded, nullptr);
         EXPECT_EQ(loaded->Metadata().domain, Domain::Element);

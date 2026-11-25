@@ -46,6 +46,7 @@ type SegmentIndex struct {
 	// keep it even after their entry leaves the current manifest. The zero value
 	// conservatively treats a record as catalog-backed. It is not serialized.
 	ManifestPublished bool
+	LegacyRowDomain   bool
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -74,6 +75,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		LegacyRowDomain:           segIndex.LegacyRowDomain,
 	}
 }
 
@@ -104,6 +106,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+		LegacyRowDomain:           segIdx.LegacyRowDomain,
 	}
 }
 
@@ -132,6 +135,7 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 		ManifestPublished:         segIndex.ManifestPublished,
+		LegacyRowDomain:           segIndex.LegacyRowDomain,
 	}
 }
 

@@ -70,9 +70,16 @@ bool
 IsNestedMetadataCompatible(const nlohmann::json* packed_metadata,
                            const Config& params,
                            bool runtime_nested) {
-    if (packed_metadata != nullptr && packed_metadata->contains(kV3NestedKey)) {
-        return ReadRequiredIndexMeta<bool>(
-                   *packed_metadata, kV3NestedKey.data()) == runtime_nested;
+    if (packed_metadata != nullptr) {
+        if (packed_metadata->contains(kV3NestedKey)) {
+            return ReadRequiredIndexMeta<bool>(
+                       *packed_metadata, kV3NestedKey.data()) == runtime_nested;
+        }
+        // V3 packed INVERTED without `is_nested` comes from 3.0.0~3.0.6
+        // (already element-domain); 2.6 stepping-stone V3 writes
+        // `is_nested = false`, and pre-stepping-stone 2.6 indexes carry
+        // `legacy_row_domain = true`.
+        return true;
     }
     if (!runtime_nested) {
         return true;

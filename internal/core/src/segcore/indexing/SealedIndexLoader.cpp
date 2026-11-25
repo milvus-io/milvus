@@ -168,6 +168,10 @@ SealedIndexLoader::SealedIndexLoader(
     const auto nested =
         milvus::index::ReadNestedConfigParam(config_, "sealed index translator")
             .value_or(false);
+    const bool legacy_row_domain =
+        milvus::index::GetValueFromConfig<bool>(
+            config_, milvus::index::LEGACY_ROW_DOMAIN_KEY)
+            .value_or(false);
     auto adapted = milvus::index::AdaptIndexType({
         .index_type = index_type_,
         .field_type = index_load_info_.field_type,
@@ -181,6 +185,22 @@ SealedIndexLoader::SealedIndexLoader(
     const auto value_type = adapted.value_type;
     source_family_ = adapted.family;
     config_ = std::move(adapted.params);
+
+    if (nested && !IsVectorDataType(index_load_info_.field_type) &&
+        legacy_row_domain) {
+        skipped_incompatible_nested_ = true;
+        family_ = adapted.family;
+        value_type_ = value_type;
+        caps_ = {};
+        LOG_WARN(
+            "skip legacy row-domain StructArray scalar index: segment={}, "
+            "field={}, index_id={}, family={}",
+            index_load_info_.segment_id,
+            index_load_info_.field_id,
+            index_load_info_.index_id,
+            family_);
+        return;
+    }
 
     const auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
