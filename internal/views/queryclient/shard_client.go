@@ -623,12 +623,14 @@ type shardExecParams struct {
 
 // shardRetryState outlives executeShard only for request-scoped streaming retries.
 type shardRetryState struct {
-	attempt          int                     // Completed attempts, including successful stream openings.
-	lastErr          error                   // Original failure returned when the budget is exhausted.
-	tried            map[qviews.Replica]bool // Batch replica history; true requires a newer plan/session.
-	deadNodes        map[int64]struct{}      // QNs excluded only for missing sessions, not raw Unavailable.
-	sessionChanged   <-chan struct{}         // Wakes routing when excluded worker sessions change.
-	previousReplicas map[int64]struct{}      // Replicas to defer after earlier whole-Proxy failures.
+	// Keep the single overload failover budget across pre-output stream restarts.
+	overloadExtraUsed bool
+	attempt           int                     // Completed attempts, including successful stream openings.
+	lastErr           error                   // Original failure returned when the budget is exhausted.
+	tried             map[qviews.Replica]bool // Batch replica history; true requires a newer plan/session.
+	deadNodes         map[int64]struct{}      // QNs excluded only for missing sessions, not raw Unavailable.
+	sessionChanged    <-chan struct{}         // Wakes routing when excluded worker sessions change.
+	previousReplicas  map[int64]struct{}      // Replicas to defer after earlier whole-Proxy failures.
 }
 
 func (r *shardRetryState) recordFailure(err error) {
@@ -697,16 +699,28 @@ func (s *shardViewQueryClient) executeShard(
 			retry.recordFailure(retryErr)
 		}
 	}
-	overloadExtraUsed := false
+	var overloadErr error
+	var retryOverload bool
 	for ; ; retry.attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if s.maxRetries > 0 && retry.attempt >= s.maxRetries && !route.hasUntried(retry.tried) {
+		if !retryOverload && s.maxRetries > 0 && retry.attempt >= s.maxRetries && !route.hasUntried(retry.tried) {
 			return nil, retry.lastErr
 		}
 
-		candidate, sessionsUpdated, err := route.nextReplica(ctx, retry.tried, retry.sessionChanged, checkLoad)
+		var candidate qviews.Replica
+		var sessionsUpdated bool
+		var err error
+		if retryOverload {
+			var found bool
+			candidate, found = route.alternative(0, retry.tried, nil)
+			if !found {
+				return nil, overloadErr
+			}
+		} else {
+			candidate, sessionsUpdated, err = route.nextReplica(ctx, retry.tried, retry.sessionChanged, checkLoad)
+		}
 		if sessionsUpdated {
 			clear(retry.deadNodes)
 			clear(retry.tried)
@@ -724,6 +738,7 @@ func (s *shardViewQueryClient) executeShard(
 			retry.attempt--
 			continue
 		}
+		retryOverload = false
 		targetShardID := qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: vchannel}
 
 		// Phase 1: GetQueryPlan with consistency routing.
@@ -731,8 +746,10 @@ func (s *shardViewQueryClient) executeShard(
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
 			if isOverloadErr(err) {
+				retry.lastErr, overloadErr = err, err
 				retry.tried[candidate] = true
-				if consumeExtraAttemptOnOverload(route, retry.tried, &overloadExtraUsed) {
+				if !retry.overloadExtraUsed {
+					retry.overloadExtraUsed, retryOverload = true, true
 					continue
 				}
 				return nil, err
@@ -799,9 +816,11 @@ func (s *shardViewQueryClient) executeShard(
 		}
 		if err != nil {
 			if isOverloadErr(err) {
+				retry.lastErr, overloadErr = err, err
 				retry.tried[candidate] = true
 				params.resetShard(shardID)
-				if consumeExtraAttemptOnOverload(route, retry.tried, &overloadExtraUsed) {
+				if !retry.overloadExtraUsed {
+					retry.overloadExtraUsed, retryOverload = true, true
 					continue
 				}
 				return nil, err
@@ -989,14 +1008,4 @@ func retryableQueryError(err error) bool {
 		return true
 	}
 	return status.Code(err) == codes.Unavailable
-}
-
-// consumeExtraAttemptOnOverload claims the single extra attempt allowed for an
-// overloaded shard read when an untried replica remains.
-func consumeExtraAttemptOnOverload(route *replicaRoute, tried map[qviews.Replica]bool, extraUsed *bool) bool {
-	if *extraUsed || !route.hasUntried(tried) {
-		return false
-	}
-	*extraUsed = true
-	return true
 }

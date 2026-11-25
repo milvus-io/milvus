@@ -25,6 +25,14 @@ live for new shard requests without restarting the proxy. This is a local proxy
 routing choice, with no durable metadata, WAL message, or cross-cluster
 replication change.
 
+When either latency-weighted selection or hedging is enabled, legacy Search and
+Query use Batch execution even if `proxy.queryView.enableReduceStream` is enabled.
+The streaming path does not yet implement adaptive attempt selection, isolated
+result publication, or replica feedback. Batch execution keeps these features
+effective, at the cost of buffering results instead of streaming their reduction.
+With both features disabled, the existing streaming configuration takes effect.
+Requery using retained plans keeps its existing path.
+
 ## Selection and feedback
 
 When `proxy.replicaSelectionPolicy` is `latency_weighted`, a proxy records
@@ -184,3 +192,17 @@ and idle replica cleanup. Search and Query regression tests cover wire-encoded
 worker OOM followed by sibling success, both failure orders, retry exhaustion,
 InputError followed by sibling success, all-attempt failure, single-attempt
 InputError, and caller cancellation while the sibling is pending.
+
+Queue wait is checked again when a worker starts, before `PreExecute` and
+`Execute`, including time blocked handing off to the worker pool. The
+`scheduled` queue-duration observation is recorded at that point. Rejection
+occurs when the worker becomes available; queue budgets do not install timers.
+Searches with a positive queue budget merge only when their absolute queue
+expiry times match. This preserves the expiry when cancellation promotes a
+surviving member, at the cost of fewer merge opportunities under queue limits.
+
+Unknown replica latency uses the candidate fallback before applying the current
+failure penalty. A recent penalty still suppresses a replica with no successes;
+a small decayed penalty cannot make an unknown replica appear faster than the
+fallback. Hedge-delay samples continue to be collected while hedging is disabled
+so live enabling can use the observed workload latency.

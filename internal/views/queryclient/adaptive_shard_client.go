@@ -216,14 +216,27 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 	// extraUsed tracks the single extra attempt (hedge or overload failover)
 	// permitted across all retry rounds for this shard read.
 	extraUsed := false
+	retryOverload := false
 	for attempts := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if s.maxRetries > 0 && attempts >= s.maxRetries && !route.hasUntried(tried) {
+		if !retryOverload && s.maxRetries > 0 && attempts >= s.maxRetries && !route.hasUntried(tried) {
 			return nil, lastErr
 		}
-		primary, sessionsUpdated, err := route.nextReplicaWithSelector(ctx, tried, sessionChanged, checkLoad, choose)
+		var primary qviews.Replica
+		var sessionsUpdated bool
+		var err error
+		if retryOverload {
+			var found bool
+			primary, found = route.alternative(0, tried, choose)
+			if !found {
+				return nil, overloadErr
+			}
+			retryOverload = false
+		} else {
+			primary, sessionsUpdated, err = route.nextReplicaWithSelector(ctx, tried, sessionChanged, checkLoad, choose)
+		}
 		if sessionsUpdated {
 			clear(tried)
 			clear(deadNodes)
@@ -318,7 +331,7 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 					roundRefused = true
 					continue
 				}
-				if merr.GetErrorType(toMilvusError(result.err)) == merr.InputError {
+				if merr.GetErrorType(ToMilvusError(result.err)) == merr.InputError {
 					// Stop retrying, but allow an already dispatched sibling to succeed.
 					terminalErr = result.err
 					continue
@@ -352,7 +365,8 @@ func (s *shardViewQueryClient) executeAdaptiveShard(ctx context.Context, key rep
 			return nil, terminalErr
 		}
 		if roundRefused {
-			if consumeExtraAttemptOnOverload(route, tried, &extraUsed) {
+			if !extraUsed {
+				extraUsed, retryOverload = true, true
 				continue
 			}
 			return nil, overloadErr

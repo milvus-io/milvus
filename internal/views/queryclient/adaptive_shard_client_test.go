@@ -17,6 +17,7 @@ package queryclient
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -1039,4 +1040,105 @@ func TestAdaptiveOverloadUnderDefaultPolicy(t *testing.T) {
 	nodes, err = run(3)
 	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
 	require.Len(t, nodes, 2)
+}
+
+func TestOverloadAlternativeRemovedReturnsOriginalError(t *testing.T) {
+	for _, weighted := range []bool{false, true} {
+		t.Run(fmt.Sprint(weighted), func(t *testing.T) {
+			var client *shardViewQueryClient
+			client = overloadTestClient(t, weighted, false, []int64{1, 2}, func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+				route := client.replicas.channels["channel"]
+				route.mu.Lock()
+				route.snapshot.Replicas = []qviews.Replica{{ReplicaID: req.GetShardId().GetReplicaId()}}
+				route.mu.Unlock()
+				return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: overloadViewStatus()}}, nil
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := client.Search(ctx, &ShardSearchRequest{VChannel: "channel", Req: &internalpb.SearchRequest{}, Reducer: newLegacySearchCollector()})
+			require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+			require.NoError(t, ctx.Err())
+		})
+	}
+}
+
+// The default streaming setting must not silently bypass adaptive routing.
+func TestLegacyAdaptiveRoutingUsesBatchWithStreamingAllowed(t *testing.T) {
+	for _, operation := range []string{"search", "query"} {
+		for _, weighted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/weighted=%v", operation, weighted), func(t *testing.T) {
+				planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+					response := adaptiveTestPlan(shard)
+					if operation == "query" {
+						response.Plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: req.GetLegacyRetrieveRequest()}
+					}
+					return response, nil
+				}}
+				service := &adaptiveTestService{
+					search: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+						return &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{Status: merr.Success(), NumQueries: 1}}, nil
+					},
+					query: func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+						return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
+					},
+				}
+				client := newLegacyClient(ViewQueryClientConfig{ReplicaSelection: func() ReplicaSelectionConfig {
+					cfg := adaptiveTestConfig()
+					cfg.LatencyWeighted, cfg.HedgeEnabled = weighted, !weighted
+					return cfg
+				}}, planner, service, &legacyResolver{vchannels: []string{"channel"}})
+				client.shardClient.replicas.channels["channel"] = &replicaRoute{changed: make(chan struct{}), snapshot: qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 1}}}}
+				if operation == "search" {
+					result, err := client.Search(t.Context(), &LegacySearchRequest{AllowStreaming: true, Req: &internalpb.SearchRequest{CollectionID: 100, Nq: 1, Topk: 1}})
+					require.NoError(t, err)
+					require.Nil(t, result.Stream)
+					require.Len(t, result.Results, 1)
+				} else {
+					result, err := client.Query(t.Context(), &LegacyQueryRequest{AllowStreaming: true, Req: &internalpb.RetrieveRequest{CollectionID: 100}})
+					require.NoError(t, err)
+					require.Nil(t, result.Stream)
+					require.Len(t, result.Results, 1)
+				}
+				client.shardClient.selection.mu.Lock()
+				defer client.shardClient.selection.mu.Unlock()
+				require.NotEmpty(t, client.shardClient.selection.keys, "adaptive feedback must be recorded")
+			})
+		}
+	}
+}
+
+func TestOverloadExtraAttemptBudgetSurvivesStreamRestart(t *testing.T) {
+	planner := &adaptiveTestPlanner{plan: func(_ context.Context, shard qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		return adaptiveTestPlan(shard), nil
+	}}
+	client := adaptiveTestClient(planner, nil)
+	var dispatched []int64
+	params := &shardExecParams{
+		retryState: &shardRetryState{},
+		buildPlanReq: func(qviews.ShardID) *viewpb.GetQueryPlanRequest {
+			return &viewpb.GetQueryPlanRequest{Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{}}}
+		},
+		dispatchNode: func(_ context.Context, _ qviews.WorkNode, _ *viewpb.QueryPlan, shard qviews.ShardID) error {
+			dispatched = append(dispatched, shard.ReplicaID)
+			if shard.ReplicaID != 2 {
+				return merr.ErrServiceTooManyRequests
+			}
+			return nil
+		},
+		resetShard: func(qviews.ShardID) {},
+	}
+	plan, err := client.executeShard(t.Context(), "channel", params)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), plan.ShardID.ReplicaID)
+	require.Equal(t, []int64{1, 2}, dispatched)
+
+	// A pre-output receive failure restarts the stream with the same budget,
+	// even when the replica directory has acquired new candidates.
+	route := client.replicas.channels["channel"]
+	route.mu.Lock()
+	route.snapshot.Replicas = []qviews.Replica{{ReplicaID: 3}, {ReplicaID: 4}}
+	route.mu.Unlock()
+	_, err = client.executeShard(t.Context(), "channel", params)
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.Len(t, dispatched, 3, "a stream restart must not grant another overload failover")
 }

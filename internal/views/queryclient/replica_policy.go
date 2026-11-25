@@ -120,7 +120,7 @@ func (p *replicaPolicy) selectReplica(key replicaPolicyKey, candidates []qviews.
 	known := 0
 	for i, candidate := range candidates {
 		if replica := stats.replicas[candidate.ReplicaID]; replica != nil {
-			if latency, ok := replica.latency(now, cfg.Decay); ok {
+			if latency, ok := replica.mean(now, cfg.Decay); ok {
 				latencies[i] = max(latency, replicaMinLatency)
 				sum += latencies[i]
 				known++
@@ -141,6 +141,7 @@ func (p *replicaPolicy) selectReplica(key replicaPolicyKey, candidates []qviews.
 		inflight := 0
 		if replica := stats.replicas[candidate.ReplicaID]; replica != nil {
 			inflight = replica.inflight
+			latency = max(latency, replica.currentPenalty(now, cfg.Decay))
 		}
 		weights[i] = 1 / (latency.Seconds() * float64(inflight+1))
 		total += weights[i]
@@ -233,7 +234,7 @@ func (o *replicaObservation) finish(ctx context.Context, err error, workerFailur
 	if success {
 		stats.succeed(now, now.Sub(o.start), o.config.Decay)
 	} else if !o.failed && workerFailure && !errors.Is(ctx.Err(), context.Canceled) &&
-		merr.GetErrorType(toMilvusError(err)) != merr.InputError && !isOverloadErr(err) {
+		merr.GetErrorType(ToMilvusError(err)) != merr.InputError && !isOverloadErr(err) {
 		o.failed = true
 		stats.fail(now, replicaAttemptPenalty(ctx, o.start, now), o.config.Decay)
 	}
@@ -244,7 +245,7 @@ func (o *replicaObservation) finish(ctx context.Context, err error, workerFailur
 // done, not that it is failing: the request may try another replica once, and
 // the refusal does not count against this one.
 func isOverloadErr(err error) bool {
-	return errors.Is(toMilvusError(err), merr.ErrServiceTooManyRequests)
+	return errors.Is(ToMilvusError(err), merr.ErrServiceTooManyRequests)
 }
 
 func replicaAttemptPenalty(ctx context.Context, start, now time.Time) time.Duration {

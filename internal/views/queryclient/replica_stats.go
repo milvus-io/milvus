@@ -117,11 +117,10 @@ func (s *replicaStats) currentPenalty(now time.Time, decay time.Duration) time.D
 }
 
 // latency returns the latency the replica is weighed with: the larger of the
-// success mean and the penalty. It returns false when nothing is known.
+// success mean and the penalty. The boolean reports whether a recent successful sample exists.
 func (s *replicaStats) latency(now time.Time, decay time.Duration) (time.Duration, bool) {
 	latency, known := s.mean(now, decay)
 	if p := s.currentPenalty(now, decay); p > 0 {
-		known = true
 		if p > latency {
 			latency = p
 		}

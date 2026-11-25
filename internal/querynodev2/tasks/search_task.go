@@ -489,6 +489,11 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	return true
 }
 
+// CanMerge reports whether the search can participate in scheduler batching.
+func (t *SearchTask) CanMerge() bool {
+	return t.selected == nil
+}
+
 func (t *SearchTask) canMerge(other *SearchTask) bool {
 	// Even equal segment IDs may refer to handles from different view versions.
 	if t.selected != nil || other.selected != nil {

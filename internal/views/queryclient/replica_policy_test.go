@@ -132,3 +132,29 @@ func TestReplicaSelectionLatencyFloorAndInflight(t *testing.T) {
 	delete(policy.keys[key].replicas, 1)
 	require.InDelta(t, 5000, count(), 150)
 }
+
+func TestUnknownReplicaUsesFallbackBeforePenalty(t *testing.T) {
+	for _, age := range []time.Duration{0, 100 * time.Second} {
+		policy := newReplicaPolicy()
+		policy.rng = rand.New(rand.NewSource(1))
+		cfg := adaptiveTestConfig()
+		key := replicaPolicyKey{channel: "channel", class: "search"}
+		now := time.Now()
+		state := policy.statsLocked(key, now)
+		state.replicas[1] = &replicaStats{}
+		state.replicas[1].succeed(now, 50*time.Millisecond, cfg.Decay)
+		state.replicas[2] = &replicaStats{penalty: 5 * time.Second, penaltyAt: now.Add(-age), lastUsed: now}
+		candidates := []qviews.Replica{{ReplicaID: 1}, {ReplicaID: 2}}
+		selected := 0
+		for i := 0; i < 2000; i++ {
+			if policy.selectReplica(key, candidates, cfg).ReplicaID == 2 {
+				selected++
+			}
+		}
+		if age == 0 {
+			require.Less(t, selected, 80)
+		} else {
+			require.InDelta(t, 1000, selected, 100)
+		}
+	}
+}

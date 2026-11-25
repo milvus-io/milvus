@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -1562,7 +1563,7 @@ func (t *QueryTask) shardRequest(nodeID int64, channel string) (req *querypb.Que
 }
 
 func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+	ctx = grpcclient.WithFailFastOnOverload(retry.WithMaxAttemptsContext(ctx, 1))
 	req, skip := t.shardRequest(nodeID, channel)
 	if skip {
 		return nil
