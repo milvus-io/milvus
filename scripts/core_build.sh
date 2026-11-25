@@ -100,7 +100,7 @@ BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_TSAN="${USE_TSAN:-OFF}"
 USE_DYNAMIC_SIMD="ON"
-USE_SVS="OFF"
+USE_SVS="AUTO"
 WITH_CRT="OFF"
 TANTIVY_FEATURES=""
 : "${TANTIVY_ANALYZER_REMOTE_TLS:=ON}"
@@ -187,7 +187,7 @@ parameter:
 -a: build milvus with AddressSanitizer(default: false)
 -T: build milvus with ThreadSanitizer (ON/OFF, default: OFF; Linux CPU only)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
+-S: build milvus with SVS/Intel Scalable Vector Search (AUTO/ON/OFF, default: AUTO; ON for Linux x86-64 targets)
 -R: build milvus-storage with AWS S3 CRT read path(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
