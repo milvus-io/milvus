@@ -113,7 +113,11 @@ func (g *orderedGroups) appendNext(ready []*orderedChildBuffer, out *internalpb.
 			first = candidate
 		}
 	}
-	if g.lastGroup != nil && g.compare(first, queryReduceUnit{result: g.lastGroup, rowIndex: 0}) <= 0 {
+	prev, prevRow := g.lastGroup, int64(0)
+	if n := queryutil.GetRowCount(out); n > 0 {
+		prev, prevRow = out, int64(n-1)
+	}
+	if prev != nil && g.compare(first, queryReduceUnit{result: prev, rowIndex: prevRow}) <= 0 {
 		return merr.WrapErrServiceInternalMsg("GROUP BY child streams are not strictly ordered by group key")
 	}
 	var merged *agg.Row
@@ -145,16 +149,19 @@ func (g *orderedGroups) appendNext(ready []*orderedChildBuffer, out *internalpb.
 	if out.FieldsData == nil {
 		out.FieldsData = typeutil.PrepareResultFieldData(first.result.FieldsData, 0)
 	}
-	if err := agg.AssembleSingleRow(len(out.FieldsData), merged, out.FieldsData); err != nil {
+	return agg.AssembleSingleRow(len(out.FieldsData), merged, out.FieldsData)
+}
+
+func (g *orderedGroups) rememberLast(out *internalpb.RetrieveResults) error {
+	n := queryutil.GetRowCount(out)
+	if n == 0 {
+		return nil
+	}
+	last, err := buildRetrieveChunk([]queryReduceUnit{{result: out, rowIndex: int64(n - 1)}})
+	if err != nil {
 		return err
 	}
-	lastGroup := &internalpb.RetrieveResults{
-		FieldsData: typeutil.PrepareResultFieldData(out.FieldsData, 1),
-	}
-	if err := agg.AssembleSingleRow(len(lastGroup.FieldsData), merged, lastGroup.FieldsData); err != nil {
-		return err
-	}
-	g.lastGroup = lastGroup
+	g.lastGroup = last
 	return nil
 }
 
@@ -227,6 +234,10 @@ func (s *OrderedReduceStream) recvGroups() (*internalpb.RetrieveResults, error) 
 		s.finished = true
 		if err := s.closeChildren(); err != nil {
 			return nil, err
+		}
+	} else if len(s.outputChunks) == 0 {
+		if err := g.rememberLast(out); err != nil {
+			return nil, s.fail(err)
 		}
 	}
 	return out, nil
