@@ -15,7 +15,7 @@ FROM ubuntu:noble-20240530
 
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 tar xz-utils bzip2 \
     g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-18 clang-tidy-18 lcov libtool m4 autoconf automake \
     pkg-config uuid-dev libaio-dev && \
@@ -38,7 +38,8 @@ RUN uv python install 3.12.13 && \
     uv tool install --python python3.12 conan==2.25.1
 
 
-# Ubuntu 24.04 ships GCC 13 by default, no upgrade needed
+COPY build/docker/builder/cpu/install-gcc.sh /tmp/install-gcc.sh
+RUN bash /tmp/install-gcc.sh && rm /tmp/install-gcc.sh
 
 
 RUN echo "target arch $TARGETARCH"

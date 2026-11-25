@@ -70,6 +70,7 @@ case "${BUILD_TYPE}" in
 esac
 
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
+bash "${ROOT_DIR}/scripts/check_cpp_compiler.sh" || exit 1
 CPP_SRC_DIR="${ROOT_DIR}/internal/core"
 BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
 CONAN_PROFILE_ARGS=()
@@ -299,7 +300,10 @@ HOOK_EOF
     fi
     echo "Running on ${OS_NAME}"
     export CPU_TARGET=avx
-    GCC_VERSION=`gcc -dumpversion`
+    GCC_VERSION=$(gcc -dumpversion | cut -d. -f1)
+    # Cyrus SASL needs pre-C23 declarations; its legacy recipe discards compiler.cstd.
+    CONAN_PROFILE_ARGS+=(-c:h 'cyrus-sasl/*:tools.build:cflags+=["-std=gnu17"]'
+                        -c:b 'cyrus-sasl/*:tools.build:cflags+=["-std=gnu17"]')
     CONAN_ENV=()
     if [[ "${USE_TSAN:-OFF}" == "ON" ]]; then
       # Ordinary/build-context packages retain their declared GCC toolchain.
