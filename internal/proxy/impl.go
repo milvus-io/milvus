@@ -2711,6 +2711,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2949,6 +2951,8 @@ func (l *hybridSearchRequestExprLogger) String() string {
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3348,6 +3352,9 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
+	// Keep this synthesized read inside the outer search observation.
+	qt.MarkInternal()
+
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
 	if err != nil {
@@ -3654,6 +3661,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
