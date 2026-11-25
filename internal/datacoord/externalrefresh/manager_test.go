@@ -1038,6 +1038,119 @@ func TestExploreExternalFiles_UsesUniqueAttemptDirectories(t *testing.T) {
 	}, baseDirs)
 }
 
+// Refresh revalidates the job's source and spec before exploring. A spec that
+// sets one key twice fails with an error naming the keys; a lone other
+// spelling of a key is still accepted.
+func TestExploreExternalFiles_RejectsCollidingSpecKeys(t *testing.T) {
+	paramtable.Init()
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&meta.CollectionInfo{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:       100,
+			Name:          "id",
+			ExternalField: "id",
+		}}},
+	})
+	mgr := &Manager{
+		mt:        &meta.Meta{MetaStore: ms},
+		allocator: &stubAllocator{nextID: 300},
+	}
+	explored := 0
+	mockExplore := mockey.Mock(packed.ExploreFilesReturnManifestPath).
+		To(func(_ []string, _ string, _, _ string, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) ([]packed.FileInfo, string, error) {
+			explored++
+			return []packed.FileInfo{{FilePath: "f.parquet", NumRows: 1}}, "manifest", nil
+		}).Build()
+	defer mockExplore.UnPatch()
+
+	newJob := func(spec string) *datapb.ExternalCollectionRefreshJob {
+		return &datapb.ExternalCollectionRefreshJob{
+			JobId:          42,
+			CollectionId:   100,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   spec,
+		}
+	}
+	const extfs = `{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}`
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"format":"parquet","extfs":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"format":"parquet","Format":"vortex","extfs":` + extfs + `}`, `external spec keys "format" and "Format" differ only in case`},
+		{`{"format":"parquet","extfs":` + extfs + `,"extfs":` + extfs + `}`, `external spec key "extfs" appears more than once`},
+		{`{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk","Region":"eu-west-1"}}`, `extfs keys "region" and "Region" differ only in case`},
+	} {
+		_, _, err := mgr.exploreExternalFiles(context.Background(), newJob(tc.spec))
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, "external source/spec failed revalidation", tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+	}
+	require.Zero(t, explored)
+
+	for _, spec := range []string{
+		`{"format":"parquet","extfs":` + extfs + `}`,
+		`{"Format":"parquet","EXTFS":` + extfs + `}`,
+	} {
+		_, _, err := mgr.exploreExternalFiles(context.Background(), newJob(spec))
+		require.NoError(t, err, spec)
+	}
+	require.Equal(t, 2, explored)
+}
+
+// When the collection already has segments, refresh parses the collection's
+// persisted spec to read the baseline manifests. That parse is strict, so a
+// persisted spec that sets one key twice fails every refresh.
+func TestCreateTasksForJob_CollidingBaselineSpecKeys(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	jobID := int64(1001)
+
+	for _, tc := range []struct{ baselineSpec, wantErr string }{
+		{`{"format":"parquet","extfs":{"region":"us-west-2"},"Extfs":{"use_ssl":"true"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		// A lone other spelling parses, so planning gets as far as reading
+		// the baseline manifests.
+		{`{"Format":"parquet","EXTFS":{"region":"us-west-2"}}`, "read external refresh baseline manifests"},
+	} {
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&meta.CollectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{ExternalSpec: tc.baselineSpec}})
+		segments := meta.NewSegmentsInfo(ms)
+		segments.SetSegment(10, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: collectionID,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "baseline-manifest",
+		}})
+		mt := &meta.Meta{MetaStore: ms, Segments: segments}
+		refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
+		mgr := NewExternalCollectionRefreshManager(
+			ctx, mt, nil, newStubScheduler(), &stubAllocator{nextID: 2000},
+			refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*Manager)
+
+		mockExplore := mockey.Mock((*Manager).exploreExternalFiles).
+			Return([]packed.FileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+			Build()
+		mockRead := mockey.Mock(packed.ReadFragmentsFromManifest).
+			Return(nil, errors.New("manifest read failed")).
+			Build()
+
+		job := &datapb.ExternalCollectionRefreshJob{
+			JobId:        jobID,
+			CollectionId: collectionID,
+			State:        indexpb.JobState_JobStateInit,
+			ExternalSpec: `{"format":"parquet"}`,
+		}
+		require.NoError(t, refreshMeta.AddJob(job))
+		tasks, err := mgr.createTasksForJob(ctx, job)
+		mockRead.UnPatch()
+		mockExplore.UnPatch()
+		require.ErrorContains(t, err, tc.wantErr, tc.baselineSpec)
+		require.Empty(t, tasks)
+		if strings.Contains(tc.wantErr, "differ only in case") {
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "parse external refresh baseline spec")
+		}
+	}
+}
+
 func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
