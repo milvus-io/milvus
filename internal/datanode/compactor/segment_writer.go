@@ -56,6 +56,14 @@ type MultiSegmentWriter struct {
 	// segmentSize might be changed dynamicly. To make sure a compaction plan is static,
 	// The target segmentSize is defined when creating the compaction plan.
 
+	// segmentMaxRows cuts the current segment once it holds this many rows,
+	// in addition to segmentSize; 0 cuts on bytes only. Like segmentSize it
+	// comes from the compaction plan, so the planner and the writer agree on
+	// which outputs are full.
+	segmentMaxRows int64
+	// currentRows counts the rows handed to the current segment's writer.
+	currentRows int64
+
 	schema        *schemapb.CollectionSchema
 	partitionID   int64
 	collectionID  int64
@@ -125,6 +133,12 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 		params:         params,
 		rwOption:       rwOpts,
 	}, nil
+}
+
+// SetSegmentMaxRows makes the writer start a new segment once the current one
+// holds maxRows rows. 0 or less leaves the writer cutting on bytes only.
+func (w *MultiSegmentWriter) SetSegmentMaxRows(maxRows int64) {
+	w.segmentMaxRows = max(maxRows, 0)
 }
 
 func (w *MultiSegmentWriter) closeWriter() error {
@@ -202,6 +216,7 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	}
 
 	w.currentSegmentID = newSegmentID
+	w.currentRows = 0
 	w.writer = storage.NewBinlogValueWriter(rw, w.batchSize)
 	return nil
 }
@@ -213,7 +228,9 @@ func (w *MultiSegmentWriter) rotateWriterOrGrowCurrent() error {
 	if w.allocator.isSegmentIDBudgetExhausted() {
 		return nil
 	}
-	if w.writer.GetWrittenUncompressed() < uint64(w.segmentSize) {
+	sizeFull := w.writer.GetWrittenUncompressed() >= uint64(w.segmentSize)
+	rowsFull := w.segmentMaxRows > 0 && w.currentRows >= w.segmentMaxRows
+	if !sizeFull && !rowsFull {
 		return nil
 	}
 
@@ -255,10 +272,45 @@ func (w *MultiSegmentWriter) GetCompactionSegments() []*datapb.CompactionSegment
 }
 
 func (w *MultiSegmentWriter) Write(r storage.Record) error {
-	if err := w.rotateWriterOrGrowCurrent(); err != nil {
+	// A record is a whole batch, which for narrow rows is hundreds of
+	// thousands of rows. Under a row cap the batch that crosses the cap is
+	// split, so that a segment ends at segmentMaxRows rows and not one batch
+	// later.
+	for start := 0; ; {
+		if err := w.rotateWriterOrGrowCurrent(); err != nil {
+			return err
+		}
+		end := r.Len()
+		// room is not positive only when the segment ID budget is exhausted
+		// and the current segment has to take everything that is left.
+		if room := w.segmentMaxRows - w.currentRows; w.segmentMaxRows > 0 && room > 0 && int64(end-start) > room {
+			end = start + int(room)
+		}
+		if start == 0 && end == r.Len() {
+			if err := w.writer.Write(r); err != nil {
+				return err
+			}
+		} else if err := w.writeSlice(r, start, end); err != nil {
+			return err
+		}
+		w.currentRows += int64(end - start)
+		if end >= r.Len() {
+			return nil
+		}
+		start = end
+	}
+}
+
+// writeSlice writes rows [start, end) of r to the current segment.
+func (w *MultiSegmentWriter) writeSlice(r storage.Record, start, end int) error {
+	rb := storage.NewRecordBuilder(w.schema)
+	defer rb.Release()
+	if err := rb.Append(r, start, end); err != nil {
 		return err
 	}
-	return w.writer.Write(r)
+	slice := rb.Build()
+	defer slice.Release()
+	return w.writer.Write(slice)
 }
 
 func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
@@ -266,7 +318,11 @@ func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 		return err
 	}
 
-	return w.writer.WriteValue(v)
+	if err := w.writer.WriteValue(v); err != nil {
+		return err
+	}
+	w.currentRows++
+	return nil
 }
 
 // Flush calls storage.SerializeWriter.Flush(), it is used for serialize the value buffer to record and write to binlog.
