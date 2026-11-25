@@ -53,3 +53,11 @@ type Task interface {
 	GetResource() taskcommon.Resource
 	IsVectorIndex() bool
 }
+
+// PreparedTask separates input preparation from execution without exposing
+// pipeline states to the coordinator or to non-index task implementations.
+type PreparedTask interface {
+	Task
+	LoadData(context.Context) error
+	TryReserveBuild() (bool, error)
+}

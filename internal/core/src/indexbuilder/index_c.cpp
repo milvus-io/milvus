@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -285,9 +286,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
 }
 
 CStatus
-CreateIndex(CIndex* res_index,
-            const uint8_t* serialized_build_index_info,
-            const uint64_t len) {
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -375,8 +376,6 @@ CreateIndex(CIndex* res_index,
                 field_type, config, fileManagerContext);
         LOG_INFO("create index instance success, build_id: {}",
                  build_index_info->buildid());
-        index->Build();
-        LOG_INFO("build index done, build_id: {}", build_index_info->buildid());
         *res_index = index.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -398,6 +397,55 @@ CreateIndex(CIndex* res_index,
         status.error_msg = strdup(e.what());
         return status;
     }
+}
+
+CStatus
+CreateIndex(CIndex* res_index, const uint8_t* data, const uint64_t len) {
+    auto status = CreateIndexBuilder(res_index, data, len);
+    if (status.error_code != Success) {
+        return status;
+    }
+    status = LoadIndexData(*res_index);
+    if (status.error_code == Success) {
+        status = BuildIndex(*res_index);
+    }
+    if (status.error_code != Success) {
+        delete static_cast<milvus::indexbuilder::IndexCreatorBase*>(*res_index);
+        *res_index = nullptr;
+    }
+    return status;
+}
+
+CStatus
+LoadIndexData(CIndex index) {
+    try {
+        static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)->LoadData();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted) {
+    try {
+        *admitted = static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)
+                        ->TryReserveBuild();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+BuildIndex(CIndex index) {
+    try {
+        auto* builder =
+            static_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        AssertInfo(builder != nullptr && builder->InputPrepared(),
+                   "index build requires prepared input");
+        builder->Build();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus

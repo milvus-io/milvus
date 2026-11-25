@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 as builder
+FROM nvidia/cuda:13.2.0-devel-ubuntu22.04 as builder
 
 ARG TARGETARCH
 
@@ -13,6 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
         echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
+
+
+# upgrade gcc to 12
+RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
+    && unlink gcc && ln -s gcc-12 gcc \
+    && unlink g++ && ln -s g++-12 g++ \
+    && unlink gcov && ln -s gcov-12 gcov
 
 
 # Install go

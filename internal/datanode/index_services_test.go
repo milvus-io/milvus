@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,9 +58,10 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	paramtable.Init()
 	manager := index.NewTaskManager(ctx)
 
-	manager.LoadOrStoreIndexTask("cluster-1", 1, &index.IndexTaskInfo{
+	attempt := &index.IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
-	})
+	}
+	manager.LoadOrStoreIndexTask("cluster-1", 1, attempt)
 	manager.LoadOrStoreIndexTask("cluster-2", 2, &index.IndexTaskInfo{
 		State: commonpb.IndexState_Finished,
 	})
@@ -67,7 +69,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	assert.True(t, manager.HasInProgressTask())
 	go func() {
 		time.Sleep(2 * time.Second)
-		manager.StoreIndexTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
+		manager.StoreIndexTaskState("cluster-1", 1, attempt, commonpb.IndexState_Finished, "")
 	}()
 	noTaskChan := make(chan struct{})
 	go func() {
@@ -78,6 +80,64 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	case <-noTaskChan:
 	case <-time.After(5 * time.Second):
 		assert.Fail(t, "timeout task chan")
+	}
+}
+
+func TestDataNodeStopWaitsForIndexTasksBeforeClosingSegcore(t *testing.T) {
+	paramtable.Init()
+	node := NewDataNode(context.Background())
+
+	entered := make(chan context.Context, 1)
+	release := make(chan struct{})
+	buildMock := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(
+		func(ctx context.Context, _ *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
+			entered <- ctx
+			<-release // A native call can outlive cancellation.
+			return nil, context.Canceled
+		}).Build()
+	defer buildMock.UnPatch()
+	segcoreClosed := make(chan struct{})
+	closeMock := mockey.Mock(index.CloseSegcore).To(func() { close(segcoreClosed) }).Build()
+	defer closeMock.UnPatch()
+
+	require.NoError(t, node.taskScheduler.Start())
+	releaseTask := sync.OnceFunc(func() { close(release) })
+	defer func() {
+		releaseTask()
+		node.Stop()
+		node.taskScheduler.Wait()
+	}()
+
+	status, err := node.createIndexTask(node.ctx, &workerpb.CreateJobRequest{
+		ClusterID: "cluster", BuildID: 1, CollectionID: 1, TaskSlot: 1,
+		Field:         &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+		IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+	}, taskcommon.Resource{})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	select {
+	case ctx := <-entered:
+		go node.Stop()
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("shutdown did not cancel the index task")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("index task did not enter the native call")
+	}
+	select {
+	case <-segcoreClosed:
+		t.Fatal("Segcore closed while the index task was still in the native call")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseTask()
+	select {
+	case <-segcoreClosed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Segcore did not close after the index task exited")
 	}
 }
 

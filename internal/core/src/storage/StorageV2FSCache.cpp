@@ -17,6 +17,7 @@
 #include "milvus-storage/properties.h"
 #include "log/Log.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/loon_ffi/property_singleton.h"
 
 namespace milvus::storage {
 
@@ -59,6 +60,9 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_GCP_CREDENTIAL_JSON] = key.gcp_credential_json;
     props[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] = key.use_custom_part_upload;
     props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
+    const auto crt_queue_sizes =
+        LoonFFIPropertiesSingleton::GetInstance().GetS3CrtQueueSizes();
+    props[PROPERTY_FS_S3_CRT_QUEUE_SIZES] = crt_queue_sizes;
     if (!key.tls_min_version.empty() && key.tls_min_version != "default") {
         props[PROPERTY_FS_TLS_MIN_VERSION] = key.tls_min_version;
     }
@@ -66,12 +70,13 @@ StorageV2FSCache::Get(const Key& key) {
 
     LOG_INFO(
         "StorageV2FSCache::Get: address={}, bucket={}, key_prefix={}, "
-        "fs_root_path={}, storage_type={}",
+        "fs_root_path={}, storage_type={}, crt_queue_sizes={}",
         key.address,
         key.bucket_name,
         key.root_path,
         fs_root_path,
-        key.storage_type);
+        key.storage_type,
+        crt_queue_sizes);
 
     auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
 

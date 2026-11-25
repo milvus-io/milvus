@@ -38,10 +38,12 @@
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
 #include "index/VectorDiskIndex.h"
+#include "index/VectorMemIndex.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/expected.h"
+#include "knowhere/version.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
@@ -56,6 +58,7 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
+#include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -364,7 +367,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res,
+        ASSERT_EQ(res.path,
                   file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
     }
 
@@ -531,7 +534,8 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
 
     auto file_manager =
         std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
-    auto local_path = file_manager->CacheRawDataToDisk<float>(config);
+    auto cached_data = file_manager->CacheRawDataToDisk<float>(config);
+    const auto& local_path = cached_data.path;
     ASSERT_EQ(local_path,
               file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
 
@@ -550,6 +554,8 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     in.read(reinterpret_cast<char*>(&got_dim), sizeof(got_dim));
     EXPECT_EQ(got_rows, static_cast<uint32_t>(total_rows));
     EXPECT_EQ(got_dim, static_cast<uint32_t>(kDim));
+    EXPECT_EQ(cached_data.rows, got_rows);
+    EXPECT_EQ(cached_data.dim, got_dim);
 
     // Payload must be finite and fully written; a short read here would
     // mean the tail of the last batch never reached the file.
@@ -561,4 +567,63 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
     }
+}
+
+TEST_F(StorageV2IndexRawDataTest, BuildDenseIndexWithoutManifest) {
+    constexpr int64_t dim = 16;
+    constexpr int64_t rows = 100;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vector = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    milvus::test::TmpPath temp_path;
+    auto group_path = temp_path.get() / "0";
+    ASSERT_TRUE(fs_->CreateDir(group_path.string(), true).ok());
+    std::vector<std::string> paths{(group_path / "19532.parquet").string()};
+    std::vector<std::vector<int>> column_groups{{0, 1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto writer = milvus_storage::PackedRecordBatchWriter::Make(
+                      fs_,
+                      paths,
+                      arrow_schema,
+                      storage_config,
+                      column_groups,
+                      16 * 1024 * 1024,
+                      ::parquet::default_writer_properties())
+                      .ValueOrDie();
+    auto data = DataGen(schema, rows);
+    ASSERT_TRUE(
+        writer->Write(ConvertToArrowRecordBatch(data, dim, arrow_schema)).ok());
+    ASSERT_TRUE(writer->Close().ok());
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     vector.get(),
+                                     DataType::VECTOR_FLOAT,
+                                     DataType::NONE,
+                                     false);
+    auto index_meta =
+        gen_index_meta(segment_id, vector.get(), index_build_id, index_version);
+    storage::FileManagerContext context(field_meta, index_meta, cm_, fs_);
+    index::VectorMemIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        true,
+        context);
+    Config config{{STORAGE_VERSION_KEY, STORAGE_V2},
+                  {SEGMENT_MANIFEST_KEY, ""},
+                  {SEGMENT_INSERT_FILES_KEY,
+                   std::vector<std::vector<std::string>>{paths}},
+                  {DATA_TYPE_KEY, DataType::VECTOR_FLOAT},
+                  {ELEMENT_TYPE_KEY, DataType::NONE},
+                  {DIM_KEY, dim},
+                  {INDEX_NUM_ROWS_KEY, rows},
+                  {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    ASSERT_NO_THROW(index.Prepare(config));
+    ASSERT_NO_THROW(index.Build(config));
+    EXPECT_EQ(index.Count(), rows);
 }

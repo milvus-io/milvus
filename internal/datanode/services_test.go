@@ -513,6 +513,38 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
+func TestQuerySlotIncludesQueueBudget(t *testing.T) {
+	paramtable.Init()
+	slots := mockey.Mock(index.CalculateNodeSlots).Return(int64(128)).Build()
+	defer slots.UnPatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, nodeTaskCapacity, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	for id := int64(1); id <= 3; id++ {
+		task := index.NewIndexBuildTask(ctx, cancel, &workerpb.CreateJobRequest{
+			ClusterID: "queue-budget", BuildID: id, TaskSlot: 64,
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+		}, nil, node.taskManager, nil, nil, taskcommon.Resource{})
+		require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
+		resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		if id == 3 {
+			require.Zero(t, resp.GetAvailableSlots())
+		} else {
+			require.EqualValues(t, 64, resp.GetAvailableSlots())
+		}
+		if id == 1 {
+			require.Same(t, task, node.taskScheduler.TaskQueue.PopUnissuedTask(true))
+		}
+	}
+}
+
 func (s *DataNodeServicesSuite) TestQuerySlot() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()
@@ -851,9 +883,10 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	})
 
 	s.Run("query index task with cost", func() {
-		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
-		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
-		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, 180, 80, commonpb.IndexState_Finished, "")
+		attempt := &index.IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, attempt)
+		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, attempt, 100, 3)
+		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, attempt, 180, 80, commonpb.IndexState_Finished, "")
 
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{

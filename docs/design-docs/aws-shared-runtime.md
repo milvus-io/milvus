@@ -28,7 +28,7 @@ Compiler inlining can affect whether an endpoint-provider test exposes it.
 
 The audit defaults to the unit-test build setting. `scripts/core_build.sh`
 passes it explicitly on every configure, including switching an existing build
-tree from normal to CI unit/coverage builds. `make install` and `make gpu-install`
+tree from normal to CI unit/coverage builds. `make install` and `make install WITH_GPU=ON`
 also default the audit to ON for packaged builds. Developers can override it
 with the `MILVUS_AUDIT_AWS_RUNTIME=ON/OFF` environment or make variable; direct
 CMake invocations use `-DMILVUS_AUDIT_AWS_RUNTIME=ON/OFF`. Conan's shared-library
