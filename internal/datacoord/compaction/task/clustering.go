@@ -134,7 +134,7 @@ func (t *ClusteringCompactionTask) retryOnError(err error) {
 	}
 }
 
-func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -156,6 +156,7 @@ func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 			err = merr.WrapErrClusteringCompactionSubmitTaskFail("compact", err)
 		}
 	}
+	return globalTask.DispatchHandled
 }
 
 func (t *ClusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {

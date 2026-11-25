@@ -183,7 +183,7 @@ func (st *statsTask) retireObsolete(ctx context.Context, segment *meta.SegmentIn
 	return globalTask.LocalCompleted
 }
 
-func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	ctx, cancel := context.WithTimeout(context.Background(), Params.DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
 	defer cancel()
 
@@ -204,27 +204,27 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, r
 	// Handle empty segment case
 	segment := st.meta.GetHealthySegment(ctx, st.GetSegmentID())
 	if st.retireObsolete(ctx, segment) != globalTask.LocalNeedsWorker {
-		return
+		return globalTask.DispatchHandled
 	}
 
 	if segment.GetNumOfRows() == 0 {
 		if err := st.handleEmptySegment(ctx); err != nil {
 			log.Warn(context.TODO(), "failed to handle empty segment", mlog.Err(err))
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update task version
 	if err := st.UpdateTaskVersion(nodeID); err != nil {
 		log.Warn(context.TODO(), "failed to update stats task version", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Prepare request
 	req, err := st.prepareJobRequest(ctx, segment)
 	if err != nil {
 		log.Warn(context.TODO(), "failed to prepare stats request", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Use defer for cleanup on error
@@ -236,16 +236,17 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, r
 	// Execute task creation
 	if err = cluster.CreateStats(nodeID, req, resource); err != nil {
 		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 	log.Info(context.TODO(), "assign stats task to worker successfully", mlog.FieldTaskID(st.GetTaskID()))
 
 	if err = st.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
 		log.Warn(context.TODO(), "failed to update stats task state to InProgress", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(context.TODO(), "stats task update state to InProgress successfully", mlog.Int64("task version", st.GetVersion()))
+	return globalTask.DispatchHandled
 }
 
 func (st *statsTask) shouldDropExternalJSONStatsTask(segment *meta.SegmentInfo) bool {

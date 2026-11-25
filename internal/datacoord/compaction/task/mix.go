@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -112,7 +113,7 @@ func (t *MixCompactionTask) GetTaskVersion() int64 {
 	return int64(t.GetTaskProto().GetRetryTimes())
 }
 
-func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))
@@ -120,7 +121,7 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		if err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
@@ -139,7 +140,7 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		}
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", meta.NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
-		return
+		return globalTask.DispatchHandled
 	}
 	mlog.Info(context.TODO(), "mixCompactionTask notify compaction tasks to DataNode")
 
@@ -147,6 +148,7 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 	}
+	return globalTask.DispatchHandled
 }
 
 func (t *MixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {

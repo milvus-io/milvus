@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -193,7 +194,7 @@ func (t *Task) NodeMemoryShare() float64 {
 	return taskresource.ImportTaskNodeMemoryShare()
 }
 
-func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
 	req, err := AssembleImportRequest(t, job, t.Meta, t.Alloc)
@@ -215,27 +216,28 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
 					WrapTaskLog(t, mlog.Err(updateErr))...)
 			}
-			return
+			return globalTask.DispatchHandled
 		}
 		t.retryTimes++
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++
-		return
+		return globalTask.DispatchHandled
 	}
 	err = t.ImportMeta.UpdateTask(context.TODO(), t.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
 		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	pendingDuration := t.GetTR().RecordSpan()
 	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending, t.GetType().String()).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+	return globalTask.DispatchHandled
 }
 
 func (t *Task) QueryTaskOnWorker(cluster session.Cluster) {

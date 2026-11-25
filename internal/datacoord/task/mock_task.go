@@ -25,8 +25,21 @@ func (_m *MockTask) EXPECT() *MockTask_Expecter {
 }
 
 // CreateTaskOnWorker provides a mock function with given fields: nodeID, cluster, resource
-func (_m *MockTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
-	_m.Called(nodeID, cluster, resource)
+func (_m *MockTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) DispatchResult {
+	ret := _m.Called(nodeID, cluster, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateTaskOnWorker")
+	}
+
+	var r0 DispatchResult
+	if rf, ok := ret.Get(0).(func(int64, session.Cluster, taskcommon.Resource) DispatchResult); ok {
+		r0 = rf(nodeID, cluster, resource)
+	} else {
+		r0 = ret.Get(0).(DispatchResult)
+	}
+
+	return r0
 }
 
 // MockTask_CreateTaskOnWorker_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateTaskOnWorker'
@@ -49,13 +62,13 @@ func (_c *MockTask_CreateTaskOnWorker_Call) Run(run func(nodeID int64, cluster s
 	return _c
 }
 
-func (_c *MockTask_CreateTaskOnWorker_Call) Return() *MockTask_CreateTaskOnWorker_Call {
-	_c.Call.Return()
+func (_c *MockTask_CreateTaskOnWorker_Call) Return(_a0 DispatchResult) *MockTask_CreateTaskOnWorker_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockTask_CreateTaskOnWorker_Call) RunAndReturn(run func(int64, session.Cluster, taskcommon.Resource)) *MockTask_CreateTaskOnWorker_Call {
-	_c.Run(run)
+func (_c *MockTask_CreateTaskOnWorker_Call) RunAndReturn(run func(int64, session.Cluster, taskcommon.Resource) DispatchResult) *MockTask_CreateTaskOnWorker_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

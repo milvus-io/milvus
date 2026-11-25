@@ -433,7 +433,7 @@ func TestIndexScheduler_CoordinatorOnlyTasksDoNotConsumeWorkerMemory(t *testing.
 				return taskcommon.Init
 			}).Maybe()
 			follower.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
-			follower.EXPECT().CreateTaskOnWorker(int64(1), cluster, mock.Anything).Run(func(int64, session.Cluster, taskcommon.Resource) { dispatched.Store(true) }).Once()
+			follower.EXPECT().CreateTaskOnWorker(int64(1), cluster, mock.Anything).Run(func(int64, session.Cluster, taskcommon.Resource) { dispatched.Store(true) }).Return(globalTask.DispatchHandled).Once()
 			scheduler.Enqueue(it)
 			scheduler.Enqueue(follower)
 			scheduler.Start()

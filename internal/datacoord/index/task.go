@@ -477,11 +477,11 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 	return prepared
 }
 
-func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	ctx := context.TODO()
 	prepared := it.prepareForWorker(ctx)
 	if prepared == nil {
-		return
+		return globalTask.DispatchHandled
 	}
 	segment, segIndex := prepared.segment, prepared.segIndex
 	indexParams, indexType := prepared.indexParams, prepared.indexType
@@ -489,20 +489,20 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 
 	// The segment can acquire a new revision between placement and dispatch.
 	if isManifestNgram(segment, indexType) && segment.GetManifestPath() != it.lobManifest && isLobText(prepared.schema, prepared.field) {
-		return
+		return globalTask.DispatchRequeue
 	}
 
 	// Create job request
 	req, err := it.prepareJobRequest(ctx, segment, segIndex, indexParams, indexType)
 	if err != nil {
 		log.Warn(ctx, "failed to prepare job request", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update task version
 	if err := it.UpdateTaskVersion(nodeID); err != nil {
 		log.Warn(ctx, "failed to update task version", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	defer func() {
@@ -514,16 +514,17 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update state to in progress
 	if err = it.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
 		log.Warn(ctx, "failed to update task state", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(ctx, "index task assigned successfully")
+	return globalTask.DispatchHandled
 }
 
 func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {

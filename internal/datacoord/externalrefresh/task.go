@@ -676,7 +676,7 @@ func getExternalRefreshSegmentSnapshots(mt *meta.Meta, segmentIDs []int64) []*me
 	return result
 }
 
-func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	ctx := context.TODO()
 	log := mlog.With(
 		mlog.FieldJobID(t.GetJobId()),
@@ -702,7 +702,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 
 	if t.mt == nil {
 		err = merr.WrapErrServiceInternalMsg("meta is nil, cannot create task on worker")
-		return
+		return globalTask.DispatchHandled
 	}
 	if !isSupportedExternalRefreshOwnershipPlanVersion(t.GetOwnershipPlanVersion()) {
 		err = merr.WrapErrServiceInternalMsg(
@@ -710,20 +710,20 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 			t.GetTaskId(),
 			t.GetOwnershipPlanVersion(),
 		)
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Persist task version and nodeID before dispatching to worker
 	if err = t.refreshMeta.UpdateTaskVersion(t.GetTaskId(), nodeID); err != nil {
 		log.Warn(ctx, "failed to update task version", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Re-read task from meta to sync in-memory state (nodeID and version)
 	updatedTask := t.refreshMeta.GetTask(t.GetTaskId())
 	if updatedTask == nil {
 		err = merr.WrapErrServiceInternalMsg("task %d not found after version update", t.GetTaskId())
-		return
+		return globalTask.DispatchHandled
 	}
 	t.ExternalCollectionRefreshTask = updatedTask
 
@@ -733,7 +733,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	for _, segmentID := range ownedSegmentIDs {
 		if _, ok := seenOwnedSegments[segmentID]; ok {
 			err = merr.WrapErrServiceInternalMsg("task %d contains duplicate owned segment %d", t.GetTaskId(), segmentID)
-			return
+			return globalTask.DispatchHandled
 		}
 		seenOwnedSegments[segmentID] = struct{}{}
 	}
@@ -743,7 +743,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		segment := segmentSnapshots[i]
 		if segment == nil {
 			err = merr.WrapErrServiceInternalMsg("owned segment %d not found for task %d", segmentID, t.GetTaskId())
-			return
+			return globalTask.DispatchHandled
 		}
 		if segment.GetCollectionID() != t.GetCollectionId() {
 			err = merr.WrapErrServiceInternalMsg(
@@ -752,11 +752,11 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 				segment.GetCollectionID(),
 				t.GetCollectionId(),
 			)
-			return
+			return globalTask.DispatchHandled
 		}
 		if !meta.IsSegmentHealthy(segment) {
 			err = merr.WrapErrServiceInternalMsg("owned segment %d is not active", segmentID)
-			return
+			return globalTask.DispatchHandled
 		}
 		currentSegments = append(currentSegments, segment.SegmentInfo)
 	}
@@ -769,7 +769,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	idBegin, idEnd, err := t.allocator.AllocN(preAllocCount)
 	if err != nil {
 		log.Warn(ctx, "failed to batch allocate segment IDs", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	idRange := &datapb.IDRange{
@@ -792,11 +792,11 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
-		return
+		return globalTask.DispatchHandled
 	}
 	if len(collInfo.Partitions) != 1 {
 		err = merr.WrapErrServiceInternalMsg("external collection %d expected exactly 1 partition, got %d", t.GetCollectionId(), len(collInfo.Partitions))
-		return
+		return globalTask.DispatchHandled
 	}
 	partitionID := collInfo.Partitions[0]
 
@@ -822,16 +822,17 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	err = cluster.CreateRefreshExternalCollectionTask(nodeID, req, resource)
 	if err != nil {
 		log.Warn(ctx, "failed to create refresh task on worker", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Mark task as in progress - QueryTaskOnWorker will check completion
 	if err = t.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
 		log.Warn(ctx, "failed to update task state to InProgress", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(ctx, "refresh task submitted successfully")
+	return globalTask.DispatchHandled
 }
 
 func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluster) {
