@@ -442,7 +442,9 @@ func TestQueryTask_all(t *testing.T) {
 			limit:  100,
 			offset: 100,
 		}
+		decodeCount := decodeResultHistogram(t, task.getQueryLabel()).GetSampleCount()
 		assert.NoError(t, task.PostExecute(ctx))
+		assert.Equal(t, decodeCount, decodeResultHistogram(t, task.getQueryLabel()).GetSampleCount())
 
 		for i := 0; i < len(task.result.FieldsData); i++ {
 			assert.NotEqual(t, task.result.FieldsData[i].FieldId, common.TimeStampField)
