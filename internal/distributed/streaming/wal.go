@@ -92,11 +92,36 @@ func (w *walAccesserImpl) Local() Local {
 
 // ControlChannel returns the control channel name of the wal.
 func (w *walAccesserImpl) ControlChannel() string {
-	last, err := w.streamingCoordClient.Assignment().GetLatestAssignments(context.Background())
+	name, err := controlPChannel(context.Background(), w.streamingCoordClient.Assignment())
 	if err != nil {
 		panic(err)
 	}
-	return funcutil.GetControlChannel(last.PChannelOfCChannel())
+	return funcutil.GetControlChannel(name)
+}
+
+// controlPChannel waits across the gap between sealing one writer and advertising the next.
+func controlPChannel(ctx context.Context, service client.AssignmentService) (string, error) {
+	current, err := service.GetLatestAssignments(ctx)
+	if err != nil {
+		return "", err
+	}
+	if name := current.PChannelOfCChannel(); name != "" {
+		return name, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var name string
+	err = service.AssignmentDiscover(ctx, func(state *types.VersionedStreamingNodeAssignments) error {
+		if next := state.PChannelOfCChannel(); next != "" {
+			name = next
+			cancel()
+		}
+		return nil
+	})
+	if name != "" {
+		return name, nil
+	}
+	return "", err
 }
 
 // RawAppend writes a record to the log.

@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-func NewWatcher(r resolver.Resolver) Watcher {
+func NewWatcher(r resolver.Resolver) *watcherImpl {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &watcherImpl{
 		ctx:         ctx,
@@ -19,6 +19,7 @@ func NewWatcher(r resolver.Resolver) Watcher {
 		r:           r,
 		cond:        *syncutil.NewContextCond(&sync.Mutex{}),
 		assignments: make(map[string]types.PChannelInfoAssigned),
+		changed:     make(chan struct{}),
 	}
 	go w.execute()
 	return w
@@ -30,7 +31,10 @@ type watcherImpl struct {
 	cancel      context.CancelFunc
 	r           resolver.Resolver
 	cond        syncutil.ContextCond
-	assignments map[string]types.PChannelInfoAssigned // map pchannel to node.
+	assignments map[string]types.PChannelInfoAssigned
+	readers     map[string][]types.PChannelInfoAssigned
+	next        uint64
+	changed     chan struct{}
 }
 
 // execute starts the watcher.
@@ -38,7 +42,10 @@ func (w *watcherImpl) execute() {
 	mlog.Info(w.ctx, "assignment watcher start")
 	var err error
 	defer func() {
-		// error can be ignored here, so use info level log here.
+		w.cond.LockAndBroadcast()
+		close(w.changed)
+		w.changed = nil
+		w.cond.L.Unlock()
 		mlog.Info(w.ctx, "assignment watcher close", mlog.Err(err))
 	}()
 
@@ -53,7 +60,11 @@ func (w *watcherImpl) execute() {
 // updateAssignment updates the assignment.
 func (w *watcherImpl) updateAssignment(state discoverer.VersionedState) {
 	newAssignments := make(map[string]types.PChannelInfoAssigned)
+	readers := make(map[string][]types.PChannelInfoAssigned)
 	for _, assignments := range state.ChannelAssignmentInfo() {
+		for name, ch := range assignments.ReadOnlyChannels {
+			readers[name] = append(readers[name], types.PChannelInfoAssigned{Channel: ch, Node: assignments.NodeInfo})
+		}
 		for _, pChannelInfo := range assignments.Channels {
 			newAssignments[pChannelInfo.Name] = types.PChannelInfoAssigned{
 				Channel: pChannelInfo,
@@ -63,6 +74,9 @@ func (w *watcherImpl) updateAssignment(state discoverer.VersionedState) {
 	}
 	w.cond.LockAndBroadcast()
 	w.assignments = newAssignments
+	w.readers = readers
+	close(w.changed)
+	w.changed = make(chan struct{})
 	w.cond.L.Unlock()
 }
 
@@ -77,6 +91,27 @@ func (w *watcherImpl) Get(ctx context.Context, channel string) *types.PChannelIn
 	return nil
 }
 
+// Readable returns each read-only candidate once in rotating order, then the writer.
+func (w *watcherImpl) Readable(channel string) ([]types.PChannelInfoAssigned, <-chan struct{}) {
+	w.cond.L.Lock()
+	defer w.cond.L.Unlock()
+	if w.changed == nil {
+		return nil, nil
+	}
+	readers := w.readers[channel]
+	routes := make([]types.PChannelInfoAssigned, 0, len(readers)+1)
+	if len(readers) > 0 {
+		start := int(w.next % uint64(len(readers)))
+		w.next++
+		routes = append(routes, readers[start:]...)
+		routes = append(routes, readers[:start]...)
+	}
+	if writer, ok := w.assignments[channel]; ok {
+		routes = append(routes, writer)
+	}
+	return routes, w.changed
+}
+
 // Watch watches the channel assignment.
 func (w *watcherImpl) Watch(ctx context.Context, channel string, previous *types.PChannelInfoAssigned) error {
 	w.cond.L.Lock()
@@ -87,6 +122,10 @@ func (w *watcherImpl) Watch(ctx context.Context, channel string, previous *types
 	}
 
 	for {
+		if w.changed == nil {
+			w.cond.L.Unlock()
+			return context.Canceled
+		}
 		if info, ok := w.assignments[channel]; ok {
 			if info.Channel.Term > term {
 				break

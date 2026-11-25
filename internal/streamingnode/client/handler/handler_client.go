@@ -153,6 +153,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		service:                    lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
 		rb:                         rb,
 		watcher:                    watcher,
+		readable:                   watcher.Readable,
 		rebalanceTrigger:           w,
 		newProducer:                producer.CreateProducer,
 		newConsumer:                consumer.CreateConsumer,

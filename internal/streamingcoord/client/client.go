@@ -97,11 +97,15 @@ func NewClient(etcdCli *clientv3.Client) Client {
 		)
 	})
 	assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
-	assignmentServiceImpl := assignment.NewAssignmentService(assignmentService)
+	snRoutes := resolver.NewSessionBuilder(etcdCli,
+		discoverer.OptSDPrefix(sessionutil.GetSessionPrefixByRole(typeutil.StreamingNodeRole)),
+		discoverer.OptSDVersionRange(">=2.6.0-dev"))
+	assignmentServiceImpl := assignment.NewAssignmentService(assignmentService, snRoutes.Resolver())
 	broadcastService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordBroadcastServiceClient)
 	return &clientImpl{
 		conn:              conn,
 		rb:                rb,
+		snRoutes:          snRoutes,
 		assignmentService: assignmentServiceImpl,
 		broadcastService:  broadcast.NewGRPCBroadcastService(broadcastService),
 	}

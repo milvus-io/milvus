@@ -46,14 +46,15 @@ type VersionedStreamingNodeAssignments struct {
 
 // PChannelOfCChannel returns the pchannel of the cchannel.
 func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
-	return v.CChannel.Meta.Pchannel
+	return v.CChannel.GetMeta().GetPchannel()
 }
 
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
 	NodeInfo StreamingNodeInfo
 	// Channels contains only primary read-write WAL assignments.
-	Channels map[string]PChannelInfo
+	Channels         map[string]PChannelInfo
+	ReadOnlyChannels map[string]PChannelInfo
 }
 
 // NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.

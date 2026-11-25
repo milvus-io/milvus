@@ -43,6 +43,7 @@ type handlerClientImpl struct {
 	service                    lazygrpc.Service[streamingpb.StreamingNodeHandlerServiceClient]
 	rb                         resolver.Builder
 	watcher                    assignment.Watcher
+	readable                   func(string) ([]types.PChannelInfoAssigned, <-chan struct{})
 	rebalanceTrigger           types.AssignmentRebalanceTrigger
 	newProducer                func(ctx context.Context, opts *producer.ProducerOptions, handler streamingpb.StreamingNodeHandlerServiceClient) (Producer, error)
 	newConsumer                func(ctx context.Context, opts *consumer.ConsumerOptions, handlerClient streamingpb.StreamingNodeHandlerServiceClient) (Consumer, error)
@@ -344,7 +345,10 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 
 			// Check if the error is permanent failure until new assignment.
 			if assign != nil && isPermanentFailureUntilNewAssignment(err) {
-				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
+				// A control-plane hint must not block discovery of the next writer.
+				reportCtx, cancel := context.WithTimeout(ctx, backoff.InitialInterval)
+				reportErr := hc.rebalanceTrigger.ReportAssignmentError(reportCtx, assign.Channel, err)
+				cancel()
 				logger.Info(ctx, "report assignment error", mlog.NamedError("assignmentError", err), mlog.Err(reportErr))
 			}
 		} else {
@@ -362,6 +366,46 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 		}
 		logger.Info(ctx, "wait for next backoff done", mlog.Bool("isAssignmentChange", isAssignemtChange), mlog.Duration("cost", cost))
 	}
+}
+
+// createOnReadable tries the serving replicas at one session revision before waiting.
+// Only acquisition may move between replicas. The returned plan fixes the execution target.
+func (hc *handlerClientImpl) createOnReadable(ctx context.Context, channel string, create handlerCreateFunc) (any, error) {
+	delay := backoff.NewExponentialBackOff()
+	delay.MaxElapsedTime = 0
+	delay.MaxInterval = 10 * time.Second
+	delay.Reset()
+	for ctx.Err() == nil {
+		candidates, changed := hc.readable(channel)
+		if len(candidates) == 0 && changed == nil {
+			return nil, ErrClientClosed
+		}
+		var viewErr error
+		for _, route := range candidates {
+			pickCtx := contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, route.Node.ServerID))
+			result, err := create(pickCtx, &route)
+			if err == nil {
+				return result, nil
+			}
+			v := viewerror.AsViewError(err)
+			if v.IsViewNotFound() || v.IsViewInvalidated() {
+				viewErr = err
+				continue
+			}
+			if !queryViewRPCNeedsWaitForReady(err) && !isPermanentFailureUntilNewAssignment(err) && !status.AsStreamingError(err).IsOnShutdown() {
+				return nil, err
+			}
+		}
+		if viewErr != nil {
+			return nil, viewErr
+		}
+		select {
+		case <-ctx.Done():
+		case <-changed:
+		case <-time.After(delay.NextBackOff()):
+		}
+	}
+	return nil, ctx.Err()
 }
 
 // isGRPCMessageSizeError recognizes grpc-go's transport size checks. gRPC uses
@@ -401,10 +445,8 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
 	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
-	// Owners close resumable clients before joining physical stream acquisition.
-	hc.lifetime.Wait()
-
 	hc.watcher.Close()
+	hc.lifetime.Wait()
 	hc.service.Close()
 	hc.rb.Close()
 }

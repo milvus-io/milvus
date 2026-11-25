@@ -40,11 +40,14 @@ func (m *fakeWALManager) GetAvailableRawWALByPChannel(pchannel string) (wal.WAL,
 
 type fakeProviderWAL struct {
 	wal.WAL
+	channel        types.PChannelInfo
 	inlineResponse *viewpb.GrowingInlineResponse
 	plan           *viewpb.QueryPlan
 	err            error
 	mvcc           *viewpb.QueryPlanMVCC
 }
+
+func (w *fakeProviderWAL) Channel() types.PChannelInfo { return w.channel }
 
 func (w *fakeProviderWAL) GetQueryPlan(context.Context, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	return &viewpb.GetQueryPlanResponse{Plan: w.plan, GrowingInlineResponse: w.inlineResponse}, w.err
@@ -222,4 +225,26 @@ func TestQueryPlanReplicaTermAdmission(t *testing.T) {
 	require.Equal(t, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, viewerror.AsViewError(err).Code)
 	_, err = server.GetMVCCTimestamp(ctx, &viewpb.GetMVCCTimestampRequest{Vchannel: testVChannel})
 	require.Equal(t, viewpb.ViewCode_VIEW_CODE_NOT_PRIMARY, viewerror.AsViewError(err).Code)
+}
+
+func TestBarrierUsesAdvertisedWriterInstance(t *testing.T) {
+	route := types.PChannelInfo{Name: "by-dev-rootcoord-dml_0", WALReplicaID: 42, AccessMode: types.AccessModeRW}
+	writer := &fakeProviderWAL{channel: route}
+	writer.channel.Term = 7
+	manager := &fakeWALManager{wal: writer}
+	server := NewServer(manager)
+	out := worknodehandler.EncodeQueryViewPChannelToOutgoingContext(t.Context(), route)
+	md, _ := metadata.FromOutgoingContext(out)
+	ctx := metadata.NewIncomingContext(t.Context(), md)
+	req := &viewpb.GetQueryPlanRequest{ShardId: &viewpb.ShardID{Vchannel: testVChannel}, Mvcc: &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 100}}
+	_, err := server.GetQueryPlan(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, route.Name, manager.pchannel)
+	writer.channel.WALReplicaID++
+	_, err = server.GetQueryPlan(ctx, req)
+	require.True(t, viewerror.AsViewError(err).IsNotPrimary())
+	writer.channel = route
+	writer.channel.AccessMode = types.AccessModeRO
+	_, err = server.GetQueryPlan(ctx, req)
+	require.True(t, viewerror.AsViewError(err).IsNotPrimary())
 }

@@ -172,26 +172,9 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 				Global: resp.FullAssignment.VersionByRevision.Global,
 				Local:  resp.FullAssignment.VersionByRevision.Local,
 			}
-			newIncomingAssignments := make(map[int64]types.StreamingNodeAssignment, len(resp.FullAssignment.Assignments))
-			for _, assignment := range resp.FullAssignment.Assignments {
-				channels := make(map[string]types.PChannelInfo, len(assignment.Channels))
-				for _, channel := range assignment.Channels {
-					info := types.NewPChannelInfoFromProto(channel)
-					// Current channel routing targets only the primary read-write WAL.
-					if info.AccessMode == types.AccessModeRW {
-						channels[info.Name] = info
-					}
-				}
-				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
-					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),
-					Channels: channels,
-				}
-			}
 			c.w.Update(types.VersionedStreamingNodeAssignments{
 				StreamingVersion: resp.FullAssignment.StreamingVersion,
 				Version:          newIncomingVersion,
-				Assignments:      newIncomingAssignments,
-				CChannel:         resp.FullAssignment.Cchannel,
 				ReplicateConfigHelper: replicateutil.MustNewConfigHelper(
 					c.clusterID,
 					resp.FullAssignment.ReplicateConfiguration),

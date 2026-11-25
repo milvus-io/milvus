@@ -45,18 +45,6 @@ func (w *watcher) GetLatestStreamingVersion(ctx context.Context) (*streamingpb.S
 	return last, nil
 }
 
-func (w *watcher) GetLatestDiscover(ctx context.Context) (*types.VersionedStreamingNodeAssignments, error) {
-	w.cond.L.Lock()
-	for w.lastVersionedAssignment.Version.Global == -1 && w.lastVersionedAssignment.Version.Local == -1 {
-		if err := w.cond.Wait(ctx); err != nil {
-			return nil, err
-		}
-	}
-	last := w.lastVersionedAssignment
-	w.cond.L.Unlock()
-	return &last, nil
-}
-
 // GetLatestReplicateConfiguration returns the replicate configuration of the
 // latest assignment. It waits until an assignment has been received, and only
 // for that: a nil ConfigHelper is a valid answer meaning "this cluster has no
@@ -73,20 +61,6 @@ func (w *watcher) GetLatestReplicateConfiguration(ctx context.Context) (*replica
 	last := w.lastVersionedAssignment
 	w.cond.L.Unlock()
 	return last.ReplicateConfigHelper, nil
-}
-
-// AssignmentDiscover watches the assignment discovery.
-func (w *watcher) AssignmentDiscover(ctx context.Context, cb func(*types.VersionedStreamingNodeAssignments) error) error {
-	w.cond.L.Lock()
-	for {
-		if err := cb(&w.lastVersionedAssignment); err != nil {
-			w.cond.L.Unlock()
-			return err
-		}
-		if err := w.cond.Wait(ctx); err != nil {
-			return err
-		}
-	}
 }
 
 // Update updates the assignment.

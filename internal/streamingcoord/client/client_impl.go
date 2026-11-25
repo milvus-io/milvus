@@ -11,6 +11,7 @@ import (
 type clientImpl struct {
 	conn              lazygrpc.Conn
 	rb                resolver.Builder
+	snRoutes          resolver.Builder
 	assignmentService *assignment.AssignmentServiceImpl
 	broadcastService  *broadcast.GRPCBroadcastServiceImpl
 }
@@ -31,4 +32,5 @@ func (c *clientImpl) Close() {
 	}
 	c.conn.Close()
 	c.rb.Close()
+	c.snRoutes.Close()
 }

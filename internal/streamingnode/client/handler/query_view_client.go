@@ -67,13 +67,14 @@ func (hc *handlerClientImpl) QueryViewClient() QueryViewClient {
 func (qvc *queryViewClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 	level, samples := req.GetMvcc().(*viewpb.GetQueryPlanRequest_ConsistencyLevel)
 	strong := samples && level.ConsistencyLevel == commonpb.ConsistencyLevel_Strong
-	return executeQueryPlanRPC(ctx, qvc, shardID.VChannel, strong, viewpb.QueryPlanService_GetQueryPlan_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
+	preferReader := samples && !strong
+	return executeQueryPlanRPC(ctx, qvc, shardID.VChannel, strong, preferReader, viewpb.QueryPlanService_GetQueryPlan_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetQueryPlanResponse, error) {
 		return client.GetQueryPlan(ctx, req)
 	})
 }
 
 func (qvc *queryViewClient) GetMVCCTimestamp(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
-	result, _, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, true, viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetMVCCTimestampResponse, error) {
+	result, _, err := executeQueryPlanRPC(ctx, qvc, shardID.VChannel, true, false, viewpb.QueryPlanService_GetMVCCTimestamp_FullMethodName, func(ctx context.Context, client viewpb.QueryPlanServiceClient) (*viewpb.GetMVCCTimestampResponse, error) {
 		return client.GetMVCCTimestamp(ctx, req)
 	})
 	return result, err
@@ -111,13 +112,13 @@ func executeQueryPlanRPC[T any](
 	ctx context.Context,
 	qvc *queryViewClient,
 	vchannel string,
-	strong bool,
+	strong, preferReader bool,
 	method string,
 	call func(context.Context, viewpb.QueryPlanServiceClient) (T, error),
 ) (T, *types.PChannelInfoAssigned, error) {
 	pchannel := funcutil.ToPhysicalChannel(vchannel)
 	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", method))
-	return executeViewRPC(ctx, qvc, logger, pchannel, strong, method, func(ctx context.Context, assign *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
+	return executeViewRPC(ctx, qvc, logger, pchannel, strong, preferReader, method, func(ctx context.Context, assign *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
 		client, err := qvc.queryPlanService.GetService(ctx)
 		if err != nil {
 			return viewRPCResult[T]{}, err
@@ -152,7 +153,7 @@ func executeViewQueryRPC[T any](
 		}
 		return call(ctx, client)
 	}
-	resp, _, err := executeViewRPC(ctx, qvc, logger, pchannel.Name, false, method, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
+	resp, _, err := executeViewRPC(ctx, qvc, logger, pchannel.Name, false, false, method, func(ctx context.Context, _ *types.PChannelInfoAssigned) (viewRPCResult[T], error) {
 		client, err := qvc.viewQueryService.GetService(ctx)
 		if err != nil {
 			return viewRPCResult[T]{}, err
@@ -168,7 +169,7 @@ func executeViewRPC[T any](
 	qvc *queryViewClient,
 	logger *mlog.Logger,
 	pchannel string,
-	strong bool,
+	strong, preferReader bool,
 	method string,
 	call func(context.Context, *types.PChannelInfoAssigned) (viewRPCResult[T], error),
 ) (T, *types.PChannelInfoAssigned, error) {
@@ -182,7 +183,7 @@ func executeViewRPC[T any](
 	}
 	// Wait for readiness through the WAL handler's assignment watch and backoff.
 	// A successful connection does not imply that its assigned WAL is still ready.
-	result, err := qvc.owner.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	create := func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		channel := assign.Channel
 		if channel.WALReplicaID != 0 && !strong {
 			channel.Term = 0
@@ -194,13 +195,20 @@ func executeViewRPC[T any](
 		if err != nil {
 			return nil, err
 		}
-		if queryViewRPCNeedsWaitForReady(rpcResult.err) {
+		if queryViewRPCNeedsWaitForReady(rpcResult.err) || (preferReader && rpcResult.err != nil && viewerror.AsViewError(rpcResult.err).IsRetryable()) {
 			return nil, rpcResult.err
 		}
 		// View invalidation and request errors belong to the query orchestrator.
 		// In particular, a pinned Phase 2 request must not wait for a retired view.
 		return rpcResult, nil
-	})
+	}
+	var result any
+	var err error
+	if preferReader {
+		result, err = qvc.owner.createOnReadable(ctx, pchannel, create)
+	} else {
+		result, err = qvc.owner.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, create)
+	}
 	if err != nil {
 		return zero, nil, err
 	}

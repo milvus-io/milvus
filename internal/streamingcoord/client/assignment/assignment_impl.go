@@ -9,10 +9,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -20,7 +22,7 @@ import (
 )
 
 // NewAssignmentService creates a new assignment service.
-func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAssignmentServiceClient]) *AssignmentServiceImpl {
+func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAssignmentServiceClient], routes resolver.Resolver) *AssignmentServiceImpl {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &AssignmentServiceImpl{
 		ctx:            ctx,
@@ -28,6 +30,7 @@ func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAss
 		lifetime:       typeutil.NewLifetime(),
 		watcher:        newWatcher(),
 		service:        service,
+		routes:         routes,
 		resumingExitCh: make(chan struct{}),
 		cond:           syncutil.NewContextCond(&sync.Mutex{}),
 		discoverer:     nil,
@@ -38,6 +41,7 @@ func NewAssignmentService(service lazygrpc.Service[streamingpb.StreamingCoordAss
 }
 
 type AssignmentServiceImpl struct {
+	routes         resolver.Resolver
 	ctx            context.Context
 	cancel         context.CancelFunc
 	lifetime       *typeutil.Lifetime
@@ -66,7 +70,13 @@ func (c *AssignmentServiceImpl) GetLatestAssignments(ctx context.Context) (*type
 	}
 	defer c.lifetime.Done()
 
-	return c.watcher.GetLatestDiscover(ctx)
+	ctx, cancel := contextutil.MergeContext(ctx, c.ctx)
+	defer cancel()
+	state, err := c.routes.GetLatestState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return sessionAssignments(state), nil
 }
 
 func (c *AssignmentServiceImpl) UpdateWALBalancePolicy(ctx context.Context, req *streamingpb.UpdateWALBalancePolicyRequest) (*types.UpdateWALBalancePolicyResponse, error) {
@@ -89,7 +99,11 @@ func (c *AssignmentServiceImpl) AssignmentDiscover(ctx context.Context, cb func(
 	}
 	defer c.lifetime.Done()
 
-	return c.watcher.AssignmentDiscover(ctx, cb)
+	ctx, cancel := contextutil.MergeContext(ctx, c.ctx)
+	defer cancel()
+	return c.routes.Watch(ctx, func(state resolver.VersionedState) error {
+		return cb(sessionAssignments(state))
+	})
 }
 
 // ReportAssignmentError reports the assignment error to server.
@@ -202,9 +216,8 @@ func (c *AssignmentServiceImpl) getFreshReplicateConfiguration(ctx context.Conte
 // Close closes the assignment service.
 func (c *AssignmentServiceImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)
-	c.lifetime.Wait()
-
 	c.cancel()
+	c.lifetime.Wait()
 	<-c.resumingExitCh
 	c.cond.L.Lock()
 	if c.discoverer != nil {

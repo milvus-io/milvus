@@ -188,12 +188,12 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
-		assignments, err := s.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+		control, err := controlPChannel(ctx, s.streamingCoordClient.Assignment())
 		if err != nil {
 			return nil, err
 		}
-		if !strings.HasPrefix(msg.VChannel(), assignments.PChannelOfCChannel()) {
-			return nil, status.NewReplicateViolation("invalid control channel %s, expected pchannel %s", msg.VChannel(), assignments.PChannelOfCChannel())
+		if funcutil.ToPhysicalChannel(msg.VChannel()) != control {
+			return nil, status.NewReplicateViolation("invalid control channel %s, expected pchannel %s", msg.VChannel(), control)
 		}
 	}
 	return msg, nil
