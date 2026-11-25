@@ -1,18 +1,26 @@
-#include <gtest/gtest.h>
+#include <algorithm>
 #include <arrow/io/memory.h>
 #include <boost/filesystem.hpp>
 #include <cstdint>
 #include <filesystem>
+#include <gtest/gtest.h>
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "index/StringIndexSort.h"
 #include "index/IndexFactory.h"
+#include "index/StringIndexSort.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "pb/plan.pb.h"
+#include "storage/ChunkManager.h"
+#include "storage/FileManager.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
+#include "storage/Types.h"
+#include "storage/Util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -34,6 +42,146 @@ class StringIndexBaseTest : public ::testing::Test {
 };
 
 class StringIndexSortTest : public StringIndexBaseTest {};
+
+namespace {
+
+struct StringSortMembershipLoadFixture {
+    explicit StringSortMembershipLoadFixture(std::string test_name)
+        : root_path(TestLocalPath + "/" + std::move(test_name)) {
+        std::filesystem::remove_all(root_path);
+        storage::StorageConfig storage_config;
+        storage_config.storage_type = "local";
+        storage_config.root_path = root_path;
+        chunk_manager = storage::CreateChunkManager(storage_config);
+        fs = storage::InitArrowFileSystem(storage_config);
+
+        field_schema.set_data_type(proto::schema::DataType::String);
+        field_meta = storage::FieldDataMeta{1, 2, 3, 101, field_schema};
+        index_meta = storage::IndexMeta{3, 101, 1000, 10000};
+        ctx = storage::FileManagerContext(
+            field_meta, index_meta, chunk_manager, fs);
+    }
+
+    ~StringSortMembershipLoadFixture() {
+        std::filesystem::remove_all(root_path);
+    }
+
+    std::string root_path;
+    proto::schema::FieldSchema field_schema;
+    storage::FieldDataMeta field_meta;
+    storage::IndexMeta index_meta;
+    storage::ChunkManagerPtr chunk_manager;
+    milvus_storage::ArrowFileSystemPtr fs;
+    storage::FileManagerContext ctx;
+};
+
+std::vector<std::string>
+StringMembershipRows() {
+    std::vector<std::string> rows{"",
+                                  "a",
+                                  "aa",
+                                  "ab",
+                                  std::string("a\0b", 3),
+                                  std::string("a\0c", 3),
+                                  "\x80",
+                                  "\xff",
+                                  "\xe4\xb8\xad\xe6\x96\x87",
+                                  std::string(8192, 'x'),
+                                  std::string(8192, 'x') + "a",
+                                  std::string(8192, 'x') + "b"};
+    for (size_t i = 0; i < 129; ++i) {
+        rows.push_back("prefix/" + std::to_string(i % 31));
+    }
+    std::reverse(rows.begin(), rows.end());
+    return rows;
+}
+
+void
+CheckStringMembership(StringIndexSort& index,
+                      const std::vector<std::string>& rows,
+                      const bool* valid) {
+    std::vector<std::vector<std::string>> queries{
+        {},
+        {""},
+        {"absent"},
+        {"a", "a", "aa", "missing"},
+        rows,
+        {std::string("a\0b", 3), std::string("a\0d", 3), "\x80", "\xff"},
+        {std::string(8192, 'x'), std::string(8192, 'x') + "c"},
+        std::vector<std::string>(512, "prefix/3")};
+    auto sorted = rows;
+    std::sort(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    std::reverse(sorted.begin(), sorted.end());
+    queries.push_back(sorted);
+    ASSERT_EQ(index.Count(), rows.size());
+    for (const auto& query : queries) {
+        SCOPED_TRACE("query size=" + std::to_string(query.size()));
+        const auto original = query;
+        const auto* values = query.empty() ? nullptr : query.data();
+        const auto in = index.In(query.size(), values);
+        const auto not_in = index.NotIn(query.size(), values);
+        ASSERT_EQ(in.size(), rows.size());
+        ASSERT_EQ(not_in.size(), rows.size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            const bool hit =
+                std::find(query.begin(), query.end(), rows[row]) != query.end();
+            const bool is_valid = !valid || valid[row];
+            ASSERT_EQ(in[row], is_valid && hit) << "row=" << row;
+            ASSERT_EQ(not_in[row], is_valid && !hit) << "row=" << row;
+        }
+        EXPECT_EQ(query, original);
+    }
+}
+
+}  // namespace
+
+TEST(StringIndexSortMembershipTest, ScanOracleAndInputImmutability) {
+    for (size_t n : {1, 63, 64, 65, 129, 141}) {
+        auto rows = StringMembershipRows();
+        rows.resize(n);
+        for (int null_mode : {0, 1, 2}) {
+            auto valid = std::make_unique<bool[]>(n);
+            for (size_t i = 0; i < n; ++i) {
+                valid[i] = null_mode == 0 || (null_mode == 1 && i % 3 != 0);
+            }
+            const bool* validity = null_mode == 0 ? nullptr : valid.get();
+            StringIndexSort index;
+            index.Build(n, rows.data(), validity);
+            CheckStringMembership(index, rows, validity);
+        }
+    }
+}
+
+TEST(StringIndexSortMembershipTest, LegacyAndPackedReloads) {
+    StringSortMembershipLoadFixture fixture("string_sort_membership_reload");
+    const auto rows = StringMembershipRows();
+    auto valid = std::make_unique<bool[]>(rows.size());
+    for (bool all_null : {false, true}) {
+        SCOPED_TRACE("all_null=" + std::to_string(all_null));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            valid[i] = !all_null && i % 3 != 0;
+        }
+        StringIndexSort built(fixture.ctx);
+        built.Build(rows.size(), rows.data(), valid.get());
+        const auto stats = built.UploadUnified({});
+        for (bool mmap : {false, true}) {
+            SCOPED_TRACE("mmap=" + std::to_string(mmap));
+            Config config;
+            if (mmap) {
+                config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/membership";
+            }
+            config[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+            config[INDEX_FILES] = stats->GetIndexFiles();
+            StringIndexSort loaded(fixture.ctx);
+            loaded.LoadUnified(config);
+            CheckStringMembership(loaded, rows, valid.get());
+            StringIndexSort legacy(fixture.ctx);
+            legacy.Load(built.Serialize({}), config);
+            CheckStringMembership(legacy, rows, valid.get());
+        }
+    }
+}
 
 TEST_F(StringIndexSortTest, ConstructorMemory) {
     Config config;
