@@ -62,7 +62,7 @@ type functionConfig struct {
 	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
 }
 
-func (p *functionConfig) init(base *BaseTable) {
+func (p *functionConfig) init(base *BaseTable, localStoragePath string) {
 	p.BatchFactor = ParamItem{
 		Key:          "function.batch_factor.",
 		Version:      "2.6.7",
@@ -219,10 +219,13 @@ func (p *functionConfig) init(base *BaseTable) {
 		Key:          "function.analyzer.local_resource_path",
 		Version:      "2.5.16",
 		Export:       true,
-		DefaultValue: "/var/lib/milvus/analyzer",
+		DefaultValue: "",
 		Forbidden:    true,
-		Doc:          "Absolute directory containing operator-provided analyzer dictionaries. Symbolic links below it are rejected. Restart required.",
+		Doc:          "Absolute directory containing operator-provided analyzer dictionaries. Empty uses localStorage.path/analyzer. Symbolic links below it are rejected. Restart required.",
 		Formatter: func(value string) string {
+			if value == "" {
+				value = filepath.Join(localStoragePath, "analyzer")
+			}
 			if !filepath.IsAbs(value) || filepath.Clean(value) == "/" {
 				panic(merr.WrapErrParameterInvalidMsg("function.analyzer.local_resource_path must be an absolute non-root directory"))
 			}

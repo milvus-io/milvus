@@ -171,6 +171,7 @@ func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testin
 	wantRoot := filepath.Clean(root)
 	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
 	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "analyzer"), params.FunctionCfg.LocalResourcePath.GetValue())
 	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
 	initialDiskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetValue()
 
@@ -183,6 +184,7 @@ func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testin
 	}, time.Second, 10*time.Millisecond)
 	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
 	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "analyzer"), params.FunctionCfg.LocalResourcePath.GetValue())
 	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
 	require.Equal(t, initialDiskCapacity, params.QueryNodeCfg.DiskCapacityLimit.GetValue())
 	require.NoDirExists(t, filepath.Join(workingDir, "relative"))

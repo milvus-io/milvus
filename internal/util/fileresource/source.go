@@ -30,9 +30,13 @@ import (
 )
 
 // RestrictSource applies the same boundary before admission probes and downloads.
-// ChunkManager keys remain complete keys; object keys are never path-cleaned.
+// Local paths may be relative to the allowed directory; object keys stay complete.
 func RestrictSource(cm storage.ChunkManager) storage.ChunkManager {
-	return &restrictedSource{ChunkManager: cm, root: strings.TrimRight(paramtable.Get().CommonCfg.FileResourceAllowedPath.GetValue(), "/")}
+	root := paramtable.Get().CommonCfg.FileResourceAllowedPath.GetValue()
+	if _, local := cm.(*storage.LocalChunkManager); local && root == "" {
+		root = filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "file_resource")
+	}
+	return &restrictedSource{ChunkManager: cm, root: strings.TrimRight(root, "/")}
 }
 
 type restrictedSource struct {
@@ -44,11 +48,14 @@ func (s *restrictedSource) relativePath(name string) (string, error) {
 	if s.root == "" {
 		return "", merr.WrapErrParameterInvalidMsg("common.fileResource.allowedPath must be configured before using file resources")
 	}
-	prefix := s.root + "/"
-	if !strings.HasPrefix(name, prefix) {
-		return "", merr.WrapErrParameterInvalidMsg("file resource path is outside the configured directory")
+	relative := name
+	if _, local := s.ChunkManager.(*storage.LocalChunkManager); !local || filepath.IsAbs(name) {
+		prefix := s.root + "/"
+		if !strings.HasPrefix(name, prefix) {
+			return "", merr.WrapErrParameterInvalidMsg("file resource path is outside the configured directory")
+		}
+		relative = strings.TrimPrefix(name, prefix)
 	}
-	relative := strings.TrimPrefix(name, prefix)
 	for _, component := range strings.Split(relative, "/") {
 		if component == "" || component == "." || component == ".." || strings.ContainsAny(component, "\\\x00") {
 			return "", merr.WrapErrParameterInvalidMsg("invalid file resource path")
