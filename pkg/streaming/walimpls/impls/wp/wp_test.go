@@ -2,9 +2,12 @@ package wp
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/zilliztech/woodpecker/common/config"
 	"github.com/zilliztech/woodpecker/tests/utils"
 	"github.com/zilliztech/woodpecker/woodpecker"
@@ -32,6 +35,44 @@ func TestRegistry(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(newMessageIDOfWoodpecker(1, 2)))
+}
+
+func TestEmbeddedLocalStorageRoot(t *testing.T) {
+	params := paramtable.Get()
+	setParam := func(t *testing.T, item *paramtable.ParamItem, value string) {
+		t.Helper()
+		old := item.SwapTempValue(value)
+		t.Cleanup(func() { item.SwapTempValue(old) })
+	}
+	setParam(t, &params.WoodpeckerCfg.StorageType, "local")
+
+	t.Run("DefaultRoot", func(t *testing.T) {
+		base := t.TempDir()
+		setParam(t, &params.LocalStorageCfg.Path, base)
+		setParam(t, &params.WoodpeckerCfg.RootPath, "default")
+		t.Cleanup(func() { require.NoError(t, woodpecker.StopEmbedLogStore()) })
+
+		wpDir := filepath.Join(base, "wp")
+		require.NoDirExists(t, wpDir)
+		walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
+		require.DirExists(t, wpDir)
+	})
+
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	for _, tc := range []struct{ name, base, root string }{
+		{"MissingBase", missing, "default"},
+		{"MissingCustomRoot", dir, missing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setParam(t, &params.LocalStorageCfg.Path, tc.base)
+			setParam(t, &params.WoodpeckerCfg.RootPath, tc.root)
+			_, err := (&builderImpl{}).Build()
+			require.ErrorIs(t, err, os.ErrNotExist)
+			require.ErrorContains(t, err, missing)
+			require.NoDirExists(t, missing)
+		})
+	}
 }
 
 func TestWAL(t *testing.T) {
