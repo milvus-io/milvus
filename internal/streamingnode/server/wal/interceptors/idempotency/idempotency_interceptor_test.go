@@ -1664,7 +1664,7 @@ func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
 	mvccManager.ApplyRecoveryBarrier("v1", baseTimeTick)
 	txnManager := txn.NewTxnManager(types.PChannelInfo{Name: "idle-mvcc"}, nil)
 	t.Cleanup(func() {
-		txnManager.FailTxnAtVChannel("")
+		txnManager.FailTxnAtVChannel("", 1)
 		require.NoError(t, txnManager.GracefulClose(context.Background()))
 	})
 	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{

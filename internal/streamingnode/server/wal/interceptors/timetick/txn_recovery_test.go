@@ -57,7 +57,7 @@ func TestRecoveredTransactionPinsLaterAcknowledgements(t *testing.T) {
 		_, err = impl.operator.AckManager().SyncAndGetAcknowledged(context.Background())
 		require.NoError(t, err)
 	}
-	manager.FailTxnAtVChannel("")
+	manager.FailTxnAtVChannel("", 1)
 }
 
 func TestRepeatedCommitReturnsOriginalResult(t *testing.T) {
@@ -149,5 +149,5 @@ func TestFailedCommitDoesNotCreateSuccessTombstone(t *testing.T) {
 		func(context.Context, message.MutableMessage) (message.MessageID, error) { return nil, context.Canceled })
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, impl.tombstones.Get(commit.TxnContext().TxnID, "v1"))
-	impl.txnManager.FailTxnAtVChannel("")
+	impl.txnManager.FailTxnAtVChannel("", 1)
 }

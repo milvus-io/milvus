@@ -10370,7 +10370,7 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 		Key:          "streaming.txn.tombstoneMaxCount",
 		Version:      "3.0.0",
 		DefaultValue: "1024",
-		Doc:          "Maximum cached successful transaction results per WAL; zero disables the cache.",
+		Doc:          "Maximum retained entries per WAL in each of the successful and expired transaction caches; zero disables retention.",
 		Export:       true,
 	}
 	p.TxnTombstoneMaxCount.Init(base.mgr)
@@ -10378,7 +10378,7 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 		Key:          "streaming.txn.tombstoneMaxLifetime",
 		Version:      "3.0.0",
 		DefaultValue: "1m",
-		Doc:          "Maximum transaction result age relative to WAL TimeTick; capacity eviction may shorten this window.",
+		Doc:          "Maximum transaction result retention relative to WAL TimeTick; capacity eviction may shorten this window.",
 		Export:       true,
 	}
 	p.TxnTombstoneMaxLifetime.Init(base.mgr)

@@ -57,9 +57,9 @@ func (r *lockAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 	// the WAL lock. Failed, deduplicated and explicitly ignored operations do not.
 	vchannel := msg.VChannel()
 	if vchannel == "" || vchannel == r.channel.Name || msg.IsPChannelLevel() {
-		r.txnManager.FailTxnAtVChannel("")
+		r.txnManager.FailTxnAtVChannel("", msg.TimeTick())
 	} else if !funcutil.IsControlChannel(vchannel) {
-		r.txnManager.FailTxnAtVChannel(vchannel)
+		r.txnManager.FailTxnAtVChannel(vchannel, msg.TimeTick())
 	}
 	return msgID, nil
 }

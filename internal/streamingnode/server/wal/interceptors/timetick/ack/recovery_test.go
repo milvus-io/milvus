@@ -37,7 +37,7 @@ func TestRecoveredAckEntriesFollowActualSessionLifecycle(t *testing.T) {
 				begins = append(begins, begin)
 			}
 			manager := txn.NewTxnManager(types.PChannelInfo{Name: t.Name()}, builders)
-			defer manager.FailTxnAtVChannel("")
+			defer manager.FailTxnAtVChannel("", 1)
 			first, err := manager.GetSessionOfTxn(1)
 			require.NoError(t, err)
 			second, err := manager.GetSessionOfTxn(2)
@@ -65,9 +65,9 @@ func TestRecoveredAckEntriesFollowActualSessionLifecycle(t *testing.T) {
 			case "expire":
 				finishTT = tsoutil.AddPhysicalDurationOnTs(initialTT, time.Second)
 			case "scoped abort":
-				manager.FailTxnAtVChannel("v1")
+				manager.FailTxnAtVChannel("v1", 1)
 			case "global abort":
-				manager.FailTxnAtVChannel("")
+				manager.FailTxnAtVChannel("", 1)
 			}
 			last.AddConfirmedDetails(nil, finishTT)
 			if finish == "global abort" {
@@ -75,7 +75,7 @@ func TestRecoveredAckEntriesFollowActualSessionLifecycle(t *testing.T) {
 			} else {
 				require.True(t, begins[0].MessageID().EQ(last.GetLastConfirmedMessageID()))
 				require.False(t, second.IsExpiredOrDone(finishTT), "other recovered txn must still pin")
-				manager.FailTxnAtVChannel("v2")
+				manager.FailTxnAtVChannel("v2", 1)
 				last.AddConfirmedDetails(nil, finishTT+1)
 				require.True(t, later.MessageID().EQ(last.GetLastConfirmedMessageID()))
 			}

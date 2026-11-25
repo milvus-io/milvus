@@ -108,7 +108,7 @@ func TestCommitCancellationKeepsReferencesForRecovery(t *testing.T) {
 			require.Equal(t, message.TxnStateOnCommit, session.State())
 			require.False(t, cleaned)
 			requireCommitAckerError(t, impl, err)
-			impl.txnManager.FailTxnAtVChannel("")
+			impl.txnManager.FailTxnAtVChannel("", 1)
 			require.True(t, cleaned)
 		})
 	}
