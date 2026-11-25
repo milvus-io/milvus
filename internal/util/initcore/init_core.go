@@ -153,12 +153,14 @@ func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
 }
 
+// InitStorageV2FileSystem preserves QueryNode's Talon mode and stage mask for
+// reader-open metadata. The native filesystem routes ordinary IO separately.
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if err := InitCredentialBrokerPolicy(params); err != nil {
 		return err
 	}
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
+		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
 	}
 	return InitRemoteArrowFileSystem(params)
 }
@@ -174,13 +176,29 @@ func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
 }
 
 func InitLocalArrowFileSystem(path string) error {
+	return initLocalArrowFileSystem(path, paramtable.Get())
+}
+
+func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) error {
 	cRootPath := C.CString(path)
 	cStorageType := C.CString("local")
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cRootPath))
 	defer C.free(unsafe.Pointer(cStorageType))
 	storageConfig := C.CStorageConfig{
-		root_path:    cRootPath,
-		storage_type: cStorageType,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -200,6 +218,10 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -214,33 +236,42 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:                cAddress,
-		bucket_name:            cBucketName,
-		access_key_id:          cAccessKey,
-		access_key_value:       cAccessValue,
-		root_path:              cRootPath,
-		storage_type:           cStorageType,
-		iam_endpoint:           cIamEndPoint,
-		cloud_provider:         cCloudProvider,
-		useSSL:                 C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:              cSslCACert,
-		useIAM:                 C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:              cLogLevel,
-		region:                 cRegion,
-		useVirtualHost:         C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:       C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json:    cGcpCredentialJSON,
-		use_custom_part_upload: true,
-		max_connections:        C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:        cTLSMinVersion,
-		use_crc32c_checksum:    C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
-		crt_queue_sizes:        C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		use_custom_part_upload:          true,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
 }
 
+// InitRemoteChunkManager initializes the singleton used for ordinary QueryNode IO.
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())
@@ -260,6 +291,10 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	cGcpCredentialJSON := C.CString(params.MinioCfg.GcpCredentialJSON.GetValue())
 	cTLSMinVersion := C.CString(tlsMinVersionForStorage(params.MinioCfg.SslTLSMinVersion.GetValue()))
+	cTalonCoordinator := C.CString(params.CommonCfg.StorageTalonCoordinator.GetValue())
+	defer C.free(unsafe.Pointer(cTalonCoordinator))
+	cTalonNamespace := C.CString(params.CommonCfg.TalonNamespace())
+	defer C.free(unsafe.Pointer(cTalonNamespace))
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -274,26 +309,34 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cGcpCredentialJSON))
 	defer C.free(unsafe.Pointer(cTLSMinVersion))
 	storageConfig := C.CStorageConfig{
-		address:             cAddress,
-		bucket_name:         cBucketName,
-		access_key_id:       cAccessKey,
-		access_key_value:    cAccessValue,
-		root_path:           cRootPath,
-		storage_type:        cStorageType,
-		iam_endpoint:        cIamEndPoint,
-		cloud_provider:      cCloudProvider,
-		useSSL:              C.bool(params.MinioCfg.UseSSL.GetAsBool()),
-		sslCACert:           cSslCACert,
-		useIAM:              C.bool(params.MinioCfg.UseIAM.GetAsBool()),
-		log_level:           cLogLevel,
-		region:              cRegion,
-		useVirtualHost:      C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
-		requestTimeoutMs:    C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
-		gcp_credential_json: cGcpCredentialJSON,
-		max_connections:     C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
-		tls_min_version:     cTLSMinVersion,
-		use_crc32c_checksum: C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
-		crt_queue_sizes:     C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
+		address:                         cAddress,
+		bucket_name:                     cBucketName,
+		access_key_id:                   cAccessKey,
+		access_key_value:                cAccessValue,
+		root_path:                       cRootPath,
+		storage_type:                    cStorageType,
+		iam_endpoint:                    cIamEndPoint,
+		cloud_provider:                  cCloudProvider,
+		useSSL:                          C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:                       cSslCACert,
+		useIAM:                          C.bool(params.MinioCfg.UseIAM.GetAsBool()),
+		log_level:                       cLogLevel,
+		region:                          cRegion,
+		useVirtualHost:                  C.bool(params.MinioCfg.UseVirtualHost.GetAsBool()),
+		requestTimeoutMs:                C.int64_t(params.MinioCfg.RequestTimeoutMs.GetAsInt64()),
+		gcp_credential_json:             cGcpCredentialJSON,
+		max_connections:                 C.uint32_t(params.MinioCfg.MaxConnections.GetAsInt()),
+		tls_min_version:                 cTLSMinVersion,
+		use_crc32c_checksum:             C.bool(params.MinioCfg.UseCRC32C.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
+		talon_mode:                      C.uint32_t(params.CommonCfg.StorageTalonMode.GetAsUint32()),
+		talon_enabled_stages:            C.uint32_t(params.CommonCfg.StorageTalonEnabledStages.GetAsUint32()),
+		talon_small_read_threshold:      C.uint32_t(params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32()),
+		talon_coordinator:               cTalonCoordinator,
+		talon_namespace:                 cTalonNamespace,
+		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
+		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
+		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

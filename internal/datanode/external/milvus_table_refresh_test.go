@@ -91,7 +91,7 @@ func TestMilvusTableRefreshReadsTargetManifestOnce(t *testing.T) {
 	defer sourceDeltas.UnPatch()
 	targetReads := 0
 	open := mockey.Mock(packed.GetManifestHandle).
-		When(func(manifestPath string, _ *indexpb.StorageConfig) bool {
+		When(func(manifestPath string, _ *indexpb.StorageConfig, _ ...uint32) bool {
 			if manifestPath == manifest {
 				targetReads++
 			}
@@ -701,7 +701,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_VirtualPKColum
 			// The source has the nullable column; the target projection needs repair.
 			targetReads := 0
 			read := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).To(func(manifest string,
-				_ *indexpb.StorageConfig, extfs packed.ExternalSpecContext,
+				_ *indexpb.StorageConfig, extfs packed.ExternalSpecContext, _ ...uint32,
 			) ([]*datapb.FieldBinlog, error) {
 				s.Equal(oldManifest, manifest)
 				targetReads++

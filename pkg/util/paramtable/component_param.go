@@ -316,8 +316,13 @@ func (p *ComponentParam) CleanEvent() {
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
+
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
+
+	CloudClusterID    ParamItem `refreshable:"false"`
+	CloudInstanceType ParamItem `refreshable:"false"`
+	CloudClassType    ParamItem `refreshable:"false"`
 
 	RootCoordTimeTick   ParamItem `refreshable:"true"`
 	RootCoordStatistics ParamItem `refreshable:"true"`
@@ -425,6 +430,13 @@ type commonConfig struct {
 	StorageIopsMaxRate                  ParamItem `refreshable:"false"`
 	ExternalVectorPartialNullPolicy     ParamItem `refreshable:"false"`
 	ExternalSparseConversionMemoryLimit ParamItem `refreshable:"false"`
+	StorageTalonMode                    ParamItem `refreshable:"false"`
+	StorageTalonEnabledStages           ParamItem `refreshable:"false"`
+	StorageTalonEnableForExternalTable  ParamItem `refreshable:"false"`
+	StorageTalonSmallReadThreshold      ParamItem `refreshable:"false"`
+	StorageTalonCoordinator             ParamItem `refreshable:"false"`
+	StorageTalonBlockSize               ParamItem `refreshable:"false"`
+	StorageTalonMaxIdlePerAddr          ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -483,6 +495,27 @@ type commonConfig struct {
 	GroupByMaxGroups ParamItem `refreshable:"false"`
 }
 
+// TalonNamespace returns the cloud namespace shared by Talon reads and prewarming.
+// An empty cluster ID selects Talon's default namespace.
+func (p *commonConfig) TalonNamespace() string {
+	clusterID := p.CloudClusterID.GetValue()
+	if clusterID == "" {
+		return ""
+	}
+	namespaceType := "others"
+	switch {
+	case p.CloudInstanceType.GetValue() == "VectorLake":
+		namespaceType = "VectorLake"
+	case p.CloudClassType.GetValue() == "Tiered":
+		namespaceType = "Tiered"
+	}
+	caseMode := "meta"
+	if p.StorageTalonEnabledStages.GetAsUint32() == common.TalonStagesAll {
+		caseMode = "all"
+	}
+	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
+}
+
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
@@ -498,6 +531,34 @@ To share a Pulsar instance among multiple Milvus instances, consider changing th
 		Export:       true,
 	}
 	p.ClusterPrefix.Init(base.mgr)
+
+	p.CloudClusterID = ParamItem{
+		Key:          "common.cloud.clusterId",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.",
+		Export:       true,
+	}
+	p.CloudClusterID.Init(base.mgr)
+	p.CloudInstanceType = ParamItem{
+		Key:          "common.cloud.instanceType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.",
+		Export:       true,
+	}
+	p.CloudInstanceType.Init(base.mgr)
+	p.CloudClassType = ParamItem{
+		Key:          "common.cloud.classType",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Forbidden:    true,
+		Doc:          "Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.",
+		Export:       true,
+	}
+	p.CloudClassType.Init(base.mgr)
 
 	pulsarPartitionKeyword := "-partition-"
 	chanNamePrefix := func(prefix string) string {
@@ -1490,6 +1551,105 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Export:       true,
 	}
 	p.ExternalSparseConversionMemoryLimit.Init(base.mgr)
+
+	p.StorageTalonMode = ParamItem{
+		Key:          "common.storage.talon.mode",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc:          "Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed > 2 {
+				panic(fmt.Sprintf("invalid common.storage.talon.mode: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMode.Init(base.mgr)
+
+	p.StorageTalonEnabledStages = ParamItem{
+		Key:          "common.storage.talon.enabledStages",
+		Version:      "3.0.1",
+		DefaultValue: "all",
+		Forbidden:    true,
+		Doc:          "Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.",
+		Formatter: func(value string) string {
+			mask, ok := common.ParseTalonEnabledStages(value)
+			if !ok {
+				panic(fmt.Sprintf("invalid common.storage.talon.enabledStages: %q", value))
+			}
+			return strconv.FormatUint(uint64(mask), 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonEnabledStages.Init(base.mgr)
+
+	p.StorageTalonEnableForExternalTable = ParamItem{
+		Key:          "common.storage.talon.enableForExternalTable",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonEnableForExternalTable.Init(base.mgr)
+
+	p.StorageTalonSmallReadThreshold = ParamItem{
+		Key:          "common.storage.talon.smallReadThreshold",
+		Version:      "3.0.1",
+		DefaultValue: "524288",
+		Doc:          "Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 || parsed > 1048576 {
+				panic(fmt.Sprintf("invalid common.storage.talon.smallReadThreshold: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonSmallReadThreshold.Init(base.mgr)
+
+	p.StorageTalonCoordinator = ParamItem{
+		Key:          "common.storage.talon.coordinator",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonCoordinator.Init(base.mgr)
+
+	p.StorageTalonBlockSize = ParamItem{
+		Key:          "common.storage.talon.blockSize",
+		Version:      "3.0.1",
+		DefaultValue: "268435456",
+		Doc:          "Talon block size in bytes; must be greater than 0. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.blockSize: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonBlockSize.Init(base.mgr)
+
+	p.StorageTalonMaxIdlePerAddr = ParamItem{
+		Key:          "common.storage.talon.maxIdlePerAddr",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Doc:          "Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.maxIdlePerAddr: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMaxIdlePerAddr.Init(base.mgr)
 
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
@@ -6000,6 +6160,10 @@ user-task-polling:
 // /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
+	TalonPrewarmEnabled   ParamItem `refreshable:"false"`
+	TalonPrewarmInterval  ParamItem `refreshable:"false"`
+	TalonPrewarmBatchSize ParamItem `refreshable:"false"`
+
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
 	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
@@ -6230,6 +6394,31 @@ type dataCoordConfig struct {
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
+	p.TalonPrewarmEnabled = ParamItem{
+		Key:          "dataCoord.talonPrewarm.enabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Export:       false,
+		Doc:          "Enable Talon prewarming, currently covering published manifests of all collections. Remote storage only. Requires a restart.",
+	}
+	p.TalonPrewarmEnabled.Init(base.mgr)
+	p.TalonPrewarmInterval = ParamItem{
+		Key:          "dataCoord.talonPrewarm.interval",
+		Version:      "3.0.1",
+		DefaultValue: "600",
+		Export:       false,
+		Doc:          "Seconds to wait after completing each Talon prewarm round. Valid range: [1, 86400]. Requires a restart.",
+	}
+	p.TalonPrewarmInterval.Init(base.mgr)
+	p.TalonPrewarmBatchSize = ParamItem{
+		Key:          "dataCoord.talonPrewarm.batchSize",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Export:       false,
+		Doc:          "Maximum objects per Talon batch. Valid range: [1, 4096]. Requires a restart.",
+	}
+	p.TalonPrewarmBatchSize.Init(base.mgr)
+
 	p.WatchTimeoutInterval = ParamItem{
 		Key:          "dataCoord.channel.watchTimeoutInterval",
 		Version:      "2.2.3",

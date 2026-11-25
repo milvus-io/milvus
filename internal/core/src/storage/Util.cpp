@@ -1283,6 +1283,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
 milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
     StorageV2FSCache::Key conf;
+    conf.talon_mode = storage_config.talon_mode;
+    conf.talon_enabled_stages = storage_config.talon_enabled_stages;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
         conf.root_path = path;
@@ -1309,6 +1311,12 @@ InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
+        conf.talon_small_read_threshold =
+            storage_config.talon_small_read_threshold;
+        conf.talon_coordinator = storage_config.talon_coordinator;
+        conf.talon_namespace = storage_config.talon_namespace;
+        conf.talon_block_size = storage_config.talon_block_size;
+        conf.talon_max_idle_per_addr = storage_config.talon_max_idle_per_addr;
     }
     return StorageV2FSCache::Instance().Get(conf);
 }

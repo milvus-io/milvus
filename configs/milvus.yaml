@@ -1207,6 +1207,10 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
+  cloud:
+    clusterId:  # Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.
+    instanceType:  # Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.
+    classType:  # Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
@@ -1257,6 +1261,14 @@ common:
       partialNullPolicy: error
     externalSparseVector:
       conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
+    talon:
+      mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.
+      enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
+      smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
+      coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
+      blockSize: 268435456 # Talon block size in bytes; must be greater than 0. Requires a restart.
+      maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

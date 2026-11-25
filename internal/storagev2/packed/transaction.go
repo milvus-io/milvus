@@ -164,8 +164,9 @@ func addDeltaLogsToManifest(
 func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	talonStages ...uint32,
 ) ([]string, error) {
-	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +222,9 @@ func GetDeltaLogsFromManifestWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
 ) ([]*datapb.FieldBinlog, error) {
-	return getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, nil)
+	return getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, nil, talonStages...)
 }
 
 // GetMilvusTableSourceDeltalogs validates the required physical columns and
@@ -243,13 +245,14 @@ func getDeltaLogsFromManifest(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 	requiredColumns []string,
+	talonStages ...uint32,
 ) ([]*datapb.FieldBinlog, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to create properties")
 	}

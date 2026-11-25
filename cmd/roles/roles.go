@@ -83,6 +83,7 @@ func init() {
 		for _, entry := range entries {
 			metricsList = append(metricsList, metrics.FilesystemMetrics{
 				DisplayKey:              entry.DisplayKey,
+				Source:                  entry.Source,
 				ReadCount:               entry.ReadCount,
 				WriteCount:              entry.WriteCount,
 				ReadBytes:               entry.ReadBytes,

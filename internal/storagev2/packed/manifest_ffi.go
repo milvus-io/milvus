@@ -865,16 +865,26 @@ func manifestColumnGroupHasAnyColumn(group manifestColumnGroup, columns map[stri
 	return false
 }
 
+// ManifestFilePath resolves a published manifest descriptor to its object key.
+func ManifestFilePath(manifestPath string) (string, error) {
+	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.Wrap(err, "failed to parse manifest path")
+	}
+	if basePath == "" {
+		return "", merr.WrapErrDataIntegrityMsg("manifest descriptor has an empty base path")
+	}
+	return fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version), nil
+}
+
 func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]manifestColumnGroup, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifestFilePath, err := ManifestFilePath(manifestPath)
 	if err != nil {
-		return nil, merr.Wrap(err, "failed to parse manifest path")
+		return nil, err
 	}
-
-	manifestFilePath := fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, version)
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {

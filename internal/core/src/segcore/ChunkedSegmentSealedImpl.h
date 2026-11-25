@@ -2115,7 +2115,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadColumnGroups(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
@@ -2135,7 +2136,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         const std::vector<FieldId>& milvus_field_ids,
         const SegmentLoadInfo& segment_load_info,
@@ -2450,7 +2452,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<ChunkedColumnInterface>
     TestStageLoadColumnGroupWithReader(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         const std::vector<FieldId>& field_ids,
         const SegmentLoadInfo& segment_load_info,
@@ -2490,7 +2493,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<std::shared_ptr<ChunkedColumnInterface>>
     TestStageLoadColumnGroupsWithReader(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         std::vector<std::pair<int, std::vector<FieldId>>> cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,

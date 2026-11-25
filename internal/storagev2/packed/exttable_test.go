@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/snapshotio"
@@ -964,6 +965,151 @@ func TestNormalizeFileInfos_StableSortAndFilter(t *testing.T) {
 	assert.Equal(t, "data/part-1.parquet", gotA[0].FilePath)
 	assert.Equal(t, "data/part-2.parquet", gotA[1].FilePath)
 	assert.Equal(t, skippedA, skippedB)
+}
+
+func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mode             string
+		mask             uint32
+		stage            uint32
+		wantMode         string
+		wantOpenOnly     string
+		enableExternal   bool
+		wantExternalMode string
+	}{
+		{name: "external_disabled", mode: "2", wantMode: "2", wantExternalMode: "0"},
+		{name: "legacy_stages", mode: "2", wantMode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_small_reads", mode: "2", mask: ^uint32(0), wantMode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_all_reads", mode: "1", mask: ^uint32(0), wantMode: "1", enableExternal: true, wantExternalMode: "1"},
+		{name: "talon_disabled", mode: "0", wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_disabled", mode: "0", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_only", mode: "1", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_small_reads", mode: "2", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "unknown_stage", mode: "1", mask: 4, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_and_unknown_stage", mode: "2", mask: 5, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "manifest_unscoped", mode: "1", mask: 2, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "manifest", mode: "1", mask: 2, stage: 2, wantMode: "1", enableExternal: true, wantExternalMode: "1"},
+		{name: "manifest_small_reads", mode: "2", mask: 3, stage: 2, wantMode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "manifest_disabled", mode: "0", mask: 2, stage: 2, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "manifest_not_enabled", mode: "1", mask: 1, stage: 2, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "manifest_external_disabled", mode: "1", mask: 2, stage: 2, wantMode: "1", wantExternalMode: "0"},
+		{name: "load_open_scoped", mode: "1", mask: 3, stage: 1, wantMode: "1", wantOpenOnly: "true", enableExternal: true, wantExternalMode: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			for key, value := range map[string]string{
+				"mode":               tc.mode,
+				"smallReadThreshold": "65536",
+				"coordinator":        "127.0.0.1:7000",
+				"blockSize":          "8388608",
+				"maxIdlePerAddr":     "32",
+			} {
+				require.NoError(t, params.Save("common.storage.talon."+key, value))
+			}
+			if tc.enableExternal {
+				require.NoError(t, params.Save("common.storage.talon.enableForExternalTable", "true"))
+			}
+
+			for _, storageType := range []string{"remote", "local"} {
+				t.Run(storageType, func(t *testing.T) {
+					require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, tc.mode))
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, "all"))
+					config := CreateStorageConfig()
+					config.TalonEnabledStages = tc.mask
+					config.TalonNamespace = "request-namespace"
+					config.AccessKeyID = "request-access-key"
+					config.SecretAccessKey = "request-secret-key"
+					original := proto.Clone(config)
+					// Request policy must survive a worker with different local settings.
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "0"))
+					localStages := "load_open"
+					if tc.mask == 1 {
+						localStages = "all"
+					}
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, localStages))
+					cConfig := GetCStorageConfig(config)
+					assert.Equal(t, config.GetTalonMode(), uint32(cConfig.talon_mode))
+					assert.Equal(t, tc.mask, uint32(cConfig.talon_enabled_stages))
+					assert.Equal(t, config.GetTalonEnableForExternalTable(), bool(cConfig.talon_enable_for_external_table))
+					DeleteCStorageConfig(cConfig)
+					readerConfig, release := newCStorageConfig(config)
+					assert.Equal(t, config.GetTalonMode(), uint32(readerConfig.talon_mode))
+					assert.Equal(t, tc.mask, uint32(readerConfig.talon_enabled_stages))
+					release()
+					props, err := MakePropertiesFromStorageConfig(config, nil, tc.stage)
+					require.NoError(t, err)
+					defer FreeProperties(props)
+					wantOpenOnly := tc.wantOpenOnly
+					if wantOpenOnly == "" {
+						wantOpenOnly = "false"
+					}
+					assert.Equal(t, wantOpenOnly, loonPropertyString(props, "fs.talon.open_only"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "fs.talon.namespace"))
+					assert.Equal(t, "request-access-key", loonPropertyString(props, "fs.access_key_id"))
+					assert.Equal(t, "request-secret-key", loonPropertyString(props, "fs.access_key_value"))
+					assert.True(t, proto.Equal(original, config), "conversions must preserve the request")
+					if storageType == "local" {
+						assert.Equal(t, "0", loonPropertyString(props, "fs.talon.mode"))
+					} else {
+						for key, want := range map[string]string{
+							"mode":                 tc.wantMode,
+							"small_read_threshold": "65536",
+							"coordinator":          "127.0.0.1:7000",
+							"block_size":           "8388608",
+							"max_idle_per_addr":    "32",
+						} {
+							assert.Equal(t, want, loonPropertyString(props, "fs.talon."+key), key)
+						}
+					}
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet"}`))
+					assert.Equal(t, tc.wantExternalMode, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Equal(t, "127.0.0.1:7000", loonPropertyString(props, "extfs.42.talon.coordinator"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "extfs.42.talon.namespace"))
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet","extfs":{"storage_type":"local"}}`))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.namespace"))
+				})
+			}
+		})
+	}
+}
+
+func TestMakePropertiesFromStorageConfig_TalonThresholdDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override string
+		want     uint32
+	}{
+		{name: "default", want: 524288},
+		{name: "configured", override: "1048576", want: 1048576},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "2"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonCoordinator.Key, "talon:7000"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnableForExternalTable.Key, "true"))
+			if tc.override != "" {
+				require.NoError(t, params.Save(params.CommonCfg.StorageTalonSmallReadThreshold.Key, tc.override))
+			}
+			config := CreateStorageConfig()
+			assert.Equal(t, tc.want, config.GetTalonSmallReadThreshold())
+			cConfig := GetCStorageConfig(config)
+			assert.Equal(t, tc.want, uint32(cConfig.talon_small_read_threshold))
+			DeleteCStorageConfig(cConfig)
+			props, err := MakePropertiesFromStorageConfig(config, nil)
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "fs.talon.small_read_threshold"))
+			require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", ""))
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "extfs.42.talon.small_read_threshold"))
+		})
+	}
 }
 
 func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
