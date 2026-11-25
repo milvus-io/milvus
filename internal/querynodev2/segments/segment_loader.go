@@ -158,8 +158,6 @@ func (r *LoadResource) IsZero() bool {
 }
 
 type resourceEstimateFactor struct {
-	memoryUsageFactor               float64
-	memoryIndexUsageFactor          float64
 	EnableInterminSegmentIndex      bool
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
@@ -1801,56 +1799,40 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsageWithSchema(ctx c
 		mlog.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
-	maxFactor := resourceEstimateFactor{
-		memoryUsageFactor:           paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:      paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex:  paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
-		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
-		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		externalRawDataFactor:       paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
-	}
-	maxSegmentSize := uint64(0)
-	predictMemUsage := uint64(0)
-	predictDiskUsage := uint64(0)
-	var predictGpuMemUsage []uint64
-	mmapFieldCount := 0
+	schemas := make([]*schemapb.CollectionSchema, 0, len(segmentLoadInfos))
 	for _, loadInfo := range segmentLoadInfos {
 		loadSchema := schema
 		if loadSchema == nil {
-			loadSchema = loader.manager.Collection.Get(loadInfo.GetCollectionID()).Schema()
+			collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
+			if collection == nil {
+				return nil, 0, merr.WrapErrCollectionNotFound(loadInfo.GetCollectionID())
+			}
+			loadSchema = collection.Schema()
 		}
-		loadingUsage, err := estimateLoadingResourceUsageOfSegment(loadSchema, loadInfo, maxFactor)
-		if err != nil {
-			logger.Warn(ctx, "failed to estimate max resource usage of segment",
-				mlog.Int64("collectionID", loadInfo.GetCollectionID()),
-				mlog.Int64("segmentID", loadInfo.GetSegmentID()),
-				mlog.Err(err))
-			return nil, 0, err
-		}
-
-		logger.Debug(ctx, "segment resource for loading",
-			mlog.Int64("segmentID", loadInfo.GetSegmentID()),
-			mlog.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(loadingUsage.MemorySize))),
-			mlog.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(loadingUsage.DiskSize))),
-			mlog.Float64("memoryLoadFactor", maxFactor.memoryUsageFactor),
-		)
-		mmapFieldCount += loadingUsage.MmapFieldCount
-		predictDiskUsage += loadingUsage.DiskSize
-		predictMemUsage += loadingUsage.MemorySize
-		predictGpuMemUsage = append(predictGpuMemUsage, loadingUsage.FieldGpuMemorySize...)
-		if loadingUsage.MemorySize > maxSegmentSize {
-			maxSegmentSize = loadingUsage.MemorySize
-		}
+		schemas = append(schemas, loadSchema)
 	}
-
+	total, perSegment, err := loadresource.EstimateSegmentsLoadingResource(ctx, schemas, segmentLoadInfos, loadresource.DefaultSegmentLoadingEstimateOptions(), func(fn func() error) error {
+		_, err := GetDynamicPool().Submit(func() (any, error) { return nil, fn() }).Await()
+		return err
+	})
+	if err != nil {
+		logger.Warn(ctx, "failed to estimate loading resource usage", mlog.Err(err))
+		return nil, 0, err
+	}
+	maxSegmentSize := uint64(0)
+	for i, usage := range perSegment {
+		logger.Debug(ctx, "segment resource for loading",
+			mlog.Int64("segmentID", segmentLoadInfos[i].GetSegmentID()),
+			mlog.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(usage.MemoryBytes))),
+			mlog.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(usage.DiskBytes))),
+		)
+		maxSegmentSize = max(maxSegmentSize, usage.MemoryBytes)
+	}
 	return &ResourceUsage{
-		MemorySize:         predictMemUsage,
-		DiskSize:           predictDiskUsage,
-		MmapFieldCount:     mmapFieldCount,
-		FieldGpuMemorySize: predictGpuMemUsage,
+		MemorySize:         total.MemoryBytes,
+		DiskSize:           total.DiskBytes,
+		MmapFieldCount:     total.MmapFieldCount,
+		FieldGpuMemorySize: total.FieldGPUMemoryBytes,
 	}, maxSegmentSize, nil
 }
 

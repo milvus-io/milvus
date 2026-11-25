@@ -170,7 +170,8 @@ SegmentLoadInfo::ConvertFieldIndexInfoToLoadIndexInfo(
                            kv_pair.value().end(),
                            std::back_inserter(lower),
                            ::tolower);
-            use_mmap = (lower == "true");
+            // Accept the boolean aliases allowed by Go index validation.
+            use_mmap = lower == "true" || lower == "1" || lower == "t";
         }
         // Extract warmup policy from index params
         if (kv_pair.key() == "warmup") {
