@@ -988,20 +988,40 @@ Changes:
   `Scores` only. `$distance` leaves segcore in its natural direction and is
   not restored.
 - **Proxy requery pipelines.** Requery replaces `FieldsData` with the result of
-  a second Query by primary key (`search_pipeline.go:1375`). Virtual columns
-  must not come from that Query: the row may be in a different segment by
-  then, and a Query has no distance. The Search plan carries the projection
-  items even when stored output fields are left to the requery. Add a step
-  that selects the projection-item columns from the reduced result in the
-  final ID order and appends them to the requery fields. With streaming
-  reduce ([#55219](https://github.com/milvus-io/milvus/pull/55219)) the proxy
-  pipeline starts after candidate reduction, so the columns are recorded from
-  the reduced result before the pipeline runs. Element-level results
-  key on (primary key, element index), as `hybridAssembleOperator` does.
-- **Search with ORDER BY** (`searchWithOrderByPipe`, `search_pipeline.go:3619`).
-  This pipeline always requeries and then reorders every `FieldsData` column
-  generically (`reorderResults`, `:2573`). The carry step above goes before
-  the `order_by` node.
+  a second Query by primary key (`search_pipeline.go:1375`). `$seg_id` and
+  `$seg_offset` follow the stored scalar output fields: a request with a
+  requery lists them in the output fields of that Query and leaves them out
+  of the Search plan, so they are computed for the final rows only and do
+  not pass through the three reduces; a request without a requery (the
+  default policy requeries only for vector and TEXT output fields) carries
+  them with the Search rows. The requery runs on the query view of the
+  Search with the same timestamps, so it sees the same segments; a row it
+  cannot find fails with the existing inconsistent-requery error, which
+  retries the Search. The requery returns one column per virtual column
+  under its own request-local IDs; the requery operator re-labels them with
+  the IDs of the Search's items before the fields enter the rest of the
+  pipeline. A requery with projection items stays off the Materialize path,
+  which carries schema fields only.
+- **`$distance` without a column.** When nothing between the vector search
+  and the result changes the scores or the row order (no rerank, no Boost
+  scorer in the plan, no score-writing function chain, no aggregation, no
+  `order_by`), the final `Scores` are the distances, and `$distance` is
+  copied from them as `$score` is; the Search plan does not ask the worker
+  for the column. In the other cases the worker returns the column, and a
+  requery would drop it: the proxy keeps the column of the reduced result
+  and adds it back at the end of the pipeline, by position when the final
+  rows are the reduced rows in the reduced order and by (query, primary key,
+  element index) otherwise. The same lookup serves the per-sub-request
+  columns of hybrid search. With streaming reduce
+  ([#55219](https://github.com/milvus-io/milvus/pull/55219)) the proxy
+  pipeline starts after candidate reduction, so the reduced result is
+  recorded before the pipeline runs.
+- **Search with ORDER BY** (`searchWithOrderByPipe`,
+  `search_pipeline.go:3619`). The pipeline always requeries and then reorders
+  every `FieldsData` column generically (`reorderResults`, `:2573`), so
+  `$seg_id` and `$seg_offset` arrive with the requery fields and are
+  reordered with them. `$distance` is added back after the `order_by` node,
+  by key.
 - **Search iterator.** An iterator request is an ordinary Search whose
   `QueryInfo` carries iterator state; the proxy derives the continuation bound
   from the final result (`task_search.go:1736`). It uses the same worker path
@@ -1148,7 +1168,7 @@ it, but no writer was found in this repository. This design does not use it.
 4. segcore: projection-item branch at the Retrieve output points; Query
    `$seg_id` / `$seg_offset`.
 5. segcore: Search late materialization branch; Search `$seg_id` /
-   `$seg_offset`; proxy requery carry step.
+   `$seg_offset`, from the requery when the request has one.
 6. segcore: raw-distance vector and export; Search `$distance`;
    `$distance AS distance`.
 7. Hybrid search `$score(x)`, `$distance(x)`, `$rank(x)`.
