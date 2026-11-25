@@ -18,6 +18,7 @@ package fileresource
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,14 +67,52 @@ func TestFileResourceLocalSourceIsConfined(t *testing.T) {
 	require.NoError(t, os.Symlink(filepath.Join(outside, "secret"), filepath.Join(root, "file_link")))
 	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0600))
 	source := &restrictedSource{ChunkManager: storage.NewLocalChunkManager(), root: root}
-	size, err := source.Size(context.Background(), filepath.Join(root, "dict"))
-	require.NoError(t, err)
-	require.EqualValues(t, 2, size)
-	for _, key := range []string{outside + "/secret", outside + "/absent", root + "/../secret", root + "/link/secret", root + "/file_link", root + "/fifo"} {
+	for _, key := range []string{"dict", filepath.Join(root, "dict")} {
+		exists, err := source.Exist(context.Background(), key)
+		require.NoError(t, err)
+		require.True(t, exists)
+		size, err := source.Size(context.Background(), key)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, size)
+		reader, err := source.Reader(context.Background(), key)
+		require.NoError(t, err)
+		content, err := io.ReadAll(reader)
+		require.NoError(t, reader.Close())
+		require.NoError(t, err)
+		require.Equal(t, "ok", string(content))
+	}
+	for _, key := range []string{outside + "/secret", outside + "/absent", root + "/../secret", root + "/link/secret", root + "/file_link", root + "/fifo", "../secret", "a/../../secret", "link/secret", "file_link", "fifo", "", ".", "a\\b", "a\x00b"} {
 		_, err := source.Reader(context.Background(), key)
 		require.Error(t, err, key)
 		require.NotContains(t, err.Error(), "SECRET_MARKER")
 	}
+}
+
+func TestFileResourceLocalDefaultDirectory(t *testing.T) {
+	setSourceRoot(t, "")
+	storageRoot := t.TempDir()
+	setting := &paramtable.Get().LocalStorageCfg.Path
+	old := setting.SwapTempValue(storageRoot)
+	t.Cleanup(func() { setting.SwapTempValue(old) })
+	root := filepath.Join(storageRoot, "file_resource")
+	require.NoError(t, os.Mkdir(root, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dict"), []byte("ok"), 0600))
+	source := RestrictSource(storage.NewLocalChunkManager())
+	size, err := source.Size(context.Background(), "dict")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, size)
+	destination := filepath.Join(t.TempDir(), "downloaded")
+	err = (&BaseManager{}).downloadFile(context.Background(), storage.NewLocalChunkManager(),
+		&internalpb.FileResourceInfo{Id: 1, Path: "dict"}, destination, time.Second)
+	require.NoError(t, err)
+	content, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, "ok", string(content))
+
+	// Empty still denies remote access before any storage probe.
+	remote := RestrictSource(mocks.NewChunkManager(t))
+	_, err = remote.Exist(context.Background(), "dict")
+	require.Error(t, err)
 }
 
 func TestFileResourceDownloadEnforcesActualReadLimit(t *testing.T) {

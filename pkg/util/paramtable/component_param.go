@@ -196,7 +196,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
-	p.FunctionCfg.init(bt)
+	p.FunctionCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.CredentialCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
@@ -2112,7 +2112,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Key:          "common.fileResource.allowedPath",
 		Version:      "3.0",
 		DefaultValue: "",
-		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty disables access. Restart required.",
+		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty uses localStorage.path/file_resource for local storage and disables remote access. Local request paths may be relative to this directory. Restart required.",
 		Export:       true,
 		Forbidden:    true,
 	}

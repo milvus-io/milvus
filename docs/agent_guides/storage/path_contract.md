@@ -254,8 +254,14 @@ See the [migration design](../../design-docs/design_docs/20260901-storagev3-mani
 ## Analyzer and file resource sources
 
 File resource admission and download use `common.fileResource.allowedPath` as
-an explicit complete-key boundary. Empty disables access. Keys outside the
-boundary are rejected before any backend probe. Local source reads pin directory
-descriptors and reject symlinks and non-regular files. Analyzer local dictionaries
-use the separate `function.analyzer.local_resource_path` boundary. Both source
-reads have finite byte limits; a prior size check alone is not sufficient.
+a source boundary. Remote object keys remain complete keys; empty disables
+remote access. For local sources, empty uses `<localStorage.path>/file_resource`.
+The file-resource adapter accepts relative local paths beneath this directory,
+or absolute descendants of it; this does not change the general ChunkManager
+complete-key contract. Paths outside the boundary are rejected before any
+backend probe. Local source reads pin directory descriptors and reject symlinks
+and non-regular files. Analyzer local dictionaries use the separate
+`function.analyzer.local_resource_path` boundary, defaulting to
+`<localStorage.path>/analyzer`. Both source reads have finite byte limits; a
+prior size check alone is not sufficient. Source directories are provisioned by
+operators and are separate from the disposable per-node resource cache.
