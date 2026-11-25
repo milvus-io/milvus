@@ -19,10 +19,10 @@
 #include <nlohmann/json.hpp>
 #include "common/CGoCatch.h"
 #include "grep/Grep.h"
+#include "grep/GrepBatchReader.h"
 #include "grep/IndexCondition.h"
 #include "log/Log.h"
 #include "index/contracts/query/INgramReader.h"
-#include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/arrow_field_utils.h"
@@ -170,14 +170,9 @@ struct GrepInputBatch {
     std::optional<Views> pinned;
     std::unique_ptr<DataArray> owned;
     std::vector<int64_t> owned_positions;
-    std::vector<Views> text_pins;
-    std::vector<std::optional<std::string_view>> inline_text;
 
     std::optional<std::string_view>
     Text(int64_t index) const {
-        if (!inline_text.empty()) {
-            return inline_text[index];
-        }
         if (pinned) {
             const auto& [views, validity] = pinned->get();
             if (!validity.empty() && !validity[index]) {
@@ -196,71 +191,6 @@ struct GrepInputBatch {
     }
 };
 
-// Borrow only self-contained inline TEXT. If any non-null value is a LOB
-// reference, leave the entire batch to the existing bulk reader so file-group
-// batching and prefetch/error behavior stay unchanged. Keep every chunk pinned
-// until matching and Arrow result copying have both completed.
-bool
-TryReadInlineTextBatch(const ChunkedColumnInterface* column,
-                       milvus::OpContext* op_ctx,
-                       const int64_t* offsets,
-                       GrepInputBatch& batch) {
-    const auto& boundaries = column->GetNumRowsUntilChunk();
-    batch.inline_text.resize(batch.count);
-    int64_t begin = 0;
-    while (begin < batch.count) {
-        const auto end = std::upper_bound(
-            boundaries.begin(), boundaries.end(), offsets[begin]);
-        AssertInfo(end != boundaries.begin() && end != boundaries.end(),
-                   "grep offset out of column range");
-        const int64_t chunk = std::distance(boundaries.begin(), end) - 1;
-        const int64_t chunk_begin = *(end - 1), chunk_end = *end;
-        auto stop = begin + 1;
-        while (stop < batch.count && offsets[stop] >= chunk_begin &&
-               offsets[stop] < chunk_end) {
-            ++stop;
-        }
-        FixedVector<int32_t> local_offsets(stop - begin);
-        for (auto i = begin; i < stop; ++i) {
-            const auto relative = offsets[i] - chunk_begin;
-            AssertInfo(relative <= std::numeric_limits<int32_t>::max(),
-                       "grep chunk offset exceeds int32");
-            local_offsets[i - begin] = relative;
-        }
-        auto pinned =
-            column->StringViewsByOffsets(op_ctx, chunk, local_offsets);
-        const auto& [views, validity] = pinned.get();
-        for (auto i = begin; i < stop; ++i) {
-            const auto local = i - begin;
-            if (!validity.empty() && !validity[local])
-                continue;
-            const auto encoded = views[local];
-            if (encoded.empty()) {
-                batch.inline_text[i] = std::string_view{};
-                continue;
-            }
-            const auto* data = reinterpret_cast<const uint8_t*>(encoded.data());
-            if (!milvus_storage::lob_column::IsInlineData(data)) {
-                batch.inline_text.clear();
-                batch.text_pins.clear();
-                return false;
-            }
-            const uint8_t* payload = nullptr;
-            size_t length = 0;
-            milvus_storage::lob_column::DecodeInlineData(
-                data, encoded.size(), &payload, &length);
-            batch.inline_text[i] =
-                length == 0
-                    ? std::string_view{}
-                    : std::string_view(reinterpret_cast<const char*>(payload),
-                                       length);
-        }
-        batch.text_pins.push_back(std::move(pinned));
-        begin = stop;
-    }
-    return true;
-}
-
 // Compute the original read window before pruning. In particular, keep
 // read-ahead offset validation and chunk boundaries independent of candidates.
 int64_t
@@ -275,7 +205,7 @@ GrepReadCount(const SegmentInternalInterface* segment,
                "grep offset out of range");
     const auto field = meta.get_id();
     int64_t chunk_begin = 0, chunk_end = rows;
-    if (view_column && meta.get_data_type() != DataType::TEXT) {
+    if (view_column) {
         const auto& boundaries = view_column->GetNumRowsUntilChunk();
         const auto end =
             std::upper_bound(boundaries.begin(), boundaries.end(), offsets[0]);
@@ -302,29 +232,17 @@ GrepReadCount(const SegmentInternalInterface* segment,
     return count;
 }
 
-// LOB take can coalesce repeated row references. Fetch each input row once,
-// then expose repeated views in input order without copying large documents.
-void
-ReadOwnedGrepBatch(const SegmentInternalInterface* segment,
-                   const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
-                   milvus::OpContext* op_ctx,
-                   const FieldMeta& meta,
-                   const int64_t* offsets,
-                   GrepInputBatch& batch) {
+// Keep one owned value per distinct TEXT offset and preserve input positions.
+std::vector<int64_t>
+UniqueTextOffsets(const FieldMeta& meta,
+                  const int64_t* offsets,
+                  GrepInputBatch& batch) {
     const auto end = offsets + batch.count;
     const bool unique_sorted =
         std::adjacent_find(
             offsets, end, [](int64_t a, int64_t b) { return a >= b; }) == end;
-    if (meta.get_data_type() != DataType::TEXT || unique_sorted) {
-        batch.owned = BulkSubscriptWithSnapshot(segment,
-                                                snapshot,
-                                                op_ctx,
-                                                meta.get_id(),
-                                                meta,
-                                                offsets,
-                                                batch.count);
-        return;
-    }
+    if (meta.get_data_type() != DataType::TEXT || unique_sorted)
+        return {};
     std::unordered_map<int64_t, int64_t> positions;
     std::vector<int64_t> unique_offsets;
     positions.reserve(batch.count);
@@ -337,16 +255,54 @@ ReadOwnedGrepBatch(const SegmentInternalInterface* segment,
             unique_offsets.push_back(offsets[i]);
         batch.owned_positions.push_back(entry->second);
     }
-    batch.owned = BulkSubscriptWithSnapshot(segment,
-                                            snapshot,
-                                            op_ctx,
-                                            meta.get_id(),
-                                            meta,
-                                            unique_offsets.data(),
-                                            unique_offsets.size());
     if (unique_offsets.size() == static_cast<size_t>(batch.count)) {
         batch.owned_positions.clear();
+        return {};
     }
+    return unique_offsets;
+}
+
+void
+ReadOwnedGrepBatch(const SegmentInternalInterface* segment,
+                   const std::shared_ptr<const SegmentReadSnapshot>& snapshot,
+                   milvus::OpContext* op_ctx,
+                   const FieldMeta& meta,
+                   const int64_t* offsets,
+                   GrepInputBatch& batch) {
+    auto unique = UniqueTextOffsets(meta, offsets, batch);
+    batch.owned =
+        BulkSubscriptWithSnapshot(segment,
+                                  snapshot,
+                                  op_ctx,
+                                  meta.get_id(),
+                                  meta,
+                                  unique.empty() ? offsets : unique.data(),
+                                  unique.empty() ? batch.count : unique.size());
+}
+
+folly::SemiFuture<GrepInputBatch>
+ReadOwnedGrepBatchAsync(
+    const ChunkedSegmentSealedImpl* segment,
+    const std::shared_ptr<
+        const ChunkedSegmentSealedImpl::PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    const FieldMeta& meta,
+    const int64_t* offsets,
+    int64_t count) {
+    GrepInputBatch batch;
+    batch.count = count;
+    auto unique = UniqueTextOffsets(meta, offsets, batch);
+    auto future = segment->bulk_subscript_text_async_from_state(
+        snapshot,
+        op_ctx,
+        meta.get_id(),
+        unique.empty() ? offsets : unique.data(),
+        unique.empty() ? count : unique.size());
+    return std::move(future).deferValue(
+        [batch = std::move(batch)](std::unique_ptr<DataArray>&& data) mutable {
+            batch.owned = std::move(data);
+            return std::move(batch);
+        });
 }
 
 GrepInputBatch
@@ -361,12 +317,6 @@ ReadGrepBatch(const SegmentInternalInterface* segment,
     const auto field = meta.get_id();
     GrepInputBatch batch;
     batch.count = count;
-    if (view_column != nullptr && meta.get_data_type() == DataType::TEXT) {
-        if (!TryReadInlineTextBatch(view_column, op_ctx, offsets, batch)) {
-            ReadOwnedGrepBatch(segment, snapshot, op_ctx, meta, offsets, batch);
-        }
-        return batch;
-    }
     if (view_column != nullptr) {
         const auto& boundaries = view_column->GetNumRowsUntilChunk();
         const auto end =
@@ -635,12 +585,8 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
     milvus::OpContext op_ctx(cancel_token);
     const auto snapshot = segment->CaptureReadSnapshot();
     const auto rows = segment->get_row_count();
-    const bool borrow_inline_text =
-        snapshot && meta.get_data_type() == DataType::TEXT &&
-        !meta.is_external_field() && segment->HasFieldData(field);
     const auto* view_column =
-        snapshot && (meta.get_data_type() == DataType::VARCHAR ||
-                     borrow_inline_text)
+        snapshot && meta.get_data_type() == DataType::VARCHAR
             ? snapshot->GetColumn(field)
             : nullptr;
     const bool use_views = meta.get_data_type() == DataType::VARCHAR &&
@@ -668,13 +614,41 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
         candidates = BuildGrepCandidates(*index, offsets, size, rows);
         index.reset();
     }
-    const auto* read_column =
-        (use_views || borrow_inline_text) ? view_column : nullptr;
+    const auto* read_column = use_views ? view_column : nullptr;
     std::vector<int64_t> selected_offsets, original_positions;
     GrepResultBuilder output(elements);
     int64_t begin = 0;
     int64_t window_end = 0;
     int64_t scanned_rows = 0;
+    auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
+    auto published = chunked
+                         ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
+                         : nullptr;
+    std::unique_ptr<GrepBatchReader<GrepInputBatch>> prefetched;
+    if (mode == GrepMode::Scan && opt.max_scan_rows == 0 &&
+        meta.get_data_type() == DataType::TEXT && !meta.is_external_field() &&
+        published && published->fields->has_field(field) &&
+        snapshot->GetColumn(field) != nullptr) {
+        prefetched = std::make_unique<GrepBatchReader<GrepInputBatch>>(
+            [&, next = int64_t{0}]() mutable
+            -> std::optional<folly::SemiFuture<GrepInputBatch>> {
+                check();
+                if (next == size)
+                    return std::nullopt;
+                const auto count = GrepReadCount(
+                    segment,
+                    meta,
+                    offsets + next,
+                    std::min<int64_t>(opt.batch_size, size - next),
+                    rows,
+                    false,
+                    nullptr);
+                auto future = ReadOwnedGrepBatchAsync(
+                    chunked, published, &op_ctx, meta, offsets + next, count);
+                next += count;
+                return std::move(future);
+            });
+    }
     while (begin < size && output.MatchedUnits() < opt.limit) {
         check();
         // Preserve complete input positions. NGRAM-rejected rows and NULLs
@@ -729,14 +703,16 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
             read_count = selected_offsets.size();
         }
         if (read_count != 0) {
-            auto batch = ReadGrepBatch(segment,
-                                       snapshot,
-                                       &op_ctx,
-                                       meta,
-                                       read_offsets,
-                                       read_count,
-                                       use_views,
-                                       read_column);
+            auto batch = prefetched ? std::move(prefetched->Next().value())
+                                    : ReadGrepBatch(segment,
+                                                    snapshot,
+                                                    &op_ctx,
+                                                    meta,
+                                                    read_offsets,
+                                                    read_count,
+                                                    use_views,
+                                                    read_column);
+            check();
             if (mode == GrepMode::Probe) {
                 probe.TrimAndCharge(batch);
                 input_count = batch.count;
@@ -756,6 +732,9 @@ ExecuteGrepScan(const SegmentInternalInterface* segment,
             mode = GrepMode::Index;
         }
     }
+    if (prefetched)
+        prefetched->Close();
+    check();
     auto result = output.Finish();
     if (debug_enabled) {
         const auto elapsed = std::chrono::duration<double>(

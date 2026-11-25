@@ -5765,12 +5765,12 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
         count);
 }
 
-static std::vector<std::string>
-ReadTextLobBatch(
+static folly::SemiFuture<std::vector<std::string>>
+ReadTextLobBatchAsync(
     const std::string& lob_base_path,
     const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
-        return {};
+        return folly::makeSemiFuture(std::vector<std::string>{});
     }
 
     auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
@@ -5778,11 +5778,19 @@ ReadTextLobBatch(
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
     auto& cache = GetGlobalTextColumnCache();
-    return cache.ReadBatch(lob_base_path, fs, properties, encoded_refs);
+    return cache.ReadBatchAsync(lob_base_path, fs, properties, encoded_refs);
 }
 
-void
-ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
+static std::vector<std::string>
+ReadTextLobBatch(
+    const std::string& lob_base_path,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
+    return cachinglayer::SemiInlineGet(
+        ReadTextLobBatchAsync(lob_base_path, encoded_refs));
+}
+
+folly::SemiFuture<folly::Unit>
+ChunkedSegmentSealedImpl::bulk_subscript_text_impl_async(
     FieldId field_id,
     const std::shared_ptr<const RuntimeResourceState>& runtime,
     const ChunkedColumnInterface::TakeResult& take,
@@ -5816,13 +5824,76 @@ ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
         });
 
     if (encoded_refs.empty()) {
-        return;
+        return folly::makeSemiFuture();
     }
 
-    auto texts = ReadTextLobBatch(lob_base_path, encoded_refs);
-    for (size_t i = 0; i < valid_indices.size() && i < texts.size(); i++) {
-        *dst->Mutable(valid_indices[i]) = std::move(texts[i]);
+    // ReadBatchAsync consumes encoded refs before returning. No TakeResult
+    // pointers escape; the caller keeps dst alive until completion.
+    return ReadTextLobBatchAsync(lob_base_path, encoded_refs)
+        .deferValue([dst, valid_indices = std::move(valid_indices)](
+                        std::vector<std::string>&& texts) {
+            AssertInfo(texts.size() == valid_indices.size(),
+                       "TEXT batch returned an unexpected row count");
+            for (size_t i = 0; i < valid_indices.size(); ++i) {
+                *dst->Mutable(valid_indices[i]) = std::move(texts[i]);
+            }
+            return folly::unit;
+        });
+}
+
+void
+ChunkedSegmentSealedImpl::bulk_subscript_text_impl(
+    FieldId field_id,
+    const std::shared_ptr<const RuntimeResourceState>& runtime,
+    const ChunkedColumnInterface::TakeResult& take,
+    google::protobuf::RepeatedPtrField<std::string>* dst,
+    bool* validity) const {
+    cachinglayer::SemiInlineGet(
+        bulk_subscript_text_impl_async(field_id, runtime, take, dst, validity));
+}
+
+folly::SemiFuture<std::unique_ptr<DataArray>>
+ChunkedSegmentSealedImpl::bulk_subscript_text_async_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    const int64_t* seg_offsets,
+    int64_t count) const {
+    // The caller gates missing fields. Preserve index-backed and external
+    // routing rather than forcing those reads through a loaded TEXT column.
+    AssertInfo(snapshot->fields->has_field(field_id),
+               "async TEXT field must exist in the pinned snapshot");
+    const auto& meta = snapshot->fields->operator[](field_id);
+    AssertInfo(meta.get_data_type() == DataType::TEXT,
+               "async TEXT read requires a TEXT field");
+    if (count == 0 || meta.is_external_field() ||
+        !HasFieldDataFromState(*snapshot, field_id) ||
+        IndexHasRawDataFromState(*snapshot, field_id)) {
+        return folly::makeSemiFuture(bulk_subscript_from_state(
+            snapshot, op_ctx, field_id, seg_offsets, count));
     }
+    auto column = get_column(snapshot->runtime, field_id);
+    auto take = TakeColumnData(op_ctx,
+                               column.get(),
+                               TakeTargetType(meta),
+                               seg_offsets,
+                               count,
+                               TakePinPolicy::Batch);
+    auto output = fill_with_empty(field_id, count);
+    auto* validity =
+        column->IsNullable()
+            ? MutableFieldDataRowValidData(output.get())->mutable_data()
+            : nullptr;
+    auto pending = bulk_subscript_text_impl_async(
+        field_id,
+        snapshot->runtime,
+        *take,
+        output->mutable_scalars()->mutable_string_data()->mutable_data(),
+        validity);
+    return std::move(pending).deferValue(
+        [output = std::move(output), snapshot](folly::Unit) mutable {
+            return std::move(output);
+        });
 }
 
 void

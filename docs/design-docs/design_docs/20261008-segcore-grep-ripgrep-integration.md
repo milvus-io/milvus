@@ -455,6 +455,19 @@ captures a snapshot for that call; candidate, identity and output reads do not
 share a request-owned snapshot. GrepOp retains no matcher/session across calls.
 Text batches use pinned views or owned data and skip NULL values.
 
+Internal TEXT uses the standard owned batch reader; there is no inline-only
+Grep probe. A reader with five batches of lookahead is used for loaded sealed internal TEXT
+in Scan mode with `maxScanRows=0`. The existing `function.grep.batchSize`
+controls rows per batch; there is no separate prefetch configuration.
+`GrepBatchReader` drives deferred storage reads
+and consumes batches in order; `TextColumnCache::ReadBatchAsync` consumes
+reference buffers before returning and retains readers through completion.
+Early termination drains speculative reads before releasing the native call.
+This bounds resident batches to six per segment scan, not aggregate bytes; node/request byte
+admission remains a follow-up. See the [LOB pipeline design](20261126-grep-lob-read-pipeline.md)
+for implementation boundaries and validation status.
+
+
 [Resource limits](#71-resource-limits) define candidate, matching and output
 budgets. [Arrow ownership](#arrow-boundary-ownership) defines row-buffer lifetime;
 [engine ownership](#6-ownership-and-concurrency) defines native handles.
