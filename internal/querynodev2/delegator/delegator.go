@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -477,7 +478,12 @@ func (sd *shardDelegator) executeSearchSubTasks(
 		return nil, err
 	}
 
-	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
+	evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+	if req.GetReq().GetCollectSearchReadUsage() {
+		// Every selected worker must contribute its planned column usage.
+		evaluator = nil
+	}
+	results, err := executeSubTasks(ctx, tasks, evaluator,
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
 			ctx = workerReadContext(ctx)
 			resp, err := worker.SearchSegments(ctx, req)
@@ -552,16 +558,18 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
+	var filterUsage *internalpb.QueryReadUsage
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
-		results, fallback, bits, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, bits, usage, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
 		}
 		if !fallback {
 			// Only a two-stage search that ran both stages is one.
 			orFeatureBits(results, delegatorBits|execBit(featureusage.FeatureTwoStageSearch))
-			return results, nil
+			return attachFilterUsage(results, usage)
 		}
+		filterUsage = usage
 		// fallback: continue with normal single-stage search below; the filter
 		// stage still ran, so its execution features are kept.
 		delegatorBits |= bits
@@ -580,6 +588,26 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	orFeatureBits(results, delegatorBits)
+	return attachFilterUsage(results, filterUsage)
+}
+
+// Keep filter data out of the vector reducer. Attach its cost once even if
+// the second stage did not dispatch any work.
+func attachFilterUsage(results []*internalpb.SearchResults, filter *internalpb.QueryReadUsage) ([]*internalpb.SearchResults, error) {
+	if filter == nil {
+		return results, nil
+	}
+	if len(results) == 0 {
+		return []*internalpb.SearchResults{{Status: merr.Success(), SearchReadUsage: filter}}, nil
+	}
+	usage := &internalpb.QueryReadUsage{}
+	if err := querymeter.AddReadUsage(usage, results[0].GetSearchReadUsage()); err != nil {
+		return nil, err
+	}
+	if err := querymeter.AddReadUsage(usage, filter); err != nil {
+		return nil, err
+	}
+	results[0].SearchReadUsage = usage
 	return results, nil
 }
 

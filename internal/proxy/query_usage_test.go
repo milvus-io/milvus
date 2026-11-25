@@ -25,8 +25,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
@@ -103,5 +106,65 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 			page := reporter.reports[i+1].(map[string]any)
 			require.Equal(t, pageBytes, page["bytes"])
 		}
+	})
+}
+
+func TestSearchReportsOneUsageValue(t *testing.T) {
+	paramtable.Init()
+	mockey.PatchConvey("only a successful Search emits its accumulated usage", t, func() {
+		node := &Proxy{}
+		request := &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection"}
+		reporter := &queryUsageReporter{}
+		oldReporter := extension.RequestUsageReporter()
+		extension.SetRequestUsageReporter(reporter)
+		t.Cleanup(func() { extension.SetRequestUsageReporter(oldReporter) })
+		mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
+
+		attempts := 0
+		var cancel context.CancelFunc
+		var fail error
+		mockey.Mock((*Proxy).search).To(func(_ *Proxy, ctx context.Context, _ *milvuspb.SearchRequest, _, _, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+			meter := querymeter.SearchUsageFromContext(ctx)
+			require.NotNil(t, meter)
+			attempts++
+			require.NoError(t, meter.AddRead(&internalpb.QueryReadUsage{DataBytes: 40}))
+			if attempts == 1 {
+				err := merr.WrapErrInconsistentRequery("retry after receiving the ANN reads")
+				return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, err
+			}
+			require.NoError(t, meter.AddRead(&internalpb.QueryReadUsage{DataBytes: 10}))
+			if cancel != nil {
+				cancel()
+			}
+			return &milvuspb.SearchResults{
+				Status:  merr.Status(fail),
+				Results: &schemapb.SearchResultData{Scores: []float32{1, 2, 3}},
+			}, false, false, false, fail
+		}).Build()
+
+		response, err := node.Search(t.Context(), request)
+		require.NoError(t, err)
+		require.True(t, merr.Ok(response.GetStatus()))
+		require.Equal(t, 2, attempts)
+		require.Len(t, reporter.reports, 1)
+		report := reporter.reports[0].(map[string]any)
+		require.Len(t, report, 4)
+		require.Equal(t, hookutil.OpTypeSearch, report[hookutil.OpTypeKey])
+		require.EqualValues(t, 102, report[hookutil.BytesKey])
+
+		fail = merr.WrapErrServiceInternalMsg("missing search read usage")
+		response, err = node.Search(t.Context(), request)
+		require.NoError(t, err)
+		require.False(t, merr.Ok(response.GetStatus()))
+		require.Len(t, reporter.reports, 1)
+
+		fail = nil
+		ctx, cancelSearch := context.WithCancel(t.Context())
+		defer cancelSearch()
+		cancel = cancelSearch
+		response, err = node.Search(ctx, request)
+		require.NoError(t, err)
+		require.False(t, merr.Ok(response.GetStatus()))
+		require.Len(t, reporter.reports, 1)
 	})
 }

@@ -53,6 +53,27 @@ func QueryFieldIDs(plan *planpb.PlanNode) []int64 {
 	return fields
 }
 
+// SearchFieldIDs returns the planned reads for one ANN or filter-only stage.
+// Output projection is accounted for by the final response.
+func SearchFieldIDs(plan *planpb.PlanNode, filterOnly bool) []int64 {
+	anns := plan.GetVectorAnns()
+	fields := PredicateFieldIDs(anns.GetPredicates())
+	if filterOnly {
+		return fields
+	}
+	fields = append(fields, anns.GetFieldId())
+	for _, scorer := range plan.GetScorers() {
+		fields = appendPredicateFieldIDs(fields, scorer.GetFilter())
+	}
+	info := anns.GetQueryInfo()
+	if groupIDs := info.GetGroupByFieldIds(); len(groupIDs) > 0 {
+		fields = append(fields, groupIDs...)
+	} else if fieldID := info.GetGroupByFieldId(); fieldID > 0 {
+		fields = append(fields, fieldID)
+	}
+	return fields
+}
+
 // PredicateFieldIDs returns one entry per column reference in the planned
 // predicate. Both sides of a boolean expression count even if the executor
 // can short-circuit, and distinct references to the same field are retained.

@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -100,6 +101,21 @@ func (s *shardViewQueryClient) prepareTwoStageSearch(ctx context.Context, respon
 	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: optimized.Req}
 	stage.options = &viewpb.SearchExecutionOptions{EnableExprCache: true}
 	stage.completed = true
+	return nil
+}
+
+func (s *twoStageSearch) mergeReadUsage(node qviews.WorkNode, result *internalpb.SearchResults) error {
+	qn, ok := node.(qviews.QueryNode)
+	if !ok {
+		return nil
+	}
+	if filter := s.filters[qn.ID]; filter != nil {
+		usage, err := querymeter.CollectSearchUsage([]*internalpb.SearchResults{result, filter})
+		if err != nil {
+			return err
+		}
+		result.SearchReadUsage = usage
+	}
 	return nil
 }
 

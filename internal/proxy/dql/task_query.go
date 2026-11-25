@@ -128,6 +128,7 @@ type QueryTask struct {
 	mustUsePartitionKey  bool
 	resolvedTimezoneStr  string
 	storageCost          segcore.StorageCost
+	readUsage            *internalpb.QueryReadUsage
 	usageBytes           int64
 	aggregationFieldMap  *agg.AggregationFieldMap
 	chMgr                channelmgr.ChannelsMgr
@@ -212,6 +213,11 @@ func (t *QueryTask) StorageCost() segcore.StorageCost {
 // UsageBytes returns the chargeable bytes for the completed Query.
 func (t *QueryTask) UsageBytes() int64 {
 	return t.usageBytes
+}
+
+// ReadUsage returns the successful Query's planned reads for its parent RPC.
+func (t *QueryTask) ReadUsage() *internalpb.QueryReadUsage {
+	return t.readUsage
 }
 
 // ReQuery reports whether this task was built as a requery of an earlier search.
@@ -1377,7 +1383,8 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	if err := t.formatTimeFields(ctx); err != nil {
 		return err
 	}
-	if readUsage != nil {
+	t.readUsage = readUsage
+	if readUsage != nil && !t.internalTask {
 		returnedBytes, err := storage.LogicalQueryResultBytes(t.result.GetFieldsData(), t.schema.CollectionSchema)
 		if err != nil {
 			return err

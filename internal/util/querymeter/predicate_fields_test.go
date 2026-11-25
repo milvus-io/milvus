@@ -17,10 +17,12 @@
 package querymeter
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
 
@@ -71,4 +73,44 @@ func TestQueryFieldIDs(t *testing.T) {
 	require.Equal(t, []int64{100}, QueryFieldIDs(&planpb.PlanNode{
 		Node: &planpb.PlanNode_Predicates{Predicates: predicate},
 	}))
+}
+
+func TestSearchFieldIDs(t *testing.T) {
+	predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 100},
+		Op:         planpb.OpType_GreaterThan,
+	}}}
+	plan := &planpb.PlanNode{
+		Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
+			FieldId: 101, Predicates: predicate,
+			QueryInfo: &planpb.QueryInfo{GroupByFieldIds: []int64{102, 103}},
+		}},
+		OutputFieldIds: []int64{104},
+		Scorers:        []*planpb.ScoreFunction{{Filter: predicate}},
+	}
+	require.Equal(t, []int64{100, 101, 100, 102, 103}, SearchFieldIDs(plan, false))
+	require.Equal(t, []int64{100}, SearchFieldIDs(plan, true))
+}
+
+func TestSearchReadUsageWeightsEachContribution(t *testing.T) {
+	column := &internalpb.QueryReadUsage{DataBytes: 20, ValidityBits: map[int64]uint64{100: 2}}
+	first, err := ScaleSearchUsage(column, 2)
+	require.NoError(t, err)
+	second, err := ScaleSearchUsage(column, 3)
+	require.NoError(t, err)
+	total, err := CollectSearchUsage([]*internalpb.SearchResults{
+		{SearchReadUsage: first}, {SearchReadUsage: second}, {SearchReadUsage: &internalpb.QueryReadUsage{}},
+	})
+	require.NoError(t, err)
+	bytes, err := BillableBytes(total, 8)
+	require.NoError(t, err)
+	require.EqualValues(t, 110, bytes)
+
+	total, err = CollectSearchUsage(nil)
+	require.NoError(t, err)
+	require.Zero(t, total.GetDataBytes())
+	_, err = CollectSearchUsage([]*internalpb.SearchResults{{}})
+	require.Error(t, err)
+	_, err = ScaleSearchUsage(&internalpb.QueryReadUsage{DataBytes: math.MaxUint64}, 2)
+	require.Error(t, err)
 }

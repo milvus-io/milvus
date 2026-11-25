@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -127,6 +128,12 @@ func reduceLegacyShardSearch(ctx context.Context, req *internalpb.SearchRequest,
 	result.ScannedRemoteBytes, result.ScannedTotalBytes = scannedRemote, scannedTotal
 	result.IsTopkReduce, result.IsRecallEvaluation = topkReduce, recallEvaluation
 	result.CostAggregation = cost
+	if req.GetCollectSearchReadUsage() {
+		result.SearchReadUsage, err = querymeter.CollectSearchUsage(inputs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	result.Status = merr.Success()
 	return result, nil
 }

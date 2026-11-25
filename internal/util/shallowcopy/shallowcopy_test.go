@@ -44,6 +44,8 @@ func TestShallowCopySearchRequest(t *testing.T) {
 			AnalyzerName:            "analyzer",
 			CollectionTtlTimestamps: 999,
 			EntityTtlPhysicalTime:   888,
+			CollectSearchReadUsage:  true,
+			SearchReadFieldIds:      []int64{101, 101},
 		}
 
 		dst := ShallowCopySearchRequest(src, 42)
@@ -68,6 +70,8 @@ func TestShallowCopySearchRequest(t *testing.T) {
 		assert.Equal(t, src.PlaceholderGroup, dst.PlaceholderGroup)
 		assert.Equal(t, src.SerializedExprPlan, dst.SerializedExprPlan)
 		assert.Equal(t, src.GroupByFieldIds, dst.GroupByFieldIds)
+		assert.True(t, dst.GetCollectSearchReadUsage())
+		assert.Equal(t, src.GetSearchReadFieldIds(), dst.GetSearchReadFieldIds())
 	})
 }
 
@@ -94,9 +98,11 @@ func TestShallowCopyRetrieveRequest(t *testing.T) {
 			CollectionTtlTimestamps: 999,
 			EntityTtlPhysicalTime:   888,
 			QueryLabel:              "query",
+			CollectQueryReadUsage:   true,
 		}
 
 		dst := ShallowCopyRetrieveRequest(src, 42)
+		assert.True(t, dst.GetCollectQueryReadUsage())
 
 		assert.Equal(t, int64(42), dst.Base.TargetID)
 		assert.Equal(t, int64(100), src.Base.TargetID)

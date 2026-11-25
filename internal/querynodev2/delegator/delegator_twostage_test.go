@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -365,7 +366,7 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1000: 10000}
 
-		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 1)
@@ -413,10 +414,49 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStage() {
 		}
 		sealedRowCount := map[int64]int64{1001: 10000}
 
-		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.Error(err)
 		s.Nil(validCounts)
 	})
+}
+
+func (s *TwoStageSearchSuite) TestMeteredSearchRequiresAllSelectedWorkers() {
+	params := paramtable.Get()
+	key := params.QueryNodeCfg.PartialResultRequiredDataRatio.Key
+	s.Require().NoError(params.Save(key, "0.5"))
+	defer params.Reset(key)
+
+	ctx := s.T().Context()
+	first, second := int64(8100), int64(8101)
+	sealed := []SnapshotItem{
+		{NodeID: 1, Segments: []SegmentEntry{{NodeID: 1, SegmentID: first}}},
+		{NodeID: 2, Segments: []SegmentEntry{{NodeID: 2, SegmentID: second}}},
+	}
+	rowCounts := map[int64]int64{first: 80, second: 20}
+	s.delegator.distribution.AddDistributions(sealed[0].Segments[0], sealed[1].Segments[0])
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+			if req.GetSegmentIDs()[0] == second {
+				return nil, merr.WrapErrServiceInternalMsg("missing sealed column usage")
+			}
+			return &internalpb.SearchResults{
+				Status:          merr.Success(),
+				SearchReadUsage: &internalpb.QueryReadUsage{DataBytes: 80},
+			}, nil
+		})
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker, nil)
+	req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{}, DmlChannels: []string{s.vchannelName}}
+
+	results, err := s.delegator.executeSearchSubTasks(ctx, req, sealed, nil, rowCounts)
+	s.Require().NoError(err)
+	s.Len(results, 1)
+
+	req.Req.CollectSearchReadUsage = true
+	results, err = s.delegator.executeSearchSubTasks(ctx, req, sealed, nil, rowCounts)
+	s.Require().ErrorContains(err, "missing sealed column usage")
+	s.Nil(results)
 }
 
 func (s *TwoStageSearchSuite) TestTwoStageSearch() {
@@ -465,7 +505,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{2000: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -527,7 +567,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3000: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -585,7 +625,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 			3101: 10000,
 		}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.True(fallback)
 		s.Nil(results)
@@ -681,7 +721,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3500: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -757,7 +797,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{3600: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -811,7 +851,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearch() {
 		growing := []SegmentEntry{}
 		sealedRowCount := map[int64]int64{4000: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.Error(err)
 		s.False(fallback)
 		s.Nil(results)
@@ -886,7 +926,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithMultipleSegments() {
 			5002: 10000,
 		}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1032,7 +1072,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchWithGrowingSegments() {
 		}
 		sealedRowCount := map[int64]int64{6000: 10000}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1098,7 +1138,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchZeroValidCounts() {
 			7002: 10000,
 		}
 
-		results, fallback, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, _, _, err := s.delegator.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		s.NoError(err)
 		s.False(fallback)
 		s.NotNil(results)
@@ -1134,7 +1174,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchCarriesFilterStageFeatureBits() 
 		req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Topk: 100}, DmlChannels: []string{s.vchannelName}}
 		sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 8000, NodeID: 1}}}}
 
-		results, fallback, bits, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8000: 10000})
+		results, fallback, bits, _, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8000: 10000})
 		s.NoError(err)
 		s.False(fallback)
 		s.Equal(stage1Bits, bits)
@@ -1163,7 +1203,7 @@ func (s *TwoStageSearchSuite) TestTwoStageSearchCarriesFilterStageFeatureBits() 
 		req := &querypb.SearchRequest{Req: &internalpb.SearchRequest{Topk: 100}, DmlChannels: []string{s.vchannelName}}
 		sealed := []SnapshotItem{{NodeID: 1, Segments: []SegmentEntry{{SegmentID: 8100, NodeID: 1}, {SegmentID: 8101, NodeID: 1}}}}
 
-		results, fallback, bits, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8100: 10000, 8101: 10000})
+		results, fallback, bits, _, err := s.delegator.twoStageSearch(context.Background(), req, sealed, nil, map[int64]int64{8100: 10000, 8101: 10000})
 		s.NoError(err)
 		s.True(fallback)
 		s.Nil(results)
@@ -1268,7 +1308,7 @@ func (s *TwoStageSearchSuite) TestExecuteFilterStageWithMultipleNodes() {
 			8002: 10000,
 		}
 
-		validCounts, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
+		validCounts, _, _, err := s.delegator.executeFilterStage(ctx, req, sealed, sealedRowCount)
 		s.NoError(err)
 		s.NotNil(validCounts)
 		s.Len(validCounts, 3)

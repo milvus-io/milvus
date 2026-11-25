@@ -218,10 +218,13 @@ func TestTwoStageSearchCancellationJoinsFilterWorkers(t *testing.T) {
 
 func TestTwoStageSearchMergesFilterCostsOnlyIntoItsWorker(t *testing.T) {
 	stage := twoStageSearch{completed: true, filters: map[int64]*internalpb.SearchResults{
-		11: {FeatureBits: 1, ScannedRemoteBytes: 7, ScannedTotalBytes: 9, CostAggregation: &internalpb.CostAggregation{ServiceTime: 4}},
+		11: {FeatureBits: 1, ScannedRemoteBytes: 7, ScannedTotalBytes: 9, CostAggregation: &internalpb.CostAggregation{ServiceTime: 4}, SearchReadUsage: &internalpb.QueryReadUsage{DataBytes: 11}},
 	}}
-	response := &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{ScannedRemoteBytes: 3, ScannedTotalBytes: 5}}
+	response := &viewpb.SearchOnViewResponse{LegacyResults: &internalpb.SearchResults{ScannedRemoteBytes: 3, ScannedTotalBytes: 5, SearchReadUsage: &internalpb.QueryReadUsage{DataBytes: 13}}}
 	stage.mergeFeatures(qviews.NewQueryNode(11), response)
+	require.NoError(t, stage.mergeReadUsage(qviews.NewQueryNode(11), response.GetLegacyResults()))
+	require.EqualValues(t, 24, response.GetLegacyResults().GetSearchReadUsage().GetDataBytes())
+	require.Error(t, stage.mergeReadUsage(qviews.NewQueryNode(11), &internalpb.SearchResults{}))
 	require.EqualValues(t, 10, response.LegacyResults.ScannedRemoteBytes)
 	require.EqualValues(t, 14, response.LegacyResults.ScannedTotalBytes)
 	require.EqualValues(t, 4, response.LegacyResults.CostAggregation.ServiceTime)

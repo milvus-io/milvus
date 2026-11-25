@@ -172,6 +172,9 @@ message SearchRequest {
   SearchType search_type = 33;
   repeated int64 group_by_field_ids = 34;
   int32 schema_version = 35;
+  bool collect_search_read_usage = 36;
+  // Source columns for planned aggregation and ordering outside segcore.
+  repeated int64 search_read_field_ids = 37;
 }
 
 message SubSearchResults {
@@ -222,6 +225,7 @@ message SearchResults {
   // OR-merged wherever the results are merged. Zero unless the plan asked
   // for them (PlanOption.collect_feature_bits).
   uint64 feature_bits = 24;
+  QueryReadUsage search_read_usage = 25;
 }
 
 message CostAggregation {
@@ -232,7 +236,7 @@ message CostAggregation {
   QueryReadUsage query_read_usage = 5;
 }
 
-// QueryReadUsage contains the data-plane portion of a metered Query. Presence
+// QueryReadUsage contains the data-plane portion of a metered read. Presence
 // distinguishes a measured zero from a result without metering support.
 message QueryReadUsage {
   uint64 data_bytes = 1;

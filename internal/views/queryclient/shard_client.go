@@ -220,6 +220,11 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			if err != nil {
 				return err
 			}
+			if req.Req.GetCollectSearchReadUsage() && merr.Ok(resp.GetLegacyResults().GetStatus()) {
+				if err := stage.mergeReadUsage(node, resp.GetLegacyResults()); err != nil {
+					return err
+				}
+			}
 			stage.mergeFeatures(node, resp)
 			return req.Reducer.Add(shardID, resp)
 		},

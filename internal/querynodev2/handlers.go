@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -440,6 +441,13 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 	if err != nil {
 		return nil, err
+	}
+
+	if req.GetReq().GetCollectSearchReadUsage() {
+		resp.SearchReadUsage, err = querymeter.CollectSearchUsage(results)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	tr.CtxElapse(ctx, "search with channel done, ch="+channel)

@@ -9,7 +9,7 @@ import (
 func emptySearchResults(req *internalpb.SearchRequest) *internalpb.SearchResults {
 	nq := req.GetNq()
 	topK := req.GetTopk()
-	return &internalpb.SearchResults{
+	result := &internalpb.SearchResults{
 		Status:             merr.Success(),
 		MetricType:         req.GetMetricType(),
 		NumQueries:         nq,
@@ -26,6 +26,10 @@ func emptySearchResults(req *internalpb.SearchRequest) *internalpb.SearchResults
 		},
 		CostAggregation: &internalpb.CostAggregation{},
 	}
+	if req.GetCollectSearchReadUsage() {
+		result.SearchReadUsage = &internalpb.QueryReadUsage{}
+	}
+	return result
 }
 
 func emptyQueryResults() *internalpb.RetrieveResults {

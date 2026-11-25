@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SearchSuite struct {
@@ -170,9 +171,25 @@ func (suite *SearchSuite) TestSearchSealed() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), []int64{suite.sealed.ID()}, mock_segcore.IndexFaissIDMap, nq)
 	suite.NoError(err)
 
-	_, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
+	results, segments, err := SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()})
 	suite.NoError(err)
 	suite.manager.Segment.Unpin(segments)
+	DeleteSearchResults(results)
+
+	meter := NewSearchReadUsage([]int64{searchTestFloatVectorID(suite.schema)})
+	_, segments, err = SearchHistorical(ctx, suite.manager, searchReq, suite.collectionID, nil, []int64{suite.sealed.ID()}, meter)
+	suite.manager.Segment.Unpin(segments)
+	suite.ErrorContains(err, "sealed manifest")
+	suite.Nil(meter.Usage)
+}
+
+func searchTestFloatVectorID(schema *schemapb.CollectionSchema) int64 {
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_FloatVector {
+			return field.GetFieldID()
+		}
+	}
+	return 0
 }
 
 func (suite *SearchSuite) TestSearchGrowing() {
@@ -338,13 +355,19 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 	searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithNoMatchPKPredicate(suite.collection.GetCCollection(), growingSegIDs, 1, 1)
 	suite.NoError(err)
 
+	pk, err := typeutil.GetPrimaryFieldSchema(suite.schema)
+	suite.Require().NoError(err)
+	meter := NewSearchReadUsage([]int64{pk.GetFieldID(), searchTestFloatVectorID(suite.schema)})
 	res, segments, err := SearchStreaming(ctx, suite.manager, searchReq,
 		suite.collectionID,
 		[]int64{suite.partitionID},
 		growingSegIDs,
+		meter,
 	)
 	suite.NoError(err)
 	suite.Len(segments, 10)
+	// Even a predicate matching zero rows bills both planned columns.
+	suite.EqualValues(55*(8+mock_segcore.DefaultDim*4), meter.Usage.GetDataBytes())
 	suite.manager.Segment.Unpin(segments)
 	DeleteSearchResults(res)
 

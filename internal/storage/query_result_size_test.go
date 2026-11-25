@@ -54,3 +54,37 @@ func TestLogicalQueryResultBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 16, bytes)
 }
+
+func TestLogicalSearchResultBytes(t *testing.T) {
+	result := &schemapb.SearchResultData{
+		Ids:    &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{91}}}},
+		Scores: []float32{0.9},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+			}},
+		}},
+		AggBuckets: []*schemapb.AggBucket{{
+			Count: 2,
+			Key:   []*schemapb.BucketKeyEntry{{Value: &schemapb.BucketKeyEntry_StringVal{StringVal: "雪"}}},
+			Metrics: map[string]*schemapb.MetricValue{
+				"average": {Value: &schemapb.MetricValue_DoubleVal{DoubleVal: 3}},
+				"unset":   nil,
+			},
+			Hits: []*schemapb.AggHit{{
+				Pk:    &schemapb.AggHit_StrPk{StrPk: "pk"},
+				Score: 0.6,
+			}},
+		}},
+		OutputFields: []string{"a"},
+		Topks:        []int64{1},
+	}
+	bytes, err := LogicalSearchResultBytes(result, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 45, bytes)
+
+	bytes, err = LogicalSearchResultBytes(nil, nil)
+	require.NoError(t, err)
+	require.Zero(t, bytes)
+}

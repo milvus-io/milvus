@@ -18,6 +18,7 @@ package querymeter
 
 import (
 	"math"
+	"math/bits"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -47,6 +48,41 @@ func AddReadUsage(total, part *internalpb.QueryReadUsage) error {
 		}
 	}
 	return nil
+}
+
+// ScaleSearchUsage applies one ANN request's effective NQ. Keep validity bits
+// packed across participating reads until final reporting.
+func ScaleSearchUsage(part *internalpb.QueryReadUsage, nq int64) (*internalpb.QueryReadUsage, error) {
+	if part == nil || nq < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid search read usage or query count %d", nq)
+	}
+	hi, payload := bits.Mul64(part.GetDataBytes(), uint64(nq))
+	if hi != 0 {
+		return nil, merr.WrapErrServiceInternalMsg("search read usage exceeds the byte counter")
+	}
+	out := &internalpb.QueryReadUsage{DataBytes: payload}
+	for fieldID, count := range part.GetValidityBits() {
+		hi, count := bits.Mul64(count, uint64(nq))
+		if hi != 0 {
+			return nil, merr.WrapErrServiceInternalMsg("search read usage exceeds the validity counter for field %d", fieldID)
+		}
+		if err := addValidityBits(out, fieldID, count); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// CollectSearchUsage sums successful worker contributions, including responses
+// with no hits. Zero planned workers produce an explicit zero.
+func CollectSearchUsage(results []*internalpb.SearchResults) (*internalpb.QueryReadUsage, error) {
+	total := &internalpb.QueryReadUsage{}
+	for _, result := range results {
+		if err := AddReadUsage(total, result.GetSearchReadUsage()); err != nil {
+			return nil, err
+		}
+	}
+	return total, nil
 }
 
 // AddDataBytes adds a measured contribution without separate validity bits.

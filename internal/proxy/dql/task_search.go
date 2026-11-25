@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -229,6 +230,14 @@ func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *schedule
 		mustUsePartitionKey:    paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool(),
 		chMgr:                  node.ChMgr(),
 	}
+}
+
+// ResultSchema returns the schema bound to this execution.
+func (t *SearchTask) ResultSchema() *schemapb.CollectionSchema {
+	if t.schema == nil {
+		return nil
+	}
+	return t.schema.CollectionSchema
 }
 
 // Result returns the search result after execution.
@@ -518,6 +527,14 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+	if t.GetCollectSearchReadUsage() {
+		if t.aggCtx != nil {
+			t.SearchReadFieldIds = append(t.SearchReadFieldIds, t.aggCtx.ReadFieldIDs()...)
+		}
+		for _, order := range t.orderByFields {
+			t.SearchReadFieldIds = append(t.SearchReadFieldIds, order.FieldID)
+		}
+	}
 
 	if err = ValidateTask(t); err != nil {
 		return err
@@ -1574,7 +1591,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 
 	legacy := t.viewQueryClient.Legacy()
 	// Refresh applies to new requests, not retries or Hybrid sub-searches.
-	enableReduceStream := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
+	enableReduceStream := !t.GetCollectSearchReadUsage() && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
 	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
 	searchRequest := t.SearchRequest
 	if enableReduceStream && len(t.orderByFields) > 0 &&
@@ -2158,6 +2175,17 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 		if err != nil {
 			log.Warn(ctx, "failed to collect search results", mlog.Err(err))
 			return err
+		}
+		if t.GetCollectSearchReadUsage() {
+			usage, err := querymeter.CollectSearchUsage(toReduceResults)
+			if err != nil {
+				return err
+			}
+			if meter := querymeter.SearchUsageFromContext(t.TraceCtx()); meter != nil {
+				if err := meter.AddRead(usage); err != nil {
+					return err
+				}
+			}
 		}
 		for _, r := range toReduceResults {
 			collectMetadata(r)

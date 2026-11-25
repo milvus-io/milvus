@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -2653,6 +2654,12 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
 	defer node.unregisterRequest(entry)
 
+	reporter := extension.RequestUsageReporter()
+	var usage *querymeter.SearchUsage
+	if reporter != nil && len(request.GetSubReqs()) == 0 {
+		ctx, usage = querymeter.WithSearchUsage(ctx)
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2712,6 +2719,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
 		rsp.Status = status
+		reportSearchUsage(ctx, reporter, usage, rsp, hookutil.OpTypeSearch, request.GetDbName())
 	}
 	return rsp, nil
 }
@@ -2765,6 +2773,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, err
 	}
 
+	usage := querymeter.SearchUsageFromContext(ctx)
 	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
 	if err != nil {
 		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
@@ -2786,6 +2795,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
 	qt.SetCountFeatures(countFeatures)
+	qt.CollectSearchReadUsage = usage != nil
 
 	succeeded := false
 	defer func() {
@@ -2889,7 +2899,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.Result() != nil {
+	if qt.Result() != nil && usage == nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.Result())
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -2911,6 +2921,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		adjustSearchResultsForNullVectors(qt.Result(), validData)
 	}
 
+	if usage != nil && qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if !isRecallEvaluation {
+			usage.SetResultSchema(qt.ResultSchema())
+		}
+	}
 	succeeded = true
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), qt.IsRecallEvaluation(), nil
 }
@@ -3593,6 +3609,10 @@ func (node *Proxy) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace
 // Query get the records by primary keys.
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.Request()
+	usage := querymeter.SearchUsageFromContext(ctx)
+	if usage != nil {
+		qt.CollectQueryReadUsage = true
+	}
 	method := "Query"
 	queryLabel := qt.GetMetricLabel()
 	if sp != nil {
@@ -3686,6 +3706,11 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
+	if usage != nil && merr.Ok(qt.Result().GetStatus()) {
+		if err := usage.AddRead(qt.ReadUsage()); err != nil {
+			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
+		}
+	}
 	succeeded = true
 	return qt.Result(), qt.StorageCost(), nil
 }
