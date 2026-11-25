@@ -387,7 +387,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilterDoesNotPruneGrowing() {
 
 	var retrievedSegments []Segment
 	go func() {
-		retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, server)
+		retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, server, nil, nil)
 		suite.NoError(err)
 		server.FinishSend(err)
 	}()
@@ -502,7 +502,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamSealed() {
 	server := client.CreateServer()
 
 	go func() {
-		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server)
+		segments, err := RetrieveStream(ctx, suite.manager, plan, req, server, nil, nil)
 		suite.NoError(err)
 		suite.manager.Segment.Unpin(segments)
 		server.FinishSend(err)
@@ -597,7 +597,7 @@ func (suite *RetrieveSuite) TestRetrieveStreamWithFilter() {
 
 		var retrievedSegments []Segment
 		go func() {
-			retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, server)
+			retrievedSegments, err = RetrieveStream(ctx, suite.manager, plan, req, server, nil, nil)
 			suite.NoError(err)
 			server.FinishSend(err)
 		}()

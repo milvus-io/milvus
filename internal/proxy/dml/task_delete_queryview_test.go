@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -27,7 +28,7 @@ import (
 )
 
 func TestComplexDeleteQueryViewBatch(t *testing.T) {
-	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
+	for _, scenario := range []string{"int64", "varchar", "empty", "zero_hits", "missing_usage", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			pkType := schemapb.DataType_Int64
@@ -53,6 +54,19 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				{Ids: ids(values[0], values[1]), AllRetrieveCount: 7, ScannedRemoteBytes: 10, ScannedTotalBytes: 20},
 				{Ids: ids(values[1], values[2]), AllRetrieveCount: 5, ScannedRemoteBytes: 30, ScannedTotalBytes: 40},
 			}}
+			for i, result := range response.Results {
+				result.CostAggregation = &internalpb.CostAggregation{
+					QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: uint64(i+1) * 20, ValidityBits: map[int64]uint64{101: 3}},
+				}
+			}
+			if scenario == "zero_hits" {
+				for _, result := range response.Results {
+					result.Ids = nil
+				}
+			}
+			if scenario == "missing_usage" {
+				response.Results[1].CostAggregation = nil
+			}
 			if scenario == "empty" {
 				response.Results = nil
 			}
@@ -121,11 +135,12 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				// No legacy LB: falling back to GetShardLeaders would fail this test.
 			}
 			runner.SetViewQueryClient(client)
+			runner.EnableQueryReadUsage()
 			err = runner.Run(ctx)
 			switch scenario {
 			case "query_error", "enqueue_error", "write_error":
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			case "incomplete":
+			case "incomplete", "missing_usage":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "rate_limit":
 				require.ErrorIs(t, err, merr.ErrServiceRateLimit)
@@ -145,6 +160,18 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.GetConsistencyLevel())
 			require.EqualValues(t, typeutil.Unlimited, captured.GetLimit())
 			require.Equal(t, metrics.DeleteQueryLabel, captured.GetQueryLabel())
+			require.True(t, captured.GetCollectQueryReadUsage())
+			bytes, usagePresent := runner.QueryReadBytes()
+			switch scenario {
+			case "query_error", "incomplete", "missing_usage":
+				require.False(t, usagePresent)
+			case "empty":
+				require.True(t, usagePresent)
+				require.Zero(t, bytes)
+			default:
+				require.True(t, usagePresent)
+				require.EqualValues(t, 61, bytes)
+			}
 			require.Equal(t, []int64{100, common.TimeStampField}, captured.GetOutputFieldsId())
 			parsed := &planpb.PlanNode{}
 			require.NoError(t, proto.Unmarshal(captured.GetSerializedExprPlan(), parsed))
@@ -160,7 +187,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			} else {
 				require.Zero(t, runner.Result().GetDeleteCnt())
 			}
-			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" {
+			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" || scenario == "zero_hits" || scenario == "missing_usage" {
 				require.Zero(t, limitCalls)
 			}
 			if scenario != "int64" && scenario != "varchar" && scenario != "enqueue_error" && scenario != "write_error" {
@@ -276,4 +303,24 @@ func TestComplexDeleteRetryRejectsReplacementCollection(t *testing.T) {
 
 	require.ErrorIs(t, runner.complexDeleteByQueryView(t.Context()), merr.ErrCollectionNotFound)
 	require.EqualValues(t, 10, runner.collectionID)
+}
+
+func TestComplexDeleteStreamUsageFrame(t *testing.T) {
+	runner := &DeleteRunner{}
+	runner.EnableQueryReadUsage()
+	client := streamrpc.NewLocalQueryClient(t.Context())
+	server := client.CreateServer()
+	require.NoError(t, server.Send(&internalpb.RetrieveResults{
+		CostAggregation: &internalpb.CostAggregation{QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: 42}},
+	}))
+	require.NoError(t, server.FinishSend(nil))
+	// A usage frame contains no IDs and must never create a delete task.
+	require.NoError(t, runner.receiveQueryResult(t.Context(), client, nil))
+	bytes, present := runner.QueryReadBytes()
+	require.True(t, present)
+	require.EqualValues(t, 42, bytes)
+
+	client = streamrpc.NewLocalQueryClient(t.Context())
+	require.NoError(t, client.CreateServer().FinishSend(nil))
+	require.ErrorContains(t, runner.receiveQueryResult(t.Context(), client, nil), "did not report read usage")
 }

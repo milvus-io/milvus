@@ -17,12 +17,46 @@
 package querymeter
 
 import (
+	"maps"
 	"math"
 	"math/bits"
+	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// ReadUsageAccumulator combines completed query stages in an outer mutation.
+type ReadUsageAccumulator struct {
+	mu    sync.Mutex
+	total *internalpb.QueryReadUsage
+	bytes int64
+	seen  bool
+}
+
+func (a *ReadUsageAccumulator) Add(part *internalpb.QueryReadUsage) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	total := &internalpb.QueryReadUsage{
+		DataBytes:    a.total.GetDataBytes(),
+		ValidityBits: maps.Clone(a.total.GetValidityBits()),
+	}
+	if err := AddReadUsage(total, part); err != nil {
+		return err
+	}
+	bytes, err := BillableBytes(total, 0)
+	if err != nil {
+		return err
+	}
+	a.total, a.bytes, a.seen = total, bytes, true
+	return nil
+}
+
+func (a *ReadUsageAccumulator) Bytes() (int64, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bytes, a.seen
+}
 
 // AddColumn records an entire planned column. Keep the validity positions
 // unrounded until the request is combined so segment boundaries do not change

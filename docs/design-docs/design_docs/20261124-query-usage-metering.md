@@ -27,3 +27,7 @@ Proxy adds successful read stages, including internal primary-key lookups and re
 ## HybridSearch
 
 Each sub-search follows the Search column rules using its own effective NQ. Workers sum these contributions. A sub-search skipped during planning contributes zero. Proxy adds successful shared requery reads and the logical values in the final fused response, then reports one `bytes` value for the successful HybridSearch RPC. The legacy advanced Search entry uses the same accounting and retains its Search operation name.
+
+## Delete by filter
+
+The internal lookup counts the planned predicate columns for every selected segment, including when no rows match. A primary-key delete that can build its mutation directly has no query read. A successful Delete reports the lookup bytes together with its existing write inputs under `msg_type=delete` on `milvus_proxy_report_value`. Internal lookup rows do not go to the client and contribute no returned-value bytes.

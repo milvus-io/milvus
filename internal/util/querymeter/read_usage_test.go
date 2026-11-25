@@ -39,3 +39,14 @@ func TestBillableBytes(t *testing.T) {
 	_, err = BillableBytes(&internalpb.QueryReadUsage{DataBytes: math.MaxInt64}, 1)
 	require.Error(t, err)
 }
+
+func TestReadUsageAccumulatorRejectsIncompleteContribution(t *testing.T) {
+	var usage ReadUsageAccumulator
+	require.NoError(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: 2, ValidityBits: map[int64]uint64{100: 4}}))
+	require.Error(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: math.MaxInt64}))
+	require.Error(t, usage.Add(nil))
+	require.NoError(t, usage.Add(&internalpb.QueryReadUsage{DataBytes: 3, ValidityBits: map[int64]uint64{100: 4}}))
+	size, present := usage.Bytes()
+	require.True(t, present)
+	require.EqualValues(t, 6, size)
+}

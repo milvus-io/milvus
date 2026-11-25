@@ -2451,6 +2451,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 	dr.SetViewQueryClient(node.viewQueryClient)
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil {
+		dr.EnableQueryReadUsage()
+	}
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2479,16 +2483,15 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
-		hookutil.DatabaseKey:   dbName,
-		hookutil.UsernameKey:   username,
-		hookutil.SuccessCntKey: successCnt,
-		hookutil.RelatedCntKey: dr.AllQueryCnt(),
-	})
-	SetReportValue(dr.Result().GetStatus(), v)
+	report := map[string]any{hookutil.SuccessCntKey: successCnt}
+	if readBytes, metered := dr.QueryReadBytes(); metered {
+		report[hookutil.BytesKey] = readBytes
+	} else {
+		usageReporter = nil
+		report[hookutil.RelatedCntKey] = dr.AllQueryCnt()
+	}
+	reportMutationUsage(ctx, dr.Result().GetStatus(), usageReporter, hookutil.OpTypeDelete, dbName, report)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedRemoteBytes()) / 1024 / 1024)
@@ -2499,10 +2502,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		ScannedRemoteBytes: dr.ScannedRemoteBytes(),
 		ScannedTotalBytes:  dr.ScannedTotalBytes(),
 	})
-
-	if merr.Ok(dr.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
-	}
 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).

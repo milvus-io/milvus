@@ -1129,6 +1129,42 @@ func (s *DelegatorSuite) TestQueryStream() {
 	paramtable.SetNodeID(1)
 	s.initSegments()
 
+	s.Run("metered", func() {
+		defer func() { s.workerManager.ExpectedCalls = nil }()
+		var omitUsage bool
+		worker := &cluster.MockWorker{}
+		worker.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
+			RunAndReturn(func(_ context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
+				s.True(req.GetReq().GetCollectQueryReadUsage())
+				if omitUsage && req.GetReq().GetBase().GetTargetID() == 2 {
+					return nil
+				}
+				return srv.Send(&internalpb.RetrieveResults{
+					CostAggregation: &internalpb.CostAggregation{
+						QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: uint64(10 * len(req.GetSegmentIDs()))},
+					},
+				})
+			})
+		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker, nil)
+		req := &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase(), CollectQueryReadUsage: true},
+			DmlChannels: []string{s.vchannelName},
+		}
+		client := streamrpc.NewLocalQueryClient(s.T().Context())
+		server := client.CreateServer()
+		s.Require().NoError(s.delegator.QueryStream(s.T().Context(), req, server))
+		s.Require().NoError(server.FinishSend(nil))
+		result, err := client.Recv()
+		s.Require().NoError(err)
+		s.EqualValues(50, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+		_, err = client.Recv()
+		s.ErrorIs(err, io.EOF)
+
+		omitUsage = true
+		client = streamrpc.NewLocalQueryClient(s.T().Context())
+		s.Require().ErrorContains(s.delegator.QueryStream(s.T().Context(), req, client.CreateServer()), "did not report read usage")
+	})
+
 	s.Run("normal", func() {
 		defer func() {
 			s.workerManager.AssertExpectations(s.T())

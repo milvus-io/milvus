@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -306,6 +307,7 @@ type DeleteRunner struct {
 	lb              shardclient.LBPolicy
 	count           atomic.Int64
 	viewQueryClient queryclient.Client
+	queryUsage      *querymeter.ReadUsageAccumulator
 
 	// task queue
 	queue *scheduler.DmTaskQueue
@@ -336,6 +338,18 @@ func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, m
 // SetViewQueryClient selects the QueryView execution path for complex deletes.
 func (dr *DeleteRunner) SetViewQueryClient(client queryclient.Client) {
 	dr.viewQueryClient = client
+}
+
+// EnableQueryReadUsage opts this request into planned query metering.
+func (dr *DeleteRunner) EnableQueryReadUsage() {
+	dr.queryUsage = &querymeter.ReadUsageAccumulator{}
+}
+
+func (dr *DeleteRunner) QueryReadBytes() (int64, bool) {
+	if dr.queryUsage == nil {
+		return 0, false
+	}
+	return dr.queryUsage.Bytes()
 }
 
 // Result returns the mutation result after execution.
@@ -587,16 +601,17 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					commonpbutil.WithTargetID(nodeID),
 				),
-				MvccTimestamp:      dr.ts,
-				ReqID:              paramtable.GetNodeID(),
-				DbID:               0, // TODO
-				CollectionID:       dr.collectionID,
-				SchemaVersion:      dr.schema.GetVersion(),
-				PartitionIDs:       dr.partitionIDs,
-				SerializedExprPlan: serializedPlan,
-				OutputFieldsId:     outputFieldIDs,
-				GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
-				QueryLabel:         metrics.DeleteQueryLabel,
+				MvccTimestamp:         dr.ts,
+				ReqID:                 paramtable.GetNodeID(),
+				DbID:                  0, // TODO
+				CollectionID:          dr.collectionID,
+				SchemaVersion:         dr.schema.GetVersion(),
+				PartitionIDs:          dr.partitionIDs,
+				SerializedExprPlan:    serializedPlan,
+				OutputFieldsId:        outputFieldIDs,
+				GuaranteeTimestamp:    dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				QueryLabel:            metrics.DeleteQueryLabel,
+				CollectQueryReadUsage: dr.queryUsage != nil,
 			},
 			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,
@@ -625,6 +640,10 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 		for task := range taskCh {
 			err := task.WaitToFinish()
 			if err != nil {
+				cancel()
+				// Join the reader before another shard attempt can start.
+				for range taskCh {
+				}
 				return err
 			}
 			dr.count.Add(task.count)
@@ -657,11 +676,15 @@ func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		msgPartitionID = dr.partitionIDs[0]
 	}
 
+	var usage *internalpb.QueryReadUsage
 	for {
 		result, err := client.Recv()
 		if err != nil {
 			if err == io.EOF {
 				mlog.Debug(ctx, "query stream for delete finished", mlog.Int64("msgID", dr.msgID))
+				if dr.queryUsage != nil {
+					return dr.queryUsage.Add(usage)
+				}
 				return nil
 			}
 			return err
@@ -671,6 +694,14 @@ func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		if err != nil {
 			mlog.Warn(ctx, "query stream for delete get error status", mlog.Int64("msgID", dr.msgID), mlog.Err(err))
 			return err
+		}
+
+		if readUsage := result.GetCostAggregation().GetQueryReadUsage(); dr.queryUsage != nil && readUsage != nil {
+			if usage != nil {
+				return merr.WrapErrServiceInternalMsg("query shard reported stream read usage more than once")
+			}
+			usage = readUsage
+			continue
 		}
 
 		if dr.limiter != nil {
@@ -692,7 +723,11 @@ func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 			ScannedTotalBytes:  result.GetScannedTotalBytes(),
 		}
 
-		taskCh <- task
+		select {
+		case taskCh <- task:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -781,17 +816,18 @@ func (dr *DeleteRunner) queryByView(ctx context.Context) (*queryclient.LegacyQue
 				commonpbutil.WithMsgID(dr.msgID),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			ReqID:              paramtable.GetNodeID(),
-			DbID:               dr.dbID,
-			CollectionID:       dr.collectionID,
-			PartitionIDs:       dr.partitionIDs,
-			SchemaVersion:      dr.schema.GetVersion(),
-			SerializedExprPlan: serializedPlan,
-			OutputFieldsId:     dr.plan.GetOutputFieldIds(),
-			ConsistencyLevel:   dr.req.GetConsistencyLevel(),
-			GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
-			Limit:              typeutil.Unlimited,
-			QueryLabel:         metrics.DeleteQueryLabel,
+			ReqID:                 paramtable.GetNodeID(),
+			DbID:                  dr.dbID,
+			CollectionID:          dr.collectionID,
+			PartitionIDs:          dr.partitionIDs,
+			SchemaVersion:         dr.schema.GetVersion(),
+			SerializedExprPlan:    serializedPlan,
+			OutputFieldsId:        dr.plan.GetOutputFieldIds(),
+			ConsistencyLevel:      dr.req.GetConsistencyLevel(),
+			GuaranteeTimestamp:    dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+			Limit:                 typeutil.Unlimited,
+			QueryLabel:            metrics.DeleteQueryLabel,
+			CollectQueryReadUsage: dr.queryUsage != nil,
 		},
 	})
 	if err != nil {
@@ -828,9 +864,18 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context) error {
 
 	primaryKeys := &schemapb.IDs{}
 	seen := typeutil.NewSet[any]()
+	var usage *internalpb.QueryReadUsage
+	if dr.queryUsage != nil {
+		usage = &internalpb.QueryReadUsage{}
+	}
 	for _, batch := range result.Results {
 		if batch.GetHasMoreResult() {
 			return merr.WrapErrServiceInternalMsg("incomplete QueryView batch for complex delete")
+		}
+		if usage != nil {
+			if err := querymeter.AddReadUsage(usage, batch.GetCostAggregation().GetQueryReadUsage()); err != nil {
+				return err
+			}
 		}
 		dr.allQueryCnt.Add(batch.GetAllRetrieveCount())
 		dr.scannedRemoteBytes.Add(batch.GetScannedRemoteBytes())
@@ -841,6 +886,11 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context) error {
 				seen.Insert(pk)
 				typeutil.AppendID(primaryKeys, pk)
 			}
+		}
+	}
+	if usage != nil {
+		if err := dr.queryUsage.Add(usage); err != nil {
+			return err
 		}
 	}
 	if seen.Len() == 0 {

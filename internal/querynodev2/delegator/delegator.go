@@ -864,23 +864,67 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return err
 	}
 
-	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		// ClientBase only retries stream creation; it never replays received data.
 		ctx = workerReadContext(ctx)
-		err := worker.QueryStreamSegments(ctx, req, srv)
+		workerStream := srv
+		var metered *queryReadUsageStream
+		if req.GetReq().GetCollectQueryReadUsage() {
+			metered = &queryReadUsageStream{QueryStreamServer: srv}
+			workerStream = metered
+		}
+		err := worker.QueryStreamSegments(ctx, req, workerStream)
 		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
-		return nil, err
+		if err != nil || metered == nil {
+			return nil, err
+		}
+		return &internalpb.RetrieveResults{
+			CostAggregation: &internalpb.CostAggregation{QueryReadUsage: metered.usage},
+		}, nil
 	}, "QueryStream", log)
 	if err != nil {
 		mlog.Warn(ctx, "Delegator query stream failed", mlog.Err(err))
 		return err
 	}
 
+	if req.GetReq().GetCollectQueryReadUsage() {
+		usage := &internalpb.QueryReadUsage{}
+		for _, result := range results {
+			if err := querymeter.AddReadUsage(usage, result.GetCostAggregation().GetQueryReadUsage()); err != nil {
+				return err
+			}
+		}
+		if err := srv.Send(&internalpb.RetrieveResults{
+			Status:          merr.Success(),
+			CostAggregation: &internalpb.CostAggregation{QueryReadUsage: usage},
+		}); err != nil {
+			return err
+		}
+	}
+
 	mlog.Info(ctx, "Delegator QueryStream done")
 
 	return nil
+}
+
+// queryReadUsageStream forwards row batches and retains one worker's terminal
+// usage so the delegator can validate that all selected workers contributed.
+type queryReadUsageStream struct {
+	streamrpc.QueryStreamServer
+	usage *internalpb.QueryReadUsage
+}
+
+func (s *queryReadUsageStream) Send(result *internalpb.RetrieveResults) error {
+	if usage := result.GetCostAggregation().GetQueryReadUsage(); usage != nil {
+		if s.usage != nil {
+			return merr.WrapErrServiceInternalMsg("query worker reported stream read usage more than once")
+		}
+		s.usage = usage
+		return nil
+	}
+	return s.QueryStreamServer.Send(result)
 }
 
 // withQuerySubTasks runs Query's steps up to the sub-task split, then run on

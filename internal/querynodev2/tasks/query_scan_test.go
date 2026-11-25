@@ -18,6 +18,7 @@ package tasks
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -130,6 +132,37 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		t.Fatal("text output field is missing")
 	}
 	if !enableScan {
+		t.Run("metered_legacy_stream_with_no_matching_rows", func(t *testing.T) {
+			predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				Op:         planpb.OpType_GreaterThan,
+				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 500}},
+			}}}
+			plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{
+				Predicates: predicate, Limit: typeutil.Unlimited,
+			}}, OutputFieldIds: []int64{100, 1}}
+			encoded, err := proto.Marshal(plan)
+			require.NoError(t, err)
+			req := &querypb.QueryRequest{
+				Req: &internalpb.RetrieveRequest{
+					Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10},
+					SerializedExprPlan: encoded, MvccTimestamp: typeutil.MaxTimestamp, Limit: typeutil.Unlimited,
+					OutputFieldsId: plan.GetOutputFieldIds(), CollectQueryReadUsage: true,
+				},
+				SegmentIDs: []int64{100, 101}, Scope: querypb.DataScope_Streaming,
+			}
+			client := streamrpc.NewLocalQueryClient(t.Context())
+			server := client.CreateServer()
+			task := NewQueryStreamTask(t.Context(), collection, manager, req, server, 1024, 4096)
+			require.NoError(t, task.Execute())
+			require.NoError(t, server.FinishSend(nil))
+			result, err := client.Recv()
+			require.NoError(t, err)
+			require.Nil(t, result.GetIds())
+			require.EqualValues(t, 48, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
+			_, err = client.Recv()
+			require.ErrorIs(t, err, io.EOF)
+		})
 		for _, arrowPath := range []string{"false", "true"} {
 			t.Run("transport_arrow="+arrowPath, func(t *testing.T) {
 				item := &paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled

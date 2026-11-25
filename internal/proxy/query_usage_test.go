@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -38,11 +40,12 @@ import (
 type queryUsageReporter struct {
 	hookutil.DefaultExtension
 	reports []any
+	value   int
 }
 
 func (r *queryUsageReporter) Report(report any) int {
 	r.reports = append(r.reports, report)
-	return 0
+	return r.value
 }
 
 func TestQueryReportsOneUsageValue(t *testing.T) {
@@ -206,4 +209,29 @@ func TestHybridSearchReportsOneUsageValue(t *testing.T) {
 		require.False(t, merr.Ok(response.GetStatus()))
 		require.Len(t, reporter.reports, 1)
 	})
+}
+
+func TestDeleteReportsReadUsageOnMutationMetric(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	db := t.Name()
+	reporter := &queryUsageReporter{value: 7}
+	counter := metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeDelete, db, GetCurUserFromContextOrDefault(ctx))
+	before := testutil.ToFloat64(counter)
+	newReport := func() map[string]any {
+		return map[string]any{hookutil.SuccessCntKey: int64(0), hookutil.BytesKey: int64(61)}
+	}
+	reportMutationUsage(ctx, merr.Success(), reporter, hookutil.OpTypeDelete, db, newReport())
+	require.Len(t, reporter.reports, 1)
+	report := reporter.reports[0].(map[string]any)
+	require.Equal(t, hookutil.OpTypeDelete, report[hookutil.OpTypeKey])
+	require.EqualValues(t, 61, report[hookutil.BytesKey])
+	require.Equal(t, before+7, testutil.ToFloat64(counter))
+
+	reportMutationUsage(ctx, merr.Status(merr.ErrServiceUnavailable), reporter, hookutil.OpTypeDelete, db, newReport())
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	reportMutationUsage(canceled, merr.Success(), reporter, hookutil.OpTypeDelete, db, newReport())
+	require.Len(t, reporter.reports, 1)
+	require.Equal(t, before+7, testutil.ToFloat64(counter))
 }
