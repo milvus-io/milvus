@@ -54,6 +54,7 @@ type RestfulInfo struct {
 
 	// runtime set info
 	actualConsistencyLevel atomic.Pointer[commonpb.ConsistencyLevel]
+	coldSearchInfo
 }
 
 func NewRestfulInfo(ctx *gin.Context) *RestfulInfo {

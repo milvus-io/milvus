@@ -40,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -250,6 +252,64 @@ func newRESTV1ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Eng
 	})
 	h.RegisterRoutesToV1(app)
 	return ginHandler
+}
+
+func TestRESTV1ColdSearchAccessLog(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for _, key := range []string{params.CommonCfg.AuthorizationEnabled.Key, params.QuotaConfig.QuotaAndLimitsEnabled.Key} {
+		require.NoError(t, params.Save(key, "false"))
+		t.Cleanup(func() { params.Reset(key) })
+	}
+	accesslog.InitAccessLogger(params)
+	formatters := params.ProxyCfg.AccessLog.Formatter.GetValue()
+
+	for _, tc := range []struct {
+		request   *http.Request
+		formatter string
+	}{
+		{genQueryRequest(), "query"},
+		{genGetRequest(), "query"},
+		{httptest.NewRequest(http.MethodPost, versional(VectorSearchPath),
+			strings.NewReader(`{"collectionName":"book","vector":[0.1,0.2]}`)), "search"},
+	} {
+		path := tc.request.URL.Path
+		t.Run(path, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			if path == versional(VectorGetPath) {
+				mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&DefaultDescCollectionResp, nil).Once()
+			}
+			if tc.formatter == "search" {
+				mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, _ *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+					accesslog.SetColdSearch(ctx, true)
+					return &milvuspb.SearchResults{Status: &StatusSuccess, Results: &schemapb.SearchResultData{}}, nil
+				}).Once()
+			} else {
+				mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, _ *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+					accesslog.SetColdSearch(ctx, true)
+					return &milvuspb.QueryResults{Status: &StatusSuccess}, nil
+				}).Once()
+			}
+
+			var accessInfo info.AccessInfo
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(ContextUsername, "")
+				c.Next()
+				value, _ := c.Get(accesslog.ContextLogKey)
+				accessInfo = value.(info.AccessInfo)
+			}, accesslog.AccessLogMiddleware)
+			NewHandlersV1(mp).RegisterRoutesToV1(router.Group(URIPrefixV1))
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, tc.request)
+
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Equal(t, path, accessInfo.MethodNameForFormatter())
+			require.Contains(t, paramtable.ParseAsStings(formatters[tc.formatter+".methods"]), path)
+			formatter := accesslog.NewFormatter(formatters[tc.formatter+".format"])
+			require.Contains(t, formatter.Format(accessInfo), "[is_cold_search: true]")
+		})
+	}
 }
 
 // TestRESTV1AliasRBAC guards the alias-resolution wiring of the REST v1

@@ -40,9 +40,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -80,34 +83,61 @@ func enableAutoReleaseForTest(t *testing.T, scanRoles ...replicateutil.Role) {
 
 func newUsageTestManager(t *testing.T) (*Server, *collectionUsageManager, *mockey.Mocker) {
 	t.Helper()
-	s, _, _ := newReadinessTestServer(t, testPersistedQueryView(100, qviews.ShardID{
+	view := testPersistedQueryView(100, qviews.ShardID{
 		ReplicaID: 1000,
 		VChannel:  usageTestVChannel,
-	}))
-	manager := s.collectionUsage
-	return s, manager, mockAutoRelease(t, manager)
+	})
+	s, _, _ := newReadinessTestServer(t, view)
+	store := s.qviewsRuntime.loadConfigStore
+	cfg := store.GetConfig(100).Clone()
+	cfg.AutoLoad = true
+	require.NoError(t, store.Put(t.Context(), cfg))
+	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100, VChannelNames: []string{usageTestVChannel}})
+	manager, releaseMock := setupUsageTestManager(t, s, view)
+	return s, manager, releaseMock
 }
 
-func mockAutoRelease(t *testing.T, manager *collectionUsageManager) *mockey.Mocker {
+type usageDataViews []*viewpb.QueryViewOfShard
+
+func (views usageDataViews) RegisterDataViewListener(listener api.DataViewListener) func() {
+	collections := make(map[int64][]*api.ShardDataView)
+	for _, view := range views {
+		meta := view.GetMeta()
+		collections[meta.GetCollectionId()] = append(collections[meta.GetCollectionId()], &api.ShardDataView{VChannel: meta.GetVchannel()})
+	}
+	for id, shards := range collections {
+		listener(id, &api.CollectionDataView{Shards: shards})
+	}
+	return func() {}
+}
+
+func setupUsageTestManager(t *testing.T, s *Server, views ...*viewpb.QueryViewOfShard) (*collectionUsageManager, *mockey.Mocker) {
 	t.Helper()
+	runtime := s.qviewsRuntime
+	runtime.viewFeedback = viewfeedback.New(runtime.loadConfigStore, usageDataViews(views))
+	t.Cleanup(runtime.viewFeedback.Close)
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	s.broker = broker
+	manager := newCollectionUsageManager(s)
 	releaseMock := mockey.Mock((*collectionUsageManager).autoReleaseCollection).Return(nil).Build()
 	t.Cleanup(func() {
 		manager.close()
 		releaseMock.UnPatch()
 	})
-	return releaseMock
+	return manager, releaseMock
 }
 
-func activityTime(manager *collectionUsageManager, collectionID int64) (time.Time, bool) {
+func activityUnixNanos(manager *collectionUsageManager, collectionID int64) (int64, bool) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	lastActiveAt, exists := manager.lastActiveAt[collectionID]
-	return lastActiveAt, exists
+	lastActiveUnixNanos, exists := manager.lastActiveUnixNanos[collectionID]
+	return lastActiveUnixNanos, exists
 }
 
 func setActivityTime(manager *collectionUsageManager, collectionID int64, at time.Time) {
 	manager.mu.Lock()
-	manager.lastActiveAt[collectionID] = at
+	manager.lastActiveUnixNanos[collectionID] = at.UnixNano()
 	manager.mu.Unlock()
 }
 
@@ -156,6 +186,7 @@ func newLRUUsageManager(t *testing.T, count int, scanRoles ...replicateutil.Role
 		replicaID := id * 10
 		require.NoError(t, store.Put(ctx, &loadmgr.LoadConfig{
 			CollectionID: id,
+			AutoLoad:     true,
 			Replicas:     []*loadmgr.ReplicaAssignment{{ReplicaID: replicaID, ResourceGroup: "pool"}},
 		}))
 		views = append(views, testPersistedQueryView(id, qviews.ShardID{ReplicaID: replicaID, VChannel: channel}))
@@ -163,17 +194,13 @@ func newLRUUsageManager(t *testing.T, count int, scanRoles ...replicateutil.Role
 	}
 	s, _ := newReadinessTestServerWithStore(t, store, views...)
 	s.meta = newViewMeta(collections...)
-	manager := s.collectionUsage
-	releaseMock := mockAutoRelease(t, manager)
+	memoryMock := mockey.Mock((*collectionUsageManager).collectMemoryUsageByRG).
+		Return(map[string]collectionMemoryUsage{"pool": {used: 90, total: 100}}).Build()
+	t.Cleanup(func() { memoryMock.UnPatch() })
+	manager, releaseMock := setupUsageTestManager(t, s, views...)
 	for i := 0; i < count; i++ {
 		setActivityTime(manager, int64(100+i), time.Now().Add(-time.Duration(count-i)*time.Second))
 	}
-	memoryMock := mockey.Mock((*collectionUsageManager).collectMemoryUsageByRG).
-		Return(map[string]collectionMemoryUsage{"pool": {used: 90, total: 100}}).Build()
-	t.Cleanup(func() {
-		manager.close()
-		memoryMock.UnPatch()
-	})
 	released := make(chan int64, count*2)
 	releaseMock.To(func(_ *collectionUsageManager, _ context.Context, id int64, _ collectionReleaseReason) error {
 		manager.s.qviewsRuntime.loadConfigStore.StopPlanning(id)
@@ -209,34 +236,27 @@ func TestCollectionUsageSkipsScanWhenRoleUnavailable(t *testing.T) {
 	require.Equal(t, 1, getBalancer.Times())
 }
 
-func TestCollectionUsageRefreshesOnEveryDQLAttempt(t *testing.T) {
+func reportCollectionAccess(manager *collectionUsageManager, replicaID int64, channel string, at time.Time) {
+	id := qviews.ShardID{ReplicaID: replicaID, VChannel: channel}
+	manager.s.qviewsRuntime.viewFeedback.OnViewFeedback(qviews.ViewFeedbackWindow{
+		StartUnixNanos: at.Add(-time.Second).UnixNano(),
+		EndUnixNanos:   at.Add(time.Second).UnixNano(),
+		Shards: map[qviews.ShardID]qviews.ViewFeedback{
+			id: {ShardID: id, RequestCount: 1, LastAccessUnixNanos: at.UnixNano()},
+		},
+	})
+}
+
+func TestCollectionUsageExpiresOnFirstScanWithOldFeedback(t *testing.T) {
 	enableAutoReleaseForTest(t)
-	s, manager, releaseMock := newUsageTestManager(t)
-	manager.scan(context.Background())
-	_, exists := activityTime(manager, 100)
+	_, manager, releaseMock := newUsageTestManager(t)
+	now := time.Now()
+	reportCollectionAccess(manager, 1000, usageTestVChannel, now.Add(-20*time.Second))
+	manager.scan(t.Context())
+	lastActiveUnixNanos, exists := activityUnixNanos(manager, 100)
 	require.True(t, exists)
-
-	// No request ID or Proxy identity is needed. Repeated attempts and requests
-	// from different Proxies all refresh the same collection timestamp.
-	req := readinessRequest(usageTestVChannel)
-	for i := 0; i < 3; i++ {
-		before := time.Now()
-		status, err := s.EnsureCollectionReady(context.Background(), req)
-		require.NoError(t, merr.CheckRPCCall(status, err))
-		lastActiveAt, _ := activityTime(manager, 100)
-		require.False(t, lastActiveAt.Before(before))
-		manager.scan(context.Background())
-		require.Zero(t, releaseMock.Times())
-	}
-
-	// There is no end notification. A query which is still running after TTI
-	// does not prevent release and must use the existing DQL retry path.
-	setActivityTime(manager, 100, time.Now().Add(-9*time.Second))
-	manager.scan(context.Background())
-	require.Zero(t, releaseMock.Times())
-	setActivityTime(manager, 100, time.Now().Add(-10*time.Second))
-	manager.scan(context.Background())
-	require.Equal(t, 1, releaseMock.Times())
+	require.Equal(t, now.Add(-20*time.Second).UnixNano(), lastActiveUnixNanos)
+	require.Equal(t, 1, releaseMock.Times(), "expired feedback makes the collection eligible on its first scan")
 }
 
 func TestCollectionUsageHotEnableAndScanInterval(t *testing.T) {
@@ -255,7 +275,7 @@ func TestCollectionUsageHotEnableAndScanInterval(t *testing.T) {
 	_, manager, _ := newUsageTestManager(t)
 	manager.start(context.Background())
 	manager.scan(context.Background())
-	_, exists := activityTime(manager, 100)
+	_, exists := activityUnixNanos(manager, 100)
 	require.False(t, exists, "startup disabled must not initialize activity")
 
 	// Save follows the same cache-invalidation and event-dispatch order as
@@ -265,7 +285,7 @@ func TestCollectionUsageHotEnableAndScanInterval(t *testing.T) {
 	require.Equal(t, time.Minute, params.QueryCoordCfg.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	require.NoError(t, params.Save(intervalKey, "1"))
 	require.Eventually(t, func() bool {
-		_, exists := activityTime(manager, 100)
+		_, exists := activityUnixNanos(manager, 100)
 		return exists
 	}, 5*time.Second, 10*time.Millisecond, "the new interval must replace the 60-second startup timer")
 
@@ -273,7 +293,7 @@ func TestCollectionUsageHotEnableAndScanInterval(t *testing.T) {
 	require.NoError(t, params.Save(enabledKey, "false"))
 	require.NoError(t, params.Save(enabledKey, "true"))
 	require.Never(t, func() bool {
-		_, exists := activityTime(manager, 100)
+		_, exists := activityUnixNanos(manager, 100)
 		return exists
 	}, 1500*time.Millisecond, 10*time.Millisecond, "increasing the interval must also reset the timer")
 	manager.close()
@@ -294,32 +314,29 @@ func TestCollectionUsageFeatureGatesClearActivityAndRestartTTI(t *testing.T) {
 		t.Run(gate.name, func(t *testing.T) {
 			enableAutoReleaseForTest(t)
 			require.NoError(t, params.Save(gate.key, "false"))
-			s, manager, releaseMock := newUsageTestManager(t)
+			_, manager, releaseMock := newUsageTestManager(t)
 			manager.scan(context.Background())
-			_, exists := activityTime(manager, 100)
+			_, exists := activityUnixNanos(manager, 100)
 			require.False(t, exists)
 
 			require.NoError(t, params.Save(gate.key, "true"))
 			manager.scan(context.Background())
-			_, exists = activityTime(manager, 100)
+			_, exists = activityUnixNanos(manager, 100)
 			require.True(t, exists)
 			setActivityTime(manager, 100, time.Now().Add(-10*time.Second))
 
 			require.NoError(t, params.Save(gate.key, "false"))
-			_, exists = activityTime(manager, 100)
+			_, exists = activityUnixNanos(manager, 100)
 			require.False(t, exists)
-			status, err := s.EnsureCollectionReady(context.Background(), readinessRequest(usageTestVChannel))
-			require.NoError(t, merr.CheckRPCCall(status, err))
-			_, exists = activityTime(manager, 100)
-			require.False(t, exists, "disabled DQL must not recreate activity")
 			manager.scan(context.Background())
 			require.Zero(t, releaseMock.Times())
 
 			require.NoError(t, params.Save(gate.key, "true"))
 			manager.scan(context.Background())
-			lastActiveAt, exists := activityTime(manager, 100)
+			lastActiveUnixNanos, exists := activityUnixNanos(manager, 100)
 			require.True(t, exists)
-			require.WithinDuration(t, time.Now(), lastActiveAt, time.Second)
+			require.GreaterOrEqual(t, lastActiveUnixNanos, time.Now().Add(-time.Second).UnixNano())
+			require.LessOrEqual(t, lastActiveUnixNanos, time.Now().UnixNano())
 			require.Zero(t, releaseMock.Times())
 		})
 	}
@@ -339,40 +356,29 @@ func TestCollectionUsageHotTTIAppliesToScan(t *testing.T) {
 	require.NoError(t, params.Save(key, "5"))
 	manager.scan(context.Background())
 	require.Equal(t, 1, releaseMock.Times(), "shortening TTI must use the existing timestamp")
-	lastActiveAt, _ := activityTime(manager, 100)
-	require.Equal(t, initial, lastActiveAt, "changing TTI must not reset activity")
+	lastActiveUnixNanos, _ := activityUnixNanos(manager, 100)
+	require.Equal(t, initial.UnixNano(), lastActiveUnixNanos, "changing TTI must not reset activity")
 }
 
 func TestCollectionUsageUsesDifferentCollectionTTIs(t *testing.T) {
-	enableAutoReleaseForTest(t)
-	s, manager, releaseMock := newUsageTestManager(t)
-	for _, id := range []int64{200, 300, 400} {
-		cfg := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
-		cfg.CollectionID = id
-		cfg.Replicas[0].ReplicaID = id * 10
-		require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), cfg))
-	}
+	manager, released, _, memoryMock := newLRUUsageManager(t, 4)
+	memoryMock.Return(nil)
+	setUsageParameter(t, &paramtable.Get().QueryCoordCfg.AutoReleaseTTISeconds, "10")
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
-		values := map[int64]string{100: "20", 200: "5", 300: "-1"}
+		values := map[int64]string{100: "20", 101: "5", 102: "-1"}
 		if value, ok := values[id]; ok {
 			return []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: value}}, nil
 		}
 		return nil, nil
 	})
 	manager.s.broker = broker
-	manager.scan(context.Background())
-	for _, id := range []int64{100, 200, 300, 400} {
+	for id := int64(100); id <= 103; id++ {
 		setActivityTime(manager, id, time.Now().Add(-11*time.Second))
 	}
-	released := make(chan int64, 4)
-	releaseMock.To(func(_ *collectionUsageManager, _ context.Context, id int64, _ collectionReleaseReason) error {
-		released <- id
-		return nil
-	})
 	manager.scan(context.Background())
 	require.Len(t, released, 2)
-	require.ElementsMatch(t, []int64{200, 400}, []int64{<-released, <-released})
+	require.ElementsMatch(t, []int64{101, 103}, []int64{<-released, <-released})
 }
 
 func TestCollectionUsageDynamicCollectionTTI(t *testing.T) {
@@ -401,17 +407,18 @@ func TestCollectionUsageDynamicCollectionTTI(t *testing.T) {
 		} else {
 			require.Equal(t, before, releaseMock.Times())
 		}
-		lastActiveAt, _ := activityTime(manager, 100)
-		require.Equal(t, initial, lastActiveAt, "changing or deleting a property must not reset activity")
+		lastActiveUnixNanos, _ := activityUnixNanos(manager, 100)
+		require.Equal(t, initial.UnixNano(), lastActiveUnixNanos, "changing or deleting a property must not reset activity")
 		require.Equal(t, configVersion, s.qviewsRuntime.loadConfigStore.GetConfigVersion(100))
 	}
 	properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "-1"}}
-	manager.touch(100)
-	lastActiveAt, _ := activityTime(manager, 100)
-	require.True(t, lastActiveAt.After(initial), "DQL must still refresh activity while auto release is disabled for this collection")
+	reportCollectionAccess(manager, 1000, usageTestVChannel, time.Now())
+	manager.scan(t.Context())
+	lastActiveUnixNanos, _ := activityUnixNanos(manager, 100)
+	require.Greater(t, lastActiveUnixNanos, initial.UnixNano(), "SN feedback must still refresh activity while auto release is disabled for this collection")
 	properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseTTIKey, Value: "5"}}
 	manager.scan(context.Background())
-	require.Equal(t, 1, releaseMock.Times(), "enabling auto release must respect the latest DQL activity")
+	require.Equal(t, 1, releaseMock.Times(), "enabling auto release must respect the latest reported activity")
 }
 
 func TestCollectionUsageInvalidTTIFallsBackToGlobalTTI(t *testing.T) {
@@ -434,8 +441,8 @@ func TestCollectionUsageInvalidTTIFallsBackToGlobalTTI(t *testing.T) {
 			setActivityTime(manager, 100, initial)
 			manager.scan(context.Background())
 			require.Equal(t, 1, releaseMock.Times(), "invalid TTI must allow release after the global idle TTI")
-			lastActiveAt, _ := activityTime(manager, 100)
-			require.Equal(t, initial, lastActiveAt, "falling back to the global TTI must not reset activity")
+			lastActiveUnixNanos, _ := activityUnixNanos(manager, 100)
+			require.Equal(t, initial.UnixNano(), lastActiveUnixNanos, "falling back to the global TTI must not reset activity")
 		})
 	}
 }
@@ -460,8 +467,8 @@ func TestCollectionUsageSkipsUnavailableMetadata(t *testing.T) {
 			manager.s.broker = broker
 			manager.scan(context.Background())
 			require.Zero(t, releaseMock.Times(), "a failed lookup must not fall back to the global TTI and release")
-			lastActiveAt, _ := activityTime(manager, 100)
-			require.Equal(t, initial, lastActiveAt)
+			lastActiveUnixNanos, _ := activityUnixNanos(manager, 100)
+			require.Equal(t, initial.UnixNano(), lastActiveUnixNanos)
 		})
 	}
 }
@@ -481,142 +488,158 @@ func TestCollectionUsageReadsLoadedPropertiesOnEveryScan(t *testing.T) {
 	require.Zero(t, releaseMock.Times())
 }
 
-func TestCollectionUsageEnsureRefreshesOnEntryAndReady(t *testing.T) {
-	for _, scenario := range []string{"ready", "canceled"} {
-		t.Run(scenario, func(t *testing.T) {
-			ready := scenario == "ready"
-			enableAutoReleaseForTest(t)
-			s, _, syncer := newReadinessTestServer(t, testPersistedQueryView(100, qviews.ShardID{
-				ReplicaID: 1000, VChannel: usageTestVChannel,
-			}))
-			manager := s.collectionUsage
-			manager.initializeLastActiveAt(100)
-			initial := time.Now().Add(-20 * time.Second)
-			setActivityTime(manager, 100, initial)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			second := "by-dev-rootcoord-dml_100v1"
-			result := make(chan error, 1)
-			go func() {
-				result <- s.ensureCollectionReady(ctx, readinessRequest(usageTestVChannel, second))
-			}()
-			assertReadinessBlocked(t, result)
-			lastActiveAt, _ := activityTime(manager, 100)
-			require.True(t, lastActiveAt.After(initial), "every Ensure attempt refreshes activity before waiting")
-			initial = lastActiveAt
-			beforeReady := time.Now()
-			if ready {
-				shardID := qviews.ShardID{ReplicaID: 1000, VChannel: second}
-				builder := qviews.NewQueryViewAtCoordBuilder(1000, &viewpb.DataViewOfCollection{
-					CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
-					Shards: []*viewpb.DataViewOfShard{{Vchannel: second}},
-				}, second).SetLoadInfoVersion(s.qviewsRuntime.loadConfigStore.GetConfigVersion(100))
-				require.NoError(t, s.qviewsRuntime.shardViewRegistry.Ensure(shardID).AddPreparing(ctx, builder))
-				preparing := receiveReadinessSync(t, syncer, qviews.QueryViewStatePreparing)
-				readyView := preparing.View.IntoProto()
-				readyView.Meta.State = viewpb.QueryViewState_QueryViewStateReady
-				preparing.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(readyView))
-				up := receiveReadinessSync(t, syncer, qviews.QueryViewStateUp)
-				up.OnSyncResponse(up.View)
-			} else {
-				cancel()
-			}
-			select {
-			case err := <-result:
-				if ready {
-					require.NoError(t, err)
-				} else {
-					require.ErrorIs(t, err, context.Canceled)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("readiness wait did not finish")
-			}
-			lastActiveAt, _ = activityTime(manager, 100)
-			if ready {
-				require.False(t, lastActiveAt.Before(beforeReady), "refresh must use the ready time, not the wait start")
-			} else {
-				require.Equal(t, initial, lastActiveAt, "canceled wait must not refresh activity")
-			}
-		})
-	}
-}
-
-func TestCollectionUsageInitializesFromRecoveredLoadConfig(t *testing.T) {
+func TestCollectionUsageStartsTTIOnFirstReadyScan(t *testing.T) {
 	enableAutoReleaseForTest(t)
-	s, _, _ := newReadinessTestServer(t)
-	manager := s.collectionUsage
-	req := readinessRequest(usageTestVChannel)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	view := testPersistedQueryView(100, qviews.ShardID{
+		ReplicaID: 1000, VChannel: usageTestVChannel,
+	})
+	s, _, syncer := newReadinessTestServer(t, view)
+	runtime := s.qviewsRuntime
+	cfg := runtime.loadConfigStore.GetConfig(100).Clone()
+	cfg.AutoLoad = true
+	require.NoError(t, runtime.loadConfigStore.Put(t.Context(), cfg))
+	second := "by-dev-rootcoord-dml_100v1"
+	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100, VChannelNames: []string{usageTestVChannel, second}})
+	manager, releaseMock := setupUsageTestManager(t, s, view)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	status, err := s.EnsureCollectionReady(ctx, req)
-	require.NoError(t, err)
-	require.Equal(t, merr.TimeoutCode, status.GetCode())
-	before := time.Now()
-	manager.scan(context.Background())
-	lastActiveAt, exists := activityTime(manager, 100)
-	require.True(t, exists, "a load config starts the idle timer without a readiness RPC")
-	require.False(t, lastActiveAt.Before(before))
+	result := make(chan error, 1)
+	go func() { result <- s.ensureCollectionReady(ctx, readinessRequest(usageTestVChannel, second)) }()
+	assertReadinessBlocked(t, result)
+	manager.scan(ctx)
+	_, exists := activityUnixNanos(manager, 100)
+	require.False(t, exists, "scanning a loading collection must not start the timer")
+
+	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: second}
+	builder := qviews.NewQueryViewAtCoordBuilder(1000, &viewpb.DataViewOfCollection{
+		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{Vchannel: second}},
+	}, second).SetLoadInfoVersion(runtime.loadConfigStore.GetConfigVersion(100))
+	require.NoError(t, runtime.shardViewRegistry.Ensure(shardID).AddPreparing(ctx, builder))
+	preparing := receiveReadinessSync(t, syncer, qviews.QueryViewStatePreparing)
+	readyView := preparing.View.IntoProto()
+	readyView.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+	preparing.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(readyView))
+	up := receiveReadinessSync(t, syncer, qviews.QueryViewStateUp)
+	up.OnSyncResponse(up.View)
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("readiness wait did not finish")
+	}
+	_, exists = activityUnixNanos(manager, 100)
+	require.False(t, exists, "Ensure success must not record an access")
+
+	beforeScan := time.Now()
+	manager.scan(ctx)
+	lastActiveUnixNanos, exists := activityUnixNanos(manager, 100)
+	require.True(t, exists)
+	require.GreaterOrEqual(t, lastActiveUnixNanos, beforeScan.UnixNano())
+	require.Zero(t, releaseMock.Times())
+
+	reportedAt := beforeScan.Add(-20 * time.Second)
+	reportCollectionAccess(manager, 1000, usageTestVChannel, reportedAt)
+	manager.scan(ctx)
+	current, _ := activityUnixNanos(manager, 100)
+	require.Equal(t, lastActiveUnixNanos, current, "an older SQN report must not move the timer backward")
+	require.Zero(t, releaseMock.Times())
+
+	reportedAt = time.Now()
+	reportCollectionAccess(manager, 1000, usageTestVChannel, reportedAt)
+	manager.scan(ctx)
+	lastActiveUnixNanos, _ = activityUnixNanos(manager, 100)
+	require.Equal(t, reportedAt.UnixNano(), lastActiveUnixNanos, "a newer SQN report advances the timer")
+	require.Zero(t, releaseMock.Times())
 }
 
-func TestCollectionUsageCleansReleasedCollectionAndRestartsTTI(t *testing.T) {
+func TestCollectionUsageClearsActivityWhenReleaseOverlapsScan(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	s, manager, releaseMock := newUsageTestManager(t)
-	manager.scan(context.Background())
-	config := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
+	store := s.qviewsRuntime.loadConfigStore
+	config := store.GetConfig(100).Clone()
 	setActivityTime(manager, 100, time.Now().Add(-20*time.Second))
-	s.qviewsRuntime.loadConfigStore.StopPlanning(100)
-	require.NoError(t, s.qviewsRuntime.loadConfigStore.Remove(context.Background(), 100))
-	_, exists := activityTime(manager, 100)
-	require.False(t, exists)
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).RunAndReturn(func(context.Context, int64) ([]*commonpb.KeyValuePair, error) {
+		// The scan has read the load config and readiness when release clears them.
+		store.StopPlanning(100)
+		_, exists := activityUnixNanos(manager, 100)
+		require.False(t, exists, "release clears the existing activity record")
+		return nil, nil
+	}).Once()
+	s.broker = broker
 
-	// A late query touch cannot recreate a released collection's activity.
-	manager.touch(100)
-	_, exists = activityTime(manager, 100)
-	require.False(t, exists)
+	manager.scan(t.Context())
+	_, exists := activityUnixNanos(manager, 100)
+	require.False(t, exists, "the scan must not leave activity for a released collection")
+	require.NoError(t, store.Remove(t.Context(), 100))
 
-	require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), config))
-	before := time.Now()
-	manager.scan(context.Background())
-	lastActiveAt, exists := activityTime(manager, 100)
-	require.True(t, exists)
-	require.False(t, lastActiveAt.Before(before))
+	require.NoError(t, store.Put(t.Context(), config))
+	manager.scan(t.Context())
+	_, exists = activityUnixNanos(manager, 100)
+	require.False(t, exists, "a fresh load must become ready before starting a new timer")
 	require.Zero(t, releaseMock.Times())
 }
 
 func TestCollectionUsageLRUDefaultBatchSelectsOldest64(t *testing.T) {
 	manager, released, _, _ := newLRUUsageManager(t, 70)
+	reportCollectionAccess(manager, 1000, usageTestVChannel, time.Now())
 	manager.scan(context.Background())
 	require.Len(t, released, 64)
-	for id := int64(100); id < 164; id++ {
+	require.True(t, manager.s.qviewsRuntime.loadConfigStore.Contains(100), "recent SN feedback protects the oldest baseline")
+	for id := int64(101); id < 165; id++ {
 		require.False(t, manager.s.qviewsRuntime.loadConfigStore.Contains(id))
 	}
-	for id := int64(164); id < 170; id++ {
+	for id := int64(165); id < 170; id++ {
 		require.True(t, manager.s.qviewsRuntime.loadConfigStore.Contains(id))
 	}
 }
 
-func TestCollectionUsageLRUSkipsLoadingCollections(t *testing.T) {
-	manager, released, _, _ := newLRUUsageManager(t, 3)
-	store := manager.s.qviewsRuntime.loadConfigStore
-	cfg := store.Get(101).Config.Clone()
-	cfg.AutoLoad = true
+func TestCollectionUsagePicksLatestReplicaFeedback(t *testing.T) {
+	manager, _, _, _ := newLRUUsageManager(t, 2)
+	runtime := manager.s.qviewsRuntime
+	store := runtime.loadConfigStore
+	cfg := store.GetConfig(100).Clone()
+	cfg.Replicas = append(cfg.Replicas, &loadmgr.ReplicaAssignment{ReplicaID: 999, ResourceGroup: "another-pool"})
 	require.NoError(t, store.Put(t.Context(), cfg))
-	// Two collections still need a shard to finish loading. One was loaded
-	// explicitly and the other was loaded by a query.
+	// Release selection compares collection-level activity across all replicas,
+	// including a recent query served outside the pressured pool.
+	now := time.Now()
+	reportCollectionAccess(manager, 1000, usageTestVChannel, now.Add(-time.Second))
+	reportCollectionAccess(manager, 999, usageTestVChannel, now)
+	candidate, _, ok := manager.releaseCandidate(t.Context(), store.GetConfig(100), runtime.viewFeedback.GetPlanningSnapshot())
+	require.True(t, ok)
+	require.Equal(t, now.UnixNano(), candidate.lastActiveUnixNanos)
+}
+
+func TestCollectionUsageSkipsManualAndLoadingCollections(t *testing.T) {
+	manager, released, _, _ := newLRUUsageManager(t, 4)
+	store := manager.s.qviewsRuntime.loadConfigStore
+	for _, id := range []int64{100, 103} {
+		cfg := store.GetConfig(id).Clone()
+		cfg.AutoLoad = false
+		require.NoError(t, store.Put(t.Context(), cfg))
+	}
 	manager.s.meta = newViewMeta(
-		&metacache.CollectionInfo{ID: 100, VChannelNames: []string{usageTestVChannel, "by-dev-rootcoord-dml_100v1"}},
+		&metacache.CollectionInfo{ID: 100, VChannelNames: []string{usageTestVChannel}},
 		&metacache.CollectionInfo{ID: 101, VChannelNames: []string{"by-dev-rootcoord-dml_101v0", "by-dev-rootcoord-dml_101v1"}},
 		&metacache.CollectionInfo{ID: 102, VChannelNames: []string{"by-dev-rootcoord-dml_102v0"}},
+		&metacache.CollectionInfo{ID: 103, VChannelNames: []string{"by-dev-rootcoord-dml_103v0"}},
 	)
-	setActivityTime(manager, 100, time.Now().Add(-time.Minute))
-	setActivityTime(manager, 101, time.Now().Add(-time.Minute))
+	setActivityTime(manager, 100, time.Now().Add(-2*time.Hour))
+	setActivityTime(manager, 101, time.Now().Add(-2*time.Hour))
+	delete(manager.lastActiveUnixNanos, 102)
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, int64(102)).Return(nil, nil).Once()
+	manager.s.broker = broker
 
 	manager.scan(t.Context())
 
 	require.Len(t, released, 1)
-	require.EqualValues(t, 102, <-released)
+	require.EqualValues(t, 102, <-released, "LRU can select a collection on its first ready scan without feedback")
 	require.True(t, store.Contains(100))
 	require.True(t, store.Contains(101))
+	require.True(t, store.Contains(103))
 }
 
 func TestCollectionUsageLRUHysteresisAndDynamicParameters(t *testing.T) {
@@ -690,11 +713,7 @@ func TestCollectionUsageScanFinishesSelectedBatch(t *testing.T) {
 	})
 	manager.s.broker = broker
 	releaseMock.To(func(_ *collectionUsageManager, _ context.Context, id int64, _ collectionReleaseReason) error {
-		if !firstReleaseStarted.Swap(true) {
-			for selectedID := int64(100); selectedID <= 103; selectedID++ {
-				manager.touch(selectedID)
-			}
-		}
+		firstReleaseStarted.Store(true)
 		manager.s.qviewsRuntime.loadConfigStore.StopPlanning(id)
 		released <- id
 		return nil
@@ -746,6 +765,30 @@ func TestCollectionUsageLRUMissingMetricsAndInvalidWatermarksPreserveTTI(t *test
 			require.EqualValues(t, 102, <-released)
 		})
 	}
+}
+
+func TestCollectionUsageChecksLoadOriginAfterAcquiringReleaseLock(t *testing.T) {
+	manager, _, releaseMock, _ := newLRUUsageManager(t, 1)
+	releaseMock.UnPatch()
+	store := manager.s.qviewsRuntime.loadConfigStore
+	manual := store.GetConfig(100).Clone()
+	manual.AutoLoad = false
+
+	b := mock_broadcaster.NewMockBroadcastAPI(t)
+	b.EXPECT().Close().Once()
+	lock := mockey.Mock((*Server).startBroadcastWithCollectionIDLock).To(
+		func(_ *Server, ctx context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
+			// A manual load finishes before the release acquires the lock.
+			require.NoError(t, store.Put(ctx, manual))
+			return b, nil
+		},
+	).Build()
+	defer lock.UnPatch()
+
+	logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+	require.NoError(t, manager.autoReleaseCollection(t.Context(), 100, releaseReasonTTI))
+	require.False(t, store.GetConfig(100).AutoLoad)
+	require.NotContains(t, logs.String(), "event=collection_auto_released")
 }
 
 func TestCollectionUsageReleaseLogs(t *testing.T) {
@@ -1067,31 +1110,4 @@ func TestCollectionUsageCloseCancelsReleasesAndUnblocksScan(t *testing.T) {
 		t.Fatal("shutdown did not unblock the scan waiting for the release batch")
 	}
 	require.Empty(t, started, "pending collections must not start releasing during shutdown")
-}
-
-func TestCollectionUsageConcurrentTouchAndScan(t *testing.T) {
-	enableAutoReleaseForTest(t)
-	_, manager, _ := newUsageTestManager(t)
-	manager.scan(context.Background())
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				manager.touch(100)
-				manager.scan(context.Background())
-			}
-		}()
-	}
-	params := paramtable.Get()
-	key := params.QueryCoordCfg.AutoReleaseEnabled.Key
-	for i := 0; i < 100; i++ {
-		require.NoError(t, params.Save(key, "false"))
-		require.NoError(t, params.Save(key, "true"))
-	}
-	wg.Wait()
-	manager.scan(context.Background())
-	_, exists := activityTime(manager, 100)
-	require.True(t, exists)
 }
