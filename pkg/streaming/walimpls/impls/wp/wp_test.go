@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,8 +42,6 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
-	tmpDir := t.TempDir()
-	rootPath := filepath.Join(tmpDir, "TestWpWAL")
 	testCases := []struct {
 		name        string
 		storageType string
@@ -54,7 +51,7 @@ func TestWAL(t *testing.T) {
 		{
 			name:        "LocalFsStorage",
 			storageType: "local",
-			rootPath:    rootPath,
+			rootPath:    t.TempDir(),
 			needCluster: false,
 		},
 		{
@@ -65,8 +62,8 @@ func TestWAL(t *testing.T) {
 		},
 		{
 			name:        "ServiceStorage",
-			storageType: "service",             // Using default storage type minio-compatible
-			rootPath:    rootPath + "_service", // No need to specify path for this storage
+			storageType: "service", // Using default storage type minio-compatible
+			rootPath:    t.TempDir(),
 			needCluster: true,
 		},
 	}
@@ -152,7 +149,7 @@ func TestWpRetentionTruncateRead(t *testing.T) {
 	// adjust logic lives in woodpecker's log handle/reader and is storage-backend agnostic.
 	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RetentionTTL.Key, "72h"))
 	require.NoError(t, pt.Save(pt.WoodpeckerCfg.StorageType.Key, "local"))
-	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RootPath.Key, filepath.Join(t.TempDir(), "wp_ret_trunc")))
+	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RootPath.Key, t.TempDir()))
 	// Small rolling size + padded messages => a new segment every few messages
 	// (woodpecker rolls by flushed byte size, not timing), so the seek-forward sub-tests
 	// can reach both the within-segment and cross-segment adjustment branches.
