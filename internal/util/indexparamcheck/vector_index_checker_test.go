@@ -31,6 +31,38 @@ func TestVecIndexChecker_StaticCheck(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:     "Valid IVF_FLAT e-means training",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":  "IVF_FLAT",
+				"metric_type": "L2",
+				"nlist":       "1024",
+				EMeansEpochs:  "2.5",
+			},
+		},
+		{
+			name:     "Invalid e-means epoch budget",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":  "IVF_FLAT",
+				"metric_type": "L2",
+				"nlist":       "1024",
+				EMeansEpochs:  "-1",
+			},
+			wantErr: true,
+		},
+		{
+			name:     "E-means rejects inner product",
+			dataType: schemapb.DataType_FloatVector,
+			params: map[string]string{
+				"index_type":  "IVF_FLAT",
+				"metric_type": "IP",
+				"nlist":       "1024",
+				EMeansEpochs:  "2.5",
+			},
+			wantErr: true,
+		},
+		{
 			name:     "Invalid index type",
 			dataType: schemapb.DataType_FloatVector,
 			params: map[string]string{
