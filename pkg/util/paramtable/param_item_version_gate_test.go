@@ -168,14 +168,12 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 	})
 }
 
-func TestArraySortVersionGate(t *testing.T) {
-	params := &ComponentParam{}
-	params.Init(NewBaseTable(SkipRemote(true)))
-	item := &params.DataCoordCfg.EnableArraySortIndex
+func assertBoolVersionGate(t *testing.T, params *ComponentParam, item *ParamItem, gateVersion string, delay time.Duration) {
+	t.Helper()
 	assert.Contains(t, params.versionGateItems(), item)
 	assert.Equal(t, "auto", item.DefaultValue)
-	assert.Equal(t, "3.1.0", item.VersionGateSwitcher.GateVersion)
-	assert.Equal(t, time.Minute, item.VersionGateSwitcher.SwitchDelay)
+	assert.Equal(t, gateVersion, item.VersionGateSwitcher.GateVersion)
+	assert.Equal(t, delay, item.VersionGateSwitcher.SwitchDelay)
 	assert.False(t, item.GetAsBool())
 
 	// The existing switcher publishes TargetValue through the config manager.
@@ -190,4 +188,16 @@ func TestArraySortVersionGate(t *testing.T) {
 		item.SwapTempValue(old)
 	}
 	assert.False(t, item.GetAsBool())
+}
+
+func TestArraySortVersionGate(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	assertBoolVersionGate(t, params, &params.DataCoordCfg.EnableArraySortIndex, "3.1.0", time.Minute)
+}
+
+func TestImportV3VersionGate(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	assertBoolVersionGate(t, params, &params.DataCoordCfg.EnableImportV3, "3.0.7", time.Minute)
 }
