@@ -23,9 +23,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -609,4 +612,62 @@ func TestCompactionExecutor(t *testing.T) {
 		assert.Equal(t, int64(8), ex.Slots())
 		assert.True(t, ex.Resource().IsZero())
 	})
+}
+
+func TestCompactionAttemptLatency(t *testing.T) {
+	paramtable.Init()
+	q, run := metrics.DataNodeCompactionLatencyInQueue, metrics.DataNodeCompactionLatency
+	q.Reset()
+	run.Reset()
+	t.Cleanup(q.Reset)
+	t.Cleanup(run.Reset)
+	node := paramtable.GetStringNodeID()
+	count := func(h prometheus.Observer) uint64 {
+		m := &dto.Metric{}
+		require.NoError(t, h.(prometheus.Metric).Write(m))
+		return m.GetHistogram().GetSampleCount()
+	}
+	for _, tc := range []struct {
+		kind    datapb.CompactionType
+		state   datapb.CompactionTaskState
+		err     error
+		outcome string
+	}{
+		{datapb.CompactionType_MixCompaction, datapb.CompactionTaskState_completed, nil, metrics.SuccessLabel},
+		{datapb.CompactionType_SortCompaction, datapb.CompactionTaskState_failed, nil, metrics.FailLabel},
+		{datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionTaskState_unknown, context.Canceled, metrics.CancelLabel},
+		{datapb.CompactionType_ClusteringCompaction, datapb.CompactionTaskState_unknown, context.DeadlineExceeded, "timeout"},
+		{datapb.CompactionType_BumpSchemaVersionCompaction, datapb.CompactionTaskState_unknown, errors.New("failed"), metrics.FailLabel},
+	} {
+		e := NewExecutor()
+		task := NewMockCompactor(t)
+		task.EXPECT().GetPlanID().Return(int64(7))
+		task.EXPECT().GetSlotUsage().Return(int64(1))
+		task.EXPECT().GetCollection().Return(int64(2))
+		task.EXPECT().GetChannelName().Return("c")
+		task.EXPECT().GetCompactionType().Return(tc.kind)
+		task.EXPECT().Compact().Return(&datapb.CompactionPlanResult{State: tc.state}, tc.err).Once()
+		task.EXPECT().Complete().Return().Once()
+		ok, err := e.Enqueue(task, taskcommon.Resource{})
+		require.NoError(t, err)
+		require.True(t, ok)
+		e.executeTask(<-e.taskCh)
+		require.EqualValues(t, 1, count(q.WithLabelValues(node, tc.kind.String(), "started")))
+		require.EqualValues(t, 1, count(run.WithLabelValues(node, tc.kind.String(), tc.outcome)))
+	}
+	e := NewExecutor()
+	task := NewMockCompactor(t)
+	kind := datapb.CompactionType_MixCompaction
+	task.EXPECT().GetPlanID().Return(int64(9))
+	task.EXPECT().GetSlotUsage().Return(int64(1))
+	task.EXPECT().GetCompactionType().Return(kind)
+	task.EXPECT().Complete().Return().Once()
+	ok, err := e.Enqueue(task, taskcommon.Resource{})
+	require.True(t, ok)
+	require.NoError(t, err)
+	e.cancelQueued()
+	e.executeTask(<-e.taskCh)
+	require.EqualValues(t, 1, count(q.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
+	require.Zero(t, count(run.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
+	require.Zero(t, e.Slots())
 }
