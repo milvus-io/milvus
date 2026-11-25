@@ -58,7 +58,7 @@ type indexBuildTask struct {
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
-	queueDur       time.Duration
+	queuedAt       time.Time
 	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
 	info           *IndexTaskInfo
@@ -129,7 +129,6 @@ func (it *indexBuildTask) Name() string {
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, commonpb.IndexState(state), failReason)
-	it.observeStateMetrics(state)
 }
 
 // SetStateWithCost stores the final state/failReason together with the
@@ -138,14 +137,6 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 // in-progress state.
 func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
 	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, endMs, costTimeMs, commonpb.IndexState(state), failReason)
-	it.observeStateMetrics(state)
-}
-
-func (it *indexBuildTask) observeStateMetrics(state indexpb.JobState) {
-	if state == indexpb.JobState_JobStateFinished {
-		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID()).Observe(it.tr.ElapseSpan().Seconds())
-		metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID()).Observe(float64(it.queueDur.Milliseconds()))
-	}
 }
 
 func (it *indexBuildTask) GetState() indexpb.JobState {
@@ -154,7 +145,6 @@ func (it *indexBuildTask) GetState() indexpb.JobState {
 
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
-	it.queueDur = 0
 	it.prepareDur = 0
 	it.tr.RecordSpan()
 	mlog.Info(ctx, "IndexBuilderTask Enqueue", mlog.FieldBuildID(it.req.GetBuildID()),
@@ -177,7 +167,7 @@ func (it *indexBuildTask) IsVectorIndex() bool {
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 	started := it.now()
-	it.queueDur = it.tr.RecordSpan()
+	it.tr.RecordSpan()
 	mlog.Info(ctx, "Begin to prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.Int64("Collection", it.req.GetCollectionID()), mlog.Int64("SegmentID", it.req.GetSegmentID()))
 
