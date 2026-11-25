@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"sync"
@@ -163,12 +164,17 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
+	downloader = RestrictSource(downloader)
 	size, err := downloader.Size(downloadCtx, resource.GetPath())
 	if err != nil {
 		return merr.Wrapf(err, "get file resource size for %s", resource.GetPath())
 	}
 	if size < 0 {
 		return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", resource.GetPath(), size)
+	}
+	limit := paramtable.Get().CommonCfg.FileResourceMaxFileSize.GetAsSize()
+	if limit <= 0 || limit == math.MaxInt64 || size > limit {
+		return merr.WrapErrParameterTooLarge("file resource", "configured read limit exceeded or invalid")
 	}
 	reader, err := downloader.Reader(downloadCtx, resource.GetPath())
 	if err != nil {
@@ -202,9 +208,12 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 		}
 	}()
 
-	written, err := io.Copy(temporary, reader)
+	written, err := io.Copy(temporary, io.LimitReader(reader, limit+1))
 	if err != nil {
 		return merr.Wrapf(err, "download file resource %s", resource.GetPath())
+	}
+	if written > limit {
+		return merr.WrapErrParameterTooLarge("file resource", "configured read limit exceeded")
 	}
 	if written != size {
 		return merr.WrapErrIoUnexpectEOF(resource.GetPath(), errors.Newf("expected %d bytes, downloaded %d", size, written))

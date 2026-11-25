@@ -21,8 +21,8 @@ pub extern "C" fn tantivy_create_analyzer(
     match analyzer {
         Ok(text_analyzer) => RustResult::from_ptr(create_binding(text_analyzer)),
         Err(err) => RustResult::from_error(format!(
-            "create tokenizer failed with error: {} param: {}",
-            err, params,
+            "create tokenizer failed with error: {}",
+            err,
         )),
     }
 }
@@ -39,8 +39,8 @@ pub extern "C" fn tantivy_validate_analyzer(
     match result {
         Ok(ids) => RustResult::from_vec_i64(ids),
         Err(err) => RustResult::from_error(format!(
-            "validate tokenizer failed with error: {} param: {}",
-            err, params,
+            "validate tokenizer failed with error: {}",
+            err,
         )),
     }
 }

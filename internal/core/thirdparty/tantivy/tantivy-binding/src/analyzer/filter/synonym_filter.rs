@@ -1,4 +1,4 @@
-use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
+use crate::analyzer::options::{read_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
@@ -75,8 +75,7 @@ impl SynonymDictBuilder {
             if chars[i] == '\\' {
                 if i + 1 >= chars.len() {
                     return Err(TantivyBindingError::InvalidArgument(format!(
-                        "invalid synonym escaped in the end: {}",
-                        str
+                        "invalid synonym escape at end of line"
                     )));
                 }
                 if chars[i + 1] == ',' || chars[i + 1] == '\\' || chars[i + 1] == ' ' {
@@ -93,9 +92,7 @@ impl SynonymDictBuilder {
                 }
 
                 return Err(TantivyBindingError::InvalidArgument(format!(
-                    "invalid synonym escaped: \\{} in {}",
-                    chars[i + 1],
-                    str,
+                    "invalid synonym escape"
                 )));
             }
 
@@ -131,8 +128,7 @@ impl SynonymDictBuilder {
             if chars[i] == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {
                 if is_mapping {
                     return Err(TantivyBindingError::InvalidArgument(format!(
-                        "read synonym dict failed, has more than one \"=>\" in {}",
-                        str,
+                        "read synonym dict failed, has more than one \"=>\""
                     )));
                 } else {
                     is_mapping = true;
@@ -148,8 +144,7 @@ impl SynonymDictBuilder {
 
             if space_flag {
                 return Err(TantivyBindingError::InvalidArgument(format!(
-                    "read synonym dict failed, has space between words {}, please use \\ to escape space",
-                    str,
+                    "read synonym dict failed, has space between words; escape spaces"
                 )));
             }
 
@@ -232,12 +227,17 @@ impl SynonymFilter {
         }
 
         if let Some(file_params) = params.get("synonyms_file") {
-            let path = get_resource_path(helper, file_params, "synonyms dict file")?;
-            let file = std::fs::File::open(path)?;
-            let reader = std::io::BufReader::new(file);
-            for line in reader.lines() {
+            let bytes = read_resource_file(helper, file_params, "synonyms dict file")?;
+            let reader = std::io::Cursor::new(bytes);
+            for (index, line) in reader.lines().enumerate() {
                 if let Ok(row_data) = line {
-                    builder.add_row(&row_data)?;
+                    builder.add_row(&row_data).map_err(|err| {
+                        TantivyBindingError::InvalidArgument(format!(
+                            "synonym dictionary line {}: {}",
+                            index + 1,
+                            err
+                        ))
+                    })?;
                 } else {
                     return Err(TantivyBindingError::InternalError(format!(
                         "read synonyms dict file failed, error: {}",
@@ -392,7 +392,10 @@ mod tests {
     fn test_synonym_filter_with_file() {
         init_log();
         let file_dir = Path::new(file!()).parent().unwrap();
-        let synonyms_path = file_dir.join("../data/test/synonyms_dict.txt");
+        let synonyms_path = file_dir
+            .join("../data/test/synonyms_dict.txt")
+            .canonicalize()
+            .unwrap();
         let synonyms_path_str = synonyms_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -405,6 +408,7 @@ mod tests {
         );
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(synonyms_path.parent().unwrap().to_path_buf());
         let filter = SynonymFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());

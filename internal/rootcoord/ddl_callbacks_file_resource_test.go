@@ -41,6 +41,15 @@ import (
 
 func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockBroadcastAPI {
 	t.Helper()
+	if Params.CommonCfg.FileResourceAllowedPath.GetValue() == "" {
+		previous := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("dict")
+		t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(previous) })
+	}
+	if cm, ok := core.storage.(interface {
+		On(string, ...interface{}) *mock.Call
+	}); ok {
+		cm.On("Size", mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	}
 	if core.meta == nil {
 		core.meta = mockrootcoord.NewIMetaTable(t)
 	}
@@ -213,7 +222,7 @@ func TestFileResourceAddKeepsMetadataUnchangedBeforeBroadcast(t *testing.T) {
 	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage), withTsoAllocator(tso))
 	api := mockFileResourceBroadcast(t, core)
 	api.ExpectedCalls = nil
-	api.EXPECT().Close().Return().Once()
+	api.EXPECT().Close().Return().Twice()
 	api.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		require.Empty(t, meta.fileResourceID2Meta)
 		body := message.MustAsBroadcastAddFileResourceMessageV2(msg).MustBody()
@@ -235,6 +244,8 @@ func TestFileResourceRejectsMalformedMetadata(t *testing.T) {
 }
 
 func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("dict")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot) })
 	Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 	t.Cleanup(func() { Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key) })
 	meta, catalog := fileResourceTestMeta(t)

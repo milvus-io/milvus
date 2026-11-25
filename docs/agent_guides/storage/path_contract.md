@@ -145,3 +145,12 @@ fingerprint.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+## Analyzer and file resource sources
+
+File resource admission and download use `common.fileResource.allowedPath` as
+an explicit complete-key boundary. Empty disables access. Keys outside the
+boundary are rejected before any backend probe. Local source reads pin directory
+descriptors and reject symlinks and non-regular files. Analyzer local dictionaries
+use the separate `function.analyzer.local_resource_path` boundary. Both source
+reads have finite byte limits; a prior size check alone is not sufficient.

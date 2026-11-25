@@ -1916,6 +1916,8 @@ func TestRootCoord_ServerExist(t *testing.T) {
 }
 
 func TestRootCoord_AddFileResource(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("/path")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot) })
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -1933,6 +1935,16 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterMissing)
+	})
+
+	t.Run("outside allowed directory does not probe storage", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		c := newTestCore(withHealthyCode(), withStorage(storageMock))
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource", Path: "/outside/secret",
+		})
+		require.NoError(t, err)
+		require.ErrorContains(t, merr.Error(resp), "outside the configured directory")
 	})
 
 	t.Run("storage check error", func(t *testing.T) {
@@ -1965,7 +1977,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("file size limit disabled", func(t *testing.T) {
+	t.Run("zero size limit uses safe default", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "0")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 

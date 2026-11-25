@@ -65,6 +65,7 @@ func BuildRuntimeOptions() map[string]any {
 	return map[string]any{
 		LinderaDictURLKey:  buildLinderaDownloadURLs(cfg.FunctionCfg.LinderaDownloadUrls.GetValue()),
 		DefaultDictPathKey: cfg.FunctionCfg.LocalResourcePath.GetValue(),
+		"max_dict_size":    cfg.FunctionCfg.AnalyzerMaxDictSize.GetAsUint64(),
 		ResourcePathKey:    pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()),
 	}
 }

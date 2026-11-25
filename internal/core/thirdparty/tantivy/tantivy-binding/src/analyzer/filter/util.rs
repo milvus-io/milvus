@@ -1,4 +1,4 @@
-use crate::analyzer::options::get_resource_path;
+use crate::analyzer::options::read_resource_file;
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -32,9 +32,8 @@ pub(crate) fn read_line_file(
     params: &json::Value,
     key: &str,
 ) -> Result<()> {
-    let path = get_resource_path(helper, params, key)?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
+    let bytes = read_resource_file(helper, params, key)?;
+    let reader = std::io::Cursor::new(bytes);
     for (line_index, line) in reader.lines().enumerate() {
         let mut row_data = line.map_err(|err| {
             TantivyBindingError::InternalError(format!(
@@ -72,6 +71,7 @@ mod tests {
             "path": file_path.to_string_lossy()
         });
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(dir.path().to_path_buf());
         let mut dict = Vec::new();
 
         read_line_file(&mut helper, &mut dict, &params, "test dict file").unwrap();

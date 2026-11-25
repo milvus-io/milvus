@@ -240,9 +240,9 @@ func TestBuildRuntimeOptions(t *testing.T) {
 	params := paramtable.Get()
 	localResourcePath := "/tmp/milvus-analyzer-test"
 	urlKey := "function.analyzer.lindera.download_urls.ipadic"
-	require.NoError(t, params.Save(params.FunctionCfg.LocalResourcePath.Key, localResourcePath))
+	previousPath := params.FunctionCfg.LocalResourcePath.SwapTempValue(localResourcePath)
 	require.NoError(t, params.SaveGroup(map[string]string{urlKey: "http://a.test/ipadic.tar.gz, http://b.test/ipadic.tar.gz"}))
-	defer params.Reset(params.FunctionCfg.LocalResourcePath.Key)
+	defer params.FunctionCfg.LocalResourcePath.SwapTempValue(previousPath)
 	defer params.Reset(urlKey)
 
 	options := BuildRuntimeOptions()

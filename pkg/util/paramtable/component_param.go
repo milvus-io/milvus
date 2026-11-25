@@ -476,6 +476,7 @@ type commonConfig struct {
 	QNFileResourceMode          ParamItem `refreshable:"false"`
 	DNFileResourceMode          ParamItem `refreshable:"false"`
 	ProxyFileResourceMode       ParamItem `refreshable:"false"`
+	FileResourceAllowedPath     ParamItem `refreshable:"false"`
 	FileResourceMaxFileSize     ParamItem `refreshable:"true"`
 	FileResourceDownloadTimeout ParamItem `refreshable:"true"`
 
@@ -1879,11 +1880,21 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 	}
 	p.ProxyFileResourceMode.Init(base.mgr)
 
+	p.FileResourceAllowedPath = ParamItem{
+		Key:          "common.fileResource.allowedPath",
+		Version:      "3.0",
+		DefaultValue: "",
+		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty disables access. Restart required.",
+		Export:       true,
+		Forbidden:    true,
+	}
+	p.FileResourceAllowedPath.Init(base.mgr)
+
 	p.FileResourceMaxFileSize = ParamItem{
 		Key:          "common.fileResource.maxFileSize",
 		Version:      "3.0",
-		DefaultValue: "0",
-		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.",
+		DefaultValue: "64m",
+		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Also limits downloaded bytes; must be positive.",
 		Export:       true,
 		Formatter: func(v string) string {
 			value := strings.ToLower(v)
@@ -1909,8 +1920,8 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 				multiplier = 1024
 			}
 			size, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || size < 0 || size > math.MaxInt64/multiplier {
-				return "0"
+			if err != nil || size <= 0 || size > math.MaxInt64/multiplier {
+				return "64m"
 			}
 			return v
 		},
