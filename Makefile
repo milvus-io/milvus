@@ -107,7 +107,7 @@ ifdef TANTIVY_ANALYZER_REMOTE_TLS
 endif
 
 
-use_svs = OFF
+use_svs = AUTO
 ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
@@ -538,7 +538,7 @@ rpm: install
 	@cp -r lib ~/rpmbuild/BUILD/
 	@cp -r configs ~/rpmbuild/BUILD/
 	@cp -r build/rpm/services ~/rpmbuild/BUILD/
-	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec
+	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild $(if $(wildcard $(LIBRARY_PATH)/libsvs_runtime.so),--with,--without) svs -ba ./build/rpm/milvus.spec
 
 generate-mockery-types: getdeps
 	# MixCoord
