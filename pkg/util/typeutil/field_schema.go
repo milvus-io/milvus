@@ -44,7 +44,7 @@ func (h *FieldSchemaHelper) GetDim() (int64, error) {
 
 func (h *FieldSchemaHelper) supportsTextAnalysis() bool {
 	return IsStringType(h.schema.GetDataType()) || (h.schema.GetDataType() == schemapb.DataType_Array &&
-		h.schema.GetElementType() == schemapb.DataType_VarChar && IsStructSubField(h.schema.GetName()))
+		h.schema.GetElementType() == schemapb.DataType_VarChar)
 }
 
 func (h *FieldSchemaHelper) EnableMatch() bool {

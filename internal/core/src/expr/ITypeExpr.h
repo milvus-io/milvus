@@ -926,22 +926,34 @@ class MatchExpr : public ITypeFilterExpr {
     MatchExpr(const std::string& struct_name,
               MatchType match_type,
               int64_t count,
-              const TypedExprPtr& predicate)
-        : struct_name_(struct_name), match_type_(match_type), count_(count) {
+              const TypedExprPtr& predicate,
+              std::optional<FieldId> target_field = std::nullopt)
+        : struct_name_(struct_name),
+          match_type_(match_type),
+          count_(count),
+          target_field_(target_field) {
         inputs_.push_back(predicate);
     }
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
-                           struct_name_,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        return fmt::format(
+            "MatchExpr(struct_name={}, target_field={}, match_type={}, "
+            "count={})",
+            struct_name_,
+            target_field_ ? target_field_->get() : -1,
+            proto::plan::MatchType_Name(match_type_),
+            count_);
     }
 
     const std::string&
     get_struct_name() const {
         return struct_name_;
+    }
+
+    std::optional<FieldId>
+    get_target_field() const {
+        return target_field_;
     }
 
     MatchType
@@ -958,6 +970,7 @@ class MatchExpr : public ITypeFilterExpr {
     std::string struct_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+    std::optional<FieldId> target_field_;
 };
 
 // RoaringFilterExpr: exact integer membership filter (`membership_match`, MRB1).

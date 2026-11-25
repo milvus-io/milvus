@@ -131,6 +131,8 @@ Schema::Schema(const Schema& other)
       mmap_enabled_(other.mmap_enabled_),
       mmap_fields_(other.mmap_fields_),
       struct_array_field_cache_(other.struct_array_field_cache_),
+      struct_field_ids_(other.struct_field_ids_),
+      representative_child_by_parent_(other.representative_child_by_parent_),
       warmup_vector_index_(other.warmup_vector_index_),
       warmup_scalar_index_(other.warmup_scalar_index_),
       warmup_scalar_field_(other.warmup_scalar_field_),
@@ -166,6 +168,9 @@ Schema::operator=(const Schema& other) {
     std::swap(mmap_enabled_, copied.mmap_enabled_);
     std::swap(mmap_fields_, copied.mmap_fields_);
     std::swap(struct_array_field_cache_, copied.struct_array_field_cache_);
+    std::swap(struct_field_ids_, copied.struct_field_ids_);
+    std::swap(representative_child_by_parent_,
+              copied.representative_child_by_parent_);
     std::swap(warmup_vector_index_, copied.warmup_vector_index_);
     std::swap(warmup_scalar_index_, copied.warmup_scalar_index_);
     std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);
@@ -231,13 +236,21 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         process_field(child);
     }
 
-    for (const milvus::proto::schema::StructArrayFieldSchema& child :
+    for (const milvus::proto::schema::StructArrayFieldSchema& struct_field :
          schema_proto.struct_array_fields()) {
-        schema->struct_field_ids_[child.name()] = FieldId(child.fieldid());
-        for (const auto& sub_field : child.fields()) {
+        schema->struct_field_ids_[struct_field.name()] =
+            FieldId(struct_field.fieldid());
+        for (const auto& sub_field : struct_field.fields()) {
             auto field = sub_field;
-            field.set_nullable(field.nullable() || child.nullable());
+            field.set_nullable(field.nullable() || struct_field.nullable());
             process_field(field);
+        }
+        auto first =
+            schema->struct_array_field_cache_.find(struct_field.name());
+        if (struct_field.fieldid() != 0 &&
+            first != schema->struct_array_field_cache_.end()) {
+            schema->representative_child_by_parent_.emplace(
+                FieldId(struct_field.fieldid()), first->second);
         }
     }
 
@@ -506,6 +519,22 @@ Schema::MmapEnabled(const FieldId& field_id) const {
         return {has_mmap_setting_, mmap_enabled_};
     }
     return {true, it->second};
+}
+
+const FieldMeta&
+Schema::GetMatchTargetField(FieldId target_id) const {
+    const auto representative_it =
+        representative_child_by_parent_.find(target_id);
+    if (representative_it != representative_child_by_parent_.end()) {
+        return fields_.at(representative_it->second);
+    }
+    auto field = fields_.find(target_id);
+    if (field != fields_.end() &&
+        field->second.get_data_type() == DataType::ARRAY &&
+        !GetStructNameForArrayField(field->second)) {
+        return field->second;
+    }
+    ThrowInfo(ExprInvalid, "invalid MATCH target field ID {}", target_id.get());
 }
 
 const FieldMeta&

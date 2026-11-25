@@ -17,7 +17,6 @@
 
 #include "index/TextMatchIndex.h"
 #include "common/ArrayTextValues.h"
-#include "common/Utils.h"
 #include "common/FieldData.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
@@ -301,8 +300,7 @@ TextMatchIndex::BuildWithFieldData(
         InvertedIndexTantivy<std::string>::BuildWithFieldData(field_datas);
         return;
     }
-    AssertInfo(IsStructSubField(schema_.name()) &&
-                   schema_.element_type() == proto::schema::DataType::VarChar,
+    AssertInfo(schema_.element_type() == proto::schema::DataType::VarChar,
                "array text index requires VarChar elements");
     int64_t document = 0;
     for (const auto& data : field_datas) {

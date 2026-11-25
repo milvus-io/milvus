@@ -4707,7 +4707,7 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleFieldReadyBit) {
 
     auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
     next_runtime->fields.erase(payload);
-    next_runtime->struct_element_offsets_map.erase(payload);
+    next_runtime->element_offsets_by_field.erase(payload);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.schema = current->schema;

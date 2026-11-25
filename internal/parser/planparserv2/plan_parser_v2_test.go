@@ -6049,42 +6049,114 @@ func TestExpr_ElementLevelLikeAndRegex(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrQueryPlan)
 }
 
-func TestStructTextMatchOperand(t *testing.T) {
+func TestScalarArrayMatchBinding(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields,
+		&schemapb.FieldSchema{FieldID: 950, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true},
+		&schemapb.FieldSchema{FieldID: 951, Name: "flags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+	)
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	for _, filter := range []string{
+		"MATCH_ANY(scores, $ IS NULL)", "MATCH_ALL(scores, $ is not null)",
+		"MATCH_LEAST(scores, 1 < $ <= 10, threshold=2)",
+		"MATCH_MOST(scores, $ % 2 == 0 && $ in [2, 4], threshold=0)",
+		"MATCH_EXACT(scores, $ > 0, threshold=2)",
+		"MATCH_ANY(flags, $ < true)", "MATCH_ANY(StringArrayField, $ like 'ab%')",
+		"MATCH_ANY(StringArrayField, $ =~ 'ab.*')",
+	} {
+		t.Run(filter, func(t *testing.T) {
+			expr, err := ParseExpr(helper, filter, nil)
+			require.NoError(t, err)
+			require.NotNil(t, expr.GetMatchExpr().TargetFieldId)
+			require.Positive(t, expr.GetMatchExpr().GetTargetFieldId())
+			require.Empty(t, expr.GetMatchExpr().GetStructName())
+		})
+	}
+	for _, filter := range []string{
+		"$ > 0", "MATCH_ANY(scores, $[sub_int] > 0)", "MATCH_ANY(struct_array, $ > 0)",
+		"MATCH_ANY(scores, Int64Field > 0)", "MATCH_ANY(Int64Field, $ == 1)",
+		"MATCH_ANY(scores, array_length($) > 0)", "MATCH_ANY(scores, array_contains($, 1))",
+		"MATCH_ANY(scores, MATCH_ALL(scores, $ > 0))", "MATCH_ANY(flags, $)",
+		"MATCH_ANY(StringArrayField, TEXT_MATCH($, 'word'))", "MATCH_ANY(StringArrayField, PHRASE_MATCH($, 'word'))",
+		"element_filter(scores, $ > 0)",
+	} {
+		t.Run(filter, func(t *testing.T) {
+			_, err := ParseExpr(helper, filter, nil)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestMatchStructParentID(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	expr, err := ParseExpr(helper, "MATCH_ANY(struct_array, $[sub_int] > 0)", nil)
+	require.NoError(t, err)
+	match := expr.GetMatchExpr()
+	require.Equal(t, "struct_array", match.GetStructName())
+	require.EqualValues(t, structArrayFieldID, match.GetTargetFieldId())
+	require.EqualValues(t, structSubIntFieldID, match.GetPredicate().GetUnaryRangeExpr().GetColumnInfo().GetFieldId())
+}
+
+func TestMatchWithFlattenedStructSchema(t *testing.T) {
+	schema := newTestSchema(false)
+	schema.Fields = append(schema.Fields, schema.StructArrayFields[0].GetFields()...)
+	schema.StructArrayFields = nil
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	expr, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_int] > 0)`, nil)
+	require.NoError(t, err)
+	require.Equal(t, "struct_array", expr.GetMatchExpr().GetStructName())
+	require.Nil(t, expr.GetMatchExpr().TargetFieldId)
+}
+
+func TestArrayTextMatchOperand(t *testing.T) {
 	schema := newTestSchema(false)
 	field := schema.StructArrayFields[0].Fields[0]
 	field.ElementNullable = true
 	field.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableMatchKey, Value: "true"}, {Key: common.EnableAnalyzerKey, Value: "true"}}
+	tags := &schemapb.FieldSchema{FieldID: 952, Name: "tags", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, ElementNullable: true, TypeParams: field.TypeParams}
+	schema.Fields = append(schema.Fields, tags)
 	helper, err := typeutil.CreateSchemaHelper(schema)
 	require.NoError(t, err)
-	for _, filter := range []string{
-		`ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`,
-		`ELEMENT_FILTER(struct_array, PHRASE_MATCH($[sub_str], "a b", 2))`,
-		`MATCH_ANY(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`,
-		`MATCH_EXACT(struct_array, PHRASE_MATCH($[sub_str], "a b", 2), threshold=1)`,
+	for _, tc := range []struct {
+		filter  string
+		fieldID int64
+	}{
+		{`ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`, field.GetFieldID()},
+		{`ELEMENT_FILTER(struct_array, PHRASE_MATCH($[sub_str], "a b", 2))`, field.GetFieldID()},
+		{`MATCH_ANY(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`, field.GetFieldID()},
+		{`MATCH_EXACT(struct_array, PHRASE_MATCH($[sub_str], "a b", 2), threshold=1)`, field.GetFieldID()},
+		{`MATCH_LEAST(tags, TEXT_MATCH($, "a b", minimum_should_match=2), threshold=2)`, tags.GetFieldID()},
+		{`MATCH_ALL(tags, PHRASE_MATCH($, "a b", 2))`, tags.GetFieldID()},
 	} {
-		plan, err := ParseExpr(helper, filter, nil)
+		plan, err := ParseExpr(helper, tc.filter, nil)
 		require.NoError(t, err)
 		predicate := plan.GetMatchExpr().GetPredicate()
 		if ef := plan.GetElementFilterExpr(); ef != nil {
 			predicate = ef.GetElementExpr()
 		}
 		leaf := predicate.GetUnaryRangeExpr()
-		require.Equal(t, field.FieldID, leaf.GetColumnInfo().GetFieldId())
+		require.Equal(t, tc.fieldID, leaf.GetColumnInfo().GetFieldId())
 		require.True(t, leaf.GetColumnInfo().GetIsElementLevel())
 		require.True(t, leaf.GetColumnInfo().GetNullable())
 		require.EqualValues(t, 2, leaf.GetExtraValues()[0].GetInt64Val())
 	}
 	for _, filter := range []string{
-		`TEXT_MATCH($[sub_str], "x")`, `TEXT_MATCH(StringArrayField, "x")`,
+		`TEXT_MATCH($[sub_str], "x")`, `TEXT_MATCH(StringArrayField, "x")`, `TEXT_MATCH(tags, "x")`,
+		`TEXT_MATCH($, "x")`, `MATCH_ANY(tags, TEXT_MATCH($[sub_str], "x"))`,
+		`MATCH_ANY(struct_array, PHRASE_MATCH($, "x"))`,
 		`MATCH_ANY(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
+		`element_filter(tags, TEXT_MATCH($, "x"))`,
 		`element_filter(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
 		`element_filter(struct_array, TEXT_MATCH($[missing], "x"))`,
-		`MATCH_ANY(StringArrayField, TEXT_MATCH($, "x"))`,
 	} {
 		_, err := ParseExpr(helper, filter, nil)
 		require.Error(t, err, filter)
 	}
-	_, err = ParseExpr(newTestSchemaHelper(t), `ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "x"))`, nil)
+	disabled := newTestSchemaHelper(t)
+	_, err = ParseExpr(disabled, `ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "x"))`, nil)
 	require.ErrorContains(t, err, "does not enable match")
 }
 
@@ -6110,31 +6182,38 @@ func TestElementBooleanPredicates(t *testing.T) {
 	defer cfg.EnabledOptimizeExpr.SwapTempValue(saved)
 	for _, optimize := range []string{"true", "false"} {
 		cfg.EnabledOptimizeExpr.SwapTempValue(optimize)
-		comparison := `$[sub_str] == "new"`
-		for _, op := range []string{"ELEMENT_FILTER", "MATCH_ANY", "MATCH_ALL", "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT"} {
-			threshold := ""
-			switch op {
-			case "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT":
-				threshold = ", threshold=1"
-			}
-			for _, child := range []string{"TRUE", "FALSE", "1 == 2", "FALSE && " + comparison, "FALSE || " + comparison,
-				comparison + ` && $[sub_str] == "york"`} {
-				dsl := fmt.Sprintf("%s(%s, %s%s)", op, "struct_array", child, threshold)
-				expr, err := ParseExpr(helper, dsl, nil)
-				require.NoError(t, err, dsl)
-				bitmap := expr.GetMatchExpr().GetPredicate()
-				if op == "ELEMENT_FILTER" {
-					bitmap = expr.GetElementFilterExpr().GetElementExpr()
+		for _, target := range []struct{ name, field string }{
+			{"struct_array", "$[sub_str]"}, {"StringArrayField", "$"},
+		} {
+			comparison := target.field + ` == "new"`
+			for _, op := range []string{"ELEMENT_FILTER", "MATCH_ANY", "MATCH_ALL", "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT"} {
+				if op == "ELEMENT_FILTER" && target.name != "struct_array" {
+					continue
 				}
-				require.NotNil(t, bitmap, dsl)
-				switch child {
-				case "TRUE":
-					require.True(t, rewriter.IsAlwaysTrueExpr(bitmap), dsl)
-				case "FALSE", "1 == 2":
-					require.True(t, rewriter.IsAlwaysFalseExpr(bitmap), dsl)
-				case "FALSE && " + comparison:
-					if optimize == "true" {
+				threshold := ""
+				switch op {
+				case "MATCH_LEAST", "MATCH_MOST", "MATCH_EXACT":
+					threshold = ", threshold=1"
+				}
+				for _, child := range []string{"TRUE", "FALSE", "1 == 2", "FALSE && " + comparison, "FALSE || " + comparison,
+					comparison + " && " + target.field + ` == "york"`} {
+					dsl := fmt.Sprintf("%s(%s, %s%s)", op, target.name, child, threshold)
+					expr, err := ParseExpr(helper, dsl, nil)
+					require.NoError(t, err, dsl)
+					bitmap := expr.GetMatchExpr().GetPredicate()
+					if op == "ELEMENT_FILTER" {
+						bitmap = expr.GetElementFilterExpr().GetElementExpr()
+					}
+					require.NotNil(t, bitmap, dsl)
+					switch child {
+					case "TRUE":
+						require.True(t, rewriter.IsAlwaysTrueExpr(bitmap), dsl)
+					case "FALSE", "1 == 2":
 						require.True(t, rewriter.IsAlwaysFalseExpr(bitmap), dsl)
+					case "FALSE && " + comparison:
+						if optimize == "true" {
+							require.True(t, rewriter.IsAlwaysFalseExpr(bitmap), dsl)
+						}
 					}
 				}
 			}
@@ -6155,6 +6234,11 @@ func TestElementPredicateRewrite(t *testing.T) {
 	schema := newTestSchema(false)
 	sub := schema.StructArrayFields[0].Fields[0]
 	sub.ElementNullable = true
+	tags := &schemapb.FieldSchema{FieldID: 952, Name: "tags", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, Nullable: true, ElementNullable: true}
+	schema.Fields = append(schema.Fields, tags, &schemapb.FieldSchema{
+		FieldID: 953, Name: "weights", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+	})
 	schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, &schemapb.FieldSchema{
 		FieldID: 954, Name: "struct_array[weight]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
 	})
@@ -6171,43 +6255,55 @@ func TestElementPredicateRewrite(t *testing.T) {
 		require.NoError(t, err, filter)
 		return expr
 	}
-	anyMatch := func(predicate string) *planpb.Expr {
-		return parse("MATCH_ANY(struct_array, " + predicate + ")")
+	for _, tc := range []struct {
+		target, el string
+		field      int64
+	}{
+		{"tags", "$", tags.FieldID}, {"struct_array", "$[sub_str]", sub.FieldID},
+	} {
+		anyMatch := func(predicate string) *planpb.Expr {
+			return parse("MATCH_ANY(" + tc.target + ", " + strings.ReplaceAll(predicate, "@", tc.el) + ")")
+		}
+		contradiction := `@ == "new" && @ == "york"`
+		m := anyMatch(contradiction).GetMatchExpr()
+		require.NotNil(t, m)
+		require.True(t, rewriter.IsAlwaysFalseExpr(m.GetPredicate()), "%v", m)
+		if tc.target == "tags" {
+			require.Equal(t, tc.field, m.GetTargetFieldId())
+		} else {
+			require.Equal(t, tc.target, m.GetStructName())
+			require.EqualValues(t, structArrayFieldID, m.GetTargetFieldId())
+		}
+		root := parse(fmt.Sprintf(`NOT MATCH_EXACT(%s, %s, threshold=0)`, tc.target, strings.ReplaceAll(contradiction, "@", tc.el)))
+		exact := root.GetUnaryExpr().GetChild().GetMatchExpr()
+		require.Equal(t, planpb.MatchType_MatchExact, exact.GetMatchType())
+		require.Zero(t, exact.GetCount())
+		require.True(t, rewriter.IsAlwaysFalseExpr(exact.GetPredicate()))
+		term := anyMatch(`@ == "new" || @ == "york"`).GetMatchExpr().GetPredicate().GetTermExpr()
+		require.Len(t, term.GetValues(), 2)
+		require.Equal(t, tc.field, term.GetColumnInfo().GetFieldId())
+		require.True(t, term.GetColumnInfo().GetIsElementLevel())
+		require.True(t, term.GetColumnInfo().GetNullable())
+		bounds := anyMatch(`@ >= "a" && @ < "z"`).GetMatchExpr().GetPredicate().GetBinaryRangeExpr()
+		require.Equal(t, tc.field, bounds.GetColumnInfo().GetFieldId())
+		require.True(t, bounds.GetLowerInclusive())
+		require.False(t, bounds.GetUpperInclusive())
+		require.True(t, rewriter.IsAlwaysFalseExpr(anyMatch(`@ >= "z" && @ < "a"`).GetMatchExpr().GetPredicate()))
+		innerNot := anyMatch("not (" + contradiction + ")").GetMatchExpr().GetPredicate().GetUnaryExpr()
+		require.NotNil(t, innerNot.GetChild().GetBinaryExpr())
+		require.NotNil(t, anyMatch(`@ == "new" && @ == "new"`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	}
-	contradiction := `$[sub_str] == "new" && $[sub_str] == "york"`
-	m := anyMatch(contradiction).GetMatchExpr()
-	require.NotNil(t, m)
-	require.True(t, rewriter.IsAlwaysFalseExpr(m.GetPredicate()), "%v", m)
-	require.Equal(t, "struct_array", m.GetStructName())
-	root := parse("NOT MATCH_EXACT(struct_array, " + contradiction + ", threshold=0)")
-	exact := root.GetUnaryExpr().GetChild().GetMatchExpr()
-	require.Equal(t, planpb.MatchType_MatchExact, exact.GetMatchType())
-	require.Zero(t, exact.GetCount())
-	require.True(t, rewriter.IsAlwaysFalseExpr(exact.GetPredicate()))
-	term := anyMatch(`$[sub_str] == "new" || $[sub_str] == "york"`).GetMatchExpr().GetPredicate().GetTermExpr()
-	require.Len(t, term.GetValues(), 2)
-	require.Equal(t, sub.FieldID, term.GetColumnInfo().GetFieldId())
-	require.True(t, term.GetColumnInfo().GetIsElementLevel())
-	require.True(t, term.GetColumnInfo().GetNullable())
-	bounds := anyMatch(`$[sub_str] >= "a" && $[sub_str] < "z"`).GetMatchExpr().GetPredicate().GetBinaryRangeExpr()
-	require.Equal(t, sub.FieldID, bounds.GetColumnInfo().GetFieldId())
-	require.True(t, bounds.GetLowerInclusive())
-	require.False(t, bounds.GetUpperInclusive())
-	require.True(t, rewriter.IsAlwaysFalseExpr(anyMatch(`$[sub_str] >= "z" && $[sub_str] < "a"`).GetMatchExpr().GetPredicate()))
-	innerNot := anyMatch("not (" + contradiction + ")").GetMatchExpr().GetPredicate().GetUnaryExpr()
-	require.NotNil(t, innerNot.GetChild().GetBinaryExpr())
-	require.NotNil(t, anyMatch(`$[sub_str] == "new" && $[sub_str] == "new"`).GetMatchExpr().GetPredicate().GetBinaryExpr())
-	bound, err := ParseExpr(helper, `MATCH_ANY(struct_array, $[sub_str] == {first} && $[sub_str] == {second})`, map[string]*schemapb.TemplateValue{
+	bound, err := ParseExpr(helper, `MATCH_ANY(tags, $ == {first} && $ == {second})`, map[string]*schemapb.TemplateValue{
 		"first":  {Val: &schemapb.TemplateValue_StringVal{StringVal: "new"}},
 		"second": {Val: &schemapb.TemplateValue_StringVal{StringVal: "york"}},
 	})
 	require.NoError(t, err)
 	require.True(t, rewriter.IsAlwaysFalseExpr(bound.GetMatchExpr().GetPredicate()))
 	// Both literals round to the same FLOAT element value.
-	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[weight] == 16777216.0 && $[weight] == 16777217.0)`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	require.NotNil(t, parse(`MATCH_ANY(weights, $ == 16777216.0 && $ == 16777217.0)`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	// Equalities on different StructArray children can both match the same element.
 	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[sub_str] == "new" && $[sub_int] == 1)`).GetMatchExpr().GetPredicate().GetBinaryExpr())
-	separate := parse(`MATCH_ANY(struct_array, $[sub_str] == "new") && MATCH_ANY(struct_array, $[sub_str] == "york")`).GetBinaryExpr()
+	separate := parse(`MATCH_ANY(tags, $ == "new") && MATCH_ANY(tags, $ == "york")`).GetBinaryExpr()
 	require.NotNil(t, separate.GetLeft().GetMatchExpr())
 	require.NotNil(t, separate.GetRight().GetMatchExpr())
 	elementFilter := func(predicate string) *planpb.ElementFilterExpr {
@@ -6223,12 +6319,12 @@ func TestElementPredicateRewrite(t *testing.T) {
 	require.NotNil(t, elementFilter("NOT ("+conflict+")").GetElementExpr().GetUnaryExpr().GetChild().GetBinaryExpr())
 	require.NotNil(t, elementFilter(`$[weight] == 16777216.0 && $[weight] == 16777217.0`).GetElementExpr().GetBinaryExpr())
 	require.NotNil(t, elementFilter(`$[weight] >= 16777217.0 && $[weight] <= 16777216.0`).GetElementExpr().GetBinaryExpr())
-	filterPlan, err := ParseExpr(helper, `ELEMENT_FILTER(struct_array, $[sub_str] == {x} || $[sub_str] == {y})`, map[string]*schemapb.TemplateValue{
+	term, err := ParseExpr(helper, `ELEMENT_FILTER(struct_array, $[sub_str] == {x} || $[sub_str] == {y})`, map[string]*schemapb.TemplateValue{
 		"x": {Val: &schemapb.TemplateValue_StringVal{StringVal: "a"}},
 		"y": {Val: &schemapb.TemplateValue_StringVal{StringVal: "b"}},
 	})
 	require.NoError(t, err)
-	require.Len(t, filterPlan.GetElementFilterExpr().GetElementExpr().GetTermExpr().GetValues(), 2)
+	require.Len(t, term.GetElementFilterExpr().GetElementExpr().GetTermExpr().GetValues(), 2)
 	// IN uses stored FLOAT values. 2^24 and 2^24+1 compare equal there.
 	for _, predicate := range []string{
 		`$[weight] in [16777217.0, 9.0] && $[weight] == 16777216.0`,
@@ -6239,12 +6335,12 @@ func TestElementPredicateRewrite(t *testing.T) {
 		require.NotNil(t, elementFilter(predicate).GetElementExpr().GetBinaryExpr(), predicate)
 	}
 	cfg.EnableMatchConstantPredicate.SwapTempValue("false")
-	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[sub_str] == "new" && $[sub_str] == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
-	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[sub_str] == "new" || $[sub_str] == "york")`).GetMatchExpr().GetPredicate().GetTermExpr())
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" && $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetTermExpr())
 	require.NotNil(t, elementFilter(conflict).GetElementExpr().GetBinaryExpr())
 	require.NotNil(t, elementFilter(`$[sub_str] >= "a" && $[sub_str] < "z"`).GetElementExpr().GetBinaryRangeExpr())
 	cfg.EnabledOptimizeExpr.SwapTempValue("false")
-	require.NotNil(t, parse(`MATCH_ANY(struct_array, $[sub_str] == "new" || $[sub_str] == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
+	require.NotNil(t, parse(`MATCH_ANY(tags, $ == "new" || $ == "york")`).GetMatchExpr().GetPredicate().GetBinaryExpr())
 	require.NotNil(t, elementFilter(conflict).GetElementExpr().GetBinaryExpr())
 	require.True(t, rewriter.IsAlwaysTrueExpr(elementFilter("1 == 1").GetElementExpr()))
 	require.True(t, rewriter.IsAlwaysFalseExpr(elementFilter("1 == 2").GetElementExpr()))
