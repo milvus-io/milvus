@@ -37,6 +37,7 @@ import (
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -3133,4 +3134,105 @@ func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.
 			require.ErrorContains(t, err, key+" is not supported on struct sub-field s[tag]")
 		})
 	}
+}
+
+// On 3.0, RestoreSnapshot calls RootCoord CreateCollection with preserveFieldID
+// set while bypassing proxy: the added sub-field origin marker must survive
+// that restore path and still be rejected for new collections.
+func Test_createCollectionTask_prepareSchema_structSubFieldOriginMarker(t *testing.T) {
+	paramtable.Init()
+	buildTask := func(preserveFieldID bool) createCollectionTask {
+		collectionName := funcutil.GenRandomStr()
+		added := &schemapb.FieldSchema{
+			FieldID: 112, Name: "s[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			ElementNullable: true,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+		}
+		schemautil.MarkAddedStructSubField(added)
+		schema := &schemapb.CollectionSchema{
+			Name:               collectionName,
+			EnableDynamicField: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				}},
+				{FieldID: 102, Name: MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 105, Name: "s",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: 106, Name: "s[id]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					},
+					added,
+				},
+			}},
+		}
+		return createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: preserveFieldID,
+		}
+	}
+
+	t.Run("new collection", func(t *testing.T) {
+		task := buildTask(false)
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"s[added]\" is reserved")
+	})
+
+	t.Run("restored from snapshot", func(t *testing.T) {
+		task := buildTask(true)
+		require.NoError(t, task.prepareSchema(context.TODO()))
+		subFields := task.body.CollectionSchema.GetStructArrayFields()[0].GetFields()
+		require.False(t, schemautil.IsAddedStructSubField(subFields[0]))
+		require.True(t, schemautil.IsAddedStructSubField(subFields[1]), "the marker must survive the restore")
+	})
+
+	t.Run("restore rejects non-element-nullable added sub-field", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[1].ElementNullable = false
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "added sub-field \"s[added]\" of struct field \"s\" must set element_nullable=true")
+	})
+
+	t.Run("restore rejects struct with all sub-fields marked added", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[0].ElementNullable = true
+		schemautil.MarkAddedStructSubField(task.body.CollectionSchema.StructArrayFields[0].Fields[0])
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "struct field \"s\" must keep at least one original sub-field without "+common.StructSubFieldAddedKey)
+	})
+
+	t.Run("restore rejects malformed origin marker value", func(t *testing.T) {
+		task := buildTask(true)
+		for _, kv := range task.body.CollectionSchema.StructArrayFields[0].Fields[1].TypeParams {
+			if kv.Key == common.StructSubFieldAddedKey {
+				kv.Value = "false"
+			}
+		}
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"s[added]\" must be \"true\", got \"false\"")
+	})
+
+	t.Run("restore rejects added sub-field with field ID below original sibling", func(t *testing.T) {
+		task := buildTask(true)
+		task.body.CollectionSchema.StructArrayFields[0].Fields[0].FieldID = 112
+		task.body.CollectionSchema.StructArrayFields[0].Fields[1].FieldID = 106
+		err := task.prepareSchema(context.TODO())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "added sub-field \"s[added]\" of struct field \"s\" has field ID 106, which must be greater than original sub-field ID 112")
+	})
 }
