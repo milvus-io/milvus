@@ -21,9 +21,5 @@ override_dh_auto_install:
 	cp $(PWD)/scripts/milvus.conf $(PWD)/debian/milvus/etc/ld.so.conf.d/
 	cp $(PWD)/scripts/milvus.service $(PWD)/debian/milvus/lib/systemd/system/
 
-# Preserve Intel's prebuilt SVS runtime when packaging the staged libraries.
-override_dh_strip:
-	dh_strip -Xlibsvs_runtime.so
-
 override_dh_shlibdeps:
 	dh_shlibdeps -l$(shell pwd)/milvus-lib

@@ -84,25 +84,22 @@ assert_install() {
 
 svs_dir="$repo_root/internal/core/output/lib64"
 create_library "$svs_dir" libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
-printf 'vendor notices\n' > "$svs_dir/svs-notices.txt"
 run_install
 assert_install
 assert_library libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
-cmp "$svs_dir/svs-notices.txt" "$runtime_dir/svs-notices.txt"
 
 # Stage only this build's SVS files, even when two native prefixes contain a runtime.
 manifest="$repo_root/cmake_build/install_manifest.txt"
-printf '%s\n' "$svs_dir"/libsvs_runtime.so* "$svs_dir/svs-notices.txt" > "$manifest"
+printf '%s\n' "$svs_dir"/libsvs_runtime.so* > "$manifest"
 touch "$repo_root/internal/core/output/lib/libsvs_runtime.so.obsolete"
 run_install
 test ! -e "$runtime_dir/libsvs_runtime.so.obsolete"
 assert_library libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
-cmp "$svs_dir/svs-notices.txt" "$runtime_dir/svs-notices.txt"
 
-# Turning SVS off removes the prior library and its notices from image staging.
+# Turning SVS off removes the prior library from image staging.
 printf '%s\n' "$repo_root/internal/core/output/lib/libdemo.so" > "$manifest"
 run_install
-if compgen -G "$runtime_dir/libsvs_runtime.so*" > /dev/null || [[ -e "$runtime_dir/svs-notices.txt" ]]; then
+if compgen -G "$runtime_dir/libsvs_runtime.so*" > /dev/null; then
     echo "Disabled SVS files remained in the runtime directory" >&2
     exit 1
 fi

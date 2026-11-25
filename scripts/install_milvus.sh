@@ -36,7 +36,7 @@ for lib_dir in "$PWD/internal/core/output/lib" "$PWD/internal/core/output/lib64"
     fi
     # A cached native installation may be staged without its CMake build tree.
     if [[ -f "$lib_dir/libsvs_runtime.so" ]]; then
-        svs_files=("$lib_dir"/libsvs_runtime.so* "$lib_dir/svs-notices.txt")
+        svs_files=("$lib_dir"/libsvs_runtime.so*)
     fi
 done
 # In reused build trees, the install prefix may still contain a disabled or older SVS.
@@ -45,17 +45,13 @@ if [[ -f "$manifest" ]]; then
     svs_files=()
     while IFS= read -r path || [[ -n "$path" ]]; do
         case "${path##*/}" in
-            libsvs_runtime.so*|svs-notices.txt) svs_files+=("$path") ;;
+            libsvs_runtime.so*) svs_files+=("$path") ;;
         esac
     done < "$manifest"
 fi
-rm -f -- "$LIBRARY_PATH"/libsvs_runtime.so* "$LIBRARY_PATH/svs-notices.txt"
+rm -f -- "$LIBRARY_PATH"/libsvs_runtime.so*
 if (( ${#svs_files[@]} )); then
     cp -a "${svs_files[@]}" "$LIBRARY_PATH/"
-    if [[ ! -f "$LIBRARY_PATH/svs-notices.txt" ]]; then
-        echo "Missing SVS redistribution notices" >&2
-        exit 1
-    fi
 fi
 shopt -u nullglob
 # The plan parser libraries exist for the C++ unit tests, which link them from
