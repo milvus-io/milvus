@@ -55,7 +55,9 @@ func TestRecoveredAckEntriesFollowActualSessionLifecycle(t *testing.T) {
 			finishTT := initialTT + 4
 			switch finish {
 			case "commit":
-				require.NoError(t, first.RequestCommitAndWait(context.Background(), finishTT, 0))
+				require.NoError(t, first.AddNewMessage(context.Background(), finishTT))
+				first.AddNewMessageDoneAndKeepalive(finishTT, message.MessageTypeInsert)
+				require.NoError(t, first.RequestCommitAndWait(context.Background(), finishTT, 1))
 				first.CommitDone()
 			case "rollback":
 				require.NoError(t, first.RequestRollback(context.Background(), finishTT))

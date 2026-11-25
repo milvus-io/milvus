@@ -21,7 +21,9 @@ func TestCommitOutcomeDoesNotBecomeExpired(t *testing.T) {
 			m := NewTxnManager(types.PChannelInfo{Name: t.Name()}, nil)
 			s, err := m.BeginNewTxn(context.Background(), newBeginTxnMessage(0, time.Millisecond))
 			require.NoError(t, err)
-			require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 0))
+			require.NoError(t, s.AddNewMessage(context.Background(), 0))
+			s.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+			require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 1))
 			if state == message.TxnStateCommitted {
 				s.CommitDone()
 			}

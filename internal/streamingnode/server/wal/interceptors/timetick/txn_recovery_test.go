@@ -68,7 +68,7 @@ func TestRepeatedCommitReturnsOriginalResult(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			impl := newTestTimeTickAppendInterceptor(t)
-			commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1")
+			commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 			calls := 0
 			appendFn := func(context.Context, message.MutableMessage) (message.MessageID, error) {
 				calls++
@@ -93,7 +93,7 @@ func TestRepeatedCommitReturnsOriginalResult(t *testing.T) {
 
 func TestConcurrentRepeatedCommitUsesOneResult(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
-	commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 	txnCtx := *commit.TxnContext()
 	started, finish := make(chan struct{}), make(chan struct{})
 	results := make(chan *utility.ExtraAppendResult, 8)
@@ -144,7 +144,7 @@ func TestConcurrentRepeatedCommitUsesOneResult(t *testing.T) {
 
 func TestFailedCommitDoesNotCreateSuccessTombstone(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
-	commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit, _ := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 	_, err := impl.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), commit,
 		func(context.Context, message.MutableMessage) (message.MessageID, error) { return nil, context.Canceled })
 	require.ErrorIs(t, err, context.Canceled)
