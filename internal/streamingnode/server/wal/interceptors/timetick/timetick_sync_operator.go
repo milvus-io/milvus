@@ -76,6 +76,8 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 }
 
 func (impl *timeTickSyncOperator) SyncWithQueryBarriers(ctx context.Context, persisted bool, barriers map[string]uint64) (map[string]uint64, error) {
+	impl.interceptorBuildParam.TimeTickSyncMu.Lock()
+	defer impl.interceptorBuildParam.TimeTickSyncMu.Unlock()
 	if impl.walShutdownOrFenced.Load() {
 		// skip append tt msg to a shutdown or fenced wal
 		return nil, status.NewChannelFenced(impl.Channel().Name)

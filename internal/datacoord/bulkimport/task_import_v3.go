@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -386,7 +387,7 @@ func (t *importTaskV3) acceptResult(results []*datapb.ImportTaskV3Result) error 
 	if err := validateImportResults(results, 1); err != nil {
 		return err
 	}
-	namespaceSorted := job.GetSchema().GetEnableNamespace()
+	namespaceSorted := common.UsesNamespacePartitionKey(job.GetSchema())
 	return applyImportResults(context.TODO(), t.meta, p.GetCollectionId(), schemaVersion, []int64{p.GetSegmentId()}, !namespaceSorted, namespaceSorted, results)
 }
 

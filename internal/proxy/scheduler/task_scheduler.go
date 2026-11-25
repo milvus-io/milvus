@@ -29,8 +29,10 @@ import (
 	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -102,6 +104,9 @@ func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, er
 
 	if queue.utFull() {
 		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+	}
+	if observeDQLTask(t) {
+		extension.ObserveDQLPhase(t.TraceCtx(), "queue")
 	}
 	element := queue.unissuedTasks.PushBack(t)
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
@@ -499,6 +504,9 @@ func (sched *TaskScheduler) processTask(t taskmodel.Task, q TaskQueue) {
 }
 
 func (sched *TaskScheduler) processTaskWithContext(ctx context.Context, t taskmodel.Task, q TaskQueue) {
+	if observeDQLTask(t) {
+		extension.ObserveDQLPhase(t.TraceCtx(), "execute")
+	}
 	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, t.Name())
 	defer span.End()
 
@@ -846,4 +854,12 @@ func (sched *TaskScheduler) GetMetrics() []metricsinfo.TaskQueueMetrics {
 		dqlQueueMetrics,
 		dcQueueMetrics,
 	}
+}
+
+func observeDQLTask(t taskmodel.Task) bool {
+	if internal, ok := t.(interface{ IsInternalTask() bool }); ok && internal.IsInternalTask() {
+		return false
+	}
+	msgType := t.Type()
+	return !t.IsSubTask() && (msgType == commonpb.MsgType_Search || msgType == commonpb.MsgType_Retrieve)
 }

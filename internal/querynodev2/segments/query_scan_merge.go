@@ -50,6 +50,7 @@ type queryFrameRows struct {
 	pks        arrow.Array
 	timestamps *array.Int64
 	offsets    *array.Int64
+	elements   *array.List
 	rows       int
 }
 
@@ -81,6 +82,10 @@ func prepareQueryFrame(frame *chain.DataFrame) (*queryFrameRows, error) {
 	if frame == nil {
 		return nil, merr.WrapErrServiceInternalMsg("missing query DataFrame")
 	}
+	if col := frame.Column(types.QueryElementIndicesFieldName); col != nil &&
+		!arrow.TypeEqual(col.DataType(), arrow.ListOf(arrow.PrimitiveTypes.Int32)) {
+		return nil, merr.WrapErrServiceInternalMsg("query element indices must be List<Int32>")
+	}
 	if frame.NumRows() == 0 {
 		return r, nil
 	}
@@ -101,6 +106,13 @@ func prepareQueryFrame(frame *chain.DataFrame) (*queryFrameRows, error) {
 	r.timestamps, err = queryFrameInt64Column(frame, types.TimestampFieldName)
 	if err != nil {
 		return nil, err
+	}
+	if frame.HasColumn(types.QueryElementIndicesFieldName) {
+		col, err := queryFrameColumn(frame, types.QueryElementIndicesFieldName)
+		if err != nil {
+			return nil, err
+		}
+		r.elements = col.(*array.List)
 	}
 	r.rows = int(frame.NumRows())
 	return r, nil
@@ -127,6 +139,15 @@ func (r *queryFrameRows) pk(row int) any {
 	return r.pks.(*array.String).Value(row)
 }
 
+// resultCount uses the Query limit's unit, preserving whole document lists.
+func (r *queryFrameRows) resultCount(row int) int64 {
+	if r.elements == nil {
+		return 1
+	}
+	start, end := r.elements.ValueOffsets(row)
+	return end - start
+}
+
 // queryScanMergeResult follows the L0 reduce layout: Arrow data plus source
 // locations for late materialization. The caller owns Frame.
 type queryScanMergeResult struct {
@@ -135,7 +156,8 @@ type queryScanMergeResult struct {
 }
 
 // mergeQueryScanResults preserves the existing PK/timestamp cursor and limit
-// rules. No result payload is converted to protobuf here.
+// rules, counting selected elements in element mode and documents otherwise.
+// No result payload is converted to protobuf here.
 func mergeQueryScanResults(frames []*chain.DataFrame, limit int64, reduceType reduce.IReduceType) (*queryScanMergeResult, error) {
 	merged := &queryScanMergeResult{}
 	var detailRows []int
@@ -146,6 +168,9 @@ func mergeQueryScanResults(frames []*chain.DataFrame, limit int64, reduceType re
 		results[i], err = prepareQueryFrame(frame)
 		if err != nil {
 			return nil, err
+		}
+		if frame.HasColumn(types.QueryElementIndicesFieldName) != frames[0].HasColumn(types.QueryElementIndicesFieldName) {
+			return nil, merr.WrapErrServiceInternalMsg("query element mode differs across segments")
 		}
 		if results[i].rows == 0 {
 			continue
@@ -162,7 +187,8 @@ func mergeQueryScanResults(frames []*chain.DataFrame, limit int64, reduceType re
 		timestamp int64
 	}
 	winners := make(map[any]entry)
-	for limit == typeutil.Unlimited || !reduce.ShouldUseInputLimit(reduceType) || int64(len(merged.Selections)) < limit {
+	var availableCount int64
+	for limit == typeutil.Unlimited || !reduce.ShouldUseInputLimit(reduceType) || availableCount < limit {
 		best, row := -1, 0
 		for i, r := range results {
 			if cursors[i] == r.rows {
@@ -188,7 +214,10 @@ func mergeQueryScanResults(frames []*chain.DataFrame, limit int64, reduceType re
 			winners[pk] = entry{len(merged.Selections), timestamp}
 			merged.Selections = append(merged.Selections, selection)
 			detailRows = append(detailRows, row)
+			availableCount += r.resultCount(row)
 		} else if timestamp != 0 && timestamp > previous.timestamp {
+			old := merged.Selections[previous.index]
+			availableCount += r.resultCount(row) - results[old.SegmentIndex].resultCount(detailRows[previous.index])
 			winners[pk] = entry{previous.index, timestamp}
 			merged.Selections[previous.index] = selection
 			detailRows[previous.index] = row

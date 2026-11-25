@@ -61,9 +61,10 @@ class MetadataOpenCancellationTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = std::filesystem::temp_directory_path().string();
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] =
+            std::string(std::filesystem::temp_directory_path().string());
         fs_ = std::make_shared<CancellingMetadataFileSystem>(cancelled_);
         context_ =
             storage::FileManagerContext(storage::FieldDataMeta{1, 2, 3, 101},

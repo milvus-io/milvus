@@ -447,12 +447,10 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
-	// DataNode, which builds the text index inline and needs the analyzer resources in ref mode.
+	// The namespace compactor builds the text index inline and needs analyzer resources in ref mode.
 	taskSchema := taskProto.GetSchema()
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
-		taskSchema.GetEnableNamespace() &&
-		len(taskSchema.GetFileResourceIds()) > 0 {
+	if len(taskSchema.GetFileResourceIds()) > 0 && common.UsesNamespacePartitionKey(taskSchema) &&
+		fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			mlog.Warn(context.TODO(), "get file resources for clustering compaction failed", mlog.Int64("collectionID", taskProto.GetCollectionID()), mlog.Err(err))

@@ -60,8 +60,10 @@ RunPackedIndexLoad(PackedIndexSource& source,
             : proto::common::LoadPriority::HIGH;
     const auto operation_token =
         context ? context->cancellation_token : folly::CancellationToken{};
-    const auto token = folly::cancellation_token_merge(
-        operation_token, co_await folly::coro::co_current_cancellation_token);
+    const auto caller_token =
+        co_await folly::coro::co_current_cancellation_token;
+    const auto token =
+        folly::cancellation_token_merge(operation_token, caller_token);
     if (const auto* sync =
             std::get_if<std::shared_ptr<storage::IndexEntryReader>>(
                 &source.reader)) {
@@ -165,10 +167,10 @@ RunPackedIndexLoad(PackedIndexSource& source,
                 }
             };
             if (plan.worker_writes) {
-                entry_reader.ReadEntryStreamAt(entry.name, write);
+                co_await entry_reader.ReadEntryStreamAtAsync(entry.name, write);
             } else {
                 size_t offset = 0;
-                entry_reader.ReadEntryStream(
+                co_await entry_reader.ReadEntryStreamAsync(
                     entry.name, [&](const uint8_t* bytes, size_t size) {
                         write(offset, bytes, size);
                         offset += size;

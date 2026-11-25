@@ -79,7 +79,13 @@ PhyElementFilterBitsNode::AddInput(RowVectorPtr& input) {
 
 RowVectorPtr
 PhyElementFilterBitsNode::GetOutput() {
-    if (is_finished_ || input_ == nullptr) {
+    if (is_finished_) {
+        return nullptr;
+    }
+    if (input_ == nullptr) {
+        // An empty upstream can finish without producing a bitmap. Let the
+        // driver terminate instead of polling this operator indefinitely.
+        is_finished_ = no_more_input_;
         return nullptr;
     }
 

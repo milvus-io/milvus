@@ -41,6 +41,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		}
 	}()
 
+	if msg.MessageType() == message.MessageTypeAlterWAL {
+		return impl.appendAlterWAL(ctx, msg, append)
+	}
+
 	ackManager := impl.operator.AckManager()
 	var txnSession *txn.TxnSession
 	var immutableMsg message.ImmutableMessage

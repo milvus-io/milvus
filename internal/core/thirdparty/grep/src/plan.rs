@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use grep::regex::{RegexMatcher, RegexMatcherBuilder};
-use regex_syntax::ast::{self, Ast, Flag, GroupKind, Visitor};
+use regex_syntax::ast;
 use regex_syntax::hir::Hir;
 
 use crate::{Error, InputKind, LimitKind, LiteralCondition};
@@ -33,6 +33,8 @@ pub struct MatchOptions {
     pub boundary: Boundary,
     /// Maximum matching lines per input. None is unlimited; Some(0) matches nothing.
     pub max_count: Option<u64>,
+    pub before_context: u64,
+    pub after_context: u64,
 }
 
 /// Strictly positive service limits. Engine limits are approximate and do not
@@ -50,6 +52,8 @@ pub struct Plan(Arc<PlanData>);
 struct PlanData {
     matcher: RegexMatcher,
     max_count: Option<u64>,
+    before_context: u64,
+    after_context: u64,
     condition: LiteralCondition,
     condition_payload: Vec<u8>,
 }
@@ -121,6 +125,8 @@ impl Plan {
         Ok(Self(Arc::new(PlanData {
             matcher,
             max_count: options.max_count,
+            before_context: options.before_context,
+            after_context: options.after_context,
             condition,
             condition_payload,
         })))
@@ -141,6 +147,10 @@ impl Plan {
 
     pub(crate) fn matcher(&self) -> RegexMatcher {
         self.0.matcher.clone()
+    }
+
+    pub(crate) fn context(&self) -> (u64, u64) {
+        (self.0.before_context, self.0.after_context)
     }
 
     pub(crate) fn max_count(&self) -> Option<u64> {
@@ -198,9 +208,6 @@ fn prepare_hir(patterns: &[&str], options: MatchOptions) -> Result<Hir, Error> {
     let ast = ast::parse::Parser::new()
         .parse(&combined)
         .map_err(|e| Error::Syntax(Box::new(e.into())))?;
-    if options.pattern_kind == PatternKind::Regex {
-        ast::visit(&ast, UnicodePolicy)?;
-    }
     // Validate Unicode classes and other HIR-level syntax before the upstream
     // builder stringifies its errors. Matching still uses grep-regex itself.
     regex_syntax::hir::translate::TranslatorBuilder::new()
@@ -211,29 +218,4 @@ fn prepare_hir(patterns: &[&str], options: MatchOptions) -> Result<Hir, Error> {
         .build()
         .translate(&combined, &ast)
         .map_err(|e| Error::Syntax(Box::new(e.into())))
-}
-
-struct UnicodePolicy;
-impl Visitor for UnicodePolicy {
-    type Output = ();
-    type Err = Error;
-    fn finish(self) -> Result<(), Error> {
-        Ok(())
-    }
-    fn visit_pre(&mut self, ast: &Ast) -> Result<(), Error> {
-        let flags = match ast {
-            Ast::Flags(set) => Some(&set.flags),
-            Ast::Group(group) => match &group.kind {
-                GroupKind::NonCapturing(flags) => Some(flags),
-                _ => None,
-            },
-            _ => None,
-        };
-        if flags.is_some_and(|f| f.flag_state(Flag::Unicode) == Some(false)) {
-            return Err(Error::PatternPolicy(
-                "inline Unicode disabling is not supported",
-            ));
-        }
-        Ok(())
-    }
 }

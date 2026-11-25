@@ -61,7 +61,7 @@ func PKUpdateFieldRestriction(schema *schemapb.CollectionSchema) func(*schemapb.
 		}
 	}
 	return func(field *schemapb.FieldSchema) bool {
-		if field.GetDataType() == schemapb.DataType_VarChar && CreateFieldSchemaHelper(field).EnableMatch() {
+		if field.GetDataType() == schemapb.DataType_VarChar && IsTextMatchEnabled(field) {
 			return true
 		}
 		return field.GetFieldID() < common.StartOfUserFieldID || field.GetIsPrimaryKey() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || restrictedNames[field.GetName()] || restrictedIDs[field.GetFieldID()]

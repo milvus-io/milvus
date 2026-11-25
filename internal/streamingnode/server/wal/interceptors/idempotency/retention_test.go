@@ -17,15 +17,18 @@
 package idempotency
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -123,20 +126,58 @@ func TestPChannelRetentionIdleCleanupAndShutdown(t *testing.T) {
 		Now: func() time.Time { return time.Unix(0, clock.Load()) },
 	})
 	defer interceptor.Close()
-	w := interceptor.window("idle")
+	w := interceptor.cache.acquireWindow("idle")
 	for i := 0; i < 600; i++ {
 		completeKey(t, w, IdempotencyKey(fmt.Sprint(i)), uint64(i+1))
 	}
 	require.Equal(t, 600, w.Len())
+	w.release()
 	clock.Add(int64(20 * time.Millisecond))
 	require.Eventually(t, func() bool { return w.Len() == 0 }, 5*time.Second, 5*time.Millisecond,
 		"expired records must be reclaimed without another append")
+	interceptor.cache.mu.Lock()
+	_, found := interceptor.cache.windows["idle"]
+	interceptor.cache.mu.Unlock()
+	require.False(t, found)
 	interceptor.cache.shutdown()
 	select {
 	case <-interceptor.cache.done:
 	default:
 		t.Fatal("shutdown did not join the cleanup worker")
 	}
+}
+
+func TestEmptyWindowRemainsRegisteredWhileInUse(t *testing.T) {
+	paramtable.Init()
+	m := newWindowManager(WindowConfig{MaxSize: 1})
+	const vc = "pending-window"
+	owner := m.acquireWindow(vc)
+	msg := newIdempotentInsertMessage(t, vc, "key")
+	pending := owner.Begin("key", msg).Pending
+	waiter := m.acquireWindow(vc)
+	require.Same(t, pending, waiter.Begin("key", msg).Pending)
+	owner.Complete(pending, CommitResult{CommitTimeTick: 1}, msg)
+	owner.release()
+	require.Zero(t, waiter.Len(), "the record exceeds the byte budget")
+	again := m.acquireWindow(vc)
+	require.Same(t, waiter, again)
+	again.release()
+	require.NotNil(t, pending.Wait(context.Background(), msg).Entry)
+	waiter.release()
+	require.NotContains(t, m.windows, vc)
+	node := paramtable.GetStringNodeID()
+	require.False(t, metrics.WALIdempotencyWindowEntries.DeleteLabelValues(node, vc))
+	require.False(t, metrics.WALIdempotencyWindowInflight.DeleteLabelValues(node, vc))
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.WALIdempotencyDuplicateTotal.WithLabelValues(node, vc)))
+	require.EqualValues(t, 1, testutil.ToFloat64(metrics.WALIdempotencyEvictionTotal.WithLabelValues(node, vc)))
+	next := m.acquireWindow(vc)
+	completeKey(t, next, "other", 2)
+	next.release()
+	require.EqualValues(t, 2, testutil.ToFloat64(metrics.WALIdempotencyEvictionTotal.WithLabelValues(node, vc)))
+	m.dropVChannel(vc)
+	require.NotContains(t, m.idleCounters, vc)
+	require.False(t, metrics.WALIdempotencyDuplicateTotal.DeleteLabelValues(node, vc))
+	require.False(t, metrics.WALIdempotencyEvictionTotal.DeleteLabelValues(node, vc))
 }
 
 func TestPChannelRetentionConcurrentWindows(t *testing.T) {

@@ -62,6 +62,8 @@ typedef struct {
    */
   uint32_t has_max_count;
   uint64_t max_count;
+  uint64_t before_context;
+  uint64_t after_context;
 } MgGrepMatchOptions;
 
 /**
@@ -92,7 +94,7 @@ typedef struct {
 
 /**
  * UTF-8 byte interval [start,end) relative to the owning line.content.
- * Empty matches have start == end; endpoints are character boundaries.
+ * Empty matches have start == end; endpoints may lie inside UTF-8 code points.
  */
 typedef struct {
   uint64_t start;
@@ -100,8 +102,10 @@ typedef struct {
 } MgGrepSpan;
 
 /**
- * Complete matching line, minus only its terminal LF. Other bytes remain.
- * Every returned line has at least one span. Empty content is {NULL,0}.
+ * Complete matching or context line, minus only its terminal LF. Other bytes remain.
+ * Context lines have zero spans; matching spans are line-local and include
+ * zero-length matches at the end of the line. Selection depends on line_count.
+ * Empty content is {NULL,0}.
  */
 typedef struct {
   MgGrepBytes content;
@@ -115,6 +119,10 @@ typedef struct {
    * Zero-based UTF-8 byte offset in the original field, including preceding LFs.
    */
   uint64_t line_start_offset;
+  /**
+   * True for matching lines, even when span_count is zero.
+   */
+  bool is_match;
 } MgGrepLine;
 
 /**
