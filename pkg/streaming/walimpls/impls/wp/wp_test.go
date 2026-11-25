@@ -2,7 +2,6 @@ package wp
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,8 +35,6 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
-	tmpDir := t.TempDir()
-	rootPath := filepath.Join(tmpDir, "TestWpWAL")
 	testCases := []struct {
 		name        string
 		storageType string
@@ -47,7 +44,7 @@ func TestWAL(t *testing.T) {
 		{
 			name:        "LocalFsStorage",
 			storageType: "local",
-			rootPath:    rootPath,
+			rootPath:    t.TempDir(),
 			needCluster: false,
 		},
 		{
@@ -58,8 +55,8 @@ func TestWAL(t *testing.T) {
 		},
 		{
 			name:        "ServiceStorage",
-			storageType: "service",             // Using default storage type minio-compatible
-			rootPath:    rootPath + "_service", // No need to specify path for this storage
+			storageType: "service", // Using default storage type minio-compatible
+			rootPath:    t.TempDir(),
 			needCluster: true,
 		},
 	}

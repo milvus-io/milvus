@@ -18,8 +18,8 @@ cluster:
 woodpecker:
   enabled: true
   image:
-    repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: v0.1.48
+    repository: harbor.milvus.io/milvusdb/woodpecker
+    tag: v0.1.49
     pullPolicy: Always
 streaming:
   enabled: true
