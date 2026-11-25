@@ -896,15 +896,18 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo) bool {
-	if t.indexEngineVersionManager != nil && t.indexEngineVersionManager.ResolveScalarIndexVersion() >= 4 {
+	if t.indexMeta != nil {
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
 			if idx.LegacyRowDomain && !idx.IsDeleted && idx.IndexState == commonpb.IndexState_Finished && len(idx.IndexFileKeys) > 0 {
-				mlog.Info(context.TODO(), "segment has legacy row-domain scalar index, trigger compaction",
-					mlog.FieldSegmentID(segment.ID),
-					mlog.FieldIndexID(idx.IndexID),
-					mlog.Strings("indexFileKeys", idx.IndexFileKeys))
-				return true
+				if t.indexEngineVersionManager != nil && t.indexEngineVersionManager.ResolveScalarIndexVersion() >= 4 {
+					mlog.Info(context.TODO(), "segment has legacy row-domain scalar index, trigger compaction",
+						mlog.FieldSegmentID(segment.ID),
+						mlog.FieldIndexID(idx.IndexID),
+						mlog.Strings("indexFileKeys", idx.IndexFileKeys))
+					return true
+				}
+				break
 			}
 		}
 	}
