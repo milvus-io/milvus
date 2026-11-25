@@ -39,28 +39,50 @@ func LogicalQueryResultBytes(fields []*schemapb.FieldData, schema *schemapb.Coll
 	return total, nil
 }
 
+// LogicalWriteFieldBytes counts only the values supplied for a write field.
+// Requests can omit the type and dimension metadata filled in by Proxy.
+func LogicalWriteFieldBytes(field *schemapb.FieldData, schema *schemapb.FieldSchema) (uint64, error) {
+	var total uint64
+	kind := schema.GetDataType()
+	if schema == nil {
+		kind = field.GetType()
+	}
+	var dim int64
+	if schema != nil && typeutil.IsVectorType(kind) && !typeutil.IsSparseFloatVectorType(kind) {
+		dim, _ = typeutil.GetDim(schema)
+	}
+	if !addFieldValues(&total, field, kind, schema, uint64(max(dim, 0))) {
+		return 0, merr.WrapErrServiceInternalMsg("cannot measure write field %q (type %s)", field.GetFieldName(), kind)
+	}
+	return total, nil
+}
+
 func addResultFields(total *uint64, fields []*schemapb.FieldData, schemas map[int64]*schemapb.FieldSchema) error {
 	for _, f := range fields {
-		valid := typeutil.GetFieldDataValidData(f)
-		var known bool
-		switch data := f.GetField().(type) {
-		case nil:
-			known = addResultValues(total, 0, valid, 0, nil)
-		case *schemapb.FieldData_Scalars:
-			known = addResultScalar(total, f.GetType(), data.Scalars, valid, schemas[f.GetFieldId()])
-		case *schemapb.FieldData_Vectors:
-			known = addResultVector(total, data.Vectors, valid)
-		case *schemapb.FieldData_StructArrays:
+		if data, ok := f.GetField().(*schemapb.FieldData_StructArrays); ok {
 			if err := addResultFields(total, data.StructArrays.GetFields(), schemas); err != nil {
 				return err
 			}
-			known = true
+			continue
 		}
-		if !known {
+		if !addFieldValues(total, f, f.GetType(), schemas[f.GetFieldId()], 0) {
 			return merr.WrapErrServiceInternalMsg("missing logical size for query result field %q (id %d, type %s)", f.GetFieldName(), f.GetFieldId(), f.GetType())
 		}
 	}
 	return nil
+}
+
+func addFieldValues(total *uint64, field *schemapb.FieldData, kind schemapb.DataType, schema *schemapb.FieldSchema, dim uint64) bool {
+	valid := typeutil.GetFieldDataValidData(field)
+	switch data := field.GetField().(type) {
+	case nil:
+		return addResultValues(total, 0, valid, 0, nil)
+	case *schemapb.FieldData_Scalars:
+		return addResultScalar(total, kind, data.Scalars, valid, schema)
+	case *schemapb.FieldData_Vectors:
+		return addResultVector(total, data.Vectors, valid, dim)
+	}
+	return false
 }
 
 func addResultScalar(total *uint64, kind schemapb.DataType, data *schemapb.ScalarField, valid []bool, schema *schemapb.FieldSchema) bool {
@@ -118,8 +140,11 @@ func addResultScalar(total *uint64, kind schemapb.DataType, data *schemapb.Scala
 	return false
 }
 
-func addResultVector(total *uint64, vector *schemapb.VectorField, valid []bool) bool {
-	dim := uint64(max(vector.GetDim(), 0))
+func addResultVector(total *uint64, vector *schemapb.VectorField, valid []bool, schemaDim uint64) bool {
+	dim := schemaDim
+	if dim == 0 {
+		dim = uint64(max(vector.GetDim(), 0))
+	}
 	switch values := vector.GetData().(type) {
 	case nil:
 		return addResultValues(total, 0, valid, 0, nil)
@@ -140,7 +165,7 @@ func addResultVector(total *uint64, vector *schemapb.VectorField, valid []bool) 
 		return addResultValues(total, len(rows), valid, 0, func(i int) (uint64, bool) {
 			var bytes uint64
 			row := rows[i]
-			ok := addResultVector(&bytes, row, typeutil.GetVectorArrayElementValidData(row))
+			ok := addResultVector(&bytes, row, typeutil.GetVectorArrayElementValidData(row), schemaDim)
 			return bytes, ok
 		})
 	}

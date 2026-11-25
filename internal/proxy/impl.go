@@ -2341,6 +2341,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil {
+		it.EnableWriteUsage()
+	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2389,23 +2393,19 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
 	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
-		hookutil.DatabaseKey:        dbName,
-		hookutil.UsernameKey:        username,
+	report := map[string]any{
 		hookutil.RequestDataSizeKey: proto.Size(request),
 		hookutil.SuccessCntKey:      successCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeInsert, request.DbName, username).Add(float64(v))
 	}
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = it.WriteBytes()
+	}
+	reportMutationUsage(ctx, it.Result().GetStatus(), usageReporter, hookutil.OpTypeInsert, dbName, report)
 	metrics.ProxyInsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))

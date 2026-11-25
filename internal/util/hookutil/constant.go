@@ -28,6 +28,7 @@ var (
 	ResultDataSizeKey  = "result_data_size"
 	RelatedDataSizeKey = "related_data_size"
 	BytesKey           = "bytes"
+	WriteBytesKey      = "write_bytes"
 	SuccessCntKey      = "success_cnt"
 	FailCntKey         = "fail_cnt"
 	RelatedCntKey      = "related_cnt"

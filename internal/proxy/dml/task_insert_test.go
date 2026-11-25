@@ -1192,8 +1192,71 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.Anything,
 	).Return(&collectionInfo{Schema: info}, nil)
 	task.MetaCache = cache
+	task.EnableWriteUsage()
 	err = task.PreExecute(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2*len("sentence"), task.WriteBytes())
+}
+
+func TestInsertWriteRequestBytes(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "metered",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "small", DataType: schemapb.DataType_Int8, Nullable: true},
+			{FieldID: 102, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 103,
+			Name:    "items",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID: 104, Name: "items[vec]", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+			}},
+		}},
+	})
+	json := []byte(`{"dynamic":"值"}`)
+	fields := []*schemapb.FieldData{
+		{
+			FieldName: "id",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+			}},
+		},
+		{
+			FieldName: "small",
+			ValidData: []bool{true, false},
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{7, 0}}},
+			}},
+		},
+		{
+			IsDynamic: true,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{json, json}}},
+			}},
+		},
+		{
+			FieldName: "items",
+			Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+				Fields: []*schemapb.FieldData{{
+					FieldName: "vec",
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
+							Data: []*schemapb.VectorField{
+								{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}},
+								{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{5, 6}}}},
+							},
+						}},
+					}},
+				}},
+			}},
+		},
+	}
+	bytes, err := writeRequestBytes(fields, schema)
+	require.NoError(t, err)
+	require.EqualValues(t, 2*8+1+2*len(json)+6*4, bytes)
 }
 
 func TestInsertTaskForSchemaMismatch(t *testing.T) {

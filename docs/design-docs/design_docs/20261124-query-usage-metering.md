@@ -41,3 +41,7 @@ Proxy accumulates successful lookup stages across retries. On a successful Upser
 ## Full AutoID Upsert
 
 The existence lookup counts the entire primary-key column in every selected segment, including lookups with zero matches. Proxy adds the lookup bytes to the successful Upsert's report.
+
+## Insert
+
+Proxy measures the logical bytes of the client-supplied field values, including vectors and dynamic fields, before materializing the write. Generated IDs, field defaults, and function results add no write bytes. A successful Insert submits `write_bytes` to the same usage reporter and metric as queries. The legacy reporter still receives its existing request-size and row-count inputs.
