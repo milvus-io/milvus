@@ -919,6 +919,19 @@ func SetupCoreConfigChangelCallback() {
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
+	mutableEnabled := params.QueryNodeCfg.MutableScalarIndexEnabled.GetAsBool()
+	mutableStatus := C.SegcoreSetMutableScalarIndex(
+		C.bool(mutableEnabled),
+		C.int64_t(params.QueryNodeCfg.MutableScalarHotBitmapBytes.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.MutableScalarHotQueryThreshold.GetAsInt64()),
+		C.int64_t(params.QueryNodeCfg.MutableScalarHotPostingThreshold.GetAsInt64()))
+	if err := HandleCStatus(&mutableStatus, "SegcoreSetMutableScalarIndex failed"); err != nil {
+		return err
+	}
+	mlog.Info(context.TODO(), "growing mutable scalar index configuration",
+		mlog.Bool("enabled", mutableEnabled), mlog.String("backend", "btree"),
+		mlog.Int64("hotBitmapBytes", params.QueryNodeCfg.MutableScalarHotBitmapBytes.GetAsInt64()))
+
 	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
 	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
 	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {

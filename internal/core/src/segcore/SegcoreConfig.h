@@ -76,6 +76,34 @@ class SegcoreConfig {
         return interim_index_target_version_;
     }
 
+    void
+    set_mutable_scalar_index(bool enabled,
+                             size_t cache_bytes,
+                             size_t hot_queries,
+                             size_t hot_postings) {
+        enable_mutable_scalar_index_ = enabled;
+        mutable_scalar_hot_bitmap_bytes_ = cache_bytes;
+        mutable_scalar_hot_query_threshold_ = hot_queries;
+        mutable_scalar_hot_posting_threshold_ = hot_postings;
+    }
+
+    bool
+    get_enable_mutable_scalar_index() const {
+        return enable_mutable_scalar_index_;
+    }
+    size_t
+    get_mutable_scalar_hot_bitmap_bytes() const {
+        return mutable_scalar_hot_bitmap_bytes_;
+    }
+    size_t
+    get_mutable_scalar_hot_query_threshold() const {
+        return mutable_scalar_hot_query_threshold_;
+    }
+    size_t
+    get_mutable_scalar_hot_posting_threshold() const {
+        return mutable_scalar_hot_posting_threshold_;
+    }
+
     int32_t
     get_interim_index_version() const {
         return interim_index_target_version_ == -1
@@ -358,6 +386,10 @@ class SegcoreConfig {
     inline static std::string sparse_ip_index_algo_;
     inline static std::string sparse_bm25_index_algo_;
     inline static bool enable_interim_segment_index_ = false;
+    inline static bool enable_mutable_scalar_index_ = false;
+    inline static size_t mutable_scalar_hot_bitmap_bytes_ = 0;
+    inline static size_t mutable_scalar_hot_query_threshold_ = 8;
+    inline static size_t mutable_scalar_hot_posting_threshold_ = 256;
     inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;

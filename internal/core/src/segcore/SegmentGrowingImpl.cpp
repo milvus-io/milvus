@@ -928,6 +928,11 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
         }
     }
 
+    if (segcore_config_.get_enable_mutable_scalar_index()) {
+        // Index allocations are now complete. Charge them before visibility:
+        // accounting failure must not report an error after publishing rows.
+        UpdateResourceTracking(*schema, growing_index_feed_cursor_);
+    }
     const auto visible_end = insert_record_.ack_responder_.GetAck();
     AssertInfo(visible_end <= growing_index_feed_cursor_,
                "query-visible growing row end {} exceeds indexed prefix {}",
@@ -1256,6 +1261,62 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
         return;
     }
 
+    auto feed_scalar = [&]<typename T>() {
+        const auto* values = dynamic_cast<const ConcurrentVector<T>*>(
+            insert_record_.get_data_base(field_id));
+        AssertInfo(values != nullptr,
+                   "growing scalar field {} has incompatible raw storage",
+                   field_id.get());
+        const auto chunk_rows = segcore_config_.get_chunk_rows();
+        AssertInfo(chunk_rows > 0,
+                   "growing scalar chunk size must be positive");
+        for (auto offset = row_begin; offset < row_end;) {
+            // Borrow only within one raw chunk. Scalar raw storage is retained
+            // throughout the segment lifetime; Append owns any retained keys.
+            const auto count =
+                std::min(row_end - offset, chunk_rows - offset % chunk_rows);
+            FixedVector<bool> valid(static_cast<size_t>(count), true);
+            const bool* valid_data = nullptr;
+            if (field_meta.is_nullable()) {
+                auto field_valid = insert_record_.get_valid_data(field_id);
+                AssertInfo(field_valid != nullptr,
+                           "nullable scalar field {} has no validity",
+                           field_id.get());
+                field_valid->bulk_is_valid_range(offset, count, valid.data());
+                valid_data = valid.data();
+            }
+            const index::ScalarBatch<T> batch{static_cast<size_t>(count),
+                                              values->get_element(offset),
+                                              valid_data};
+            if (staged != nullptr) {
+                GrowingIndexSet::AppendTo(*staged, field_id, offset, batch);
+            } else {
+                growing_indexes_.Append(field_id, offset, batch);
+            }
+            offset += count;
+        }
+    };
+    switch (data_type) {
+        case DataType::BOOL:
+            feed_scalar.template operator()<bool>();
+            return;
+        case DataType::INT8:
+            feed_scalar.template operator()<int8_t>();
+            return;
+        case DataType::INT16:
+            feed_scalar.template operator()<int16_t>();
+            return;
+        case DataType::INT32:
+            feed_scalar.template operator()<int32_t>();
+            return;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            feed_scalar.template operator()<int64_t>();
+            return;
+        default:
+            break;
+    }
+
     AssertInfo(IsStringDataType(data_type) || data_type == DataType::GEOMETRY,
                "field {} type {} has no connected growing feed",
                field_id.get(),
@@ -1335,10 +1396,14 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
 }
 
 cachinglayer::ResourceUsage
-SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
-    int64_t num_rows = get_row_count();
+SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema,
+                                                 int64_t row_count) const {
+    // Ordered feed supplies its accepted prefix before publishing ACK. Other
+    // callers retain the existing query-visible row-count estimate.
+    const int64_t num_rows = row_count < 0 ? get_row_count() : row_count;
     if (num_rows == 0) {
-        return cachinglayer::ResourceUsage{0, 0};
+        return {static_cast<int64_t>(growing_indexes_.UnchargedResidentBytes()),
+                0};
     }
 
     bool growing_mmap_enabled = storage::MmapManager::GetInstance()
@@ -1513,6 +1578,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
 
     // 5. Deleted records overhead
     memory_bytes += deleted_record_.mem_size();
+    memory_bytes +=
+        static_cast<int64_t>(growing_indexes_.UnchargedResidentBytes());
 
     // Apply safety margin
     constexpr double kResourceSafetyMargin = 1.2;
@@ -1529,8 +1596,9 @@ SegmentGrowingImpl::UpdateResourceTracking() {
 }
 
 void
-SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
-    auto new_resource = EstimateSegmentResourceUsage(schema);
+SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema,
+                                           int64_t row_count) {
+    auto new_resource = EstimateSegmentResourceUsage(schema, row_count);
 
     // Lock to ensure refund-then-charge is atomic
     std::lock_guard<std::mutex> lock(resource_tracking_mutex_);
@@ -1846,8 +1914,11 @@ SegmentGrowingImpl::Insert(
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
-    // step 5: update the resource usage
-    UpdateResourceTracking(*schema);
+    // With mutable scalar indexes, charge raw and index storage together after
+    // feeding the owners and before ACK. Avoid a second full accounting pass.
+    if (!segcore_config_.get_enable_mutable_scalar_index()) {
+        UpdateResourceTracking(*schema);
+    }
 
     // Raw rows become query-visible only after every connected growing owner
     // has accepted the same contiguous prefix.

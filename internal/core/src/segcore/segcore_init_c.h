@@ -30,6 +30,12 @@ void
 SegcoreSetEnableInterminSegmentIndex(const bool);
 
 CStatus
+SegcoreSetMutableScalarIndex(bool enabled,
+                             int64_t hot_bitmap_bytes,
+                             int64_t hot_queries,
+                             int64_t hot_postings);
+
+CStatus
 SegcoreSetInterimIndexTargetVersion(const int64_t target_version);
 
 void

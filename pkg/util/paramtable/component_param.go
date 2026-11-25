@@ -4746,6 +4746,10 @@ type queryNodeConfig struct {
 	ChunkRows                          ParamItem `refreshable:"false"`
 	FmindexCostRatio                   ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
+	MutableScalarIndexEnabled          ParamItem `refreshable:"false"`
+	MutableScalarHotBitmapBytes        ParamItem `refreshable:"false"`
+	MutableScalarHotQueryThreshold     ParamItem `refreshable:"false"`
+	MutableScalarHotPostingThreshold   ParamItem `refreshable:"false"`
 	InterimIndexNlist                  ParamItem `refreshable:"false"`
 	InterimIndexNProbe                 ParamItem `refreshable:"false"`
 	InterimIndexSubDim                 ParamItem `refreshable:"false"`
@@ -5525,6 +5529,31 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.EnableInterminSegmentIndex.Init(base.mgr)
+
+	p.MutableScalarIndexEnabled = ParamItem{
+		Key:     "queryNode.segcore.mutableScalarIndex.enabled",
+		Version: "3.0.0", DefaultValue: "false", Export: true,
+		Doc: "Enable the experimental append-only scalar index on Growing segments. Captured at segment creation; VARCHAR fields with text match retain their existing index.",
+	}
+	p.MutableScalarIndexEnabled.Init(base.mgr)
+	p.MutableScalarHotBitmapBytes = ParamItem{
+		Key:     "queryNode.segcore.mutableScalarIndex.hotBitmapBytes",
+		Version: "3.0.0", DefaultValue: "0", Export: true,
+		Doc: "Per-field byte budget for latest membership bitmap buffers. Zero disables the optional cache. Does not limit total scalar index memory.",
+	}
+	p.MutableScalarHotBitmapBytes.Init(base.mgr)
+	p.MutableScalarHotQueryThreshold = ParamItem{
+		Key:     "queryNode.segcore.mutableScalarIndex.hotQueryThreshold",
+		Version: "3.0.0", DefaultValue: "8", Export: true,
+		Doc: "Minimum point-query uses of a value before admitting a hot membership bitmap.",
+	}
+	p.MutableScalarHotQueryThreshold.Init(base.mgr)
+	p.MutableScalarHotPostingThreshold = ParamItem{
+		Key:     "queryNode.segcore.mutableScalarIndex.hotPostingThreshold",
+		Version: "3.0.0", DefaultValue: "256", Export: true,
+		Doc: "Minimum posting count before admitting a hot membership bitmap; sparse values retain offsets.",
+	}
+	p.MutableScalarHotPostingThreshold.Init(base.mgr)
 
 	p.DenseVectorInterminIndexType = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.denseVectorIndexType",

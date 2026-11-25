@@ -276,7 +276,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
  public:
     size_t
     GetMemoryUsageInBytes() const override {
-        return stats_.mem_size.load() + deleted_record_.mem_size();
+        return stats_.mem_size.load() + deleted_record_.mem_size() +
+               growing_indexes_.ResidentBytes();
     }
 
     int64_t
@@ -710,7 +711,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     EstimateSegmentResourceUsage() const;
 
     ResourceUsage
-    EstimateSegmentResourceUsage(const Schema& schema) const;
+    EstimateSegmentResourceUsage(const Schema& schema,
+                                 int64_t row_count = -1) const;
 
     void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
@@ -829,7 +831,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     UpdateResourceTracking();
 
     void
-    UpdateResourceTracking(const Schema& schema);
+    UpdateResourceTracking(const Schema& schema, int64_t row_count = -1);
 
  private:
     void

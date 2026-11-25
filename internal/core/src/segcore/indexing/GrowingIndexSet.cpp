@@ -24,10 +24,12 @@
 #include <string>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/growing/GrowingVectorSource.h"
 #include "index/growing/KnowhereGrowingVectorIndex.h"
+#include "index/growing/MutableScalarGrowingIndex.h"
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 #include "index/growing/TantivyGrowingTextIndex.h"
 #include "knowhere/comp/index_param.h"
@@ -37,6 +39,7 @@
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/InsertRecord.h"
 #include "storage/MmapManager.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 namespace {
@@ -284,6 +287,36 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                             kGrowingTextCommitIntervalMs));
     }
 
+    const auto scalar_type = field_meta.get_data_type();
+    const bool mutable_scalar =
+        scalar_type == DataType::BOOL || scalar_type == DataType::INT8 ||
+        scalar_type == DataType::INT16 || scalar_type == DataType::INT32 ||
+        scalar_type == DataType::INT64 ||
+        scalar_type == DataType::TIMESTAMPTZ ||
+        scalar_type == DataType::VARCHAR;
+    if (field_meta.get_id().get() >= START_USER_FIELDID && mutable_scalar &&
+        segcore_config.get_enable_mutable_scalar_index()) {
+        auto created = index::CreateMutableScalarGrowingIndex(
+            scalar_type,
+            {segcore_config.get_mutable_scalar_hot_bitmap_bytes(),
+             segcore_config.get_mutable_scalar_hot_query_threshold(),
+             segcore_config.get_mutable_scalar_hot_posting_threshold()});
+        Appender appender(field_meta.get_id(),
+                          index::ReaderCaps{.predicate = true,
+                                            .pattern_match = scalar_type ==
+                                                             DataType::VARCHAR},
+                          std::move(created.owner));
+        appender.resident_bytes = std::move(created.resident_bytes);
+        appender.self_charged_bytes = std::move(created.self_charged_bytes);
+        LOG_INFO(
+            "growing mutable scalar index created: segment={}, field={}, "
+            "backend=btree, hot_bitmap_bytes={}",
+            segment_id,
+            field_meta.get_id().get(),
+            segcore_config.get_mutable_scalar_hot_bitmap_bytes());
+        return appender;
+    }
+
     if (field_meta.get_data_type() == DataType::GEOMETRY &&
         segcore_config.get_enable_interim_segment_index() &&
         index_meta != nullptr && index_meta->GetIndexMaxRowCount() > 0 &&
@@ -437,6 +470,33 @@ bool
 GrowingIndexSet::Has(FieldId field_id) const {
     std::shared_lock lock(mutex_);
     return appenders_.find(field_id) != appenders_.end();
+}
+
+size_t
+GrowingIndexSet::ResidentBytes() const {
+    std::shared_lock lock(mutex_);
+    size_t bytes = 0;
+    for (const auto& [field_id, appender] : appenders_) {
+        if (appender.resident_bytes) {
+            bytes += appender.resident_bytes();
+        }
+        if (appender.self_charged_bytes) {
+            bytes += appender.self_charged_bytes();
+        }
+    }
+    return bytes;
+}
+
+size_t
+GrowingIndexSet::UnchargedResidentBytes() const {
+    std::shared_lock lock(mutex_);
+    size_t bytes = 0;
+    for (const auto& [field_id, appender] : appenders_) {
+        if (appender.resident_bytes) {
+            bytes += appender.resident_bytes();
+        }
+    }
+    return bytes;
 }
 
 bool
