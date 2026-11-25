@@ -33,6 +33,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/ChunkWriter.h"
@@ -4030,7 +4032,7 @@ TEST(InjectExtfsAllowlist, AzureLegacyBrokerQuery) {
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
               endpoint);
     EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
-    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_EQ(props.count("extfs.42.talon.mode"), 0u);
     EXPECT_ANY_THROW(inject(endpoint + "&extra=1"));
     EXPECT_ANY_THROW(
         inject("https://broker.example.com/v1/credentials/"
@@ -4748,7 +4750,12 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
     EXPECT_FALSE(
         InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
             .ok());
-    for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
+    for (const auto& [cloud, iam] : {std::pair{"aws", true},
+                                     {"aliyun", true},
+                                     {"tencent", true},
+                                     {"aws", false},
+                                     {"aliyun", false},
+                                     {"tencent", false}}) {
         for (const auto* format : {"parquet", "milvus-table"}) {
             for (uint32_t mode : {0u, 1u, 2u}) {
                 milvus_storage::api::Properties props;
@@ -4761,14 +4768,17 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
                                    {"extfs",
                                     {{"cloud_provider", cloud},
                                      {"region", "us-west-2"},
-                                     {"use_iam", "true"},
+                                     {"use_iam", iam ? "true" : "false"},
                                      {"credential_endpoint", endpoint}}}};
+                if (!iam) {
+                    spec["extfs"]["role_arn"] = "target-role";
+                }
                 InjectExternalSpecProperties(
                     props, 42, "s3://bucket/path", spec.dump());
                 EXPECT_EQ(std::get<std::string>(
                               props.at("extfs.42.credential_endpoint")),
                           endpoint);
-                EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+                EXPECT_EQ(props.count("extfs.42.role_arn"), iam ? 0u : 1u);
                 auto address =
                     std::get<std::string>(props.at("extfs.42.address"));
                 auto scheme_end = address.find("://");
@@ -4779,13 +4789,16 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
                         props),
                     "s3://" + address + "/bucket/path");
                 ASSERT_TRUE(config.ok()) << config.status();
-                EXPECT_TRUE(config->use_iam);
+                EXPECT_EQ(config->use_iam, iam);
                 EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
                 EXPECT_EQ(config->credential_endpoint, endpoint);
                 EXPECT_FALSE(config->s3_use_crt);
-                EXPECT_EQ(config->talon_mode,
-                          milvus_storage::TalonMode::Disabled);
-                EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+                const bool supports_talon =
+                    iam || std::string_view(cloud) == "aws";
+                EXPECT_EQ(static_cast<uint32_t>(config->talon_mode),
+                          supports_talon ? mode : 0u);
+                EXPECT_EQ(config->talon_coordinator,
+                          supports_talon ? "talon:1234" : "");
                 spec["extfs"]["credential_endpoint"] = endpoint + "/other";
                 EXPECT_ANY_THROW(InjectExternalSpecProperties(
                     props, 42, "s3://bucket/path", spec.dump()));
@@ -4809,8 +4822,9 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
     InjectExternalSpecProperties(
         props, 42, "azure://core.windows.net/container/path", spec.dump());
     EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
-    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
-    EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "2");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.coordinator")),
+              "talon:1234");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
               endpoint);
     spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
@@ -5425,6 +5439,7 @@ TEST(InjectExtfsAllowlist, S3BrokerTargetRoleAcrossClouds) {
             }
             milvus_storage::api::Properties props;
             props["milvus.talon.external_mode"] = uint32_t{2};
+            props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
             InjectExternalSpecProperties(
                 props, 42, "s3://bucket/path", spec.dump());
             auto address = std::get<std::string>(props.at("extfs.42.address"));
@@ -5444,7 +5459,9 @@ TEST(InjectExtfsAllowlist, S3BrokerTargetRoleAcrossClouds) {
             EXPECT_EQ(config->credential_endpoint, endpoint);
             EXPECT_EQ(config->access_key_id, "");
             EXPECT_EQ(config->access_key_value, "");
-            EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
+            EXPECT_EQ(config->talon_mode,
+                      cloud == "aws" ? milvus_storage::TalonMode::SmallReads
+                                     : milvus_storage::TalonMode::Disabled);
         }
         // A target role and the Broker's own identity are different modes.
         auto spec = valid;
