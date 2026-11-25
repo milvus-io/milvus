@@ -80,7 +80,6 @@ func (s *Server) ensureCollectionReadyWithPath(ctx context.Context, req *querypb
 	}
 	collectionID := req.GetCollectionID()
 	runtime := s.qviewsRuntime
-	s.collectionUsage.touch(collectionID)
 	checkStartedAt := time.Now()
 	progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels())
 	if progress.Ready() {
@@ -122,10 +121,6 @@ func (s *Server) ensureCollectionReadyWithPath(ctx context.Context, req *querypb
 			return path, context.Cause(ctx)
 		}
 		callerTimer.End(r.Err)
-		if r.Err == nil {
-			// A long load gets a fresh TTI interval immediately before query execution.
-			s.collectionUsage.touch(collectionID)
-		}
 		return path, r.Err
 	case <-ctx.Done():
 		callerTimer.End(context.Cause(ctx))

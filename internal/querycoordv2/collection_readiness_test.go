@@ -113,11 +113,6 @@ func newReadinessTestServerWithStore(t *testing.T, store *loadmgr.LoadConfigStor
 	runtime := &qviewsRuntime{loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry)}
 	t.Cleanup(func() { runtime.readyChanges.Close(); registry.Close() })
 	s := &Server{ctx: ctx, qviewsRuntime: runtime}
-	usageBroker := meta.NewMockBroker(t)
-	usageBroker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.broker = usageBroker
-	s.collectionUsage = newCollectionUsageManager(s)
-	t.Cleanup(s.collectionUsage.close)
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	return s, syncer
 }

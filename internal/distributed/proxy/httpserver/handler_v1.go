@@ -532,7 +532,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -596,7 +596,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		collSchema, err := h.describeCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
 		if err != nil || collSchema == nil {
@@ -1008,7 +1008,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 	}
 
 	username, _ := c.Get(ContextUsername)
-	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), req.DbName)
 	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
 		if _, err := CheckLimiter(ctx, req, h.proxy); err != nil {
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
@@ -1017,7 +1017,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 			})
 			return nil, err
 		}
-		return h.proxy.Search(ctx, req.(*milvuspb.SearchRequest))
+		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
 	if err == RestRequestInterceptorErr {
 		return

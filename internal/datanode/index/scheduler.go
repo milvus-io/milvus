@@ -402,7 +402,7 @@ func (sched *TaskScheduler) executeTask(exec *taskExecution) error {
 		started := time.Now()
 		if ibt := exec.indexTask; ibt != nil {
 			costCPUNum := taskcost.EstimateIndexBuildCPUNum(ibt.IsVectorIndex())
-			ibt.manager.StoreIndexTaskExecutionStart(ibt.req.GetClusterID(), ibt.req.GetBuildID(), started.UnixMilli(), costCPUNum)
+			ibt.manager.StoreIndexTaskExecutionStart(ibt.req.GetClusterID(), ibt.req.GetBuildID(), ibt.info, started.UnixMilli(), costCPUNum)
 		}
 		err := exec.task.Execute(ctx)
 		exec.buildTimeMs = taskcost.ElapsedMs(started)

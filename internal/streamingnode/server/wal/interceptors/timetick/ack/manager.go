@@ -175,3 +175,29 @@ func (ta *AckManager) popUntilLastAllAcknowledged() {
 	ta.lastConfirmedManager.AddConfirmedDetails(acknowledgedDetails, ta.lastConfirmedTimeTick)
 	ta.acknowledgedDetails = append(ta.acknowledgedDetails, acknowledgedDetails...)
 }
+
+// TakeAcknowledgedForSwitch transfers the old batch while PChannel writes and
+// ordinary Sync are excluded. The boundary itself has not been acknowledged yet.
+func (ta *AckManager) TakeAcknowledgedForSwitch() []*AckDetail {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	details := ta.acknowledgedDetails
+	ta.acknowledgedDetails = nil
+	return details
+}
+
+// CompleteWALSwitch is called only after the old batch and its durable boundary
+// have been published to WAB. The boundary is the only remaining allocation.
+func (ta *AckManager) CompleteWALSwitch(boundary *Acker, start message.MessageID) {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if ta.notAckHeap.Len() != 1 || ta.notAckHeap.Peek() != boundary {
+		panic("WAL switch with outstanding appends")
+	}
+	ta.notAckHeap.Pop()
+	ta.acknowledgedDetails = nil
+	ta.lastConfirmedTimeTick = boundary.Timestamp()
+	ta.lastConfirmedManager = newLastConfirmedManager(start)
+	ta.metrics.CountAcknowledgeTimeTick(false)
+	ta.metrics.UpdateLastConfirmedTimeTick(ta.lastConfirmedTimeTick)
+}

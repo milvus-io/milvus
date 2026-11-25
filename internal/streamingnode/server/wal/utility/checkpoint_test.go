@@ -74,7 +74,6 @@ func TestNewWALCheckpointFromProto(t *testing.T) {
 
 	// ApplyControl freezes control state into a checkpoint.
 	applyTarget := withControl.Clone()
-	applyTarget.AlterWalState = nil
 	applyTarget.ReplicateCheckpoint = nil
 	applyTarget.ApplyControl(control)
 	assert.Equal(t, uint64(123456), applyTarget.ReplicateCheckpoint.GetTimeTick())
@@ -87,19 +86,14 @@ func TestControlCheckpointRoundTripPreservesIndependentFrontier(t *testing.T) {
 		ReplicateConfig: &commonpb.ReplicateConfiguration{
 			Clusters: []*commonpb.MilvusCluster{{ClusterId: "local"}},
 		},
-		AlterWalState: &streamingpb.AlterWALState{
-			TimeTick: 115, Stage: streamingpb.AlterWALStage_FLUSHING,
-		},
 	}
 	cp := &WALCheckpoint{MessageID: rmq.NewRmqID(10), TimeTick: 100, Term: 3}
 	cp.ApplyControl(control)
 	control.CheckpointTimeTick = 130
-	control.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
 	control.ReplicateConfig.Clusters[0].ClusterId = "changed"
 
 	cloned := cp.Clone()
 	cp.ControlCheckpointTimeTick = 140
-	cp.AlterWalState.TimeTick = 135
 	encoded, err := proto.Marshal(cloned.IntoProto())
 	require.NoError(t, err)
 	stored := &streamingpb.WALCheckpoint{}
@@ -112,15 +106,11 @@ func TestControlCheckpointRoundTripPreservesIndependentFrontier(t *testing.T) {
 	state := PChannelControlFromCheckpoint(recovered)
 	require.Equal(t, uint64(120), state.CheckpointTimeTick)
 	require.Equal(t, "local", state.ReplicateConfig.Clusters[0].ClusterId)
-	require.Equal(t, uint64(115), state.AlterWalState.TimeTick)
-	require.Equal(t, streamingpb.AlterWALStage_FLUSHING, state.AlterWalState.Stage)
 
-	// A covered AlterWAL event may advance its stage without moving either frontier.
-	state.AlterWalState.Stage = streamingpb.AlterWALStage_ADVANCE_CHECKPOINT
+	// Control snapshots retain their independent frontier across repeated publication.
 	recovered.ApplyControl(state)
 	reopened := PChannelControlFromCheckpoint(NewWALCheckpointFromProto(recovered.IntoProto()))
 	require.Equal(t, uint64(120), reopened.CheckpointTimeTick)
-	require.Equal(t, streamingpb.AlterWALStage_ADVANCE_CHECKPOINT, reopened.AlterWalState.Stage)
 }
 
 func TestControlCheckpointRecoveryUsesGlobalFloor(t *testing.T) {

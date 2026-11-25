@@ -31,27 +31,32 @@ import (
 var errReleaseCollectionNotLoaded = errors.New("release collection not loaded")
 
 // broadcastDropLoadConfigCollectionV2ForReleaseCollection broadcasts the drop load config message for release collection.
-func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) error {
+func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest, onlyIfAutoLoaded bool) (released bool, err error) {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer broadcaster.Close()
+
+	// A manual load or release may have finished before we acquired the lock.
+	cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
+	if onlyIfAutoLoaded && (cfg == nil || !cfg.AutoLoad) {
+		return false, nil
+	}
 
 	// double check if the collection is already dropped.
 	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	isLoaded := s.qviewsRuntime.loadConfigStore.Contains(req.GetCollectionID())
-	if !isLoaded {
+	if cfg == nil {
 		// A previous release may have removed desired state before cleanup
 		// completed. Keep the collection lock until its views are gone.
 		if err := s.waitQueryViewsReleased(ctx, req.GetCollectionID()); err != nil {
-			return err
+			return false, err
 		}
-		return errReleaseCollectionNotLoaded
+		return false, errReleaseCollectionNotLoaded
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().
 		WithHeader(&message.DropLoadConfigMessageHeader{
@@ -63,7 +68,7 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
-	return err
+	return err == nil, err
 }
 
 func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {

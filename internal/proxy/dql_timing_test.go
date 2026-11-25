@@ -91,6 +91,8 @@ func TestDQLPathKeepsColdestKnownObservation(t *testing.T) {
 
 func TestDQLRetryRecordsCoordPathAndReadiness(t *testing.T) {
 	enableAutoLoad(t)
+	cold := mockey.Mock((*Proxy).shouldLoadCollection).Return(true, nil).Build()
+	defer cold.UnPatch()
 	coord := mocks.NewMockMixCoordClient(t)
 	coord.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).Return(
 		&commonpb.Status{ExtraInfo: map[string]string{stage.ReadinessPathKey: stage.PathUnloaded}}, nil).Once()
@@ -118,6 +120,8 @@ func TestDQLRetryRecordsCoordPathAndReadiness(t *testing.T) {
 
 func TestDQLAutoLoadRetryAccumulatesAttemptTiming(t *testing.T) {
 	enableAutoLoad(t)
+	cold := mockey.Mock((*Proxy).shouldLoadCollection).Return(true, nil).Build()
+	defer cold.UnPatch()
 	node := &Proxy{metaCache: mockSearchCollectionMeta(t, 100, []string{"v0"})}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	readinessCalls := 0

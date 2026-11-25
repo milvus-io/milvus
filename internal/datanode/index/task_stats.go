@@ -73,6 +73,7 @@ type statsTask struct {
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	manager  *TaskManager
+	info     *StatsTaskInfo
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
@@ -96,6 +97,7 @@ func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
+	info *StatsTaskInfo,
 	cm storage.ChunkManager,
 	pluginContext *indexcgopb.StoragePluginContext,
 	resource taskcommon.Resource,
@@ -106,6 +108,7 @@ func NewStatsTask(ctx context.Context,
 		cancel:        cancel,
 		req:           req,
 		manager:       manager,
+		info:          info,
 		binlogIO:      io.NewBinlogIO(cm),
 		cm:            cm,
 		pluginContext: pluginContext,
@@ -137,7 +140,7 @@ func (st *statsTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
-	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), state, failReason)
+	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), st.info, state, failReason)
 }
 
 func (st *statsTask) GetState() indexpb.JobState {
@@ -359,6 +362,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -678,6 +682,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -865,6 +870,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	st.manager.StoreJSONKeyStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),

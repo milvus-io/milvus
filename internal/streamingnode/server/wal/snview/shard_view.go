@@ -28,6 +28,9 @@ type snShardView struct {
 	preparingViews  int
 	mu              sync.Mutex
 	recoveryChanged chan struct{}
+	// queriesStopped fails acquisitions with a shutdown error; set by WAL
+	// shutdown before it waits for in-flight queries.
+	queriesStopped  bool
 	closed          bool
 	detached        bool
 	ctx             context.Context
@@ -473,6 +476,9 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.queriesStopped {
+		return nil, nil, viewerror.NewOnShutdownError("query view %s is shutting down", s.shardID.String())
+	}
 
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
@@ -522,6 +528,16 @@ func (s *snShardView) recoveryChangedLocked() <-chan struct{} {
 		s.recoveryChanged = make(chan struct{})
 	}
 	return s.recoveryChanged
+}
+
+// stopQueryAcquisition fails current and future acquisitions with a shutdown
+// error and wakes recovery waiters. Leases already handed out keep their
+// resources until CloseForHandoff releases the views.
+func (s *snShardView) stopQueryAcquisition() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queriesStopped = true
+	s.notifyRecoveryChangedLocked()
 }
 
 func (s *snShardView) notifyRecoveryChangedLocked() {

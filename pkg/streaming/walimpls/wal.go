@@ -23,7 +23,12 @@ type ROWALImpls interface {
 	// Close closes the wal instance.
 	Close()
 
-	// Read returns a scanner for reading records from the wal.
+	// Read returns a scanner for All, StartFrom or StartAfter.
+	// All starts at the earliest retained record of the initially selected
+	// physical backend. For autowalimpls this is the current backend; it does
+	// not discover earlier backends. Use StartFrom/StartAfter with a checkpoint
+	// MessageID to read retained history across WAL switches.
+	// The deprecated Latest policy returns an error.
 	Read(ctx context.Context, opts ReadOption) (ScannerImpls, error)
 }
 

@@ -25,6 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
@@ -34,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
@@ -50,21 +51,25 @@ var (
 // scannerConfig supplies an already available WAB and an optional startup boundary.
 // Without an injected WAB, RW scanners resolve it through the TimeTick inspector.
 type scannerConfig struct {
-	writeAheadBuffer wab.ROWriteAheadBuffer
-	startupBarrier   *scannerStartupBarrier
+	// RecoveryStorage observes control records; public subscriptions receive confirmations.
+	deliverWALControl bool
+	writeAheadBuffer  wab.ROWriteAheadBuffer
+	startupBarrier    *scannerStartupBarrier
 }
 
 // scannerStartupBarrier pauses raw input after this exact barrier until the
 // caller finishes initialization. The consumer snapshots unfinished transactions
 // before delivering the barrier. Cancellation also releases the pause.
 type scannerStartupBarrier struct {
-	message message.ImmutableMessage
-	resume  <-chan struct{}
+	message         message.ImmutableMessage
+	resume          <-chan struct{}
+	stopAtWALSwitch bool
+	liveSource      func() (walimpls.ROWALImpls, wab.ROWriteAheadBuffer)
 }
 
 func (b *scannerStartupBarrier) matches(msg message.ImmutableMessage) bool {
 	return msg.MessageType() == message.MessageTypeRecoveryBarrier &&
-		msg.TimeTick() == b.message.TimeTick() && msg.MessageID().EQ(b.message.MessageID())
+		msg.TimeTick() == b.message.TimeTick() && msg.WALName() == b.message.WALName() && msg.MessageID().EQ(b.message.MessageID())
 }
 
 // newScannerAdaptor creates a new scanner adaptor.
@@ -85,18 +90,19 @@ func newScannerAdaptor(
 		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
-		logger:           logger,
-		writeAheadBuffer: config.writeAheadBuffer,
-		startupBarrier:   config.startupBarrier,
-		innerWAL:         l,
-		readOption:       readOption,
-		filterFunc:       options.GetFilterFunc(readOption.MessageFilter),
-		reorderBuffer:    utility.NewReOrderBuffer(),
-		pendingQueue:     utility.NewPendingQueue(),
-		txnBuffer:        utility.NewTxnBuffer(logger, scanMetrics),
-		cleanup:          cleanup,
-		ScannerHelper:    helper.NewScannerHelper(name),
-		metrics:          scanMetrics,
+		logger:            logger,
+		deliverWALControl: config.deliverWALControl,
+		writeAheadBuffer:  config.writeAheadBuffer,
+		startupBarrier:    config.startupBarrier,
+		innerWAL:          l,
+		readOption:        readOption,
+		filterFunc:        options.GetFilterFunc(readOption.MessageFilter),
+		reorderBuffer:     utility.NewReOrderBuffer(),
+		pendingQueue:      utility.NewPendingQueue(),
+		txnBuffer:         utility.NewTxnBuffer(logger, scanMetrics),
+		cleanup:           cleanup,
+		ScannerHelper:     helper.NewScannerHelper(name),
+		metrics:           scanMetrics,
 	}
 	go s.execute()
 	return s
@@ -104,8 +110,9 @@ func newScannerAdaptor(
 
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
-	startupBarrier   *scannerStartupBarrier
-	startupTxnBuffer *utility.TxnBuffer // published by delivery of the startup barrier
+	deliverWALControl bool
+	startupBarrier    *scannerStartupBarrier
+	startupTxnBuffer  *utility.TxnBuffer // published by delivery of the startup barrier
 	*helper.ScannerHelper
 	writeAheadBuffer wab.ROWriteAheadBuffer
 	logger           *mlog.Logger
@@ -199,7 +206,7 @@ func (s *scannerAdaptorImpl) execute() {
 func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMessage) error {
 	wb := s.writeAheadBuffer
 	var err error
-	if wb == nil && s.Channel().AccessMode == types.AccessModeRW {
+	if wb == nil && s.startupBarrier == nil && s.Channel().AccessMode == types.AccessModeRW {
 		if wb, err = s.waitWriteAheadBuffer(); err != nil {
 			return err
 		}
@@ -304,61 +311,77 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 
 // handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error {
-	// Filtering the message if needed.
-	// System message should never be filtered.
-	if s.filterFunc != nil && !s.filterFunc(msg) {
+	confirm := message.IsTimeTickConfirmBarrier(msg)
+	// Raw transaction fragments must keep the existing input filter semantics:
+	// the commit decides the transaction's timestamp and bodies are type-filtered.
+	// Confirmations always finish internal processing before delivery filtering.
+	if !confirm && s.filterFunc != nil && !s.filterFunc(msg) {
 		return nil
 	}
-
-	// Observe the message.
 	var isTailing bool
 	msg, isTailing = isTailingScanImmutableMessage(msg)
 	s.metrics.ObserveMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	if messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
-		// If a timetick confirm barrier arrives, the reorder buffer can be
-		// consumed until the latest confirmed timetick.
-		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
-		s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 
-		// There's some txn message need to hold until confirmed, so we need to handle them in txn buffer.
-		msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
-		s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
-		if s.startupBarrier != nil && s.startupBarrier.matches(msg) && s.startupTxnBuffer == nil {
-			// The producer stops at this barrier until initialization releases the startup barrier.
-			// Publish a detached snapshot before the barrier reaches the consumer.
-			s.startupTxnBuffer = s.txnBuffer.Snapshot()
+	// Ordinary records, including exclusive control operations, share ordering
+	// and deduplication. Pure confirmations need no reorder-buffer entry.
+	ordered := msg.MessageType() != message.MessageTypeTimeTick &&
+		msg.MessageType() != message.MessageTypeMVCCBarrier &&
+		msg.MessageType() != message.MessageTypeRecoveryBarrier
+	if ordered {
+		// Confirmations cover the whole PChannel, including when a broadcast
+		// copy carries its PChannel or control channel as the VChannel.
+		if !confirm && msg.VChannel() != "" && s.readOption.VChannel != "" && s.readOption.VChannel != msg.VChannel() {
+			return nil
 		}
-
-		if len(msgs) > 0 {
-			// Push the confirmed messages into pending queue for consuming.
-			if s.logger.LevelEnabled(mlog.DebugLevel) {
-				for _, m := range msgs {
-					s.logger.Debug(context.TODO(), "push message into pending queue",
-						mlog.Uint64("committedTimeTick", msg.TimeTick()),
-						mlog.FieldMessage(m),
-					)
-				}
-			}
-			s.pendingQueue.Add(msgs)
+		if !s.pushToReorderBuffer(msg, isTailing) {
+			return nil
 		}
-		if msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || s.pendingQueue.Len() == 0 {
-			// Keep the legacy scanner contract for TimeTick messages: persisted
-			// TimeTicks and otherwise-empty batches must reach consumers so the
-			// legacy query pipeline can advance tsafe. Other confirmation barriers
-			// are always delivered.
-			s.pendingQueue.Add([]message.ImmutableMessage{msg})
-		}
-		s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
+	}
+	if !confirm {
 		return nil
 	}
-
-	// Filtering the vchannel
-	// If the message is not belong to any vchannel, it should be broadcasted to all vchannels.
-	// Otherwise, it should be filtered by vchannel.
-	if msg.VChannel() != "" && s.readOption.VChannel != "" && s.readOption.VChannel != msg.VChannel() {
-		return nil
+	messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
+	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
+	msgs := s.txnBuffer.HandleImmutableMessages(messages, msg.TimeTick())
+	s.metrics.UpdateTxnBufSize(s.txnBuffer.Bytes())
+	if !ordered {
+		msgs = append(msgs, msg)
 	}
-	// otherwise add message into reorder buffer directly.
+	if s.startupBarrier != nil && s.startupBarrier.matches(msg) && s.startupTxnBuffer == nil {
+		s.startupTxnBuffer = s.txnBuffer.Snapshot()
+	}
+	s.enqueue(msgs)
+	return nil
+}
+
+// enqueue applies public control-message projection and delivery filters in one
+// place, after ordering and transaction effects have completed.
+func (s *scannerAdaptorImpl) enqueue(msgs []message.ImmutableMessage) {
+	deliver := msgs[:0]
+	for _, msg := range msgs {
+		if !s.deliverWALControl && msg.MessageType() == message.MessageTypeAlterWAL {
+			msg = message.NewTimeTickMessageBuilderV1().
+				WithHeader(&message.TimeTickMessageHeader{}).
+				WithBody(&msgpb.TimeTickMsg{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_TimeTick, Timestamp: msg.TimeTick()}}).
+				WithAllVChannel().MustBuildMutable().WithTimeTick(msg.TimeTick()).
+				WithLastConfirmed(msg.LastConfirmedMessageID()).IntoImmutableMessage(msg.MessageID())
+		}
+		if s.filterFunc != nil && !s.filterFunc(msg) {
+			continue
+		}
+		// Persisted TimeTicks always reach consumers. Volatile ticks may coalesce
+		// with queued messages, preserving the existing query-pipeline contract.
+		if msg.MessageType() == message.MessageTypeTimeTick && !msg.IsPersisted() && (len(deliver) > 0 || s.pendingQueue.Len() > 0) {
+			continue
+		}
+		deliver = append(deliver, msg)
+	}
+	s.pendingQueue.Add(deliver)
+	s.metrics.UpdatePendingQueueSize(s.pendingQueue.Bytes())
+}
+
+// pushToReorderBuffer reports whether the message was accepted for ordering.
+func (s *scannerAdaptorImpl) pushToReorderBuffer(msg message.ImmutableMessage, isTailing bool) bool {
 	pushResult, err := s.reorderBuffer.Push(msg)
 	if err != nil {
 		if errors.Is(err, utility.ErrTimeTickVoilation) {
@@ -383,5 +406,5 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 	// Observe the filtered message.
 	s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 	s.metrics.ObservePassedMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	return nil
+	return err == nil && !pushResult.Dropped
 }
