@@ -149,7 +149,13 @@ client moves immediately (without retry backoff or waiting for hedge delay) to
 an untried replica once; a second overload refusal or exhaustion of untried
 replicas ends the request immediately with `ErrServiceTooManyRequests`.
 Overload refusals do not record replica failure penalties, and non-overload
-replica failures do not consume the extra-attempt slot.
+replica failures do not consume the extra-attempt slot. Once an actual hedge
+has used that slot, an overload refusal from either attempt ends the request
+when its sibling also fails with a retryable non-overload error, regardless of
+completion order. There need not be two overload refusals: no third replica is
+tried in this mixed-error case. Existing terminal-error precedence still applies.
+Ordinary non-overload retries remain available when the round has no overload
+refusal and no terminal error.
 
 **No resending inside worker RPC clients.** `grpcclient.WithFailFastOnOverload`
 stops Proxy and Delegator `ClientBase` retries on `ErrServiceTooManyRequests`
