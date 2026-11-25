@@ -91,6 +91,9 @@ func validateSummarySnapshot(ctx context.Context, mt *meta.Meta, snapshot *snaps
 				return
 			}
 			for _, entry := range entries {
+				if entry.IsSkippedBuild() && len(entry.IndexFileKeys) == 0 {
+					continue
+				}
 				_, live := liveIndexes[entry.IndexID]
 				_, captured := check.captured[entry.IndexID]
 				if live && !captured {

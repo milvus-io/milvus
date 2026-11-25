@@ -6834,6 +6834,7 @@ type dataCoordConfig struct {
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
+	ManifestIndexBackfillIncludeSkipped ParamItem `refreshable:"false"`
 	ManifestIndexBackfillInterval       ParamItem `refreshable:"true"`
 	ManifestIndexBackfillBatchSize      ParamItem `refreshable:"true"`
 	ManifestIndexBackfillConcurrency    ParamItem `refreshable:"true"`
@@ -7685,12 +7686,21 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Forbidden:    summaryMode,
 		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
 Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
-Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
+Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths. Skipped builds are opt-in via includeSkipped.
 Enable only after all DataCoord replicas, workers and QueryNodes support path version 2 and manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
 Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.`,
 		Export: true,
 	}
 	p.ManifestIndexBackfillEnabled.Init(base.mgr)
+
+	p.ManifestIndexBackfillIncludeSkipped = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.includeSkipped",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Include skipped StorageV3 index builds in manifest backfill. Requires manifest index publication and backfill. Enable after all DataCoord replicas can recover skipped entries. Use manifest index rollback before downgrading.",
+		Export:       true,
+	}
+	p.ManifestIndexBackfillIncludeSkipped.Init(base.mgr)
 
 	p.ManifestIndexBackfillInterval = ParamItem{
 		Key:          "dataCoord.index.manifestIndexBackfill.interval",

@@ -285,7 +285,8 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
 	return segIdx != nil && !segIdx.IsDeleted &&
 		segIdx.IndexState == commonpb.IndexState_Finished &&
-		len(segIdx.IndexFileKeys) > 0 &&
+		(len(segIdx.IndexFileKeys) > 0 ||
+			(Params.DataCoordCfg.ManifestIndexBackfillIncludeSkipped.GetAsBool() && segIdx.IsSkippedBuild())) &&
 		!segIdx.ManifestPublished
 }
 

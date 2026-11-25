@@ -100,6 +100,37 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	require.Equal(t, got, indexes[0])
 }
 
+func TestCommitManifestUpdates_SkippedIndexRoundTrip(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	base := path.Join(cfg.GetRootPath(), "skipped_index/seg1")
+	prefix := path.Join(base, "_index/500/0")
+	entry := indexEntry(t, base, prefix, 10, 500)
+	entry.IndexVersion = 0
+	entry.IndexFileKeys = nil
+	entry.SerializedSize = 0
+	entry.MemSize = 0
+	entry.Properties = map[string]string{ManifestIndexSkippedProperty: "true"}
+
+	published, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, &ManifestUpdates{
+		Indexes: []ManifestIndexInfo{entry},
+	})
+	require.NoError(t, err)
+	entries, err := GetManifestIndexInfos(published, cfg)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, prefix, entries[0].Path)
+	require.True(t, entries[0].IsSkippedBuild())
+	require.Empty(t, entries[0].IndexFileKeys)
+
+	dropped, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
+		DropIndexes: []DropIndexEntry{{IndexID: entry.IndexID, ExpectedBuildID: entry.BuildID}},
+	})
+	require.NoError(t, err)
+	entries, err = GetManifestIndexInfos(dropped, cfg)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
 // A rebuild republishes the same index_id under a new build. milvus-storage
 // replaces the entry rather than accumulating both, which is what lets
 // DataCoord publish a rebuild without an explicit drop.

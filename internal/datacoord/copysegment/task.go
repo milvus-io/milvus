@@ -1004,7 +1004,11 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				if !ok {
 					return nil, merr.WrapErrServiceInternalMsg("invalid source index metadata in manifest for segment %d", source.GetSegmentId())
 				}
-				source.IndexFiles = append(source.IndexFiles, info)
+				// Skipped builds do not carry files. The destination uses
+				// its own index definitions and reevaluates any skipped build.
+				if info != nil {
+					source.IndexFiles = append(source.IndexFiles, info)
+				}
 			}
 		}
 		sources = append(sources, source)
@@ -1512,7 +1516,7 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.WrapErrServiceInternalMsg(
 				"copied manifest index %d has changed target index type; retry the restore", entry.IndexID)
 		}
-		if _, ok := meta.ManifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
+		if files, ok := meta.ManifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok || files == nil {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity,
 				"copied manifest of segment %d has an invalid artifact path for build %d", result.GetSegmentId(), entry.BuildID)
 		}

@@ -91,8 +91,8 @@ it out of the next scan.
 
 - Migrating StorageV1/V2 or L0 segments. They have no usable manifest index
   destination, so the etcd row remains their only durable record.
-- Representing Unissued, InProgress, Retry, Failed, deleted, or fake-Finished
-  task state in a manifest. A manifest describes an artifact, not a task.
+- Representing Unissued, InProgress, Retry, Failed, or deleted tasks in a
+  manifest. Skipped builds are eligible only with the separate opt-in below.
 - Backfilling an index whose definition has already been deleted. Existing GC
   owns that terminal record and its files.
 - Reading every manifest to discover work. Durable placement is already known
@@ -110,12 +110,12 @@ staged under the publication locks:
   the manifest revision;
 - its parent index definition is live;
 - the record is the current `(segment_id, index_id)` occupant;
-- it is Finished, not deleted, and carries at least one index file key; and
+- it is Finished, not deleted, and carries at least one index file key or is
+  explicitly eligible under the skipped-build opt-in below; and
 - DataCoord knows that its catalog row still exists.
 
-The file-key test matches foreground publication. A Finished record with no
-files is the small-segment/fake-Finished case and has no artifact to publish.
-The scan starts from index records, rejects manifest-resident and task-only
+Artifact eligibility matches foreground publication. The scan starts from
+index records, rejects manifest-resident and task-only
 records before looking up their segments, and checks the live definition and
 current slot to exclude dropped-index GC and superseded builds. The commit
 repeats the mutable-record checks under the
@@ -127,6 +127,32 @@ A visible StorageV3 segment with an empty manifest path is an invariant
 violation. Such a record remains counted as pending and its attempted entry
 construction fails; silently excluding it would allow the operator-facing
 completion signal to reach zero while a historical artifact was never moved.
+
+### Skipped builds
+
+Existing clusters can set `dataCoord.index.manifestIndexBackfill.includeSkipped`
+to `true` in addition to enabling manifest publication and backfill. The
+default is `false`. Eligible catalog rows have the existing explicit
+`fake finished index success` completion reason and no files. The inspector
+also picks up new skipped completions. It batches by segment with the same
+limits as artifact backfill.
+
+The manifest entry retains index/build identity and the canonical
+`<build>/<version>` path, and uses the reserved property
+`milvus.index.skipped=true`. Its file keys and artifact sizes are empty and
+zero. There is no object copy. The segment pointer, recovery marker, and
+catalog-row removal commit in the existing atomic transaction. Recovery
+restores the Finished state with its original skip reason. The entry takes
+part in index replacement and retraction. Query, snapshot copy, and GC
+find no files for this entry. Snapshot restore uses its destination
+index definitions to reevaluate skipped builds.
+
+Upgrade all DataCoord replicas before enabling this option. Older
+coordinators reject zero-file entries during startup recovery. For downgrade,
+disable forward migration and wait for manifest index rollback to restore the
+catalog records. The migration and subsequent startup add manifest I/O for
+segments whose existing manifests have no entries. The placement is local
+cluster metadata and leaves the logical CDC protocol unchanged.
 
 ### Commit Protocol
 

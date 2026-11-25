@@ -146,8 +146,8 @@ func (m *Meta) validateRollbackIndex(segment *SegmentInfo, mutation SegmentIndex
 	if entry.BuildID != record.BuildID || entry.IndexID != record.IndexID {
 		return merr.Wrapf(merr.ErrDataIntegrity, "rollback record disagrees with manifest index identity, buildID=%d", mutation.BuildID)
 	}
-	if record.IndexState != commonpb.IndexState_Finished || len(record.IndexFileKeys) == 0 {
-		return merr.Wrapf(merr.ErrDataIntegrity, "manifest-only rollback record is not a finished artifact, buildID=%d", record.BuildID)
+	if record.IndexState != commonpb.IndexState_Finished || (len(record.IndexFileKeys) == 0 && !record.IsSkippedBuild()) {
+		return merr.Wrapf(merr.ErrDataIntegrity, "manifest-only rollback record is not a finished index, buildID=%d", record.BuildID)
 	}
 	if _, valid := ManifestIndexFilePathInfoForSegment(m.ChunkManager.RootPath(), segment.SegmentInfo, *entry); !valid {
 		return merr.Wrapf(merr.ErrDataIntegrity, "rollback source path disagrees with record, buildID=%d", record.BuildID)

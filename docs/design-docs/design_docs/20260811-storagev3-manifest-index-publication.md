@@ -37,8 +37,11 @@ all-etcd cluster has no marked segments and performs no manifest index reads.
 Historical eligible artifacts may be moved from etcd-only to manifest-only
 placement by the optional
 [manifest index backfill](20260901-storagev3-manifest-index-backfill.md). It
-uses this same publication transaction to add the entry and retire the row;
-there is no dual-write interval or separate index-prune phase.
+uses this same publication transaction to add the entry and retire the row.
+With its separate opt-in, the inspector also publishes explicit completion
+entries for skipped builds. Each entry has zero files and a reserved skip
+property. Recovery restores Finished for these entries. File readers receive
+only actual artifact paths.
 
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
@@ -264,9 +267,9 @@ made complete at startup and publication updates it atomically:
   for query fallback and orphan-GC protection. If a failed read is followed by a
   successful existence check proving a Dropped segment's manifest is absent,
   startup leaves its marker unchanged and lets pending GC remove the catalog row.
-- a finished record with no `index_file_keys` has no manifest entry either: the
-  only build that records no files is a fake-finished one (a segment too small
-  to train), which `publishIndexToManifest` skips.
+- a fake-finished build has no `index_file_keys`. Foreground publication
+  keeps its catalog row. Opt-in backfill can move its completion marker to the
+  manifest, where the explicit skip property identifies it during recovery.
 
 This matters for cost as well as clarity: `GetIndexInfos` is driven by
 QueryCoord's index checker every `checkIndexInterval` for exactly the segments

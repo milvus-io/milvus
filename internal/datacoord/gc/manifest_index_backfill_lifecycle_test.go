@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
@@ -68,6 +69,42 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	published := m.GetSegment(ctx, meta.RestartSegID)
 	assert.Empty(t, store.BackfillEntriesAt(published.GetManifestPath()))
 	assert.False(t, published.GetManifestHasIndex(), "merged marker clearing stays effective")
+}
+
+func TestManifestIndexSkippedBuildGC(t *testing.T) {
+	ctx := context.Background()
+	meta.WithSegmentIndexManifestWrites(t, true)
+	includeSkipped := &Params.DataCoordCfg.ManifestIndexBackfillIncludeSkipped
+	previous := includeSkipped.GetValue()
+	Params.Save(includeSkipped.Key, "true")
+	t.Cleanup(func() { Params.Save(includeSkipped.Key, previous) })
+	store := meta.NewFakeManifestStore(t)
+	catalog := metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m := index.BootMigrationMeta(t, catalog, meta.RestartCollID)
+	im := m.IndexCatalog.(*index.IndexMeta)
+	index.SeedRestartTask(t, m, im)
+	require.NoError(t, im.UpdateIndexStateWithContext(ctx, meta.RestartBuildID,
+		commonpb.IndexState_Finished, model.SkippedIndexBuildReason))
+	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
+
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: im})
+	t.Cleanup(gc.Close)
+	published := m.GetSegment(ctx, meta.RestartSegID)
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
+	files, blocked, err := gc.getManifestIndexFiles(ctx, io, published)
+	require.NoError(t, err)
+	require.False(t, blocked)
+	require.Empty(t, files)
+
+	require.NoError(t, im.MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
+	gc.RecycleUnusedSegIndexes(ctx, nil)
+	_, exists := im.GetIndexJob(meta.RestartBuildID)
+	require.False(t, exists)
+	after := m.GetSegment(ctx, meta.RestartSegID)
+	require.NotEqual(t, published.GetManifestPath(), after.GetManifestPath())
+	require.False(t, after.GetManifestHasIndex())
+	require.Empty(t, store.BackfillEntriesAt(after.GetManifestPath()))
 }
 
 func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {

@@ -996,6 +996,7 @@ func validateManifestIndexRecordProjection(entry packed.ManifestIndexInfo, segId
 		entry.CurrentIndexVersion != segIdx.CurrentIndexVersion ||
 		entry.CurrentScalarIndexVersion != segIdx.CurrentScalarIndexVersion ||
 		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion ||
+		entry.IsSkippedBuild() != segIdx.IsSkippedBuild() ||
 		!slices.Equal(entry.IndexFileKeys, segIdx.IndexFileKeys) {
 		return merr.WrapErrServiceInternalMsg(
 			"segment index changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)

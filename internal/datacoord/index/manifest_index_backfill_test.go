@@ -157,6 +157,73 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	assert.Zero(t, pending)
 }
 
+func TestManifestIndexBackfillSkippedBuildRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	meta.WithSegmentIndexManifestWrites(t, true)
+	WithManifestIndexBackfillEnabled(t, true)
+	includeSkipped := &Params.DataCoordCfg.ManifestIndexBackfillIncludeSkipped
+	previous := includeSkipped.GetValue()
+	Params.Save(includeSkipped.Key, "false")
+	t.Cleanup(func() { Params.Save(includeSkipped.Key, previous) })
+
+	store := meta.NewFakeManifestStore(t)
+	kv := &FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
+	catalog := metastorekv.NewCatalog(kv, "", "")
+	m := BootMigrationMeta(t, catalog, meta.RestartCollID)
+	indexMeta := m.IndexCatalog.(*IndexMeta)
+	SeedRestartTask(t, m, indexMeta)
+	require.NoError(t, indexMeta.UpdateIndexStateWithContext(ctx, meta.RestartBuildID,
+		commonpb.IndexState_Finished, model.SkippedIndexBuildReason))
+	before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+
+	inspector := NewMigrationBackfillInspector(ctx, m)
+	require.False(t, inspector.runOnce(ctx))
+	require.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+
+	Params.Save(includeSkipped.Key, "true")
+	kv.FailAtomicUpdate = true
+	require.True(t, inspector.runOnce(ctx))
+	require.Equal(t, before, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.True(t, rows[0].IsSkippedBuild())
+
+	kv.FailAtomicUpdate = false
+	require.True(t, inspector.runOnce(ctx))
+	published := m.GetSegment(ctx, meta.RestartSegID)
+	require.NotEqual(t, before, published.GetManifestPath())
+	require.True(t, published.GetManifestHasIndex())
+	entries := store.BackfillEntriesAt(published.GetManifestPath())
+	require.Len(t, entries, 1)
+	require.True(t, entries[0].IsSkippedBuild())
+	require.Empty(t, entries[0].IndexFileKeys)
+	rows, err = catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.False(t, inspector.runOnce(ctx))
+
+	restarted := BootMigrationMeta(t, catalog, meta.RestartCollID)
+	recoveredIndexMeta := restarted.IndexCatalog.(*IndexMeta)
+	record, ok := recoveredIndexMeta.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	require.True(t, record.IsSkippedBuild())
+	require.True(t, record.ManifestPublished)
+	require.Equal(t, commonpb.IndexState_Finished,
+		recoveredIndexMeta.GetSegmentIndexState(meta.RestartCollID, meta.RestartSegID, meta.RestartIndexID).GetState())
+
+	WithManifestIndexRollback(t, true)
+	require.True(t, NewMigrationRollbackInspector(ctx, restarted).runOnce(ctx))
+	rolledBack := restarted.GetSegment(ctx, meta.RestartSegID)
+	require.False(t, rolledBack.GetManifestHasIndex())
+	require.Empty(t, store.BackfillEntriesAt(rolledBack.GetManifestPath()))
+	rows, err = catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.True(t, rows[0].IsSkippedBuild())
+	require.EqualValues(t, meta.RestartBuildID, rows[0].BuildID)
+}
+
 func TestManifestIndexBackfillRequiresBothSwitches(t *testing.T) {
 	t.Run("migration disabled", func(t *testing.T) {
 		meta.WithSegmentIndexManifestWrites(t, false)

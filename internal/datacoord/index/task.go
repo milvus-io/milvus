@@ -560,7 +560,7 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
-		if err := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, "fake finished index success"); err != nil {
+		if err := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, model.SkippedIndexBuildReason); err != nil {
 			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
 			return nil
 		}

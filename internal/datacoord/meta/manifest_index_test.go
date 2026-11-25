@@ -60,6 +60,24 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 	require.Error(t, ValidateManifestIndexPublishable(5001, pathless))
 }
 
+func TestSkippedManifestIndexRequiresAnExplicitMarkerAndNoFiles(t *testing.T) {
+	entry := packed.ManifestIndexInfo{
+		ColumnName: "vec", IndexName: "index", IndexType: "HNSW",
+		IndexID: 1, BuildID: 2, Path: "2/0",
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
+	require.Error(t, ValidateManifestIndexPublishable(3, entry))
+
+	entry.Properties = map[string]string{packed.ManifestIndexSkippedProperty: "true"}
+	require.NoError(t, ValidateManifestIndexPublishable(3, entry))
+	info, ok := manifestIndexFilePathInfo(3, entry)
+	require.True(t, ok)
+	require.Nil(t, info)
+
+	entry.IndexFileKeys = []string{"file"}
+	require.Error(t, ValidateManifestIndexPublishable(3, entry))
+}
+
 func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
 	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
 		IndexName: "index", IndexType: "FLAT",
