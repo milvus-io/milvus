@@ -190,16 +190,18 @@ func snapshotBalancer(balancer LBBalancer) (LBBalancer, *LatencyWeightedBalancer
 
 func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
 	balancer, lw := snapshotBalancer(balancer)
-	return lb.selectNodeWithPolicy(ctx, balancer, lw, workload, excludeNodes)
+	node, selected, _, err := lb.selectNodeWithPolicy(ctx, balancer, lw, workload, excludeNodes)
+	return node, selected, err
 }
 
-// selectNodeWithPolicy may refresh shard locations. Hedge execution performs
-// that lookup asynchronously and calls selectCandidate only after it completes.
-func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, error) {
-	trySelectNode := func(withCache bool) (NodeInfo, bool, error) {
+// selectNodeWithPolicy returns the leader snapshot used for selection, including
+// any refresh, so overload failover can reuse it without another lookup. Hedge
+// execution performs its lookup asynchronously before calling selectCandidate.
+func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, excludeNodes *typeutil.UniqueSet) (NodeInfo, bool, []NodeInfo, error) {
+	trySelectNode := func(withCache bool) (NodeInfo, bool, []NodeInfo, error) {
 		leaders, err := lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, withCache)
 		if err != nil {
-			return NodeInfo{}, false, err
+			return NodeInfo{}, false, nil, err
 		}
 		if !withCache && len(leaders) > 0 {
 			allExcluded := true
@@ -213,13 +215,14 @@ func (lb *LBPolicyImpl) selectNodeWithPolicy(ctx context.Context, balancer LBBal
 				excludeNodes.Clear()
 			}
 		}
-		return lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes, false)
+		node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, leaders, excludeNodes, false)
+		return node, selected, leaders, err
 	}
-	node, selected, err := trySelectNode(true)
+	node, selected, leaders, err := trySelectNode(true)
 	if err != nil {
 		return trySelectNode(false)
 	}
-	return node, selected, nil
+	return node, selected, leaders, nil
 }
 
 // selectCandidate never performs a coordinator RPC or clears exclusions. Its
@@ -292,7 +295,7 @@ func (lb *LBPolicyImpl) selectCandidate(ctx context.Context, balancer LBBalancer
 	return candidateNodes[targetNodeID], true, nil
 }
 
-// selectAfterOverload uses the request's captured leader snapshot. No cache lookup
+// selectAfterOverload uses the request's latest selection snapshot. No cache lookup
 // occurs here: even a cache-preferred lookup refreshes on a miss. The captured
 // balancer still checks heartbeat health and the request's routing scope.
 func (lb *LBPolicyImpl) selectAfterOverload(ctx context.Context, balancer LBBalancer, lw *LatencyWeightedBalancer, workload ChannelWorkload, leaders []NodeInfo, excluded *typeutil.UniqueSet) (NodeInfo, bool, error) {
@@ -333,7 +336,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			overloadErr = nil
 		} else {
-			targetNode, selectedByBalancer, err = lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
+			targetNode, selectedByBalancer, shardLeaders, err = lb.selectNodeWithPolicy(ctx, balancer, lw, workload, &excludeNodes)
 		}
 		if err != nil {
 			log.Warn("failed to select node for shard",

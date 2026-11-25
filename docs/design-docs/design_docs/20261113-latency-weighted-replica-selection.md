@@ -279,7 +279,11 @@ with the old retry loop, this can return a refusal sooner and avoids repeated
 work against overloaded replicas. It can also reject a request that might have
 succeeded after a longer wait; disabling hedging does not restore the old overload
 retry behavior. No leader-cache lookup or coordinator refresh is performed for
-this extra attempt, even if another request invalidated the cache.
+this extra attempt, even if another request invalidated the cache. It uses the
+latest leader snapshot obtained by this request during normal retry selection,
+including any refresh before the overload refusal. Preferred-node hints apply
+to primary selection only; hedges use the balancer health checks and do not
+record another preferred-node selection.
 
 `Hedgeable` permits concurrent attempts and requires isolated publication through
 `CommitAttempt`. `OverloadRetryable` permits only one serial failover after a

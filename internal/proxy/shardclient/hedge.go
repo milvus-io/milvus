@@ -239,7 +239,11 @@ func (lb *LBPolicyImpl) executeHedged(ctx context.Context, workload ChannelWorkl
 				continue
 			}
 			start := time.Now()
-			node, selected, err := lb.selectCandidate(ctx, balancer, lw, workload, candidates.nodes, &excluded, true)
+			// Preference applies to the primary. A hedge must pass balancer health
+			// checks and must not record another preferred-node selection.
+			hedgeWorkload := workload
+			hedgeWorkload.PreferredNodeID = 0
+			node, selected, err := lb.selectCandidate(ctx, balancer, lw, hedgeWorkload, candidates.nodes, &excluded, true)
 			if err != nil {
 				if !candidates.refreshed {
 					lookup(true)
