@@ -1383,13 +1383,6 @@ common:
   # Disk write buffer size in KB, used for both 'direct' and 'buffered' modes, default is 64KB.
   # Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.
   diskWriteBufferSizeKb: 64
-  # This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
-  # Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
-  # The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
-  # For example, set this parameter to 1 to serialize these local file writes.
-  # When unset, defaults to the CPU count reported by Milvus at initialization.
-  # Explicit 0 disables the dedicated pool and the concurrency limit; callers perform local file work directly.
-  # diskWriteNumThreads: 0
   diskWriteRateLimiter:
     refillPeriodUs: 100000 # refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)
     avgKBps: 262144 # average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)

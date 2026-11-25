@@ -775,8 +775,9 @@ remote record batches are not considered consumed until the final
 | `queryNode.segcore.load.admission.slots` | unset: `10 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, index stream slices, and async metadata preparation operations |
 | `common.diskWriteNumThreads` | `CPUNUM` when unset | applied through disk-writer configuration | local mmap-finalization executor and write concurrency limit; explicit `0` disables both |
 
-All six `queryNode.segcore.load` parameters have `Export: false` and are absent
-from `milvus.yaml`. They remain available for explicit internal configuration.
+All six `queryNode.segcore.load` parameters and `common.diskWriteNumThreads`
+have `Export: false` and are absent from `milvus.yaml`. They remain available
+for explicit internal configuration.
 The previous `queryNode.segcore.storageV2` loading keys and `common` admission
 keys are removed without aliases; existing overrides must use the keys above.
 Async reads are enabled by default for supported loaders. Without explicit

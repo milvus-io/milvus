@@ -1122,7 +1122,7 @@ The same value also limits concurrent synchronous FileWriter disk operations in 
 For example, set this parameter to 1 to serialize these local file writes.
 When unset, defaults to the CPU count reported by Milvus at initialization.
 Explicit 0 disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
-		Export: true,
+		Export: false,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
 

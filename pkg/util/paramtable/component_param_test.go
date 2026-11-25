@@ -761,6 +761,7 @@ func TestDiskWriteNumThreads(t *testing.T) {
 			params := &ComponentParam{}
 			params.Init(base)
 			item := &params.CommonCfg.DiskWriteNumThreads
+			assert.False(t, item.Export)
 			assert.Equal(t, hardware.GetCPUNum(), item.GetAsInt())
 			for _, value := range []int{0, 3} {
 				require.NoError(t, params.Save(item.Key, fmt.Sprint(value)))
