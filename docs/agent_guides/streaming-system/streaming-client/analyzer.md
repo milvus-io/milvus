@@ -312,16 +312,21 @@ limits each local or downloaded dictionary to 64 MiB by default. Parser errors
 must not echo dictionary contents, and native errors must not append analyzer
 parameters. Lindera's path-only parser receives a private temporary snapshot.
 
-`common.fileResource.allowedPath` is a startup-only absolute base directory for
-local file resources. Empty uses `<localStorage.path>/file_resource` (default
-`/var/lib/milvus/data/file_resource`). Relative request paths resolve beneath
-this base; absolute paths must already be descendants of it. These source
-directories are operator-provisioned, separate from downloaded resource caches
-under `<localStorage.path>/cache/<nodeID>/file_resource/`.
+`common.fileResource.allowedPath` is a startup-only source boundary. For S3 and
+other remote storage, empty uses `<storage-root>/file_resource`, normally
+`<minio.rootPath>/file_resource` (default `files/file_resource`). This is a
+bucket-relative object-key prefix, unrelated to `localStorage.path`. For example,
+`AddFileResource(path="files/file_resource/dict.txt")` reads that object in the
+configured bucket. An explicit prefix overrides the default. Remote request
+paths must be complete keys under the prefix; they are never rebased or
+path-cleaned.
 
-For remote storage, `common.fileResource.allowedPath` remains a complete
-object-key prefix, and empty disables access. Remote request paths must be
-complete keys under that prefix; they are never rebased or path-cleaned.
+With a local storage backend, empty uses `<localStorage.path>/file_resource`
+(default `/var/lib/milvus/data/file_resource`). Relative request paths resolve
+beneath this base; absolute paths must already be descendants of it. Source
+files are operator-provisioned, separate from downloaded resource caches under
+`<localStorage.path>/cache/<nodeID>/file_resource/`.
+
 Configure an appropriate source boundary before upgrading; move existing
 resources into it and update registrations as necessary. Admission and downloads reject
 out-of-range paths before calling the storage backend. Resource filenames in

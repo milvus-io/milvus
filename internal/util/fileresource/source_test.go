@@ -109,10 +109,6 @@ func TestFileResourceLocalDefaultDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ok", string(content))
 
-	// Empty still denies remote access before any storage probe.
-	remote := RestrictSource(mocks.NewChunkManager(t))
-	_, err = remote.Exist(context.Background(), "dict")
-	require.Error(t, err)
 }
 
 func TestFileResourceDownloadEnforcesActualReadLimit(t *testing.T) {
@@ -133,4 +129,46 @@ func TestFileResourceDownloadEnforcesActualReadLimit(t *testing.T) {
 	files, err := os.ReadDir(filepath.Dir(destination))
 	require.NoError(t, err)
 	require.Empty(t, files)
+}
+
+func TestFileResourceRemoteDefaultPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name, storageRoot, configured, prefix string
+	}{
+		{name: "default", storageRoot: "files", prefix: "files/file_resource"},
+		{name: "custom_root", storageRoot: "tenant/data", prefix: "tenant/data/file_resource"},
+		{name: "bucket_root", storageRoot: ".", prefix: "file_resource"},
+		{name: "empty_root", storageRoot: "", prefix: "file_resource"},
+		{name: "explicit_override", storageRoot: "files", configured: "dictionaries", prefix: "dictionaries"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setSourceRoot(t, tc.configured)
+			cm := mocks.NewChunkManager(t)
+			if tc.configured == "" {
+				cm.EXPECT().RootPath().Return(tc.storageRoot).Once()
+			}
+			source := RestrictSource(cm)
+			key := tc.prefix + "/dict.txt"
+			cm.EXPECT().Exist(mock.Anything, key).Return(true, nil).Once()
+			cm.EXPECT().Size(mock.Anything, key).Return(int64(2), nil).Once()
+			cm.EXPECT().Reader(mock.Anything, key).Return(newMockReader("ok"), nil).Once()
+			exists, err := source.Exist(context.Background(), key)
+			require.NoError(t, err)
+			require.True(t, exists)
+			size, err := source.Size(context.Background(), key)
+			require.NoError(t, err)
+			require.EqualValues(t, 2, size)
+			reader, err := source.Reader(context.Background(), key)
+			require.NoError(t, err)
+			require.NoError(t, reader.Close())
+			for _, invalid := range []string{"dict.txt", "/" + key, tc.prefix + "2/dict.txt", tc.prefix + "/../secret"} {
+				_, err := source.Exist(context.Background(), invalid)
+				require.Error(t, err)
+				_, err = source.Size(context.Background(), invalid)
+				require.Error(t, err)
+				_, err = source.Reader(context.Background(), invalid)
+				require.Error(t, err)
+			}
+		})
+	}
 }
