@@ -2547,6 +2547,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	usageReporter := extension.RequestUsageReporter()
 	if usageReporter != nil {
 		it.EnableQueryReadUsage()
+		it.EnableWriteUsage()
 	}
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
@@ -2611,10 +2612,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	}
-	if readBytes, metered := it.QueryReadBytes(); metered {
-		report[hookutil.BytesKey] = readBytes
-	} else {
-		usageReporter = nil
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = it.WriteBytes()
+		if readBytes, metered := it.QueryReadBytes(); metered {
+			report[hookutil.BytesKey] = readBytes
+		}
 	}
 	reportMutationUsage(ctx, it.Result().GetStatus(), usageReporter, hookutil.OpTypeUpsert, dbName, report)
 	SetStorageCost(it.Result().GetStatus(), it.StorageCost())

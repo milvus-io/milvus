@@ -36,11 +36,11 @@ The internal lookup counts the planned predicate columns for every selected segm
 
 The lookup counts the entire primary-key column in each selected segment. Proxy adds the logical bytes of all old fields returned by the internal Query, including any fields the request replaces. Zero matches contribute zero returned bytes. A `WriteCondition` also adds the whole source column used in the version comparison.
 
-Proxy accumulates successful lookup stages across retries. On a successful Upsert, it reports one `bytes` value alongside the existing write inputs under `msg_type=upsert` on `milvus_proxy_report_value`.
+Proxy accumulates successful lookup stages across retries. On a successful Upsert, it reports one read `bytes` value under `msg_type=upsert` on `milvus_proxy_report_value`. The same report includes `write_bytes`, the sum of the original request field values and the primary keys committed as deletes. Fields inherited from the lookup and generated values add no write bytes. A partial Upsert counts the original request payload once, and a channel retry adds delete bytes only when it commits.
 
 ## Full AutoID Upsert
 
-The existence lookup counts the entire primary-key column in every selected segment, including lookups with zero matches. Proxy adds the lookup bytes to the successful Upsert's report.
+The existence lookup counts the entire primary-key column in every selected segment, including lookups with zero matches. Proxy adds the lookup bytes to the successful Upsert's report. The delete part of `write_bytes` covers the keys selected for deletion by that lookup.
 
 ## Insert
 

@@ -1823,6 +1823,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 		generatedPK = int64(1001)
 	)
 	task := newFullAutoIDUpsertPreExecuteTask()
+	task.EnableWriteUsage()
 	task.MetaCache = &metacache.MetaCache{}
 	task.collectionID = 1001
 	task.req.Base = commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Upsert))
@@ -1867,6 +1868,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 	require.Equal(t, []int64{generatedPK + 1, generatedPK + 2}, task.rowIDs)
 	require.NoError(t, task.Execute(context.Background()))
 	require.NoError(t, task.PostExecute(context.Background()))
+	require.EqualValues(t, 2*(8+4)+8, task.WriteBytes())
 	require.Equal(t, 1, reads)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Zero(t, fakeWAL.resolveCalls, "Full Upsert must not prepare CAS terms")
@@ -4124,12 +4126,14 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 	defer m.UnPatch()
 
 	task := createTestUpdateTask()
+	task.EnableWriteUsage()
 	task.req.PartialUpdate = true
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
 	originalFields := cloneFieldDataList(task.req.GetFieldsData())
 
 	err := task.PreExecute(context.Background())
 	require.NoError(t, err)
+	require.EqualValues(t, 3*(8+5+128*4), task.WriteBytes())
 	require.Equal(t, originalFields, task.partialUpdateOriginalFields)
 	require.NotSame(t, task.req.GetFieldsData()[0], task.partialUpdateOriginalFields[0])
 }
@@ -8178,6 +8182,8 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 		}
 	}
 	task, _, _ := partialUpdateCASTestTask(t, true, pks, pks, pks)
+	task.EnableWriteUsage()
+	task.writeBytes = 26
 	firstChannel := partialUpdateCASTestVChannels[successful]
 	var secondChannel string
 	channels, err := typeutil.HashPK2Channels(partialUpdateCASIDs(pks), partialUpdateCASTestVChannels)
@@ -8194,6 +8200,7 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 	require.Equal(t, map[int]any{0: pks[0]}, task.partialState.written)
 	require.Equal(t, []int{1}, task.partialState.retryRows)
 	require.EqualValues(t, 1, task.partialState.insertCount)
+	require.EqualValues(t, 26+8, task.WriteBytes())
 	task.partialState.rows = []int{1}
 	task.partialState.writeRows = []int{0}
 	task.partialState.writeChannels = []string{secondChannel}
@@ -8203,6 +8210,7 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 	require.Equal(t, pks, task.result.IDs.GetIntId().Data)
 	require.EqualValues(t, 2, task.result.UpsertCnt)
 	require.EqualValues(t, 200, task.result.Timestamp)
+	require.EqualValues(t, 26+16, task.WriteBytes())
 }
 
 func TestConditionalUpsertAllMissingWithEmptyQueryColumns(t *testing.T) {

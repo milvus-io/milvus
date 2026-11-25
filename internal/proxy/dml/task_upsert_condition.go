@@ -44,6 +44,7 @@ type partialUpsertState struct {
 	timestamp       uint64
 	insertCount     int64
 	deleteCount     int64
+	deleteBytes     int64
 	appendAttempted bool
 }
 
@@ -358,9 +359,10 @@ func (it *UpsertTask) recordPartialAppend(messages []message.MutableMessage, res
 	if len(s.writeChannels) != len(s.writeRows) {
 		return merr.WrapErrServiceInternalMsg("partial update destination channels are not aligned")
 	}
-	deletes := make(map[any]struct{}, typeutil.GetSizeOfIDs(it.deletePKs))
+	deletes := make(map[any]int, typeutil.GetSizeOfIDs(it.deletePKs))
 	for row := 0; row < typeutil.GetSizeOfIDs(it.deletePKs); row++ {
-		deletes[typeutil.GetPK(it.deletePKs, int64(row))] = struct{}{}
+		size, pk := typeutil.GetId(it.deletePKs, row)
+		deletes[pk] = size
 	}
 	s.retryRows = nil
 	for offset, row := range s.writeRows {
@@ -371,11 +373,15 @@ func (it *UpsertTask) recordPartialAppend(messages []message.MutableMessage, res
 		}
 		original := s.rows[row]
 		if outcome == nil {
-			s.written[original] = typeutil.GetPK(ids, int64(offset))
+			pk := typeutil.GetPK(ids, int64(offset))
+			s.written[original] = pk
 			it.observeConditionalOutcome("written", 1)
 			s.insertCount++
-			if _, deleted := deletes[typeutil.GetPK(ids, int64(offset))]; deleted {
+			if size, deleted := deletes[pk]; deleted {
 				s.deleteCount++
+				if it.meterWriteUsage {
+					s.deleteBytes += int64(size)
+				}
 			}
 		} else if isPartialUpdateCASRetry(outcome) {
 			s.retryRows = append(s.retryRows, original)

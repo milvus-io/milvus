@@ -54,3 +54,11 @@ func writeRequestBytes(fields []*schemapb.FieldData, schema *schemaInfo) (int64,
 	}
 	return total, nil
 }
+
+func primaryKeyBytes(ids *schemapb.IDs) int64 {
+	total := int64(len(ids.GetIntId().GetData())) * 8
+	for _, id := range ids.GetStrId().GetData() {
+		total += int64(len(id))
+	}
+	return total
+}

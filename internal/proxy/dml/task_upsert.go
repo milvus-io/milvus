@@ -96,12 +96,14 @@ type UpsertTask struct {
 	partialUpdateResultIDs  *schemapb.IDs
 	fieldPartialUpdatePlans map[string]*fieldPartialUpdatePlan
 
-	queryUsage   *querymeter.ReadUsageAccumulator
-	partialState *partialUpsertState
-	storageCost  segcore.StorageCost
-	writeState   requestutil.ConditionalWriteState
-	requestSize  int
-	mutationSize int
+	queryUsage      *querymeter.ReadUsageAccumulator
+	meterWriteUsage bool
+	writeBytes      int64
+	partialState    *partialUpsertState
+	storageCost     segcore.StorageCost
+	writeState      requestutil.ConditionalWriteState
+	requestSize     int
+	mutationSize    int
 }
 
 // NewUpsertTask constructs an upsert task. It takes the host node and the
@@ -141,6 +143,18 @@ func (ut *UpsertTask) QueryReadBytes() (int64, bool) {
 		return 0, false
 	}
 	return ut.queryUsage.Bytes()
+}
+
+// EnableWriteUsage opts the upsert into request byte metering.
+func (ut *UpsertTask) EnableWriteUsage() {
+	ut.meterWriteUsage = true
+}
+
+func (ut *UpsertTask) WriteBytes() int64 {
+	if ut.partialState != nil {
+		return ut.writeBytes + ut.partialState.deleteBytes
+	}
+	return ut.writeBytes + primaryKeyBytes(ut.UpsertMsg().DeleteMsg.GetPrimaryKeys())
 }
 
 // Result returns the mutation result after execution.
@@ -2261,6 +2275,10 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
 	}
 
+	var usageErr error
+	if it.meterWriteUsage {
+		it.writeBytes, usageErr = writeRequestBytes(it.req.GetFieldsData(), schema)
+	}
 	if it.req.GetPartialUpdate() {
 		primaryData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
@@ -2278,7 +2296,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 
 	if it.partialState != nil && len(it.partialState.writeRows) == 0 {
 		it.refreshMutationResultCounts()
-		return nil
+		return merr.Wrap(usageErr, "measure upsert write bytes")
 	}
 	err = it.insertPreExecute(ctx)
 	if err != nil {
@@ -2290,6 +2308,9 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		log.Warn(ctx, "Fail to deletePreExecute", mlog.Err(err))
 		return err
+	}
+	if usageErr != nil {
+		return merr.Wrap(usageErr, "measure upsert write bytes")
 	}
 
 	it.refreshMutationResultCounts()

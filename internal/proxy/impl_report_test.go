@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -42,10 +43,12 @@ type upsertReportExtension struct {
 	hookutil.DefaultExtension
 	value int
 	calls int
+	last  any
 }
 
-func (e *upsertReportExtension) Report(any) int {
+func (e *upsertReportExtension) Report(info any) int {
 	e.calls++
+	e.last = info
 	return e.value
 }
 
@@ -65,20 +68,30 @@ func TestProxy_Upsert_ReportValue(t *testing.T) {
 		enqueueErr   error
 		taskErr      error
 		resultErr    error
+		agentBase    bool
 		wantSuccess  bool
 		wantReports  int
 		wantIncrease float64
 	}{
 		{name: "positive", value: 10, wantSuccess: true, wantReports: 2, wantIncrease: 20},
+		{name: "agentbase write only", agentBase: true, value: 10, wantSuccess: true, wantReports: 2, wantIncrease: 20},
 		{name: "zero", wantSuccess: true, wantReports: 2},
 		{name: "enqueue failure", value: 10, enqueueErr: merr.ErrServiceTooManyRequests},
 		{name: "task failure", value: 10, taskErr: merr.ErrServiceUnavailable},
 		{name: "result failure", value: 10, resultErr: merr.ErrServiceUnavailable, wantReports: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			extension := &upsertReportExtension{value: tc.value}
-			hookutil.SetTestExtension(extension)
-			t.Cleanup(func() { hookutil.SetTestExtension(originalExtension) })
+			reporter := &upsertReportExtension{value: tc.value}
+			if tc.agentBase {
+				originalReporter := extension.RequestUsageReporter()
+				extension.SetRequestUsageReporter(reporter)
+				t.Cleanup(func() { extension.SetRequestUsageReporter(originalReporter) })
+				writeBytes := mockey.Mock((*upsertTask).WriteBytes).Return(int64(24)).Build()
+				t.Cleanup(func() { writeBytes.UnPatch() })
+			} else {
+				hookutil.SetTestExtension(reporter)
+				t.Cleanup(func() { hookutil.SetTestExtension(originalExtension) })
+			}
 
 			dbName := t.Name()
 			cache := NewMockCache(t)
@@ -126,7 +139,12 @@ func TestProxy_Upsert_ReportValue(t *testing.T) {
 					require.Equal(t, previous, testutil.ToFloat64(counter))
 				}
 			}
-			require.Equal(t, tc.wantReports, extension.calls)
+			require.Equal(t, tc.wantReports, reporter.calls)
+			if tc.agentBase {
+				info := reporter.last.(map[string]any)
+				require.EqualValues(t, 24, info[hookutil.WriteBytesKey])
+				require.NotContains(t, info, hookutil.BytesKey)
+			}
 			require.Equal(t, tc.wantIncrease, testutil.ToFloat64(counter)-before)
 		})
 	}
