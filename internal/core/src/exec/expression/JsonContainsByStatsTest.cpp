@@ -145,6 +145,27 @@ class CountingExistsColumn : public ChunkedVariableColumn<std::string> {
     std::shared_ptr<ChunkedColumnInterface> source_;
 };
 
+// Use the production scan cursor and record every payload/validity pin.
+class CountingExistsArrayColumn : public ChunkedVariableColumn<std::string> {
+ public:
+    using ChunkedVariableColumn<std::string>::ChunkedVariableColumn;
+
+    PinWrapper<Chunk*>
+    GetChunk(OpContext* ctx, int64_t chunk_id) const override {
+        pinned_chunks.push_back(chunk_id);
+        return ChunkedVariableColumn<std::string>::GetChunk(ctx, chunk_id);
+    }
+
+    ScanResult
+    Scan(OpContext* ctx, const ScanOptions& options) const override {
+        ++array_scans;
+        return ChunkedVariableColumn<std::string>::Scan(ctx, options);
+    }
+
+    mutable std::vector<int64_t> pinned_chunks;
+    mutable int64_t array_scans = 0;
+};
+
 bool
 IsValidAt(const std::vector<uint8_t>& valid_data, size_t i) {
     return ((valid_data[i >> 3] >> (i & 0x07)) & 1) != 0;
@@ -2149,6 +2170,12 @@ TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
                     parent["c"] = 1;
                 }
             }
+            // Resolved rows can have NULL array entries too. Skipping their
+            // cells must not read validity or erase the scalar's true result.
+            if (i == 1) {
+                parent["b"] = nullptr;
+                parent["d"] = nullptr;
+            }
             rows.push_back(nlohmann::json({{"parent", parent}}).dump());
         }
         auto stats = BuildAndLoadJsonKeyStats(
@@ -2198,10 +2225,55 @@ TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
             column = counted;
             return counted;
         };
-        auto array_b = wrap(JsonStatsProjectionTestAccessor::ShreddingColumn(
-            *stats, first_array));
-        auto array_d = wrap(JsonStatsProjectionTestAccessor::ShreddingColumn(
-            *stats, second_array));
+        // Rechunk the real loaded BSON bytes to make physical read assertions
+        // deterministic. The final cell mixes resolved and unresolved rows.
+        auto wrap_array = [&](const std::string& field_name) {
+            auto& column = JsonStatsProjectionTestAccessor::ShreddingColumn(
+                *stats, field_name);
+            auto cursor = column->Scan(
+                nullptr, ScanOptions::ForData(0, TargetType::StringView));
+            arrow::BinaryBuilder binary;
+            ScanBatch batch;
+            while (cursor->Next(n, ScanReadMode::DataAndValidity, &batch)) {
+                const auto* data = batch.values.data_as<std::string_view>();
+                for (int64_t i = 0; i < batch.size; ++i) {
+                    if (batch.validity && !batch.validity[i]) {
+                        EXPECT_TRUE(binary.AppendNull().ok());
+                    } else {
+                        EXPECT_TRUE(
+                            binary.Append(data[i].data(), data[i].size()).ok());
+                    }
+                }
+            }
+            std::shared_ptr<arrow::Array> bson_values;
+            EXPECT_TRUE(binary.Finish(&bson_values).ok());
+            FieldMeta meta(FieldName(field_name),
+                           fid,
+                           DataType::STRING,
+                           true,
+                           std::nullopt);
+            const std::vector<int64_t> cell_rows{5, 7, 5};
+            std::vector<std::unique_ptr<Chunk>> array_chunks;
+            int64_t offset = 0;
+            for (auto count : cell_rows) {
+                array_chunks.push_back(create_chunk(
+                    meta, {bson_values->Slice(offset, count)}, false));
+                offset += count;
+            }
+            auto array_slot =
+                cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+                    std::make_unique<TestChunkTranslator>(
+                        cell_rows,
+                        fmt::format("exists_payload_{}_{}", id, field_name),
+                        std::move(array_chunks)),
+                    nullptr);
+            auto counted = std::make_shared<CountingExistsArrayColumn>(
+                std::move(array_slot), meta);
+            column = counted;
+            return counted;
+        };
+        auto array_b = wrap_array(first_array);
+        auto array_d = wrap_array(second_array);
         ASSERT_NE(JsonStatsProjectionTestAccessor::SharedColumn(*stats),
                   nullptr);
         auto shared =
@@ -2241,6 +2313,13 @@ TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
                   scalars_resolve || last_row == Array ? 0 : 1);
         EXPECT_EQ(shared->shared_reads == 0,
                   scalars_resolve || last_row == Array);
+        EXPECT_EQ(
+            array_b->pinned_chunks,
+            scalars_resolve ? std::vector<int64_t>{} : std::vector<int64_t>{2});
+        EXPECT_EQ(array_d->pinned_chunks,
+                  scalars_resolve || last_row == Array
+                      ? std::vector<int64_t>{}
+                      : std::vector<int64_t>{2});
     }
 }
 

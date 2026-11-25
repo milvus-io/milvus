@@ -43,6 +43,8 @@ namespace exec {
 
 namespace {
 
+// Determine whether each unresolved BSON array contains a nonempty value for
+// EXISTS. Resolved rows in mixed scan batches need no BSON parsing.
 void
 EvaluateShreddedArrayExists(const std::string_view* values,
                             ValidityView valid,
@@ -296,16 +298,16 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                             break;
                         }
                         TargetBitmap array_exists(active_count_, false);
-                        // The evaluator ignores validity output; the executor
-                        // only clears both outputs for skipped invalid rows.
-                        index->ExecutorForShreddingData<std::string_view>(
-                            op_ctx_,
-                            field,
-                            EvaluateShreddedArrayExists,
-                            nullptr,
-                            TargetBitmapView(array_exists),
-                            TargetBitmapView(array_exists),
-                            res_view);
+                        // Fully resolved cells need neither payload nor
+                        // validity. Mixed cells still skip resolved rows in
+                        // the evaluator; its validity output is unused.
+                        index->ExecutorForUnresolvedShreddingData<
+                            std::string_view>(op_ctx_,
+                                              field,
+                                              EvaluateShreddedArrayExists,
+                                              TargetBitmapView(array_exists),
+                                              TargetBitmapView(array_exists),
+                                              res_view);
                         res_view |= TargetBitmapView(array_exists);
                     }
                 }
