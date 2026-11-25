@@ -1,0 +1,5 @@
+# CI trust-path probe
+
+marker: I141237-CI-TRUST-PROBE
+repo: milvus-io/milvus
+purpose: authorized check of whether base-context pull_request_target jobs execute PR-tree content. This PR is transient and will be closed.
