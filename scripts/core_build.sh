@@ -213,7 +213,7 @@ case "${USE_TSAN}" in
   *) echo "ERROR: -T must be ON or OFF" >&2; exit 1 ;;
 esac
 if [[ "${USE_TSAN}" == "ON" ]]; then
-  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" == "ON" ]]; then
+  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" =~ ^(ON|on|TRUE|True|true|1)$ ]]; then
     echo "ERROR: ThreadSanitizer cannot be combined with AddressSanitizer or GPU builds" >&2
     exit 1
   fi
