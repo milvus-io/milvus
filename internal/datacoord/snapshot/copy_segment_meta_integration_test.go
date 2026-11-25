@@ -125,10 +125,11 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	assert.False(t, unpinCalled, "UnpinSnapshot must not be called for legacy job (PinId=0)")
 }
 
-// TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed verifies that when UnpinSnapshot
-// returns an error the state transition is still persisted, and the caller receives nil.
-// The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
-func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
+// TestUpdateJobStateAndReleaseRef_UnpinErrorRetriesBeforeTerminal verifies that
+// when UnpinSnapshot fails, the job remains non-terminal and returns the error
+// so the caller/checker can retry; once unpin succeeds, the job transitions to
+// the terminal state.
+func TestUpdateJobStateAndReleaseRef_UnpinErrorRetriesBeforeTerminal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -137,7 +138,10 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	mockUnpin := mockey.Mock((*SnapshotMeta).UnpinSnapshot).To(
 		func(_ *SnapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
 			unpinCalls++
-			return 0, "", 0, errors.New("etcd unavailable")
+			if unpinCalls == 1 {
+				return 0, "", 0, errors.New("etcd unavailable")
+			}
+			return 0, "", 0, nil
 		}).Build()
 	defer mockUnpin.UnPatch()
 
@@ -164,8 +168,74 @@ func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	err := copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
 		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 
-	assert.NoError(t, err, "unpin error must be swallowed — state transition already persisted")
+	assert.Error(t, err, "unpin error must be returned so job stays non-terminal for retry")
 	assert.Equal(t, 1, unpinCalls)
-	// State transition happened despite unpin failure.
+	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, copyMeta.Jobs[jobID].GetState())
+
+	// Retry succeeds: unpin completes and job transitions to Completed.
+	err = copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
+	assert.NoError(t, err)
+	assert.Equal(t, 2, unpinCalls)
 	assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobCompleted, copyMeta.Jobs[jobID].GetState())
+}
+
+// TestUpdateJobStateAndReleaseRef_TerminalNotVisibleBeforeUnpin verifies that
+// neither Completed nor Failed becomes visible to callers until UnpinSnapshot finishes.
+func TestUpdateJobStateAndReleaseRef_TerminalNotVisibleBeforeUnpin(t *testing.T) {
+	for _, targetState := range []datapb.CopySegmentJobState{
+		datapb.CopySegmentJobState_CopySegmentJobCompleted,
+		datapb.CopySegmentJobState_CopySegmentJobFailed,
+	} {
+		t.Run(targetState.String(), func(t *testing.T) {
+			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+			catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+			unpinEntered := make(chan struct{})
+			unpinRelease := make(chan struct{})
+			mockUnpin := mockey.Mock((*SnapshotMeta).UnpinSnapshot).To(
+				func(_ *SnapshotMeta, _ context.Context, _ int64) (int64, string, int, error) {
+					close(unpinEntered)
+					<-unpinRelease
+					return 0, "", 0, nil
+				}).Build()
+			defer mockUnpin.UnPatch()
+
+			copyMeta := &copysegment.Meta{
+				Catalog:      catalog,
+				SnapshotMeta: &SnapshotMeta{},
+				Jobs:         map[int64]copysegment.CopySegmentJob{},
+				Tasks:        copysegment.NewCopySegmentTasks(),
+			}
+
+			jobID := int64(1001)
+			copyMeta.Jobs[jobID] = &copysegment.Job{
+				CopySegmentJob: &datapb.CopySegmentJob{
+					JobId:              jobID,
+					CollectionId:       1,
+					SourceCollectionId: 1,
+					SnapshotName:       "snap_barrier",
+					State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
+					PinId:              202,
+				},
+				Tr: timerecord.NewTimeRecorder("test"),
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				done <- copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
+					copysegment.UpdateCopyJobState(targetState))
+			}()
+
+			<-unpinEntered
+			assert.Equal(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, copyMeta.GetJob(context.TODO(), jobID).GetState(),
+				"terminal state must not be visible while UnpinSnapshot is still in flight")
+
+			close(unpinRelease)
+			assert.NoError(t, <-done)
+			assert.Equal(t, targetState, copyMeta.GetJob(context.TODO(), jobID).GetState(),
+				"terminal state must be visible after UnpinSnapshot completes")
+		})
+	}
 }

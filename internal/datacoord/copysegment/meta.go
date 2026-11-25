@@ -521,11 +521,12 @@ func (m *Meta) CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) 
 // This ensures snapshot pins are released immediately when restore jobs finish,
 // while Job records are retained for audit purposes (3 hours).
 //
-// Locking strategy: the state-mutate section takes m.mu; the Unpin call (an etcd
-// roundtrip via snapshotMeta.SaveSnapshot) runs AFTER releasing m.mu to avoid
-// blocking all copy-segment job operations on an external write. Double-unpin is
-// prevented because only one caller observes the `!wasTerminal → isTerminal`
-// transition under m.mu; every subsequent caller sees wasTerminal=true.
+// Locking strategy: phase 1 validates the transition under m.mu without holding
+// the lock across external IO; phase 2 unpins the source snapshot via
+// snapshotMeta.UnpinSnapshot (an etcd roundtrip) BEFORE the terminal job state
+// becomes visible; phase 3 re-validates under m.mu and persists the terminal
+// state. UnpinSnapshot is idempotent, and failing to unpin returns an error so
+// the job remains non-terminal and the checker retries on the next tick.
 func (m *Meta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	return m.updateJobStateAndReleaseRef(ctx, jobID, false, actions...)
 }
@@ -540,85 +541,106 @@ func (m *Meta) FailJobForDroppedCollection(ctx context.Context, jobID int64) err
 		UpdateCopyJobReason("restore target collection dropped"))
 }
 
+func (m *Meta) canTransitionJobLocked(current CopySegmentJob, jobID int64, targetDropped bool, actions ...UpdateCopySegmentJobAction) bool {
+	state := current.GetState()
+	if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+		return false
+	}
+	// Completed copy tasks are the durable publication prerequisite. Once
+	// every expected segment is copied, publication retries cannot fail the
+	// job or release its data, even after a crash between publishing the
+	// collection and persisting the job's Completed state.
+	if !targetDropped && current.(*Job).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.Tasks.getByJobID(jobID)) {
+		next := current.Clone()
+		for _, action := range actions {
+			action(next)
+		}
+		if next.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Meta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, targetDropped bool, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
 	current := m.Jobs[jobID]
-	if current != nil {
-		state := current.GetState()
-		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
-			m.mu.Unlock()
-			return nil
-		}
-		// Completed copy tasks are the durable publication prerequisite. Once
-		// every expected segment is copied, publication retries cannot fail the
-		// job or release its data, even after a crash between publishing the
-		// collection and persisting the job's Completed state.
-		if !targetDropped && current.(*Job).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.Tasks.getByJobID(jobID)) {
-			next := current.Clone()
-			for _, action := range actions {
-				action(next)
-			}
-			if next.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted {
-				m.mu.Unlock()
-				return nil
-			}
-		}
-	}
-	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
-	if err != nil {
-		m.mu.Unlock()
-		return err
-	}
-	if prevJob == nil {
+	if current == nil {
 		m.mu.Unlock()
 		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found", mlog.FieldJobID(jobID))
 		return nil
 	}
-
-	previousState := prevJob.GetState()
-	newState := updatedJob.GetState()
-	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
-	wasTerminal := previousState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
-		previousState == datapb.CopySegmentJobState_CopySegmentJobFailed
-
-	if isTerminal && !wasTerminal {
-		updatedJob.(*Job).SnapshotCache = nil
-	}
-	shouldUnpin := isTerminal && !wasTerminal && updatedJob.GetPinId() > 0
-	pinID := updatedJob.GetPinId()
-	sourceCollectionID := updatedJob.GetSourceCollectionId()
-	snapshotName := updatedJob.GetSnapshotName()
-	m.mu.Unlock()
-
-	if !shouldUnpin {
+	if !m.canTransitionJobLocked(current, jobID, targetDropped, actions...) {
+		m.mu.Unlock()
 		return nil
 	}
 
+	next := current.Clone()
+	for _, action := range actions {
+		action(next)
+	}
+	previousState := current.GetState()
+	newState := next.GetState()
+	isTerminal := newState == datapb.CopySegmentJobState_CopySegmentJobCompleted ||
+		newState == datapb.CopySegmentJobState_CopySegmentJobFailed
+	shouldUnpin := isTerminal && current.GetPinId() > 0
+
+	if !shouldUnpin {
+		prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
+		if err != nil {
+			m.mu.Unlock()
+			return err
+		}
+		if prevJob != nil && isTerminal {
+			updatedJob.(*Job).SnapshotCache = nil
+		}
+		m.mu.Unlock()
+		return nil
+	}
+
+	pinID := current.GetPinId()
+	sourceCollectionID := current.GetSourceCollectionId()
+	snapshotName := current.GetSnapshotName()
+	m.mu.Unlock()
+
 	unpinCollID, unpinName, remaining, unpinErr := m.SnapshotMeta.UnpinSnapshot(ctx, pinID)
 	if unpinErr != nil {
-		// Unpin failure is non-fatal for the state transition (already persisted).
-		// Pins carry a TTL (dataCoord.snapshot.restorePinTTLSeconds) so an orphan
-		// left here will self-heal; we still log loudly so operators can detect
-		// a broken unpin path early instead of waiting for TTL expiry.
-		mlog.Warn(ctx, "failed to unpin source snapshot on job terminal transition, orphan pin will expire via TTL",
+		mlog.Warn(ctx, "failed to unpin source snapshot before job terminal transition, will retry on next check",
 			mlog.FieldJobID(jobID),
 			mlog.Int64("pinID", pinID),
 			mlog.Int64("sourceCollectionID", sourceCollectionID),
 			mlog.String("snapshot", snapshotName),
 			mlog.Err(unpinErr))
-		return nil
+		return unpinErr
 	}
 	if unpinName != "" {
 		SetSnapshotActivePinsGauge(unpinCollID, unpinName, remaining)
 	}
-	mlog.Info(ctx, "unpinned source snapshot on job completion",
+	mlog.Info(ctx, "unpinned source snapshot before job terminal transition",
 		mlog.FieldJobID(jobID),
 		mlog.Int64("pinID", pinID),
 		mlog.Int64("sourceCollectionID", sourceCollectionID),
 		mlog.String("snapshot", snapshotName),
 		mlog.String("previousState", previousState.String()),
 		mlog.String("newState", newState.String()))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current = m.Jobs[jobID]
+	if current == nil {
+		mlog.Warn(ctx, "UpdateJobStateAndReleaseRef: job not found after unpin", mlog.FieldJobID(jobID))
+		return nil
+	}
+	if !m.canTransitionJobLocked(current, jobID, targetDropped, actions...) {
+		return nil
+	}
+	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
+	if err != nil {
+		return err
+	}
+	if prevJob != nil {
+		updatedJob.(*Job).SnapshotCache = nil
+	}
 	return nil
 }
 
