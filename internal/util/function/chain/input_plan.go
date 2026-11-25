@@ -149,6 +149,21 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 			if err != nil {
 				return nil, merr.Wrapf(err, "op[%d] input %q", opIdx, name)
 			}
+			// Vector columns are only consumed by the MMR operator.
+			if typeutil.IsVectorType(resolved.DataType) {
+				if op.Type != types.OpTypeMMR {
+					return nil, merr.WrapErrParameterInvalidMsg(
+						"op[%d]: function chain input %q has unsupported field type %s",
+						opIdx, name, resolved.DataType.String())
+				}
+				field, err := schemaHelper.GetFieldFromID(resolved.SourceFieldID)
+				if err != nil {
+					return nil, merr.Wrapf(err, "op[%d] input %q", opIdx, name)
+				}
+				if err := ValidateMMRInputField(schemaHelper, field); err != nil {
+					return nil, merr.Wrapf(err, "op[%d]", opIdx)
+				}
+			}
 			input := *resolved
 			key := resolvedInputIdentity(input)
 			if offset, ok := inputOffsets[key]; ok {

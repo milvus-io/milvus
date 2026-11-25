@@ -455,6 +455,7 @@ func (s *MergeHelperTestSuite) TestBuildEmptyArrayAllTypes() {
 		arrow.PrimitiveTypes.Float32,
 		arrow.PrimitiveTypes.Float64,
 		arrow.BinaryTypes.String,
+		arrow.BinaryTypes.Binary,
 	}
 
 	for _, dt := range dtypes {
@@ -466,7 +467,7 @@ func (s *MergeHelperTestSuite) TestBuildEmptyArrayAllTypes() {
 }
 
 func (s *MergeHelperTestSuite) TestBuildEmptyArrayUnsupportedType() {
-	_, err := buildEmptyArray(s.pool, arrow.BinaryTypes.Binary)
+	_, err := buildEmptyArray(s.pool, arrow.FixedWidthTypes.Date32)
 	s.Error(err)
 	s.Contains(err.Error(), "unsupported type")
 }

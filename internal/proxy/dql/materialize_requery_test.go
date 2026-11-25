@@ -409,6 +409,8 @@ func TestOrganize_FastPathAndCopyFields(t *testing.T) {
 	}
 	require.Equal(t, map[string]bool{"organize_rank_data": true, "organize_result": true},
 		build(hybridSearchWithRequeryAndRerankByFieldDataPipe))
+	require.Equal(t, map[string]bool{"organize_rank_data": true, "organize_result": true},
+		build(searchWithRequeryAndRerankByFieldDataPipe))
 	for _, def := range []*pipelineDef{searchWithRequeryPipe, searchWithRerankPipe, searchWithRerankRequeryPipe, hybridSearchWithRequeryPipe, searchWithOrderByPipe} {
 		for name, c := range build(def) {
 			require.False(t, c, "%s/%s", def.name, name)

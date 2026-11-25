@@ -32,6 +32,8 @@ type functionConfig struct {
 	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
+	MMRMaxCandidateSize           ParamItem  `refreshable:"true"`
+	MMRMaxSimilarityOps           ParamItem  `refreshable:"true"`
 	LocalResourcePath             ParamItem  `refreshable:"true"`
 	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
 	ZillizProviders               ParamGroup `refreshable:"true"`
@@ -153,6 +155,38 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.GrepMaxScanRows.Init(base.mgr)
+
+	p.MMRMaxCandidateSize = ParamItem{
+		Key:          "function.rerank.mmr.maxCandidateSize",
+		Version:      "3.1.0",
+		DefaultValue: "1024",
+		Export:       true,
+		Doc:          "Maximum candidate_size accepted by the MMR reranker, that is, the maximum number of top search results MMR diversifies per query. Invalid or non-positive values fall back to 1024.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.MMRMaxCandidateSize.DefaultValue
+			}
+			return value
+		},
+	}
+	p.MMRMaxCandidateSize.Init(base.mgr)
+
+	p.MMRMaxSimilarityOps = ParamItem{
+		Key:          "function.rerank.mmr.maxSimilarityOps",
+		Version:      "3.1.0",
+		DefaultValue: "1000000000",
+		Export:       true,
+		Doc:          "Upper bound on the estimated vector element operations the MMR reranker may spend per request, counted as one similarity per candidate pair of every query's window. Requests above it are rejected. Protects embedding-list fields, whose pairwise similarity is quadratic in their token counts. Invalid or non-positive values fall back to 1000000000.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.MMRMaxSimilarityOps.DefaultValue
+			}
+			return value
+		},
+	}
+	p.MMRMaxSimilarityOps.Init(base.mgr)
 
 	p.BatchFactor = ParamItem{
 		Key:          "function.batch_factor.",

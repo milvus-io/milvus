@@ -147,6 +147,8 @@ type SearchTask struct {
 	// Rerank configuration metadata (nil means no rerank)
 	rerankMeta rerankMeta
 	rankParams *rankParams
+	// mmrPage is set for an ordinary search whose rerank chain contains MMR.
+	mmrPage *mmrPage
 
 	// Order by fields for sorting results
 	orderByFields []OrderByField
@@ -691,6 +693,15 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		log.Error(ctx, "parseRankParams failed", mlog.Err(err))
 		return err
 	}
+	// Hybrid MMR diversifies the fused top-W; reject an invalid window before
+	// any sub-search runs.
+	_, hybridMMR, err := mmrWindow(t.rerankMeta, t.rankParams.limit)
+	if err != nil {
+		return err
+	}
+	if hybridMMR && t.rankParams.GetGroupByFieldId() > 0 {
+		return merr.WrapErrParameterInvalidMsg("mmr: cannot be combined with group_by")
+	}
 
 	// Parse order_by_fields from main search params
 	if t.orderByFields, err = parseOrderByFields(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
@@ -874,6 +885,11 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		if t.needRequery {
 			plan.OutputFieldIds = rerankInputFieldIDs
+			if hybridMMR {
+				// Rerank inputs come from the requery of all candidates; do not
+				// also fetch the MMR vectors from every shard.
+				plan.OutputFieldIds = nil
+			}
 		} else {
 			primaryFieldSchema, err := t.schema.GetPkField()
 			if err != nil {
@@ -991,6 +1007,9 @@ func (t *SearchTask) validateHybridArrayOfVectorGroupBy() error {
 
 func (t *SearchTask) fillResult() {
 	limit := t.GetTopk() - t.GetOffset()
+	if t.mmrPage != nil {
+		limit = t.mmrPage.expectedRows()
+	}
 	resultSizeInsufficient := false
 	if t.aggCtx == nil {
 		for _, topk := range t.result.Results.Topks {
@@ -1119,6 +1138,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("L1 function chain is not supported with search_aggregation")
 		}
 	} else if t.request.FunctionScore != nil {
+		fillDefaultMMRInputField(t.request.FunctionScore, annsFieldName(t.schema.CollectionSchema, queryInfo.GetQueryFieldId()))
 		t.rerankMeta, err = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
 		if err != nil {
 			return err
@@ -1144,6 +1164,9 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 
 	t.isIterator = isIterator
 	t.Offset = offset
+	if err := t.initMMRPage(queryInfo, offset); err != nil {
+		return err
+	}
 	if t.aggCtx != nil {
 		if t.isIterator {
 			return merr.WrapErrParameterInvalidMsg("search iterator is not supported with search_aggregation")
@@ -1203,6 +1226,11 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 			t.needRequery = len(vectorOutputFields) > 0 || len(textOutputFields) > 0
 		}
 	}
+	if t.mmrPage != nil {
+		// MMR reads the stored vectors of the whole window; requery fetches
+		// them once for the merged candidates.
+		t.needRequery = true
+	}
 	if t.skipRequeryByNamespacePartitionMode() {
 		t.needRequery = false
 	}
@@ -1212,6 +1240,10 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	}
 	if t.needRequery {
 		plan.OutputFieldIds = rerankInputFieldIDs
+		if t.mmrPage != nil {
+			// The requery before rerank supplies every rerank input.
+			plan.OutputFieldIds = nil
+		}
 	} else {
 		primaryFieldSchema, err := t.schema.GetPkField()
 		if err != nil {

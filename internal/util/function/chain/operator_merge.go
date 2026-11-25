@@ -1263,6 +1263,10 @@ func buildEmptyArray(pool memory.Allocator, dt arrow.DataType) (arrow.Array, err
 		b := array.NewStringBuilder(pool)
 		defer b.Release()
 		return b.NewArray(), nil
+	case arrow.BINARY:
+		b := array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary)
+		defer b.Release()
+		return b.NewArray(), nil
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
@@ -1287,6 +1291,9 @@ func buildArrayFromLocations(pool memory.Allocator, colName string, locs []idLoc
 		return buildTypedArrayFromLocations[float64](colName, locs, inputs, array.NewFloat64Builder(pool), chunkIdx, dt.ID())
 	case arrow.STRING:
 		return buildTypedArrayFromLocations[string](colName, locs, inputs, array.NewStringBuilder(pool), chunkIdx, dt.ID())
+	case arrow.BINARY:
+		// JSON and opaque vector columns.
+		return buildTypedArrayFromLocations[[]byte](colName, locs, inputs, array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary), chunkIdx, dt.ID())
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported type: %s", dt.Name())
 	}
@@ -1374,6 +1381,10 @@ func getTypedValue[T any](arr arrow.Array, idx int) T {
 			return v
 		}
 	case *array.String:
+		if v, ok := any(a.Value(idx)).(T); ok {
+			return v
+		}
+	case *array.Binary:
 		if v, ok := any(a.Value(idx)).(T); ok {
 			return v
 		}

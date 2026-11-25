@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // rerankMeta provides access to common rerank metadata.
@@ -61,7 +62,17 @@ func newRerankMeta(collSchema *schemapb.CollectionSchema, funcScore *schemapb.Fu
 		return nil, nil
 	}
 	inputFieldNames := chain.GetInputFieldNamesFromFuncScore(funcScore)
-	inputPlan, err := newDataFrameInputPlanFromFieldNames(collSchema, inputFieldNames)
+	// Vector fields are only valid inputs of the MMR reranker, which reads the
+	// stored candidate vectors; every other reranker takes scalar inputs.
+	vectorInputs := make(map[string]bool)
+	for _, f := range funcScore.Functions {
+		if rerank.GetRerankName(f) == chain.MMRRerankerName {
+			for _, name := range f.GetInputFieldNames() {
+				vectorInputs[name] = true
+			}
+		}
+	}
+	inputPlan, err := newDataFrameInputPlanFromFieldNames(collSchema, inputFieldNames, vectorInputs)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +85,16 @@ func newRerankMeta(collSchema *schemapb.CollectionSchema, funcScore *schemapb.Fu
 }
 
 // newDataFrameInputPlanFromFieldNames adapts schema field names used by
-// FunctionScore to the plan-based SearchResultData converter.
+// FunctionScore to the plan-based SearchResultData converter. Vector fields
+// are accepted only when listed in vectorInputs (inputs of the MMR reranker).
 func newDataFrameInputPlanFromFieldNames(
 	schema *schemapb.CollectionSchema,
 	fieldNames []string,
+	vectorInputs map[string]bool,
 ) (*chain.DataFrameInputPlan, error) {
 	plan := &chain.DataFrameInputPlan{Inputs: make([]chain.ResolvedChainInput, 0, len(fieldNames))}
-	fieldsByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, field := range schema.GetFields() {
+	fieldsByName := make(map[string]*schemapb.FieldSchema)
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		fieldsByName[field.GetName()] = field
 	}
 	seen := make(map[string]struct{}, len(fieldNames))
@@ -94,14 +107,23 @@ func newDataFrameInputPlanFromFieldNames(
 			return nil, merr.WrapErrParameterInvalidMsg(
 				"function score input field %s not found in collection schema", fieldName)
 		}
-		// FunctionScore names describe whole schema fields, not typed JSON
-		// paths. Reject unsupported request inputs before creating a plan
-		// whose downstream validation assumes it was already compiled.
-		// JSON has an Arrow representation for computed outputs, but whole
-		// JSON roots are not valid FunctionScore field-name inputs.
-		if _, err := chain.ToArrowType(field.GetDataType()); err != nil || field.GetDataType() == schemapb.DataType_JSON {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"function score input field %q has unsupported field type %s", fieldName, field.GetDataType().String())
+		unsupported := merr.WrapErrParameterInvalidMsg(
+			"function score input field %q has unsupported field type %s", fieldName, field.GetDataType().String())
+		if typeutil.IsVectorType(field.GetDataType()) {
+			if !vectorInputs[fieldName] {
+				return nil, unsupported
+			}
+			helper, err := typeutil.CreateSchemaHelper(schema)
+			if err != nil {
+				return nil, err
+			}
+			if err := chain.ValidateMMRInputField(helper, field); err != nil {
+				return nil, err
+			}
+		} else if _, err := chain.ToArrowType(field.GetDataType()); err != nil || field.GetDataType() == schemapb.DataType_JSON {
+			// FunctionScore names describe whole schema fields, not typed
+			// JSON paths; whole JSON roots are not valid inputs.
+			return nil, unsupported
 		}
 		// Deduplicate only materialized columns; keep FunctionScore intact so
 		// each reranker can still validate its original input cardinality.

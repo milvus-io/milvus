@@ -82,7 +82,9 @@ func (s *ConverterSuite) TestToArrowType() {
 		{schemapb.DataType_VarChar, arrow.BinaryTypes.String, false},
 		{schemapb.DataType_Text, arrow.BinaryTypes.String, false},
 		{schemapb.DataType_JSON, arrow.BinaryTypes.Binary, false},
-		{schemapb.DataType_FloatVector, nil, true}, // Unsupported
+		{schemapb.DataType_FloatVector, arrow.BinaryTypes.Binary, false}, // opaque vector column
+		{schemapb.DataType_SparseFloatVector, arrow.BinaryTypes.Binary, false},
+		{schemapb.DataType_Array, nil, true}, // Unsupported
 	}
 
 	for _, tc := range testCases {
@@ -1410,15 +1412,15 @@ func TestFromSearchResultData_MemoryLeakOnError(t *testing.T) {
 				},
 			},
 			{
-				Type:      schemapb.DataType_FloatVector, // Unsupported!
-				FieldName: "vector",
+				Type:      schemapb.DataType_Array, // Unsupported!
+				FieldName: "arr",
 				FieldId:   101,
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: 4,
-						Data: &schemapb.VectorField_FloatVector{
-							FloatVector: &schemapb.FloatArray{
-								Data: make([]float32, 20),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{
+								ElementType: schemapb.DataType_Int64,
+								Data:        make([]*schemapb.ScalarField, 5),
 							},
 						},
 					},
@@ -1427,7 +1429,7 @@ func TestFromSearchResultData_MemoryLeakOnError(t *testing.T) {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "name", "vector"))
+	df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "name", "arr"))
 	assert.Error(t, err)
 	assert.Nil(t, df)
 	assert.Contains(t, err.Error(), "unsupported")

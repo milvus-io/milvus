@@ -62,6 +62,10 @@ func ToArrowType(t schemapb.DataType) (arrow.DataType, error) {
 	case schemapb.DataType_JSON:
 		return arrow.BinaryTypes.Binary, nil
 	default:
+		if typeutil.IsVectorType(t) {
+			// Vector columns are opaque per-row bytes; see vector_column.go.
+			return arrow.BinaryTypes.Binary, nil
+		}
 		return nil, merr.WrapErrServiceInternalMsg("unsupported data type: %s", t.String())
 	}
 }
@@ -474,6 +478,15 @@ func importFieldDataWithName(builder *DataFrameBuilder, fieldData *schemapb.Fiel
 		return nil
 	}
 
+	if typeutil.IsVectorType(fieldData.GetType()) {
+		chunks, schema, err := importVectorFieldData(fieldData, fieldName, offsets, validData, alloc)
+		if err != nil {
+			return err
+		}
+		builder.SetFieldSchema(fieldName, schema)
+		return builder.AddColumnFromChunks(fieldName, chunks)
+	}
+
 	var chunks []arrow.Array
 
 	switch fieldData.GetType() {
@@ -758,7 +771,6 @@ func ToSearchResultDataWithOptions(df *DataFrame, opts *ExportOptions) (*schemap
 		if _, ok := skipSet[name]; ok {
 			continue
 		}
-
 		fieldData, err := exportFieldData(df, name)
 		if err != nil {
 			return nil, err
