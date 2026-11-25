@@ -925,6 +925,81 @@ class MatchExprCandidateTest : public ::testing::TestWithParam<bool> {
     int64_t saved_batch_size_;
 };
 
+TEST_P(MatchExprCandidateTest, ConstantPredicatesSkipElementEvaluation) {
+    exec::QueryContext query(
+        "constant_match", segment_.get(), kRows, MAX_TIMESTAMP);
+    exec::ExecContext exec(&query);
+    for (bool value : {false, true}) {
+        expr::TypedExprPtr predicate = std::make_shared<expr::AlwaysTrueExpr>();
+        if (!value) {
+            predicate = std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, predicate);
+        }
+        data_ = TargetBitmap(starts_.back(), value);
+        valid_.set();
+        for (auto type : types_) {
+            for (int threshold : {0, 1, 2}) {
+                auto child = std::make_shared<IndexLikeMatchElementExpr>(
+                    starts_, data_, valid_, 5);
+                auto logical = std::make_shared<expr::MatchExpr>(
+                    "struct_array", type, threshold, predicate);
+                exec::PhyMatchFilterExpr match({child},
+                                               logical,
+                                               "constant_match",
+                                               nullptr,
+                                               segment_.get(),
+                                               kRows,
+                                               5);
+                exec::EvalCtx ctx(&exec);
+                exec::OffsetVector offsets{6, 2, 1, 2, 0};
+                ctx.set_offset_input(&offsets);
+                TargetBitmap mask(offsets.size(), true);
+                mask[1] = false;
+                ctx.set_bitmap_input(mask.clone());
+                VectorPtr output;
+                match.Eval(ctx, output);
+                Check(output, offsets, mask, type, threshold);
+                EXPECT_FALSE(bool(TargetBitmapView(
+                    std::static_pointer_cast<ColumnVector>(output)
+                        ->GetRawData(),
+                    offsets.size())[1]));
+                ctx.set_offset_input(nullptr);
+                ctx.set_bitmap_input(TargetBitmap{});
+                for (int64_t start = 0; start < kRows; start += 5) {
+                    exec::OffsetVector rows(
+                        std::min<int64_t>(5, kRows - start));
+                    std::iota(rows.begin(), rows.end(), start);
+                    match.Eval(ctx, output);
+                    Check(output, rows, {}, type, threshold);
+                }
+                match.Eval(ctx, output);
+                EXPECT_EQ(output, nullptr);
+                EXPECT_TRUE(child->calls.empty());
+                EXPECT_EQ(child->waits, 0);
+            }
+        }
+    }
+}
+
+TEST_P(MatchExprCandidateTest, OuterNotPreservesNullParentsOnZeroHits) {
+    ScopedSchemaHandle handle(*schema_);
+    auto bytes = handle.Parse(
+        "not match_any(struct_array, $[sub_int] == 2 && $[sub_int] == 3)");
+    auto plan = CreateRetrievePlanByExpr(schema_, bytes.data(), bytes.size());
+    auto node = plan->plan_node_->plannodes_->sources().front();
+    exec::OffsetVector rows{6, 2, 1, 11, 0, 6};
+    auto output = test::gen_filter_res(
+        node.get(), segment_.get(), kRows, MAX_TIMESTAMP, &rows);
+    ASSERT_EQ(output->size(), rows.size());
+    TargetBitmapView hits(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(bool(valid[i]), RowValid(rows[i]));
+        if (valid[i])
+            EXPECT_TRUE(hits[i]);
+    }
+}
+
 TEST_P(MatchExprCandidateTest, SequentialEmptySkippedAndDenseBatches) {
     for (auto type : types_) {
         for (int64_t threshold : {0, 1, 2, 4}) {
@@ -4852,6 +4927,14 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
             segment = std::move(growing);
         }
         const std::vector<std::pair<std::string, std::vector<bool>>> cases{
+            {R"(match_any(reviews, $[body] == "new" && $[body] == "york"))",
+             {false, false, false, false, false}},
+            {R"(match_any(reviews, $[body] == "new" || $[body] == "york"))",
+             {true, false, false, false, false}},
+            {R"(match_all(reviews, $[body] >= "new" && $[body] < "z"))",
+             {true, true, true, !GetParam(), true}},
+            {R"(match_all(reviews, not ($[body] == "new" && $[body] == "york")))",
+             {true, true, true, !GetParam(), true}},
             {R"(match_any(reviews, phrase_match($[body], "new york", 99)))",
              {false, true, false, true, false}},
             {R"(match_all(reviews, text_match($[body], "new")))",
