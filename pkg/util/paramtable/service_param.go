@@ -999,7 +999,7 @@ Valid values: [auto, enable, disable]`,
 		Key:          "woodpecker.storage.rootPath",
 		Version:      "2.6.0",
 		DefaultValue: "default",
-		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
+		Doc:          "With 'default', the root is localStorage.path/wp. For embedded local storage, provision localStorage.path and Milvus creates its wp subdirectory. Provision an explicitly configured local root before startup.",
 		Export:       true,
 		Sensitivity:  Sensitive,
 	}
