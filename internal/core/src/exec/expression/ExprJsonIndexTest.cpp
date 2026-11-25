@@ -58,35 +58,30 @@ InstallJsonConsumerIndex(
     auto* router =
         dynamic_cast<const index::IJsonIndexReader*>(opened.reader.get());
     ASSERT_NE(router, nullptr);
-    if (cast_type.data_type() != JsonCastType::DataType::JSON) {
-        auto resolved = router->Resolve(path, cast_type);
-        ASSERT_TRUE(resolved);
-        ASSERT_NE(dynamic_cast<const index::INullReader*>(resolved.get()),
-                  nullptr);
-        switch (cast_type.data_type()) {
-            case JsonCastType::DataType::BOOL:
-                ASSERT_NE(
-                    dynamic_cast<const index::IScalarPredicateReader<bool>*>(
-                        resolved.get()),
-                    nullptr);
-                break;
-            case JsonCastType::DataType::DOUBLE:
-                ASSERT_NE(
-                    dynamic_cast<const index::IScalarPredicateReader<double>*>(
-                        resolved.get()),
-                    nullptr);
-                break;
-            case JsonCastType::DataType::VARCHAR:
-                ASSERT_NE(
-                    dynamic_cast<
-                        const index::IScalarPredicateReader<std::string_view>*>(
-                        resolved.get()),
-                    nullptr);
-                break;
-            default:
-                FAIL() << "unexpected JSON consumer cast "
-                       << cast_type.ToString();
-        }
+    auto resolved = router->Resolve(path, cast_type);
+    ASSERT_TRUE(resolved);
+    ASSERT_NE(dynamic_cast<const index::INullReader*>(resolved.get()), nullptr);
+    switch (cast_type.data_type()) {
+        case JsonCastType::DataType::BOOL:
+            ASSERT_NE(dynamic_cast<const index::IScalarPredicateReader<bool>*>(
+                          resolved.get()),
+                      nullptr);
+            break;
+        case JsonCastType::DataType::DOUBLE:
+            ASSERT_NE(
+                dynamic_cast<const index::IScalarPredicateReader<double>*>(
+                    resolved.get()),
+                nullptr);
+            break;
+        case JsonCastType::DataType::VARCHAR:
+            ASSERT_NE(
+                dynamic_cast<
+                    const index::IScalarPredicateReader<std::string_view>*>(
+                    resolved.get()),
+                nullptr);
+            break;
+        default:
+            FAIL() << "unexpected JSON consumer cast " << cast_type.ToString();
     }
     milvus::test::expr_index::InstallIndex(
         segment, field_id, DataType::JSON, std::move(opened));
@@ -496,96 +491,6 @@ TEST(JsonIndexTest, JsonBinaryRangePathIndexMatchesRawData) {
                                    raw_precise->size());
     EXPECT_TRUE(precise_valid[8]);
     EXPECT_TRUE(precise_result[8]);
-}
-
-TEST(JsonIndexTest, JsonBinaryRangeFlatIndexSupportsOffsetInputWithoutRawJson) {
-    auto schema = std::make_shared<Schema>();
-    auto json_fid = schema->AddDebugField("json", DataType::JSON, true);
-
-    const std::vector<std::string> json_strs = {
-        R"({"n": 1})",
-        R"({"n": 2})",
-        R"({"n": 3.5})",
-        R"({"n": "3"})",
-        R"({"other": 4})",
-        R"({"n": null})",
-        R"({"n": 4})",
-        R"({"n": 5})",
-    };
-    auto json_field =
-        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
-    std::vector<milvus::Json> jsons;
-    jsons.reserve(json_strs.size());
-    for (const auto& json : json_strs) {
-        jsons.emplace_back(simdjson::padded_string(json));
-    }
-    json_field->add_json_data(jsons);
-    auto* valid_data = json_field->ValidData();
-    std::fill(valid_data,
-              valid_data + json_field->ValidDataSize(),
-              static_cast<uint8_t>(0));
-    valid_data[0] = 0b01111111;
-
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto raw_segment = CreateSealedSegment(schema);
-    auto raw_load_info = PrepareSingleFieldInsertBinlog(
-        1, 1, 1, json_fid.get(), {json_field}, cm);
-    raw_segment->LoadFieldData(raw_load_info);
-
-    auto flat_segment = CreateSealedSegment(schema);
-    std::vector<int64_t> row_ids(json_strs.size());
-    std::iota(row_ids.begin(), row_ids.end(), 0);
-    auto row_id_field_data =
-        storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
-    row_id_field_data->FillFieldData(row_ids.data(), row_ids.size());
-    auto row_id_load_info = PrepareSingleFieldInsertBinlog(
-        1, 1, 1, RowFieldID.get(), {row_id_field_data}, cm);
-    flat_segment->LoadFieldData(row_id_load_info);
-
-    InstallJsonConsumerIndex(*flat_segment,
-                             json_fid,
-                             {json_field},
-                             "",
-                             JsonCastType::FromString("JSON"));
-    ASSERT_FALSE(flat_segment->HasFieldData(json_fid));
-
-    proto::plan::GenericValue lower;
-    lower.set_int64_val(2);
-    proto::plan::GenericValue upper;
-    upper.set_int64_val(4);
-    auto range_expr = std::make_shared<expr::BinaryRangeFilterExpr>(
-        expr::ColumnInfo(json_fid, DataType::JSON, {"n"}),
-        lower,
-        upper,
-        true,
-        true);
-    auto evaluate = [&](const segcore::SegmentInternalInterface* segment,
-                        exec::OffsetVector* offsets) {
-        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
-                                                           range_expr);
-        return milvus::test::gen_filter_res(
-            plan.get(), segment, json_strs.size(), MAX_TIMESTAMP, offsets);
-    };
-
-    exec::OffsetVector offsets = {6, 2, 4, 1, 3, 5, 7, 0, 2};
-    auto raw_result = evaluate(raw_segment.get(), &offsets);
-    ColumnVectorPtr flat_result;
-    EXPECT_NO_THROW(flat_result = evaluate(flat_segment.get(), &offsets));
-    ASSERT_NE(flat_result, nullptr);
-    ASSERT_EQ(raw_result->size(), flat_result->size());
-
-    TargetBitmapView raw_values(raw_result->GetRawData(), raw_result->size());
-    TargetBitmapView raw_validity(raw_result->GetValidRawData(),
-                                  raw_result->size());
-    TargetBitmapView flat_values(flat_result->GetRawData(),
-                                 flat_result->size());
-    TargetBitmapView flat_validity(flat_result->GetValidRawData(),
-                                   flat_result->size());
-    for (size_t i = 0; i < offsets.size(); ++i) {
-        EXPECT_EQ(flat_values[i], raw_values[i]) << "candidate " << i;
-        EXPECT_EQ(flat_validity[i], raw_validity[i]) << "candidate " << i;
-    }
 }
 
 TEST(JsonIndexTest, EmptyJsonInIsDeterministicForEveryRow) {
@@ -1017,12 +922,11 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     json_valid_data[0] = 0xFF;
     json_valid_data[1] = 0xFE;
 
-    InstallJsonConsumerIndex(
-        *seg,
-        json_fid,
-        {json_field},
-        json_index_path,
-        JsonCastType::FromString(json_index_path.empty() ? "JSON" : "DOUBLE"));
+    InstallJsonConsumerIndex(*seg,
+                             json_fid,
+                             {json_field},
+                             json_index_path,
+                             JsonCastType::FromString("DOUBLE"));
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();

@@ -166,7 +166,6 @@ counter	proxy	scalar_index_type=Trie
 counter	proxy	scalar_index_type=INVERTED
 counter	proxy	scalar_index_type=RTREE
 counter	proxy	scalar_index_type=NGRAM
-counter	proxy	scalar_index_type=json_flat
 counter	proxy	scalar_index_type=FMINDEX
 counter	proxy	filter_index_declined
 counter	proxy	expr_cache_hit

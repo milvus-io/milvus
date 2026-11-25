@@ -514,6 +514,39 @@ func TestSegmentReadiness_IndexTerm_DVForceAllIndexReady(t *testing.T) {
 	})
 }
 
+func TestJSONFlatPreparedReadinessWaitsForSchema(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.DVForceAllIndexReady.Key, "true")
+	defer Params.Reset(Params.DataCoordCfg.DVForceAllIndexReady.Key)
+	for _, fieldType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_JSON} {
+		t.Run(fieldType.String(), func(t *testing.T) {
+			coll := readinessCollection(readinessCollID, readinessVectorSchema())
+			coll.Schema.Fields = append(coll.Schema.Fields, &schemapb.FieldSchema{FieldID: 3, Name: "candidate", DataType: fieldType})
+			im := newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{
+				10: vectorIndex(2, 10),
+				11: {
+					CollectionID: readinessCollID, FieldID: 3, IndexID: 11,
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}, {Key: common.JSONCastTypeKey, Value: "JSON"}},
+				},
+			}, map[int64][]*model.SegmentIndex{1: {segmentIndex(1, 10, commonpb.IndexState_Finished)}})
+			mt := readinessMeta(coll, im)
+			var cachedSchema *schemapb.CollectionSchema
+			im.SetCollectionSchemaGetter(func(int64) *schemapb.CollectionSchema { return cachedSchema })
+			r := mt.PrepareReadiness(coll)
+			seg := readyFlushedSegment(1)
+			require.False(t, r.IndexReady(seg))
+			cachedSchema = coll.Schema
+			// Reuse the prepared predicate: a warm cache must not silently drop
+			// a physical index that could not be classified during preparation.
+			require.Equal(t, fieldType == schemapb.DataType_JSON, r.IndexReady(seg))
+			if fieldType == schemapb.DataType_Int64 {
+				states, _ := im.SegmentIndexes.Get(seg.GetID())
+				states.Insert(11, segmentIndex(seg.GetID(), 11, commonpb.IndexState_Finished))
+				require.True(t, r.IndexReady(seg))
+			}
+		})
+	}
+}
+
 func TestSegmentReadiness_SortTerm(t *testing.T) {
 	// EnableSortCompaction defaults to true; keep EnableCompaction at its
 	// default true so enableSortCompaction() is true.

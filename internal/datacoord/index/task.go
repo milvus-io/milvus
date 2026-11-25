@@ -240,6 +240,11 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
+	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		// Ignore late results. The dispatch/poll guard cancels the worker and
+		// durably removes the existing task before removing it from scheduling.
+		return nil
+	}
 	published, err := it.publishIndexToManifest(result)
 	if err != nil {
 		return err
@@ -272,6 +277,12 @@ func (it *indexBuildTask) finishUnpublishedTask(ctx context.Context, result *wor
 // segment's current revision instead of the possibly-stale revision the build
 // was issued against.
 func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
+	switch it.indexMeta.indexKindByID(it.CollectionID, it.IndexID) {
+	case indexLogicalOnlyJSONFlat:
+		return false, nil
+	case indexUnknown:
+		return false, merr.Wrap(merr.ErrServiceUnavailable, "index field schema is not visible yet")
+	}
 	ctx := it.meta.Ctx
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
@@ -395,6 +406,12 @@ func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
 	if _, dropped := it.droppedTargetReason(segment, segIndex); dropped {
 		return true
 	}
+	switch it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat:
+		return it.NodeID == 0 // Assigned work still needs worker cancellation.
+	case indexUnknown:
+		return false
+	}
 	indexType := meta.GetIndexType(it.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID))
 	if isNoTrainIndex(indexType) {
 		return true
@@ -419,7 +436,12 @@ func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
 }
 
 func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.CoordinatorResult {
-	if it.prepareForWorker(ctx) != nil {
+	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		if it.NodeID != 0 {
+			return globalTask.LocalNeedsWorker
+		}
+		it.retireJSONFlatTask(ctx, nil)
+	} else if it.prepareForWorker(ctx) != nil {
 		return globalTask.LocalNeedsWorker
 	}
 	switch it.GetTaskState() {
@@ -462,6 +484,13 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 	if reason, dropped := it.droppedTargetReason(segment, segIndex); dropped {
 		log.Info(ctx, "task is no need to build index, marking it failed", mlog.String("reason", reason))
 		it.abortForDroppedTarget(ctx, reason)
+		return nil
+	}
+
+	// A recovered JSON-cast task must wait for local schema visibility before
+	// either physical dispatch or the small-segment completion path.
+	switch it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat, indexUnknown:
 		return nil
 	}
 
@@ -572,6 +601,10 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 
 func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	ctx := context.TODO()
+	if it.indexMeta.isJSONFlatIndexByID(it.CollectionID, it.IndexID) {
+		it.retireJSONFlatTask(ctx, cluster)
+		return
+	}
 	prepared := it.prepareForWorker(ctx)
 	if prepared == nil {
 		return
@@ -977,6 +1010,14 @@ func (it *indexBuildTask) QueryTaskOnWorker(cluster session.Cluster) {
 		return
 	}
 
+	switch it.indexMeta.indexKindByID(segIndex.CollectionID, segIndex.IndexID) {
+	case indexLogicalOnlyJSONFlat:
+		it.retireJSONFlatTask(ctx, cluster)
+		return
+	case indexUnknown:
+		return
+	}
+
 	results, err := cluster.QueryIndex(it.NodeID, &workerpb.QueryJobsRequest{
 		ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 		TaskIDs:   []UniqueID{it.BuildID},
@@ -1060,6 +1101,24 @@ func (it *indexBuildTask) abortForDroppedTarget(ctx context.Context, reason stri
 		mlog.Warn(ctx, "failed to persist aborted index task state, will retry",
 			mlog.Int64("taskID", it.BuildID), mlog.String("reason", reason), mlog.Err(err))
 	}
+}
+
+// retireJSONFlatTask cancels assigned work before removing its pending record.
+// Do not infer "never dispatched" from Unissued: retries may retain a NodeID.
+// Leave failures scheduled for retry; remove the scheduler entry only after
+// catalog deletion and in-memory cleanup succeed. Any unreported uploads are
+// reclaimed by the existing orphan-file GC, including its snapshot guards.
+func (it *indexBuildTask) retireJSONFlatTask(ctx context.Context, cluster session.Cluster) {
+	if it.NodeID != 0 {
+		if err := it.tryDropTaskOnWorker(cluster); err != nil {
+			return
+		}
+	}
+	if err := it.indexMeta.retireJSONFlatTask(ctx, it.BuildID); err != nil {
+		mlog.Warn(ctx, "failed to retire JSON flat task, will retry", mlog.FieldBuildID(it.BuildID), mlog.Err(err))
+		return
+	}
+	it.SetState(indexpb.JobState_JobStateNone, indexparams.JSONFlatIndexDeprecationReason)
 }
 
 func (it *indexBuildTask) tryDropTaskOnWorker(cluster session.Cluster) error {

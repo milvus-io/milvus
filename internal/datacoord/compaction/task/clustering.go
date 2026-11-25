@@ -619,7 +619,7 @@ func (t *ClusteringCompactionTask) processIndexing() error {
 			return t.completeTask()
 		}
 	}
-	// wait for segment indexed
+	// Check every live definition: an unknown schema is not logical completion.
 	collectionIndexes := t.indexMeta.GetIndexesForCollection(t.GetTaskProto().GetCollectionID(), "")
 	if len(collectionIndexes) == 0 {
 		mlog.Debug(context.TODO(), "the collection has no index, no need to do indexing")

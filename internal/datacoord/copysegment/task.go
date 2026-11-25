@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -886,6 +887,8 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		}
 	}
 
+	snapshotData = snapshotstorage.WithoutJSONFlatIndexFiles(snapshotData)
+
 	// Build source segment map for quick lookup
 	sourceSegmentMap := make(map[int64]*datapb.SegmentDescription)
 	for _, segDesc := range snapshotData.Segments {
@@ -948,9 +951,9 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}
 
 	snapshotIndexIDs := make(map[int64]struct{}, len(snapshotData.Indexes))
-	for _, idx := range snapshotData.Indexes {
-		if idx != nil {
-			snapshotIndexIDs[idx.GetIndexID()] = struct{}{}
+	for _, index := range snapshotData.Indexes {
+		if index != nil && !indexparams.IsJSONFlatIndex(typeutil.GetFieldByID(sourceSchema, index.GetFieldID()).GetDataType(), index.GetIndexParams()) {
+			snapshotIndexIDs[index.GetIndexID()] = struct{}{}
 		}
 	}
 	if len(manifestReadMappings) > 0 {
@@ -1539,6 +1542,9 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.WrapErrServiceInternalMsg("copied manifest contains unacknowledged indexes")
 		}
 	}
+	// A pre-upgrade copy may already have published flat artifacts. Install
+	// every verified build so GC retains its files before and after manifest
+	// recovery. Physical-load filtering must not remove artifact ownership.
 	return publishedBuilds, nil
 }
 
@@ -1570,9 +1576,9 @@ func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
 		return nil
 	}
 	targetIndexNames := make(map[string]struct{})
-	for _, idx := range indexMeta.GetIndexesForCollection(task.GetCollectionId(), "") {
-		if idx != nil && !idx.IsDeleted {
-			targetIndexNames[idx.IndexName] = struct{}{}
+	for _, index := range indexMeta.GetPhysicalIndexesForCollection(task.GetCollectionId()) {
+		if index != nil && !index.IsDeleted {
+			targetIndexNames[index.IndexName] = struct{}{}
 		}
 	}
 	for _, indexInfo := range result.GetIndexInfos() {
@@ -1617,7 +1623,7 @@ func buildCopySegmentTargetIndexes(m *meta.Meta, indexMeta *index.IndexMeta, col
 	if m == nil || indexMeta == nil {
 		return nil
 	}
-	indexes := indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := indexMeta.GetPhysicalIndexesForCollection(collectionID)
 	if len(indexes) == 0 {
 		return nil
 	}
@@ -1717,7 +1723,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 	// so that segmentIndexes entries match the index definitions in indexes map.
 	// Using indexName (instead of fieldID) as key because a single JSON field can have
 	// multiple indexes on different paths, and indexName is preserved during RestoreIndexes.
-	targetIndexes := indexMeta.GetIndexesForCollection(task.GetCollectionId(), "")
+	targetIndexes := indexMeta.GetPhysicalIndexesForCollection(task.GetCollectionId())
 	indexNameToTargetID := make(map[string]int64, len(targetIndexes))
 	for _, idx := range targetIndexes {
 		indexNameToTargetID[idx.IndexName] = idx.IndexID

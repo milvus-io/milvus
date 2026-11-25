@@ -171,11 +171,14 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs .
 	if len(indexIDs) == 0 {
 		return s.queryViewCollectionIndexInfos(collectionID)
 	}
+	// Historical load configurations retain exact index IDs, including retired
+	// flat definitions. Resolving those references is independent of selecting
+	// loadable artifacts. Current configurations still use the physical view.
 	return packQueryViewCollectionIndexInfos(s.indexMeta.GetIndexesByID(collectionID, indexIDs))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	indexes := s.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := s.indexMeta.GetPhysicalIndexesForCollection(collectionID)
 	return packQueryViewCollectionIndexInfos(indexes)
 }
 

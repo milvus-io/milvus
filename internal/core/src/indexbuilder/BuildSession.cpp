@@ -179,7 +179,6 @@ CompatibleType(DataType left, DataType right) {
 struct JsonProjectionShape {
     DataType value_type{DataType::NONE};
     bool is_array{false};
-    bool is_flat{false};
 };
 
 JsonProjectionShape
@@ -192,7 +191,7 @@ ParseJsonProjectionShape(const index::BuildParams& params) {
     }
     const auto cast = params.at(JSON_CAST_TYPE).get<std::string>();
     if (cast == "JSON") {
-        return {.value_type = DataType::JSON, .is_flat = true};
+        ThrowInfo(Unsupported, "JSON cast JSON has no physical index");
     }
     if (cast == "BOOL") {
         return {.value_type = DataType::BOOL};
@@ -649,17 +648,6 @@ BuildSession::NormalizeAndValidateRequest() {
                       "JSON build value type {} conflicts with its cast",
                       static_cast<int>(req_.value_type));
         }
-        if (json_projection->is_flat) {
-            if (req_.family != index::families::kJsonFlat) {
-                ThrowInfo(DataTypeInvalid,
-                          "JSON cast JSON requires the flat JSON family");
-            }
-        } else {
-            if (req_.family == index::families::kJsonFlat) {
-                ThrowInfo(DataTypeInvalid,
-                          "typed JSON projection requires a predicate family");
-            }
-        }
     } else {
         AssertInfo(req_.json_path.empty(),
                    "non-JSON index build has an unexpected JSON path");
@@ -718,9 +706,7 @@ BuildSession::NormalizeAndValidateRequest() {
         req_.params, "value_type", static_cast<int64_t>(req_.value_type));
     if (json_projection.has_value()) {
         const bool inner_nullable =
-            json_projection->is_flat || json_projection->is_array
-                ? field_spec_.nullable
-                : true;
+            json_projection->is_array ? field_spec_.nullable : true;
         req_.params["nullable"] = inner_nullable;
         ValidateOrSetInt64(
             req_.params, "element_type", static_cast<int64_t>(DataType::NONE));

@@ -156,10 +156,9 @@ Rust protobuf once before either reader call; malformed payloads throw there.
 - Input views are borrowed only for the duration of the call. `owned_t<string_view>` is `string`,
   and every other type is `T`; compressed structures may reconstruct values on the call stack, so
   `Lookup` must not return a dangling view.
-- `JsonResolvedReader` may own a temporary reader view or borrow a child reader, but both forms
-  require the parent reader to stay alive. An empty `CastTypesOf(path)` means the shape is not
-  supported; when it is non-empty and the path exists in no row, `Exists` returns an all-zero
-  bitmap.
+- `JsonResolvedReader` borrows a typed path's request-specific child reader and requires the parent
+  request reader to stay alive. An empty `CastTypesOf(path)` means the shape is not supported; when it is non-empty
+  and the path exists in no row, `Exists` returns an all-zero bitmap.
 - `CompareOp`, `PatternOp`, and `SpatialOp` use enums local to the contract; plan or engine enums
   are converted at the boundary. JSON routing uses `JsonCastType`, which does not mean that every
   `DataType` is usable.
@@ -238,9 +237,7 @@ I/O. A used Reader prevents eviction even between operations; consumers should r
 finished. This is a concrete single-cell policy, not a requirement to load every cell of future
 multi-cell indexes.
 JSON path indexes retain child Index objects and create child request readers with the same context.
-Projection existence metadata is loaded with the concrete scalar Storage. JSON flat resolution
-returns a path reader retaining its Storage pin across subsequent predicates; callers still obey
-the parent-reader lifetime contract above.
+Projection existence metadata is loaded with the concrete scalar Storage.
 
 `CellByteSize()` belongs to the cached Storage or Engine, not to `IIndex` or its request Readers.
 It describes owned heap and file-backed resources. Implementations using an unavailable-zero

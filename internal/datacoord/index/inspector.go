@@ -319,11 +319,22 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 		return nil
 	}
 
+	classify := i.indexMeta.indexClassifier(segment.CollectionID)
 	indexes := i.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
-	indexIDToSegIndexes := i.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+	// Deduplicate against current records, not the physical projection: an
+	// unknown record must remain present if schema visibility changes at admission.
+	indexIDsWithBuild := typeutil.NewUniqueSet()
+	for _, record := range i.indexMeta.getCurrentSegmentIndexTasks(segment.ID) {
+		if !record.IsDeleted {
+			indexIDsWithBuild.Insert(record.IndexID)
+		}
+	}
 
 	for _, index := range indexes {
-		if _, ok := indexIDToSegIndexes[index.IndexID]; ok {
+		if classify(index) == indexLogicalOnlyJSONFlat {
+			continue
+		}
+		if indexIDsWithBuild.Contain(index.IndexID) {
 			continue
 		}
 		collection, ok := i.CanCreateIndexForSegment(ctx, segment, index)
@@ -341,8 +352,8 @@ func (i *IndexInspector) createIndexesForSegment(ctx context.Context, segment *m
 
 // canCreateIndexForSegment reports whether the segment is ready to build the
 // index, returning the resolved collection so the caller does not have to look
-// it up again. The schema is resolved through the handler (lazy-loading on
-// cache miss, e.g. right after a datacoord restart); the check fails closed,
+// it up again. The handler uses local metadata with bounded retry on a cache
+// miss; the check fails closed,
 // deferring to the next inspection round on an unresolvable or inconsistent
 // view.
 func (i *IndexInspector) CanCreateIndexForSegment(ctx context.Context, segment *meta.SegmentInfo, index *model.Index) (*meta.CollectionInfo, bool) {
@@ -350,6 +361,9 @@ func (i *IndexInspector) CanCreateIndexForSegment(ctx context.Context, segment *
 	if err != nil || collection == nil || collection.Schema == nil {
 		mlog.Warn(ctx, "cannot resolve collection schema, defer index build",
 			mlog.FieldSegmentID(segment.ID), mlog.FieldFieldID(index.FieldID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
+		return nil, false
+	}
+	if index.IsDeleted || classifyIndex(collection.Schema, index) != indexPhysical {
 		return nil, false
 	}
 	// Function outputs are materialized by schema-bump reconciliation, which
@@ -492,12 +506,19 @@ func (i *IndexInspector) estimateIndexFieldSize(ctx context.Context, coll *meta.
 }
 
 func (i *IndexInspector) reloadFromMeta() {
+	// Include historical logical-only records here so their dispatch/poll guards
+	// cancel the worker and remove artifact-free pending records. New build
+	// admission still requires a confirmed physical definition.
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
-		for _, segIndex := range i.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
+		for _, segIndex := range i.indexMeta.getCurrentSegmentIndexTasks(segment.ID) {
 			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
 				segIndex.IndexState != commonpb.IndexState_Retry &&
 				segIndex.IndexState != commonpb.IndexState_InProgress) {
+				continue
+			}
+
+			if !i.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 				continue
 			}
 
@@ -511,7 +532,7 @@ func (i *IndexInspector) reloadFromMeta() {
 			taskSlot := CalculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
 
 			i.scheduler.Enqueue(NewIndexBuildTask(
-				model.CloneSegmentIndex(segIndex),
+				segIndex,
 				taskSlot,
 				i.meta,
 				i.indexMeta,

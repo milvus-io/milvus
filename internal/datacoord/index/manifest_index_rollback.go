@@ -131,7 +131,7 @@ func (i *ManifestIndexRollbackInspector) runOnce(ctx context.Context) bool {
 	if ready {
 		metrics.DataCoordManifestIndexRollbackReady.Set(1)
 		if !i.ready {
-			mlog.Info(ctx, "manifest index rollback complete: no manifest-resident index records remain")
+			mlog.Info(ctx, "manifest index rollback complete: no eligible manifest-resident index records remain")
 		}
 	}
 	i.ready = ready

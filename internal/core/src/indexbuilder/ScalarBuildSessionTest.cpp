@@ -119,15 +119,11 @@ class ScalarBuildSessionTest : public ::testing::Test {
             {stats.Files()[0].file_name}, context);
         const auto resolved_family =
             index::ResolvePackedLoadFamily(family, source.Metadata(), params);
-        // Cold-load planning annotates typed JSON completeness, as the sealed
-        // index translator does before opening the reader. A JSON flat index
-        // is not a typed projection, so the translator skips it.
+        // Match the sealed translator's typed JSON completeness annotation.
         storage::LoadOptions options;
         options.params = params;
-        if (family != index::families::kJsonFlat) {
-            options.params = index::AnnotateJsonProjectionCompleteness(
-                params, source.Directory(), source.Metadata());
-        }
+        options.params = index::AnnotateJsonProjectionCompleteness(
+            params, source.Directory(), source.Metadata());
         return index::LoaderRegistry::Instance()
             .Lookup(resolved_family)
             .Load({index::OpenedIndexSource{std::move(source)},
@@ -552,8 +548,7 @@ TEST_F(ScalarBuildSessionTest, JsonIndexBuildsWithEmptyValidDocument) {
         const char* path;
     };
     for (const auto& [index_type, cast, path] :
-         {Case{index::INVERTED_INDEX_TYPE, "JSON", ""},
-          Case{index::INVERTED_INDEX_TYPE, "DOUBLE", "/a"},
+         {Case{index::INVERTED_INDEX_TYPE, "DOUBLE", "/a"},
           Case{index::ASCENDING_SORT, "DOUBLE", "/a"},
           Case{index::NGRAM_INDEX_TYPE, "VARCHAR", ""}}) {
         SCOPED_TRACE(::testing::Message()

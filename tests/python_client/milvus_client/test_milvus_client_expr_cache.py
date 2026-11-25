@@ -590,29 +590,21 @@ class ExprCacheTestBase(TestMilvusClientV2Base):
                 indexes.add_index(f, index_type=kind, index_name=f"idx_{f}", params=params)
                 scalar_indexes.append((f"idx_{f}", f, kind))
                 built_targets.add(f)
-        if profile in ("json_path", "json_flat", "mixed"):
-            paths = (
-                [("a", "DOUBLE"), ("label", "VARCHAR"), ("enabled", "BOOL")]
-                if profile in ("json_path", "mixed")
-                else [("", "JSON")]
-            )
-            for field_name in ("j", "j2") if profile == "json_flat" else ("j",):
-                for key, cast in paths:
-                    path = f'{field_name}["{key}"]' if key else field_name
-                    if index_targets is not None and path not in index_targets:
-                        continue
-                    index_name = f"idx_json_{key or 'flat'}_{field_name}"
-                    indexes.add_index(
-                        field_name,
-                        index_type="INVERTED",
-                        index_name=index_name,
-                        params={
-                            "json_path": path,
-                            "json_cast_type": cast,
-                        },
-                    )
-                    scalar_indexes.append((index_name, field_name, "INVERTED"))
-                    built_targets.add(path)
+        if profile in ("json_path", "mixed"):
+            for key, cast in [("a", "DOUBLE"), ("label", "VARCHAR"), ("enabled", "BOOL")]:
+                field_name = "j"
+                path = f'{field_name}["{key}"]'
+                if index_targets is not None and path not in index_targets:
+                    continue
+                index_name = f"idx_json_{key}_{field_name}"
+                indexes.add_index(
+                    field_name,
+                    index_type="INVERTED",
+                    index_name=index_name,
+                    params={"json_path": path, "json_cast_type": cast},
+                )
+                scalar_indexes.append((index_name, field_name, "INVERTED"))
+                built_targets.add(path)
         for f, kind in extra_indexes:
             assert f not in built_targets, f"duplicate index target: {f}"
             indexes.add_index(f, index_type=kind, index_name=f"idx_{f}")
@@ -805,7 +797,7 @@ class TestExprCacheSealedOnly(ExprCacheTestBase):
     def indexed(self, request, ec_client):
         return self.create_dataset(ec_client, request, profile="indexed")
 
-    @pytest.fixture(scope="class", params=["raw", "json_path", "json_flat"])
+    @pytest.fixture(scope="class", params=["raw", "json_path"])
     def json_data(self, request, ec_client):
         return self.create_dataset(ec_client, request, profile=request.param)
 
@@ -909,7 +901,7 @@ class TestExprCacheSealedOnly(ExprCacheTestBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("case", case_params(json_cases()))
     def test_json_semantics(self, ec_client, json_data, case):
-        """target: JSON types/paths; method: raw/path/flat configurations; expected: typed oracle."""
+        """target: JSON types/paths; method: raw/path configurations; expected: typed oracle."""
         self.repeat_case(ec_client, json_data, case, filter_params={"expr_use_json_stats": False})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -985,7 +977,7 @@ class TestExprCacheIndependent(ExprCacheTestBase):
             self.repeat_case(ec_client, data, case)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("profile", ["raw", "json_path", "json_flat"])
+    @pytest.mark.parametrize("profile", ["raw", "json_path"])
     def test_json_integer_precision(self, ec_client, make_dataset, profile):
         """target: JSON literals around +/-2^53; method: adjacent int64 bounds/terms; expected: no double aliasing."""
         boundary = 2**53
@@ -1007,7 +999,7 @@ class TestExprCacheIndependent(ExprCacheTestBase):
         rows = make_rows(profile=profile)
         for row in rows:
             row["j"] = {"a": values[row["id"] % len(values)]}
-        targets = {"json_path": ('j["a"]',), "json_flat": ("j",)}.get(profile)
+        targets = {"json_path": ('j["a"]',)}.get(profile)
         data = make_dataset(rows=rows, profile=profile, index_targets=targets)
         for sign in (-1, 1):
             adjacent = [sign * boundary, sign * (boundary + 1)]
@@ -1265,64 +1257,6 @@ class TestExprCacheIndependent(ExprCacheTestBase):
                 self.verify_search(ec_client, data, case, oracle=oracles[case.name])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("reverse", [False, True], ids=["positive_first", "negative_first"])
-    def test_json_flat_validity_isolation(self, ec_client, make_dataset, reverse):
-        """target: flat-index validity keys; method: alternate fields/types/NOT; expected: typed truth tables."""
-        samples = [{"a": v} for v in (7, 8, "7", "8", True, False, None, [], {"nested": 7}, {"other": 8})] + [
-            {},
-            None,
-            {"other": 7},
-        ]
-        rows = make_rows()
-        for i, row in enumerate(rows):
-            row["j"] = copy.deepcopy(samples[i % len(samples)])
-            row["j2"] = copy.deepcopy(samples[(i + 6) % len(samples)])
-        data = make_dataset(rows=rows, profile="json_flat")
-        pairs = []
-        for value, types in [(7, (int, float)), ("7", (str,)), (True, (bool,))]:
-            for field_name in ("j", "j2"):
-
-                def predicate(row, field_name=field_name, value=value, types=types):
-                    actual = json_path(row, "a", field_name=field_name)
-                    return actual == value if type(actual) in types else None
-
-                positive = FilterCase(
-                    f"{field_name}_{types[0].__name__}", f'{field_name}["a"] == {json.dumps(value)}', predicate
-                )
-                negative = FilterCase(
-                    f"not_{positive.name}", f"not ({positive.expr})", lambda r, p=predicate: tri_not(p(r))
-                )
-                assert positive.expected(rows) and negative.expected(rows)
-                pairs.append((negative, positive) if reverse else (positive, negative))
-        if reverse:
-            pairs.reverse()
-        # Interleave value families and fields before returning to each leaf;
-        # both JSON fields have materialized flat indexes on this fresh collection.
-        cases = [case for pair in pairs for case in pair]
-        assert len({frozenset(r["id"] for r in case.expected(rows)) for case in cases}) == len(cases), (
-            "field/type/NOT isolation requires distinct expected ID sets"
-        )
-        oracles = {case.name: ExpectedResult(case.expected(data.rows)) for case in cases}
-        for _ in range(REPEATS):
-            for case in cases:
-                self.verify_query(
-                    ec_client,
-                    data,
-                    case,
-                    output_fields=("id", "j", "j2"),
-                    filter_params={"expr_use_json_stats": False},
-                    oracle=oracles[case.name],
-                )
-                self.verify_search(
-                    ec_client,
-                    data,
-                    case,
-                    output_fields=("j", "j2"),
-                    filter_params={"expr_use_json_stats": False},
-                    oracle=oracles[case.name],
-                )
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_dynamic_fields(self, ec_client, make_dataset):
         """target: dynamic keys/missing paths; method: alternate predicates; expected: oracle."""
         data = make_dataset(profile="dynamic")
@@ -1340,7 +1274,6 @@ class TestExprCacheIndependent(ExprCacheTestBase):
             pytest.param("minimal", True, id="raw_sealed"),
             pytest.param("indexed", True, id="scalar_indexed"),
             pytest.param("json_path", True, id="json_path_indexed"),
-            pytest.param("json_flat", True, id="json_flat_indexed"),
             pytest.param("text", True, id="text_sealed"),
         ],
     )
@@ -1350,7 +1283,7 @@ class TestExprCacheIndependent(ExprCacheTestBase):
 
         def set_value(row, value):
             row["n"] = value
-            if profile in ("json_path", "json_flat"):
+            if profile == "json_path":
                 row["j"] = None if value is None else {"a": value}
             elif profile == "text":
                 row["text"] = None if value is None else ("vector ready" if value > 0 else "other ready")
@@ -1365,9 +1298,9 @@ class TestExprCacheIndependent(ExprCacheTestBase):
             rows[i]["vec"] = [q[0] + (i + 1) / 64] + q[1:]
         # This family mutates one indexed field/path. The shared expression
         # fixtures retain the full index matrix for operator/type coverage.
-        index_targets = {"indexed": ("n",), "json_path": ('j["a"]',), "json_flat": ("j",)}.get(profile)
+        index_targets = {"indexed": ("n",), "json_path": ('j["a"]',)}.get(profile)
         data = make_dataset(rows=rows, profile=profile, sealed=sealed, index_targets=index_targets)
-        if profile in ("json_path", "json_flat"):
+        if profile == "json_path":
             expr = 'j["a"] > 0'
 
             def predicate(r):

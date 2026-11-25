@@ -19,10 +19,13 @@ package segcore
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -30,7 +33,7 @@ import (
 // ComposeCollectionIndexMeta builds segcore CollectionIndexMeta from coordinator index infos.
 func ComposeCollectionIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) *segcorepb.CollectionIndexMeta {
 	fieldIndexMetas := make([]*segcorepb.FieldIndexMeta, 0, len(indexInfos))
-	for _, info := range indexInfos {
+	for _, info := range PhysicalIndexInfos(indexInfos, schema) {
 		fieldIndexMetas = append(fieldIndexMetas, &segcorepb.FieldIndexMeta{
 			CollectionID:    info.GetCollectionID(),
 			IndexId:         info.GetIndexID(),
@@ -56,4 +59,15 @@ func ComposeCollectionIndexMeta(ctx context.Context, indexInfos []*indexpb.Index
 		IndexMetas:       fieldIndexMetas,
 		MaxIndexRowCount: maxIndexRecordPerSegment,
 	}
+}
+
+// PhysicalIndexInfos projects resolved definitions for native resource consumers.
+// Historical load requirements may still reference retired JSON flat indexes;
+// resolving them must not make their artifacts loadable again. The schema, not
+// ignored JSON extras on a scalar index, determines the field type.
+func PhysicalIndexInfos(infos []*indexpb.IndexInfo, schema *schemapb.CollectionSchema) []*indexpb.IndexInfo {
+	return lo.Filter(infos, func(info *indexpb.IndexInfo, _ int) bool {
+		field := typeutil.GetFieldByID(schema, info.GetFieldID())
+		return !indexparams.IsJSONFlatIndex(field.GetDataType(), info.GetIndexParams())
+	})
 }

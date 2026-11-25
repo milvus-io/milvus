@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -31,12 +30,8 @@
 
 namespace milvus::index {
 
-// A separate resolution handle is required because implementations produce two
-// different lifetimes behind the same path-routing contract. A flat JSON index
-// creates a temporary path-bound reader, which this handle must own. A typed
-// path reader already owns its request-specific child reader, so this handle only borrows it.
-// Flat path readers retain their storage pin. Borrowed typed readers require
-// the parent request reader to outlive the result.
+// A resolved typed path borrows its request-specific child reader. The parent
+// request reader must outlive this handle.
 class JsonResolvedReader {
  public:
     JsonResolvedReader() = default;
@@ -46,29 +41,15 @@ class JsonResolvedReader {
     operator=(const JsonResolvedReader&) = delete;
 
     JsonResolvedReader(JsonResolvedReader&& other) noexcept
-        : owned_(std::move(other.owned_)), reader_(other.reader_) {
-        if (owned_ != nullptr) {
-            reader_ = owned_.get();
-        }
-        other.reader_ = nullptr;
+        : reader_(std::exchange(other.reader_, nullptr)) {
     }
 
     JsonResolvedReader&
     operator=(JsonResolvedReader&& other) noexcept {
         if (this != &other) {
-            owned_ = std::move(other.owned_);
-            reader_ = owned_ != nullptr ? owned_.get() : other.reader_;
-            other.reader_ = nullptr;
+            reader_ = std::exchange(other.reader_, nullptr);
         }
         return *this;
-    }
-
-    static JsonResolvedReader
-    Owned(std::unique_ptr<const IIndexReaderBase> reader) noexcept {
-        JsonResolvedReader result;
-        result.owned_ = std::move(reader);
-        result.reader_ = result.owned_.get();
-        return result;
     }
 
     static JsonResolvedReader
@@ -93,7 +74,6 @@ class JsonResolvedReader {
     }
 
  private:
-    std::unique_ptr<const IIndexReaderBase> owned_;
     const IIndexReaderBase* reader_{nullptr};
 };
 
@@ -101,9 +81,9 @@ class IJsonIndexReader {
  public:
     virtual ~IJsonIndexReader() = default;
 
-    // Resolve a supported path/cast pair to a predicate reader. The result may own
-    // a temporary interface view or borrow a child; in either case keep the parent
-    // reader alive while using it. Cast to the query interface once after resolve.
+    // Resolve a supported path/cast pair to a borrowed child reader. Keep the
+    // parent request reader alive while using it. Cast to the query interface once
+    // after resolve.
     // An empty result means this index cannot serve the path/cast pair; choosing a
     // raw or shredded-column fallback belongs to the consumer.
     virtual JsonResolvedReader

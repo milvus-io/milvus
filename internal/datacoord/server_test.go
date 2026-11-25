@@ -749,14 +749,10 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		}))
 
-		getSegmentIndexesMock := mockey.Mock((*index.IndexMeta).GetSegmentsIndexes).To(
-			func(im *index.IndexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
-				im.RLockFieldIndexes()
-				indexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
-				for _, segmentID := range segmentIDs {
-					indexes[segmentID] = im.GetSegmentIndexesUnsafe(collectionID, segmentID)
-				}
-				im.RUnlockFieldIndexes()
+		var getIndexSnapshotOrigin func(*index.IndexMeta, UniqueID, []UniqueID) ([]*model.Index, map[int64]map[UniqueID]*model.SegmentIndex)
+		getIndexSnapshotMock := mockey.Mock((*index.IndexMeta).GetQueryViewIndexSnapshot).To(
+			func(im *index.IndexMeta, collectionID UniqueID, segmentIDs []UniqueID) ([]*model.Index, map[int64]map[UniqueID]*model.SegmentIndex) {
+				definitions, indexes := getIndexSnapshotOrigin(im, collectionID, segmentIDs)
 
 				replacement := &model.Index{
 					CollectionID: collectionID,
@@ -768,14 +764,15 @@ func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
 					}},
 				}
 				require.NoError(t, im.AlterIndex(context.Background(), replacement))
-				return indexes
+				return definitions, indexes
 			},
-		).Build()
-		defer getSegmentIndexesMock.UnPatch()
+		).Origin(&getIndexSnapshotOrigin).Build()
+		defer getIndexSnapshotMock.UnPatch()
 
 		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
 
 		require.NoError(t, err)
+		assert.Equal(t, newFieldID, svr.indexMeta.GetFieldIDByIndexID(collectionID, indexID), "the index must change after the captured snapshot")
 		require.Len(t, infos, 1)
 		require.Len(t, indexInfos, 1)
 		require.Len(t, infos[0].GetLoadInfo().GetIndexInfos(), 1)

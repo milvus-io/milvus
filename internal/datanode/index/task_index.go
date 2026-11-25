@@ -241,6 +241,13 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	if indexparams.IsJSONFlatIndex(it.req.GetField().GetDataType(), mapToKVPairs(it.newIndexParams)) {
+		// An old coordinator can still dispatch flat builds during an index-pool-first
+		// upgrade. Keep them retryable until coordinator retirement or worker rollback;
+		// the native Unsupported error would make the segment build permanently fail.
+		return merr.WrapErrServiceUnavailableMsg("JSON flat index building is retired on this worker; retry for coordinator upgrade or worker rollback")
+	}
+
 	it.req.CurrentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
 	it.req.CurrentScalarIndexVersion = common.ClampScalarIndexVersion(it.req.GetCurrentScalarIndexVersion())
 
