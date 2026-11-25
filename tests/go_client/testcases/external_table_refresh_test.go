@@ -5084,6 +5084,8 @@ func refreshExternalSnapshotLoad(ctx context.Context, t *testing.T, target *base
 }
 
 func TestMilvusTableStructSchemaEvolutionSnapshot(t *testing.T) {
+	t.Skip("3.0 distributed Go SDK CI does not expose /management/config/alter through the SDK service")
+
 	// Preserve missing physical columns until the explicit rewrite below.
 	previousBackfill, err := hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "false")
 	require.NoError(t, err)
