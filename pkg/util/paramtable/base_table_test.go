@@ -17,9 +17,12 @@
 package paramtable
 
 import (
+	"context"
+	"net"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -178,4 +181,41 @@ func TestNewBaseTableFromYamlOnly(t *testing.T) {
 	yaml = "not_exist.yaml"
 	gp = NewBaseTableFromYamlOnly(yaml)
 	assert.Empty(t, gp.Get("key"))
+}
+
+// A lazy unauthenticated client and an authenticating client must both wait
+// for etcd and interrupt the in-flight request on shutdown.
+func TestWaitForRemoteConfigDuringPartition(t *testing.T) {
+	for _, auth := range []string{"false", "true"} {
+		t.Run("auth="+auth, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			defer listener.Close()
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Interval(0))
+			bt.config.skipRemote = false
+			defer bt.mgr.Close()
+			bt.Save("etcd.endpoints", listener.Addr().String())
+			bt.Save("etcd.auth.enabled", auth)
+			bt.Save("etcd.auth.userName", "test")
+			bt.Save("etcd.auth.password", "test")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- bt.WaitForRemoteConfig(ctx) }()
+			require.NoError(t, listener.(*net.TCPListener).SetDeadline(time.Now().Add(5*time.Second)))
+			conn, err := listener.Accept()
+			require.NoError(t, err)
+			defer conn.Close()
+			cancel()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("etcd startup continued waiting after shutdown")
+			}
+			if bt.etcdClient != nil {
+				bt.etcdClient.Close()
+			}
+		})
+	}
 }

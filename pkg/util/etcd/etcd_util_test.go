@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,62 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestRetryAtStartup(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		err     error
+		retries bool
+	}{
+		{"dial timeout", errors.Wrap(context.DeadlineExceeded, "dial"), true},
+		{"RPC timeout", status.Error(codes.DeadlineExceeded, "request timeout"), true},
+		{"leader election", rpctypes.ErrNoLeader, true},
+		{"authentication rejected", rpctypes.ErrAuthFailed, false},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"local TLS configuration", os.ErrNotExist, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			err := RetryAtStartup(t.Context(), func() error {
+				calls++
+				if calls == 1 {
+					return tt.err
+				}
+				return nil
+			})
+			if tt.retries {
+				require.NoError(t, err)
+				require.Equal(t, 2, calls)
+			} else {
+				require.ErrorIs(t, err, tt.err)
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
+	t.Run("shutdown during backoff", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		attempted := make(chan struct{}, 1)
+		done := make(chan error, 1)
+		go func() {
+			done <- RetryAtStartup(ctx, func() error {
+				select {
+				case attempted <- struct{}{}:
+				default:
+				}
+				return rpctypes.ErrNoLeader
+			})
+		}()
+		<-attempted
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("startup retry did not stop")
+		}
+	})
+}
 
 func TestIsRetriableWatchErr(t *testing.T) {
 	cases := []struct {

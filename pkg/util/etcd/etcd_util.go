@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -120,6 +121,29 @@ func IsRetriableEtcdErr(err error) bool {
 }
 
 type ClientOption func(*clientv3.Config)
+
+// RetryAtStartup waits for a temporarily unavailable etcd until startup is canceled.
+// Each individual operation must have its own deadline. Keep connection details
+// out of bootstrap logs (errors may include endpoints or certificate paths).
+func RetryAtStartup(ctx context.Context, operation func() error) error {
+	policy := backoff.NewExponentialBackOff()
+	policy.InitialInterval = 200 * time.Millisecond
+	policy.MaxInterval = 2 * time.Second // with jitter, at most three seconds
+	policy.MaxElapsedTime = 0
+	return backoff.RetryNotify(func() error {
+		if err := ctx.Err(); err != nil {
+			return backoff.Permanent(err)
+		}
+		err := operation()
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) &&
+			status.Code(err) != codes.DeadlineExceeded && !IsRetriableEtcdErr(err) {
+			return backoff.Permanent(err)
+		}
+		return err
+	}, backoff.WithContext(policy, ctx), func(_ error, delay time.Duration) {
+		mlog.RatedWarn(ctx, 0.2, "waiting for etcd during startup", mlog.Duration("retryAfter", delay))
+	})
+}
 
 // WithDialTimeout overrides the etcd client dial timeout. A non-positive value keeps the default.
 func WithDialTimeout(dialTimeout time.Duration) ClientOption {

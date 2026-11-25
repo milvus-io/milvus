@@ -27,6 +27,8 @@ import (
 	"strings"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -387,6 +389,26 @@ func (p *EtcdConfig) GetAll() map[string]string {
 		"etcd.auth.userName":        p.EtcdAuthUserName.GetValue(),
 		"etcd.auth.password":        p.EtcdAuthPassword.GetValue(),
 	}
+}
+
+// NewClient opens a client owned by the caller. For remote etcd, ctx bounds the client's lifetime.
+func (p *EtcdConfig) NewClient(ctx context.Context) (*clientv3.Client, error) {
+	opts := append(p.ClientOptions(), func(cfg *clientv3.Config) { cfg.Context = ctx })
+	return etcd.CreateEtcdClient(p.UseEmbedEtcd.GetAsBool(), p.EtcdEnableAuth.GetAsBool(),
+		p.EtcdAuthUserName.GetValue(), p.EtcdAuthPassword.GetValue(), p.EtcdUseSSL.GetAsBool(),
+		p.Endpoints.GetAsStrings(), p.EtcdTLSCert.GetValue(), p.EtcdTLSKey.GetValue(),
+		p.EtcdTLSCACert.GetValue(), p.EtcdTLSMinVersion.GetValue(), opts...)
+}
+
+// NewClientAtStartup retries temporary dial and authentication-service failures.
+func (p *EtcdConfig) NewClientAtStartup(ctx context.Context) (*clientv3.Client, error) {
+	var client *clientv3.Client
+	err := etcd.RetryAtStartup(ctx, func() error {
+		var err error
+		client, err = p.NewClient(ctx)
+		return err
+	})
+	return client, err
 }
 
 func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {

@@ -190,11 +190,15 @@ func (s *EtcdSourceSuite) TestStaleSnapshotDoesNotRollBackNewerRefresh() {
 // headerlessKV is the shape a hand-written clientv3.KV fake naturally takes: it fills in the
 // key-values it wants to serve and leaves the rest of GetResponse zero, so Header is nil.
 type headerlessKV struct {
+	err error
 	clientv3.KV
 	kvs []*mvccpb.KeyValue
 }
 
 func (kv *headerlessKV) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	if kv.err != nil {
+		return nil, kv.err
+	}
 	return &clientv3.GetResponse{Kvs: kv.kvs}, nil
 }
 
@@ -219,4 +223,37 @@ func TestSnapshotWithoutResponseHeaderIsPublished(t *testing.T) {
 
 func TestEtcdSource(t *testing.T) {
 	suite.Run(t, new(EtcdSourceSuite))
+}
+
+func TestStartupRecoversInitialEtcdSource(t *testing.T) {
+	client := clientv3.NewCtxClient(t.Context())
+	kv := &headerlessKV{err: context.DeadlineExceeded}
+	client.KV = kv
+	source, err := NewEtcdSource(client, &EtcdInfo{KeyPrefix: "test"})
+	require.NoError(t, err)
+	manager := NewManager()
+	defer manager.Close()
+	require.ErrorIs(t, manager.AddSource(source), context.DeadlineExceeded)
+	source.SetEventHandler(manager)
+
+	// Package initialization may already have frozen and cached this key.
+	manager.ForbidUpdate("option")
+	require.True(t, manager.CASCachedValue("option", "", "local"))
+	kv.err = nil
+	kv.kvs = []*mvccpb.KeyValue{{Key: []byte("test/config/option"), Value: []byte("remote")}}
+	require.NoError(t, manager.LoadEtcdConfigsAtStartup(t.Context(), source))
+	_, value, err := manager.GetConfig("option")
+	require.NoError(t, err)
+	require.Equal(t, "remote", value)
+	_, cached := manager.GetCachedValue("option")
+	require.False(t, cached)
+
+	// A remote override can also disappear between the first load and startup.
+	require.NoError(t, manager.AddSource(&mapSource{name: "local", configs: map[string]string{"option": "fallback"}}))
+	kv.kvs = nil
+	require.NoError(t, manager.LoadEtcdConfigsAtStartup(t.Context(), source))
+	sourceName, value, err := manager.GetConfig("option")
+	require.NoError(t, err)
+	require.Equal(t, "local", sourceName)
+	require.Equal(t, "fallback", value)
 }
