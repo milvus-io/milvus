@@ -57,7 +57,7 @@ func TestS3SummaryPaginationAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 3)
 	require.Equal(t, uint64(100), entries[2].Generation)
-	m := newTestManager(t, NewStore(cm, "p2", 0), 1<<30)
+	m := newTestManager(t, NewStore(cm, "p2", 1), 1<<30)
 	require.NoError(t, m.Restore(ctx))
 	require.NoError(t, drainSummary(ctx, m))
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
