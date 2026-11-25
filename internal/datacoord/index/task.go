@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -318,23 +320,24 @@ func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.
 
 func (p *indexBuildPreparation) ngramResource(ctx context.Context) (taskcommon.Resource, error) {
 	fieldID := p.field.GetFieldID()
-	size := taskresource.EstimateFieldSize(p.segment, p.schema, fieldID)
 	if isLobText(p.schema, p.field) {
-		io := packed.NewManifestIOContext(1)
-		defer io.Close()
-		files, err := packed.GetManifestLobFilesAsync(ctx, io, p.segment.GetManifestPath(), meta.CreateStorageConfig())
+		pluginContext, err := hookutil.GetCollectionPluginContext(p.schema.GetProperties(), p.segment.GetCollectionID())
 		if err != nil {
 			return taskcommon.Resource{}, err
 		}
-		// Column groups hold inline values and references. The worker also
-		// materializes the referenced text during input preparation.
-		for _, file := range files {
-			if file.FieldID == fieldID {
-				size += file.FileSizeBytes
-			}
+		io := packed.NewManifestIOContext(1)
+		defer io.Close()
+		size, found, err := packed.EstimateManifestTextInputSize(ctx, io, p.segment.GetManifestPath(), fieldID, meta.CreateStorageConfig(), pluginContext)
+		if err != nil {
+			return taskcommon.Resource{}, err
 		}
+		if found {
+			return taskresource.Index(size, false), nil
+		}
+		// The native reader materializes historical rows as nulls when a
+		// nullable TEXT field is added later. Preserve their existing estimate.
 	}
-	return taskresource.Index(size, false), nil
+	return taskresource.Index(taskresource.EstimateFieldSize(p.segment, p.schema, fieldID), false), nil
 }
 
 // effectiveIndexRows applies the same nullable-vector rule during cached

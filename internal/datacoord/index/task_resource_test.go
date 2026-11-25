@@ -101,10 +101,10 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 	fixture := meta.NewLocalPackedFixture(t, false)
 	mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(true))
 	idx := im.Indexes[1][4]
-	idx.FieldID = 102
+	idx.FieldID = 101
 	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexNGRAM}}
 	schema := taskresource.FixtureSchema()
-	field := schema.Fields[2]
+	field := schema.Fields[1]
 	field.DataType = schemapb.DataType_Text
 	taskresource.PutFixtureSchema(mt, schema)
 	ctx := context.Background()
@@ -119,7 +119,7 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 		taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) {
 			seg.ManifestPath = path
 			seg.Stats.LoadResource = &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
-				{FieldIds: []int64{102}, MemorySize: recorded},
+				{FieldIds: []int64{101}, MemorySize: recorded},
 			}}
 		})
 	}
@@ -132,16 +132,22 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 	taskresource.PutFixtureSchema(mt, schema)
 	require.True(t, it.CanCompleteOnCoordinator())
 
-	// This real manifest has out-of-line TEXT in field 101 only.
+	// Read the encoded size from a real TEXT manifest, ignoring the old
+	// logical-payload statistic still stored in the segment metadata.
 	setManifest(fixture.PhysicalManifest)
 	require.Equal(t, globalTask.LocalNeedsWorker, it.CompleteOnCoordinator(ctx))
 	require.False(t, it.CanCompleteOnCoordinator())
-	oldPrice := taskresource.Index(recorded, false)
+	manifestIO := packed.NewManifestIOContext(1)
+	defer manifestIO.Close()
+	encodedInput, found, err := packed.EstimateManifestTextInputSize(ctx, manifestIO, fixture.PhysicalManifest, 101, meta.CreateStorageConfig(), nil)
+	require.NoError(t, err)
+	require.True(t, found)
+	oldPrice := taskresource.Index(encodedInput, false)
 	require.Equal(t, oldPrice, it.GetTaskResource())
 
 	files := []packed.LobFileInfo{
-		{FieldID: 102, Path: "lobs/a", TotalRows: 500, ValidRows: 500, FileSizeBytes: 400 << 20},
-		{FieldID: 102, Path: "lobs/b", TotalRows: 300, ValidRows: 200, FileSizeBytes: 268 << 20},
+		{FieldID: 101, Path: "lobs/a", TotalRows: 500, ValidRows: 500, FileSizeBytes: 400 << 20},
+		{FieldID: 101, Path: "lobs/b", TotalRows: 300, ValidRows: 200, FileSizeBytes: 268 << 20},
 	}
 	manifest, err := packed.AddLobFilesToTransaction(fixture.PhysicalManifest, meta.CreateStorageConfig(), files)
 	require.NoError(t, err)
@@ -155,10 +161,10 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 	// across scheduling rounds so the test observes the actual admission limit.
 	const builds = 34
 	const capacity = int64(20 << 30)
-	want := taskresource.Index(recorded+(668<<20), false)
+	want := taskresource.Index(encodedInput+(668<<20), false)
 	require.Less(t, builds*oldPrice.Memory, capacity)
 	limit := int(capacity / want.Memory)
-	require.Equal(t, 11, limit)
+	require.Equal(t, 15, limit)
 	var used, fullRounds atomic.Int64
 	cluster.EXPECT().QuerySlot().RunAndReturn(func() map[int64]*session.WorkerSlots {
 		free := capacity - used.Load()
@@ -170,7 +176,7 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 		}}
 	}).Maybe()
 	cluster.EXPECT().CreateIndex(int64(1), mock.MatchedBy(func(req *workerpb.CreateJobRequest) bool {
-		return req.FieldID == 102 && req.Manifest == mt.GetSegment(ctx, req.SegmentID).GetManifestPath()
+		return req.FieldID == 101 && req.Manifest == mt.GetSegment(ctx, req.SegmentID).GetManifestPath()
 	}), want).Run(func(_ int64, _ *workerpb.CreateJobRequest, price taskcommon.Resource) {
 		used.Add(price.Memory)
 	}).Return(nil).Times(limit)
@@ -179,13 +185,19 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 			{BuildID: req.TaskIDs[0], State: commonpb.IndexState_InProgress},
 		}}, nil
 	}).Maybe()
+	columnGroups, err := packed.ReadManifestColumnGroups(manifest, meta.CreateStorageConfig())
+	require.NoError(t, err)
+	allLobs, err := packed.GetManifestLobFiles(manifest, meta.CreateStorageConfig())
+	require.NoError(t, err)
 	scheduler := globalTask.NewGlobalTaskScheduler(ctx, cluster)
 	scheduler.Enqueue(it)
 	for n := int64(1); n < builds; n++ {
 		segment := mt.Segments.GetSegment(job.SegmentID).Clone()
 		segment.ID += n
 		base := fmt.Sprintf("%s/insert_log/1/2/%d", fixture.LegacyRoot, segment.ID)
-		segment.ManifestPath, err = packed.AddLobFilesToTransaction(packed.MarshalManifestPath(base, 0), meta.CreateStorageConfig(), files)
+		segment.ManifestPath, err = packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), meta.CreateStorageConfig(), &packed.ManifestUpdates{ColumnGroups: columnGroups})
+		require.NoError(t, err)
+		segment.ManifestPath, err = packed.AddLobFilesToTransaction(segment.ManifestPath, meta.CreateStorageConfig(), allLobs)
 		require.NoError(t, err)
 		mt.Segments.SetSegment(segment.ID, segment)
 		next := model.CloneSegmentIndex(job)
@@ -200,6 +212,46 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 		return fullRounds.Load() >= 2 && scheduler.GetPendingTaskCount(taskcommon.Index) == builds-limit
 	}, 10*time.Second, 10*time.Millisecond)
 	require.Equal(t, int64(limit)*want.Memory, used.Load())
+}
+
+func TestNgramTextPricingIndependentOfWriterStatistics(t *testing.T) {
+	paramtable.Init()
+	fixture := meta.NewLocalPackedFixture(t, false)
+	schema := taskresource.FixtureSchema()
+	field := schema.Fields[1]
+	field.DataType = schemapb.DataType_Text
+	segment := &meta.SegmentInfo{SegmentInfo: fixture.Segment}
+	segment.ManifestPath = fixture.PhysicalManifest
+	preparation := &indexBuildPreparation{segment: segment, schema: schema, field: field}
+	setRecorded := func(size int64) {
+		segment.Stats = &datapb.Statistics{LoadResource: &datapb.LoadResourceStatistics{
+			ColumnGroups: []*datapb.ColumnGroupStatistics{{FieldIds: []int64{101}, MemorySize: size}},
+		}}
+	}
+	// Raw TEXT writers record logical payload bytes before LOB externalization;
+	// reference-preserving writers record encoded references instead. Neither
+	// statistic changes the input represented by this exact manifest.
+	setRecorded(223 << 20)
+	fromReferences, err := preparation.ngramResource(context.Background())
+	require.NoError(t, err)
+	setRecorded(891 << 20)
+	fromLogicalText, err := preparation.ngramResource(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, fromReferences, fromLogicalText)
+
+	// A newly added nullable field has no stored column, but the worker still
+	// materializes the historical null rows. Preserve the existing estimate.
+	absent := schema.Fields[2]
+	absent.DataType = schemapb.DataType_Text
+	absent.Nullable = true
+	preparation.field = absent
+	segment.NumOfRows = taskresource.BigFixtureRows
+	segment.Stats.InsertBinlogSize = taskresource.BigFixtureSegmentSize
+	wantMissing := taskresource.Index(taskresource.EstimateFieldSize(segment, schema, absent.FieldID), false)
+	require.Greater(t, wantMissing.Memory, taskresource.Default().Memory)
+	missing, err := preparation.ngramResource(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, wantMissing, missing)
 }
 
 func TestNgramPricingWithPendingSchema(t *testing.T) {
