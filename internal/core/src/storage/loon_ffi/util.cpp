@@ -1283,9 +1283,14 @@ InjectExternalSpecProperties(
         ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
     }
 
-    // External Tables share the filesystem tuning, with an independently
-    // configured mode. Local external filesystems never use Talon.
-    const bool external_is_local = value("storage_type") == "local";
+    // Talon's S3 broker accepts target roles only for AWS. Preserve native
+    // routing for Aliyun and Tencent target roles.
+    const bool native_target_role =
+        !broker_endpoint.empty() &&
+        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent") &&
+        !use_iam;
+    const bool origin_only =
+        native_target_role || value("storage_type") == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
@@ -1298,13 +1303,7 @@ InjectExternalSpecProperties(
                                      : key;
         const auto value = PropertyValueAsString(properties, source_key);
         const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
-        // Keep Broker credential acquisition and refresh on the origin filesystem.
-        if (!broker_endpoint.empty()) {
-            properties.erase(extfs_key);
-            if (std::string_view(key) == PROPERTY_FS_TALON_MODE) {
-                properties[extfs_key] = std::string("0");
-            }
-        } else if (external_is_local) {
+        if (origin_only) {
             properties.erase(extfs_key);
         } else if (value.has_value()) {
             properties[extfs_key] = *value;

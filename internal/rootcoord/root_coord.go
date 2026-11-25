@@ -1309,7 +1309,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-	resp.Properties = collInfo.Properties
+	// Reuse the filtered slice from collectionSchemaPB so legacy create-only
+	// directives persisted on v3.0.0–v3.0.6 are never returned by DescribeCollection.
+	resp.Properties = resp.Schema.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp

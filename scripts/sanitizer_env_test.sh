@@ -90,14 +90,14 @@ done
 cmake_dir="${scripts_dir}/../internal/core/cmake"
 printf 'include("%s/DefineOptions.cmake")\ninclude("%s/Sanitizers.cmake")\n' \
     "${cmake_dir}" "${cmake_dir}" > "${test_root}/check.cmake"
-for guard in conflict dependency-asan platform gpu gpu-default dependencies cache; do
+for guard in conflict dependency-asan platform gpu cuvs dependencies cache; do
     args=(-DUSE_ASAN=OFF -DUSE_TSAN=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SIZEOF_VOID_P=8)
     case "${guard}" in
         conflict) args+=(-DUSE_ASAN=ON); expected='mutually exclusive' ;;
         dependency-asan) args+=(-DWITH_ASAN=ON); expected='mutually exclusive' ;;
         platform) args+=(-DCMAKE_SYSTEM_NAME=Darwin); expected='64-bit Linux only' ;;
         gpu) args+=(-DWITH_GPU=ON); expected='GPU builds' ;;
-        gpu-default) args+=(-DINDEX_ENGINE=cardinal); expected='GPU builds' ;;
+        cuvs) args+=(-DWITH_CUVS=ON); expected='GPU builds' ;;
         dependencies) args+=(-DUSE_TSAN=OFF -DMILVUS_CONAN_SANITIZER=thread); expected='require USE_TSAN=ON' ;;
         cache) args+=(-DUSE_TSAN=OFF -DMILVUS_CONFIGURED_SANITIZER=thread); expected='fresh build' ;;
     esac
@@ -109,7 +109,7 @@ for guard in conflict dependency-asan platform gpu gpu-default dependencies cach
 done
 
 # Reject invalid shell options before the script creates a build directory.
-for args in '-T invalid' '-T ON -a ON' '-T ON -G ON' '-T ON -x cardinal'; do
+for args in '-T invalid' '-T ON -a ON' '-T ON -G ON' '-T ON -G true'; do
     if bash "${scripts_dir}/core_build.sh" ${args} > "${test_root}/script.log" 2>&1; then
         echo "Expected core_build.sh ${args} to fail" >&2
         exit 1
@@ -121,20 +121,18 @@ for args in '-T invalid' '-T ON -a ON' '-T ON -G ON' '-T ON -x cardinal'; do
     grep -q "${expected}" "${test_root}/script.log"
 done
 
-# GPU defaults are engine-specific; reject TSan after resolving those defaults.
-for args in 'WITH_GPU=ON' 'index_engine=cardinal'; do
-    if GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
-        USE_TSAN=ON ${args} build-cpp > "${test_root}/make.log" 2>&1; then
-        echo "Expected make ${args} with TSan to fail" >&2
-        exit 1
-    fi
-    grep -q 'USE_TSAN does not support GPU builds' "${test_root}/make.log"
-done
+# Reject an explicitly enabled GPU build before starting its prerequisites.
+if GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
+    USE_TSAN=ON WITH_GPU=ON build-cpp > "${test_root}/make.log" 2>&1; then
+    echo 'Expected WITH_GPU=ON with TSan to fail' >&2
+    exit 1
+fi
+grep -q 'USE_TSAN does not support GPU builds' "${test_root}/make.log"
 
 # Preserve both sanitizer and upstream GPU/TLS arguments on every build target.
 for target in build-cpp build-cpp-with-unittest build-cpp-with-coverage; do
-    GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
-        USE_TSAN=ON index_engine=cardinal WITH_GPU=OFF TANTIVY_ANALYZER_REMOTE_TLS=OFF \
+    env -u WITH_GPU GIT_CONFIG_GLOBAL=/dev/null make -C "${scripts_dir}/.." -n GO=true OS=Linux \
+        USE_TSAN=ON index_engine=cardinal TANTIVY_ANALYZER_REMOTE_TLS=OFF \
         -o generated-proto -o plan-parser-lib "${target}" > "${test_root}/make.log" 2>&1
     grep -q 'TANTIVY_ANALYZER_REMOTE_TLS=OFF .*core_build.sh .* -T ON .* -G OFF ' "${test_root}/make.log"
 done
