@@ -85,12 +85,8 @@ func TestResourceManager(t *testing.T) {
 
 func TestLoadDemandMetricsFollowResourceGroupLifecycle(t *testing.T) {
 	const rgName = "load-demand-metrics-lifecycle"
-	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
-	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
-	t.Cleanup(func() {
-		metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
-		metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
-	})
+	metrics.DeleteQueryCoordLoadDemand(rgName)
+	t.Cleanup(func() { metrics.DeleteQueryCoordLoadDemand(rgName) })
 
 	catalog := metastoremocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().RemoveResourceGroup(mock.Anything, rgName).Return(nil).Once()
@@ -98,14 +94,17 @@ func TestLoadDemandMetricsFollowResourceGroupLifecycle(t *testing.T) {
 	manager := NewResourceManager(catalog, nodeMgr)
 	manager.setupInMemResourceGroup(NewResourceGroup(rgName, newResourceGroupConfig(0, 0), nodeMgr))
 
-	require.True(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName))
-	require.True(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName))
+	for _, source := range []string{metrics.LoadDemandSourceLoad, metrics.LoadDemandSourceImport} {
+		require.True(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName, source))
+		require.True(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName, source))
+	}
 
-	metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName).Add(0)
-	metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName).Add(0)
+	metrics.InitQueryCoordLoadDemand(rgName)
 	require.NoError(t, manager.DropResourceGroup(context.Background(), rgName))
-	require.False(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName))
-	require.False(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName))
+	for _, source := range []string{metrics.LoadDemandSourceLoad, metrics.LoadDemandSourceImport} {
+		require.False(t, metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName, source))
+		require.False(t, metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName, source))
+	}
 }
 
 func (suite *ResourceManagerSuite) TestValidateConfiguration() {

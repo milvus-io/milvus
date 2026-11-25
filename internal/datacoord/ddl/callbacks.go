@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -33,14 +34,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Deps holds what the DDL ack callbacks read.
 type Deps struct {
-	RefreshDataView                  func(context.Context, int64) (*viewpb.DataVersion, error)
+	RefreshImportDataView            func(context.Context, int64) (dataview.DataViewRef, error)
 	Meta                             *meta.Meta
 	ImportMeta                       bulkimport.ImportMeta
 	IndexMeta                        *index.IndexMeta
@@ -50,8 +50,9 @@ type Deps struct {
 	Broker                           broker.Broker
 	NotifyIndexChan                  chan UniqueID
 	// CreateImportJobFromAck creates the import job of an acked ImportMessageV1.
-	CreateImportJobFromAck func(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error)
-	StageImportChange      func(context.Context, bulkimport.ImportJob, string, []int64, uint64, model.SegmentChangeSource) (bool, error)
+	CreateImportJobFromAck      func(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error)
+	StageImportChange           func(context.Context, bulkimport.ImportJob, string, []int64, uint64, model.SegmentChangeSource) (bool, error)
+	GetImportLoadDemandRecorder func(context.Context, int64) func([]int64)
 }
 
 // Callbacks holds the DDL ack callbacks and the helpers they share with the RPC handlers.

@@ -101,6 +101,9 @@ type Manager interface {
 	// need a deterministic reconciliation. Same semantics as the async
 	// worker's step.
 	RecomputeNow(ctx context.Context, collectionID int64, project Projector) (*viewpb.DataVersion, error)
+	// RecomputeNowWithRef acquires a reference to the resulting version before
+	// releasing the Collection lock. The caller owns the reference.
+	RecomputeNowWithRef(ctx context.Context, collectionID int64, project Projector) (DataViewRef, error)
 	AdvanceSchema(ctx context.Context, collectionID int64, schemaVersion int32, project Projector) (*viewpb.DataVersion, error)
 	OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error)
 
@@ -542,13 +545,23 @@ func (m *dataViewManager) RecomputeNow(ctx context.Context, collectionID int64, 
 	return m.recomputeNow(ctx, collectionID, project)
 }
 
+func (m *dataViewManager) RecomputeNowWithRef(ctx context.Context, collectionID int64, project Projector) (DataViewRef, error) {
+	_, ref, err := m.recompute(ctx, collectionID, project, true)
+	return ref, err
+}
+
 func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, project Projector) (*viewpb.DataVersion, error) {
+	version, _, err := m.recompute(ctx, collectionID, project, false)
+	return version, err
+}
+
+func (m *dataViewManager) recompute(ctx context.Context, collectionID int64, project Projector, retain bool) (*viewpb.DataVersion, DataViewRef, error) {
 	if project == nil {
-		return nil, merr.WrapErrServiceInternalMsg("DataView Recompute requires a projection function")
+		return nil, nil, merr.WrapErrServiceInternalMsg("DataView Recompute requires a projection function")
 	}
 	state, unlock := m.lockStateForMutation(collectionID)
 	if state == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	defer unlock()
 
@@ -556,21 +569,21 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 	base := latestView(state)
 	if base == nil && m.frontierProjector != nil {
 		// Only Create/Bootstrap may install the complete initial shard skeleton.
-		return nil, nil
+		return nil, nil, nil
 	}
 	segments, err := project(ctx, collectionID, base)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	next := canonicalDataViewClone(base)
 	if next == nil {
 		next = &viewpb.DataViewOfCollection{CollectionId: collectionID}
 	}
 	if err := rebuildSegments(next, segments); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	canonicalizeDataView(next)
 	if dataViewMembershipEqual(base, next) {
@@ -590,13 +603,16 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 			}
 		}
 		m.publishDataViewLocked(state)
-		return dataVersionFromView(base), nil
+	} else {
+		next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
+		if err := m.persistLockedWithStats(ctx, state, next, buildSegmentStats(segments)); err != nil {
+			return nil, nil, err
+		}
 	}
-	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
-	if err := m.persistLockedWithStats(ctx, state, next, buildSegmentStats(segments)); err != nil {
-		return nil, err
+	if retain {
+		return nil, acquireRefLocked(state, state.latest), nil
 	}
-	return cloneDataVersion(next.GetDataVersion()), nil
+	return dataVersionFromView(latestView(state)), nil, nil
 }
 
 func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int64) (*viewpb.DataVersion, error) {

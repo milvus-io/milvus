@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -24,17 +25,31 @@ func (s *Server) RefreshDataView(ctx context.Context, collectionID int64) (*view
 		return nil, err
 	}
 	if version == nil {
-		// A dropped collection has no publication obligation. Consult RootCoord
-		// rather than the DataView manager's process-local drop markers so this
-		// also works when a durable callback is replayed after recovery.
-		dropped, err := s.collectionDropped(ctx, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		if dropped {
-			return nil, merr.WrapErrCollectionNotFound(collectionID)
-		}
-		return nil, merr.WrapErrServiceNotReadyMsg("collection %d DataView is not published", collectionID)
+		return nil, s.missingDataViewError(ctx, collectionID)
 	}
 	return version, nil
+}
+
+func (s *Server) refreshImportDataView(ctx context.Context, collectionID int64) (dataview.DataViewRef, error) {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return nil, err
+	}
+	ref, err := s.dataViewManager.RecomputeNowWithRef(ctx, collectionID, s.meta.LoadableProjection)
+	if err != nil || ref != nil {
+		return ref, err
+	}
+	return nil, s.missingDataViewError(ctx, collectionID)
+}
+
+func (s *Server) missingDataViewError(ctx context.Context, collectionID int64) error {
+	// A dropped collection has no publication obligation. Consult RootCoord
+	// so this also works when a durable callback is replayed after recovery.
+	dropped, err := s.collectionDropped(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	if dropped {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return merr.WrapErrServiceNotReadyMsg("collection %d DataView is not published", collectionID)
 }

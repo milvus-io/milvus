@@ -41,6 +41,10 @@ const (
 
 	UnknownTaskLabel = "unknown"
 
+	loadDemandSourceLabelName = "source"
+	LoadDemandSourceLoad      = "load"
+	LoadDemandSourceImport    = "import"
+
 	QueryCoordTaskType = "querycoord_task_type"
 )
 
@@ -112,16 +116,16 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_demand_memory_bytes",
-			Help:      "cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck",
-		}, []string{ResourceGroupLabelName})
+			Help:      "cumulative estimated memory bytes required by accepted load demand",
+		}, []string{ResourceGroupLabelName, loadDemandSourceLabelName})
 
 	QueryCoordLoadDemandDiskBytes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_demand_disk_bytes",
-			Help:      "cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck",
-		}, []string{ResourceGroupLabelName})
+			Help:      "cumulative estimated disk bytes required by accepted load demand",
+		}, []string{ResourceGroupLabelName, loadDemandSourceLabelName})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -195,10 +199,24 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
+// InitQueryCoordLoadDemand seeds both demand sources for a resource group.
+func InitQueryCoordLoadDemand(rgName string) {
+	for _, source := range []string{LoadDemandSourceLoad, LoadDemandSourceImport} {
+		QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName, source).Add(0)
+		QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName, source).Add(0)
+	}
+}
+
+// DeleteQueryCoordLoadDemand removes all demand series for a resource group.
+func DeleteQueryCoordLoadDemand(rgName string) {
+	labels := prometheus.Labels{ResourceGroupLabelName: rgName}
+	QueryCoordLoadDemandMemoryBytes.DeletePartialMatch(labels)
+	QueryCoordLoadDemandDiskBytes.DeletePartialMatch(labels)
+}
+
 // RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
-	QueryCoordLoadDemandMemoryBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
-	QueryCoordLoadDemandDiskBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
+	InitQueryCoordLoadDemand(common.DefaultResourceGroupName)
 
 	registry.MustRegister(QueryCoordNumCollections)
 	registry.MustRegister(QueryCoordNumPartitions)

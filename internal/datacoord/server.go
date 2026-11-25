@@ -205,6 +205,8 @@ type Server struct {
 
 	ddl *ddl.Callbacks
 
+	getImportLoadDemandRecorder func(context.Context, int64) func([]int64)
+
 	metricsRequest *metricsinfo.MetricsRequest
 
 	// file resource
@@ -267,6 +269,13 @@ func WithCatalog(catalog metastore.DataCoordCatalog) Option {
 func WithPKIndexService(svc *pkindexservice.Service) Option {
 	return func(svr *Server) {
 		svr.pkindexService = svc
+	}
+}
+
+// WithImportLoadDemandRecorder supplies a recorder for a loaded collection.
+func WithImportLoadDemandRecorder(getRecorder func(context.Context, int64) func([]int64)) Option {
+	return func(svr *Server) {
+		svr.getImportLoadDemandRecorder = getRecorder
 	}
 }
 

@@ -1560,7 +1560,26 @@ func createSortCompactionTask(ctx context.Context,
 	return task, nil
 }
 
-// getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
+// ImportTaskSegmentIDs returns the task's candidate outputs, including the V2
+// sort lineage. Publication determines which candidates can actually be loaded.
+func ImportTaskSegmentIDs(task ImportTask) []int64 {
+	switch t := task.(type) {
+	case *Task:
+		output := t.Task.Load()
+		original, sorted := output.GetSegmentIDs(), output.GetSortedSegmentIDs()
+		ids := make([]int64, 0, len(original)+len(sorted))
+		ids = append(ids, original...)
+		return append(ids, sorted...)
+	case *importTaskV3:
+		output := t.task.Load()
+		if output.GetState() == datapb.ImportTaskStateV2_Completed && output.GetSegmentId() != 0 {
+			return []int64{output.GetSegmentId()}
+		}
+	}
+	return nil
+}
+
+// GetImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
 // Called by the broadcast callback without holding importMeta's mutex.
 //
@@ -1572,15 +1591,7 @@ func GetImportSegmentIDsByVchannel(ctx context.Context, importMeta ImportMeta, m
 	tasks := importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
 	var segIDs []int64
 	for _, task := range tasks {
-		it, ok := task.(*Task)
-		if !ok {
-			continue
-		}
-		// Collect all candidate segment IDs from this task (safe copies).
-		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
-		candidates = append(candidates, it.GetSegmentIDs()...)
-		candidates = append(candidates, it.GetSortedSegmentIDs()...)
-		for _, segID := range candidates {
+		for _, segID := range ImportTaskSegmentIDs(task) {
 			seg := mt.GetSegment(ctx, segID)
 			if seg == nil {
 				continue
@@ -1593,18 +1604,7 @@ func GetImportSegmentIDsByVchannel(ctx context.Context, importMeta ImportMeta, m
 	}
 	tasks = importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskV3Type))
 	for _, task := range tasks {
-		it, ok := task.(*importTaskV3)
-		if !ok {
-			continue
-		}
-		if it.GetState() != datapb.ImportTaskStateV2_Completed {
-			continue
-		}
-		var candidates []int64
-		if segmentID := it.task.Load().GetSegmentId(); segmentID != 0 {
-			candidates = append(candidates, segmentID)
-		}
-		for _, segID := range candidates {
+		for _, segID := range ImportTaskSegmentIDs(task) {
 			seg := mt.GetSegment(ctx, segID)
 			if seg == nil {
 				continue

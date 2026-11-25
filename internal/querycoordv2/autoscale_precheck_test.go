@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
@@ -39,10 +40,15 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -805,8 +811,8 @@ func TestCheckLoadResourceSkipsEstimateError(t *testing.T) {
 	req := newAutoscalePrecheckTestRequest()
 	req.CollectionInfo.Schema = nil
 	server := &Server{broker: newAutoscalePrecheckTestBroker(t, nil, nil, nil)}
-	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName)
-	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName)
+	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
+	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
 	memoryBefore := testutil.ToFloat64(memoryCounter)
 	diskBefore := testutil.ToFloat64(diskCounter)
 
@@ -832,24 +838,104 @@ func TestCheckLoadResourceDisabledSkipsPrecheck(t *testing.T) {
 
 func TestRecordLoadResourceDemand(t *testing.T) {
 	const rgName = "load-demand-metric-test"
-	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
-	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
-	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName)
-	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName)
+	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName, metrics.LoadDemandSourceLoad)
+	metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName, metrics.LoadDemandSourceLoad)
+	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName, metrics.LoadDemandSourceLoad)
+	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName, metrics.LoadDemandSourceLoad)
 	t.Cleanup(func() {
-		metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
-		metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName)
+		metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName, metrics.LoadDemandSourceLoad)
+		metrics.QueryCoordLoadDemandDiskBytes.DeleteLabelValues(rgName, metrics.LoadDemandSourceLoad)
 	})
 
-	recordLoadResourceDemand(map[string]autoscaleResourceUsage{
+	recordLoadResourceDemand(metrics.LoadDemandSourceLoad, map[string]autoscaleResourceUsage{
 		rgName: {memoryBytes: 100, diskBytes: 80},
 	})
-	recordLoadResourceDemand(map[string]autoscaleResourceUsage{
+	recordLoadResourceDemand(metrics.LoadDemandSourceLoad, map[string]autoscaleResourceUsage{
 		rgName: {memoryBytes: 20},
 	})
 
 	assert.Equal(t, float64(120), testutil.ToFloat64(memoryCounter))
 	assert.Equal(t, float64(80), testutil.ToFloat64(diskCounter))
+}
+
+func TestRecordImportLoadDemandUsesLoadedPartitionsAndReplicas(t *testing.T) {
+	enableAutoscalePrecheckForTest(t)
+	setUsageParameter(t, &paramtable.Get().QueryNodeCfg.MmapScalarField, "false")
+	ctx := t.Context()
+	const (
+		rgA = "import-demand-a"
+		rgB = "import-demand-b"
+	)
+	for _, rg := range []string{rgA, rgB} {
+		t.Cleanup(func() { metrics.DeleteQueryCoordLoadDemand(rg) })
+	}
+	collection := newAutoscalePrecheckTestRequest().CollectionInfo
+	collection.VChannelNames = []string{"v0"}
+	configs, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	require.NoError(t, configs.Put(ctx, &loadmgr.LoadConfig{
+		CollectionID: collection.ID,
+		PartitionIDs: []int64{10},
+		LoadFields:   []*viewpb.LoadFieldConfig{{FieldId: 100}},
+		Replicas: []*loadmgr.ReplicaAssignment{
+			{ReplicaID: 1, ResourceGroup: rgA},
+			{ReplicaID: 2, ResourceGroup: rgA},
+			{ReplicaID: 3, ResourceGroup: rgB},
+		},
+	}))
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetSegmentInfo(mock.Anything, int64(20), int64(21)).Return([]*datapb.SegmentInfo{
+		{
+			ID: 20, PartitionID: 10, NumOfRows: 1,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 1024}}}},
+		},
+		{
+			ID: 21, PartitionID: 11, NumOfRows: 1,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 4096}}}},
+		},
+	}, nil).Once()
+	broker.EXPECT().GetIndexInfo(mock.Anything, collection.ID, int64(20)).Return(nil, nil).Once()
+	broker.EXPECT().GetSegmentInfo(mock.Anything, int64(22)).Return(nil, context.DeadlineExceeded).Once()
+
+	stats := map[qviews.ShardID]*coordview.ShardStats{}
+	markUp := func(replicaID int64) {
+		stats[qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}] = &coordview.ShardStats{
+			UpVersion:         &qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}},
+			UpLoadInfoVersion: configs.GetConfigVersion(collection.ID),
+		}
+	}
+	patch := mockey.Mock((*coordview.ShardViewRegistry).SnapshotForShards).
+		To(func(_ *coordview.ShardViewRegistry, _ []qviews.ShardID) *coordview.ShardViewSnapshot {
+			return coordview.NewShardViewSnapshot(1, stats)
+		}).Build()
+	defer patch.UnPatch()
+	server := &Server{
+		broker: broker,
+		meta:   newViewMeta(collection),
+		qviewsRuntime: &qviewsRuntime{
+			loadConfigStore:   configs,
+			shardViewRegistry: &coordview.ShardViewRegistry{},
+		},
+	}
+
+	// A collection with a config and only one of its three replicas Up is
+	// still loading. It must not request segment or index metadata.
+	markUp(1)
+	require.Nil(t, server.GetImportLoadDemandRecorder(ctx, collection.ID))
+	markUp(2)
+	markUp(3)
+	record := server.GetImportLoadDemandRecorder(ctx, collection.ID)
+	require.NotNil(t, record)
+	record([]int64{20, 21})
+	record = server.GetImportLoadDemandRecorder(ctx, collection.ID)
+	require.NotNil(t, record)
+	record([]int64{22})
+	require.Nil(t, server.GetImportLoadDemandRecorder(ctx, collection.ID+1))
+	configs.StopPlanning(collection.ID)
+	require.Nil(t, server.GetImportLoadDemandRecorder(ctx, collection.ID))
+	assert.Equal(t, float64(2048), testutil.ToFloat64(metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgA, metrics.LoadDemandSourceImport)))
+	assert.Equal(t, float64(1024), testutil.ToFloat64(metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgB, metrics.LoadDemandSourceImport)))
+	assert.Equal(t, float64(0), testutil.ToFloat64(metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgA, metrics.LoadDemandSourceLoad)))
 }
 
 func TestCheckLoadResourceSkipsResourceGroupMetricsErrors(t *testing.T) {
@@ -1060,8 +1146,8 @@ func TestCheckLoadResourceReturnsAcceptedDemandWithoutRecording(t *testing.T) {
 		Once()
 	server := newAutoscalePrecheckTestServer(t, cluster)
 	server.broker = newAutoscalePrecheckTestBroker(t, nil, nil, nil)
-	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName)
-	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName)
+	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
+	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
 	memoryBefore := testutil.ToFloat64(memoryCounter)
 	diskBefore := testutil.ToFloat64(diskCounter)
 
@@ -1090,8 +1176,8 @@ func TestCheckLoadResourcePreservesResourceInsufficientDecision(t *testing.T) {
 		Once()
 	server := newAutoscalePrecheckTestServer(t, cluster)
 	server.broker = newAutoscalePrecheckTestBroker(t, nil, nil, nil)
-	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName)
-	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName)
+	memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
+	diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
 	memoryBefore := testutil.ToFloat64(memoryCounter)
 	diskBefore := testutil.ToFloat64(diskCounter)
 

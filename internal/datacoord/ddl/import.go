@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // importV1AckCallback handles the ack callback for import messages.
@@ -469,7 +471,11 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 	case internalpb.ImportJobState_Completed:
 		if header.GetCommitByCoordinator() {
 			// Also repair a replay of a job completed by the asynchronous producer.
-			return c.publishImportDataView(ctx, job.GetCollectionID())
+			ref, err := c.publishImportDataView(ctx, job.GetCollectionID())
+			if ref != nil {
+				ref.Deref()
+			}
+			return err
 		}
 		if c.Meta != nil {
 			c.Meta.RecomputeDataView(ctx, job.GetCollectionID())
@@ -508,6 +514,10 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 		return merr.WrapErrServiceUnavailableMsg("import segment change publisher is unavailable")
 	}
 
+	source := model.SegmentChangeSourceImportJob
+	if result.Message.ReplicateHeader() != nil && header.GetCommitByCoordinator() {
+		source = model.SegmentChangeSourceCDCReplicated
+	}
 	// Each business vchannel has its own WAL commit fence. Use that channel's
 	// append timetick, not the broadcast maximum (which may come from CChannel).
 	ops := make([]meta.UpdateOperator, 0)
@@ -518,10 +528,6 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 			continue
 		}
 		segIDs := bulkimport.GetImportSegmentIDsByVchannel(ctx, c.ImportMeta, c.Meta, jobID, vchannel)
-		source := model.SegmentChangeSourceImportJob
-		if result.Message.ReplicateHeader() != nil && result.Message.Header().GetCommitByCoordinator() {
-			source = model.SegmentChangeSourceCDCReplicated
-		}
 		if c.StageImportChange != nil {
 			if staged, err := c.StageImportChange(ctx, job, vchannel, segIDs, appendResult.TimeTick, source); staged {
 				if err != nil {
@@ -551,8 +557,22 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 	// durable. A subsequent Load/Refresh must not observe a pre-import DataView
 	// after GetImportProgress reports Completed. Do not wait for QueryView Up:
 	// query-node availability is a Load/Refresh obligation, not import commit.
-	if err := c.publishImportDataView(ctx, job.GetCollectionID()); err != nil {
+	collectionID := job.GetCollectionID()
+	ref, err := c.publishImportDataView(ctx, collectionID)
+	if err != nil {
 		return err
+	}
+	if ref != nil {
+		defer ref.Deref()
+	}
+
+	var loadDemandIDs []int64
+	var recordLoadDemand func([]int64)
+	if ref != nil && c.GetImportLoadDemandRecorder != nil && Params.QueryCoordCfg.AutoscalePrecheckEnabled.GetAsBool() {
+		recordLoadDemand = c.GetImportLoadDemandRecorder(ctx, collectionID)
+		if recordLoadDemand != nil {
+			loadDemandIDs = c.publishedImportSegmentIDs(ctx, jobID, ref, stagedCommit, source)
+		}
 	}
 
 	completeTime := time.Now().Format(time.RFC3339)
@@ -567,19 +587,54 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 	mlog.Info(ctx, "import job committed to Completed",
 		mlog.FieldJobID(jobID),
 		mlog.Duration("jobTimeCost/total", totalDuration))
+	if len(loadDemandIDs) > 0 {
+		recordLoadDemand(loadDemandIDs)
+	}
 	return nil
 }
 
-func (c *Callbacks) publishImportDataView(ctx context.Context, collectionID int64) error {
-	_, err := c.RefreshDataView(ctx, collectionID)
+// publishedImportSegmentIDs intersects the import outputs with the confirmed
+// DataView. Task outputs cover segments made visible before staging was
+// enabled on retry. Committed groups also cover replacements made during staging.
+func (c *Callbacks) publishedImportSegmentIDs(ctx context.Context, jobID int64, ref dataview.DataViewRef, staged bool, source model.SegmentChangeSource) []int64 {
+	candidates := typeutil.NewUniqueSet()
+	for _, task := range c.ImportMeta.GetTaskByJob(ctx, jobID) {
+		candidates.Insert(bulkimport.ImportTaskSegmentIDs(task)...)
+	}
+	if staged {
+		for _, group := range c.Meta.ProducerChangeGroups(source, jobID, "") {
+			if group.State == model.SegmentChangeStateCommitted {
+				candidates.Insert(group.NewSegmentIDs...)
+			}
+		}
+	}
+	if candidates.Len() == 0 {
+		return nil
+	}
+
+	var matches []int64
+	for _, shard := range ref.DataView().GetShards() {
+		for _, partition := range shard.GetPartitions() {
+			for _, id := range partition.GetSegmentIds() {
+				if candidates.Contain(id) {
+					matches = append(matches, id)
+				}
+			}
+		}
+	}
+	return matches
+}
+
+func (c *Callbacks) publishImportDataView(ctx context.Context, collectionID int64) (dataview.DataViewRef, error) {
+	ref, err := c.RefreshImportDataView(ctx, collectionID)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		// RootCoord confirmed the collection is gone. Finish the durable commit
 		// without resurrecting its DataView or rolling back committed segments.
 		// Returning a retryable error here would block the broadcaster forever.
 		mlog.Info(ctx, "skip import DataView publication for deleted collection", mlog.FieldCollectionID(collectionID))
-		return nil
+		return nil, nil
 	}
-	return err
+	return ref, err
 }
 
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
