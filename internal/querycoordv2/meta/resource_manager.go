@@ -53,10 +53,12 @@ type ResourceManager struct {
 	qviewListeners    map[uint64]func(string, []int64)
 	nextQViewListener uint64
 
-	incomingNode typeutil.UniqueSet // incomingNode is a temporary set for incoming hangup node,
-	// after node is assigned to resource group, it will be removed from this set.
-	groups    map[string]*ResourceGroup // primary index from resource group name to resource group
-	nodeIDMap map[int64]string          // secondary index from node id to resource group
+	incomingNode typeutil.UniqueSet // Nodes awaiting resource group assignment.
+	// A timed-out removal may have committed. Keep the affected node IDs by
+	// group so the observer can reconcile them against current sessions.
+	failedRemovals map[string]typeutil.UniqueSet
+	groups         map[string]*ResourceGroup // primary index from resource group name to resource group
+	nodeIDMap      map[int64]string          // secondary index from node id to resource group
 
 	catalog metastore.QueryCoordCatalog
 	nodeMgr *session.NodeManager // TODO: ResourceManager is watch node status with service discovery, so it can handle node up and down as fast as possible.
@@ -76,11 +78,12 @@ func NewResourceManager(catalog metastore.QueryCoordCatalog, nodeMgr *session.No
 	// Always create a default resource group to keep compatibility.
 	groups[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupName, newResourceGroupConfig(0, defaultResourceGroupCapacity), nodeMgr)
 	return &ResourceManager{
-		incomingNode: typeutil.NewUniqueSet(),
-		groups:       groups,
-		nodeIDMap:    make(map[int64]string),
-		catalog:      catalog,
-		nodeMgr:      nodeMgr,
+		incomingNode:   typeutil.NewUniqueSet(),
+		failedRemovals: make(map[string]typeutil.UniqueSet),
+		groups:         groups,
+		nodeIDMap:      make(map[int64]string),
+		catalog:        catalog,
+		nodeMgr:        nodeMgr,
 
 		rwmutex:             sync.RWMutex{},
 		rgChangedNotifier:   syncutil.NewVersionedNotifier(),
@@ -451,6 +454,7 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	// After recovering, all node assigned to these rg has been removed.
 	// no secondary index need to be removed.
 	delete(rm.groups, rgName)
+	delete(rm.failedRemovals, rgName)
 	rm.publishResourceGroupLocked(rgName, nil)
 	metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
 		metrics.ResourceGroupLabelName: rgName,
@@ -662,13 +666,13 @@ func (rm *ResourceManager) handleNodeUp(ctx context.Context, node int64) {
 }
 
 // HandleNodeDown handle the node when node is leave.
-func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
+func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	rm.handleNodeDown(ctx, node)
+	return rm.handleNodeDown(ctx, node)
 }
 
-func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) {
+func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) error {
 	rm.incomingNode.Remove(node)
 
 	// for stopping query node becomes offline, node change won't be triggered,
@@ -678,11 +682,11 @@ func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) {
 
 	// trigger node changes, expected to remove ro node from replica immediately
 	rm.nodeChangedNotifier.NotifyAll()
-	mlog.Info(context.TODO(), "HandleNodeDown: remove node from resource group",
-		mlog.String("rgName", rgName),
-		mlog.Int64("node", node),
-		mlog.Err(err),
-	)
+	if err != nil {
+		return err
+	}
+	mlog.Info(ctx, "HandleNodeDown: remove node from resource group", mlog.String("rgName", rgName), mlog.FieldNodeID(node))
+	return nil
 }
 
 func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
@@ -694,11 +698,9 @@ func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
 func (rm *ResourceManager) handleNodeStopping(ctx context.Context, node int64) {
 	rm.incomingNode.Remove(node)
 	rgName, err := rm.unassignNode(ctx, node)
-	mlog.Info(context.TODO(), "HandleNodeStopping: remove node from resource group",
-		mlog.String("rgName", rgName),
-		mlog.Int64("node", node),
-		mlog.Err(err),
-	)
+	if err == nil {
+		mlog.Info(ctx, "HandleNodeStopping: remove node from resource group", mlog.String("rgName", rgName), mlog.FieldNodeID(node))
+	}
 }
 
 // ListenResourceGroupChanged return a listener for resource group changed.
@@ -724,6 +726,38 @@ func (rm *ResourceManager) AssignPendingIncomingNode(ctx context.Context) {
 			mlog.Err(err),
 		)
 	}
+}
+
+// ReconcileNodeRemovals repairs an uncertain save on an observer pass. Use the
+// current group under the same lock as assignment and transfer. A live node
+// may have resumed since the failed removal, or its SuspendNode RPC failed.
+func (rm *ResourceManager) ReconcileNodeRemovals(ctx context.Context, rgName string) error {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+	nodes := rm.failedRemovals[rgName]
+	if len(nodes) == 0 {
+		return nil
+	}
+	rg := rm.groups[rgName]
+	update := rg.CopyForWrite()
+	for node := range nodes {
+		info := rm.nodeMgr.Get(node)
+		if info == nil || info.IsStoppingState() || info.IsEmbeddedQueryNodeInStreamingNode() {
+			update.UnassignNode(node)
+		}
+	}
+	current := update.ToResourceGroup()
+	// Even when membership is unchanged in memory, the timed-out write may
+	// have removed a live node in etcd. Reassert the current snapshot.
+	if err := rm.catalog.SaveResourceGroup(ctx, current.GetMeta()); err != nil {
+		return err
+	}
+	delete(rm.failedRemovals, rgName)
+	if len(current.nodes) != len(rg.nodes) {
+		rm.setupInMemResourceGroup(current)
+		rm.nodeChangedNotifier.NotifyAll()
+	}
+	return nil
 }
 
 // AutoRecoverResourceGroup auto recover rg, return recover used node num
@@ -1101,25 +1135,19 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
 
-		// Saving the whole resource group is an unconditional overwrite, so it is
-		// safe to retry a transient etcd error (e.g. leader changed during an etcd
-		// restart) even if the failed attempt was applied. The retry is bounded
-		// because rm.rwmutex is held; a persistent failure still exits to reload
-		// a consistent state.
-		//
-		// A failed save exits the process, so the caller (e.g. a SuspendNode RPC
-		// whose client went away) must not decide it by canceling ctx. Each save
-		// keeps the metastore's own request timeout, which still aborts.
+		// Finish this bounded, idempotent save even if a SuspendNode caller
+		// disconnects. Each attempt retains the metastore request timeout.
 		saveCtx := context.WithoutCancel(ctx)
 		err := retry.Do(saveCtx, func() error {
 			return rm.catalog.SaveResourceGroup(saveCtx, rg.GetMeta())
 		}, retry.RetryErr(etcd.IsRetriableEtcdErr))
 		if err != nil {
-			mlog.Fatal(context.TODO(), "unassign node from resource group",
-				mlog.String("rgName", rg.GetName()),
-				mlog.Int64("node", node),
-				mlog.Err(err),
-			)
+			if rm.failedRemovals[rg.GetName()] == nil {
+				rm.failedRemovals[rg.GetName()] = typeutil.NewUniqueSet()
+			}
+			rm.failedRemovals[rg.GetName()].Insert(node)
+			mlog.Warn(ctx, "failed to persist node removal from resource group",
+				mlog.String("rgName", rg.GetName()), mlog.FieldNodeID(node), mlog.Err(err))
 			return "", err
 		}
 
@@ -1135,7 +1163,7 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		return rg.GetName(), nil
 	}
 
-	return "", merr.WrapErrNodeNotFound(node, "not found in any resource group")
+	return "", nil // Already unassigned, including a repeated SuspendNode.
 }
 
 // validateResourceGroupConfig validate resource group config.
@@ -1260,11 +1288,11 @@ func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
 	// clean stopping/offline nodes
 	assignedNodes := typeutil.NewUniqueSet()
 	for _, rg := range rm.groups {
-		for _, node := range rg.GetNodes() {
+		for _, node := range rg.GetAllNodes() {
 			assignedNodes.Insert(node)
 			info := rm.nodeMgr.Get(node)
 			if info == nil {
-				rm.handleNodeDown(ctx, node)
+				_ = rm.handleNodeDown(ctx, node) // Failed removals are retried by the resource observer.
 			} else if info.GetState() == session.NodeStateStopping {
 				mlog.Warn(context.TODO(), "node is stopping", mlog.Int64("node", node))
 				rm.handleNodeStopping(ctx, node)

@@ -686,9 +686,8 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
-	suite.Panics(func() {
-		suite.manager.HandleNodeDown(ctx, 1)
-	})
+	suite.ErrorIs(suite.manager.HandleNodeDown(ctx, 1), merr.ErrServiceInternal)
+	suite.Equal("rg1", suite.manager.GetResourceGroupByNodeID(1))
 }
 
 func (suite *ResourceManagerSuite) TestUnassignRetriesTransientEtcdError() {
@@ -1320,6 +1319,23 @@ func TestResourceManager_CheckNodesInResourceGroup(t *testing.T) {
 
 	// Verify new node (1003) should be added
 	assert.Contains(t, finalNodes, int64(1003), "New node should be added")
+}
+
+func TestCheckNodesInResourceGroupCleansFilteredOfflineMember(t *testing.T) {
+	ctx := t.Context()
+	manager := createTestResourceManager(t)
+	cfg := newResourceGroupConfig(1, 1)
+	cfg.NodeFilter = &rgpb.ResourceGroupNodeFilter{NodeLabels: []*commonpb.KeyValuePair{{Key: "zone", Value: "a"}}}
+	// Recreate the persisted membership before discovering any live sessions.
+	rg := NewResourceGroup("filtered", cfg, manager.nodeMgr).CopyForWrite()
+	rg.AssignNode(42)
+	manager.setupInMemResourceGroup(rg.ToResourceGroup())
+	require.Empty(t, manager.groups["filtered"].GetNodes())
+	require.Equal(t, "filtered", manager.GetResourceGroupByNodeID(42))
+
+	manager.CheckNodesInResourceGroup(ctx)
+	require.Empty(t, manager.groups["filtered"].GetAllNodes())
+	require.Empty(t, manager.GetResourceGroupByNodeID(42))
 }
 
 // TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy tests CheckNodesInResourceGroup with all healthy nodes

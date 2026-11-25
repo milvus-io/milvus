@@ -108,6 +108,10 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup(ctx context.Context) {
 	// QN assignment stability during scale-up.
 	sort.Strings(rgNames)
 	for _, rgName := range rgNames {
+		if err := manager.ReconcileNodeRemovals(ctx, rgName); err != nil {
+			mlog.Warn(ctx, "failed to reconcile node removals", mlog.String("rgName", rgName), mlog.Err(err))
+			continue
+		}
 		if err := manager.MeetRequirement(ctx, rgName); err != nil {
 			mlog.Info(ctx, "found resource group need to be recovered",
 				mlog.String("rgName", rgName),

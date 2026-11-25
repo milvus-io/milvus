@@ -164,6 +164,29 @@ func (suite *ResourceObserverSuite) TestObserverRecoverOperation() {
 	suite.NoError(suite.meta.MeetRequirement(ctx, "rg3"))
 }
 
+func (suite *ResourceObserverSuite) TestRetryFailedNodeRemovals() {
+	ctx := suite.ctx
+	manager := suite.meta.ResourceManager
+	suite.store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Unset()
+	failed := suite.store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(context.DeadlineExceeded)
+	suite.nodeMgr.Remove(1)
+	suite.ErrorIs(manager.HandleNodeDown(ctx, 1), context.DeadlineExceeded)
+	suite.nodeMgr.Stopping(2)
+	manager.HandleNodeStopping(ctx, 2)
+	suite.observer.checkAndRecoverResourceGroup(ctx)
+	suite.Equal(meta.DefaultResourceGroupName, manager.GetResourceGroupByNodeID(1))
+	suite.Equal(meta.DefaultResourceGroupName, manager.GetResourceGroupByNodeID(2))
+
+	failed.Unset()
+	suite.store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Once()
+	suite.observer.checkAndRecoverResourceGroup(ctx)
+	suite.Empty(manager.GetResourceGroupByNodeID(1))
+	suite.Empty(manager.GetResourceGroupByNodeID(2))
+	suite.Equal(meta.DefaultResourceGroupName, manager.GetResourceGroupByNodeID(3))
+	// A clean pass must not issue another catalog write.
+	suite.observer.checkAndRecoverResourceGroup(ctx)
+}
+
 func (suite *ResourceObserverSuite) TestSchedule() {
 	suite.observer.Start()
 	defer suite.observer.Stop()
