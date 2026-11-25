@@ -6312,7 +6312,7 @@ user-task-polling:
 
 	p.LoadTransientBudgetBytes = ParamItem{
 		Key:          "queryNode.segcore.load.admission.transientBudgetBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
 		Doc: `QueryNode transient memory budget in bytes shared by supported ` +
 			`field-data and index loaders. It gates ` +
@@ -6337,7 +6337,7 @@ user-task-polling:
 
 	p.LoadAdmissionSlots = ParamItem{
 		Key:          "queryNode.segcore.load.admission.slots",
-		Version:      "3.0.1",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
 		Doc: `QueryNode limit on admitted, unfinished work shared by supported ` +
 			`field-data and index loaders. Each ` +
@@ -6362,7 +6362,7 @@ user-task-polling:
 
 	p.LoadFieldDataCellTargetSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.load.fieldData.cellTargetSizeBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: "4194304", // 4 MiB
 		Doc: `Target average byte size per field-data cell. Parquet row groups are ` +
 			`greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. ` +
@@ -6383,7 +6383,7 @@ user-task-polling:
 
 	p.LoadAsyncReadEnabled = ParamItem{
 		Key:          "queryNode.segcore.load.asyncReadEnabled",
-		Version:      "3.0.1",
+		Version:      "3.1.0",
 		DefaultValue: "true",
 		Doc:          "Enable asynchronous storage reads for supported field data and index loaders. Change this setting by restarting QueryNode; existing translators retain their mode.",
 		Export:       false,
@@ -6392,7 +6392,7 @@ user-task-polling:
 
 	p.LoadExecutorThreads = ParamItem{
 		Key:          "queryNode.segcore.load.executorThreads",
-		Version:      "3.0.1",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(max(1, min(hardware.GetCPUNum(), DefaultThreadPoolMaxThreadsSize))),
 		Doc: `Worker count for the shared QueryNode async-load executor. ` +
 			`Must be a positive integer; defaults to min(CPUNUM, 16). ` +
@@ -6413,7 +6413,7 @@ user-task-polling:
 
 	p.LoadFieldDataReadWindowSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.load.fieldData.readWindowSizeBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(DefaultLoadFieldDataReadWindowSizeBytes),
 		Doc: `Target estimated loaded-byte threshold for one Storage V3 field-data async read window. ` +
 			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
