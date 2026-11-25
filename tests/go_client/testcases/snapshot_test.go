@@ -3740,6 +3740,9 @@ func TestMilvusTableStructArraySnapshot(t *testing.T) {
 func TestMilvusTableAddedStructFieldSnapshot(t *testing.T) {
 	for _, oldSegment := range []bool{false, true} {
 		t.Run(fmt.Sprintf("pre_add_segment=%t", oldSegment), func(t *testing.T) {
+			if oldSegment {
+				t.Skip("3.0 CI enables schema backfill, so the snapshot may already contain the added column")
+			}
 			ctx := hp.CreateContext(t, 10*time.Minute)
 			mc := hp.CreateDefaultMilvusClient(ctx, t)
 			source, target := common.GenRandomString("added_src", 6), common.GenRandomString("added_ext", 6)
