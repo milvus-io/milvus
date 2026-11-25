@@ -112,8 +112,10 @@ func newQueryShutdownTestWAL(
 		return walimplstest.NewTestMessageID(1), nil
 	})
 	roWAL := adaptImplsToROWAL(walImpls, func() {})
-	param, err := buildInterceptorParams(context.Background(), walImpls, nil)
+	ctx := context.Background()
+	barrier, err := sendFirstTimeTick(ctx, walImpls, nil)
 	require.NoError(t, err)
+	param := newInterceptorParams(ctx, walImpls, barrier)
 	shardManager := mock_shards.NewMockShardManager(t)
 	shardManager.EXPECT().Close().Return()
 	param.ShardManager = shardManager
