@@ -216,7 +216,12 @@ moves to another replica from the request's captured leader snapshot at once
 (bypassing policy retry backoff and hedge delay), or the hedge delay fires and uses that slot. A second overload refusal
 ends the request immediately with `ErrServiceTooManyRequests` without trying a
 third replica or refreshing shard leaders. Non-overload replica failures (down
-node, broken connection) do not consume the extra-attempt slot. This applies
+node, broken connection) do not consume the extra-attempt slot. However, once
+an actual hedge has used that slot, an overload refusal from either attempt
+ends the request when the other attempt also fails with a retryable non-overload
+error, regardless of completion order. There need not be two overload refusals:
+no third replica is tried in this mixed-error case. Ordinary non-overload retry
+behavior is preserved when the round has no overload refusal. This applies
 under all replica selection policies (`round_robin`, `look_aside`,
 `latency_weighted`).
 
