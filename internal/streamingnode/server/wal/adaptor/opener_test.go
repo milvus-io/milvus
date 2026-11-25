@@ -10,10 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/mock_recovery"
@@ -102,9 +100,17 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 			metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
 		),
 	}
-	mockRecoverStorage := mockey.Mock(recovery.RecoverRecoveryStorage).
-		Return(rs, snapshot, nil).
-		Build()
+	var recoveryComplete func(*recovery.RecoverySnapshot)
+	hook := mockey.Mock(recovery.WithRecoveryComplete).To(func(f func(*recovery.RecoverySnapshot)) recovery.RecoveryStorageOption {
+		recoveryComplete = f
+		return nil
+	}).Build()
+	defer hook.UnPatch()
+	mockRecoverStorage := mockey.Mock(recovery.RecoverRecoveryStorage).To(func(_ context.Context, _ recovery.RecoveryStreamBuilder, _ *utility.WALCheckpoint, barrier message.ImmutableMessage, _ ...recovery.RecoveryStorageOption) (recovery.RecoveryStorage, *recovery.RecoverySnapshot, error) {
+		snapshot.RecoveryBarrier = barrier
+		recoveryComplete(snapshot)
+		return rs, snapshot, nil
+	}).Build()
 	defer mockRecoverStorage.UnPatch()
 
 	errExpected := errors.New("replicate recovery failed")
@@ -172,74 +178,4 @@ func TestDetermineLastConfirmedMessageID(t *testing.T) {
 	}, 4)
 	lastConfirmedMessageID = determineLastConfirmedMessageID(rmq.NewRmqID(5), txnBuffer)
 	assert.Equal(t, rmq.NewRmqID(1), lastConfirmedMessageID)
-}
-
-func TestHandleAlterWALAdvanceCheckpointsStageKeepsReplicateCheckpoint(t *testing.T) {
-	channel := types.PChannelInfo{
-		Name:       "alter-wal-replicate-checkpoint-test",
-		Term:       1,
-		AccessMode: types.AccessModeRW,
-	}
-	// The position this cluster has reached in the source cluster's WAL. The source
-	// cluster runs a different backend than the one this cluster migrates to.
-	sourceMessageID := rmq.NewRmqID(42)
-
-	var persisted *streamingpb.WALCheckpoint
-	catalog := &mock_metastore.MockStreamingNodeCataLog{}
-	list := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListVChannel).Return(nil, nil).Build()
-	defer list.UnPatch()
-	save := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).SaveRecoverySnapshot).
-		To(func(_ *mock_metastore.MockStreamingNodeCataLog, _ context.Context, _ string, snapshot *metastore.WALRecoverySnapshot) error {
-			persisted = proto.Clone(snapshot.ConsumeCheckpoint).(*streamingpb.WALCheckpoint)
-			return nil
-		}).Build()
-	defer save.UnPatch()
-	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
-
-	previousDefaultWALName := message.GetDefaultWALName()
-	defer message.RegisterDefaultWALName(previousDefaultWALName)
-
-	snapshot := &recovery.RecoverySnapshot{
-		Checkpoint: &recovery.WALCheckpoint{
-			MessageID:                 rmq.NewRmqID(1),
-			TimeTick:                  100,
-			ControlCheckpointTimeTick: 120,
-			AlterWalState: &streamingpb.AlterWALState{
-				TargetWalName: commonpb.WALName_Kafka,
-				TimeTick:      100,
-				Stage:         streamingpb.AlterWALStage_ADVANCE_CHECKPOINT,
-			},
-			ReplicateCheckpoint: &commonpb.ReplicateCheckpoint{
-				ClusterId: "source-cluster",
-				Pchannel:  "source-pchannel",
-				MessageId: message.MustMarshalMessageID(sourceMessageID),
-				TimeTick:  50,
-			},
-		},
-	}
-
-	snapshot.PChannelControl = utility.PChannelControlFromCheckpoint(snapshot.Checkpoint)
-
-	err := (&openerAdaptorImpl{}).handleAlterWALAdvanceCheckpointsStage(
-		context.Background(),
-		&wal.OpenOption{Channel: channel},
-		snapshot,
-	)
-	require.NoError(t, err)
-	require.NotNil(t, persisted)
-
-	// The local checkpoint moves to the initial position of the new backend.
-	assert.Equal(t, commonpb.WALName_Kafka, persisted.GetMessageId().GetWALName())
-	assert.Equal(t, uint64(120), persisted.GetControlCheckpointTimeTick())
-	assert.Nil(t, persisted.GetAlterWalState())
-
-	// The replicate checkpoint still points at the source cluster, whose WAL the
-	// local migration did not touch.
-	replicateCheckpoint := persisted.GetReplicateCheckpoint()
-	require.NotNil(t, replicateCheckpoint)
-	assert.Equal(t, "source-cluster", replicateCheckpoint.GetClusterId())
-	assert.Equal(t, "source-pchannel", replicateCheckpoint.GetPchannel())
-	assert.Equal(t, uint64(50), replicateCheckpoint.GetTimeTick())
-	assert.Equal(t, sourceMessageID.IntoProto().GetWALName(), replicateCheckpoint.GetMessageId().GetWALName())
-	assert.Equal(t, sourceMessageID.Marshal(), replicateCheckpoint.GetMessageId().GetId())
 }

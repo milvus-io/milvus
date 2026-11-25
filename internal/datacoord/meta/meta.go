@@ -255,7 +255,17 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// mode. A segment marked manifest_has_index may contain records published
 	// while the switch was previously on, so it must still be loaded after the
 	// switch is turned off. Unmarked clusters perform no manifest reads.
-	if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		source, ok := mt.IndexCatalog.(interface {
+			UseSegmentSummaries(metacache.MetaView) error
+		})
+		if !ok {
+			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "index catalog does not support segment summaries")
+		}
+		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
+			return nil, err
+		}
+	} else if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
 		// Object-store reads have already retried per segment. Re-entering
 		// initMeta's metastore retry would reread every successful manifest.
 		return nil, retry.Unrecoverable(err)
@@ -432,7 +442,6 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	// collection id => l0 delta entry count
 	collectionL0RowCounts := make(map[UniqueID]int64)
 
-	segments := m.Segments.GetSegments()
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
@@ -445,7 +454,7 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	l0DeltalogFilesByDB := make(map[string]int64)
 	var totalBinlogFileCount int64
 
-	for _, segment := range segments {
+	m.Segments.RangeReused(func(segment *SegmentInfo) bool {
 		segmentSize := segment.GetSegmentSize()
 		if IsSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
@@ -474,7 +483,7 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 					storedRowsByDB[key] += segment.GetNumOfRows()
 					totalBinlogFileCount += int64(getBinlogFileCount(segment.SegmentInfo))
 				}
-				continue
+				return true
 			}
 			if ok {
 				collIDStr := strconv.FormatInt(segment.GetCollectionID(), 10)
@@ -499,7 +508,8 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
 		}
-	}
+		return true
+	})
 
 	// Reset to remove dropped collection
 	metrics.DataCoordStoredBinlogSize.Reset()
@@ -572,17 +582,20 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
 	ret := make(map[int64]int64)
-	segments := m.Segments.GetSegments()
-	for _, segment := range segments {
+	m.Segments.RangeReused(func(segment *SegmentInfo) bool {
 		if IsSegmentHealthy(segment) {
 			ret[segment.GetCollectionID()] += segment.GetNumOfRows()
 		}
-	}
+		return true
+	})
 	return ret
 }
 
 // AddSegment records segment info, persisting info into kv store
 func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetStorageVersion() != storage.StorageV3 {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require StorageV3 segments")
+	}
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
 	defer m.LockSegments(segment.GetID())()
 	if info := m.Segments.GetSegment(segment.GetID()); info != nil {
@@ -3615,27 +3628,29 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 }
 
 func (m *Meta) GetSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
-	allSegs := m.Segments.GetSegments()
-	segments := make([]*metricsinfo.Segment, 0, len(allSegs))
-	for _, s := range allSegs {
-		if collectionID <= 0 || s.GetCollectionID() == collectionID {
-			segments = append(segments, &metricsinfo.Segment{
-				SegmentID:    s.ID,
-				CollectionID: s.CollectionID,
-				PartitionID:  s.PartitionID,
-				Channel:      s.InsertChannel,
-				NumOfRows:    s.NumOfRows,
-				State:        s.State.String(),
-				MemSize:      s.GetSegmentSize(),
-				Level:        s.Level.String(),
-				IsImporting:  s.IsImporting,
-				Compacted:    s.Compacted,
-				IsSorted:     s.IsSorted,
-				NodeID:       paramtable.GetNodeID(),
-			})
-		}
+	var filters []SegmentFilter
+	if collectionID > 0 {
+		filters = append(filters, WithCollection(collectionID))
 	}
-
+	// Non-nil: an empty result marshals as [].
+	segments := make([]*metricsinfo.Segment, 0)
+	m.Segments.RangeReused(func(s *SegmentInfo) bool {
+		segments = append(segments, &metricsinfo.Segment{
+			SegmentID:    s.ID,
+			CollectionID: s.CollectionID,
+			PartitionID:  s.PartitionID,
+			Channel:      s.InsertChannel,
+			NumOfRows:    s.NumOfRows,
+			State:        s.State.String(),
+			MemSize:      s.GetSegmentSize(),
+			Level:        s.Level.String(),
+			IsImporting:  s.IsImporting,
+			Compacted:    s.Compacted,
+			IsSorted:     s.IsSorted,
+			NodeID:       paramtable.GetNodeID(),
+		})
+		return true
+	}, filters...)
 	return segments
 }
 

@@ -84,7 +84,7 @@ func TestMixCoordGetCollectionProperties(t *testing.T) {
 	mockey.PatchConvey("collection properties use the in-process metadata reader", t, func() {
 		core := &rootcoord.Core{}
 		ctx := context.Background()
-		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "20"}}
+		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.tti.seconds", Value: "20"}}
 		mockey.Mock((*rootcoord.Core).GetCollectionProperties).To(func(receiver *rootcoord.Core, actualCtx context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
 			require.Same(t, core, receiver)
 			require.Equal(t, ctx, actualCtx)

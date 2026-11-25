@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <future>
@@ -530,6 +531,82 @@ TEST_P(JsonKeyStatsScanTest, SkipUsesPhysicalCellOnceAndPreservesIncomingBits) {
             const bool is_valid = !nullable || ValidRow(i);
             EXPECT_EQ(valid[i], is_valid);
             EXPECT_EQ(result[i], is_valid && (i >= first_rows || i % 2 == 0));
+        }
+    }
+}
+
+TEST_P(JsonKeyStatsScanTest, ResolvedCellsNeverPinPayloadOrValidity) {
+    const int64_t first_rows = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE + 3;
+    const int64_t rows = first_rows + 5 + 7;
+    for (bool nullable : {false, true}) {
+        for (int mode : {0, 1, 2, 3}) {
+            SCOPED_TRACE(testing::Message()
+                         << "nullable=" << nullable << " mode=" << mode);
+            auto fixture = MakeColumn({first_rows, 5, 7},
+                                      std::vector<std::string>(rows, "payload"),
+                                      DataType::STRING,
+                                      nullable);
+            auto stats = MakeStats(fixture.column);
+            // 0: none resolved, 1: all resolved, 2/3: a single unresolved
+            // valid/invalid row in the middle cell. Both end cells can skip.
+            TargetBitmap resolved(rows, mode != 0);
+            if (mode >= 2) {
+                int64_t unresolved = first_rows;
+                while (ValidRow(unresolved) != (mode == 2)) {
+                    ++unresolved;
+                }
+                ASSERT_LT(unresolved, first_rows + 5);
+                resolved[unresolved] = false;
+            }
+            auto original = resolved.clone();
+            TargetBitmap result(rows, false), valid(rows, true);
+            int64_t parsed_rows = 0;
+            auto predicate = [&](const std::string_view* data,
+                                 ValidityView validity,
+                                 int64_t size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 TargetBitmapView resolved_rows) {
+                auto resolved_batch = resolved_rows.view(res.offset(), size);
+                for (int64_t i = 0; i < size; ++i) {
+                    if (resolved_batch[i]) {
+                        continue;
+                    }
+                    valid_res[i] = !validity || validity[i];
+                    if (!valid_res[i]) {
+                        continue;
+                    }
+                    ++parsed_rows;
+                    res[i] = data[i] == "payload";
+                }
+            };
+            fixture.trace->fail_pin = mode == 1;
+            EXPECT_EQ(
+                stats->ExecutorForUnresolvedShreddingData<std::string_view>(
+                    nullptr,
+                    "test_path",
+                    predicate,
+                    TargetBitmapView(result),
+                    TargetBitmapView(valid),
+                    TargetBitmapView(resolved)),
+                rows);
+            const auto& pins = fixture.trace->pinned_chunks;
+            if (mode == 1) {
+                EXPECT_TRUE(pins.empty());
+            } else if (mode >= 2) {
+                EXPECT_EQ(pins, (std::vector<int64_t>{1}));
+                EXPECT_EQ(parsed_rows, mode == 2 || !nullable ? 1 : 0);
+            } else {
+                EXPECT_NE(std::find(pins.begin(), pins.end(), 0), pins.end());
+                EXPECT_NE(std::find(pins.begin(), pins.end(), 1), pins.end());
+                EXPECT_NE(std::find(pins.begin(), pins.end(), 2), pins.end());
+            }
+            for (int64_t i = 0; i < rows; ++i) {
+                EXPECT_EQ(resolved[i], original[i]);
+                EXPECT_EQ(result[i],
+                          !resolved[i] && (!nullable || ValidRow(i)));
+                EXPECT_EQ(valid[i], resolved[i] || !nullable || ValidRow(i));
+            }
         }
     }
 }

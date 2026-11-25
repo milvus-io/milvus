@@ -54,7 +54,6 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 	}
 	collectionID := req.GetCollectionID()
 	runtime := s.qviewsRuntime
-	s.collectionUsage.touch(collectionID)
 	progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels())
 	if progress.Ready() {
 		return nil
@@ -86,10 +85,6 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 	case r := <-result:
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
-		}
-		if r.Err == nil {
-			// A long load gets a fresh idle TTL immediately before query execution.
-			s.collectionUsage.touch(collectionID)
 		}
 		return r.Err
 	case <-ctx.Done():

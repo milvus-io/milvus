@@ -287,7 +287,7 @@ message StreamingNodeAssignment {
 message DeliverPolicy {
     oneof policy {
         google.protobuf.Empty all    = 1;  // deliver all messages.
-        google.protobuf.Empty latest = 2;  // deliver the latest message.
+        google.protobuf.Empty latest = 2 [deprecated = true]; // Unsupported; use all, start_from or start_after.
         common.MessageID start_from =
             3;  // deliver message from this message id. [startFrom, ...]
         common.MessageID start_after =
@@ -984,7 +984,7 @@ message WALCheckpoint {
     // cover a newer prefix than the global replay position.
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
-    AlterWALState alter_wal_state = 6;
+    AlterWALState alter_wal_state = 6 [deprecated = true];
     // Term of the publisher that last advanced this checkpoint. A publisher of
     // an older term must never advance it past a newer takeover: WAL
     // truncation follows the checkpoint, and the records it would remove are
@@ -1002,16 +1002,20 @@ message PChannelRecoveryControlMeta {
     uint64 checkpoint_time_tick = 1; // Complete applied control effects through this timetick.
     common.ReplicateConfiguration replicate_config = 2;
     common.ReplicateCheckpoint replicate_checkpoint = 3;
-    AlterWALState alter_wal_state = 4;
+    AlterWALState alter_wal_state = 4 [deprecated = true];
 }
 
+// Deprecated: WAL switches are recovered from durable log links, not stages.
 enum AlterWALStage{
+    option deprecated = true;
     NONE = 0;
     FLUSHING = 1;
     ADVANCE_CHECKPOINT = 2;
 }
 
+// Deprecated: retained only for decoding old metadata. Finish legacy switches before upgrade.
 message AlterWALState {
+    option deprecated = true;
     common.WALName  target_wal_name = 1;
     uint64 time_tick = 2;
     map<string, string> configs = 3;

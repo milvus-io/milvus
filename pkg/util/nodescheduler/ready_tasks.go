@@ -186,5 +186,8 @@ func (s *nodeScheduler) releaseWorkerLocked(entry *taskEntry) {
 		s.running[band]--
 	}
 	entry.runningBand = -1
-	s.cond.Broadcast()
+	// One returned slot can admit at most one additional task.
+	if len(s.ready) > 0 && s.canRunLocked(priorityBand(s.ready[0].priority)) {
+		s.cond.Signal()
+	}
 }

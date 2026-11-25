@@ -27,7 +27,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -49,7 +48,6 @@ type CollectionObserver struct {
 	meta                 *meta.Meta
 	targetMgr            meta.TargetManagerInterface
 	targetObserver       *TargetObserver
-	checkerController    *checkers.CheckerController
 	partitionLoadedCount map[int64]int
 
 	loadTasks *typeutil.ConcurrentMap[string, LoadTask]
@@ -71,7 +69,6 @@ func NewCollectionObserver(
 	meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *TargetObserver,
-	checherController *checkers.CheckerController,
 	proxyManager proxyutil.ProxyClientManagerInterface,
 ) *CollectionObserver {
 	ob := &CollectionObserver{
@@ -79,7 +76,6 @@ func NewCollectionObserver(
 		meta:                 meta,
 		targetMgr:            targetMgr,
 		targetObserver:       targetObserver,
-		checkerController:    checherController,
 		partitionLoadedCount: make(map[int64]int),
 		loadTasks:            typeutil.NewConcurrentMap[string, LoadTask](),
 		proxyManager:         proxyManager,
@@ -151,7 +147,6 @@ func (ob *CollectionObserver) LoadCollection(ctx context.Context, collectionID i
 	}
 
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadCollection, CollectionID: collectionID})
-	ob.checkerController.Check()
 }
 
 func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID int64, partitionIDs []int64) {
@@ -164,7 +159,6 @@ func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID i
 	}
 
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadPartition, CollectionID: collectionID, PartitionIDs: partitionIDs})
-	ob.checkerController.Check()
 }
 
 func (ob *CollectionObserver) Observe(ctx context.Context) {
@@ -250,11 +244,9 @@ func (ob *CollectionObserver) readyToObserve(ctx context.Context, collectionID i
 }
 
 func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
-	loading := false
 	observeTaskNum := 0
 	observeStart := time.Now()
 	ob.loadTasks.Range(func(traceID string, task LoadTask) bool {
-		loading = true
 		observeTaskNum++
 
 		start := time.Now()
@@ -317,11 +309,6 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 
 	if observeTaskNum > 0 {
 		mlog.Info(ctx, "observe all collections done", mlog.Int("num", observeTaskNum), mlog.Duration("dur", time.Since(observeStart)))
-	}
-
-	// trigger check logic when loading collections/partitions
-	if loading {
-		ob.checkerController.Check()
 	}
 }
 

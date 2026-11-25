@@ -267,18 +267,30 @@ collection and row checks use `MilvusClient`.
 | File | Contracts checked |
 | --- | --- |
 | `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
-| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; local restore data with continued DML replication |
+| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; complete primary restore, secondary destination absence and continued source DML replication |
 | `test_api_control.py` | RestoreRBAC, AlterRole, restored credentials and effective permissions; phrase slop; local heartbeat/telemetry/client commands |
-| `test_api_storage.py` | Local file-resource registration/removal; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
+| `test_api_storage.py` | Replicated file-resource registration/removal and rejected secondary mutations; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
 | `test_import_2pc.py` | Manual import commit/abort, rejected auto-commit without visible rows, and subsequent successful imports |
 | `test_resource_group.py` | Actual create/update/drop/transfer calls, with local/replicated-state assertions |
 
-RestoreSnapshot, RestoreExternalSnapshot and RefreshExternalCollection currently
-emit unreplicable task messages. Their boundary cases assert successful primary
-data changes, no corresponding secondary job or restored/refreshed rows after a
-control-channel barrier, and continued ordinary DML replication. Collection and
-index DDL still replicate independently. These are executable boundary tests,
-not expected failures of full-data replication tests.
+On current master, CreateSnapshot, DropSnapshot, RestoreSnapshot and
+RestoreExternalSnapshot messages are explicitly unreplicable. Snapshot creation
+and deletion remain local. Both restore cases verify the primary destination's
+field definitions, index definition and exact rows, then verify that the
+destination and corresponding restore job remain absent on the secondary after
+a control-channel barrier. Destination creation and its indexes belong to the
+same unreplicable restore recipe; the secondary must not contain an empty copy.
+
+Subsequent writes target the original, independently replicated collection and
+must reach the secondary. This checks that local restore does not interrupt
+existing CDC; it does not establish replication of writes to the restored
+destination. Ordinary collection and index DDL still replicate independently.
+RefreshExternalCollection has its own local-data boundary tests.
+
+These assertions document the current implementation boundary, not complete
+snapshot CDC support. Revisit them when snapshot replication work such as
+[PR #54997](https://github.com/milvus-io/milvus/pull/54997) lands, alongside positive
+coverage for replicated snapshot lifecycle and restored-destination writes.
 
 Run from `tests/python_client` with the repository virtual environment active:
 

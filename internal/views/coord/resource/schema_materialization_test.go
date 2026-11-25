@@ -23,3 +23,15 @@ func TestSchemaRequiresMaterialization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.want, SchemaRequiresMaterialization(old, tc.target)) })
 	}
 }
+
+func TestSchemaRequiresMaterialization_MilvusTableMappedAdditions(t *testing.T) {
+	published := &schemapb.CollectionSchema{
+		Version: 1, ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`,
+	}
+	target := &schemapb.CollectionSchema{
+		Version: 2, ExternalSource: published.ExternalSource, ExternalSpec: published.ExternalSpec,
+		Fields: []*schemapb.FieldSchema{{FieldID: 103, Name: "extra", ExternalField: "extra", DataType: schemapb.DataType_Int64, Nullable: true}},
+	}
+	require.False(t, SchemaRequiresMaterialization(published, target),
+		"mapped additions publish schema independently; explicit refresh prepares the projection")
+}

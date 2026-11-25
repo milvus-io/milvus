@@ -64,7 +64,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
@@ -936,8 +935,6 @@ func TestProxy(t *testing.T) {
 	require.NoError(t, params.Save(params.CommonCfg.UseLoonFFI.Key, "true"))
 	t.Cleanup(func() { _ = params.Save(params.CommonCfg.UseLoonFFI.Key, previousLoonFFI) })
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
-	streamingutil.SetStreamingServiceEnabled()
-	defer streamingutil.UnsetStreamingServiceEnabled()
 
 	// params.Save(params.EtcdCfg.RequestTimeout.Key, "300000")
 	// params.Save(params.CommonCfg.SessionTTL.Key, "300")

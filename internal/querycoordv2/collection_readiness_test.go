@@ -94,6 +94,13 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	catalog.EXPECT().GetReplicas(mock.Anything).Return([]*querypb.Replica{{ID: 1000, CollectionID: 100}}, nil).Once()
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.FromLegacyCatalog(t, catalog))
 	require.NoError(t, err)
+	s, syncer := newReadinessTestServerWithStore(t, store, views...)
+	return s, catalog, syncer
+}
+
+func newReadinessTestServerWithStore(t *testing.T, store *loadmgr.LoadConfigStore, views ...*viewpb.QueryViewOfShard) (*Server, *readinessSyncer) {
+	t.Helper()
+	ctx := context.Background()
 	// Seed Up views with the recovered configuration identity; an update below
 	// must still wait for a new matching Up acknowledgement.
 	for _, view := range views {
@@ -105,12 +112,8 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	runtime := &qviewsRuntime{loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry)}
 	t.Cleanup(func() { runtime.readyChanges.Close(); registry.Close() })
 	s := &Server{ctx: ctx, qviewsRuntime: runtime}
-	usageBroker := meta.NewMockBroker(t)
-	usageBroker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.collectionUsage = newCollectionUsageManager(store, usageBroker, nil)
-	t.Cleanup(s.collectionUsage.close)
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	return s, catalog, syncer
+	return s, syncer
 }
 
 func readinessRequest(channels ...string) *querypb.EnsureCollectionReadyRequest {

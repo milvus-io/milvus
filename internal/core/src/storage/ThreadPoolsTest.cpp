@@ -19,6 +19,7 @@
 #include <atomic>
 #include <functional>
 #include <folly/futures/Future.h>
+#include <folly/executors/InlineExecutor.h>
 #include "monitor/Monitor.h"
 #include "storage/Util.h"
 #include <future>
@@ -356,22 +357,28 @@ TEST(ThreadPool, RejectedBatchSubmissionReturnsAdmissionBytesAndSlots) {
     int reads = 0;
     int finalized = 0;
     submission_attempted = true;
-    auto batches = segcore::LoadCellBatchAsync(
-        nullptr,
-        {{0, 0, 0, 1, 8}},
-        [&](size_t, int64_t, int64_t, int64_t)
-            -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
-            ++reads;
-            return arrow::Status::IOError("rejected task must not read");
-        },
-        8,
-        proto::common::LoadPriority::HIGH,
-        [&](const std::vector<std::shared_ptr<arrow::Table>>&, int64_t) {
-            ++finalized;
-            return std::make_unique<GroupChunk>();
-        });
-    ASSERT_EQ(batches.size(), 1);
-    ASSERT_TRUE(batches.front().isReady());
+    auto operation =
+        folly::coro::co_withExecutor(
+            &folly::InlineExecutor::instance(),
+            segcore::LoadCellBatchesAsync(
+                nullptr,
+                {{0, 0, 0, 1, 8}},
+                [&](size_t, int64_t, int64_t, int64_t)
+                    -> arrow::Result<
+                        std::vector<std::shared_ptr<arrow::Table>>> {
+                    ++reads;
+                    return arrow::Status::IOError(
+                        "rejected task must not read");
+                },
+                8,
+                proto::common::LoadPriority::HIGH,
+                [&](const std::vector<std::shared_ptr<arrow::Table>>&,
+                    int64_t) {
+                    ++finalized;
+                    return std::make_unique<GroupChunk>();
+                }))
+            .start();
+    ASSERT_TRUE(operation.isReady());
     EXPECT_EQ(rejected->rejections, 1);
     EXPECT_EQ(reads, 0);
     EXPECT_EQ(finalized, 0);
@@ -389,10 +396,23 @@ TEST(ThreadPool, RejectedBatchSubmissionReturnsAdmissionBytesAndSlots) {
         budget.Release({0, 1});
     }
     try {
-        std::move(batches.front()).get();
+        std::move(operation).get();
         FAIL() << "expected executor submission failure";
     } catch (const std::system_error& error) {
         EXPECT_EQ(error.code(),
                   std::make_error_code(std::errc::not_enough_memory));
+    }
+    auto downloads = storage::GetObjectData(
+        nullptr, {"rejected-field-data"}, ThreadPoolPriority::HIGH, false);
+    ASSERT_EQ(downloads.size(), 1);
+    EXPECT_THROW(std::move(downloads.front()).get(), std::system_error);
+    EXPECT_EQ(rejected->rejections, 2);
+    EXPECT_EQ(reads, 0);
+    EXPECT_EQ(finalized, 0);
+    const bool async_budget_returned =
+        budget.TryAcquire({8, 1}, storage::LoadAdmissionPriority::High);
+    EXPECT_TRUE(async_budget_returned);
+    if (async_budget_returned) {
+        budget.Release({8, 1});
     }
 }

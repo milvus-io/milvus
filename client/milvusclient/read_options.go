@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/functionchain"
 	"github.com/milvus-io/milvus/client/v3/index"
 )
 
@@ -86,7 +87,8 @@ type AnnRequest struct {
 	offset          int
 	templateParams  map[string]any
 
-	functionScore *entity.FunctionScore
+	functionScore  *entity.FunctionScore
+	functionChains []*functionchain.FunctionChain
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -100,9 +102,14 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnReq
 }
 
 func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
+	chains, err := buildFunctionChains(r.functionChains, "search", r.functionScore != nil)
+	if err != nil {
+		return nil, err
+	}
 	request := &milvuspb.SearchRequest{
-		Dsl:     r.expr,
-		DslType: commonpb.DslType_BoolExprV1,
+		FunctionChains: chains,
+		Dsl:            r.expr,
+		DslType:        commonpb.DslType_BoolExprV1,
 	}
 
 	// Determine search mode and build request accordingly
@@ -646,10 +653,11 @@ type hybridSearchOption struct {
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
 
-	limit         int
-	offset        int
-	reranker      Reranker
-	functionScore *entity.FunctionScore
+	limit          int
+	offset         int
+	reranker       Reranker
+	functionScore  *entity.FunctionScore
+	functionChains []*functionchain.FunctionChain
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -724,11 +732,28 @@ func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
 }
 
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
+	chains, err := buildFunctionChains(opt.functionChains, "hybrid", opt.reranker != nil || opt.functionScore != nil)
+	if err != nil {
+		return nil, err
+	}
 	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
 	for _, annRequest := range opt.reqs {
 		req, err := annRequest.searchRequest()
 		if err != nil {
 			return nil, err
+		}
+		if len(req.FunctionChains) > 0 && opt.functionScore != nil {
+			return nil, errors.New("function score cannot be used with sub-search function chains")
+		}
+		seen := map[schemapb.FunctionChainStage]bool{}
+		for _, chain := range req.FunctionChains {
+			if seen[chain.Stage] {
+				return nil, errors.New("duplicate stage in hybrid sub-search function chains")
+			}
+			if len(chain.Ops) == 0 {
+				return nil, errors.New("hybrid sub-search function chain must contain an operation")
+			}
+			seen[chain.Stage] = true
 		}
 		requests = append(requests, req)
 	}
@@ -743,6 +768,7 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 	}
 
 	r := &milvuspb.HybridSearchRequest{
+		FunctionChains:        chains,
 		CollectionName:        opt.collectionName,
 		PartitionNames:        opt.partitionNames,
 		Namespace:             opt.namespace,
@@ -779,6 +805,7 @@ type QueryOption interface {
 }
 
 type queryOption struct {
+	functionChains             []*functionchain.FunctionChain
 	collectionName             string
 	partitionNames             []string
 	namespace                  *string
@@ -796,7 +823,12 @@ type queryOption struct {
 // it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
 // valid only while those slices are unmodified.
 func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
+	chains, err := buildFunctionChains(opt.functionChains, "query", false)
+	if err != nil {
+		return nil, err
+	}
 	req := &milvuspb.QueryRequest{
+		FunctionChains: chains,
 		CollectionName: opt.collectionName,
 		PartitionNames: opt.partitionNames,
 		Namespace:      opt.namespace,

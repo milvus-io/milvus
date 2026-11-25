@@ -370,6 +370,23 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	s.Equal(testLabel, cv[0].GetGroupLabel())
 }
 
+func (s *ClusteringCompactionPolicySuite) TestTriggerPartitionNamespaceWithPKSortedSegment() {
+	schema := newTestScalarClusteringKeySchema()
+	schema.EnableNamespace = true
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}}
+	coll := &meta.CollectionInfo{ID: 1, Schema: schema}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil)
+	label := &view.CompactionGroupLabel{CollectionID: coll.ID, PartitionID: 10, Channel: "ch-1"}
+	segment := policy.GenTestSegmentInfo(label, 100, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+	segment.IsSorted = true
+	s.meta.Segments.SetSegment(segment.GetID(), segment)
+
+	views, _, err := s.clusteringCompactionPolicy.TriggerOneCollection(context.Background(), coll.ID, true)
+	s.Require().NoError(err)
+	s.Require().Len(views, 1)
+	s.Equal(label, views[0].GetGroupLabel())
+}
+
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSchemaVersionGroup() {
 	paramtable.Get().Save(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key, "0")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.ClusteringCompactionNewDataSizeThreshold.Key)

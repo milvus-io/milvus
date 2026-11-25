@@ -94,13 +94,9 @@ func TestPreparationPriorityCapturesRGReplicaRateShares(t *testing.T) {
 		for id, rate := range map[int64]float64{1: 20, 2: 30, 3: 50, 4: 1e9} {
 			samples[id] = &viewfeedback.Snapshot{LastAccessUnixNanos: now, RequestRates: viewfeedback.RequestRates{Last6Windows: rate}}
 		}
-		calls := 0
-		mockey.Mock((*viewfeedback.ReplicaFeedbackStore).GetViewFeedback).To(func(_ *viewfeedback.ReplicaFeedbackStore, id int64) (*viewfeedback.Snapshot, bool) {
-			calls++
-			sample, ok := samples[id]
-			return sample, ok
-		}).Build()
-		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(&viewfeedback.ReplicaFeedbackStore{})), nil)
+		configs := []*loadmgr.LoadConfig{cfg, cfgFor(20, 3, nil, nil), other, cfgFor(40, 5, nil, nil)}
+		reader := &benchmarkFeedbackReader{snapshot: priorityFeedbackSnapshot(t, configs, samples)}
+		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(reader)), nil)
 		p := b.preparationPriorities()
 		id := qviews.ShardID{ReplicaID: 1, VChannel: "p_10v0"}
 		require.EqualValues(t, 15, p.preparationPriority(id))
@@ -108,9 +104,11 @@ func TestPreparationPriorityCapturesRGReplicaRateShares(t *testing.T) {
 		require.EqualValues(t, 19, p.preparationPriority(qviews.ShardID{ReplicaID: 3, VChannel: "p_20v0"}))
 		require.EqualValues(t, 20, p.preparationPriority(qviews.ShardID{ReplicaID: 4, VChannel: "p_30v0"}))
 		require.EqualValues(t, 2, p.preparationPriority(qviews.ShardID{ReplicaID: 5, VChannel: "p_40v0"}))
-		require.Equal(t, 5, calls, "read each replica once, without walking its shards")
-		require.Equal(t, 100.0, p.preparationFeedback.groupRates["rg1"])
+		require.Equal(t, 1, reader.calls, "pin one pre-aggregated snapshot without scanning collections")
+		_, rates := p.preparationFeedback.GetReplicaFeedback(1, "rg1")
+		require.Equal(t, 100.0, rates.Last6Windows)
 		samples[1] = &viewfeedback.Snapshot{LastAccessUnixNanos: now, RequestRates: viewfeedback.RequestRates{Last6Windows: 200}}
+		reader.snapshot = priorityFeedbackSnapshot(t, configs, samples)
 		require.EqualValues(t, 15, p.preparationPriority(id), "the same operation retains old numerator and denominator")
 		require.EqualValues(t, 17, b.preparationPriorities().preparationPriority(id), "the next operation captures new feedback")
 		require.Zero(t, p.preparationPriority(qviews.ShardID{ReplicaID: 999, VChannel: "p_99v0"}))
@@ -128,10 +126,8 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		cache.PublishShard(id, testShardStats(ver(1, 0, 1), 1, placement(11, 1, 1, coordview.SegmentStateUp)))
 		cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 		sample := &viewfeedback.Snapshot{LastAccessUnixNanos: time.Now().UnixNano(), RequestRates: viewfeedback.RequestRates{Last6Windows: 100}}
-		mockey.Mock((*viewfeedback.ReplicaFeedbackStore).GetViewFeedback).To(func(_ *viewfeedback.ReplicaFeedbackStore, _ int64) (*viewfeedback.Snapshot, bool) {
-			return sample, sample != nil
-		}).Build()
-		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(&viewfeedback.ReplicaFeedbackStore{})), nil)
+		reader := &benchmarkFeedbackReader{snapshot: priorityFeedbackSnapshot(t, []*loadmgr.LoadConfig{cfg}, map[int64]*viewfeedback.Snapshot{1: sample})}
+		b := NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(WithViewFeedbackReader(reader)), nil)
 		p := b.preparationPriorities()
 		require.EqualValues(t, 4, p.preparationPriority(id))
 		require.EqualValues(t, 20, p.preparationPriority(other), "another shard's Up does not cover this shard")
@@ -143,6 +139,7 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		cache.PublishNode(1, nil)
 		require.EqualValues(t, 20, b.preparationPriorities().preparationPriority(id))
 		sample = &viewfeedback.Snapshot{LastAccessUnixNanos: time.Now().Add(-time.Hour).UnixNano()}
+		reader.snapshot = priorityFeedbackSnapshot(t, []*loadmgr.LoadConfig{cfg}, map[int64]*viewfeedback.Snapshot{1: sample})
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
 		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
 		cfg.AutoLoad = true
@@ -157,7 +154,7 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		cache.PublishLoadConfig(10, cfg, 3)
 		require.EqualValues(t, 12, auto.preparationPriority(id), "captured load config remains immutable")
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
-		sample = nil
+		reader.snapshot = &viewfeedback.PlanningSnapshot{}
 		require.EqualValues(t, 2, b.preparationPriorities().preparationPriority(id))
 		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
 		cfg.AutoLoad = true
@@ -188,4 +185,18 @@ func TestPreparationPriorityPlanPublishesImmutableControl(t *testing.T) {
 	next := policy.Plan(cache, []qviews.ShardID{id})
 	require.Contains(t, next.Prepares, id)
 	require.EqualValues(t, 2, next.Prepares[id].Build().GetMeta().GetControl().GetPreparationPriority())
+}
+
+func TestPreparationPriorityUnchangedDoesNotReadFeedback(t *testing.T) {
+	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	id := cacheShard(1, 10)
+	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
+	c.PublishShard(id, cacheStats(1000, 1, 100, coordview.SegmentStateUp, true))
+	reader := &benchmarkFeedbackReader{snapshot: &viewfeedback.PlanningSnapshot{}}
+	policy := NewDefaultBalancePolicy(WithViewFeedbackReader(reader))
+	for i := 0; i < 100; i++ {
+		require.Empty(t, policy.Plan(c, []qviews.ShardID{id}).Prepares)
+	}
+	require.Zero(t, reader.calls, "unchanged optional batches must not read priority feedback")
 }

@@ -97,6 +97,30 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	}
 }
 
+// QueryViewBuilderMetadata is the native metadata needed to materialize a view.
+// Maps are immutable after handing them to the builder; the builder only reads
+// them and never exposes them in the resulting protobuf.
+type QueryViewBuilderMetadata struct {
+	CollectionID                int64
+	DataVersion                 DataVersion
+	SchemaVersion               int32
+	TransformStartAfterTimetick uint64
+	SegmentManifestVersions     map[int64]int64
+	PartitionStatsVersions      map[int64]int64
+}
+
+// NewQueryViewAtCoordBuilderFromMetadata avoids a temporary DataView protobuf
+// when a planner already owns native immutable metadata.
+func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilderMetadata) *QueryViewAtCoordBuilder {
+	return &QueryViewAtCoordBuilder{
+		collectionID: metadata.CollectionID, replicaID: id.ReplicaID, vchannel: id.VChannel,
+		dataVersion: metadata.DataVersion, queryVersion: 1, schemaVersion: metadata.SchemaVersion,
+		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
+		segmentManifestVersions:     metadata.SegmentManifestVersions,
+		partitionStatsVersions:      metadata.PartitionStatsVersions,
+	}
+}
+
 func (b *QueryViewAtCoordBuilder) DataVersion() DataVersion {
 	return b.dataVersion
 }

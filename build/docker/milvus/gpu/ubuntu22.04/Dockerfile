@@ -11,11 +11,13 @@ ENV UV_PYTHON_BIN_DIR=/usr/local/bin
 ENV PYTHON=python3.12
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
+# Limit OS updates to the named packages; a full upgrade also replaces CUDA libraries.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y apt openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
+    apt-get install -y --no-install-recommends --only-upgrade \
+        apt openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -47,6 +49,8 @@ ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
+# Milvus provides task-level parallelism; keep BLAS calls single-threaded by default.
+ENV OPENBLAS_NUM_THREADS=1
 ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 
 # Generate fipsmodule.cnf for FIPS module integrity self-test.

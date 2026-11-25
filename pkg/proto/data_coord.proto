@@ -499,6 +499,21 @@ message SegmentInfo {
   // Exclusive TransformLog replay start for this exact data/manifest revision.
   // Persisted with the base; compaction inherits its actual input coverage.
   uint64 transform_start_after_timetick = 42;
+  repeated SegmentIndexSummary index_summaries = 43;
+}
+
+// Completed index inventory. File ownership remains in the pinned manifest.
+message SegmentIndexSummary {
+  int64 index_id = 1;
+  int64 field_id = 2;
+  int64 build_id = 3;
+  bool has_artifact = 4;
+  int64 index_version = 5;
+  uint64 serialized_size = 6;
+  uint64 mem_size = 7;
+  int32 vector_engine_version = 8;
+  int32 scalar_engine_version = 9;
+  string index_type = 10;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1357,6 +1372,7 @@ message VectorScalarIndexInfo {
   string index_name = 9;                   // Index name for multi-index-per-field lookup
   index.IndexStorePathVersion index_store_path_version = 10;
   string index_type = 11;
+  optional uint64 mem_size = 12;  // Estimated memory size, independent of index_size.
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1791,12 +1807,21 @@ message GetGcStatusResponse {
 message QuerySlotRequest {}
 
 message QuerySlotResponse {
+  reserved 5;  // removed: segment_rooted_indexes
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
   bool copy_segment_shared_indexes = 4;
-  // Supports v2 index build and copy destinations under a segment's _index.
-  bool segment_rooted_indexes = 5;
+  // Two-dimensional report. A worker that predates it leaves total_* at zero,
+  // and a coordinator that sees total_memory == 0 places on available_slots.
+  // available_cpu = total_cpu - sum(cpu of accepted, unfinished tasks).
+  // available_memory = max(total_memory - sum(memory of accepted, unfinished tasks), 0).
+  int64 total_cpu = 6;
+  int64 available_cpu = 7;
+  int64 total_memory = 8;   // bytes
+  int64 available_memory = 9; // bytes
+  // No accepted background work.
+  bool idle = 10;
 }
 
 enum CompactionTaskState {

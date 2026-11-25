@@ -109,7 +109,6 @@ ENABLE_AZURE_FS="ON"
 if [[ "$(uname)" == "Darwin" ]]; then
   ENABLE_AZURE_FS="OFF"
 fi
-: "${ENABLE_GCP_NATIVE:="OFF"}"
 # Build acceleration options (override via env vars)
 : "${USE_PCH:="ON"}"
 : "${USE_UNITY_BUILD:="OFF"}"
@@ -214,7 +213,7 @@ case "${USE_TSAN}" in
   *) echo "ERROR: -T must be ON or OFF" >&2; exit 1 ;;
 esac
 if [[ "${USE_TSAN}" == "ON" ]]; then
-  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" == "ON" ]]; then
+  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" =~ ^(ON|on|TRUE|True|true|1)$ ]]; then
     echo "ERROR: ThreadSanitizer cannot be combined with AddressSanitizer or GPU builds" >&2
     exit 1
   fi
@@ -318,7 +317,6 @@ ${CMAKE_EXTRA_ARGS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DTANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS} \
--DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
 -DWITH_CRT=${WITH_CRT} \
 -DMILVUS_USE_PCH=${USE_PCH} \

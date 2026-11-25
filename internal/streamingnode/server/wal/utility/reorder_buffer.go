@@ -82,7 +82,9 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) (ReOrderByT
 	}
 	if msg.MessageType() != message.MessageTypeTimeTick && msg.Version() != message.VersionOld {
 		timetick := msg.TimeTick()
-		if r.seenTimeTicks.Contain(timetick) {
+		// Pop removes the buffered dedup entries, but a message at the
+		// confirmed boundary has already been delivered as well.
+		if timetick == r.lastPopTimeTick || r.seenTimeTicks.Contain(timetick) {
 			return ReOrderByTimeTickBufferPushResult{
 				Dropped:    true,
 				DropReason: ReOrderByTimeTickBufferDropReasonDuplicateTimeTick,

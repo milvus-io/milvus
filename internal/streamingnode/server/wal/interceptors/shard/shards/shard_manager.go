@@ -275,17 +275,6 @@ func (c *CollectionInfo) AllowGrowingSourceFlush() bool {
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
 }
 
-func (c *CollectionInfo) RequiresStorageV3() bool {
-	return c.HasTextField()
-}
-
-func (c *CollectionInfo) HasTextField() bool {
-	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
-		return false
-	}
-	return typeutil.HasTextField(c.Schema.GetSchema())
-}
-
 // RuntimeFlushSize estimates the in-memory footprint used by flush pressure decisions.
 func (c *CollectionInfo) RuntimeFlushSize(modified stats.ModifiedMetrics) uint64 {
 	if modified.Rows == 0 || modified.BinarySize == 0 {

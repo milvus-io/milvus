@@ -267,6 +267,63 @@ class JsonKeyStats {
         TargetBitmapView res,
         TargetBitmapView valid_res,
         ValTypes... values) {
+        milvus::detail::ColumnFilterPtr filter;
+        if (skip_func) {
+            filter = std::make_shared<milvus::detail::ColumnFilter>(
+                milvus::detail::ColumnFilter::MetricsSource::
+                    PreloadedStatistics,
+                [&](int64_t cell_id) {
+                    return skip_func(skip_index_, path, cell_id);
+                });
+        }
+        return ScanShreddingData<T>(
+            op_ctx, path, func, filter, res, valid_res, values...);
+    }
+
+    // EXISTS has already resolved the rows set in resolved. Skip their entire
+    // physical cells before pinning payload or validity; the callback still
+    // receives resolved to avoid parsing those rows in mixed cells.
+    template <typename T, typename FUNC>
+    int64_t
+    ExecutorForUnresolvedShreddingData(milvus::OpContext* op_ctx,
+                                       const std::string& path,
+                                       FUNC func,
+                                       TargetBitmapView res,
+                                       TargetBitmapView valid_res,
+                                       TargetBitmapView resolved) {
+        const auto it = shredding_columns_.find(path);
+        if (it == shredding_columns_.end()) {
+            return 0;
+        }
+        const auto& column = it->second;
+        column->Prepare(op_ctx);
+        AssertInfo(resolved.size() >= column->NumRows(),
+                   "Resolved bitmap is shorter than shredding column {}",
+                   path);
+        auto filter = std::make_shared<milvus::detail::ColumnFilter>(
+            milvus::detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [column, resolved](int64_t cell_id) {
+                const auto start = column->GetNumRowsUntilChunk(cell_id);
+                const auto size = column->chunk_row_nums(cell_id);
+                return resolved.view(start, size).all();
+            },
+            // These rows already have their final result. Their array-column
+            // validity must not trigger a payload pin or clear that result.
+            /*skipped_validity_required=*/false);
+        return ScanShreddingData<T>(
+            op_ctx, path, func, filter, res, valid_res, resolved);
+    }
+
+ private:
+    template <typename T, typename FUNC, typename... ValTypes>
+    int64_t
+    ScanShreddingData(milvus::OpContext* op_ctx,
+                      const std::string& path,
+                      FUNC& func,
+                      milvus::detail::ColumnFilterPtr filter,
+                      TargetBitmapView res,
+                      TargetBitmapView valid_res,
+                      ValTypes... values) {
         int64_t processed_size = 0;
         // if path is not in shredding_columns_, return 0
         if (shredding_columns_.find(path) == shredding_columns_.end()) {
@@ -284,14 +341,7 @@ class JsonKeyStats {
                 : ChunkedColumnInterface::ScanPinPolicy::ResultOwned;
         auto options = ChunkedColumnInterface::ScanOptions::ForData(
             0, TargetTypeOf<T>(), pin_policy);
-        if (skip_func) {
-            options.filter = std::make_shared<milvus::detail::ColumnFilter>(
-                milvus::detail::ColumnFilter::MetricsSource::
-                    PreloadedStatistics,
-                [&](int64_t cell_id) {
-                    return skip_func(skip_index_, path, cell_id);
-                });
-        }
+        options.filter = std::move(filter);
         auto cursor = column->Scan(op_ctx, options);
         AssertInfo(cursor != nullptr,
                    "Shredding column {} does not support data scan",
@@ -344,6 +394,7 @@ class JsonKeyStats {
         return processed_size;
     }
 
+ public:
     std::set<std::string>
     GetShreddingFields(const std::string& pointer) {
         std::set<std::string> fields;

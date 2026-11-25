@@ -215,9 +215,15 @@ func IsSnapshotSource(options Options) bool {
 	return err == nil && strings.EqualFold(strings.TrimSpace(sourceType), SourceTypeSnapshot)
 }
 
-// ValidateImportSourceOptions checks source options for ordinary, backup and
-// snapshot imports. Persisted tasks may include coordinator-owned options.
+// ValidateImportSourceOptions rejects combinations that would make the
+// backup/snapshot/L0 source contract ambiguous. Snapshot metadata is the sole
+// authority for the source storage version. L0 import remains a separate contract;
+// CMEK content is validated later against the source schema and supplied EZK.
+// Per-request external source storage options (`storage.*`) are parsed
+// independently by GetSourceStorageConfig.
 func ValidateImportSourceOptions(options Options) error {
+	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
+	counts := make(map[string]int, len(contractKeys))
 	hasSnapshotContractOption := false
 	for _, option := range options {
 		if option == nil {
@@ -228,26 +234,11 @@ func ValidateImportSourceOptions(options Options) error {
 		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping {
 			hasSnapshotContractOption = true
 		}
-	}
-	if source, err := GetSourceStorageConfig(options); err != nil {
-		return err
-	} else if source != nil && (IsBackup(options) || IsL0Import(options) || hasSnapshotContractOption) {
-		return merr.WrapErrParameterInvalidMsg("storage.* options are only supported for ordinary file imports")
-	}
-	return validateSnapshotSourceOptions(options, hasSnapshotContractOption)
-}
-
-// validateSnapshotSourceOptions runs after common source validation. Snapshot
-// metadata owns the storage version; L0 import retains its separate contract.
-func validateSnapshotSourceOptions(options Options, hasSnapshotContractOption bool) error {
-	if hasSnapshotContractOption {
-		contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
-		counts := make(map[string]int, len(contractKeys))
-		for _, option := range options {
-			if lo.Contains(contractKeys, option.GetKey()) {
-				counts[option.GetKey()]++
-			}
+		if lo.Contains(contractKeys, option.GetKey()) {
+			counts[option.GetKey()]++
 		}
+	}
+	if hasSnapshotContractOption {
 		for _, key := range contractKeys {
 			if counts[key] > 1 {
 				return merr.WrapErrImportFailedMsg("duplicate snapshot-source option: %s", key)
@@ -374,6 +365,8 @@ func HasExternalSource(options Options) bool {
 
 // ValidateImportSourceRequest additionally rejects internal routing options
 // supplied by a public caller. Persisted tasks use ValidateImportSourceOptions.
+// Per-request external source storage options (`storage.*`) are validated
+// separately via GetSourceStorageConfig.
 func ValidateImportSourceRequest(options Options) error {
 	// Do not silently broaden a request written for the earlier partition
 	// selector. Already-expanded tasks still use ValidateImportSourceOptions

@@ -113,9 +113,11 @@ The framework executes the following steps:
    order and applying the same per-chunk selection. Identity selection retains
    references; ranges use zero-copy slices; index lists use the existing
    `dispatchPickByIndices` helper for Boolean, integer, floating-point, String
-   and Binary arrays, including nullable values. Binary selection copies opaque
-   bytes without interpreting JSON. Non-empty index selections of List, Struct
-   and other unsupported types are rejected.
+   and Binary arrays, plus `List<Int32>`, including nullable values. Binary
+   selection copies opaque bytes without interpreting JSON. List selection uses
+   `pickInt32Lists`, preserving list/child validity, sliced offsets and repeated
+   positions while checking Int32 offset capacity. Non-empty index selections
+   of other List child types, Struct and unsupported array types are rejected.
 5. Publish the complete output after successful assembly.
 
 `assembleOperatorResult` receives the complete `inputDF` retained after any
@@ -267,8 +269,10 @@ preservation, cancellation and reference cleanup with Arrow's checked allocator.
 - Expansion is tested at the per-chunk framework level. There is no public
   expansion operator; distributed identity, deduplication and pagination for
   such an operator are outside this contract.
-- Index selection uses `dispatchPickByIndices` for scalar and Binary arrays.
-  List and Struct rejection is covered with checked-allocator cleanup checks.
+- Index selection uses `dispatchPickByIndices` for scalar, Binary and
+  `List<Int32>` arrays. Tests cover sliced lists, repeated/out-of-order and empty
+  selections, null lists/children, and invalid indices. Unsupported List child
+  types and Struct rejection retain checked-allocator cleanup coverage.
 - Cancellation tests cover canceled/expired contexts at entry, operator errors
   with partial results, and cancellation during execution or assembly. A last
   operator may complete successfully; a following operator checks cancellation

@@ -41,6 +41,36 @@
 namespace milvus {
 namespace exec {
 
+namespace {
+
+// Determine whether each unresolved BSON array contains a nonempty value for
+// EXISTS. Resolved rows in mixed scan batches need no BSON parsing.
+void
+EvaluateShreddedArrayExists(const std::string_view* values,
+                            ValidityView valid,
+                            size_t size,
+                            TargetBitmapView result,
+                            TargetBitmapView /*valid_result*/,
+                            TargetBitmapView resolved) {
+    // The executor slices result for each scan batch; resolved spans the segment.
+    const auto resolved_batch = resolved.view(result.offset(), size);
+    for (size_t i = 0; i < size; ++i) {
+        // Rows already matched by another descendant need no BSON parsing.
+        if (resolved_batch[i] || (valid && !valid[i])) {
+            result[i] = false;
+            continue;
+        }
+        // A valid BSON array can still be recursively empty ([], [null],
+        // [[]], ...). Match Json::exist and the shared BSON evaluator.
+        BsonView bson(reinterpret_cast<const uint8_t*>(values[i].data()),
+                      values[i].size());
+        auto array = bson.ParseAsArrayAtOffset(0);
+        result[i] = array.has_value() && !BsonView::IsBsonValueEmpty(*array);
+    }
+}
+
+}  // namespace
+
 void
 PhyExistsFilterExpr::PrefetchJsonStatsPath(index::JsonKeyStats& stats,
                                            const std::string& pointer) const {
@@ -247,17 +277,49 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         });
                     auto shredding_fields =
                         index->GetShreddingFieldsWithPrefix(pointer);
+                    // Resolve cheap scalar validity first, regardless of field
+                    // name order, before reading any array payloads.
                     for (const auto& field : shredding_fields) {
+                        if (index->GetShreddingJsonType(field) ==
+                            index::JSONType::ARRAY) {
+                            continue;
+                        }
+                        if (res_view.all()) {
+                            break;
+                        }
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
                         index->ExecutorForGettingValid(
                             op_ctx_, field, temp_valid_view);
                         res_view |= temp_valid_view;
                     }
+
+                    // Only read arrays if scalar validity left unresolved rows.
+                    for (const auto& field : shredding_fields) {
+                        if (index->GetShreddingJsonType(field) !=
+                            index::JSONType::ARRAY) {
+                            continue;
+                        }
+                        if (res_view.all()) {
+                            break;
+                        }
+                        TargetBitmap array_exists(active_count_, false);
+                        // Fully resolved cells need neither payload nor
+                        // validity. Mixed cells still skip resolved rows in
+                        // the evaluator; its validity output is unused.
+                        index->ExecutorForUnresolvedShreddingData<
+                            std::string_view>(op_ctx_,
+                                              field,
+                                              EvaluateShreddedArrayExists,
+                                              TargetBitmapView(array_exists),
+                                              TargetBitmapView(array_exists),
+                                              res_view);
+                        res_view |= TargetBitmapView(array_exists);
+                    }
                 }
 
                 // process shared data
-                {
+                if (!res_view.all()) {
                     milvus::ScopedTimer timer(
                         "exists_json_stats_shared_data", [this](double us) {
                             json_stats_shared_latency_us_ += us;
@@ -267,7 +329,11 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         bson_index_,
                         pointer,
                         [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                            // A parent can have children in both layouts. An
+                            // empty shared child must not erase a shredded hit.
+                            if (!bson.IsBsonValueEmpty(offset)) {
+                                res_view[row_id] = true;
+                            }
                         });
                 }
 

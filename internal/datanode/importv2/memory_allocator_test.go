@@ -28,6 +28,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -611,4 +616,38 @@ func TestMemoryAllocatorCancelRacesRelease(t *testing.T) {
 		t.Fatal("canceled waiter did not return")
 	}
 	assert.Equal(t, int64(0), ma.usedMemory, "canceled waiter must not be charged")
+}
+
+func TestMemoryAllocatorUsed(t *testing.T) {
+	ma := NewMemoryAllocator(1 << 30)
+	assert.Zero(t, ma.Used())
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, 1<<20))
+	assert.Equal(t, int64(1<<20), ma.Used())
+	ma.Release(1, 1<<20)
+	assert.Zero(t, ma.Used())
+}
+
+func TestImportTaskKeepsCoordinatorBooking(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.Key
+	defer paramtable.Get().Reset(key)
+	paramtable.Get().Save(key, "10")
+	patch := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64 << 30)).Build()
+	defer patch.UnPatch()
+	priced := taskcommon.Resource{CPU: 1, Memory: 32 << 30}
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	imp := NewImportTask(&datapb.ImportRequest{Schema: schema}, nil, nil, nil, priced)
+	assert.Equal(t, priced, imp.GetResource(), "worker keeps the node-specific coordinator price")
+
+	plain := NewPreImportTask(&datapb.PreImportRequest{ImportFiles: []*internalpb.ImportFile{{Paths: []string{"a.parquet"}}}}, nil, nil, priced)
+	assert.Equal(t, priced, plain.GetResource(), "a plain pre-import does not reserve from the allocator")
+
+	snapshot := NewPreImportTask(&datapb.PreImportRequest{ImportFiles: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{}}}}, nil, nil, priced)
+	assert.Equal(t, priced, snapshot.GetResource())
+
+	sharedL0 := NewPreImportTask(&datapb.PreImportRequest{SnapshotL0Source: &internalpb.SnapshotImportL0Source{}}, nil, nil, priced)
+	assert.Equal(t, priced, sharedL0.GetResource())
 }

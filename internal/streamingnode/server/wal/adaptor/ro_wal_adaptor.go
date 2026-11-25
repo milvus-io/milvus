@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -32,7 +33,6 @@ type roWALAdaptorImpl struct {
 	scanners        *typeutil.ConcurrentMap[int64, wal.Scanner]
 	cleanup         func()
 	scanMetrics     *metricsutil.ScanMetrics
-	forceRecovery   bool
 }
 
 func (w *roWALAdaptorImpl) WALName() message.WALName {
@@ -73,13 +73,11 @@ func (w *roWALAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableM
 	panic("we cannot append message into a read only wal")
 }
 
-// ForceRecovery force recovery wal, currently only used for Alter WAL
-func (w *roWALAdaptorImpl) ForceRecovery(forceRecovery bool) {
-	w.forceRecovery = forceRecovery
-}
-
 // Read returns a scanner for reading records from the wal.
 func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
+	if _, latest := opts.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return nil, status.NewInvalidArgument("latest delivery policy is deprecated; use All, StartFrom or StartAfter")
+	}
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
@@ -107,6 +105,9 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 }
 
 func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
+	if _, ok := w.roWALImpls.(*autowalimpls.WAL); ok {
+		return nil
+	}
 	if opts.DeliverPolicy != nil {
 		currentWALName := w.WALName()
 		var msgID *commonpb.MessageID

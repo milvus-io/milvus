@@ -4,9 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
-	"github.com/pingcap/failpoint"
 	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -14,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
-	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -215,10 +212,8 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	ctx = utility.WithExtraAppendResult(ctx, &extraAppendResult)
 	messageID, err := w.interceptorBuildResult.Interceptor.DoAppend(ctx, msg,
 		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-			// The lock interceptor still holds its lock while this callback runs, so
-			// recheck the fence here: an append that passed the check at the entry of
-			// Append and then waited for that lock must not be persisted behind an
-			// AlterWAL message that was persisted in the meantime.
+			// The writer may have been fenced while this append waited for the
+			// interceptor lock. Recheck before attempting a physical write.
 			if w.isFenced.Load() {
 				return nil, walimpls.ErrFenced
 			}
@@ -235,15 +230,13 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				return msgID, err
 			}
 
-			if msg.MessageType() == message.MessageTypeAlterWAL {
-				// AlterWAL is exclusive and pchannel-level, so the lock interceptor holds
-				// the global exclusive lock here while every other append holds the shared
-				// one. Raising the fence inside the callback therefore makes it atomic with
-				// respect to persistence: no other append can be persisting right now, and
-				// every later one sees the fence in the recheck above.
-				w.Logger().Info(ctx, "alter WAL message appended, marking WAL as fenced")
-				w.isFenced.Store(true)
+			if message.IsWALSwitch(msg) {
+				// Publish the new backend's metrics and budget before releasing the exclusive
+				// PChannel lock and admitting any waiting business append.
+				w.writeMetrics.UpdateWALName(w.rwWALImpls.WALName())
+				w.chunkPayloadSizeAt.Store(0)
 			}
+
 			return msgID, nil
 		})
 	metricsGuard.FinishAppend()
@@ -258,11 +251,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			return nil, status.NewChannelFenced(w.Channel().String())
 		}
 		return nil, err
-	}
-	// The fence itself was already raised inside the append callback.
-	if msg.MessageType() == message.MessageTypeAlterWAL {
-		w.forceCancelAfterGracefulTimeout()
-		w.Logger().Info(ctx, "alter WAL message appended, WAL marked as fenced, all append operations will be rejected")
 	}
 	w.appendRateCounter.Add(int64(msg.EstimateSize()))
 
@@ -298,13 +286,15 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 // acknowledges exactly once -- when its whole run is persisted), so no
 // downstream component can ever observe a half-written pack.
 func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-	if !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
-		return w.appendOneWithRetry(ctx, msg)
+	// A switch link must be one complete physical record: splitting it would
+	// switch the backend before its remaining chunks were appended.
+	if msg.MessageType() == message.MessageTypeAlterWAL || !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
+		return w.appendOne(ctx, msg)
 	}
 
 	chunkPayloadSize := w.chunkPayloadSize()
 	if chunkPayloadSize <= 0 || len(msg.IntoMessageProto().GetPayload()) <= chunkPayloadSize {
-		return w.appendOneWithRetry(ctx, msg)
+		return w.appendOne(ctx, msg)
 	}
 
 	// Split into chunks when the payload exceeds the backend's per-message
@@ -318,7 +308,7 @@ func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg mes
 
 	var firstID message.MessageID
 	for i, chunk := range chunks {
-		msgID, err := w.appendOneWithRetry(ctx, chunk)
+		msgID, err := w.appendOne(ctx, chunk)
 		if err != nil {
 			return nil, err
 		}
@@ -333,7 +323,7 @@ func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg mes
 // be. The underlying config items (pulsar.maxMessageSize,
 // pulsar.messageReserveSize) are refreshable; a live DOWNWARD refresh takes
 // effect for chunking within this window. Note a message already stuck in
-// appendOneWithRetry's infinite retry loop never re-reads config regardless --
+// autowalimpls' physical retry loop never re-reads config regardless --
 // that exposure is pre-existing, and the cache only widens it by this window
 // for newly arriving appends.
 const chunkPayloadSizeRefresh = time.Second
@@ -371,62 +361,19 @@ func (w *walAdaptorImpl) computeChunkPayloadSize() int {
 	return maxMessageSize - reserve
 }
 
-// appendOneWithRetry appends a single message, retrying until it succeeds or
-// an unrecoverable error occurs.
-func (w *walAdaptorImpl) appendOneWithRetry(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 10 * time.Millisecond
-	backoff.MaxInterval = 5 * time.Second
-	backoff.MaxElapsedTime = 0
-	backoff.Reset()
-
-	// An append operation should be retried until it succeeds or some unrecoverable error occurs.
-	for i := 0; ; i++ {
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
-		appendCtx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
-		message.OverwriteTraceContext(appendCtx, msg)
-		msgID, err := w.rwWALImpls.Append(appendCtx, msg)
-		failpoint.Inject("afterBackendAppend", func(value failpoint.Value) {
-			if err == nil && walpoint.Hit(appendCtx, value, walpoint.AfterBackendAppend, msg, msgID, nil) {
-				// Persisted data with a lost acknowledgement must enter the real retry loop.
-				err = status.NewInner("injected lost WAL backend acknowledgement")
-			}
-		})
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-		if err == nil {
-			if msg.MessageType() == message.MessageTypeAlterWAL {
-				// if the append operation is a alter WAL message, we should log the message
-				w.Logger().Info(ctx, "append alter WAL message to WAL finish", mlog.String("channel", msg.VChannel()), mlog.Uint64("timetick", msg.TimeTick()))
-			}
-			return msgID, nil
-		}
-		// A backend may cancel or time out its own attempt while this WAL is
-		// still available. Only writer fencing or our lifecycle context ends
-		// the retry loop; a backend context error alone does not.
-		if errors.Is(err, walimpls.ErrFenced) {
-			return nil, err
-		}
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
-		w.writeMetrics.ObserveRetry()
-		nextInterval := backoff.NextBackOff()
-		w.Logger().Warn(ctx, "append message into wal impls failed, retrying...", mlog.FieldMessage(msg), mlog.Int("retry", i), mlog.Duration("nextInterval", nextInterval), mlog.Err(err))
-
-		select {
-		case <-ctx.Done():
-			return nil, context.Cause(ctx)
-		case <-w.availableCtx.Done():
-			return nil, status.NewOnShutdownError("wal is on shutdown")
-		case <-time.After(nextInterval):
-		}
+// appendOne observes one call into the WAL implementation, including all of
+// autowalimpls' internal retries. A successful append must remain successful so
+// the interceptors can complete their in-memory state transitions.
+func (w *walAdaptorImpl) appendOne(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppendImpl)
+	defer span.End()
+	message.OverwriteTraceContext(ctx, msg)
+	id, err := w.rwWALImpls.Append(ctx, msg)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
+	return id, err
 }
 
 // AppendAsync writes a record to the log asynchronously.
@@ -456,6 +403,11 @@ func (w *walAdaptorImpl) Close() {
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
+	if w.queryViewHandler != nil {
+		// Recovery waiters hold a lifetime reference. Wake them before waiting
+		// for in-flight operations, without releasing their query resources yet.
+		w.queryViewHandler.StopQueryAcquisition()
+	}
 	w.lifetime.Wait()
 	if w.queryViewHandler != nil {
 		w.queryViewHandler.CloseForHandoff()

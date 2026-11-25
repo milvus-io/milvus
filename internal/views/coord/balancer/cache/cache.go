@@ -45,7 +45,7 @@ func (c *CollectionEntry) LoadConfig() *loadmgr.LoadConfig   { return c.config }
 func (c *CollectionEntry) ConfigVersion() uint64             { return c.configVersion }
 func (c *CollectionEntry) DataView() *api.CollectionDataView { return c.data }
 func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
-	shard, _ := c.shards.get(shardKey(id))
+	shard, _ := c.shards.getShard(id)
 	return shard
 }
 func (c *CollectionEntry) RangeShards(fn func(*ShardEntry) bool) { c.shards.each(fn) }
@@ -76,7 +76,7 @@ type NodeEntry struct {
 
 func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
 func (n *NodeEntry) Contribution(id qviews.ShardID) NodeSizeStats {
-	value, _ := n.contributions.get(shardKey(id))
+	value, _ := n.contributions.getShard(id)
 	return value.rows
 }
 
@@ -351,11 +351,12 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	if next.config == cfg && next.configVersion == version {
 		return
 	}
+	key := idKey(id)
 	c.mu.Lock()
 	if next.config != nil {
 		for _, replica := range next.config.Replicas {
 			group := c.groupLocked(replica.ResourceGroup)
-			group.collections = group.collections.remove(idKey(id))
+			group.collections = group.collections.remove(key[:])
 			c.storeGroupLocked(replica.ResourceGroup, group)
 			// Keep a replica-to-collection binding while residual shards still use it.
 			if slot.replicaUses[replica.ReplicaID] == 0 {
@@ -367,7 +368,7 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 		for _, replica := range cfg.Replicas {
 			c.replicas[replica.ReplicaID] = id
 			group := c.groupLocked(replica.ResourceGroup)
-			group.collections = group.collections.set(idKey(id), id)
+			group.collections = group.collections.set(key[:], id)
 			c.storeGroupLocked(replica.ResourceGroup, group)
 		}
 	}
@@ -596,13 +597,14 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 		c.finishNode(id, slot)
 		return
 	}
+	key := idKey(id)
 	c.mu.Lock()
 	oldGroup := c.groupLocked(old.ResourceGroup)
-	oldGroup.nodes = oldGroup.nodes.remove(idKey(id))
+	oldGroup.nodes = oldGroup.nodes.remove(key[:])
 	c.storeGroupLocked(old.ResourceGroup, oldGroup)
 	group := c.groupLocked(next.info.ResourceGroup)
 	if next.info.Alive && !next.info.Stopping {
-		group.nodes = group.nodes.set(idKey(id), id)
+		group.nodes = group.nodes.set(key[:], id)
 	}
 	c.storeGroupLocked(next.info.ResourceGroup, group)
 	c.mu.Unlock()

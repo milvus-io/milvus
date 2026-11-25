@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -60,6 +61,8 @@ type indexBuildTask struct {
 	queueDur       time.Duration
 	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
+	info           *IndexTaskInfo
+	resource       taskcommon.Resource
 
 	now           func() time.Time // Injectable clock; defaults to time.Now, tests override it.
 	pluginContext *indexcgopb.StoragePluginContext
@@ -70,7 +73,9 @@ func NewIndexBuildTask(ctx context.Context,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	manager *TaskManager,
+	info *IndexTaskInfo,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
@@ -81,7 +86,9 @@ func NewIndexBuildTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
 		now:           time.Now,
+		info:          info,
 		pluginContext: pluginContext,
+		resource:      resource,
 	}
 
 	t.parseParams()
@@ -121,7 +128,7 @@ func (it *indexBuildTask) Name() string {
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
-	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -130,7 +137,7 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 // concurrent QueryTask can never observe a final cost paired with a stale
 // in-progress state.
 func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
-	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, endMs, costTimeMs, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -157,6 +164,10 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 
 func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
+}
+
+func (it *indexBuildTask) GetResource() taskcommon.Resource {
+	return it.resource
 }
 
 func (it *indexBuildTask) IsVectorIndex() bool {
@@ -336,6 +347,7 @@ func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 		TalonEnabledStages:          it.req.GetStorageConfig().GetTalonEnabledStages(),
 		TalonSmallReadThreshold:     it.req.GetStorageConfig().GetTalonSmallReadThreshold(),
 		TalonCoordinator:            it.req.GetStorageConfig().GetTalonCoordinator(),
+		TalonNamespace:              it.req.GetStorageConfig().GetTalonNamespace(),
 		TalonBlockSize:              it.req.GetStorageConfig().GetTalonBlockSize(),
 		TalonMaxIdlePerAddr:         it.req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
 		TalonEnableForExternalTable: it.req.GetStorageConfig().GetTalonEnableForExternalTable(),
@@ -456,6 +468,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),
 		it.req.GetBuildID(),
+		it.info,
 		saveFileKeys,
 		serializedSize,
 		uint64(indexStats.MemSize),

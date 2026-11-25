@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "boost/variant/detail/apply_visitor_binary.hpp"
+#include "boost/variant/get.hpp"
 #include "common/Tracer.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
@@ -35,24 +36,53 @@
 namespace milvus {
 namespace exec {
 
-bool
-PhyCompareFilterExpr::GatherValues(
-    const ValueLookupSource& source,
-    DataType data_type,
-    const int64_t* offsets,
-    int64_t count,
-    std::vector<segcore::data_access_type>& values) const {
+template <typename F>
+static decltype(auto)
+DispatchCompareType(DataType type, F&& evaluate) {
+    switch (type) {
+        case DataType::BOOL:
+            return evaluate.template operator()<bool>();
+        case DataType::INT8:
+            return evaluate.template operator()<int8_t>();
+        case DataType::INT16:
+            return evaluate.template operator()<int16_t>();
+        case DataType::INT32:
+            return evaluate.template operator()<int32_t>();
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return evaluate.template operator()<int64_t>();
+        case DataType::FLOAT:
+            return evaluate.template operator()<float>();
+        case DataType::DOUBLE:
+            return evaluate.template operator()<double>();
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return evaluate.template operator()<std::string_view>();
+        default:
+            ThrowInfo(
+                UnexpectedError, "unsupported compare data type {}", type);
+    }
+}
+
+ColumnVectorPtr
+PhyCompareFilterExpr::GatherValues(const ValueLookupSource& source,
+                                   DataType data_type,
+                                   const int64_t* offsets,
+                                   int64_t count) const {
     if (!source.Covers(offsets, count)) {
-        return false;
+        return nullptr;
     }
 
-    values.assign(static_cast<size_t>(count), std::nullopt);
+    auto values = std::make_shared<ColumnVector>(data_type, count);
+    TargetBitmapView validity(values->GetValidRawData(), count);
     std::vector<uint8_t> seen(static_cast<size_t>(count), 0);
-    const auto gather = [&]<typename T>() {
+    DispatchCompareType(data_type, [&]<typename T>() {
         const auto* selected = source.Reader<T>();
         AssertInfo(selected != nullptr,
                    "cached value reader does not match data type {}",
                    data_type);
+        auto* data = values->RawAsValues<index::owned_t<T>>();
         selected->Gather(
             offsets, count, [&](int64_t i, const T* value, bool valid) {
                 AssertInfo(i >= 0 && i < count,
@@ -64,58 +94,22 @@ PhyCompareFilterExpr::GatherValues(
                     seen[pos] == 0, "value gather produced output {} twice", i);
                 seen[pos] = 1;
                 if (!valid) {
+                    validity[pos] = false;
                     return;
                 }
                 AssertInfo(value != nullptr,
                            "value reader returned a null value for row {}",
                            offsets[pos]);
-                if constexpr (std::is_same_v<T, std::string_view>) {
-                    values[pos] = std::string(value->data(), value->size());
-                } else {
-                    values[pos] = *value;
-                }
+                // Gather strings are borrowed only during this callback.
+                data[pos] = *value;
             });
-    };
-    switch (data_type) {
-        case DataType::BOOL:
-            gather.template operator()<bool>();
-            break;
-        case DataType::INT8:
-            gather.template operator()<int8_t>();
-            break;
-        case DataType::INT16:
-            gather.template operator()<int16_t>();
-            break;
-        case DataType::INT32:
-            gather.template operator()<int32_t>();
-            break;
-        case DataType::INT64:
-        // #52689: TIMESTAMPTZ is stored and indexed as int64.
-        case DataType::TIMESTAMPTZ:
-            gather.template operator()<int64_t>();
-            break;
-        case DataType::FLOAT:
-            gather.template operator()<float>();
-            break;
-        case DataType::DOUBLE:
-            gather.template operator()<double>();
-            break;
-        case DataType::STRING:
-        case DataType::VARCHAR:
-        case DataType::TEXT:
-            gather.template operator()<std::string_view>();
-            break;
-        default:
-            ThrowInfo(UnexpectedError,
-                      "unsupported value lookup data type {}",
-                      data_type);
-    }
+    });
     for (int64_t i = 0; i < count; ++i) {
         AssertInfo(seen[static_cast<size_t>(i)] != 0,
                    "value gather omitted row {}",
                    offsets[i]);
     }
-    return true;
+    return values;
 }
 
 bool
@@ -144,7 +138,7 @@ PhyCompareFilterExpr::CanUseBothDataCompare() {
         }
         const auto can_compare_string_type = [](DataType data_type) {
             return data_type == DataType::VARCHAR ||
-                   data_type == DataType::STRING;
+                   data_type == DataType::STRING || data_type == DataType::TEXT;
         };
         if (IsStringDataType(expr_->left_data_type_) ||
             IsStringDataType(expr_->right_data_type_)) {
@@ -167,8 +161,8 @@ int64_t
 PhyCompareFilterExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
 
-    return current_rows + batch_size_ >= segment_chunk_reader_.active_count_
-               ? segment_chunk_reader_.active_count_ - current_rows
+    return current_rows + batch_size_ >= active_count_
+               ? active_count_ - current_rows
                : batch_size_;
 }
 
@@ -193,60 +187,25 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-        auto left_raw_data_chunk_count =
-            segment_chunk_reader_.NumChunkData(expr_->left_field_id_);
-        auto right_raw_data_chunk_count =
-            segment_chunk_reader_.NumChunkData(expr_->right_field_id_);
-
-        int64_t processed_rows = 0;
-        const auto size_per_chunk = segment_chunk_reader_.SizePerChunk();
-        auto get_chunk_id_and_offset =
-            [&](const FieldId field,
-                const int64_t raw_data_chunk_count,
-                int64_t offset) -> std::pair<int64_t, int64_t> {
-            if (segment_chunk_reader_.segment_->type() ==
-                SegmentType::Growing) {
-                return {offset / size_per_chunk, offset % size_per_chunk};
-            } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                       raw_data_chunk_count > 0) {
-                return segment_chunk_reader_.GetChunkByOffset(field, offset);
-            } else {
-                return {0, offset};
-            }
-        };
         // Consecutive offsets frequently fall in the same left/right chunk;
         // keep each column's data accessor (which pins its chunk) across
         // iterations and rebuild it only when that column's chunk id changes.
-        // Safe on both sealed and growing (data and the chunked validity
-        // storage have stable per-chunk buffers).
+        // Growing data and validity have stable per-chunk buffers.
         int64_t cached_left_chunk_id = -1;
         int64_t cached_right_chunk_id = -1;
         segcore::ChunkDataAccessor left;
         segcore::ChunkDataAccessor right;
-        // Finite offset input uses one Take per supported sealed column,
-        // preserving order, duplicates and nulls.
-        segcore::ChunkDataAccessor left_by_offsets;
-        segcore::ChunkDataAccessor right_by_offsets;
-        if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
-            auto offsets = OffsetView::From(input->data(), real_batch_size);
-            left_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
-                expr_->left_data_type_, left_field_, offsets);
-            right_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
-                expr_->right_data_type_, right_field_, offsets);
-        }
+        AssertInfo(segment_->type() == SegmentType::Growing,
+                   "sealed compare requires Column Scan/Take");
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
             auto read = [&](FieldId field,
                             DataType type,
-                            int64_t raw_chunk_count,
-                            const segcore::ChunkDataAccessor& by_offsets,
                             int64_t& cached_chunk_id,
                             segcore::ChunkDataAccessor& accessor) {
-                if (by_offsets) {
-                    return by_offsets(i);
-                }
-                auto [chunk_id, chunk_offset] =
-                    get_chunk_id_and_offset(field, raw_chunk_count, offset);
+                const auto chunk_size = segment_chunk_reader_.SizePerChunk();
+                const auto chunk_id = offset / chunk_size;
+                const auto chunk_offset = offset % chunk_size;
                 if (chunk_id != cached_chunk_id) {
                     accessor = segment_chunk_reader_.GetChunkDataAccessor(
                         type, field, chunk_id);
@@ -256,32 +215,27 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             };
             auto left_opt = read(left_field_,
                                  expr_->left_data_type_,
-                                 left_raw_data_chunk_count,
-                                 left_by_offsets,
                                  cached_left_chunk_id,
                                  left);
             auto right_opt = read(right_field_,
                                   expr_->right_data_type_,
-                                  right_raw_data_chunk_count,
-                                  right_by_offsets,
                                   cached_right_chunk_id,
                                   right);
             if (!left_opt.has_value() || !right_opt.has_value()) {
-                res[processed_rows] = false;
-                valid_res[processed_rows] = false;
+                res[i] = false;
+                valid_res[i] = false;
             } else {
-                res[processed_rows] = boost::apply_visitor(
+                res[i] = boost::apply_visitor(
                     milvus::query::Relational<decltype(op)>{},
                     left_opt.value(),
                     right_opt.value());
             }
-            processed_rows++;
         }
         return res_vec;
     }
 
     // normal path
-    if (segment_chunk_reader_.segment_->is_chunked()) {
+    if (segment_->is_chunked()) {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
             return nullptr;
@@ -297,16 +251,12 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             expr_->left_data_type_,
             expr_->left_field_id_,
             left_current_chunk_id_,
-            left_current_chunk_pos_,
-            real_batch_size,
-            &left_column_scan_state_);
+            left_current_chunk_pos_);
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
             right_current_chunk_id_,
-            right_current_chunk_pos_,
-            real_batch_size,
-            &right_column_scan_state_);
+            right_current_chunk_pos_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
@@ -337,7 +287,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
              ++chunk_id) {
             auto chunk_size =
                 chunk_id == num_chunk_ - 1
-                    ? segment_chunk_reader_.active_count_ -
+                    ? active_count_ -
                           chunk_id * segment_chunk_reader_.SizePerChunk()
                     : segment_chunk_reader_.SizePerChunk();
             auto left = segment_chunk_reader_.GetChunkDataAccessor(
@@ -374,7 +324,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
 
 template <typename OpType>
 VectorPtr
-PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
+PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType, EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto real_batch_size = input != nullptr
                                      ? static_cast<int64_t>(input->size())
@@ -395,74 +345,88 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
         }
     }
 
-    std::vector<segcore::data_access_type> left_values;
-    std::vector<segcore::data_access_type> right_values;
-    const bool left_gathered = GatherValues(left_value_lookup_,
-                                            expr_->left_data_type_,
-                                            offsets.data(),
-                                            real_batch_size,
-                                            left_values);
-    const bool right_gathered = GatherValues(right_value_lookup_,
-                                             expr_->right_data_type_,
-                                             offsets.data(),
-                                             real_batch_size,
-                                             right_values);
+    const auto left_values = GatherValues(left_value_lookup_,
+                                          expr_->left_data_type_,
+                                          offsets.data(),
+                                          real_batch_size);
+    const auto right_values = GatherValues(right_value_lookup_,
+                                           expr_->right_data_type_,
+                                           offsets.data(),
+                                           real_batch_size);
 
-    const auto vortex_raw_by_offsets =
-        [&](bool gathered, FieldId field_id, DataType data_type) {
-            if (gathered ||
-                segment_chunk_reader_.segment_->type() != SegmentType::Sealed) {
-                return segcore::ChunkDataAccessor{};
-            }
-            auto column = CaptureDataColumn(field_id);
-            if (column == nullptr ||
-                column->GetLocalFormat() !=
-                    ChunkedColumnInterface::LocalFormat::Vortex) {
-                return segcore::ChunkDataAccessor{};
-            }
-            return segment_chunk_reader_.GetDataAccessorByOffsets(
-                data_type,
-                field_id,
-                OffsetView::From(offsets.data(), real_batch_size));
-        };
-    auto left_by_offsets = vortex_raw_by_offsets(
-        left_gathered, left_field_, expr_->left_data_type_);
-    auto right_by_offsets = vortex_raw_by_offsets(
-        right_gathered, right_field_, expr_->right_data_type_);
-
-    const auto left_raw_chunk_count =
-        segment_chunk_reader_.NumChunkData(left_field_);
-    const auto right_raw_chunk_count =
-        segment_chunk_reader_.NumChunkData(right_field_);
-    int64_t cached_left_chunk_id = -1;
-    int64_t cached_right_chunk_id = -1;
-    segcore::ChunkDataAccessor left_accessor;
-    segcore::ChunkDataAccessor right_accessor;
-    const auto read_raw =
-        [&](FieldId field_id,
-            DataType data_type,
-            int64_t raw_chunk_count,
-            int64_t offset,
-            int64_t& cached_chunk_id,
-            segcore::ChunkDataAccessor& accessor) -> segcore::data_access_type {
-        const auto [chunk_id, chunk_offset] = [&]() {
-            if (segment_chunk_reader_.segment_->type() ==
-                SegmentType::Growing) {
-                const auto chunk_size = segment_chunk_reader_.SizePerChunk();
-                return std::pair{offset / chunk_size, offset % chunk_size};
-            }
-            if (segment_chunk_reader_.segment_->is_chunked() &&
-                raw_chunk_count > 0) {
-                return segment_chunk_reader_.GetChunkByOffset(field_id, offset);
-            }
-            return std::pair<int64_t, int64_t>{0, offset};
-        }();
-        if (chunk_id != cached_chunk_id) {
-            accessor = segment_chunk_reader_.GetChunkDataAccessor(
-                data_type, field_id, chunk_id);
-            cached_chunk_id = chunk_id;
+    const auto take_column = [&](const ColumnVectorPtr& gathered,
+                                 FieldId field_id,
+                                 DataType data_type) -> TakeResultPtr {
+        if (gathered || segment_->type() != SegmentType::Sealed) {
+            return nullptr;
         }
-        return accessor(chunk_offset);
+        const auto column = CaptureDataColumn(field_id);
+        AssertInfo(column != nullptr, "field {} has no column", field_id.get());
+        auto take = DispatchCompareType(data_type, [&]<typename T>() {
+            return column->Take(
+                op_ctx_,
+                TakeOptions{OffsetView::From(offsets.data(), real_batch_size),
+                            TargetTypeOf<T>()});
+        });
+        AssertInfo(take != nullptr && take->Size() == real_batch_size,
+                   "field {} has invalid Take result",
+                   field_id.get());
+        return take;
+    };
+    auto left_take =
+        take_column(left_values, left_field_, expr_->left_data_type_);
+    auto right_take =
+        take_column(right_values, right_field_, expr_->right_data_type_);
+
+    const auto read_values = [&]<typename T>(const ColumnVectorPtr& gathered,
+                                             const TakeResultPtr& take,
+                                             FieldId field_id,
+                                             DataType data_type) {
+        const auto* data =
+            gathered ? gathered->RawAsValues<index::owned_t<T>>() : nullptr;
+        auto items = take ? std::make_optional(take->template Access<T>())
+                          : std::nullopt;
+        return [&,
+                data,
+                values = gathered.get(),
+                items,
+                field_id,
+                data_type,
+                cached_chunk_id = int64_t{-1},
+                accessor = segcore::ChunkDataAccessor{},
+                raw = segcore::data_access_type{}](
+                   int64_t i) mutable -> std::optional<T> {
+            if (values) {
+                return values->ValidAt(i) ? std::optional<T>(data[i])
+                                          : std::nullopt;
+            }
+            if (items) {
+                const auto item = (*items)[i];
+                return item.is_valid ? std::optional<T>(*item.value)
+                                     : std::nullopt;
+            }
+            // Only Growing retains the legacy getter and its current-Chunk cache.
+            const auto chunk_size = segment_chunk_reader_.SizePerChunk();
+            const auto offset = offsets[i];
+            const auto chunk_id = offset / chunk_size;
+            if (chunk_id != cached_chunk_id) {
+                accessor = segment_chunk_reader_.GetChunkDataAccessor(
+                    data_type, field_id, chunk_id);
+                cached_chunk_id = chunk_id;
+            }
+            raw = accessor(offset % chunk_size);
+            if (!raw) {
+                return std::nullopt;
+            }
+            if constexpr (std::is_same_v<T, std::string_view>) {
+                // A legacy getter may return an owning string; retain it until
+                // this side is read again, rather than borrowing a temporary.
+                if (const auto* owned = boost::get<std::string>(&raw.value())) {
+                    return std::string_view(*owned);
+                }
+            }
+            return segcore::get_from_variant<T>(raw);
+        };
     };
 
     auto result =
@@ -470,46 +434,27 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
                                        TargetBitmap(real_batch_size, true));
     TargetBitmapView bits(result->GetRawData(), real_batch_size);
     TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
-    for (int64_t i = 0; i < real_batch_size; ++i) {
-        const auto offset = offsets[static_cast<size_t>(i)];
-        segcore::data_access_type left_raw;
-        segcore::data_access_type right_raw;
-        const segcore::data_access_type* left = nullptr;
-        const segcore::data_access_type* right = nullptr;
-        if (left_gathered) {
-            left = &left_values[static_cast<size_t>(i)];
-        } else {
-            left_raw = left_by_offsets ? left_by_offsets(i)
-                                       : read_raw(left_field_,
-                                                  expr_->left_data_type_,
-                                                  left_raw_chunk_count,
-                                                  offset,
-                                                  cached_left_chunk_id,
-                                                  left_accessor);
-            left = &left_raw;
-        }
-        if (right_gathered) {
-            right = &right_values[static_cast<size_t>(i)];
-        } else {
-            right_raw = right_by_offsets ? right_by_offsets(i)
-                                         : read_raw(right_field_,
-                                                    expr_->right_data_type_,
-                                                    right_raw_chunk_count,
-                                                    offset,
-                                                    cached_right_chunk_id,
-                                                    right_accessor);
-            right = &right_raw;
-        }
-        if (!left->has_value() || !right->has_value()) {
-            bits[static_cast<size_t>(i)] = false;
-            valid[static_cast<size_t>(i)] = false;
-            continue;
-        }
-        bits[static_cast<size_t>(i)] =
-            boost::apply_visitor(milvus::query::Relational<decltype(op)>{},
-                                 left->value(),
-                                 right->value());
-    }
+    // Only the typed read/compare loop participates in the type cross-product.
+    DispatchCompareType(expr_->left_data_type_, [&]<typename T>() {
+        auto left = read_values.template operator()<T>(
+            left_values, left_take, left_field_, expr_->left_data_type_);
+        DispatchCompareType(expr_->right_data_type_, [&]<typename U>() {
+            auto right =
+                read_values.template operator()<U>(right_values,
+                                                   right_take,
+                                                   right_field_,
+                                                   expr_->right_data_type_);
+            for (int64_t i = 0; i < real_batch_size; ++i) {
+                const auto l = left(i);
+                const auto r = right(i);
+                if (!l || !r) {
+                    valid[i] = false;
+                    continue;
+                }
+                bits[i] = milvus::query::Relational<OpType>{}(*l, *r);
+            }
+        });
+    });
     // The sequential cursor (current_data_global_pos_) is advanced once per
     // Eval by the caller, so this path must not move it again.
     return result;
@@ -596,6 +541,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
             return ExecCompareLeftType<double>(context);
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             return ExecCompareLeftType<std::string_view>(context);
         default:
             ThrowInfo(
@@ -648,6 +594,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
             break;
         case DataType::STRING:
         case DataType::VARCHAR:
+        case DataType::TEXT:
             if constexpr (IsCompareStringViewType<T>) {
                 return ExecCompareRightType<T, std::string_view>(context);
             }
@@ -803,8 +750,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                     right_field_.get());
             } else {
                 AssertInfo(
-                    segment_chunk_reader_.segment_->type() ==
-                        SegmentType::Growing,
+                    segment_->type() == SegmentType::Growing,
                     "sealed compare Column Scan is unavailable for fields {} "
                     "and {}",
                     left_field_.get(),

@@ -33,16 +33,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// SortFieldIDs returns the collection's storage sort order: the partition key
-// first for namespace collections, the primary key always. Sort compaction and
-// Import V3 must produce identically-ordered output, so both derive the order
-// here rather than one sending it to the other.
+// SortFieldIDs returns the storage order shared by compaction and Import V3:
+// [namespace partition key, primary key] in partition-key namespace mode, and
+// [primary key] otherwise.
 func SortFieldIDs(schema *schemapb.CollectionSchema) ([]int64, error) {
 	pk, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
-	if !schema.GetEnableNamespace() {
+	if !common.UsesNamespacePartitionKey(schema) {
 		return []int64{pk.GetFieldID()}, nil
 	}
 	partitionKey, err := typeutil.GetPartitionKeyFieldSchema(schema)

@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -238,9 +239,9 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	seg := mt.GetSegment(ctx, 100)
 	require.NotNil(t, seg)
@@ -270,9 +271,9 @@ func TestImportTaskV3CreateTaskOnWorkerCreatesSegmentBeforeRunning(t *testing.T)
 		}
 		return nil
 	}).Once()
-	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(8), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(8, cluster)
+	task.CreateTaskOnWorker(8, cluster, task.GetTaskResource())
 
 	require.Equal(t, int64(7), mt.GetSegment(ctx, 100).GetNumOfRows(), "existing segment must be reused, not recreated")
 	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 101).GetState())
@@ -309,9 +310,9 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 
 	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Maybe()
 	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2)).Return(nil).Once()
+	cluster.EXPECT().CreateImportV3(int64(7), mock.Anything, int64(2), mock.Anything).Return(nil).Once()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	require.Equal(t, storage.StorageV3, mt.GetSegment(ctx, 100).GetStorageVersion())
 }
@@ -391,6 +392,27 @@ func TestImportTaskV3AcceptanceNotifiesIndexAndStatsBuild(t *testing.T) {
 	require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 101).GetState())
 	require.Empty(t, meta.DrainBuildIndexChForTest())
 	require.Empty(t, meta.DrainStatsBuildChForTest())
+}
+
+func TestImportTaskV3PartitionNamespaceSortOrder(t *testing.T) {
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	schema := &schemapb.CollectionSchema{
+		EnableNamespace: true,
+		Properties:      []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}},
+		Fields:          retryTestSchema.GetFields(),
+	}
+	mt.AddCollection(&meta.CollectionInfo{ID: 2, Schema: schema})
+	_, err = addImportSegment(ctx, mt, 100, 1, 10, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
+	require.NoError(t, err)
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(&Job{ImportJob: &datapb.ImportJob{Schema: schema}})
+	task := NewImportTaskV3(&datapb.ImportTaskV3{JobId: 1, CollectionId: 2, SegmentId: 100}, importMeta, mt, nil)
+	require.NoError(t, task.acceptResult([]*datapb.ImportTaskV3Result{{Rows: 4, Statistics: &datapb.Statistics{TimestampFrom: 1, TimestampTo: 2}}}))
+	segment := mt.GetSegment(ctx, 100)
+	require.True(t, segment.GetIsSorted())
+	require.False(t, segment.GetIsSortedByNamespace())
 }
 
 func TestReconcileOrphanImportSegments(t *testing.T) {
@@ -671,7 +693,7 @@ func TestImportTaskV3CreateTaskKeepsOldSegmentsOnDropFailure(t *testing.T) {
 	patch := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
 	defer patch.UnPatch()
 
-	task.CreateTaskOnWorker(7, cluster)
+	task.CreateTaskOnWorker(7, cluster, task.GetTaskResource())
 
 	require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState(), "a transient drop failure must not fail the task")
 	require.Equal(t, []int64{101}, task.task.Load().GetOldSegmentIds(),

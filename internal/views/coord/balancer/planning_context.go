@@ -6,6 +6,7 @@ import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
@@ -29,7 +30,7 @@ type balanceInput interface {
 
 type planningContext struct {
 	feedback            ViewFeedbackReader
-	preparationFeedback *preparationSnapshot
+	preparationFeedback *viewfeedback.PlanningSnapshot
 	priorityNow         time.Time
 	recovery            *publishedRecoveryBase
 	balancercache.Reader

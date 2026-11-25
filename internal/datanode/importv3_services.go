@@ -40,7 +40,7 @@ func (node *DataNode) submitImportV3WorkerTask(_ context.Context, task importv3.
 }
 
 // submitReshardTask validates the request and queues one ReshardTask run.
-func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.ReshardTaskRequest) (*commonpb.Status, error) {
+func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.ReshardTaskRequest, resource taskcommon.Resource) (*commonpb.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return merr.Status(err), nil
 	}
@@ -55,11 +55,11 @@ func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.Reshard
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	return node.submitImportV3WorkerTask(ctx, importv3.NewReshardTask(req, cm, pluginContext, node.importV3Metrics))
+	return node.submitImportV3WorkerTask(ctx, importv3.NewReshardTask(req, cm, pluginContext, node.importV3Metrics, resource))
 }
 
 // submitImportTaskV3 validates the request and queues one ImportTaskV3 run.
-func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.ImportTaskV3Request) (*commonpb.Status, error) {
+func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.ImportTaskV3Request, resource taskcommon.Resource) (*commonpb.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return merr.Status(err), nil
 	}
@@ -76,7 +76,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if err != nil {
 		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
-	return node.submitImportV3WorkerTask(ctx, importv3.NewImportTask(req, cm, pluginContext))
+	return node.submitImportV3WorkerTask(ctx, importv3.NewImportTask(req, cm, pluginContext, resource))
 }
 
 func (node *DataNode) queryImportV3WorkerTask(
