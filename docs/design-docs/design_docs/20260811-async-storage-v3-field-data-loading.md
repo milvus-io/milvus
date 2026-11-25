@@ -657,8 +657,9 @@ hop after the remote future completes.
 
 ### Mmap-backed fields
 
-Mmap finalization creates local files and performs blocking write syscalls. If
-`common.diskWriteNumThreads` is positive, the translator asks
+Mmap finalization creates local files and performs blocking write syscalls.
+`common.diskWriteNumThreads` defaults to Milvus's effective CPU count when unset.
+When the effective value is positive, the translator asks
 `LocalFileIOPool` for a keep-alive token only after the remote read succeeds and
 then schedules the complete finalization task there.
 
@@ -677,10 +678,10 @@ blocking writes to the configured local-file worker count across `FileWriter`
 callers, and the existing disk write rate limiter and load priority remain in
 effect.
 
-If `common.diskWriteNumThreads` is `0`, no dedicated local-file executor exists
-and mmap finalization falls back to the async load executor. This preserves the
-existing default configuration while allowing deployments to isolate blocking
-local writes during async-load rollout.
+If `common.diskWriteNumThreads` is explicitly `0`, no dedicated local-file
+executor exists and mmap finalization falls back to the async load executor.
+Positive overrides are preserved. The shipped YAML leaves this key unset so
+default async loads isolate blocking local writes without a separate override.
 
 ## Cancellation and Failure Propagation
 
@@ -772,7 +773,7 @@ remote record batches are not considered consumed until the final
 | `queryNode.segcore.load.fieldData.readWindowSizeBytes` | `16777216` (16 MiB) | watched dynamically; non-positive values fall back to 16 MiB | target loaded bytes per contiguous read window |
 | `queryNode.segcore.load.admission.transientBudgetBytes` | unset: `2 GiB` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted transient bytes across load paths |
 | `queryNode.segcore.load.admission.slots` | unset: `10 × CPUNUM` with async enabled, otherwise `0` | refreshable; explicit values override the switch | QueryNode admitted, unfinished load windows, batches, index stream slices, and async metadata preparation operations |
-| `common.diskWriteNumThreads` | `0` | applied through disk-writer configuration | optional local mmap-finalization executor and write concurrency limit |
+| `common.diskWriteNumThreads` | `CPUNUM` when unset | applied through disk-writer configuration | local mmap-finalization executor and write concurrency limit; explicit `0` disables both |
 
 All six `queryNode.segcore.load` parameters have `Export: false` and are absent
 from `milvus.yaml`. They remain available for explicit internal configuration.
@@ -835,8 +836,9 @@ Deployment validation and rollback:
 1. Configure a positive `queryNode.segcore.load.admission.transientBudgetBytes` appropriate for the
    QueryNode memory envelope, and a positive `queryNode.segcore.load.admission.slots` to
    independently cap unfinished load work.
-2. Optionally configure `common.diskWriteNumThreads` when mmap finalization
-   should be isolated from the async load executor.
+2. The default `common.diskWriteNumThreads` isolates mmap finalization on a
+   local-file pool sized to the CPU count. Override it for the local disk workload;
+   this also limits synchronous FileWriter operations in legacy and index loads.
 3. Async reads are enabled by default. For a synchronous comparison cohort,
    explicitly set `queryNode.segcore.load.asyncReadEnabled=false`.
 4. Restart the affected QueryNodes after changing the mode so all translators

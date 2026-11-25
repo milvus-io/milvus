@@ -1115,12 +1115,13 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 	p.DiskWriteNumThreads = ParamItem{
 		Key:          "common.diskWriteNumThreads",
 		Version:      "2.6.0",
-		DefaultValue: "0",
+		DefaultValue: strconv.Itoa(hardware.GetCPUNum()),
 		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
 Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
 The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
 For example, set this parameter to 1 to serialize these local file writes.
-The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
+When unset, defaults to the CPU count reported by Milvus at initialization.
+Explicit 0 disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
 		Export: true,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
