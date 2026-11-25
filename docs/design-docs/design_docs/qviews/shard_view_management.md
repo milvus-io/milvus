@@ -532,6 +532,11 @@ Incremental statistics publication remains a separate optimization.
     and emptiness preconditions; the registry only rechecks manager identity
     before deletion.
 
+An explicit collection Release also discards the registry's cached public schema
+version. Managers created during the next Load inherit the public version read
+from RootCoord for that load. Schema publication and Release order their cache
+updates under the registry lock, including when Release finds no resident shards.
+
 ## 8. Package Location
 
 ```text

@@ -61,7 +61,16 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	require.Contains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
 	fakeBalancer.triggers = nil
 	shard := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
-	runtime.shardViewRegistry.Ensure(shard)
+	// The DDL publication arrives before the first manager is registered.
+	runtime.resources.PublishCollectionSchema(100, 2)
+	assertSchema := func(version int32, present bool) {
+		t.Helper()
+		m := runtime.shardViewRegistry.Ensure(shard)
+		called := false
+		require.NoError(t, m.RequestReplicaRetirement(ctx, version, func() bool { called = true; return false }))
+		require.Equal(t, present, called)
+	}
+	assertSchema(2, true)
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 	s := &Server{qviewsRuntime: runtime}
@@ -71,6 +80,14 @@ func TestDropLoadConfigV2AckCallbackUpdatesQViewsRuntime(t *testing.T) {
 	assert.NotContains(t, runtime.loadConfigStore.Snapshot().ConfigsMap(), int64(100))
 	assert.Nil(t, runtime.shardViewRegistry.Get(shard))
 	assert.Empty(t, fakeBalancer.triggers, "withdrawal must complete without scheduling placement")
+
+	// An ALTER on an unloaded collection must not seed the next load.
+	runtime.resources.PublishCollectionSchema(100, 3)
+	require.NoError(t, runtime.loadManager.UpdateLoadConfig(ctx, buildAlterLoadConfigBroadcastResult(100)))
+	assertSchema(2, false)
+	assertSchema(3, false)
+	runtime.resources.PublishCollectionSchema(100, 4)
+	assertSchema(4, true)
 }
 
 func buildDropLoadConfigBroadcastResult(collectionID int64) message.BroadcastResultDropLoadConfigMessageV2 {

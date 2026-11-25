@@ -345,12 +345,16 @@ func (r *ShardViewRegistry) HasCollectionShards(collectionID int64) bool {
 // RequestCollectionRelease captures the withdrawn collection's managers under
 // the lock shared with EnsureIf. Manager transitions run outside that lock.
 func (r *ShardViewRegistry) RequestCollectionRelease(ctx context.Context, collectionID int64) error {
-	r.mu.RLock()
+	r.mu.Lock()
+	// The next load recovers its fence from RootCoord before planning. A
+	// publication already in flight owns its manager snapshot and completion.
+	delete(r.publishedSchemas, collectionID)
+	delete(r.publishingSchemas, collectionID)
 	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
 	for id := range r.collectionShards[collectionID] {
 		managers = append(managers, r.shards[id])
 	}
-	r.mu.RUnlock()
+	r.mu.Unlock()
 	control := &viewpb.QueryViewControl{PreemptServingLease: true}
 	for _, manager := range managers {
 		if err := manager.RequestReleaseWithControl(ctx, control); err != nil {
@@ -572,7 +576,17 @@ func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *Sh
 // PublishCollectionSchema records the public read generation recovered from or
 // durably committed to RootCoord. Manager calls run without the registry lock.
 func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version int32) {
+	r.PublishCollectionSchemaIf(collectionID, version, nil)
+}
+
+// PublishCollectionSchemaIf checks load intent under the lock shared with
+// RequestCollectionRelease. The predicate may only read published snapshots.
+func (r *ShardViewRegistry) PublishCollectionSchemaIf(collectionID int64, version int32, current func() bool) {
 	r.mu.Lock()
+	if current != nil && !current() {
+		r.mu.Unlock()
+		return
+	}
 	if old, ok := r.publishedSchemas[collectionID]; ok && old >= version {
 		pending := r.publishingSchemas[collectionID]
 		r.mu.Unlock()

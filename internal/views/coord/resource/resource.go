@@ -57,6 +57,15 @@ func Init(r *Resources) { current.Store(r) }
 // Callers must be inside the initialized Coordinator lifecycle.
 func Resource() *Resources { return current.Load() }
 
+// PublishCollectionSchema applies a durable DDL publication to the active load.
+// Unloaded collections recover this version when QueryCoord plans their next load.
+func (r *Resources) PublishCollectionSchema(id int64, version int32) {
+	r.ShardViews.PublishCollectionSchemaIf(id, version, func() bool {
+		collection := r.BalanceCache.GetCollection(id)
+		return collection != nil && collection.LoadConfig() != nil
+	})
+}
+
 // Refresh publishes pending data mutations and waits for their serving views.
 func (r *Resources) Refresh(ctx context.Context, collectionID int64) error {
 	if err := r.checkActive(ctx); err != nil {

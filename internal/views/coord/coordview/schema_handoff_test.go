@@ -1,7 +1,9 @@
 package coordview
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -67,4 +69,77 @@ func TestRegistryRepeatedSchemaPublication(t *testing.T) {
 	require.Error(t, manager.AddPreparing(t.Context(), testBuilderForShard(1, id).SetSchemaVersion(1)))
 	r.PublishCollectionSchema(1, 3)
 	require.EqualValues(t, 3, *r.Ensure(qviews.ShardID{ReplicaID: 20, VChannel: "p_1v1"}).publishedSchema)
+}
+
+func TestRegistryCollectionReleaseForgetsPublishedSchema(t *testing.T) {
+	r := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	for id := int64(1); id <= 1000; id++ {
+		// The first public read can precede the first manager.
+		r.PublishCollectionSchema(id, 0)
+		require.NoError(t, r.RequestCollectionRelease(t.Context(), id))
+		r.PublishCollectionSchemaIf(id, 3, func() bool { return false })
+	}
+	require.Empty(t, r.publishedSchemas)
+	require.Empty(t, r.publishingSchemas)
+
+	id := qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"}
+	r.PublishCollectionSchema(1, 2)
+	m := r.Ensure(id)
+	require.EqualValues(t, 2, *m.publishedSchema)
+	r.PublishCollectionSchema(2, 4)
+	require.NoError(t, r.RequestCollectionRelease(t.Context(), 1))
+	require.Nil(t, r.Get(id))
+	require.NotContains(t, r.publishedSchemas, int64(1))
+	require.EqualValues(t, 4, r.publishedSchemas[2])
+	r.PublishCollectionSchema(1, 5)
+	require.EqualValues(t, 5, *r.Ensure(id).publishedSchema)
+}
+
+func TestRegistrySchemaReleaseDuringPublication(t *testing.T) {
+	r := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	id := qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"}
+	manager := r.Ensure(id)
+	manager.mu.Lock()
+	var unlock sync.Once
+	release := func() { unlock.Do(manager.mu.Unlock) }
+	defer release()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		r.PublishCollectionSchema(1, 2)
+	}()
+	var pending chan struct{}
+	require.Eventually(t, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		pending = r.publishingSchemas[1]
+		return pending != nil
+	}, time.Second, time.Millisecond)
+
+	waiting, replayed := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(replayed)
+		r.PublishCollectionSchemaIf(1, 2, func() bool { close(waiting); return true })
+	}()
+	<-waiting
+	released := make(chan error, 1)
+	go func() { released <- r.RequestCollectionRelease(t.Context(), 1) }()
+	require.Eventually(t, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		_, found := r.publishedSchemas[1]
+		return !found
+	}, time.Second, time.Millisecond)
+	select {
+	case <-replayed:
+		t.Fatal("duplicate publication returned before manager notification completed")
+	default:
+	}
+	release()
+	require.NoError(t, <-released)
+	<-replayed
+	<-finished
+	<-pending // The old publisher still wakes existing waiters after eviction.
+	require.Empty(t, r.publishedSchemas)
+	require.Empty(t, r.publishingSchemas)
 }
