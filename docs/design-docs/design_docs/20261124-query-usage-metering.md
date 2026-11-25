@@ -35,3 +35,7 @@ The internal lookup counts the planned predicate columns for every selected segm
 ## Conditional Upsert
 
 A `WriteCondition` lookup counts the whole primary-key column used to locate old rows and the whole source column used in the version comparison, in each selected segment. Proxy accumulates successful lookup stages across retries. On a successful Upsert, it reports these read bytes alongside the existing write inputs under `msg_type=upsert` on the same `milvus_proxy_report_value` metric.
+
+## Full AutoID Upsert
+
+The existence lookup counts the entire primary-key column in every selected segment, including lookups with zero matches. Proxy adds the lookup bytes to the successful Upsert's report.

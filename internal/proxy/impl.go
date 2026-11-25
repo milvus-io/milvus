@@ -2545,7 +2545,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
 	usageReporter := extension.RequestUsageReporter()
-	if usageReporter != nil && request.GetWriteCondition() != nil {
+	if usageReporter != nil {
 		it.EnableQueryReadUsage()
 	}
 

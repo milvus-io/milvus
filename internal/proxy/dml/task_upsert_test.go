@@ -2724,16 +2724,23 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	defer readSchema.UnPatch()
 	const beginTS = uint64(200)
 	var captured *dql.QueryTask
+	var returned []*schemapb.FieldData
 
 	m := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, task *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		captured = task
-		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+		return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: returned}, segcore.StorageCost{}, nil
 	}).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(10), nil).Build()
 	defer m.UnPatch()
 
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).Return(&internalpb.QueryReadUsage{DataBytes: 64}).Build()
+	defer readUsage.UnPatch()
 	task := createTestUpdateTask()
+	task.schema = mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+	}})
+	task.EnableQueryReadUsage()
 	task.SetTs(beginTS)
 	task.partitionKeyMode = false
 	task.upsertMsg = &msgstream.UpsertMsg{
@@ -2760,10 +2767,22 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	require.Zero(t, captured.Request().GetBase().GetTimestamp())
 	require.False(t, captured.CanSkipAllocTimestamp(), "the Query must obtain its own Strong-read timestamp")
 	require.Equal(t, []string{"id"}, captured.Request().GetOutputFields())
+	require.True(t, captured.GetCollectQueryReadUsage())
+	require.Empty(t, captured.GetQueryReadFieldIds())
 	require.Zero(t, captured.GetMvccTimestamp())
 	require.False(t, captured.HasRecordedChannelMvcc())
 	require.Empty(t, task.partialUpdateCASGroups)
 	require.Equal(t, beginTS, task.BeginTs())
+	bytes, metered := task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 64, bytes, "an empty lookup still counts its planned primary key column")
+
+	returned = []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1})}
+	_, _, err = retrieveByPKs(t.Context(), task, ids, []string{"id"})
+	require.NoError(t, err)
+	bytes, metered = task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 128, bytes, "the existence lookup has no merge payload")
 }
 
 func TestQueryPreExecuteFullAutoIDPreservesRequestOrder(t *testing.T) {

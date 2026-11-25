@@ -130,7 +130,7 @@ func NewUpsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvus
 	}
 }
 
-// EnableQueryReadUsage opts this conditional Upsert into lookup metering.
+// EnableQueryReadUsage opts the Upsert task into lookup metering.
 func (ut *UpsertTask) EnableQueryReadUsage() {
 	ut.queryUsage = &querymeter.ReadUsageAccumulator{}
 }
@@ -344,16 +344,18 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 		MvccTimestamp:    0,
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
-	if t.queryUsage != nil {
-		// The PK predicate locates old rows. The version comparison in Proxy
-		// is a separate planned read of its source column.
-		condition := t.req.GetWriteCondition()
-		field, err := readSchema.SchemaHelper.GetFieldFromName(condition.GetField())
-		if err != nil {
-			return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("missing conditional upsert read field %q", condition.GetField())
-		}
+	condition := t.req.GetWriteCondition()
+	meterLookup := t.queryUsage != nil && (!t.req.GetPartialUpdate() || condition != nil)
+	if meterLookup {
 		qt.CollectQueryReadUsage = true
-		qt.QueryReadFieldIds = []int64{field.GetFieldID()}
+		if condition != nil {
+			// The version comparison in Proxy reads a separate source column.
+			field, err := readSchema.SchemaHelper.GetFieldFromName(condition.GetField())
+			if err != nil {
+				return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("missing conditional upsert read field %q", condition.GetField())
+			}
+			qt.QueryReadFieldIds = []int64{field.GetFieldID()}
+		}
 	}
 	qt.BindReadSchema(t.collectionID, readSchema)
 	qt.SetActualChannelsMvcc(channelReadTs)
@@ -368,7 +370,7 @@ func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
 	}
-	if t.queryUsage != nil {
+	if meterLookup {
 		if err := t.queryUsage.Add(qt.ReadUsage()); err != nil {
 			return nil, storageCost, err
 		}
