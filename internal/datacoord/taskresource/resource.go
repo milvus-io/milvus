@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -409,8 +410,8 @@ func StatsTargetFields(schema *schemapb.CollectionSchema, subJob indexpb.StatsSu
 	var fields []int64
 	switch subJob {
 	case indexpb.StatsSubJob_TextIndexJob:
-		for _, field := range schema.GetFields() {
-			if typeutil.IsTextMatchEnabled(field) {
+		for _, field := range typeutil.GetAllFieldSchemas(schema) {
+			if schemautil.BuildTextStats(field) {
 				fields = append(fields, field.GetFieldID())
 			}
 		}

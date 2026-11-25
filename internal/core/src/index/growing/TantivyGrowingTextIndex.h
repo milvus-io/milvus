@@ -63,13 +63,13 @@ class TantivyGrowingTextIndex final : public IGrowingIndex,
 
  private:
     struct OwnedBatch {
-        int64_t row_begin{0};
+        int64_t document_begin{0};
         std::vector<std::string> values;
         std::vector<uint8_t> valid;
     };
 
     static OwnedBatch
-    OwnBatch(int64_t row_begin, const TextBatch& batch);
+    OwnBatch(int64_t document_begin, const TextBatch& batch);
 
     void
     AddOwnedBatch(const OwnedBatch& batch);
@@ -90,6 +90,7 @@ class TantivyGrowingTextIndex final : public IGrowingIndex,
 
     std::vector<OwnedBatch> uncommitted_;
     SharedValidityBitmap validity_;
+    int64_t document_count_{0};
     int64_t accepted_end_{0};
     int64_t committed_end_{0};
     int64_t published_end_{0};

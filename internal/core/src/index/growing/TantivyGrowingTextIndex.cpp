@@ -94,19 +94,19 @@ TantivyGrowingTextIndex::TantivyGrowingTextIndex(const char* unique_id,
 }
 
 TantivyGrowingTextIndex::OwnedBatch
-TantivyGrowingTextIndex::OwnBatch(int64_t row_begin, const TextBatch& batch) {
-    static_cast<void>(CheckedBatchEnd(row_begin, batch.row_count));
-    AssertInfo(batch.row_count == 0 || batch.values != nullptr,
+TantivyGrowingTextIndex::OwnBatch(int64_t document_begin,
+                                  const TextBatch& batch) {
+    AssertInfo(batch.value_count == 0 || batch.values != nullptr,
                "growing Tantivy text batch has null values for {} rows",
-               batch.row_count);
+               batch.value_count);
 
     OwnedBatch owned;
-    owned.row_begin = row_begin;
-    owned.values.reserve(batch.row_count);
+    owned.document_begin = document_begin;
+    owned.values.reserve(batch.value_count);
     if (batch.valid != nullptr) {
-        owned.valid.reserve(batch.row_count);
+        owned.valid.reserve(batch.value_count);
     }
-    for (size_t i = 0; i < batch.row_count; ++i) {
+    for (size_t i = 0; i < batch.value_count; ++i) {
         const bool valid = batch.valid == nullptr || batch.valid[i];
         const auto value = batch.values[i];
         if (!valid || value.empty()) {
@@ -125,7 +125,7 @@ void
 TantivyGrowingTextIndex::AddOwnedBatch(const OwnedBatch& batch) {
     static const std::string empty;
     for (size_t i = 0; i < batch.values.size(); ++i) {
-        const auto offset = batch.row_begin + static_cast<int64_t>(i);
+        const auto offset = batch.document_begin + static_cast<int64_t>(i);
         if (!batch.valid.empty() && batch.valid[i] == 0) {
             writer_->add_array_data(&empty, 0, offset);
         } else {
@@ -155,16 +155,16 @@ TantivyGrowingTextIndex::PublishCommitted() {
         "growing Tantivy text cannot publish beyond its committed prefix");
     auto snapshot = writer_->create_snapshot_reader(SetBitsetGrowing);
     const auto count = static_cast<int64_t>(snapshot->count());
-    AssertInfo(count == committed_end_,
+    AssertInfo(count == document_count_,
                "growing Tantivy text snapshot count {} disagrees with "
-               "committed row end {}",
+               "committed document count {}",
                count,
-               committed_end_);
+               document_count_);
     const auto payload_bytes = TextIndexRamPayloadBytes(*snapshot);
     auto index = std::make_shared<TextIndex>(nullptr,
                                              std::move(snapshot),
                                              validity_.Freeze(),
-                                             committed_end_,
+                                             count,
                                              value_type_,
                                              /*file_backed=*/false,
                                              payload_bytes);
@@ -247,18 +247,13 @@ TantivyGrowingTextIndex::Append(int64_t row_begin, const TextBatch& batch) {
                   row_begin,
                   batch_end);
     }
-    auto owned = OwnBatch(row_begin, batch);
-    if (owned.values.empty()) {
-        if (commit_policy_.ShouldCommit()) {
-            CommitAndPublish();
-        }
-        return;
-    }
-
+    const auto document_end =
+        CheckedBatchEnd(document_count_, batch.value_count);
+    auto owned = OwnBatch(document_count_, batch);
     const auto new_null_count = static_cast<size_t>(std::count(
         owned.valid.begin(), owned.valid.end(), static_cast<uint8_t>(0)));
     uncommitted_.reserve(uncommitted_.size() + 1);
-    validity_.PrepareAppend(static_cast<size_t>(batch_end),
+    validity_.PrepareAppend(static_cast<size_t>(document_end),
                             new_null_count != 0);
     try {
         AddOwnedBatch(owned);
@@ -273,10 +268,11 @@ TantivyGrowingTextIndex::Append(int64_t row_begin, const TextBatch& batch) {
     // accepted batches; their already recorded validity remains unchanged.
     for (size_t i = 0; i < owned.valid.size(); ++i) {
         if (owned.valid[i] == 0) {
-            validity_.AppendNull(static_cast<size_t>(row_begin) + i);
+            validity_.AppendNull(static_cast<size_t>(document_count_) + i);
         }
     }
-    validity_.FinishAppend(static_cast<size_t>(batch_end));
+    validity_.FinishAppend(static_cast<size_t>(document_end));
+    document_count_ = document_end;
     uncommitted_.push_back(std::move(owned));
     accepted_end_ = batch_end;
     if (commit_policy_.ShouldCommit()) {

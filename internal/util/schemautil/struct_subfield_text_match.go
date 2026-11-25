@@ -23,17 +23,33 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// RejectStructSubFieldTextMatch rejects enable_match and enable_analyzer on a
-// struct sub-field, including the levels of a nested Array type_schema. Text
-// indexes are only built for top-level fields, so on a sub-field these params
-// would be stored and silently ignored.
-//
-// Call it only on sub-fields a user supplies: earlier versions accepted these
-// params, so a stored struct may carry them, and a snapshot restore or a
-// struct that gets a new sub-field must keep working.
-func RejectStructSubFieldTextMatch(field *schemapb.FieldSchema) error {
+// ValidateStructSubFieldTextMatch accepts text parameters on scalar VarChar
+// leaves. A nested Array has its own type schema and cannot be a text document.
+func ValidateStructSubFieldTextMatch(field *schemapb.FieldSchema) error {
+	if field.GetDataType() == schemapb.DataType_Array && field.GetElementType() == schemapb.DataType_VarChar {
+		var match, analyzer bool
+		for _, kv := range field.GetTypeParams() {
+			if kv.GetKey() != common.EnableMatchKey && kv.GetKey() != common.EnableAnalyzerKey {
+				continue
+			}
+			value, err := strconv.ParseBool(kv.GetValue())
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("invalid %s on struct sub-field %s", kv.GetKey(), field.GetName())
+			}
+			if kv.GetKey() == common.EnableMatchKey {
+				match = value
+			} else {
+				analyzer = value
+			}
+		}
+		if match && !analyzer {
+			return merr.WrapErrParameterInvalidMsg("struct sub-field %s with enable_match requires enable_analyzer", field.GetName())
+		}
+		return nil
+	}
 	params := [][]*commonpb.KeyValuePair{field.GetTypeParams()}
 	for node := field.GetTypeSchema(); node != nil; node = node.GetArrayElement() {
 		params = append(params, node.GetTypeParams())
@@ -52,15 +68,22 @@ func RejectStructSubFieldTextMatch(field *schemapb.FieldSchema) error {
 	return nil
 }
 
-// RejectStructSubFieldsTextMatch applies RejectStructSubFieldTextMatch to every
+// ValidateStructSubFieldsTextMatch applies ValidateStructSubFieldTextMatch to every
 // sub-field of the given structs.
-func RejectStructSubFieldsTextMatch(schemas []*schemapb.StructArrayFieldSchema) error {
+func ValidateStructSubFieldsTextMatch(schemas []*schemapb.StructArrayFieldSchema) error {
 	for _, structField := range schemas {
 		for _, field := range structField.GetFields() {
-			if err := RejectStructSubFieldTextMatch(field); err != nil {
+			if err := ValidateStructSubFieldTextMatch(field); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// BuildTextStats reports whether a worker can build the index from the stored
+// column alone. An evolved sub-field can require a sibling column to obtain
+// the lengths of missing rows; QueryNode indexes its reconstructed column.
+func BuildTextStats(field *schemapb.FieldSchema) bool {
+	return typeutil.IsTextMatchEnabled(field) && !IsAddedStructSubField(field)
 }

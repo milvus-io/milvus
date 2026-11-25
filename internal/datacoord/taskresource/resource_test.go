@@ -169,11 +169,17 @@ func TestStatsTargetFields(t *testing.T) {
 			{FieldID: 105, Name: "json2", DataType: schemapb.DataType_JSON},
 			{FieldID: 106, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
 		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 107, Name: "reviews", Fields: []*schemapb.FieldSchema{{
+				FieldID: 108, Name: "reviews[body]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "enable_analyzer", Value: "true"}, {Key: "enable_match", Value: "true"}},
+			}},
+		}},
 		Functions: []*schemapb.FunctionSchema{{
 			Name: "bm25", Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{102}, OutputFieldIds: []int64{106},
 		}},
 	}
-	assert.Equal(t, []int64{102}, StatsTargetFields(schema, indexpb.StatsSubJob_TextIndexJob))
+	assert.Equal(t, []int64{102, 108}, StatsTargetFields(schema, indexpb.StatsSubJob_TextIndexJob))
 	// Every JSON field gets json key stats, so both are read.
 	assert.Equal(t, []int64{104, 105}, StatsTargetFields(schema, indexpb.StatsSubJob_JsonKeyIndexJob))
 	assert.Equal(t, []int64{106}, StatsTargetFields(schema, indexpb.StatsSubJob_BM25Job))

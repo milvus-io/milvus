@@ -213,7 +213,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
 	// version, so only a new schema is checked for them.
 	if !t.preserveFieldID {
-		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+		if err := schemautil.ValidateStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
 			return err
 		}
 	}
@@ -959,7 +959,7 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.AnalyzerInfo, error) {
 	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range collSchema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(collSchema) {
 		if err := validateAnalyzer(collSchema, field, &analyzerInfos); err != nil {
 			return nil, err
 		}

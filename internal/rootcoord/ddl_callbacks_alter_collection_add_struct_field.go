@@ -62,7 +62,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err := rejectStructSubFieldOriginMarkers([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
 		return err
 	}
-	if err := schemautil.RejectStructSubFieldsTextMatch([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
+	if err := schemautil.ValidateStructSubFieldsTextMatch([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
 		return err
 	}
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
@@ -98,6 +98,11 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
+	addedFileResourceIds, err := c.prepareAlterCollectionAnalyzerFileResources(ctx, coll, schema)
+	if err != nil {
+		return err
+	}
+
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
@@ -116,6 +121,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
 		return err
 	}
 	return nil

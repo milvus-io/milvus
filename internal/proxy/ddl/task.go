@@ -516,7 +516,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	// stored sub-fields may carry enable_match or enable_analyzer from an
 	// earlier version; RootCoord skips this check for it too.
 	if !preserveFieldIDs {
-		if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+		if err := schemautil.ValidateStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
 			return err
 		}
 	}
@@ -805,6 +805,9 @@ func validateAddStructSubFieldProperties(structFieldSchema *schemapb.StructArray
 		}
 		if subField.GetExternalField() != "" {
 			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", subField.GetName())
+		}
+		if err := schemautil.ValidateStructSubFieldTextMatch(subField); err != nil {
+			return err
 		}
 	}
 	return nil

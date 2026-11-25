@@ -988,8 +988,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	}
 
 	unindexedTextFields := make(map[int64]struct{})
-	// todo(SpadeA): consider struct fields when index is ready
-	for _, field := range schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		_, textIndexExist := textIndexedInfo[field.GetFieldID()]
 		if typeutil.IsTextMatchEnabled(field) && !textIndexExist {
 			unindexedTextFields[field.GetFieldID()] = struct{}{}

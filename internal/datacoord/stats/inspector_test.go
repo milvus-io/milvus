@@ -950,6 +950,21 @@ func (s *statsInspectorSuite) TestStatsTaskFieldIDs() {
 	s.Empty(statsTaskFieldIDs(coll.Schema, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
+func (s *statsInspectorSuite) TestStructTextStatsUseChildFieldID() {
+	child := &schemapb.FieldSchema{
+		FieldID: 303, Name: "reviews[body]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.EnableMatchKey, Value: "true"},
+			{Key: common.EnableAnalyzerKey, Value: "true"},
+		},
+	}
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{
+		{Name: "reviews", FieldID: 302, Fields: []*schemapb.FieldSchema{child}},
+	}}
+	s.Equal([]int64{303}, statsTaskFieldIDs(schema, indexpb.StatsSubJob_TextIndexJob))
+	s.Equal([]int64{303}, getStatsFields(&meta.CollectionInfo{Schema: schema}).text)
+}
+
 func (s *statsInspectorSuite) TestGetCollectionWithoutMeta() {
 	inspector := &Inspector{}
 	s.Nil(inspector.getCollection(1))
