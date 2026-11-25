@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -310,16 +309,6 @@ func (suite *ServiceSuite) SetupTest() {
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 		proxyClientManager:  suite.proxyManager,
 	}
-
-	// Initialize checkerController to prevent nil pointer dereference in handleNodeUp
-	suite.server.checkerController = checkers.NewCheckerController(
-		suite.meta,
-		suite.dist,
-		suite.targetMgr,
-		suite.nodeMgr,
-		suite.taskScheduler,
-		suite.broker,
-	)
 
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)

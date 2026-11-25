@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -104,9 +103,6 @@ type Server struct {
 
 	// HeartBeat
 	distController dist.Controller
-
-	// Checkers
-	checkerController *checkers.CheckerController
 
 	// Observers
 	collectionObserver   *observers.CollectionObserver
@@ -343,17 +339,6 @@ func (s *Server) initQueryCoord() error {
 	s.proxyWatcher.DelSessionFunc(s.proxyClientManager.DelProxyClient)
 	mlog.Info(s.ctx, "init proxy manager done")
 
-	// Init checker controller
-	mlog.Info(s.ctx, "init checker controller")
-	s.checkerController = checkers.NewCheckerController(
-		s.meta,
-		s.dist,
-		s.targetMgr,
-		s.nodeMgr,
-		s.taskScheduler,
-		s.broker,
-	)
-
 	// Init observers
 	s.initObserver()
 
@@ -526,7 +511,7 @@ func (s *Server) startServerLoop() {
 
 func (s *Server) Stop() error {
 	// FOLLOW the dependence graph:
-	// checker controller -> task scheduler -> dist controller -> cluster -> session
+	// task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
 	if s.collectionUsage != nil {
@@ -542,11 +527,6 @@ func (s *Server) Stop() error {
 	if s.qviewsRuntime != nil {
 		mlog.Info(s.ctx, "stop query view runtime...")
 		s.qviewsRuntime.stop()
-	}
-
-	if s.checkerController != nil {
-		mlog.Info(s.ctx, "stop checker controller...")
-		s.checkerController.Stop()
 	}
 
 	if s.taskScheduler != nil {

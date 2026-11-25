@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
@@ -495,14 +494,6 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.taskScheduler,
 		suite.server.leaderCacheObserver.RegisterEvent,
-	)
-	suite.server.checkerController = checkers.NewCheckerController(
-		suite.server.meta,
-		suite.server.dist,
-		suite.server.targetMgr,
-		suite.server.nodeMgr,
-		suite.server.taskScheduler,
-		suite.server.broker,
 	)
 	suite.server.targetObserver = observers.NewTargetObserver(
 		suite.server.meta,

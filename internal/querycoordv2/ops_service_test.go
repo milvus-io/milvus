@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
@@ -64,9 +63,7 @@ type OpsServiceSuite struct {
 	taskScheduler  *task.MockScheduler
 	proxyManager   *proxyutil.MockProxyClientManager
 
-	distMgr           *meta.DistributionManager
-	distController    *dist.MockController
-	checkerController *checkers.CheckerController
+	distController *dist.MockController
 
 	// Test object
 	server *Server
@@ -107,15 +104,9 @@ func (suite *OpsServiceSuite) SetupTest() {
 	)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
-	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.distController = dist.NewMockController(suite.T())
-
-	suite.checkerController = checkers.NewCheckerController(suite.meta, suite.distMgr,
-		suite.targetMgr, suite.nodeMgr, suite.taskScheduler, suite.broker)
 
 	suite.server = &Server{
 		kv:                  suite.kv,
@@ -132,7 +123,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 		taskScheduler:       suite.taskScheduler,
 		distController:      suite.distController,
 		ctx:                 context.Background(),
-		checkerController:   suite.checkerController,
 	}
 	suite.server.collectionObserver = observers.NewCollectionObserver(
 		suite.server.dist,
@@ -146,8 +136,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 }
 
 func (suite *OpsServiceSuite) TestDeprecatedCheckers() {
-	// These compatibility endpoints must not touch the retired controller.
-	suite.server.checkerController = nil
+	// These compatibility endpoints keep their deprecated responses.
 	ctx := suite.T().Context()
 	for _, state := range []commonpb.StateCode{commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal} {
 		suite.server.UpdateStateCode(state)
