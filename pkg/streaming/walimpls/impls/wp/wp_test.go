@@ -1,7 +1,6 @@
 package wp
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,8 +32,6 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestWAL(t *testing.T) {
-	tmpDir := t.TempDir()
-	rootPath := filepath.Join(tmpDir, "TestWpWAL")
 	testCases := []struct {
 		name        string
 		storageType string
@@ -43,7 +40,7 @@ func TestWAL(t *testing.T) {
 		{
 			name:        "LocalFsStorage",
 			storageType: "local",
-			rootPath:    rootPath,
+			rootPath:    t.TempDir(),
 		},
 		{
 			name:        "ObjectStorage",
