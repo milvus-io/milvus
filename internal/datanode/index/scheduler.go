@@ -29,6 +29,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -100,6 +101,9 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 	queue.sched.resourceMu.Lock()
 	queue.sched.executions[t] = &taskExecution{task: t, resource: res, slots: slots}
 	queue.sched.resourceMu.Unlock()
+	if index, ok := t.(*indexBuildTask); ok {
+		index.queuedAt = time.Now()
+	}
 	queue.unissuedTasks.PushBack(t)
 	queue.queuedSlot += slots
 	queue.queuedMemory += res.Memory
@@ -158,6 +162,14 @@ func (queue *IndexTaskQueue) PopUnissuedTask(allowVector bool) Task {
 				}
 				continue
 			}
+		}
+		if index, ok := t.(*indexBuildTask); ok {
+			outcome := "started"
+			if queue.sched.ctx.Err() != nil || t.Ctx().Err() != nil {
+				outcome = metrics.CancelLabel
+			}
+			wait := time.Since(index.queuedAt)
+			metrics.DataNodeIndexTaskLatencyInQueue.WithLabelValues(paramtable.GetStringNodeID(), outcome).Observe(float64(wait) / float64(time.Millisecond))
 		}
 		queue.unissuedTasks.Remove(item)
 		queue.queuedSlot -= max(t.GetSlot(), 0)
@@ -360,6 +372,20 @@ func getStateFromError(err error) indexpb.JobState {
 	return indexpb.JobState_JobStateRetry
 }
 
+// indexAttemptOutcome preserves the scheduler's retry/failure decision and exposes cancellation separately.
+func indexAttemptOutcome(err error, state indexpb.JobState) string {
+	switch {
+	case errors.Is(err, errCancel), errors.Is(err, context.Canceled), errors.Is(err, merr.ErrSegcoreFollyCancel):
+		return metrics.CancelLabel
+	case state == indexpb.JobState_JobStateRetry:
+		return "retry"
+	case state == indexpb.JobState_JobStateFailed:
+		return metrics.FailLabel
+	default:
+		return metrics.SuccessLabel
+	}
+}
+
 type taskExecution struct {
 	resource    taskcommon.Resource // immutable accepted booking
 	slots       int64
@@ -404,9 +430,18 @@ func (sched *TaskScheduler) executeTask(exec *taskExecution) error {
 			costCPUNum := taskcost.EstimateIndexBuildCPUNum(ibt.IsVectorIndex())
 			ibt.manager.StoreIndexTaskExecutionStart(ibt.req.GetClusterID(), ibt.req.GetBuildID(), ibt.info, started.UnixMilli(), costCPUNum)
 		}
+		buildStart := time.Now()
 		err := exec.task.Execute(ctx)
+		elapsed := time.Since(buildStart)
 		exec.buildTimeMs = taskcost.ElapsedMs(started)
 		exec.buildEndMs = taskcost.NowMs()
+		if exec.indexTask != nil {
+			state := indexpb.JobState_JobStateFinished
+			if err != nil {
+				state = getStateFromError(err)
+			}
+			metrics.DataNodeBuildIndexExecutionSeconds.WithLabelValues(paramtable.GetStringNodeID(), indexAttemptOutcome(err, state)).Observe(elapsed.Seconds())
+		}
 		return err
 	})
 }
@@ -434,6 +469,7 @@ func (sched *TaskScheduler) finishTask(exec *taskExecution, err error) {
 		if exec.buildEndMs == 0 {
 			exec.buildEndMs = taskcost.NowMs()
 		}
+		metrics.DataNodeBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID(), indexAttemptOutcome(err, state)).Observe(exec.indexTask.tr.ElapseSpan().Seconds())
 		exec.indexTask.SetStateWithCost(state, reason, exec.buildEndMs, exec.buildTimeMs)
 	} else {
 		t.SetState(state, reason)

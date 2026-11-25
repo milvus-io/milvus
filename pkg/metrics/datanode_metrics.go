@@ -333,7 +333,7 @@ var (
 			Name:      "index_task_latency_in_queue",
 			Help:      "latency of index task in queue",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName})
+		}, []string{nodeIDLabelName, statusLabelName})
 
 	DataNodeBuildIndexLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -342,7 +342,7 @@ var (
 			Name:      "build_index_latency",
 			Help:      "latency of build index for segment",
 			Buckets:   indexBucket,
-		}, []string{nodeIDLabelName})
+		}, []string{nodeIDLabelName, statusLabelName})
 
 	DataNodeBuildJSONStatsLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -352,6 +352,14 @@ var (
 			Help:      "latency of building the index by knowhere",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
+
+	DataNodeBuildIndexExecutionSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace, Subsystem: typeutil.IndexNodeRole,
+			Name:    "build_index_execution_seconds",
+			Help:    "Time spent in index task Execute in seconds by build-step outcome, excluding queueing, input preparation and upload",
+			Buckets: indexBucket,
+		}, []string{nodeIDLabelName, statusLabelName})
 
 	DataNodeSlot = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -547,6 +555,7 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeSaveIndexFileLatency)
 	registry.MustRegister(DataNodeIndexTaskLatencyInQueue)
 	registry.MustRegister(DataNodeBuildIndexLatency)
+	registry.MustRegister(DataNodeBuildIndexExecutionSeconds)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
 	registry.MustRegister(DataNodeImportV3Tasks)

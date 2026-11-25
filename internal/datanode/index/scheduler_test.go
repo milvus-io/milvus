@@ -26,6 +26,8 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -774,4 +777,77 @@ func TestIndexTaskGetResource(t *testing.T) {
 
 func newTestTaskScheduler(ctx context.Context) *TaskScheduler {
 	return NewTaskScheduler(ctx, func() taskcommon.Resource { return taskcommon.Resource{Memory: 102400} })
+}
+
+func TestIndexAttemptMetrics(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name, queue, attempt, execution string
+		run                             bool
+		buildErr, endErr                error
+	}{
+		{"finished", "started", metrics.SuccessLabel, metrics.SuccessLabel, true, nil, nil},
+		{"terminal preparation failure", "started", metrics.FailLabel, "", false, nil, merr.ErrIoKeyNotFound},
+		{"retryable execution error", "started", "retry", "retry", true, errors.New("retry"), nil},
+		{"execution canceled", "started", metrics.CancelLabel, metrics.CancelLabel, true, context.Canceled, nil},
+		{"terminal upload failure", "started", metrics.FailLabel, metrics.SuccessLabel, true, nil, merr.ErrIoKeyNotFound},
+		{"canceled while queued", metrics.CancelLabel, metrics.CancelLabel, "", false, nil, errCancel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			queue, total, build := metrics.DataNodeIndexTaskLatencyInQueue, metrics.DataNodeBuildIndexLatency, metrics.DataNodeBuildIndexExecutionSeconds
+			for _, h := range []*prometheus.HistogramVec{queue, total, build} {
+				h.Reset()
+				t.Cleanup(h.Reset)
+				reg.MustRegister(h)
+			}
+			manager := NewTaskManager(context.Background())
+			task := newSchedulerIndexBuildTask(t, manager, 41)
+			sched := newTestTaskScheduler(context.Background())
+			require.NoError(t, sched.TaskQueue.Enqueue(task))
+			task.queuedAt = task.queuedAt.Add(-15 * time.Millisecond)
+			if tc.queue == metrics.CancelLabel {
+				task.cancel()
+			}
+			require.Same(t, task, sched.TaskQueue.PopUnissuedTask(true))
+			exec := sched.beginTask(task)
+			err := tc.endErr
+			if tc.run {
+				patch := mockey.Mock((*indexBuildTask).Execute).Return(tc.buildErr).Build()
+				defer patch.UnPatch()
+				if stepErr := sched.executeTask(exec); stepErr != nil {
+					err = stepErr
+				}
+			}
+			sched.finishTask(exec, err)
+			families, err := reg.Gather()
+			require.NoError(t, err)
+			got := map[string]*dto.Metric{}
+			for _, f := range families {
+				require.Len(t, f.Metric, 1)
+				got[f.GetName()] = f.Metric[0]
+			}
+			check := func(name, status string) *dto.Histogram {
+				m := got["milvus_indexnode_"+name]
+				require.NotNil(t, m)
+				require.EqualValues(t, 1, m.GetHistogram().GetSampleCount())
+				for _, label := range m.Label {
+					if label.GetName() == "status" {
+						require.Equal(t, status, label.GetValue())
+						return m.GetHistogram()
+					}
+				}
+				t.Fatal("missing status label")
+				return nil
+			}
+			require.GreaterOrEqual(t, check("index_task_latency_in_queue", tc.queue).GetSampleSum(), 15.0)
+			attempt := check("build_index_latency", tc.attempt)
+			if tc.run {
+				execution := check("build_index_execution_seconds", tc.execution)
+				require.GreaterOrEqual(t, attempt.GetSampleSum(), execution.GetSampleSum())
+			} else {
+				require.NotContains(t, got, "milvus_indexnode_build_index_execution_seconds")
+			}
+		})
+	}
 }
