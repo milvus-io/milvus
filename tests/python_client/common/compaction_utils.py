@@ -30,9 +30,9 @@ class CompactionStateInfo:
     timeout_plan_no: int = 0
 
 
-def submit_compaction_once(handler, collection_name, *, timeout, context=None, segment_ids=None):
+def submit_compaction_once(handler, collection_name, *, timeout, context=None, segment_ids=None, is_l0=False):
     """Submit a collection-wide or source-restricted manual compaction in one RPC."""
-    request = milvus_pb2.ManualCompactionRequest(collection_name=collection_name)
+    request = milvus_pb2.ManualCompactionRequest(collection_name=collection_name, l0Compaction=is_l0)
     if segment_ids is not None:
         request.segment_ids.extend(sorted(set(segment_ids)))
         if not request.segment_ids:
@@ -49,18 +49,24 @@ def submit_compaction_once(handler, collection_name, *, timeout, context=None, s
     return response.compactionID
 
 
-def reload_collection_with_deadline(client, collection_name, remaining, poll_interval=1):
-    """Release, start loading asynchronously, and poll using the caller's remaining budget."""
+def reload_collection_with_deadline(client, collection_name, remaining, poll_interval=1, *, retry_progress=True):
+    """Release and load once, then poll progress within the caller's remaining budget."""
     handler = client._get_connection()
     context = client._generate_call_context()
-    # Single-attempt SDK calls: decorators and synchronous loading polls reuse
-    # the supplied timeout, so neither may own this helper's total deadline.
+    deadline = time.monotonic() + remaining()
+    # The synchronous SDK load owns its polling loop, so start asynchronously
+    # and keep each progress read within the original deadline.
     unwrap(GrpcHandler.release_collection)(handler, collection_name, timeout=remaining(), context=context)
     unwrap(GrpcHandler.load_collection)(handler, collection_name, timeout=remaining(), context=context, _async=True)
     while True:
-        progress = unwrap(GrpcHandler.get_loading_progress)(
-            handler, collection_name, timeout=remaining(), context=context
-        )
+        if retry_progress:
+            progress = call_compaction_rpc(
+                handler, GrpcHandler.get_loading_progress, collection_name, deadline=deadline, context=context
+            )
+        else:
+            progress = unwrap(GrpcHandler.get_loading_progress)(
+                handler, collection_name, timeout=remaining(), context=context
+            )
         budget = remaining()
         if progress >= 100:
             return
@@ -103,7 +109,7 @@ def reload_compaction_outputs(
             )
         return budget
 
-    reload_collection_with_deadline(client, collection_name, remaining, poll_interval)
+    reload_collection_with_deadline(client, collection_name, remaining, poll_interval, retry_progress=False)
     while True:
         # Bypass the SDK retry decorator so each observation has a fresh budget.
         response = client._get_connection()._stub.GetQuerySegmentInfo(

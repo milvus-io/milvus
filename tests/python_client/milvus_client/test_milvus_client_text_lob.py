@@ -827,15 +827,52 @@ def prepare_compaction_sources(testcase, client, collection_name, rows, batch_si
     testcase.load_collection(client, collection_name)
     testcase.delete(client, collection_name, ids=sorted(deleted))
     testcase.flush(client, collection_name)
-    # Include in-flight plans: a late completion can publish data written before the delete.
-    plans = call_compaction_rpc(
-        client._get_connection(),
-        GrpcHandler.get_compaction_tasks,
-        collection_name,
-        deadline=time.monotonic() + 30,
-        context=client._generate_call_context(),
-    ).plans
-    return sources, {plan.plan_id for plan in plans}
+    return sources, wait_for_delete_distribution(testcase, client, collection_name)
+
+
+def wait_for_delete_distribution(testcase, client, collection_name):
+    """Wait for the flushed L0 deletes to reach the data segments and record the Mix checkpoint."""
+    deadline = time.monotonic() + 120
+    handler = client._get_connection()
+    context = client._generate_call_context()
+
+    def rpc(method, **kwargs):
+        return call_compaction_rpc(handler, method, collection_name, deadline=deadline, context=context, **kwargs)
+
+    observed_l0 = set()
+    distributed = set()
+    while time.monotonic() < deadline:
+        try:
+            segments = rpc(list_persistent_segments_once)
+        except MilvusException as error:
+            if not is_segment_not_found(error):
+                raise
+        else:
+            active_l0 = {s.segment_id for s in segments if s.level_name == "L0"}
+            observed_l0.update(active_l0)
+            plans = rpc(GrpcHandler.get_compaction_tasks).plans
+            distributed = {
+                source
+                for p in plans
+                if p.compaction_type == CompactionType.Level0DeleteCompaction
+                and p.state in (CompactionTaskState.Completed, CompactionTaskState.Cleaned)
+                and not p.failure_reason
+                for source in p.sources
+            }
+            # This collection has a single delete batch. Auto-compaction may
+            # have distributed it before the first snapshot.
+            if distributed and not active_l0 and observed_l0 <= distributed:
+                return {p.plan_id for p in plans}
+            if active_l0 - distributed:
+                job_id = rpc(submit_compaction_once, is_l0=True, retry_transport=False)
+                if job_id != -1:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    assert testcase.wait_for_compaction_ready(client, job_id, timeout=remaining)
+                    continue
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    pytest.fail(f"L0 deletes were not distributed in {collection_name} within 120s: {observed_l0=}, {distributed=}")
 
 
 def mix_compaction_frontier(source_ids, prior_plan_ids, plans):
@@ -868,7 +905,7 @@ def mix_compaction_frontier(source_ids, prior_plan_ids, plans):
     return active, uncovered
 
 
-def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan_ids):
+def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan_ids, *, expected_rows):
     handler = client._get_connection()
     context = client._generate_call_context()
     deadline = time.monotonic() + 120
@@ -960,6 +997,11 @@ def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan
                 loaded = {s.segmentID for s in data}
                 remaining()
                 if loaded == expected and all(s.nodeIds for s in data):
+                    # QueryNode can hide deleted rows through delta logs even if Mix rewrote every original row.
+                    physical_rows = {s.segment_id: s.num_rows for s in segments if s.segment_id in expected}
+                    assert sum(physical_rows.values()) == expected_rows, (
+                        f"Mix outputs for {collection_name} should contain {expected_rows} surviving rows: {physical_rows=}"
+                    )
                     return
         time.sleep(min(2, remaining()))
 
@@ -2169,8 +2211,8 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
     def test_text_lob_compaction_low_delete_ratio(self):
         """
         target: verify compaction after low delete ratio preserves TEXT and text-search visibility
-        method: delete a small subset, compact, reload, and validate survivor checksums/search membership
-        expected: all survivor TEXT checksums match and text/BM25 search returns survivor rows without deleted rows
+        method: distribute L0 deletes, run Mix compaction, reload, and check survivor checksums and search results
+        expected: Mix outputs contain the survivor row count, TEXT checksums match, and text/BM25 membership is preserved
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -2192,9 +2234,9 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         text_match_before_ids = {row[ID_FIELD] for row in text_match_before}
         assert text_match_before_ids
         assert deleted.isdisjoint(text_match_before_ids)
-        compact_and_reload(self, client, collection_name, sources, prior_plan_ids)
-
         survivors = [row for row in rows if row[ID_FIELD] not in deleted]
+        compact_and_reload(self, client, collection_name, sources, prior_plan_ids, expected_rows=len(survivors))
+
         expected = expected_payloads(survivors)
         assert_count(self, client, collection_name, len(survivors))
         rows_by_id = query_by_ids(self, client, collection_name, [row[ID_FIELD] for row in survivors], [CONTENT_FIELD])
@@ -2231,8 +2273,8 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
     def test_text_lob_compaction_high_delete_ratio(self):
         """
         target: verify compaction after high delete ratio preserves surviving LOB payloads
-        method: delete most rows, compact, reload, and validate exact survivor checksum map
-        expected: deleted rows are gone and remaining TEXT payloads are byte-exact
+        method: delete most rows, distribute L0 deletes, run Mix compaction, and reload its outputs
+        expected: Mix outputs contain only the surviving rows and their TEXT payloads are byte-exact
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -2244,9 +2286,9 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         sources, prior_plan_ids = prepare_compaction_sources(
             self, client, collection_name, rows, batch_size=6, deleted=deleted
         )
-        compact_and_reload(self, client, collection_name, sources, prior_plan_ids)
-
         survivors = [row for row in rows if row[ID_FIELD] in survivor_ids]
+        compact_and_reload(self, client, collection_name, sources, prior_plan_ids, expected_rows=len(survivors))
+
         expected = expected_payloads(survivors)
         assert_count(self, client, collection_name, len(survivors))
         rows_by_id = query_by_ids(self, client, collection_name, survivor_ids, [CONTENT_FIELD])
