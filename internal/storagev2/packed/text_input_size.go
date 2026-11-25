@@ -42,18 +42,18 @@ import (
 // counted raw TEXT or references. The entire group's estimated memory and the
 // target field's full LOB file sizes are charged conservatively, not as exact
 // field bytes or process RSS. No TEXT values or LOB payloads are read here.
-func EstimateManifestTextInputSize(ctx context.Context, io *ManifestIOContext, manifestPath string, fieldID int64,
+func EstimateManifestTextInputSize(ctx context.Context, manifestPath string, fieldID int64,
 	config *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext,
 ) (size int64, found bool, err error) {
-	manifest, err := getManifestAsync(ctx, io, manifestPath, config)
+	manifest, err := getManifestHandleWithContext(ctx, manifestPath, config, ExternalSpecContext{})
 	if err != nil {
 		return 0, false, err
 	}
 	defer C.loon_manifest_destroy(manifest)
 
-	for _, file := range manifestLobFiles(manifest) {
-		if file.FieldID == fieldID {
-			size += file.FileSizeBytes
+	for _, file := range unsafe.Slice(manifest.lob_files.files, int(manifest.lob_files.num_files)) {
+		if int64(file.field_id) == fieldID {
+			size += int64(file.file_size_bytes)
 		}
 	}
 	column := strconv.FormatInt(fieldID, 10)
@@ -77,7 +77,7 @@ func EstimateManifestTextInputSize(ctx context.Context, io *ManifestIOContext, m
 	}
 
 	// Footer reads run on the coordinator and share the manifest FFI budget.
-	// Acquire after the asynchronous manifest read releases its worker slot.
+	// Acquire after the synchronous manifest read releases its admission slot.
 	if err := acquireManifestFFI(ctx); err != nil {
 		return 0, false, err
 	}

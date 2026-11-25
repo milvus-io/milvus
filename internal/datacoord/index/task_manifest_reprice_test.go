@@ -83,9 +83,9 @@ func TestNgramManifestRevisionRequeuesWithoutWorkerFailure(t *testing.T) {
 		seg.ManifestPath = fixture.PhysicalManifest
 		seg.NumOfRows = fixture.Segment.NumOfRows
 	})
-	base, _, err := packed.UnmarshalManifestPath(fixture.PhysicalManifest)
+	base, version, err := packed.UnmarshalManifestPath(fixture.PhysicalManifest)
 	require.NoError(t, err)
-	updated, err := packed.CommitManifestUpdates(fixture.PhysicalManifest, meta.CreateStorageConfig(), &packed.ManifestUpdates{
+	updated, err := packed.CommitManifestUpdates(base, version, meta.CreateStorageConfig(), &packed.ManifestUpdates{
 		Stats: []packed.StatEntry{{
 			Key: "bloom_filter.100", Files: []string{filepath.Join(base, "_stats/bloom_filter.100/42")},
 			Metadata: map[string]string{"memory_size": "25"},
@@ -97,7 +97,7 @@ func TestNgramManifestRevisionRequeuesWithoutWorkerFailure(t *testing.T) {
 	require.True(t, ok)
 	handler := meta.NewNMockHandler(t)
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(mt.GetCollection(1), nil)
-	it := NewIndexBuildTask(job, 1, mt, im, handler, fixture.Cm, NewIndexEngineVersionManager())
+	it := newIndexBuildTask(job, 1, mt, im, handler, fixture.Cm, NewIndexEngineVersionManager())
 	require.Equal(t, globalTask.LocalNeedsWorker, it.CompleteOnCoordinator(context.Background()))
 	price := it.GetTaskResource()
 	task := &manifestChangingIndexTask{indexBuildTask: it, publish: func() {

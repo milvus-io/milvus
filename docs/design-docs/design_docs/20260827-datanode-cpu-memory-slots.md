@@ -160,6 +160,10 @@ can include other columns in the group and remains an estimate, not an RSS bound
 If a field added after the segment was written has no stored column, the existing
 field estimate remains: the index reader still materializes its default/null rows.
 
+On 3.0, preparation uses the existing synchronous manifest reader. Waiting for
+the shared manifest/footer admission budget honors the task context; an admitted
+native read completes synchronously.
+
 The task caches the price for the manifest revision and retries failed manifest
 or chunk-metadata reads before worker placement. If the revision changes after
 placement, dispatch explicitly requests preparation again without recording a

@@ -325,9 +325,7 @@ func (p *indexBuildPreparation) ngramResource(ctx context.Context) (taskcommon.R
 		if err != nil {
 			return taskcommon.Resource{}, err
 		}
-		io := packed.NewManifestIOContext(1)
-		defer io.Close()
-		size, found, err := packed.EstimateManifestTextInputSize(ctx, io, p.segment.GetManifestPath(), fieldID, meta.CreateStorageConfig(), pluginContext)
+		size, found, err := packed.EstimateManifestTextInputSize(ctx, p.segment.GetManifestPath(), fieldID, meta.CreateStorageConfig(), pluginContext)
 		if err != nil {
 			return taskcommon.Resource{}, err
 		}

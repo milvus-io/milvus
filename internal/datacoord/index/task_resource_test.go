@@ -112,7 +112,7 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(mt.GetCollection(1), nil)
 	job, ok := im.GetIndexJob(5)
 	require.True(t, ok)
-	it := NewIndexBuildTask(job, 1, mt, im, handler, fixture.Cm, NewIndexEngineVersionManager())
+	it := newIndexBuildTask(job, 1, mt, im, handler, fixture.Cm, NewIndexEngineVersionManager())
 
 	const recorded = int64(223 << 20)
 	setManifest := func(path string) {
@@ -137,9 +137,7 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 	setManifest(fixture.PhysicalManifest)
 	require.Equal(t, globalTask.LocalNeedsWorker, it.CompleteOnCoordinator(ctx))
 	require.False(t, it.CanCompleteOnCoordinator())
-	manifestIO := packed.NewManifestIOContext(1)
-	defer manifestIO.Close()
-	encodedInput, found, err := packed.EstimateManifestTextInputSize(ctx, manifestIO, fixture.PhysicalManifest, 101, meta.CreateStorageConfig(), nil)
+	encodedInput, found, err := packed.EstimateManifestTextInputSize(ctx, fixture.PhysicalManifest, 101, meta.CreateStorageConfig(), nil)
 	require.NoError(t, err)
 	require.True(t, found)
 	oldPrice := taskresource.Index(encodedInput, false)
@@ -149,8 +147,11 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 		{FieldID: 101, Path: "lobs/a", TotalRows: 500, ValidRows: 500, FileSizeBytes: 400 << 20},
 		{FieldID: 101, Path: "lobs/b", TotalRows: 300, ValidRows: 200, FileSizeBytes: 268 << 20},
 	}
-	manifest, err := packed.AddLobFilesToTransaction(fixture.PhysicalManifest, meta.CreateStorageConfig(), files)
+	basePath, version, err := packed.UnmarshalManifestPath(fixture.PhysicalManifest)
 	require.NoError(t, err)
+	version, err = packed.AddLobFilesToTransaction(basePath, version, meta.CreateStorageConfig(), files)
+	require.NoError(t, err)
+	manifest := packed.MarshalManifestPath(basePath, version)
 	setManifest(manifest)
 	cluster := session.NewMockCluster(t)
 	it.CreateTaskOnWorker(1, cluster, oldPrice)
@@ -185,8 +186,22 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 			{BuildID: req.TaskIDs[0], State: commonpb.IndexState_InProgress},
 		}}, nil
 	}).Maybe()
-	columnGroups, err := packed.ReadManifestColumnGroups(manifest, meta.CreateStorageConfig())
-	require.NoError(t, err)
+	// Reuse the real fixture's files through 3.0's fragment API. A projected
+	// group may reference a file containing other columns; footer estimates
+	// still account for that file's full encoded group.
+	var columnGroups []packed.ColumnGroupEntry
+	for _, column := range []string{"100", "101"} {
+		fragments, err := packed.ReadFragmentsFromManifest(manifest, meta.CreateStorageConfig(), []string{column})
+		require.NoError(t, err)
+		group := packed.ColumnGroupEntry{Columns: []string{column}, Format: "parquet"}
+		for _, fragment := range fragments {
+			group.Files = append(group.Files, packed.ColumnGroupFileEntry{
+				Path: fragment.FilePath, StartIndex: fragment.StartRow, EndIndex: fragment.EndRow,
+				Properties: fragment.Properties,
+			})
+		}
+		columnGroups = append(columnGroups, group)
+	}
 	allLobs, err := packed.GetManifestLobFiles(manifest, meta.CreateStorageConfig())
 	require.NoError(t, err)
 	scheduler := globalTask.NewGlobalTaskScheduler(ctx, cluster)
@@ -195,16 +210,19 @@ func TestNgramManifestPricingAndPlacement(t *testing.T) {
 		segment := mt.Segments.GetSegment(job.SegmentID).Clone()
 		segment.ID += n
 		base := fmt.Sprintf("%s/insert_log/1/2/%d", fixture.LegacyRoot, segment.ID)
-		segment.ManifestPath, err = packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), meta.CreateStorageConfig(), &packed.ManifestUpdates{ColumnGroups: columnGroups})
+		segment.ManifestPath, err = packed.CommitManifestUpdates(base, packed.ManifestEarliest, meta.CreateStorageConfig(), &packed.ManifestUpdates{ColumnGroups: columnGroups})
 		require.NoError(t, err)
-		segment.ManifestPath, err = packed.AddLobFilesToTransaction(segment.ManifestPath, meta.CreateStorageConfig(), allLobs)
+		_, version, err := packed.UnmarshalManifestPath(segment.ManifestPath)
 		require.NoError(t, err)
+		version, err = packed.AddLobFilesToTransaction(base, version, meta.CreateStorageConfig(), allLobs)
+		require.NoError(t, err)
+		segment.ManifestPath = packed.MarshalManifestPath(base, version)
 		mt.Segments.SetSegment(segment.ID, segment)
 		next := model.CloneSegmentIndex(job)
 		next.BuildID += n
 		next.SegmentID = segment.ID
 		im.SegmentBuildInfo.Add(model.CloneSegmentIndex(next))
-		scheduler.Enqueue(NewIndexBuildTask(next, 1, mt, im, handler, fixture.Cm, it.indexEngineVersionManager))
+		scheduler.Enqueue(newIndexBuildTask(next, 1, mt, im, handler, fixture.Cm, it.indexEngineVersionManager))
 	}
 	scheduler.Start()
 	defer scheduler.Stop()
@@ -267,7 +285,7 @@ func TestNgramPricingWithPendingSchema(t *testing.T) {
 	// The cached schema can lag the schema returned for preparation.
 	handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(mt.GetCollection(1), nil).Once()
 	job, _ := im.GetIndexJob(5)
-	it := NewIndexBuildTask(job, 1, mt, im, handler, nil, nil)
+	it := newIndexBuildTask(job, 1, mt, im, handler, nil, nil)
 	require.True(t, it.CanCompleteOnCoordinator())
 	require.Equal(t, globalTask.LocalRetry, it.CompleteOnCoordinator(context.Background()))
 	target := &meta.CollectionInfo{ID: 1, Schema: taskresource.FixtureSchema()}

@@ -80,7 +80,7 @@ func TestManifestTextSizeAcrossWriterRepresentations(t *testing.T) {
 				output, err := raw.Close()
 				require.NoError(t, err)
 				defer output.Destroy()
-				rawManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{NewFiles: output})
+				rawManifest, err := packed.CommitManifestUpdates(base, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{NewFiles: output})
 				require.NoError(t, err)
 
 				// This is the ordinary sort/REUSE_ALL writer: its input retains
@@ -106,17 +106,18 @@ func TestManifestTextSizeAcrossWriterRepresentations(t *testing.T) {
 				refOutput, err := refs.Close()
 				require.NoError(t, err)
 				defer refOutput.Destroy()
-				refManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(refsBase, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{NewFiles: refOutput})
+				refManifest, err := packed.CommitManifestUpdates(refsBase, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{NewFiles: refOutput})
 				require.NoError(t, err)
 				lobs, err := packed.GetManifestLobFiles(rawManifest, cfg)
 				require.NoError(t, err)
-				refManifest, err = packed.AddLobFilesToTransaction(refManifest, cfg, lobs)
+				_, refVersion, err := packed.UnmarshalManifestPath(refManifest)
 				require.NoError(t, err)
-				manifestIO := packed.NewManifestIOContext(1)
-				defer manifestIO.Close()
-				rawSize, found, err := packed.EstimateManifestTextInputSize(ctx, manifestIO, rawManifest, 101, cfg, nil)
+				refVersion, err = packed.AddLobFilesToTransaction(refsBase, refVersion, cfg, lobs)
 				require.NoError(t, err)
-				refSize, refsFound, err := packed.EstimateManifestTextInputSize(ctx, manifestIO, refManifest, 101, cfg, nil)
+				refManifest = packed.MarshalManifestPath(refsBase, refVersion)
+				rawSize, found, err := packed.EstimateManifestTextInputSize(ctx, rawManifest, 101, cfg, nil)
+				require.NoError(t, err)
+				refSize, refsFound, err := packed.EstimateManifestTextInputSize(ctx, refManifest, 101, cfg, nil)
 				require.NoError(t, err)
 				require.True(t, found && refsFound)
 				// Parquet readback can drop the all-valid PK bitmap (one byte
@@ -130,19 +131,19 @@ func TestManifestTextSizeAcrossWriterRepresentations(t *testing.T) {
 				}
 				require.Greater(t, rawSize, targetLobs, "inline values and encoded references are still charged")
 				require.Less(t, rawSize, int64(rawStats)+targetLobs, "logical TEXT must not be charged twice")
-				missingSize, found, err := packed.EstimateManifestTextInputSize(ctx, manifestIO, rawManifest, 999, cfg, nil)
+				missingSize, found, err := packed.EstimateManifestTextInputSize(ctx, rawManifest, 999, cfg, nil)
 				require.NoError(t, err)
 				require.Zero(t, missingSize)
 				require.False(t, found)
 				if format == "parquet" && !sharedGroup {
 					canceled, cancel := context.WithCancel(ctx)
 					cancel()
-					_, _, err := packed.EstimateManifestTextInputSize(canceled, manifestIO, rawManifest, 101, cfg, nil)
+					_, _, err := packed.EstimateManifestTextInputSize(canceled, rawManifest, 101, cfg, nil)
 					require.ErrorIs(t, err, context.Canceled)
 
 					// No cipher plugin is loaded in this test process. Supplying
 					// a context must reach the native reader and fail explicitly.
-					_, _, err = packed.EstimateManifestTextInputSize(ctx, manifestIO, rawManifest, 101, cfg,
+					_, _, err = packed.EstimateManifestTextInputSize(ctx, rawManifest, 101, cfg,
 						&indexcgopb.StoragePluginContext{CollectionId: 1, EncryptionZoneId: 2, EncryptionKey: "required-key"})
 					require.ErrorContains(t, err, "cipher plugin")
 
@@ -150,7 +151,7 @@ func TestManifestTextSizeAcrossWriterRepresentations(t *testing.T) {
 					require.NoError(t, err)
 					require.NotEmpty(t, fragments)
 					require.NoError(t, os.Remove(fragments[0].FilePath))
-					_, _, err = packed.EstimateManifestTextInputSize(ctx, manifestIO, rawManifest, 101, cfg, nil)
+					_, _, err = packed.EstimateManifestTextInputSize(ctx, rawManifest, 101, cfg, nil)
 					require.Error(t, err, "unavailable footer must not return an estimate from ambiguous Go statistics")
 				}
 			})

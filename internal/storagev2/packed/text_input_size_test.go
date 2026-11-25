@@ -20,6 +20,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func TestManifestTextSizeCanceledWaitingForFooterAdmission(t *testing.T) {
+func TestManifestTextSizeCanceledWaitingForAdmission(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	base := filepath.Join(cfg.RootPath, "text-size-admission")
 	schema := arrow.NewSchema([]arrow.Field{{Name: "101", Type: arrow.BinaryTypes.String,
@@ -51,54 +52,71 @@ func TestManifestTextSizeCanceledWaitingForFooterAdmission(t *testing.T) {
 	output, err := writer.Close()
 	require.NoError(t, err)
 	defer output.Destroy()
-	manifest, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: output})
+	manifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: output})
 	require.NoError(t, err)
 
-	previous := manifestFFI
-	manifestFFI = &manifestFFILimit{slots: semaphore.NewWeighted(1)}
-	defer func() { manifestFFI = previous }()
-	io := NewManifestIOContext(1)
-	defer io.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	entered := make(chan struct{})
-	var acquire func(context.Context) error
-	// Deterministically let another coordinator operation take the only slot
-	// after the real manifest read. Both admissions still use the real limiter;
-	// only their interleaving is controlled, so cancellation must release the
-	// waiting estimator without consuming a slot or starting a footer read.
-	patch := mockey.Mock(acquireManifestFFI).Origin(&acquire).To(func(callCtx context.Context) error {
-		if callCtx == ctx {
-			if err := acquire(context.Background()); err != nil {
-				return err
+	for _, tc := range []struct {
+		name      string
+		admission int
+	}{
+		{name: "manifest", admission: 1},
+		{name: "footer", admission: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := manifestFFI
+			manifestFFI = &manifestFFILimit{slots: semaphore.NewWeighted(1)}
+			defer func() { manifestFFI = previous }()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			entered := make(chan struct{})
+			var acquire func(context.Context) error
+			admissions := 0
+			releaseBlocker := sync.OnceFunc(releaseManifestFFI)
+			// Let another coordinator operation take the only slot before the
+			// selected read. Both waits use the real limiter; cancellation must
+			// finish without taking the occupied slot or starting native I/O.
+			patch := mockey.Mock(acquireManifestFFI).Origin(&acquire).To(func(callCtx context.Context) error {
+				admissions++
+				if admissions == tc.admission {
+					if err := acquire(context.Background()); err != nil {
+						return err
+					}
+					defer releaseBlocker()
+					close(entered)
+				}
+				return acquire(callCtx)
+			}).Build()
+			defer patch.UnPatch()
+			done := make(chan error, 1)
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				_, _, err := EstimateManifestTextInputSize(ctx, manifest, 101, cfg, nil)
+				done <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("estimator did not reach the selected admission")
 			}
-			defer releaseManifestFFI()
-			close(entered)
-		}
-		return acquire(callCtx)
-	}).Build()
-	defer patch.UnPatch()
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := EstimateManifestTextInputSize(ctx, io, manifest, 101, cfg, nil)
-		done <- err
-	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("footer admission did not follow the manifest read")
+			// Also release the blocker if a regression ignores cancellation.
+			defer func() {
+				releaseBlocker()
+				<-finished
+			}()
+			cancel()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(5 * time.Second):
+				t.Fatal("canceled admission did not finish")
+			}
+			patch.UnPatch()
+			// Cancellation leaves the budget and manifest state usable.
+			size, found, err := EstimateManifestTextInputSize(context.Background(), manifest, 101, cfg, nil)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Positive(t, size)
+		})
 	}
-	cancel()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(5 * time.Second):
-		t.Fatal("canceled footer admission did not finish")
-	}
-	patch.UnPatch()
-	// The canceled estimator released the admission budget and manifest state.
-	size, found, err := EstimateManifestTextInputSize(context.Background(), io, manifest, 101, cfg, nil)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Positive(t, size)
 }
