@@ -580,8 +580,10 @@ func Test_parseIndexParams_DiskANNBuildParameterPrecedence(t *testing.T) {
 				requestJSON, err := json.Marshal(map[string]any{key: value, "quant_type": codec})
 				require.NoError(t, err)
 				task := &CreateIndexTask{
-					fieldSchema: &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+					fieldSchema: &schemapb.FieldSchema{
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+					},
 					req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
 						{Key: common.IndexTypeKey, Value: "DISKANN"},
 						{Key: common.MetricTypeKey, Value: "L2"},
