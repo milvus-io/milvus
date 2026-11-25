@@ -50,7 +50,8 @@ pub fn arabic_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
 }
 
 pub fn thai_analyzer(stop_words: Vec<String>) -> TextAnalyzer {
-    let builder = thai_builder()
+    let builder = thai_builder(None)
+        .unwrap()
         .filter(LowerCaser)
         .filter(DecimalDigitFilter)
         .filter(StopWordFilter::remove(

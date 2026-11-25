@@ -6,7 +6,7 @@ use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
 
 use super::{
     CharGroupTokenizer, GrpcTokenizer, IcuTokenizer, JiebaTokenizer, LangIdentTokenizer,
-    LinderaTokenizer, ThaiTokenizer,
+    LinderaTokenizer, StandardTokenizer, ThaiTokenizer,
 };
 
 use crate::error::{Result, TantivyBindingError};
@@ -15,16 +15,54 @@ pub fn standard_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(SimpleTokenizer::default()).dynamic()
 }
 
+pub fn standard_builder_with_params(
+    params: Option<&json::Map<String, json::Value>>,
+) -> Result<TextAnalyzerBuilder> {
+    let Some(params) = params else {
+        return Ok(standard_builder());
+    };
+    let uax29 = match params.get("uax29") {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| {
+            TantivyBindingError::InvalidArgument(
+                "standard tokenizer uax29 must be a boolean".to_string(),
+            )
+        })?,
+    };
+
+    if !uax29 && params.contains_key("max_token_length") {
+        return Err(TantivyBindingError::InvalidArgument(
+            "standard tokenizer max_token_length requires uax29 to be true".to_string(),
+        ));
+    }
+
+    if uax29 {
+        Ok(TextAnalyzer::builder(StandardTokenizer::from_json(params)?).dynamic())
+    } else {
+        Ok(standard_builder())
+    }
+}
+
 pub fn whitespace_builder() -> TextAnalyzerBuilder {
     TextAnalyzer::builder(WhitespaceTokenizer::default()).dynamic()
 }
 
-pub fn icu_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(IcuTokenizer::new()).dynamic()
+pub fn icu_builder(params: Option<&json::Map<String, json::Value>>) -> Result<TextAnalyzerBuilder> {
+    let tokenizer = match params {
+        Some(params) => IcuTokenizer::from_json(params)?,
+        None => IcuTokenizer::new(),
+    };
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
-pub fn thai_builder() -> TextAnalyzerBuilder {
-    TextAnalyzer::builder(ThaiTokenizer::new()).dynamic()
+pub fn thai_builder(
+    params: Option<&json::Map<String, json::Value>>,
+) -> Result<TextAnalyzerBuilder> {
+    let tokenizer = match params {
+        Some(params) => ThaiTokenizer::from_json(params)?,
+        None => ThaiTokenizer::new(),
+    };
+    Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
 pub fn lang_ident_builder(
@@ -123,13 +161,13 @@ pub fn get_builder_with_tokenizer(
     }
 
     match name {
-        "standard" => Ok(standard_builder()),
+        "standard" => standard_builder_with_params(params_map),
         "whitespace" => Ok(whitespace_builder()),
         "jieba" => jieba_builder(params_map, helper),
         "lindera" => lindera_builder(params_map, helper),
         "char_group" => char_group_builder(params_map),
-        "icu" => Ok(icu_builder()),
-        "thai" => Ok(thai_builder()),
+        "icu" => icu_builder(params_map),
+        "thai" => thai_builder(params_map),
         "language_identifier" => lang_ident_builder(params_map, helper, fc),
         "grpc" => grpc_builder(params_map),
         other => {
