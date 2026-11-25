@@ -326,7 +326,7 @@ woodpecker:
       conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local, service]
-    rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
+    rootPath: default # With 'default', the root is localStorage.path/wp. For embedded local storage, provision localStorage.path and Milvus creates its wp subdirectory. Provision an explicitly configured local root before startup.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
