@@ -673,7 +673,10 @@ type StreamingSearchTask struct {
 	streamReducer segcore.StreamSearchReducer
 }
 
-var _ scheduler.PrunableTask = (*StreamingSearchTask)(nil)
+var (
+	_ scheduler.PrunableTask    = (*StreamingSearchTask)(nil)
+	_ scheduler.QueueBudgetTask = (*StreamingSearchTask)(nil)
+)
 
 func NewStreamingSearchTask(ctx context.Context,
 	collection *segments.Collection,
@@ -712,6 +715,16 @@ func (t *StreamingSearchTask) MergeWith(other scheduler.Task) bool {
 // task instead of this receiver.
 func (t *StreamingSearchTask) PruneCanceled() (scheduler.Task, int, error) {
 	if err := cancellationOf(t.ctx); err != nil {
+		t.finishPruned(err)
+		return nil, 1, err
+	}
+	return t, 0, nil
+}
+
+// PruneQueued must retain the streaming executor just like PruneCanceled.
+// Streaming tasks never merge, so their own budget covers the entire task.
+func (t *StreamingSearchTask) PruneQueued(now time.Time) (scheduler.Task, int, error) {
+	if err := t.queueBudget.ExpiryError(t.ctx, now); err != nil {
 		t.finishPruned(err)
 		return nil, 1, err
 	}

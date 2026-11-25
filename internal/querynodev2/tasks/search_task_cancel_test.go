@@ -542,3 +542,46 @@ func TestPruneQueuedCancellationDeadlineAndUnlimitedMember(t *testing.T) {
 	require.EqualValues(t, 5, unlimited.NQ())
 	assertNotNotified(t, unlimited)
 }
+
+func TestPruneQueuedPreservesStreamingSearchTask(t *testing.T) {
+	for _, name := range []string{"unlimited", "within_budget", "overloaded", "canceled", "deadline"} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Now()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			budget := scheduler.QueueBudget{EnqueueTime: now.Add(-time.Second)}
+			var wantErr error
+			switch name {
+			case "within_budget":
+				budget.MaxWait = 2 * time.Second
+			case "overloaded":
+				budget.MaxWait = time.Millisecond
+				wantErr = merr.ErrServiceTooManyRequests
+			case "canceled":
+				cancel()
+				wantErr = context.Canceled
+			case "deadline":
+				var cancelDeadline context.CancelFunc
+				ctx, cancelDeadline = context.WithDeadline(ctx, now.Add(-time.Second))
+				defer cancelDeadline()
+				wantErr = context.DeadlineExceeded
+			}
+			task := &StreamingSearchTask{SearchTask: *newGroupMember(ctx, 1)}
+			var queued scheduler.QueueBudgetTask = task
+			queued.SetQueueBudget(budget)
+			survivor, dropped, cause := queued.PruneQueued(now)
+			if wantErr == nil {
+				require.Same(t, task, survivor)
+				require.Zero(t, dropped)
+				require.NoError(t, cause)
+				require.Equal(t, budget, survivor.(scheduler.QueueBudgetTask).QueueBudget())
+			} else {
+				require.Nil(t, survivor)
+				require.Equal(t, 1, dropped)
+				require.ErrorIs(t, cause, wantErr)
+				require.ErrorIs(t, waitResult(t, &task.SearchTask), wantErr)
+			}
+			assertNotNotified(t, &task.SearchTask)
+		})
+	}
+}
