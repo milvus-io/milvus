@@ -711,8 +711,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     EstimateSegmentResourceUsage() const;
 
     ResourceUsage
-    EstimateSegmentResourceUsage(const Schema& schema,
-                                 int64_t row_count = -1) const;
+    EstimateSegmentResourceUsage(const Schema& schema) const;
 
     void
     ApplyFieldValidData(milvus::OpContext* op_ctx,
@@ -831,7 +830,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     UpdateResourceTracking();
 
     void
-    UpdateResourceTracking(const Schema& schema, int64_t row_count = -1);
+    UpdateResourceTracking(const Schema& schema);
 
  private:
     void

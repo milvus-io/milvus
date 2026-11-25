@@ -931,7 +931,7 @@ SegmentGrowingImpl::PublishGrowingIndexesThroughRawReady() {
     if (segcore_config_.get_enable_mutable_scalar_index()) {
         // Index allocations are now complete. Charge them before visibility:
         // accounting failure must not report an error after publishing rows.
-        UpdateResourceTracking(*schema, growing_index_feed_cursor_);
+        UpdateResourceTracking(*schema);
     }
     const auto visible_end = insert_record_.ack_responder_.GetAck();
     AssertInfo(visible_end <= growing_index_feed_cursor_,
@@ -1396,11 +1396,8 @@ SegmentGrowingImpl::EstimateSegmentResourceUsage() const {
 }
 
 cachinglayer::ResourceUsage
-SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema,
-                                                 int64_t row_count) const {
-    // Ordered feed supplies its accepted prefix before publishing ACK. Other
-    // callers retain the existing query-visible row-count estimate.
-    const int64_t num_rows = row_count < 0 ? get_row_count() : row_count;
+SegmentGrowingImpl::EstimateSegmentResourceUsage(const Schema& schema) const {
+    int64_t num_rows = get_row_count();
     if (num_rows == 0) {
         return {static_cast<int64_t>(growing_indexes_.UnchargedResidentBytes()),
                 0};
@@ -1596,9 +1593,8 @@ SegmentGrowingImpl::UpdateResourceTracking() {
 }
 
 void
-SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema,
-                                           int64_t row_count) {
-    auto new_resource = EstimateSegmentResourceUsage(schema, row_count);
+SegmentGrowingImpl::UpdateResourceTracking(const Schema& schema) {
+    auto new_resource = EstimateSegmentResourceUsage(schema);
 
     // Lock to ensure refund-then-charge is atomic
     std::lock_guard<std::mutex> lock(resource_tracking_mutex_);
