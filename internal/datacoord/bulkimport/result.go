@@ -105,6 +105,9 @@ func validateImportResults(results []*datapb.ImportTaskV3Result, segmentCount in
 			if result.GetStatistics() == nil || result.GetStatistics().GetTimestampFrom() > result.GetStatistics().GetTimestampTo() {
 				return merr.WrapErrDataIntegrityMsg("non-empty import segment result at index %d has invalid statistics", index)
 			}
+			if err := meta.CheckFieldLogicalSizes(result.GetStatistics().GetFieldLogicalSizes(), result.GetRows(), result.GetManifestPath()); err != nil {
+				return merr.Wrapf(err, "import segment result at index %d", index)
+			}
 		}
 	}
 	return nil
@@ -150,8 +153,8 @@ func applyImportResults(ctx context.Context, mt *meta.Meta, collectionID int64, 
 			// positions; FieldBinlog arrays are intentionally not persisted.
 			segmentOps = append(segmentOps,
 				meta.UpdateManifest(segmentID, result.GetManifestPath()),
-				meta.UpdateSegmentStats(segmentID, result.GetStatistics()),
 				meta.UpdateImportedRows(segmentID, result.GetRows()),
+				meta.UpdateSegmentStats(segmentID, result.GetStatistics()),
 				meta.UpdateImportSegmentPosition(segmentID, result.GetStatistics().GetTimestampFrom(), result.GetStatistics().GetTimestampTo()),
 				updateImportResultProjectionOperator(segmentID, result, sorted, namespaceSorted),
 				meta.UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed),
@@ -165,8 +168,8 @@ func applyImportResults(ctx context.Context, mt *meta.Meta, collectionID int64, 
 			segmentOps = append(segmentOps,
 				meta.UpdateBinlogsOperator(segmentID, result.GetInsertLogs(), statslogs, nil, result.GetBm25Logs()),
 				meta.UpdateManifest(segmentID, result.GetManifestPath()),
-				meta.UpdateSegmentStats(segmentID, result.GetStatistics()),
 				meta.UpdateImportedRows(segmentID, result.GetRows()),
+				meta.UpdateSegmentStats(segmentID, result.GetStatistics()),
 				meta.UpdateImportSegmentPosition(segmentID, result.GetStatistics().GetTimestampFrom(), result.GetStatistics().GetTimestampTo()),
 				updateImportResultProjectionOperator(segmentID, result, sorted, namespaceSorted),
 				meta.UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed),
@@ -205,7 +208,8 @@ func importV3SegmentStatsNonZero(stats *datapb.Statistics) bool {
 		stats.GetDeltaTimestampFrom() != 0 ||
 		stats.GetDeltaTimestampTo() != 0 ||
 		len(stats.GetNullCounts()) > 0 ||
-		len(stats.GetValidElementCounts()) > 0
+		len(stats.GetValidElementCounts()) > 0 ||
+		stats.GetFieldLogicalSizes() != nil
 }
 
 func validateImportResultSegmentOperator(collectionID, segmentID int64, result *datapb.ImportTaskV3Result, sorted, namespaceSorted bool) meta.UpdateOperator {

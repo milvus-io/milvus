@@ -534,6 +534,7 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			FieldLogicalSizes:   meta.SegmentFieldLogicalSizes(segInfo.SegmentInfo),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
