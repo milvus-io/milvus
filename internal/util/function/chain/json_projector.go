@@ -64,7 +64,10 @@ func materializeEmptyPlannedColumns(
 			return merr.Wrapf(err, "function chain input %q", input.LogicalName)
 		}
 		builder.SetFieldNullable(input.LogicalName, nullable)
-		if input.DataType != schemapb.DataType_JSON {
+		switch {
+		case input.VectorField != nil:
+			builder.SetFieldSchema(input.LogicalName, input.VectorField)
+		case input.DataType != schemapb.DataType_JSON:
 			builder.SetFieldSchema(input.LogicalName, &schemapb.FieldSchema{
 				Name: input.LogicalName, FieldID: input.SourceFieldID, DataType: dataType, Nullable: nullable,
 			})
@@ -160,6 +163,11 @@ func importPlannedFieldData(
 			}
 			if err := importFieldDataWithName(builder, fieldData, first.LogicalName, offsets, alloc); err != nil {
 				return err
+			}
+			if first.VectorField != nil {
+				// Take vector metadata from the collection schema, not from
+				// the payload, which may omit it when every row is null.
+				builder.SetFieldSchema(first.LogicalName, first.VectorField)
 			}
 		}
 

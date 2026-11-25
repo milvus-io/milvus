@@ -1321,12 +1321,15 @@ func (t *SearchTask) requeryOutputFields() []string {
 	for _, orderByField := range t.orderByFields {
 		outputFieldNames.Insert(orderByField.OutputFieldName)
 	}
-	// Add highlight dynamic fields to requery output
+	// Add the fields highlighting reads (text, analyzer-name columns, dynamic
+	// fields); the requery result replaces the search output fields.
 	if t.highlighter != nil {
-		highlightDynFields := t.highlighter.DynamicFieldNames()
-		if len(highlightDynFields) > 0 {
-			outputFieldNames.Insert(highlightDynFields...)
+		for _, id := range t.highlighter.RequiredFieldIDs() {
+			if field := typeutil.GetFieldByID(t.schema.CollectionSchema, id); field != nil {
+				outputFieldNames.Insert(field.GetName())
+			}
 		}
+		outputFieldNames.Insert(t.highlighter.DynamicFieldNames()...)
 	}
 	return outputFieldNames.Collect()
 }

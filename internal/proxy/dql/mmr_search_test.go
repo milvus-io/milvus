@@ -474,3 +474,14 @@ func TestSearchWithRequeryAndRerankByFieldDataPipe_MMRElementLevel(t *testing.T)
 		assert.Equal(t, 10*id, tags[i])
 	}
 }
+
+// The requery replaces the search output fields, so it must also fetch the
+// fields that highlighting reads.
+func TestRequeryOutputFieldsIncludeHighlightDependencies(t *testing.T) {
+	task := &SearchTask{
+		schema:                 mustNewSchemaInfo(mmrTestSchema()),
+		translatedOutputFields: []string{"pk"},
+		highlighter:            &mockHighlighter{requiredFieldIDs: []int64{102}, dynamicFieldNames: []string{"dyn"}},
+	}
+	assert.ElementsMatch(t, []string{"pk", "tag", "dyn"}, task.requeryOutputFields())
+}

@@ -55,6 +55,10 @@ type ResolvedChainInput struct {
 	// DataTypeHint controls the projected JSON-path column type. It is required
 	// for JSON paths and unused for ordinary scalar fields.
 	DataTypeHint schemapb.DataType
+	// VectorField is the collection schema of a vector input. Vector columns
+	// take dim and element type from it, so an input that returned no rows or
+	// only null vectors still has complete metadata.
+	VectorField *schemapb.FieldSchema
 }
 
 // DataFrameInputPlan contains the schema-resolved inputs needed to materialize
@@ -156,11 +160,7 @@ func CompileDataFrameInputPlanWithSchemaHelper(
 						"op[%d]: function chain input %q has unsupported field type %s",
 						opIdx, name, resolved.DataType.String())
 				}
-				field, err := schemaHelper.GetFieldFromID(resolved.SourceFieldID)
-				if err != nil {
-					return nil, merr.Wrapf(err, "op[%d] input %q", opIdx, name)
-				}
-				if err := ValidateMMRInputField(schemaHelper, field); err != nil {
+				if err := ValidateMMRInputField(schemaHelper, resolved.VectorField); err != nil {
 					return nil, merr.Wrapf(err, "op[%d]", opIdx)
 				}
 			}
@@ -294,7 +294,7 @@ func resolveSchemaChainInput(
 		}
 	}
 
-	return &ResolvedChainInput{
+	resolved := &ResolvedChainInput{
 		LogicalName:   name,
 		SourceFieldID: field.GetFieldID(),
 		FieldName:     field.GetName(),
@@ -302,7 +302,11 @@ func resolveSchemaChainInput(
 		Nullable:      field.GetNullable(),
 		NestedPath:    append([]string(nil), nestedPath...),
 		DataTypeHint:  hint,
-	}, nil
+	}
+	if typeutil.IsVectorType(field.GetDataType()) {
+		resolved.VectorField = field
+	}
+	return resolved, nil
 }
 
 func isExplicitMetaInput(name string) bool {

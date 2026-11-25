@@ -128,13 +128,17 @@ func newDataFrameInputPlanFromFieldNames(
 		// Deduplicate only materialized columns; keep FunctionScore intact so
 		// each reranker can still validate its original input cardinality.
 		seen[fieldName] = struct{}{}
-		plan.Inputs = append(plan.Inputs, chain.ResolvedChainInput{
+		input := chain.ResolvedChainInput{
 			LogicalName:   fieldName,
 			SourceFieldID: field.GetFieldID(),
 			FieldName:     field.GetName(),
 			DataType:      field.GetDataType(),
 			Nullable:      field.GetNullable(),
-		})
+		}
+		if typeutil.IsVectorType(field.GetDataType()) {
+			input.VectorField = field
+		}
+		plan.Inputs = append(plan.Inputs, input)
 	}
 	return plan, nil
 }

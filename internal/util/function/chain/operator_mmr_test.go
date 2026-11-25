@@ -880,3 +880,50 @@ func TestNewMMROpFromRepr(t *testing.T) {
 	_, err = NewMMROpFromReprWithContext(&OperatorRepr{Type: types.OpTypeMMR, Inputs: []string{"a", "b"}}, types.FunctionBuildContext{})
 	assert.ErrorContains(t, err, "exactly 1")
 }
+
+// A hybrid route that returns no rows still gets complete vector metadata
+// from the input plan, so MMR after fusion finds the dim.
+func TestBuildMMRRerankChain_EmptyFirstRoute(t *testing.T) {
+	paramtable.Init()
+	alloc := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer alloc.AssertSize(t, 0)
+	schema := mmrCollSchema()
+	plan := &DataFrameInputPlan{Inputs: []ResolvedChainInput{{
+		LogicalName: mmrTestField, SourceFieldID: 102, FieldName: mmrTestField,
+		DataType: schemapb.DataType_FloatVector, VectorField: schema.Fields[2],
+	}}}
+
+	empty, err := FromSearchResultData(&schemapb.SearchResultData{
+		NumQueries: 1, Topks: []int64{0}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}},
+	}, alloc, plan)
+	require.NoError(t, err)
+	defer empty.Release()
+	ids, scores, vecs := mmrPagingFixture()
+	flat := make([]float32, 0, 2*len(vecs))
+	for _, v := range vecs {
+		flat = append(flat, v...)
+	}
+	full, err := FromSearchResultData(&schemapb.SearchResultData{
+		NumQueries: 1, TopK: 10, Topks: []int64{10}, Scores: scores,
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_FloatVector, FieldName: mmrTestField, FieldId: 102,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: flat}},
+			}},
+		}},
+	}, alloc, plan)
+	require.NoError(t, err)
+	defer full.Release()
+
+	rrf := &schemapb.FunctionSchema{Type: schemapb.FunctionType_Rerank, Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "rrf"}}}
+	params := NewSearchParams(1, 4, 0, -1)
+	params.AnnsFields = []string{mmrTestField, "vec2"}
+	fc, err := BuildRerankChain(schema, &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{rrf, mmrFunction(nil)}},
+		[]string{"COSINE", "IP"}, params, alloc)
+	require.NoError(t, err)
+	out, err := fc.ExecuteWithContext(context.Background(), empty, full)
+	require.NoError(t, err)
+	defer out.Release()
+	assert.Len(t, mmrIDs(t, out)[0], 4)
+}
