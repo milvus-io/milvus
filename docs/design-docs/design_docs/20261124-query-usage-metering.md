@@ -16,10 +16,14 @@ Sealed workers read the field totals bound to the selected manifest revision and
 
 Proxy adds successful shard contributions and the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty shard results retain their usage.
 
-The first change uses the unary Query path for metered requests so it can receive complete usage from all selected workers. Each successful QueryIterator page is measured independently. Search and HybridSearch have their own request accounting.
+The first change uses the unary Query path for metered requests so it can receive complete usage from all selected workers. Each successful QueryIterator page is measured independently.
 
 ## Search
 
 Search counts the original vector column and all planned predicate, grouping, aggregation, and sort columns in each selected segment. For each ANN or filter-only stage, workers multiply the planned column sizes by that stage's effective NQ. Filter-only stages include their predicates. Index sizes and hit counts do not enter the calculation.
 
 Proxy adds successful read stages, including internal primary-key lookups and requery, to the same Search usage. A requery counts its own planned columns once per execution. Proxy adds the logical values in the final client response once and reports a single `bytes` value for the successful request. Metered Search receives worker usage through unary reduction.
+
+## HybridSearch
+
+Each sub-search follows the Search column rules using its own effective NQ. Workers sum these contributions. A sub-search skipped during planning contributes zero. Proxy adds successful shared requery reads and the logical values in the final fused response, then reports one `bytes` value for the successful HybridSearch RPC. The legacy advanced Search entry uses the same accounting and retains its Search operation name.

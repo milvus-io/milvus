@@ -15,6 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -32,6 +33,8 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 		MvccTimestamp:           14,
 		IsAdvanced:              true,
 		CollectionTtlTimestamps: 17,
+		CollectSearchReadUsage:  true,
+		SearchReadFieldIds:      []int64{23, 23},
 	}
 	sub := &internalpb.SubSearchRequest{
 		Dsl:                "dsl",
@@ -60,6 +63,10 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	assert.Equal(t, parent.GetOutputFieldsId(), req.GetOutputFieldsId())
 	assert.Equal(t, parent.GetMvccTimestamp(), req.GetMvccTimestamp())
 	assert.Equal(t, parent.GetCollectionTtlTimestamps(), req.GetCollectionTtlTimestamps())
+	assert.True(t, req.GetCollectSearchReadUsage())
+	assert.Equal(t, parent.GetSearchReadFieldIds(), req.GetSearchReadFieldIds())
+	req.SearchReadFieldIds[0] = 24
+	assert.Equal(t, int64(23), parent.SearchReadFieldIds[0])
 	assert.Equal(t, sub.GetPartitionIDs(), req.GetPartitionIDs())
 	assert.Equal(t, sub.GetSerializedExprPlan(), req.GetSerializedExprPlan())
 	assert.Equal(t, sub.GetPlaceholderGroup(), req.GetPlaceholderGroup())
@@ -223,6 +230,37 @@ func TestServerSearchOnViewExecutesAdvancedSubSearches(t *testing.T) {
 	assert.Equal(t, 1, provider.releaseCount(3))
 }
 
+func TestServerSearchOnViewAdvancedSearchUsage(t *testing.T) {
+	provider := newAdvancedTaskProvider(4)
+	scheduler := &advancedScheduler{}
+	server := NewServer(provider, scheduler)
+	req := advancedSearchOnViewRequest([]*internalpb.SubSearchRequest{
+		{FieldId: 1, Nq: 2, Topk: 3, MetricType: metric.IP},
+		{FieldId: 2, Nq: 25, Topk: 4, MetricType: metric.BM25, Skip: true},
+		{FieldId: 3, Nq: 3, Topk: 5, MetricType: metric.L2},
+		{FieldId: 4, Nq: 7, Topk: 6, MetricType: metric.L2},
+	})
+	req.LegacyReq.CollectSearchReadUsage = true
+	req.LegacyReq.Nq = 99
+
+	resp, err := server.SearchOnView(t.Context(), req)
+	require.NoError(t, err)
+	result := resp.GetLegacyResults()
+	require.Len(t, result.GetSubResults(), 4)
+	require.ElementsMatch(t, []int64{1, 3}, scheduler.executedFields())
+	require.EqualValues(t, 110, result.GetSearchReadUsage().GetDataBytes())
+
+	empty, err := EmptySearchResults(req.GetLegacyReq())
+	require.NoError(t, err)
+	require.Len(t, empty.GetSubResults(), 4)
+	require.NotNil(t, empty.GetSearchReadUsage())
+	require.Zero(t, empty.GetSearchReadUsage().GetDataBytes())
+
+	scheduler.omitUsageField = 3
+	_, err = server.SearchOnView(t.Context(), req)
+	require.ErrorContains(t, err, "did not report read usage")
+}
+
 func TestServerSearchOnViewFailsAdvancedRequestWhenOneSubSearchFails(t *testing.T) {
 	provider := newAdvancedTaskProvider()
 	scheduler := &advancedScheduler{failField: 2}
@@ -342,9 +380,10 @@ func (p *advancedTaskProvider) releaseCount(fieldID int64) int {
 }
 
 type advancedScheduler struct {
-	mu        sync.Mutex
-	executed  []int64
-	failField int64
+	mu             sync.Mutex
+	executed       []int64
+	failField      int64
+	omitUsageField int64
 }
 
 func (s *advancedScheduler) Search(_ context.Context, tasks SearchSegmentTasks) (*internalpb.SearchResults, error) {
@@ -356,7 +395,7 @@ func (s *advancedScheduler) Search(_ context.Context, tasks SearchSegmentTasks) 
 	if fieldID == s.failField {
 		return nil, viewerror.NewUnknownError("sub-search %d failed", fieldID)
 	}
-	return &internalpb.SearchResults{
+	result := &internalpb.SearchResults{
 		Status:     merr.Success(),
 		MetricType: task.req.GetMetricType(),
 		NumQueries: task.req.GetNq(),
@@ -366,7 +405,15 @@ func (s *advancedScheduler) Search(_ context.Context, tasks SearchSegmentTasks) 
 			TopK:       task.req.GetTopk(),
 			Topks:      make([]int64, int(task.req.GetNq())),
 		},
-	}, nil
+	}
+	if task.req.GetCollectSearchReadUsage() && fieldID != s.omitUsageField {
+		usage, err := querymeter.ScaleSearchUsage(&internalpb.QueryReadUsage{DataBytes: uint64(10 * fieldID)}, task.req.GetNq())
+		if err != nil {
+			return nil, err
+		}
+		result.SearchReadUsage = usage
+	}
+	return result, nil
 }
 
 func (*advancedScheduler) Query(context.Context, QuerySegmentTasks) (*internalpb.RetrieveResults, error) {

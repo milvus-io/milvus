@@ -2656,7 +2656,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	reporter := extension.RequestUsageReporter()
 	var usage *querymeter.SearchUsage
-	if reporter != nil && len(request.GetSubReqs()) == 0 {
+	if reporter != nil {
 		ctx, usage = querymeter.WithSearchUsage(ctx)
 	}
 
@@ -2935,6 +2935,12 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
 	defer node.unregisterRequest(entry)
 
+	reporter := extension.RequestUsageReporter()
+	var usage *querymeter.SearchUsage
+	if reporter != nil {
+		ctx, usage = querymeter.WithSearchUsage(ctx)
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2975,6 +2981,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
 		rsp.Status = status
+		reportSearchUsage(ctx, reporter, usage, rsp, hookutil.OpTypeHybridSearch, request.GetDbName())
 	}
 	return rsp, nil
 }
@@ -3019,6 +3026,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	newSearchReq := ConvertHybridSearchToSearch(request)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
 	qt.SetCountFeatures(countFeatures)
+	usage := querymeter.SearchUsageFromContext(ctx)
+	qt.CollectSearchReadUsage = usage != nil
 
 	succeeded := false
 	defer func() {
@@ -3125,7 +3134,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.Result() != nil {
+	if qt.Result() != nil && usage == nil {
 		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -3141,6 +3150,10 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
+	}
+	if usage != nil && qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		usage.SetResultSchema(qt.ResultSchema())
 	}
 	succeeded = true
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), nil

@@ -727,6 +727,8 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 				SearchType:              subReq.GetSearchType(),
+				CollectSearchReadUsage:  req.GetReq().GetCollectSearchReadUsage(),
+				SearchReadFieldIds:      req.GetReq().GetSearchReadFieldIds(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -744,12 +746,22 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				if err != nil {
 					return nil, err
 				}
-				return segments.ReduceSearchOnQueryNode(ctx,
+				result, err := segments.ReduceSearchOnQueryNode(ctx,
 					results,
 					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
 						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
 						WithGroupSize(searchReq.GetReq().GetGroupSize()).
 						WithGroupByFieldIdsFromProto(searchReq.GetReq().GetGroupByFieldId(), searchReq.GetReq().GetGroupByFieldIds()))
+				if err != nil {
+					return nil, err
+				}
+				if newRequest.GetCollectSearchReadUsage() {
+					result.SearchReadUsage, err = querymeter.CollectSearchUsage(results)
+					if err != nil {
+						return nil, err
+					}
+				}
+				return result, nil
 			})
 			futures[index] = future
 		}

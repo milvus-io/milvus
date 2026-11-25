@@ -522,6 +522,46 @@ func (s *DelegatorSuite) initSegments() {
 	}, []int64{500, 501})
 }
 
+func (s *DelegatorSuite) TestHybridSearchUsage() {
+	s.delegator.Start()
+	paramtable.SetNodeID(1)
+	s.initSegments()
+
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
+		RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+			search := req.GetReq()
+			s.True(search.GetCollectSearchReadUsage())
+			s.Equal([]int64{105, 105}, search.GetSearchReadFieldIds())
+			return &internalpb.SearchResults{
+				Status: merr.Success(),
+				SearchReadUsage: &internalpb.QueryReadUsage{
+					DataBytes: 10 * uint64(search.GetNq()) * uint64(len(req.GetSegmentIDs())),
+				},
+			}, nil
+		})
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker, nil)
+
+	results, err := s.delegator.Search(s.T().Context(), &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base:                   commonpbutil.NewMsgBase(),
+			IsAdvanced:             true,
+			Nq:                     99,
+			CollectSearchReadUsage: true,
+			SearchReadFieldIds:     []int64{105, 105},
+			SubReqs: []*internalpb.SubSearchRequest{
+				{FieldId: 101, Nq: 2, Topk: 1, MetricType: metric.L2},
+				{FieldId: 101, Nq: 3, Topk: 1, MetricType: metric.L2},
+			},
+		},
+		DmlChannels: []string{s.vchannelName},
+	})
+	s.Require().NoError(err)
+	s.Require().Len(results, 2)
+	s.EqualValues(5*10*2, results[0].GetSearchReadUsage().GetDataBytes())
+	s.EqualValues(5*10*3, results[1].GetSearchReadUsage().GetDataBytes())
+}
+
 func (s *DelegatorSuite) TestSearch() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)

@@ -97,7 +97,7 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 	if err := group.Wait(); err != nil {
 		return nil, err
 	}
-	return assembleAdvancedSearchResults(results), nil
+	return finishAdvancedSearch(legacyReq, results)
 }
 
 func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest, selection *viewpb.SegmentSelection) (*internalpb.SearchResults, error) {

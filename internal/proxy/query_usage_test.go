@@ -168,3 +168,42 @@ func TestSearchReportsOneUsageValue(t *testing.T) {
 		require.Len(t, reporter.reports, 1)
 	})
 }
+
+func TestHybridSearchReportsOneUsageValue(t *testing.T) {
+	paramtable.Init()
+	mockey.PatchConvey("HybridSearch bills the final response and shared query stages once", t, func() {
+		node := &Proxy{}
+		request := &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"}
+		reporter := &queryUsageReporter{}
+		oldReporter := extension.RequestUsageReporter()
+		extension.SetRequestUsageReporter(reporter)
+		t.Cleanup(func() { extension.SetRequestUsageReporter(oldReporter) })
+		mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
+		var execErr error
+		mockey.Mock((*Proxy).hybridSearch).To(func(_ *Proxy, ctx context.Context, _ *milvuspb.HybridSearchRequest, _, _ bool) (*milvuspb.SearchResults, bool, bool, error) {
+			meter := querymeter.SearchUsageFromContext(ctx)
+			require.NotNil(t, meter)
+			require.NoError(t, meter.AddRead(&internalpb.QueryReadUsage{DataBytes: 110}))
+			require.NoError(t, meter.AddRead(&internalpb.QueryReadUsage{DataBytes: 16}))
+			return &milvuspb.SearchResults{
+				Status:  merr.Status(execErr),
+				Results: &schemapb.SearchResultData{Scores: []float32{1, 2}},
+			}, false, false, execErr
+		}).Build()
+
+		response, err := node.HybridSearch(t.Context(), request)
+		require.NoError(t, err)
+		require.True(t, merr.Ok(response.GetStatus()))
+		require.Len(t, reporter.reports, 1)
+		report := reporter.reports[0].(map[string]any)
+		require.Len(t, report, 4)
+		require.Equal(t, hookutil.OpTypeHybridSearch, report[hookutil.OpTypeKey])
+		require.EqualValues(t, 134, report[hookutil.BytesKey])
+
+		execErr = merr.WrapErrServiceInternalMsg("missing sub-search usage")
+		response, err = node.HybridSearch(t.Context(), request)
+		require.NoError(t, err)
+		require.False(t, merr.Ok(response.GetStatus()))
+		require.Len(t, reporter.reports, 1)
+	})
+}

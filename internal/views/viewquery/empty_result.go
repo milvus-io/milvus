@@ -53,5 +53,5 @@ func EmptySearchResults(req *internalpb.SearchRequest) (*internalpb.SearchResult
 	for i, request := range requests {
 		results[i] = emptySearchResults(request)
 	}
-	return assembleAdvancedSearchResults(results), nil
+	return finishAdvancedSearch(req, results)
 }
