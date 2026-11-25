@@ -823,6 +823,13 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, structFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", structFieldSchema.GetName())
 	}
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		if structFieldSchema.GetExternalField() == "" {
+			return merr.WrapErrParameterInvalidMsg("struct field '%s' in external collection %s must have external_field mapping", structFieldSchema.GetName(), schema.GetName())
+		}
+	} else if structFieldSchema.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("external_field is not supported for struct field in non-external collection %s", schema.GetName())
+	}
 	if err := validateStructArrayField(structFieldSchema, schema); err != nil {
 		return err
 	}
@@ -1241,6 +1248,19 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *s
 	}
 	newField := proto.Clone(field).(*schemapb.FieldSchema)
 	newField.Name = rawName
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		parentExt := parent.GetExternalField()
+		if parentExt == "" {
+			parentExt = structPath
+		}
+		expectedExt := storedStructSubFieldName(parentExt, rawName)
+		if field.GetExternalField() != "" && field.GetExternalField() != expectedExt {
+			return merr.WrapErrParameterInvalidMsg("struct %q child %q must map to %q; external_field=%q", structPath, rawName, expectedExt, field.GetExternalField())
+		}
+		// Mapping is validated above. Keep the common protected-role checks
+		// unchanged, and preserve the mapping on the actual request field.
+		newField.ExternalField = ""
+	}
 	if err := validateAddStructSubFieldProperties(&schemapb.StructArrayFieldSchema{Fields: []*schemapb.FieldSchema{newField}}); err != nil {
 		return err
 	}

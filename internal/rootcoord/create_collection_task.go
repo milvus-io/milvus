@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -380,6 +382,9 @@ func (t *createCollectionTask) appendDynamicField(ctx context.Context, schema *s
 				},
 			},
 		})
+		if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+			schema.Fields[len(schema.Fields)-1].ExternalField = MetaFieldName
+		}
 		mlog.Info(ctx, "append dynamic field", mlog.String("collection", schema.Name))
 	}
 }
@@ -548,6 +553,22 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 		// contract, which is not part of the milvus-table snapshot contract.
 		return merr.WrapErrParameterInvalidMsg("milvus-table external collection cannot use an external collection snapshot as source")
 	}
+	// The hidden dynamic column is supplied by the source snapshot, not the caller.
+	if schema.GetEnableDynamicField() && sourceSchema.GetEnableDynamicField() {
+		sourceMeta := typeutil.GetDynamicField(sourceSchema)
+		if sourceMeta == nil {
+			return merr.WrapErrDataIntegrityMsg("source snapshot schema %q enables dynamic fields but has no dynamic field, target collection %q",
+				sourceSchema.GetName(), schema.GetName())
+		}
+		if typeutil.GetDynamicField(schema) == nil {
+			mapped := proto.Clone(sourceMeta).(*schemapb.FieldSchema)
+			mapped.ExternalField = sourceMeta.GetName()
+			schema.Fields = append(schema.Fields, mapped)
+		}
+	}
+	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(schema); err != nil {
+		return err
+	}
 	if err := typeutil.ValidateMilvusTableSchemaIdentity(schema, sourceSchema); err != nil {
 		return merr.Wrap(err, "milvus-table target schema must match source snapshot schema")
 	}
@@ -613,7 +634,19 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 
 	// if schema comes from restore snapshot or preserve_field_ids=true
 	preservedDynamicFieldID := int64(-1)
+	var preservedMilvusTableDynamicField *schemapb.FieldSchema
 	preservedNamespaceFieldID := int64(-1)
+	if !t.preserveFieldID && typeutil.NewStorageColumnResolver(t.body.CollectionSchema).IsMilvusTable() {
+		fields := make([]*schemapb.FieldSchema, 0, len(t.body.CollectionSchema.Fields))
+		for _, field := range t.body.CollectionSchema.Fields {
+			if field.GetName() == MetaFieldName && field.GetIsDynamic() {
+				preservedMilvusTableDynamicField = field
+				continue
+			}
+			fields = append(fields, field)
+		}
+		t.body.CollectionSchema.Fields = fields
+	}
 	if t.preserveFieldID {
 		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.FieldCollectionName(t.Req.CollectionName))
 		if err := validatePreservedFieldIDs(t.body.CollectionSchema); err != nil {
@@ -627,6 +660,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.GetName() == MetaFieldName {
 				preservedDynamicFieldID = field.GetFieldID()
+				if typeutil.NewStorageColumnResolver(t.body.CollectionSchema).IsMilvusTable() {
+					preservedMilvusTableDynamicField = field
+				}
 				continue
 			}
 			if field.GetName() == NamespaceFieldName {
@@ -649,7 +685,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if err := t.appendNamespaceShardingEnabled(); err != nil {
 		return err
 	}
-	t.appendDynamicField(ctx, t.body.CollectionSchema)
+	if preservedMilvusTableDynamicField != nil && t.body.CollectionSchema.GetEnableDynamicField() {
+		// Refresh compares the full source definition, including field parameters.
+		t.body.CollectionSchema.Fields = append(t.body.CollectionSchema.Fields, preservedMilvusTableDynamicField)
+	} else {
+		t.appendDynamicField(ctx, t.body.CollectionSchema)
+	}
 	if err := common.ValidateNamespaceMode(t.Req.GetProperties()...); err != nil {
 		return err
 	}

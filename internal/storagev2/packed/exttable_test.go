@@ -25,12 +25,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -3227,6 +3233,78 @@ func TestMilvusTableLegacyManifestColumnValidation(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Empty(t, missing)
+		})
+	}
+}
+
+func TestMilvusTableHistoricalStructManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored []string
+	}{
+		{"whole parent", []string{"100"}},
+		{"new child", []string{"100", "102"}},
+		{"newer physical field", []string{"100", "102", "104"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			source, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: tc.stored, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}}}}, DeltaLogs: []DeltaLogEntry{{Path: filepath.Join(dir, "delta"), NumEntries: 1}}})
+			require.NoError(t, err)
+			ext := ExternalSpecContext{}
+			required := []string{"100", "102", "103"}
+			deltas, deltaErr := GetMilvusTableSourceDeltalogs(source, cfg, ext, required)
+			target, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), required, []Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ext)
+			require.ErrorIs(t, deltaErr, merr.ErrOperationNotSupported)
+			require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			require.Empty(t, deltas)
+			require.Empty(t, target)
+		})
+	}
+}
+
+func TestSampleExternalFieldSizesHistoricalStruct(t *testing.T) {
+	for _, hasSibling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sibling=%t", hasSibling), func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			columns := []string{"1", "100"}
+			fields := []arrow.Field{{Name: "1", Type: arrow.PrimitiveTypes.Int64}, {Name: "100", Type: arrow.PrimitiveTypes.Int64}}
+			if hasSibling {
+				columns = append(columns, "102")
+				fields = append(fields, arrow.Field{Name: "102", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true})
+			}
+			as := arrow.NewSchema(fields, nil)
+			b := array.NewRecordBuilder(memory.DefaultAllocator, as)
+			defer b.Release()
+			b.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			if hasSibling {
+				list := b.Field(2).(*array.ListBuilder)
+				list.Append(true)
+				list.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{10, 20, 30}, nil)
+				list.AppendNull()
+				list.Append(true)
+			}
+			rec := b.NewRecord()
+			defer rec.Release()
+			filename := filepath.Join(dir, "data.parquet")
+			f, err := os.Create(filename)
+			require.NoError(t, err)
+			defer f.Close()
+			writer, err := pqarrow.NewFileWriter(as, f, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+			manifest, err := CommitManifestUpdates(filepath.Join(dir, "source"), ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: columns, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filename, EndIndex: 3}}}}})
+			require.NoError(t, err)
+			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", FieldID: 101, Nullable: true}}}
+			for _, id := range []int64{102, 103} {
+				child := &schemapb.FieldSchema{Name: fmt.Sprintf("clips[f%d]", id), FieldID: id, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: id == 103, TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "4"}}}
+				schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, child)
+			}
+			_, err = SampleExternalFieldSizes(manifest, 3, 42, "", schema.ExternalSpec, schema, cfg)
+			require.ErrorContains(t, err, "not found in schema")
 		})
 	}
 }
