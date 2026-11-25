@@ -580,6 +580,20 @@ func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schem
 	return nil
 }
 
+// HasStructArrayField also recognizes older schemas with only flattened children.
+func (helper *SchemaHelper) HasStructArrayField(name string) bool {
+	if helper.GetStructArrayFieldFromName(name) != nil {
+		return true
+	}
+	prefix := name + "["
+	for _, field := range helper.schema.GetFields() {
+		if strings.HasPrefix(field.GetName(), prefix) && strings.HasSuffix(field.GetName(), "]") {
+			return true
+		}
+	}
+	return false
+}
+
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
 	field, err := helper.GetFieldFromID(fieldId)
 	if err != nil {

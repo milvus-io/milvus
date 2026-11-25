@@ -84,7 +84,12 @@ func resolveJSONEffectiveType(v *planpb.GenericValue) (schemapb.DataType, bool) 
 	}
 }
 
-func valueMatchesType(dt schemapb.DataType, v *planpb.GenericValue) bool {
+func valueMatchesType(col *planpb.ColumnInfo, dt schemapb.DataType, v *planpb.GenericValue) bool {
+	// Segcore compares element literals after casting them to the element type.
+	// Comparing the original plan bounds could turn a nonempty interval into FALSE.
+	if col.GetIsElementLevel() {
+		return elementLiteralIsExact(dt, v)
+	}
 	if v == nil || v.GetVal() == nil {
 		return false
 	}
@@ -124,7 +129,7 @@ func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planp
 	}
 
 	if effDt != schemapb.DataType_JSON {
-		if !valueMatchesType(effDt, lower) || !valueMatchesType(effDt, upper) {
+		if !valueMatchesType(col, effDt, lower) || !valueMatchesType(col, effDt, upper) {
 			return schemapb.DataType_None, false
 		}
 		return effDt, true
@@ -138,7 +143,7 @@ func resolveBinaryRangeEffectiveType(col *planpb.ColumnInfo, lower, upper *planp
 	return lowerType, true
 }
 
-func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr {
+func combineAndRangePredicates(parts []*planpb.Expr, canFoldEmpty func(*planpb.ColumnInfo) bool) []*planpb.Expr {
 	type group struct {
 		col    *planpb.ColumnInfo
 		effDt  schemapb.DataType // effective type for comparison
@@ -165,7 +170,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 		}
 		// Only optimize for supported types and matching value type
 		effDt, ok := resolveEffectiveType(col)
-		if !ok || !valueMatchesType(effDt, u.GetValue()) {
+		if !ok || !valueMatchesType(col, effDt, u.GetValue()) {
 			others = append(others, idx)
 			continue
 		}
@@ -238,7 +243,7 @@ func (v *visitor) combineAndRangePredicates(parts []*planpb.Expr) []*planpb.Expr
 				}
 			}
 
-			if isEmpty && !canFoldPredicateToBoolConstant(g.col) {
+			if isEmpty && !canFoldEmpty(g.col) {
 				continue
 			}
 
@@ -313,7 +318,7 @@ func (v *visitor) combineOrRangePredicates(parts []*planpb.Expr) []*planpb.Expr 
 			continue
 		}
 		effDt, ok := resolveEffectiveType(col)
-		if !ok || !valueMatchesType(effDt, u.GetValue()) {
+		if !ok || !valueMatchesType(col, effDt, u.GetValue()) {
 			others = append(others, idx)
 			continue
 		}
@@ -602,7 +607,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 					continue
 				}
 				effDt, ok := resolveEffectiveType(col)
-				if !ok || !valueMatchesType(effDt, ure.GetValue()) {
+				if !ok || !valueMatchesType(col, effDt, ure.GetValue()) {
 					others = append(others, idx)
 					continue
 				}
@@ -817,7 +822,7 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 					continue
 				}
 				effDt, ok := resolveEffectiveType(col)
-				if !ok || !valueMatchesType(effDt, ure.GetValue()) {
+				if !ok || !valueMatchesType(col, effDt, ure.GetValue()) {
 					others = append(others, idx)
 					continue
 				}

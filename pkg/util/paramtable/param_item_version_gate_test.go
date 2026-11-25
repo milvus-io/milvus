@@ -201,3 +201,9 @@ func TestImportV3VersionGate(t *testing.T) {
 	params.Init(NewBaseTable(SkipRemote(true)))
 	assertBoolVersionGate(t, params, &params.DataCoordCfg.EnableImportV3, "3.0.7", time.Minute)
 }
+
+func TestMatchConstantPredicateVersionGate(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	assertBoolVersionGate(t, params, &params.CommonCfg.EnableMatchConstantPredicate, "3.1.0", time.Minute)
+}

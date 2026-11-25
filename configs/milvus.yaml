@@ -1500,6 +1500,7 @@ common:
     maxConcurrencyRatio: 2 # Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.
   enableFastPB: true # Enable fast protobuf decoding for RPC requests, query results, and search results. Disable to use the standard protobuf decoder.
   enabledOptimizeExpr: true # Indicates whether to enable optimize expr
+  enableMatchConstantPredicate: auto # Fold a complete MATCH or ELEMENT_FILTER predicate with zero possible element hits to FALSE. auto enables this after all registered components reach 3.1.0. Older query nodes size constant bitmaps by row count.
   enableDriverPrefetch: false # Indicates whether to enable query driver prefetch in segcore.
   enabledJSONShredding: true # Indicates sealedsegment whether to enable JSON key stats
   enabledGrowingSegmentJSONShredding: false # Indicates growingsegment whether to enable JSON key stats
