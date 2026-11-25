@@ -1209,17 +1209,19 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 	t.Run("preserve field IDs with system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		field1 := funcutil.GenRandomStr()
-		preservedDynamicFieldID := int64(100)
-		preservedNamespaceFieldID := int64(101)
+		preservedDynamicFieldID := int64(101)
+		preservedNamespaceFieldID := int64(102)
 
 		schema := &schemapb.CollectionSchema{
-			Name:        collectionName,
-			Description: "",
-			AutoID:      false,
+			Name:               collectionName,
+			Description:        "",
+			AutoID:             false,
+			EnableDynamicField: true,
+			EnableNamespace:    true,
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:         field1,
-					FieldID:      1,
+					FieldID:      100,
 					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
@@ -1264,10 +1266,8 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		err = task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 
-		// Unmarshal the schema to verify
-		var resultSchema schemapb.CollectionSchema
-		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
-		assert.NoError(t, err)
+		resultSchema := task.body.CollectionSchema
+		require.NotNil(t, resultSchema)
 
 		// Verify that system fields TimeStampFieldName and RowIDFieldName are re-added by appendSysFields
 		hasTimestamp := false
@@ -1319,13 +1319,13 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:         field1,
-					FieldID:      10,
+					FieldID:      110,
 					DataType:     schemapb.DataType_Int64,
 					IsPrimaryKey: true,
 				},
 				{
 					Name:     field2,
-					FieldID:  20,
+					FieldID:  120,
 					DataType: schemapb.DataType_VarChar,
 				},
 			},
@@ -1349,18 +1349,16 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		err = task.prepareSchema(context.TODO())
 		assert.NoError(t, err)
 
-		// Unmarshal the schema to verify
-		var resultSchema schemapb.CollectionSchema
-		err = proto.Unmarshal(task.Req.Schema, &resultSchema)
-		assert.NoError(t, err)
+		resultSchema := task.body.CollectionSchema
+		require.NotNil(t, resultSchema)
 
 		// Verify that user fields keep their IDs
 		for _, field := range resultSchema.Fields {
 			if field.Name == field1 {
-				assert.Equal(t, int64(10), field.FieldID, "User field ID should be preserved")
+				assert.Equal(t, int64(110), field.FieldID, "User field ID should be preserved")
 			}
 			if field.Name == field2 {
-				assert.Equal(t, int64(20), field.FieldID, "User field ID should be preserved")
+				assert.Equal(t, int64(120), field.FieldID, "User field ID should be preserved")
 			}
 		}
 	})
@@ -1404,7 +1402,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 		allFields = append(allFields,
 			&schemapb.FieldSchema{
 				Name:     MetaFieldName,
-				FieldID:  50,
+				FieldID:  400,
 				DataType: schemapb.DataType_JSON,
 			},
 			&schemapb.FieldSchema{

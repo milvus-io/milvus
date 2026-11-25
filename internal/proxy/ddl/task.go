@@ -213,12 +213,12 @@ func (t *CreateCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context) error {
+func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	idx := -1
-	for i, field := range t.schema.Fields {
+	for i, field := range schema.Fields {
 		if field.GetIsPartitionKey() {
 			if idx != -1 {
-				return merr.WrapErrParameterInvalidMsg("there are more than one partition key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name)
+				return merr.WrapErrParameterInvalidMsg("there are more than one partition key, field name = %s, %s", schema.Fields[idx].Name, field.Name)
 			}
 
 			if field.GetIsPrimaryKey() {
@@ -258,7 +258,7 @@ func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context) error {
 	}
 
 	// Fields in StructArrayFields should not be partition key
-	for _, field := range t.schema.StructArrayFields {
+	for _, field := range schema.StructArrayFields {
 		for _, subField := range field.Fields {
 			if subField.GetIsPartitionKey() {
 				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
@@ -386,6 +386,17 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	// With preserve_field_ids the schema may carry the dynamic and namespace
+	// fields, only for their source field IDs. They are not user fields.
+	preserveFieldIDs := isPreserveFieldIDs(t.GetProperties())
+	var preservedSystemFields []*schemapb.FieldSchema
+	if preserveFieldIDs {
+		preservedSystemFields, err = takePreservedSystemFields(t.schema, t.GetProperties())
+		if err != nil {
+			return err
+		}
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
@@ -487,12 +498,24 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate partition key mode
-	if err := t.validatePartitionKey(ctx); err != nil {
+	// RootCoord recreates a preserved namespace field as a partition key.
+	// Validate that role using the canonicalized stub from takePreservedSystemFields
+	// without exposing the hidden field to user-field checks.
+	partitionKeySchema := t.schema
+	for _, field := range preservedSystemFields {
+		if field.GetName() == common.NamespaceFieldName {
+			partitionKeySchema = &schemapb.CollectionSchema{
+				Fields:            append(append([]*schemapb.FieldSchema{}, t.schema.GetFields()...), field),
+				StructArrayFields: t.schema.GetStructArrayFields(),
+			}
+			break
+		}
+	}
+	if err := t.validatePartitionKey(ctx, partitionKeySchema); err != nil {
 		return err
 	}
 
-	hasPartitionKey := hasPartitionKeyModeField(t.schema)
+	hasPartitionKey := hasPartitionKeyModeField(partitionKeySchema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
@@ -549,10 +572,10 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	// RootCoord skips these checks when preserve_field_ids is set, as for a
-	// snapshot restore, which does not go through proxy. Client CreateCollection
-	// requests (with or without preserve_field_ids) must not carry the internal
-	// added sub-field marker.
+	// RootCoord validates origin markers when preserve_field_ids is set, as for
+	// a snapshot restore, which does not go through proxy. Client
+	// CreateCollection requests (with or without preserve_field_ids) must not
+	// carry the internal added sub-field marker.
 	for _, structArrayField := range t.schema.GetStructArrayFields() {
 		for _, field := range structArrayField.GetFields() {
 			if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
@@ -560,8 +583,13 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
-	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
-		return err
+	// A schema with preserved field IDs restores an existing collection, whose
+	// stored sub-fields may carry enable_match or enable_analyzer from an
+	// earlier version; RootCoord skips this check for it too.
+	if !preserveFieldIDs {
+		if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
@@ -591,6 +619,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.schema.Fields = append(t.schema.Fields, preservedSystemFields...)
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
