@@ -5,6 +5,7 @@ import os
 import random
 import tempfile
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,8 +14,10 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.compaction_utils import compact_segments, is_segment_not_found, reload_collection_with_deadline
 from pymilvus import AnnSearchRequest, DataType, FieldSchema, Function, FunctionType, WeightedRanker
-from pymilvus.client.types import LoadState
+from pymilvus.client.types import CompactionTaskState, CompactionType, LoadState
+from pymilvus.exceptions import MilvusException
 from utils.util_log import test_log as log
 
 DIM = 16
@@ -796,26 +799,152 @@ def lob_object_key(partition_base, content_field_id, ref_bytes):
     return object_key(partition_base, "lobs", content_field_id, "_data", f"{file_id}.vx")
 
 
-def persistent_segment_ids(testcase, client, collection_name):
-    segments, _ = testcase.list_persistent_segments(client, collection_name)
-    return tuple(sorted(segment_identifier(segment) for segment in segments))
-
-
-def insert_flush_batches(testcase, client, collection_name, rows, batch_size):
+def prepare_compaction_sources(testcase, client, collection_name, rows, batch_size, deleted):
+    """Flush the deletes and identify all data segments that the rewrite must cover."""
     for start in range(0, len(rows), batch_size):
         testcase.insert(client, collection_name, rows[start : start + batch_size])
         testcase.flush(client, collection_name)
 
+    # Wait before delete/flush introduces an L0. Auto-compaction may already
+    # have combined batches, and the sorted outputs build fresh vector indexes.
+    for field in (VECTOR_FIELD, CONTENT_SPARSE_FIELD, CONTENT_ZH_SPARSE_FIELD, CONTENT_DEFAULT_SPARSE_FIELD):
+        deadline = time.monotonic() + 120
+        while (remaining := deadline - time.monotonic()) > 0:
+            segments = testcase.wait_for_compaction_eligible_segments(
+                client, collection_name, minimum_segment_count=1, index_name=field, timeout=remaining
+            )
+            if sum(segment.num_rows for segment in segments) == len(rows):
+                break
+        else:
+            pytest.fail(f"Index {field} did not cover all {len(rows)} flushed rows in {collection_name}")
 
-def assert_compaction_rewrote_segments(before_segments, after_segments):
-    assert len(before_segments) >= 2, f"compaction test needs multiple sealed segments, got {before_segments}"
-    assert len(after_segments) > 0
-    assert set(after_segments) != set(before_segments), (
-        f"compaction did not rewrite persistent segments: before={before_segments}, after={after_segments}"
-    )
-    assert len(after_segments) <= len(before_segments), (
-        f"compaction should not increase persistent segment count: before={before_segments}, after={after_segments}"
-    )
+    sources = {segment.segment_id for segment in segments}
+    testcase.load_collection(client, collection_name)
+    testcase.delete(client, collection_name, ids=sorted(deleted))
+    testcase.flush(client, collection_name)
+    # Include in-flight plans: a late completion can publish data written before the delete.
+    plans = client.list_compaction_tasks(collection_name, timeout=30).plans
+    return sources, {plan.plan_id for plan in plans}
+
+
+def mix_compaction_frontier(source_ids, prior_plan_ids, plans):
+    """Return the expected data segments and those still needing a post-delete rewrite."""
+    active = set(source_ids)
+    uncovered = set(source_ids)
+    pending = [
+        plan
+        for plan in plans
+        if plan.compaction_type == CompactionType.MixCompaction
+        and plan.state in (CompactionTaskState.Completed, CompactionTaskState.Cleaned)
+        and not plan.failure_reason
+        and plan.sources
+    ]
+    # Task listing order need not match parent/child order.
+    while pending:
+        deferred = []
+        for plan in pending:
+            if active.issuperset(plan.sources):
+                if plan.plan_id in prior_plan_ids and not uncovered.isdisjoint(plan.sources):
+                    uncovered.update(plan.targets)
+                uncovered.difference_update(plan.sources)
+                active.difference_update(plan.sources)
+                active.update(plan.targets)
+            else:
+                deferred.append(plan)
+        if len(deferred) == len(pending):
+            break
+        pending = deferred
+    return active, uncovered
+
+
+def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan_ids):
+    deadline = time.monotonic() + 120
+    while (submit_timeout := deadline - time.monotonic()) > 0:
+        compact_id, _ = testcase.compact(client, collection_name, timeout=submit_timeout)
+        if compact_id != -1:
+            break
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    else:
+        segments = client.list_persistent_segments(collection_name, timeout=10)
+        indexes = [
+            client.describe_index(collection_name, name, timeout=10)
+            for name in client.list_indexes(collection_name, timeout=10)
+        ]
+        pytest.fail(f"No manual compaction plan for {collection_name} within 120s: {segments=}, {indexes=}")
+
+    expected = uncovered = source_ids
+    active = loaded = set()
+
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            pytest.fail(
+                f"Rewrite did not cover all reloaded data in {collection_name}: "
+                f"{source_ids=}, {uncovered=}, {expected=}, {active=}, {loaded=}"
+            )
+        return budget
+
+    def wait_for_job(job_id, requested_sources=None):
+        assert testcase.wait_for_compaction_ready(client, job_id, timeout=remaining())
+        plans = client.get_compaction_plans(job_id, timeout=min(30, remaining())).plans
+        inputs = {source for plan in plans for source in plan.sources}
+        outputs = {target for plan in plans for target in plan.targets}
+        if requested_sources is not None:
+            assert inputs and inputs <= requested_sources, (
+                f"Targeted compaction {job_id} selected {inputs=} outside {requested_sources=}"
+            )
+        assert 0 < len(outputs) <= len(inputs) and outputs.isdisjoint(inputs), (
+            f"Compaction {job_id} did not rewrite the input segments as expected: {plans}"
+        )
+
+    deadline = time.monotonic() + 300
+    wait_for_job(compact_id)
+    deadline = time.monotonic() + 120
+    reloaded = False
+    terminal_states = {
+        CompactionTaskState.Completed,
+        CompactionTaskState.Cleaned,
+        CompactionTaskState.Failed,
+        CompactionTaskState.Timeout,
+    }
+    while True:
+        plans = client.list_compaction_tasks(collection_name, timeout=remaining()).plans
+        expected, uncovered = mix_compaction_frontier(source_ids, prior_plan_ids, plans)
+        try:
+            segments = client.list_persistent_segments(collection_name, timeout=remaining())
+        except MilvusException as error:
+            # DataCoord can retire a segment between the Proxy's ID and detail lookups.
+            if not is_segment_not_found(error):
+                raise
+            time.sleep(min(2, remaining()))
+            continue
+        active = {s.segment_id for s in segments if s.level_name != "L0"}
+        if expected and expected == active:
+            if uncovered:
+                # A partial job can leave a newly indexed segment with no automatic job pending.
+                busy = {
+                    source
+                    for plan in plans
+                    if plan.compaction_type == CompactionType.MixCompaction and plan.state not in terminal_states
+                    for source in plan.sources
+                }
+                candidates = uncovered - busy
+                if candidates:
+                    job_id = compact_segments(client, collection_name, candidates, timeout=remaining())
+                    if job_id != -1:
+                        wait_for_job(job_id, candidates)
+            elif not reloaded:
+                reload_collection_with_deadline(client, collection_name, remaining)
+                reloaded = True
+                continue  # Re-read both coordinator views after reload.
+            else:
+                placements = client.list_loaded_segments(collection_name, timeout=remaining())
+                data = [s for s in placements if s.level_name != "L0"]
+                loaded = {s.segment_id for s in data}
+                remaining()
+                if loaded == expected and all(s.node_ids for s in data):
+                    return
+        time.sleep(min(2, remaining()))
 
 
 @pytest.mark.xdist_group("TestMilvusClientTextLOB")
@@ -2032,11 +2161,10 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         extra_rows = [build_row(1520 + i, f"reuse_extra_{i}", make_text(4096, f"reuse-{i}")) for i in range(4)]
         rows.extend(extra_rows)
         self.create_text_lob_collection(client, collection_name, rows=None, load=False)
-        insert_flush_batches(self, client, collection_name, rows, batch_size=8)
-        self.load_collection(client, collection_name)
         deleted = {1500, 1520}
-        self.delete(client, collection_name, ids=sorted(deleted))
-        self.flush(client, collection_name)
+        sources, prior_plan_ids = prepare_compaction_sources(
+            self, client, collection_name, rows, batch_size=8, deleted=deleted
+        )
         text_match_before, _ = self.query(
             client,
             collection_name,
@@ -2047,14 +2175,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         text_match_before_ids = {row[ID_FIELD] for row in text_match_before}
         assert text_match_before_ids
         assert deleted.isdisjoint(text_match_before_ids)
-        before_segments = persistent_segment_ids(self, client, collection_name)
-
-        compact_id = self.compact(client, collection_name)[0]
-        assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
-        after_segments = persistent_segment_ids(self, client, collection_name)
-        assert_compaction_rewrote_segments(before_segments, after_segments)
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
+        compact_and_reload(self, client, collection_name, sources, prior_plan_ids)
 
         survivors = [row for row in rows if row[ID_FIELD] not in deleted]
         expected = expected_payloads(survivors)
@@ -2101,20 +2222,12 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
         rows = [build_row(1600 + i, f"rewrite_{i}", make_text(8192 + i, f"rewrite-{i}")) for i in range(12)]
         rows.append(build_row(1700, "rewrite_large_survivor", make_text(128 * 1024, "rewrite-survivor")))
         self.create_text_lob_collection(client, collection_name, rows=None, load=False)
-        insert_flush_batches(self, client, collection_name, rows, batch_size=6)
-        self.load_collection(client, collection_name)
         survivor_ids = {1600, 1605, 1610, 1700}
         deleted = [row[ID_FIELD] for row in rows if row[ID_FIELD] not in survivor_ids]
-        self.delete(client, collection_name, ids=deleted)
-        self.flush(client, collection_name)
-        before_segments = persistent_segment_ids(self, client, collection_name)
-
-        compact_id = self.compact(client, collection_name)[0]
-        assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
-        after_segments = persistent_segment_ids(self, client, collection_name)
-        assert_compaction_rewrote_segments(before_segments, after_segments)
-        self.release_collection(client, collection_name)
-        self.load_collection(client, collection_name)
+        sources, prior_plan_ids = prepare_compaction_sources(
+            self, client, collection_name, rows, batch_size=6, deleted=deleted
+        )
+        compact_and_reload(self, client, collection_name, sources, prior_plan_ids)
 
         survivors = [row for row in rows if row[ID_FIELD] in survivor_ids]
         expected = expected_payloads(survivors)

@@ -13,7 +13,7 @@ from pymilvus.client.types import SegmentInfo, Status
 from pymilvus.client.utils import check_status
 from pymilvus.decorators import IGNORE_RETRY_CODES
 from pymilvus.exceptions import ErrorCode, MilvusException
-from pymilvus.grpc_gen import common_pb2
+from pymilvus.grpc_gen import common_pb2, milvus_pb2
 
 UNSUCCESSFUL_COMPACTION_STATES = frozenset({"UndefiedState", "UndefinedState"})
 INITIAL_RETRY_BACKOFF = 0.01
@@ -28,6 +28,40 @@ class CompactionStateInfo:
     completed_plan_no: int = 0
     failed_plan_no: int = 0
     timeout_plan_no: int = 0
+
+
+def compact_segments(client, collection_name, segment_ids, timeout):
+    """Submit one manual request restricted to these sources; -1 means refresh candidates."""
+    # MilvusClient.compact does not expose the segment_ids field in the pinned SDK.
+    request = milvus_pb2.ManualCompactionRequest(collection_name=collection_name, segment_ids=sorted(set(segment_ids)))
+    if not request.segment_ids:
+        raise ValueError("segment_ids must be nonempty for a targeted compaction")
+    response = client._get_connection()._stub.ManualCompaction(
+        request, timeout=timeout, metadata=_api_level_md(client._generate_call_context())
+    )
+    # DataCoord rejects the selection if a requested segment was claimed or retired after our snapshot.
+    if response.status.code == 5 and "not all segment ids provided could be compacted" in response.status.reason:
+        return -1
+    check_status(response.status)
+    return response.compactionID
+
+
+def reload_collection_with_deadline(client, collection_name, remaining, poll_interval=1):
+    """Release, start loading asynchronously, and poll using the caller's remaining budget."""
+    handler = client._get_connection()
+    context = client._generate_call_context()
+    # Single-attempt SDK calls: decorators and synchronous loading polls reuse
+    # the supplied timeout, so neither may own this helper's total deadline.
+    unwrap(GrpcHandler.release_collection)(handler, collection_name, timeout=remaining(), context=context)
+    unwrap(GrpcHandler.load_collection)(handler, collection_name, timeout=remaining(), context=context, _async=True)
+    while True:
+        progress = unwrap(GrpcHandler.get_loading_progress)(
+            handler, collection_name, timeout=remaining(), context=context
+        )
+        budget = remaining()
+        if progress >= 100:
+            return
+        time.sleep(min(poll_interval, budget))
 
 
 def reload_compaction_outputs(
@@ -66,20 +100,7 @@ def reload_compaction_outputs(
             )
         return budget
 
-    handler = client._get_connection()
-    context = client._generate_call_context()
-    # Single-attempt SDK calls: decorators and synchronous loading polls reuse
-    # the supplied timeout, so neither may own this helper's total deadline.
-    unwrap(GrpcHandler.release_collection)(handler, collection_name, timeout=remaining(), context=context)
-    unwrap(GrpcHandler.load_collection)(handler, collection_name, timeout=remaining(), context=context, _async=True)
-    while True:
-        progress = unwrap(GrpcHandler.get_loading_progress)(
-            handler, collection_name, timeout=remaining(), context=context
-        )
-        budget = remaining()
-        if progress >= 100:
-            break
-        time.sleep(min(poll_interval, budget))
+    reload_collection_with_deadline(client, collection_name, remaining, poll_interval)
     while True:
         # Bypass the SDK retry decorator so each observation has a fresh budget.
         response = client._get_connection()._stub.GetQuerySegmentInfo(
@@ -292,6 +313,12 @@ def run_compaction_with_workload(trigger, get_state, operation, timeout=300, pol
     return observed_overlap
 
 
+def is_segment_not_found(error):
+    return (error.code == 600 or error.compatible_code == common_pb2.SegmentNotFound) and (
+        "segment not found" in error.message.lower()
+    )
+
+
 def list_persistent_segments_once(handler, collection_name, timeout, context=None):
     """Issue exactly one persistent-segment RPC with the supplied budget."""
     request = Prepare.get_persistent_segment_info_request(collection_name)
@@ -419,16 +446,14 @@ def wait_for_compaction_eligible_segments(
             )
             continue
         except MilvusException as error:
-            is_segment_not_found = (error.code == 600 or error.compatible_code == common_pb2.SegmentNotFound) and (
-                "segment not found" in error.message.lower()
-            )
+            segment_disappeared = is_segment_not_found(error)
             is_rate_limit = error.code == ErrorCode.RATE_LIMIT or error.compatible_code == common_pb2.RateLimit
-            if not (is_segment_not_found or is_rate_limit):
+            if not (segment_disappeared or is_rate_limit):
                 raise
             previous_snapshot = None
             stable_observations = 0
             remaining = deadline - time.monotonic()
-            delay = poll_interval if is_segment_not_found else retry_backoff
+            delay = poll_interval if segment_disappeared else retry_backoff
             if remaining <= delay:
                 break
             time.sleep(delay)
