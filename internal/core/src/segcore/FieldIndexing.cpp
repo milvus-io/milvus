@@ -41,6 +41,7 @@
 #include "common/type_c.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
+#include "index/GrowingIndexCatchupCost.h"
 #include "index/RTreeIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
@@ -1034,26 +1035,20 @@ VectorFieldIndexing::BuildAsync(const VectorBase* field_raw_data,
 void
 VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
     auto catchup_start = std::chrono::steady_clock::now();
-    int64_t consumed_rows = 0;
-    double consumed_ms = 0.0;
-
-    auto consume_rate = [&]() -> double {
-        return consumed_ms > 0.0
-                   ? static_cast<double>(consumed_rows) / consumed_ms
-                   : 0.0;
+    index::GrowingIndexCatchupCost cost;
+    auto consume_rate = [&] {
+        return cost.elapsed_ms > 0 ? cost.logical_rows / cost.elapsed_ms : 0;
     };
-    auto estimated_finalize_ms = [&](int64_t gap) -> double {
-        if (gap <= 0) {
-            return 0.0;
-        }
-        double rate = consume_rate();
-        return rate > 0.0 ? static_cast<double>(gap) / rate
-                          : std::numeric_limits<double>::infinity();
+    const auto slice = CatchupSliceRows();
+    auto fits_budget = [&](int64_t rows, double estimate_ms) {
+        return rows <= slice && estimate_ms <= async_finalize_budget_ms_;
     };
-    auto throw_deadline = [&](int64_t gap, int64_t logical_tail = 0) {
+    auto throw_deadline = [&](int64_t gap,
+                              int64_t physical_gap,
+                              double estimate_ms) {
         double elapsed_ms = ElapsedMs(catchup_start);
         double rate = consume_rate();
-        double estimate_ms = estimated_finalize_ms(gap);
+        const auto logical_tail = gap - physical_gap;
         LOG_WARN(
             "async growing index catch-up deadline exceeded, discarding the "
             "unpublished index and falling back to raw search permanently: "
@@ -1064,8 +1059,8 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             elapsed_ms,
             async_catchup_deadline_ms_,
             gap,
-            consumed_rows,
-            consumed_ms,
+            cost.logical_rows,
+            cost.elapsed_ms,
             rate,
             estimate_ms,
             async_finalize_budget_ms_,
@@ -1088,12 +1083,6 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
     auto logical_cursor = [&]() -> int64_t {
         return mapping ? index_->GetLogicalCount() : index_cur_.load();
     };
-    const auto slice = CatchupSliceRows();
-    auto fits_budget = [&](int64_t rows) {
-        return rows <= slice &&
-               estimated_finalize_ms(rows) <= async_finalize_budget_ms_;
-    };
-
     for (;;) {
         if (IsCancelled()) {
             // Segment tearing down: stay kBuilding, never publish.
@@ -1102,11 +1091,17 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
         int64_t pending_snapshot = pending_upto_.load();
         const auto round_from = logical_cursor();
         const auto gap = pending_snapshot - round_from;
-        if (gap > 0 && ElapsedMs(catchup_start) >= async_catchup_deadline_ms_ &&
-            !fits_budget(gap)) {
-            throw_deadline(gap);
+        if (gap > 0 && ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
+            const auto vectors =
+                PhysicalTarget(field_raw_data, pending_snapshot) -
+                index_cur_.load();
+            const auto ms = cost.EstimateMs(gap, vectors);
+            if (!fits_budget(gap, ms)) {
+                throw_deadline(gap, vectors, ms);
+            }
         }
         if (gap > 0) {
+            const auto physical_from = index_cur_.load();
             auto round_start = std::chrono::steady_clock::now();
             const auto logical_end = round_from + std::min(gap, slice);
             AddRange(field_raw_data,
@@ -1118,13 +1113,19 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             RegisterNullLogicalTail(field_raw_data, logical_end);
             double round_ms = ElapsedMs(round_start);
             const auto round_rows = logical_end - round_from;
-            consumed_rows += round_rows;
-            consumed_ms += round_ms;
+            cost.Observe(
+                round_rows, index_cur_.load() - physical_from, round_ms);
             CallBuildHook(GrowingBuildPhase::kAfterCatchupRound);
 
-            const auto latest_gap = pending_upto_.load() - logical_cursor();
-            double rate = consume_rate();
-            double estimate_ms = estimated_finalize_ms(latest_gap);
+            const auto latest = pending_upto_.load();
+            const auto latest_gap = latest - logical_cursor();
+            const auto latest_vectors =
+                latest_gap > 0
+                    ? PhysicalTarget(field_raw_data, latest) - index_cur_.load()
+                    : 0;
+            const auto estimate_ms =
+                cost.EstimateMs(latest_gap, latest_vectors);
+            const double rate = consume_rate();
             LOG_INFO(
                 "async growing index catch-up round completed: "
                 "round_rows={}, round_ms={}, consumed_rows={}, "
@@ -1133,19 +1134,20 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
                 "catchup_elapsed_ms={}, catchup_deadline_ms={}, decision={}",
                 round_rows,
                 round_ms,
-                consumed_rows,
-                consumed_ms,
+                cost.logical_rows,
+                cost.elapsed_ms,
                 rate,
                 latest_gap,
                 estimate_ms,
                 async_finalize_budget_ms_,
                 ElapsedMs(catchup_start),
                 async_catchup_deadline_ms_,
-                fits_budget(latest_gap) ? "try_finalize" : "continue");
+                fits_budget(latest_gap, estimate_ms) ? "try_finalize"
+                                                     : "continue");
 
-            if (!fits_budget(latest_gap)) {
+            if (!fits_budget(latest_gap, estimate_ms)) {
                 if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
-                    throw_deadline(latest_gap);
+                    throw_deadline(latest_gap, latest_vectors, estimate_ms);
                 }
                 continue;
             }
@@ -1168,10 +1170,13 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             final_target - static_cast<int64_t>(index_cur_.load());
         const auto logical_gap = pending - logical_cursor();
         const auto logical_tail = logical_gap - frozen_gap;
-        const auto frozen_estimate_ms = estimated_finalize_ms(logical_gap);
+        const auto frozen_estimate_ms =
+            cost.EstimateMs(logical_gap, frozen_gap);
         // A null-only tail still allocates and consumes validity bits. Drain
         // it outside the append lock even when its estimated cost is small.
-        if (logical_gap > 0 && (frozen_gap == 0 || !fits_budget(logical_gap))) {
+        if (logical_gap > 0 &&
+            (frozen_gap == 0 ||
+             !fits_budget(logical_gap, frozen_estimate_ms))) {
             LOG_INFO(
                 "async growing index finalize deferred after locking: "
                 "frozen_gap_rows={}, estimated_finalize_ms={}, "
@@ -1188,7 +1193,7 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
             lock.unlock();
             // Even a budget-sized null-only gap requires another round.
             if (ElapsedMs(catchup_start) >= async_catchup_deadline_ms_) {
-                throw_deadline(logical_gap, logical_tail);
+                throw_deadline(logical_gap, frozen_gap, frozen_estimate_ms);
             }
             continue;
         }
@@ -1237,23 +1242,7 @@ VectorFieldIndexing::CatchUp(const VectorBase* field_raw_data) {
 int64_t
 VectorFieldIndexing::PhysicalTarget(const VectorBase* vec,
                                     int64_t logical_upto) const {
-    if (!vec->is_mapping_storage()) {
-        return logical_upto;
-    }
-    // get_logical_offset is monotone in the physical offset (rows are appended
-    // in order), so the first physical offset whose logical offset reaches
-    // logical_upto is exactly the number of valid rows below the watermark.
-    int64_t lo = 0;
-    int64_t hi = vec->get_valid_count();
-    while (lo < hi) {
-        int64_t mid = lo + (hi - lo) / 2;
-        if (vec->get_logical_offset(mid) >= logical_upto) {
-            hi = mid;
-        } else {
-            lo = mid + 1;
-        }
-    }
-    return lo;
+    return vec->get_offset_mapping().ValidCountBelow(logical_upto);
 }
 
 int64_t

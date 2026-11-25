@@ -65,6 +65,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
+#include "index/GrowingIndexCatchupCost.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/segcore_init_c.h"
 #include "storage/FileManager.h"
@@ -2745,6 +2746,76 @@ TEST(GrowingIndexAsyncBuildTest, SparseVectorBuildsAsynchronously) {
               (n_batch + 1) * per_batch);
     sr = segment->Search(plan.get(), ph_group.get(), 1000000);
     EXPECT_EQ(sr->seg_offsets_.size(), num_queries * top_k);
+}
+
+TEST(GrowingIndexCatchupCostTest, AccountsForLogicalAndPhysicalWork) {
+    milvus::index::GrowingIndexCatchupCost cost;
+    cost.Observe(1000, 0, 1);
+    EXPECT_GT(cost.EstimateMs(1, 1), 20);
+    cost.Observe(1000, 2, 10);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(10, 10), 50);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(1000, 0), 5.5);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(0, 0), 0);
+}
+
+TEST(GrowingIndexAsyncBuildTest, NullOnlySampleCannotBudgetVectorAdd) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    ScopedAsyncGrowingBuild async(config, true);
+    ApplyAsyncBuildConfig(config);
+    using Phase = VectorFieldIndexing::GrowingBuildPhase;
+    std::atomic<bool> at_finalize{false}, release{false};
+    std::atomic<int> unlocked_rounds{0};
+    ScopedBuildHook hook([&](Phase phase) {
+        if (phase == Phase::kAfterCatchupRound) {
+            ++unlocked_rounds;
+        }
+        if (phase == Phase::kBeforeFinalize && !at_finalize.exchange(true)) {
+            while (!release.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    });
+    auto fixture =
+        MakeAsyncBuildFixture(DataType::VECTOR_FLOAT,
+                              knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                              knowhere::metric::L2,
+                              true);
+    auto segment = CreateGrowingSegment(fixture.schema, fixture.meta);
+    auto* impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(impl, nullptr);
+    ScopedFlagOnExit unblock(release);
+    auto set_valid_prefix = [&](GeneratedData& batch, int64_t count) {
+        for (auto& field : *batch.raw_->mutable_fields_data()) {
+            if (field.field_id() == fixture.vec.get()) {
+                auto* valid = MutableFieldDataRowValidData(&field);
+                std::fill_n(valid->begin(), count, true);
+                std::fill(valid->begin() + count, valid->end(), false);
+                field.mutable_vectors()
+                    ->mutable_float_vector()
+                    ->mutable_data()
+                    ->Resize(count * kAsyncDim, 0.0f);
+                return;
+            }
+        }
+    };
+    // The first slice after the build prefix contains only the trailing null.
+    InsertAsyncBatch(segment.get(),
+                     fixture.schema,
+                     kAsyncBuildThreshold + 1,
+                     17,
+                     [&](GeneratedData& batch) {
+                         set_valid_prefix(batch, kAsyncBuildThreshold);
+                     });
+    ASSERT_TRUE(WaitFlag(at_finalize, 60000));
+    InsertAsyncBatch(
+        segment.get(), fixture.schema, 1, 19, [&](GeneratedData& batch) {
+            set_valid_prefix(batch, 1);
+        });
+    release.store(true);
+    ASSERT_TRUE(WaitSynced(impl, fixture.vec, 60000));
+    EXPECT_EQ(unlocked_rounds.load(), 2);
+    EXPECT_EQ(IndexedRowCount(impl, fixture.vec), kAsyncBuildThreshold + 1);
 }
 
 TEST(GrowingIndexAsyncBuildTest, NullOnlyTailUsesUnlockedLogicalSlices) {
