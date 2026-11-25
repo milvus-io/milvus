@@ -106,21 +106,30 @@ func TestRestoreTargetCheckPreservesLiveAndUnknownTargets(t *testing.T) {
 }
 
 func TestRestoreTargetDeletionRetriesDurableFailure(t *testing.T) {
-	mockey.PatchConvey("persist terminal state before releasing its snapshot", t, func() {
-		checker, job := newRestoreTargetDropChecker(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, true)
-		mockey.Mock((*restoreCollectionTarget).IsCollectionDropped).Return(true, nil).Build()
-		unpin := mockey.Mock((*restoreSnapshotSource).UnpinSnapshot).Return(int64(0), "", 0, nil).Build()
+	checker, job := newRestoreTargetDropChecker(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, true)
+	dropped := mockey.Mock((*restoreCollectionTarget).IsCollectionDropped).Return(true, nil).Build()
+	defer dropped.UnPatch()
+	var unpinned []int64
+	unpin := mockey.Mock((*restoreSnapshotSource).UnpinSnapshot).To(func(_ *restoreSnapshotSource, _ context.Context, pinID int64) (int64, string, int, error) {
+		unpinned = append(unpinned, pinID)
+		return 0, "", 0, nil
+	}).Build()
+	defer unpin.UnPatch()
+
+	t.Run("terminal state write fails", func(t *testing.T) {
 		save := mockey.Mock((*kvdatacoord.Catalog).SaveCopySegmentJob).Return(merr.ErrServiceUnavailable).Build()
+		defer save.UnPatch()
 		require.False(t, checker.checkRestoreTarget(job))
 		require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobExecuting, checker.CopyMeta.GetJob(t.Context(), job.GetJobId()).GetState())
-		require.Zero(t, unpin.Times())
-		save.UnPatch()
-		require.False(t, checker.checkRestoreTarget(job))
-		require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, checker.CopyMeta.GetJob(t.Context(), job.GetJobId()).GetState())
-		require.Equal(t, 1, unpin.Times())
-		require.NoError(t, checker.CopyMeta.UpdateJobStateAndReleaseRef(t.Context(), job.GetJobId(), UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted)))
-		require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, checker.CopyMeta.GetJob(t.Context(), job.GetJobId()).GetState())
+		require.Equal(t, []int64{job.GetPinId()}, unpinned)
 	})
+
+	require.False(t, checker.checkRestoreTarget(job))
+	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, checker.CopyMeta.GetJob(t.Context(), job.GetJobId()).GetState())
+	require.Equal(t, []int64{job.GetPinId(), job.GetPinId()}, unpinned)
+
+	require.NoError(t, checker.CopyMeta.UpdateJobStateAndReleaseRef(t.Context(), job.GetJobId(), UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted)))
+	require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, checker.CopyMeta.GetJob(t.Context(), job.GetJobId()).GetState())
 }
 
 func TestRestoreTargetDeletionRacesPublication(t *testing.T) {
