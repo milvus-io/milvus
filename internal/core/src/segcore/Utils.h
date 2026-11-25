@@ -45,6 +45,15 @@ ParsePksFromIDs(std::vector<PkType>& pks,
                 DataType data_type,
                 const IdArray& data);
 
+// Resolves a single row's primary key via bulk_subscript while propagating
+// cancellation/load priority and recording scanned bytes in search_result.
+std::optional<PkType>
+LookupSegmentPk(const SegmentInternalInterface& segment,
+                FieldId pk_field_id,
+                int64_t offset,
+                milvus::OpContext* op_context,
+                SearchResult& search_result);
+
 int64_t
 GetSizeOfIdArray(const IdArray& data);
 

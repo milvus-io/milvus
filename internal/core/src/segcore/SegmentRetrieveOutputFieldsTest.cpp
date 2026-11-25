@@ -237,6 +237,67 @@ TEST_P(RetrieveOutputFieldsPKTest,
     EXPECT_EQ(segment->read_snapshot_captures.load(), 1);
 }
 
+TEST_P(RetrieveOutputFieldsPKTest,
+       LookupSegmentPkPropagatesOpContextAndStorageCost) {
+    auto expected = segment->SegmentGrowingImpl::bulk_subscript(
+        nullptr, pk, offsets.data(), offsets.size());
+    std::vector<PkType> expected_pks(offsets.size());
+    ParsePksFromFieldData(expected_pks, *expected);
+
+    SearchResult result;
+    result.search_storage_cost_.scanned_remote_bytes = 7;
+    result.search_storage_cost_.scanned_total_bytes = 11;
+    EXPECT_FALSE(
+        LookupSegmentPk(*segment, pk, -1, nullptr, result).has_value());
+
+    std::atomic<int> reads{0};
+    segment->before_fetch = [&](FieldId field_id, milvus::OpContext* ctx) {
+        EXPECT_EQ(field_id.get(), pk.get());
+        ASSERT_NE(ctx, nullptr);
+        EXPECT_EQ(ctx->runtime_load_priority,
+                  proto::common::LoadPriority::HIGH);
+        ++reads;
+    };
+    EXPECT_EQ(LookupSegmentPk(*segment, pk, 1, nullptr, result),
+              expected_pks[1]);
+    EXPECT_EQ(reads.load(), 1);
+
+    folly::CancellationSource cancel_source;
+    milvus::OpContext parent_ctx(cancel_source.getToken());
+    parent_ctx.runtime_load_priority = proto::common::LoadPriority::LOW;
+    parent_ctx.storage_usage.scanned_cold_bytes = 1000;
+    parent_ctx.storage_usage.scanned_total_bytes = 2000;
+
+    segment->before_fetch = [&](FieldId field_id, milvus::OpContext* ctx) {
+        EXPECT_EQ(field_id.get(), pk.get());
+        ASSERT_NE(ctx, nullptr);
+        EXPECT_NE(ctx, &parent_ctx);
+        EXPECT_EQ(ctx->runtime_load_priority, proto::common::LoadPriority::LOW);
+        EXPECT_FALSE(ctx->cancellation_token.isCancellationRequested());
+        EXPECT_EQ(ctx->storage_usage.scanned_cold_bytes.load(), 0);
+        EXPECT_EQ(ctx->storage_usage.scanned_total_bytes.load(), 0);
+        ctx->storage_usage.scanned_cold_bytes += 13;
+        ctx->storage_usage.scanned_total_bytes += 29;
+        ++reads;
+    };
+    EXPECT_EQ(LookupSegmentPk(*segment, pk, 3, &parent_ctx, result),
+              expected_pks[0]);
+    EXPECT_EQ(reads.load(), 2);
+    EXPECT_EQ(result.search_storage_cost_.scanned_remote_bytes, 20);
+    EXPECT_EQ(result.search_storage_cost_.scanned_total_bytes, 40);
+    EXPECT_EQ(parent_ctx.storage_usage.scanned_cold_bytes.load(), 1000);
+    EXPECT_EQ(parent_ctx.storage_usage.scanned_total_bytes.load(), 2000);
+
+    cancel_source.requestCancellation();
+    try {
+        LookupSegmentPk(*segment, pk, 3, &parent_ctx, result);
+        FAIL() << "Expected SegcoreError on cancelled LookupSegmentPk";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reads.load(), 2);
+}
+
 TEST_P(RetrieveOutputFieldsPKTest, EmptyResultsConstructColumnsWithoutReads) {
     auto output_schema = std::make_shared<Schema>(*schema);
     auto vector = output_schema->AddDebugField(

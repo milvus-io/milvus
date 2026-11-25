@@ -277,6 +277,41 @@ ParsePksFromIDs(std::vector<PkType>& pks,
     }
 }
 
+std::optional<PkType>
+LookupSegmentPk(const SegmentInternalInterface& segment,
+                FieldId pk_field_id,
+                int64_t offset,
+                milvus::OpContext* op_context,
+                SearchResult& search_result) {
+    if (offset < 0) {
+        return std::nullopt;
+    }
+    CheckCancellation(op_context,
+                      segment.get_segment_id(),
+                      pk_field_id.get(),
+                      "SearchIteratorV2TiePk");
+    milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
+    if (op_context != nullptr) {
+        local_ctx.cancellation_token = op_context->cancellation_token;
+        local_ctx.runtime_load_priority =
+            op_context->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
+    }
+    auto field_data =
+        segment.bulk_subscript(&local_ctx, pk_field_id, &offset, 1);
+    search_result.search_storage_cost_.scanned_remote_bytes +=
+        local_ctx.storage_usage.scanned_cold_bytes.load();
+    search_result.search_storage_cost_.scanned_total_bytes +=
+        local_ctx.storage_usage.scanned_total_bytes.load();
+    if (field_data == nullptr) {
+        return std::nullopt;
+    }
+    std::vector<PkType> pks(1);
+    ParsePksFromFieldData(pks, *field_data);
+    return pks[0];
+}
+
 int64_t
 GetSizeOfIdArray(const IdArray& data) {
     if (data.has_int_id()) {

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
@@ -375,4 +376,163 @@ func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
 	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
+}
+
+func TestSearchIteratorV2CursorRoundTrip(t *testing.T) {
+	const fixedToken = "123e4567-e89b-12d3-a456-426614174000"
+
+	t.Run("int64 row cursor", func(t *testing.T) {
+		res := &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 42}},
+				},
+			},
+		}
+		hasPK, pkBytes, elemIdx := lastPageCursorState(res)
+		require.True(t, hasPK)
+		assert.Nil(t, elemIdx)
+		cursor := encodeSearchIterCursor(1.25, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
+
+		var topK int64
+		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "4"},
+		}, 0, true, 0, &topK, false)
+		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
+		assert.Equal(t, float32(1.25), info.GetLastBound())
+		assert.Equal(t, int64ToBigEndianBytes(42), info.GetLastPrimaryKey())
+		assert.Equal(t, int32(schemapb.DataType_Int64), info.GetPrimaryKeyType())
+		assert.Nil(t, info.LastElementIndex)
+	})
+
+	t.Run("empty string varchar pk preserves hasPK", func(t *testing.T) {
+		res := &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{Data: []string{""}},
+				},
+			},
+		}
+		hasPK, pkBytes, elemIdx := lastPageCursorState(res)
+		require.True(t, hasPK)
+		assert.Empty(t, pkBytes)
+		assert.Nil(t, elemIdx)
+		cursor := encodeSearchIterCursor(0.5, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
+
+		var topK int64
+		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "2"},
+		}, 0, true, 0, &topK, false)
+		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
+		assert.NotNil(t, info.LastPrimaryKey)
+		assert.Empty(t, info.GetLastPrimaryKey())
+		assert.Equal(t, int32(schemapb.DataType_VarChar), info.GetPrimaryKeyType())
+	})
+
+	t.Run("empty page omits primary key", func(t *testing.T) {
+		hasPK, pkBytes, elemIdx := lastPageCursorState(&schemapb.SearchResultData{})
+		assert.False(t, hasPK)
+		assert.Nil(t, pkBytes)
+		assert.Nil(t, elemIdx)
+		cursor := encodeSearchIterCursor(2.0, schemapb.DataType_VarChar, hasPK, pkBytes, elemIdx)
+
+		var topK int64
+		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "2"},
+		}, 0, true, 0, &topK, false)
+		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
+		assert.Equal(t, float32(2.0), info.GetLastBound())
+		assert.Nil(t, info.LastPrimaryKey)
+		assert.Nil(t, info.PrimaryKeyType)
+		assert.Nil(t, info.LastElementIndex)
+	})
+
+	t.Run("element-level cursor carries element index", func(t *testing.T) {
+		res := &schemapb.SearchResultData{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{5, 5}},
+				},
+			},
+			ElementIndices: &schemapb.LongArray{Data: []int64{0, 2}},
+		}
+		hasPK, pkBytes, elemIdx := lastPageCursorState(res)
+		require.True(t, hasPK)
+		require.NotNil(t, elemIdx)
+		assert.Equal(t, int32(2), *elemIdx)
+		cursor := encodeSearchIterCursor(1.0, schemapb.DataType_Int64, hasPK, pkBytes, elemIdx)
+
+		var topK int64
+		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "2"},
+		}, 0, true, 0, &topK, false)
+		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
+		assert.Equal(t, int64ToBigEndianBytes(5), info.GetLastPrimaryKey())
+		require.NotNil(t, info.LastElementIndex)
+		assert.Equal(t, int32(2), info.GetLastElementIndex())
+	})
+
+	t.Run("legacy uuid token fallback without cursor", func(t *testing.T) {
+		var topK int64
+		info, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterBatchSizeKey, Value: "3"},
+			{Key: SearchIterLastBoundKey, Value: "1.5"},
+		}, 0, true, 0, &topK, false)
+		require.NoError(t, err)
+		assert.Equal(t, fixedToken, info.GetToken())
+		assert.Equal(t, float32(1.5), info.GetLastBound())
+		assert.Nil(t, info.LastPrimaryKey)
+		assert.Nil(t, info.LastElementIndex)
+	})
+
+	t.Run("cursor passed as token is rejected and malformed cursor fails", func(t *testing.T) {
+		cursor := encodeSearchIterCursor(1.0, schemapb.DataType_Int64, true, int64ToBigEndianBytes(7), nil)
+		var topK int64
+		_, err := parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: cursor},
+			{Key: SearchIterBatchSizeKey, Value: "3"},
+		}, 0, true, 0, &topK, false)
+		assert.Error(t, err)
+
+		_, err = parseSearchIteratorV2Info([]*commonpb.KeyValuePair{
+			{Key: SearchIterV2Key, Value: "true"},
+			{Key: SearchIterIdKey, Value: fixedToken},
+			{Key: SearchIterCursorKey, Value: "bad-cursor"},
+			{Key: SearchIterBatchSizeKey, Value: "3"},
+		}, 0, true, 0, &topK, false)
+		assert.Error(t, err)
+	})
+
+	t.Run("CompareSearchResultTieKey orders by pk then element index", func(t *testing.T) {
+		a := &schemapb.SearchResultData{
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{5, 10}}}},
+			ElementIndices: &schemapb.LongArray{Data: []int64{2, 0}},
+		}
+		b := &schemapb.SearchResultData{
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{5, 5}}}},
+			ElementIndices: &schemapb.LongArray{Data: []int64{1, 3}},
+		}
+		assert.False(t, typeutil.CompareSearchResultTieKey(a, 0, b, 0)) // (5,2) > (5,1)
+		assert.True(t, typeutil.CompareSearchResultTieKey(a, 0, b, 1))  // (5,2) < (5,3)
+		assert.False(t, typeutil.CompareSearchResultTieKey(a, 1, b, 1)) // (10,0) > (5,3)
+	})
 }

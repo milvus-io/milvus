@@ -4207,6 +4207,24 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
     AssertInfo(field_meta.is_vector(),
                "The meta type of vector field is not vector type");
 
+    // PK accessor for SearchIterator v2 tie continuation: resolves the primary
+    // key of a candidate row (segment offset) so equal-distance rows can be
+    // resumed across pages. Only needed on the iterator path; plain searches
+    // keep the default null accessor.
+    query::PkAccessor pk_accessor = nullptr;
+    if (search_info.iterator_v2_info_.has_value()) {
+        auto pk_field_id_opt = snapshot->fields->get_primary_field_id();
+        if (pk_field_id_opt.has_value()) {
+            pk_accessor = [this,
+                           pk_field_id = pk_field_id_opt.value(),
+                           op_context,
+                           &output](int64_t offset) -> std::optional<PkType> {
+                return LookupSegmentPk(
+                    *this, pk_field_id, offset, op_context, output);
+            };
+        }
+    }
+
     if (get_bit(snapshot->binlog_index_bitset, field_id)) {
         auto config_it = runtime->vec_binlog_config.find(field_id);
         AssertInfo(config_it != runtime->vec_binlog_config.end(),
@@ -4229,7 +4247,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_offsets,
                                    query_count,
                                    bitset,
-                                   output);
+                                   output,
+                                   pk_accessor);
         if (output.vector_iterators_.has_value()) {
             output.resource_pins_.emplace_back(std::move(index_reader));
         }
@@ -4257,7 +4276,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    query_offsets,
                                    query_count,
                                    bitset,
-                                   output);
+                                   output,
+                                   pk_accessor);
         if (output.vector_iterators_.has_value()) {
             output.resource_pins_.emplace_back(std::move(index_reader));
         }
@@ -4293,7 +4313,8 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     row_count,
                                     bitset,
                                     op_context,
-                                    output);
+                                    output,
+                                    pk_accessor);
         milvus::tracer::AddEvent("finish_searching_vector_data");
     }
 }

@@ -35,7 +35,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
               SearchResult& search_result,
-              bool is_sparse) {
+              bool is_sparse,
+              PkAccessor pk_accessor) {
     auto num_queries = search_dataset.num_queries;
     auto dim = search_dataset.dim;
     auto dataset =
@@ -117,8 +118,11 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
-        auto iter =
-            CachedSearchIterator(reader, dataset, search_conf, search_bitset);
+        auto iter = CachedSearchIterator(reader,
+                                         dataset,
+                                         search_conf,
+                                         search_bitset,
+                                         std::move(pk_accessor));
         iter.NextBatch(search_conf, search_result);
         return;
     }

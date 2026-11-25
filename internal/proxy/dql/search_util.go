@@ -2,7 +2,10 @@ package dql
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -415,6 +418,136 @@ func isSortableFieldType(dataType schemapb.DataType) bool {
 	}
 }
 
+// searchIteratorCursorVersion prefixes the opaque cursor token returned to the
+// SDK for SearchIterator v2. The token encodes the last returned (bound, pk[,
+// element_index]) so the next page resumes exactly after it; the SDK echoes it
+// verbatim.
+const (
+	searchIteratorCursorVersion = "c1"
+	cursorFlagHasPK             = 1 << 0
+	cursorFlagHasElemIdx        = 1 << 1
+)
+
+// encodeSearchIterCursor packs (last_bound, pk_type, pk_bytes, elem_idx) into
+// the opaque cursor token: 4-byte little-endian float bound, 1-byte flags
+// (hasPK / hasElemIdx), 1-byte pk type, optional 4-byte little-endian element
+// index, and optional pk bytes (INT64 -> 8-byte big-endian; VARCHAR/String ->
+// raw bytes).
+func encodeSearchIterCursor(bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32) string {
+	extra := len(pkBytes)
+	if elemIdx != nil {
+		extra += 4
+	}
+	buf := make([]byte, 6, 6+extra)
+	binary.LittleEndian.PutUint32(buf, math.Float32bits(bound))
+	var flags byte
+	if hasPK {
+		flags |= cursorFlagHasPK
+	}
+	if elemIdx != nil {
+		flags |= cursorFlagHasElemIdx
+	}
+	buf[4] = flags
+	buf[5] = byte(pkType)
+	if elemIdx != nil {
+		var elemBuf [4]byte
+		binary.LittleEndian.PutUint32(elemBuf[:], uint32(*elemIdx))
+		buf = append(buf, elemBuf[:]...)
+	}
+	if hasPK {
+		buf = append(buf, pkBytes...)
+	}
+	return searchIteratorCursorVersion + ":" + base64.RawStdEncoding.EncodeToString(buf)
+}
+
+// decodeSearchIterCursor parses an opaque cursor returned in
+// SearchIteratorV2Results.Cursor and echoed via SearchIterCursorKey.
+// Returns ok=false for malformed input.
+func decodeSearchIterCursor(cursor string) (bound float32, pkType schemapb.DataType, hasPK bool, pkBytes []byte, elemIdx *int32, ok bool) {
+	prefix := searchIteratorCursorVersion + ":"
+	if !strings.HasPrefix(cursor, prefix) {
+		return 0, 0, false, nil, nil, false
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(cursor, prefix))
+	if err != nil || len(raw) < 6 {
+		return 0, 0, false, nil, nil, false
+	}
+	bound = math.Float32frombits(binary.LittleEndian.Uint32(raw[:4]))
+	flags := raw[4]
+	if flags&^(cursorFlagHasPK|cursorFlagHasElemIdx) != 0 {
+		return 0, 0, false, nil, nil, false
+	}
+	pkType = schemapb.DataType(raw[5])
+	pos := 6
+	if flags&cursorFlagHasElemIdx != 0 {
+		if len(raw) < pos+4 {
+			return 0, 0, false, nil, nil, false
+		}
+		v := int32(binary.LittleEndian.Uint32(raw[pos : pos+4]))
+		elemIdx = &v
+		pos += 4
+	}
+	if flags&cursorFlagHasPK != 0 {
+		hasPK = true
+		pkBytes = raw[pos:]
+	} else if pos != len(raw) {
+		return 0, 0, false, nil, nil, false
+	}
+	return bound, pkType, hasPK, pkBytes, elemIdx, true
+}
+
+// isValidSearchIterToken checks whether token is a valid session UUID.
+func isValidSearchIterToken(token string) bool {
+	_, err := uuid.Parse(token)
+	return err == nil
+}
+
+// int64ToBigEndianBytes encodes an int64 as 8-byte big-endian, matching the
+// core-side continuation-pk encoding.
+func int64ToBigEndianBytes(v int64) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(v))
+	return buf
+}
+
+// lastPageCursorState returns the primary key (and optional element index for
+// element-level searches) of the last item of the page in the wire encoding
+// expected by the continuation cursor. Returns hasPK=false for an empty page.
+func lastPageCursorState(results *schemapb.SearchResultData) (hasPK bool, pkBytes []byte, elemIdx *int32) {
+	if results == nil || results.Ids == nil {
+		return false, nil, nil
+	}
+	idCount := 0
+	if intId := results.Ids.GetIntId(); intId != nil {
+		data := intId.GetData()
+		if len(data) == 0 {
+			return false, nil, nil
+		}
+		idCount = len(data)
+		pkBytes = int64ToBigEndianBytes(data[idCount-1])
+		hasPK = true
+	} else if strId := results.Ids.GetStrId(); strId != nil {
+		data := strId.GetData()
+		if len(data) == 0 {
+			return false, nil, nil
+		}
+		idCount = len(data)
+		pkBytes = []byte(data[idCount-1])
+		hasPK = true
+	}
+	if !hasPK {
+		return false, nil, nil
+	}
+	if results.ElementIndices != nil {
+		elems := results.ElementIndices.GetData()
+		if len(elems) == idCount {
+			v := int32(elems[idCount-1])
+			elemIdx = &v
+		}
+	}
+	return true, pkBytes, elemIdx
+}
+
 func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupByFieldId int64, isIterator bool, offset int64, queryTopK *int64, largeTopKEnabled bool) (*planpb.SearchIteratorV2Info, error) {
 	isIteratorV2Str, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterV2Key, searchParamsPair)
 	isIteratorV2, _ := strconv.ParseBool(isIteratorV2Str)
@@ -448,11 +581,8 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 			return nil, err
 		}
 		token = generatedToken.String()
-	} else {
-		// Validate existing token is a valid UUID
-		if _, err := uuid.Parse(token); err != nil {
-			return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
-		}
+	} else if !isValidSearchIterToken(token) {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid token format")
 	}
 
 	// parse batch size, required non-zero value
@@ -485,6 +615,27 @@ func parseSearchIteratorV2Info(searchParamsPair []*commonpb.KeyValuePair, groupB
 		}
 		lastBoundFloat32 := float32(lastBound)
 		planIteratorV2Info.LastBound = &lastBoundFloat32 // escape pointer
+	}
+
+	// Decode the cursor returned by the previous page when the SDK forwards it.
+	// Unlike search_iter_id (which many SDKs cache once on page 1 and keep
+	// constant), search_iter_cursor is updated per page and carries exact
+	// (last_bound, last_primary_key[, last_element_index]) tie state.
+	cursor, _ := funcutil.GetAttrByKeyFromRepeatedKV(SearchIterCursorKey, searchParamsPair)
+	if cursor != "" {
+		bound, pkType, hasPK, pkBytes, elemIdx, ok := decodeSearchIterCursor(cursor)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid cursor format")
+		}
+		planIteratorV2Info.LastBound = &bound
+		if hasPK {
+			planIteratorV2Info.LastPrimaryKey = pkBytes
+			pkTypeInt := int32(pkType)
+			planIteratorV2Info.PrimaryKeyType = &pkTypeInt
+		}
+		if elemIdx != nil {
+			planIteratorV2Info.LastElementIndex = elemIdx
+		}
 	}
 
 	return planIteratorV2Info, nil

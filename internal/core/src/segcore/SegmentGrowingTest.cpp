@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include "monitor/Monitor.h"
@@ -4023,5 +4024,102 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
         FAIL() << "expected short valid_data to be rejected";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+    }
+}
+
+TEST(Growing, SearchIteratorV2TiePkOpContextPropagation) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+
+    auto data = segcore::DataGen(schema, 5);
+    const std::array<int64_t, 5> pks = {40, 10, 30, 20, 99};
+    for (auto& fd : *data.raw_->mutable_fields_data()) {
+        if (fd.field_id() == pk.get()) {
+            auto* longs = fd.mutable_scalars()->mutable_long_data();
+            longs->Clear();
+            longs->mutable_data()->Add(pks.begin(), pks.end());
+        } else if (fd.field_id() == vec.get()) {
+            auto* floats = fd.mutable_vectors()->mutable_float_vector();
+            floats->clear_data();
+            for (int i = 0; i < 4; ++i) {
+                floats->add_data(1.0f);
+                floats->add_data(0.0f);
+            }
+            floats->add_data(2.0f);
+            floats->add_data(0.0f);
+        }
+    }
+
+    auto growing_base = CreateGrowingSegment(schema, empty_index_meta);
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(growing_base.get());
+    ASSERT_NE(growing, nullptr);
+    auto reserved = growing->PreInsert(5);
+    growing->Insert(reserved,
+                    5,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    data.SharedRaw());
+
+    auto encode_i64_pk = [](int64_t v) {
+        std::string s(8, '\0');
+        uint64_t u = static_cast<uint64_t>(v);
+        for (int i = 7; i >= 0; --i) {
+            s[i] = static_cast<char>(u & 0xff);
+            u >>= 8;
+        }
+        return s;
+    };
+
+    const std::array<float, 2> query_vec = {1.0f, 0.0f};
+    folly::CancellationSource cancel_source;
+    milvus::OpContext op_ctx(cancel_source.getToken());
+    auto run_page = [&](int64_t batch_size,
+                        std::optional<float> last_bound,
+                        std::optional<int64_t> last_pk) {
+        SearchInfo info;
+        info.field_id_ = vec;
+        info.metric_type_ = knowhere::metric::L2;
+        info.topk_ = batch_size;
+        info.round_decimal_ = -1;
+        info.active_count_ = 5;
+        info.search_params_ =
+            knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+        SearchIteratorV2Info v2{"", static_cast<uint32_t>(batch_size)};
+        v2.last_bound = last_bound;
+        if (last_pk.has_value()) {
+            v2.last_primary_key = encode_i64_pk(*last_pk);
+            v2.primary_key_type = DataType::INT64;
+        }
+        info.iterator_v2_info_ = v2;
+        SearchResult result;
+        query::SearchOnGrowing(*growing,
+                               info,
+                               query_vec.data(),
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               &op_ctx,
+                               result);
+        return result;
+    };
+
+    EXPECT_EQ(run_page(2, std::nullopt, std::nullopt).seg_offsets_,
+              (std::vector<int64_t>{1, 3}));
+    EXPECT_EQ(run_page(2, 0.0f, 20).seg_offsets_, (std::vector<int64_t>{2, 0}));
+    EXPECT_EQ(run_page(2, 0.0f, 40).seg_offsets_,
+              (std::vector<int64_t>{4, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(run_page(6, std::nullopt, std::nullopt).seg_offsets_,
+              (std::vector<int64_t>{1, 3, 2, 0, 4, INVALID_SEG_OFFSET}));
+
+    cancel_source.requestCancellation();
+    try {
+        run_page(2, std::nullopt, std::nullopt);
+        FAIL() << "Expected SegcoreError when OpContext is cancelled";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::FollyCancel);
     }
 }

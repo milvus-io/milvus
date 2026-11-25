@@ -79,6 +79,15 @@ message SearchIteratorV2Info {
   string token = 1;
   uint32 batch_size = 2;
   optional float last_bound = 3;
+  // Tie-break continuation: primary key of the last returned row when the
+  // page boundary distance is shared by multiple rows. Encoding depends on
+  // primary_key_type: INT64 -> 8-byte big-endian; VARCHAR/String -> raw bytes.
+  optional bytes last_primary_key = 4;
+  // schema.DataType of the collection primary key field (INT64 or VARCHAR).
+  optional int32 primary_key_type = 5;
+  // Tie-break continuation for element-level (ArrayOfVector) searches: element
+  // index within the parent row of the last returned item.
+  optional int32 last_element_index = 6;
 }
 
 message QueryInfo {

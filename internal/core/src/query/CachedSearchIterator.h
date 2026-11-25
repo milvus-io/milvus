@@ -25,6 +25,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "common/StructElementOffsets.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "index/contracts/query/IVectorReader.h"
@@ -35,6 +36,13 @@
 #include "segcore/ConcurrentVector.h"
 
 namespace milvus::query {
+
+// Resolves the primary key of the row at a given logical row offset. Used to
+// make SearchIterator pagination deterministic across equal-distance ties: rows
+// (or elements on element-level searches) tied at a page boundary are ordered
+// by (pk[, elem_idx]) and the continuation cursor carries the last returned key.
+// Returns nullopt when the pk cannot be resolved (e.g. padding rows).
+using PkAccessor = std::function<std::optional<PkType>(int64_t)>;
 
 // This class is used to cache the search results from Knowhere
 // search iterators and filter the results based on the last_bound,
@@ -53,7 +61,8 @@ class CachedSearchIterator {
     CachedSearchIterator(const milvus::index::IVectorReader& reader,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
-                         const BitsetView& bitset);
+                         const BitsetView& bitset,
+                         PkAccessor pk_accessor = nullptr);
 
     // For growing segment with chunked data, BF.
     //
@@ -73,7 +82,8 @@ class CachedSearchIterator {
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
                          const milvus::DataType& data_type,
-                         bool element_nullable = false);
+                         bool element_nullable = false,
+                         PkAccessor pk_accessor = nullptr);
 
     // For sealed segment with chunked data, BF
     CachedSearchIterator(ChunkedColumnInterface* column,
@@ -82,7 +92,8 @@ class CachedSearchIterator {
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
                          const milvus::DataType& data_type,
-                         milvus::OpContext* op_context = nullptr);
+                         milvus::OpContext* op_context = nullptr,
+                         PkAccessor pk_accessor = nullptr);
 
     // This method fetches the next batch of search results based on the provided search information
     // and updates the search_result object with the new batch of results.
@@ -119,9 +130,52 @@ class CachedSearchIterator {
     std::vector<std::vector<int32_t>> element_id_buffers_;
     int64_t batch_size_ = 0;
     std::vector<knowhere::IndexNode::IteratorPtr> iterators_;
+    // Resolves the primary key of a candidate row (logical row offset). Null
+    // when the caller cannot provide pks; equal-distance ties then keep the
+    // legacy strict `dist > last_bound` behavior.
+    PkAccessor pk_lookup_ = nullptr;
+    // Present for element-level (ArrayOfVector) searches: maps Knowhere's
+    // element offset to (doc_id, elem_idx) before invoking pk_lookup_.
+    std::shared_ptr<const milvus::IStructElementOffsets>
+        struct_element_offsets_ = nullptr;
     int8_t sign_ = 1;
     size_t num_chunks_ = 1;
     size_t nq_ = 0;
+
+    // Tie-break key within an equal-distance group: (pk, elem_idx). For
+    // row-level searches elem_idx is -1; for element-level searches elem_idx is
+    // the non-negative element index within the parent row.
+    struct TieBreakKey {
+        PkType pk;
+        int32_t elem_idx = -1;
+    };
+
+    // Decodes the wire-encoded continuation primary key
+    // (INT64 -> 8-byte big-endian; VARCHAR/String -> raw bytes).
+    static std::optional<PkType>
+    DecodePkValue(const std::optional<std::string>& raw,
+                  const std::optional<milvus::DataType>& pk_type);
+
+    // Lexicographic comparison of two primary keys (int64 or string).
+    // Returns -1/0/1.
+    static int
+    ComparePk(const PkType& lhs, const PkType& rhs);
+
+    // Total-order comparison of two tie-break keys by (pk, elem_idx).
+    // Returns -1/0/1.
+    static int
+    CompareTieBreakKey(const TieBreakKey& lhs, const TieBreakKey& rhs);
+
+    // Decodes the continuation tie-break key from SearchIteratorV2Info. For
+    // element-level searches, requires last_element_index so sibling elements
+    // of the same row are never conflated.
+    std::optional<TieBreakKey>
+    DecodeLastTieBreakKey(const SearchIteratorV2Info& info) const;
+
+    // Resolves the tie-break key for a candidate offset (element offset when
+    // struct_element_offsets_ is set; logical row offset otherwise).
+    std::optional<TieBreakKey>
+    LookupTieBreakKey(int64_t offset) const;
 
     struct IterIdDisIdPairComparator {
         bool
@@ -136,18 +190,45 @@ class CachedSearchIterator {
                                     std::vector<IterIdDisIdPair>,
                                     IterIdDisIdPairComparator>>
         chunked_heaps_;
+    // Lookahead and overflow tie-group candidates already pulled from
+    // iterators_ during an earlier NextBatch() on the same instance, kept in
+    // (dist, pk[, elem_idx]) order per query_idx.
+    std::vector<std::vector<DisIdPair>> buffered_results_;
 
     inline bool
     IsValid(const DisIdPair& result,
             const std::optional<float>& last_bound,
+            const std::optional<TieBreakKey>& last_key,
             const std::optional<float>& radius,
             const std::optional<float>& range_filter) {
         const float dist = result.first;
-        const bool is_valid =
-            !last_bound.has_value() || dist > last_bound.value();
+        bool is_valid = true;
+        if (last_bound.has_value()) {
+            if (dist < last_bound.value()) {
+                is_valid = false;
+            } else if (dist == last_bound.value()) {
+                // Rows/elements tied at the page boundary distance: keep only
+                // items whose (pk[, elem_idx]) is greater than the cursor's, so
+                // each tied item is returned exactly once across pages. Without
+                // a complete continuation key or pk accessor, tie identity is
+                // unknown, so keep the legacy strict behavior (dist >
+                // last_bound) and drop the tied item.
+                if (!last_key.has_value() || !pk_lookup_) {
+                    is_valid = false;
+                } else {
+                    auto key = LookupTieBreakKey(result.second);
+                    is_valid = key.has_value() &&
+                               CompareTieBreakKey(*key, *last_key) > 0;
+                }
+            }
+        }
+
+        if (!is_valid) {
+            return false;
+        }
 
         if (!radius.has_value()) {
-            return is_valid;
+            return true;
         }
 
         if (!range_filter.has_value()) {
@@ -177,12 +258,14 @@ class CachedSearchIterator {
     std::optional<DisIdPair>
     GetNextValidResult(size_t iterator_idx,
                        const std::optional<float>& last_bound,
+                       const std::optional<TieBreakKey>& last_key,
                        const std::optional<float>& radius,
                        const std::optional<float>& range_filter);
 
     void
     MergeChunksResults(size_t query_idx,
                        const std::optional<float>& last_bound,
+                       const std::optional<TieBreakKey>& last_key,
                        const std::optional<float>& radius,
                        const std::optional<float>& range_filter,
                        std::vector<DisIdPair>& rst);

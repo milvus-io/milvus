@@ -53,6 +53,7 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/Utils.h"
 
 namespace milvus::query {
 
@@ -103,6 +104,32 @@ SetSearchOnGrowingAfterChunkSnapshotHookForTest(
         static_cast<bool>(AfterChunkSnapshotHookSlot()),
         std::memory_order_release);
 }
+
+namespace {
+
+PkAccessor
+MakePkAccessor(const segcore::SegmentGrowingImpl& segment,
+               const Schema& schema,
+               const SearchInfo& info,
+               milvus::OpContext* op_context,
+               SearchResult& search_result) {
+    if (!info.iterator_v2_info_.has_value()) {
+        return nullptr;
+    }
+    auto pk_field_id_opt = schema.get_primary_field_id();
+    if (!pk_field_id_opt.has_value()) {
+        return nullptr;
+    }
+    return [&segment,
+            pk_field_id = pk_field_id_opt.value(),
+            op_context,
+            &search_result](int64_t offset) -> std::optional<PkType> {
+        return segcore::LookupSegmentPk(
+            segment, pk_field_id, offset, op_context, search_result);
+    };
+}
+
+}  // namespace
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
@@ -212,12 +239,15 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::make_shared<index::GrowingIndexSnapshotPin>(
                     std::move(index_pin));
         }
-        SearchOnIndex(search_dataset,
-                      *reader,
-                      search_conf,
-                      bitset,
-                      search_result,
-                      is_sparse);
+        SearchOnIndex(
+            search_dataset,
+            *reader,
+            search_conf,
+            bitset,
+            search_result,
+            is_sparse,
+            MakePkAccessor(
+                segment, *schema, search_conf, op_context, search_result));
         // A growing segment's only vector index is the interim index.
         search_result.used_interim_index_ = true;
         register_vector_search_provider();
@@ -342,15 +372,17 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         // reads the same generation the scan below would have. Reading the
         // live container instead would assert once try_remove_chunks has
         // reclaimed it -- reclamation no longer waits for a chunk lock.
-        CachedSearchIterator cached_iter(search_dataset,
-                                         vec_ptr,
-                                         chunks,
-                                         active_count,
-                                         info,
-                                         index_info,
-                                         search_bitset,
-                                         iter_data_type,
-                                         has_element_id_mapping);
+        CachedSearchIterator cached_iter(
+            search_dataset,
+            vec_ptr,
+            chunks,
+            active_count,
+            info,
+            index_info,
+            search_bitset,
+            iter_data_type,
+            has_element_id_mapping,
+            MakePkAccessor(segment, *schema, info, op_context, search_result));
         cached_iter.NextBatch(info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     info.struct_element_offsets_.get());

@@ -16,7 +16,9 @@
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "common/StructElementOffsets.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "query/Utils.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/IVectorReader.h"
@@ -886,6 +888,357 @@ TEST(CachedSearchIteratorNullableTest, ChunkedColumnWithPartialNulls) {
         ASSERT_EQ(offset % 2, 0) << "logical offset should be a valid row";
     }
     ASSERT_GT(valid_count, 0);
+}
+
+TEST(CachedSearchIteratorTieBreakTest, ElementLevelTieContinuation) {
+    constexpr int64_t kTestDim = 4;
+    constexpr int64_t kBatch = 2;
+    auto vec_col =
+        std::make_unique<ConcurrentVector<milvus::VectorArray>>(kTestDim, 16);
+
+    const std::vector<float> row0_vecs = {
+        1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, -1.f, 0.f, 0.f, 0.f};
+    const std::vector<float> row1_vecs = {
+        0.f, -1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, -1.f, 0.f};
+    std::vector<milvus::VectorArray> rows;
+    rows.emplace_back(row0_vecs.data(), 3, kTestDim, DataType::VECTOR_FLOAT);
+    rows.emplace_back(row1_vecs.data(), 3, kTestDim, DataType::VECTOR_FLOAT);
+    vec_col->set_data_raw(0, rows.data(), 2);
+
+    auto elem_offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::vector<int32_t>{0, 3, 6});
+    const std::vector<int64_t> row_pks = {10, 5};
+    PkAccessor pk_accessor =
+        [&row_pks](int64_t doc_offset) -> std::optional<PkType> {
+        EXPECT_GE(doc_offset, 0);
+        EXPECT_LT(doc_offset, static_cast<int64_t>(row_pks.size()));
+        if (doc_offset < 0 ||
+            doc_offset >= static_cast<int64_t>(row_pks.size())) {
+            return std::nullopt;
+        }
+        return PkType{row_pks[doc_offset]};
+    };
+
+    const std::vector<float> query_vec(kTestDim, 0.f);
+    dataset::SearchDataset search_ds{
+        knowhere::metric::L2, 1, kBatch, -1, kTestDim, query_vec.data()};
+    TargetBitmap bitset_data(6, false);
+    BitsetView bitset(bitset_data);
+
+    auto encode_i64_pk = [](int64_t v) {
+        std::string s(8, '\0');
+        uint64_t u = static_cast<uint64_t>(v);
+        for (int i = 7; i >= 0; --i) {
+            s[i] = static_cast<char>(u & 0xff);
+            u >>= 8;
+        }
+        return s;
+    };
+
+    auto run_page = [&](std::optional<float> last_bound,
+                        std::optional<int64_t> last_pk,
+                        std::optional<int32_t> last_elem_idx) {
+        SearchInfo info;
+        info.topk_ = kBatch;
+        info.round_decimal_ = -1;
+        info.metric_type_ = knowhere::metric::L2;
+        info.struct_element_offsets_ = elem_offsets;
+        SearchIteratorV2Info v2;
+        v2.batch_size = kBatch;
+        v2.last_bound = last_bound;
+        if (last_pk.has_value()) {
+            v2.last_primary_key = encode_i64_pk(*last_pk);
+            v2.primary_key_type = DataType::INT64;
+        }
+        v2.last_element_index = last_elem_idx;
+        info.iterator_v2_info_ = v2;
+
+        auto chunks = vec_col->acquire_chunks();
+        CachedSearchIterator iter(search_ds,
+                                  vec_col.get(),
+                                  chunks,
+                                  2,
+                                  info,
+                                  std::map<std::string, std::string>{},
+                                  bitset,
+                                  DataType::VECTOR_FLOAT,
+                                  false,
+                                  pk_accessor);
+        SearchResult sr;
+        iter.NextBatch(info, sr);
+        FinalizeVectorSearchOffsets(sr, elem_offsets.get());
+        return sr;
+    };
+
+    // Expected global (dist=1.0, pk, elem_idx) order:
+    // (5,0), (5,1), (5,2), (10,0), (10,1), (10,2)
+    auto p1 = run_page(std::nullopt, std::nullopt, std::nullopt);
+    ASSERT_EQ(p1.seg_offsets_, (std::vector<int64_t>{1, 1}));
+    ASSERT_EQ(p1.element_indices_, (std::vector<int32_t>{0, 1}));
+
+    auto p2 = run_page(1.0f, 5, 1);
+    ASSERT_EQ(p2.seg_offsets_, (std::vector<int64_t>{1, 0}));
+    ASSERT_EQ(p2.element_indices_, (std::vector<int32_t>{2, 0}));
+
+    auto p3 = run_page(1.0f, 10, 0);
+    ASSERT_EQ(p3.seg_offsets_, (std::vector<int64_t>{0, 0}));
+    ASSERT_EQ(p3.element_indices_, (std::vector<int32_t>{1, 2}));
+
+    auto p4 = run_page(1.0f, 10, 2);
+    ASSERT_EQ(p4.seg_offsets_,
+              (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
+
+    // Incomplete cursor (last_pk without last_element_index) falls back to
+    // strict dist > last_bound so sibling elements are not skipped/duplicated.
+    auto incomplete = run_page(1.0f, 5, std::nullopt);
+    ASSERT_EQ(incomplete.seg_offsets_,
+              (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
+}
+
+TEST(CachedSearchIteratorTieBreakTest, EmptyVarCharPkTieContinuation) {
+    constexpr int64_t kTestDim = 4;
+    auto vec_col =
+        std::make_unique<ConcurrentVector<milvus::FloatVector>>(kTestDim, 16);
+    const std::vector<float> vecs = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f};
+    vec_col->set_data_raw(0, vecs.data(), 2);
+
+    const std::vector<std::string> row_pks = {"a", ""};
+    PkAccessor pk_accessor =
+        [&row_pks](int64_t doc_offset) -> std::optional<PkType> {
+        if (doc_offset < 0 ||
+            doc_offset >= static_cast<int64_t>(row_pks.size())) {
+            return std::nullopt;
+        }
+        return PkType{row_pks[doc_offset]};
+    };
+
+    const std::vector<float> query_vec(kTestDim, 0.f);
+    dataset::SearchDataset search_ds{
+        knowhere::metric::L2, 1, 1, -1, kTestDim, query_vec.data()};
+    TargetBitmap bitset_data(2, false);
+    BitsetView bitset(bitset_data);
+
+    auto run_page = [&](std::optional<float> last_bound,
+                        std::optional<std::string> last_pk) {
+        SearchInfo info;
+        info.topk_ = 1;
+        info.round_decimal_ = -1;
+        info.metric_type_ = knowhere::metric::L2;
+        SearchIteratorV2Info v2;
+        v2.batch_size = 1;
+        v2.last_bound = last_bound;
+        if (last_pk.has_value()) {
+            v2.last_primary_key = *last_pk;
+            v2.primary_key_type = DataType::VARCHAR;
+        }
+        info.iterator_v2_info_ = v2;
+
+        auto chunks = vec_col->acquire_chunks();
+        CachedSearchIterator iter(search_ds,
+                                  vec_col.get(),
+                                  chunks,
+                                  2,
+                                  info,
+                                  std::map<std::string, std::string>{},
+                                  bitset,
+                                  DataType::VECTOR_FLOAT,
+                                  false,
+                                  pk_accessor);
+        SearchResult sr;
+        iter.NextBatch(info, sr);
+        return sr;
+    };
+
+    auto p1 = run_page(std::nullopt, std::nullopt);
+    ASSERT_EQ(p1.seg_offsets_, (std::vector<int64_t>{1}));
+
+    auto p2 = run_page(1.0f, std::string(""));
+    ASSERT_EQ(p2.seg_offsets_, (std::vector<int64_t>{0}));
+
+    auto p3 = run_page(1.0f, std::string("a"));
+    ASSERT_EQ(p3.seg_offsets_, (std::vector<int64_t>{INVALID_SEG_OFFSET}));
+}
+
+TEST(CachedSearchIteratorTieBreakTest,
+     MultiNextBatchPreservesTieOverflowAndLookahead) {
+    constexpr int64_t kTestDim = 4;
+    constexpr int64_t kBatch = 2;
+    auto vec_col =
+        std::make_unique<ConcurrentVector<milvus::FloatVector>>(kTestDim, 16);
+    // 4 vectors at L2 distance 1.0 (PKs 40, 10, 30, 20) + 1 at L2 distance 4.0 (PK 99).
+    const std::vector<float> vecs = {
+        1.f, 0.f, 0.f, 0.f,  0.f, 1.f, 0.f, 0.f, -1.f, 0.f,
+        0.f, 0.f, 0.f, -1.f, 0.f, 0.f, 2.f, 0.f, 0.f,  0.f,
+    };
+    vec_col->set_data_raw(0, vecs.data(), 5);
+
+    const std::vector<int64_t> row_pks = {40, 10, 30, 20, 99};
+    PkAccessor pk_accessor =
+        [&row_pks](int64_t doc_offset) -> std::optional<PkType> {
+        if (doc_offset < 0 ||
+            doc_offset >= static_cast<int64_t>(row_pks.size())) {
+            return std::nullopt;
+        }
+        return PkType{row_pks[doc_offset]};
+    };
+
+    const std::vector<float> query_vec(kTestDim, 0.f);
+    dataset::SearchDataset search_ds{
+        knowhere::metric::L2, 1, kBatch, -1, kTestDim, query_vec.data()};
+    TargetBitmap bitset_data(5, false);
+    BitsetView bitset(bitset_data);
+
+    SearchInfo info;
+    info.topk_ = kBatch;
+    info.round_decimal_ = -1;
+    info.metric_type_ = knowhere::metric::L2;
+    SearchIteratorV2Info v2;
+    v2.batch_size = kBatch;
+    info.iterator_v2_info_ = v2;
+
+    auto chunks = vec_col->acquire_chunks();
+    CachedSearchIterator iter(search_ds,
+                              vec_col.get(),
+                              chunks,
+                              5,
+                              info,
+                              std::map<std::string, std::string>{},
+                              bitset,
+                              DataType::VECTOR_FLOAT,
+                              false,
+                              pk_accessor);
+
+    SearchResult p1;
+    iter.NextBatch(info, p1);
+    ASSERT_EQ(p1.seg_offsets_, (std::vector<int64_t>{1, 3}));  // PKs 10, 20
+
+    SearchResult p2;
+    iter.NextBatch(info, p2);
+    ASSERT_EQ(p2.seg_offsets_, (std::vector<int64_t>{2, 0}));  // PKs 30, 40
+
+    SearchResult p3;
+    iter.NextBatch(info, p3);
+    ASSERT_EQ(p3.seg_offsets_,
+              (std::vector<int64_t>{4, INVALID_SEG_OFFSET}));  // PK 99
+
+    SearchResult p4;
+    iter.NextBatch(info, p4);
+    ASSERT_EQ(p4.seg_offsets_,
+              (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
+}
+
+TEST(CachedSearchIteratorTieBreakTest, RowLevelInt64AndVarCharTieContinuation) {
+    constexpr int64_t kTestDim = 4;
+    auto vec_col =
+        std::make_unique<ConcurrentVector<milvus::FloatVector>>(kTestDim, 16);
+    // 4 vectors at L2 distance 1.0 + 1 vector at L2 distance 4.0.
+    const std::vector<float> vecs = {
+        1.f, 0.f, 0.f, 0.f,  0.f, 1.f, 0.f, 0.f, -1.f, 0.f,
+        0.f, 0.f, 0.f, -1.f, 0.f, 0.f, 2.f, 0.f, 0.f,  0.f,
+    };
+    vec_col->set_data_raw(0, vecs.data(), 5);
+
+    const std::vector<float> query_vec(kTestDim, 0.f);
+    TargetBitmap bitset_data(5, false);
+    BitsetView bitset(bitset_data);
+
+    auto run_page = [&](const PkAccessor& pk_accessor,
+                        int64_t batch_size,
+                        std::optional<float> last_bound,
+                        std::optional<std::string> last_pk,
+                        std::optional<DataType> pk_type) {
+        dataset::SearchDataset search_ds{knowhere::metric::L2,
+                                         1,
+                                         batch_size,
+                                         -1,
+                                         kTestDim,
+                                         query_vec.data()};
+        SearchInfo info;
+        info.topk_ = batch_size;
+        info.round_decimal_ = -1;
+        info.metric_type_ = knowhere::metric::L2;
+        SearchIteratorV2Info v2;
+        v2.batch_size = batch_size;
+        v2.last_bound = last_bound;
+        v2.last_primary_key = std::move(last_pk);
+        v2.primary_key_type = pk_type;
+        info.iterator_v2_info_ = v2;
+
+        auto chunks = vec_col->acquire_chunks();
+        CachedSearchIterator iter(search_ds,
+                                  vec_col.get(),
+                                  chunks,
+                                  5,
+                                  info,
+                                  std::map<std::string, std::string>{},
+                                  bitset,
+                                  DataType::VECTOR_FLOAT,
+                                  false,
+                                  pk_accessor);
+        SearchResult sr;
+        iter.NextBatch(info, sr);
+        return sr;
+    };
+
+    auto encode_i64_pk = [](int64_t v) {
+        std::string s(8, '\0');
+        uint64_t u = static_cast<uint64_t>(v);
+        for (int i = 7; i >= 0; --i) {
+            s[i] = static_cast<char>(u & 0xff);
+            u >>= 8;
+        }
+        return s;
+    };
+
+    const std::vector<int64_t> int_pks = {40, 10, 30, 20, 99};
+    PkAccessor int_accessor = [&int_pks](int64_t off) -> std::optional<PkType> {
+        return PkType{int_pks.at(off)};
+    };
+    EXPECT_EQ(
+        run_page(int_accessor, 2, std::nullopt, std::nullopt, std::nullopt)
+            .seg_offsets_,
+        (std::vector<int64_t>{1, 3}));
+    EXPECT_EQ(
+        run_page(int_accessor, 2, 1.0f, encode_i64_pk(20), DataType::INT64)
+            .seg_offsets_,
+        (std::vector<int64_t>{2, 0}));
+    EXPECT_EQ(
+        run_page(int_accessor, 2, 1.0f, encode_i64_pk(40), DataType::INT64)
+            .seg_offsets_,
+        (std::vector<int64_t>{4, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(
+        run_page(int_accessor, 2, 4.0f, encode_i64_pk(99), DataType::INT64)
+            .seg_offsets_,
+        (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(
+        run_page(int_accessor, 6, std::nullopt, std::nullopt, std::nullopt)
+            .seg_offsets_,
+        (std::vector<int64_t>{1, 3, 2, 0, 4, INVALID_SEG_OFFSET}));
+
+    const std::vector<std::string> str_pks = {"d", "b", "c", "a", "z"};
+    PkAccessor str_accessor = [&str_pks](int64_t off) -> std::optional<PkType> {
+        return PkType{str_pks.at(off)};
+    };
+    EXPECT_EQ(
+        run_page(str_accessor, 2, std::nullopt, std::nullopt, std::nullopt)
+            .seg_offsets_,
+        (std::vector<int64_t>{3, 1}));
+    EXPECT_EQ(
+        run_page(str_accessor, 2, 1.0f, std::string("b"), DataType::VARCHAR)
+            .seg_offsets_,
+        (std::vector<int64_t>{2, 0}));
+    EXPECT_EQ(
+        run_page(str_accessor, 2, 1.0f, std::string("d"), DataType::VARCHAR)
+            .seg_offsets_,
+        (std::vector<int64_t>{4, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(
+        run_page(str_accessor, 2, 4.0f, std::string("z"), DataType::VARCHAR)
+            .seg_offsets_,
+        (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
+    EXPECT_EQ(
+        run_page(str_accessor, 6, std::nullopt, std::nullopt, std::nullopt)
+            .seg_offsets_,
+        (std::vector<int64_t>{3, 1, 2, 0, 4, INVALID_SEG_OFFSET}));
 }
 
 /********* Testcases End **********/

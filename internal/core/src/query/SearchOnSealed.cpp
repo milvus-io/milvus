@@ -52,7 +52,8 @@ SearchOnSealedIndex(const FieldMeta& field,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& bitset,
-                    SearchResult& search_result) {
+                    SearchResult& search_result,
+                    PkAccessor pk_accessor) {
     // The reader stays alive for the lifetime of the SearchResult that owns
     // the recreator.
     const auto* reader_ptr = &reader;
@@ -132,8 +133,11 @@ SearchOnSealedIndex(const FieldMeta& field,
     BitsetView search_bitset = bitset;
 
     if (search_info.iterator_v2_info_.has_value()) {
-        CachedSearchIterator cached_iter(
-            reader, dataset, search_info, search_bitset);
+        CachedSearchIterator cached_iter(reader,
+                                         dataset,
+                                         search_info,
+                                         search_bitset,
+                                         std::move(pk_accessor));
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
                                     search_info.struct_element_offsets_.get());
@@ -172,7 +176,8 @@ SearchOnSealedColumn(const FieldMeta& field,
                      int64_t row_count,
                      const BitsetView& bitview,
                      milvus::OpContext* op_context,
-                     SearchResult& result) {
+                     SearchResult& result,
+                     PkAccessor pk_accessor) {
     auto register_vector_search_provider = [&] {
         if (!result.allow_filtered_vector_search_ ||
             !CanUseStrictGroupSearch(search_info, num_queries) ||
@@ -286,7 +291,8 @@ SearchOnSealedColumn(const FieldMeta& field,
                                          index_info,
                                          search_bitview,
                                          data_type,
-                                         op_context);
+                                         op_context,
+                                         std::move(pk_accessor));
         cached_iter.NextBatch(search_info, result);
         FinalizeVectorSearchOffsets(result,
                                     search_info.struct_element_offsets_.get());

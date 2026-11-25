@@ -13,7 +13,9 @@
 #include <algorithm>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <numeric>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -41,7 +43,9 @@ CachedSearchIterator::CachedSearchIterator(
     const milvus::index::IVectorReader& reader,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
-    const BitsetView& bitset) {
+    const BitsetView& bitset,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (query_ds == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
@@ -142,7 +146,9 @@ CachedSearchIterator::CachedSearchIterator(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     const milvus::DataType& data_type,
-    bool element_nullable) {
+    bool element_nullable,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (vec_data == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Vector data is nullptr, cannot initialize iterator");
@@ -269,7 +275,9 @@ CachedSearchIterator::CachedSearchIterator(
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
     const milvus::DataType& data_type,
-    milvus::OpContext* op_context) {
+    milvus::OpContext* op_context,
+    PkAccessor pk_accessor)
+    : pk_lookup_(std::move(pk_accessor)) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -389,6 +397,7 @@ std::optional<CachedSearchIterator::DisIdPair>
 CachedSearchIterator::GetNextValidResult(
     const size_t iterator_idx,
     const std::optional<float>& last_bound,
+    const std::optional<TieBreakKey>& last_key,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter) {
     auto& iterator = iterators_[iterator_idx];
@@ -412,7 +421,7 @@ CachedSearchIterator::GetNextValidResult(
                       next.what());
         }
         auto result = ConvertIteratorResult(next.value());
-        if (IsValid(result, last_bound, radius, range_filter)) {
+        if (IsValid(result, last_bound, last_key, radius, range_filter)) {
             return result;
         }
     }
@@ -424,34 +433,47 @@ void
 CachedSearchIterator::MergeChunksResults(
     size_t query_idx,
     const std::optional<float>& last_bound,
+    const std::optional<TieBreakKey>& last_key,
     const std::optional<float>& radius,
     const std::optional<float>& range_filter,
     std::vector<DisIdPair>& rst) {
     auto& heap = chunked_heaps_[query_idx];
+    std::optional<float> cut_dist = std::nullopt;
+    if (rst.size() >= batch_size_) {
+        cut_dist = rst[batch_size_ - 1].first;
+    }
 
     if (heap.empty()) {
         for (size_t chunk_id = 0; chunk_id < num_chunks_; ++chunk_id) {
             const size_t iterator_idx = query_idx + chunk_id * nq_;
             if (auto next_result = GetNextValidResult(
-                    iterator_idx, last_bound, radius, range_filter);
+                    iterator_idx, last_bound, last_key, radius, range_filter);
                 next_result.has_value()) {
                 heap.emplace(iterator_idx, next_result.value());
             }
         }
     }
 
-    while (!heap.empty() && rst.size() < batch_size_) {
+    while (!heap.empty()) {
         const auto [iterator_idx, cur_rst] = heap.top();
+        if (cut_dist.has_value() && cur_rst.first > cut_dist.value()) {
+            // Boundary tie group is complete; the rest belongs to the next
+            // page.
+            break;
+        }
         heap.pop();
 
         // last_bound may change between NextBatch calls, discard any invalid results
-        if (!IsValid(cur_rst, last_bound, radius, range_filter)) {
+        if (!IsValid(cur_rst, last_bound, last_key, radius, range_filter)) {
             continue;
         }
         rst.emplace_back(cur_rst);
+        if (!cut_dist.has_value() && rst.size() >= batch_size_) {
+            cut_dist = rst[batch_size_ - 1].first;
+        }
 
         if (auto next_result = GetNextValidResult(
-                iterator_idx, last_bound, radius, range_filter);
+                iterator_idx, last_bound, last_key, radius, range_filter);
             next_result.has_value()) {
             heap.emplace(iterator_idx, next_result.value());
         }
@@ -461,53 +483,147 @@ CachedSearchIterator::MergeChunksResults(
 std::vector<CachedSearchIterator::DisIdPair>
 CachedSearchIterator::GetBatchedNextResults(size_t query_idx,
                                             const SearchInfo& search_info) {
-    auto last_bound = ConvertIncomingDistance(
-        search_info.iterator_v2_info_.value().last_bound);
+    const auto& iterator_v2_info = search_info.iterator_v2_info_.value();
+    auto last_bound = ConvertIncomingDistance(iterator_v2_info.last_bound);
+    auto last_key = DecodeLastTieBreakKey(iterator_v2_info);
     auto radius = ConvertIncomingDistance(
         index::GetValueFromConfig<float>(search_info.search_params_, RADIUS));
     auto range_filter =
         ConvertIncomingDistance(index::GetValueFromConfig<float>(
             search_info.search_params_, RANGE_FILTER));
 
-    std::vector<DisIdPair> rst;
-    rst.reserve(batch_size_);
+    std::vector<DisIdPair> collected;
+    collected.reserve(batch_size_ * 2);
 
-    if (num_chunks_ == 1) {
-        auto& iterator = iterators_[query_idx];
-        while (rst.size() < batch_size_) {
-            auto has_next = iterator->HasNext();
-            if (!has_next.has_value()) {
-                ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
-                          "knowhere iterator HasNext failed: {}",
-                          has_next.what());
+    auto& pending = buffered_results_[query_idx];
+    for (const auto& item : pending) {
+        if (IsValid(item, last_bound, last_key, radius, range_filter)) {
+            collected.emplace_back(item);
+        }
+    }
+    pending.clear();
+
+    const bool tie_group_complete =
+        collected.size() >= batch_size_ &&
+        collected.back().first > collected[batch_size_ - 1].first;
+
+    if (!tie_group_complete) {
+        if (num_chunks_ == 1) {
+            auto& iterator = iterators_[query_idx];
+            // The knowhere stream yields rows in distance order but in an
+            // unspecified order within a group of equal distances. Pull enough
+            // rows so the collected set contains the whole boundary tie group
+            // (all rows tied at the distance of the batch cut); sorting by
+            // (score, pk[, elem_idx]) below then makes the page a strict prefix
+            // of that order, which the continuation cursor can resume exactly.
+            std::optional<float> cut_dist = std::nullopt;
+            if (collected.size() >= batch_size_) {
+                cut_dist = collected[batch_size_ - 1].first;
             }
-            if (!has_next.value()) {
-                break;
+            while (true) {
+                auto has_next = iterator->HasNext();
+                if (!has_next.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(has_next.error()),
+                              "knowhere iterator HasNext failed: {}",
+                              has_next.what());
+                }
+                if (!has_next.value()) {
+                    break;
+                }
+                auto next = iterator->Next();
+                if (!next.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(next.error()),
+                              "knowhere iterator Next failed: {}",
+                              next.what());
+                }
+                auto result = ConvertIteratorResult(next.value());
+                if (cut_dist.has_value() && result.first > cut_dist.value()) {
+                    // Boundary tie group is complete; buffer this lookahead
+                    // row for subsequent NextBatch() calls on this instance.
+                    pending.emplace_back(result);
+                    break;
+                }
+                if (!IsValid(
+                        result, last_bound, last_key, radius, range_filter)) {
+                    continue;
+                }
+                collected.emplace_back(result);
+                if (!cut_dist.has_value() && collected.size() >= batch_size_) {
+                    // The batch cut lands at this distance; keep pulling until
+                    // the next row is strictly farther, so tied rows at the cut
+                    // are all collected and ordered by tie-break key.
+                    cut_dist = collected[batch_size_ - 1].first;
+                }
             }
-            auto next = iterator->Next();
-            if (!next.has_value()) {
-                ThrowInfo(KnowhereStatusToErrorCode(next.error()),
-                          "knowhere iterator Next failed: {}",
-                          next.what());
+        } else {
+            MergeChunksResults(query_idx,
+                               last_bound,
+                               last_key,
+                               radius,
+                               range_filter,
+                               collected);
+        }
+    }
+
+    // Order the batch by (distance, pk[, elem_idx]) so consecutive pages
+    // partition the global order exactly.
+    if (pk_lookup_) {
+        std::sort(collected.begin(),
+                  collected.end(),
+                  [](const DisIdPair& a, const DisIdPair& b) {
+                      return a.first < b.first;
+                  });
+        for (size_t i = 0; i < collected.size();) {
+            size_t j = i + 1;
+            while (j < collected.size() &&
+                   collected[j].first == collected[i].first) {
+                ++j;
             }
-            auto result = ConvertIteratorResult(next.value());
-            if (IsValid(result, last_bound, radius, range_filter)) {
-                rst.emplace_back(result);
+            if (j - i > 1) {
+                std::vector<std::optional<TieBreakKey>> keys;
+                keys.reserve(j - i);
+                for (size_t k = i; k < j; ++k) {
+                    keys.push_back(LookupTieBreakKey(collected[k].second));
+                }
+                std::vector<size_t> idx(j - i);
+                std::iota(idx.begin(), idx.end(), 0);
+                std::stable_sort(
+                    idx.begin(), idx.end(), [&](size_t a, size_t b) {
+                        if (!keys[a].has_value() || !keys[b].has_value()) {
+                            return keys[a].has_value() && !keys[b].has_value();
+                        }
+                        return CompareTieBreakKey(*keys[a], *keys[b]) < 0;
+                    });
+                std::vector<DisIdPair> sorted_run;
+                sorted_run.reserve(j - i);
+                for (auto pos : idx) {
+                    sorted_run.push_back(collected[i + pos]);
+                }
+                std::copy(sorted_run.begin(),
+                          sorted_run.end(),
+                          collected.begin() + i);
             }
+            i = j;
         }
     } else {
-        MergeChunksResults(query_idx, last_bound, radius, range_filter, rst);
+        std::sort(collected.begin(), collected.end());
     }
-    std::sort(rst.begin(), rst.end());
+
+    if (collected.size() > batch_size_) {
+        pending.insert(pending.begin(),
+                       std::make_move_iterator(collected.begin() + batch_size_),
+                       std::make_move_iterator(collected.end()));
+        collected.resize(batch_size_);
+    }
     if (sign_ == -1) {
-        std::for_each(rst.begin(), rst.end(), [this](DisIdPair& x) {
+        std::for_each(collected.begin(), collected.end(), [this](DisIdPair& x) {
             x.first = x.first * sign_;
         });
     }
-    while (rst.size() < batch_size_) {
-        rst.emplace_back(1.0f / 0.0f, -1);
+    while (collected.size() < batch_size_) {
+        collected.emplace_back(1.0f / 0.0f, -1);
     }
-    return rst;
+    return collected;
 }
 
 void
@@ -539,6 +655,7 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
                   "Batch size is 0, cannot initialize iterator");
     }
     batch_size_ = iterator_v2_info.batch_size;
+    struct_element_offsets_ = search_info.struct_element_offsets_;
 
     if (search_info.metric_type_.empty()) {
         ThrowInfo(ErrorCode::UnexpectedError,
@@ -561,6 +678,109 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
             ErrorCode::UnexpectedError,
             "Number of queries is greater than 1, cannot initialize iterator");
     }
+    buffered_results_.resize(nq_);
+}
+
+std::optional<PkType>
+CachedSearchIterator::DecodePkValue(
+    const std::optional<std::string>& raw,
+    const std::optional<milvus::DataType>& pk_type) {
+    if (!raw.has_value() || !pk_type.has_value()) {
+        return std::nullopt;
+    }
+    switch (*pk_type) {
+        case DataType::INT64: {
+            if (raw->size() != sizeof(int64_t)) {
+                return std::nullopt;
+            }
+            // 8-byte big-endian.
+            uint64_t be = 0;
+            for (size_t i = 0; i < sizeof(int64_t); ++i) {
+                be = (be << 8) | static_cast<uint8_t>((*raw)[i]);
+            }
+            return PkType{static_cast<int64_t>(be)};
+        }
+        case DataType::VARCHAR:
+        case DataType::STRING: {
+            return PkType{*raw};
+        }
+        default: {
+            return std::nullopt;
+        }
+    }
+}
+
+int
+CachedSearchIterator::ComparePk(const PkType& lhs, const PkType& rhs) {
+    if (std::holds_alternative<int64_t>(lhs) &&
+        std::holds_alternative<int64_t>(rhs)) {
+        auto l = std::get<int64_t>(lhs);
+        auto r = std::get<int64_t>(rhs);
+        return l < r ? -1 : (l > r ? 1 : 0);
+    }
+    if (std::holds_alternative<std::string>(lhs) &&
+        std::holds_alternative<std::string>(rhs)) {
+        const auto& l = std::get<std::string>(lhs);
+        const auto& r = std::get<std::string>(rhs);
+        return l < r ? -1 : (l > r ? 1 : 0);
+    }
+    // Mixed/monostate pks: order monostate first, then int64, then string.
+    return lhs.index() < rhs.index() ? -1 : (lhs.index() > rhs.index() ? 1 : 0);
+}
+
+int
+CachedSearchIterator::CompareTieBreakKey(const TieBreakKey& lhs,
+                                         const TieBreakKey& rhs) {
+    const int pk_cmp = ComparePk(lhs.pk, rhs.pk);
+    if (pk_cmp != 0) {
+        return pk_cmp;
+    }
+    if (lhs.elem_idx != rhs.elem_idx) {
+        return lhs.elem_idx < rhs.elem_idx ? -1 : 1;
+    }
+    return 0;
+}
+
+std::optional<CachedSearchIterator::TieBreakKey>
+CachedSearchIterator::DecodeLastTieBreakKey(
+    const SearchIteratorV2Info& info) const {
+    auto pk = DecodePkValue(info.last_primary_key, info.primary_key_type);
+    if (!pk.has_value()) {
+        return std::nullopt;
+    }
+    if (struct_element_offsets_ != nullptr) {
+        if (!info.last_element_index.has_value()) {
+            return std::nullopt;
+        }
+        return TieBreakKey{std::move(*pk), *info.last_element_index};
+    }
+    return TieBreakKey{std::move(*pk), -1};
+}
+
+std::optional<CachedSearchIterator::TieBreakKey>
+CachedSearchIterator::LookupTieBreakKey(int64_t offset) const {
+    if (!pk_lookup_ || offset < 0) {
+        return std::nullopt;
+    }
+    int64_t doc_offset = offset;
+    int32_t elem_idx = -1;
+    if (struct_element_offsets_ != nullptr) {
+        if (offset > std::numeric_limits<int32_t>::max()) {
+            return std::nullopt;
+        }
+        auto [row_id, idx] = struct_element_offsets_->ElementIDToRowID(
+            static_cast<int32_t>(offset));
+        if (row_id < 0) {
+            return std::nullopt;
+        }
+        doc_offset = row_id;
+        elem_idx = idx;
+    }
+    auto pk = pk_lookup_(doc_offset);
+    if (!pk.has_value()) {
+        return std::nullopt;
+    }
+    return TieBreakKey{std::move(*pk), elem_idx};
 }
 
 }  // namespace milvus::query
