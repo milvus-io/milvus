@@ -112,15 +112,6 @@ type DataNode struct {
 	metricsRequest *metricsinfo.MetricsRequest
 }
 
-// importV3Capacity reports the node's total slot budget (index.CalculateNodeSlots)
-// for the import V3 slot scheduler. Index-build and compaction usage is
-// deliberately not counted here: only import V3 tasks are admitted through the
-// scheduler, and DataCoord's global water-filling already accounts for every
-// executor through QuerySlot.
-func (node *DataNode) importV3Capacity() int64 {
-	return index.CalculateNodeSlots()
-}
-
 // NewDataNode will return a DataNode with abnormal state.
 func NewDataNode(ctx context.Context) *DataNode {
 	rand.Seed(time.Now().UnixNano())
@@ -134,7 +125,7 @@ func NewDataNode(ctx context.Context) *DataNode {
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
-	sc := index.NewTaskScheduler(ctx2)
+	sc := index.NewTaskScheduler(ctx2, nodeTaskCapacity)
 	node.storageFactory = NewChunkMgrFactory()
 	node.taskScheduler = sc
 	node.taskManager = index.NewTaskManager(ctx2)
@@ -228,7 +219,7 @@ func (node *DataNode) Init() error {
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 		node.importV3Metrics = importv3.NewMetrics(serverID)
-		node.importV3Scheduler = importv3.NewScheduler(node.ctx, node.importV3Capacity, node.importV3Metrics)
+		node.importV3Scheduler = importv3.NewScheduler(node.ctx, nodeTaskCapacity, node.importV3Metrics)
 		importv3.CleanImportV3Prefixes()
 
 		err := index.InitSegcore(serverID)
@@ -356,6 +347,7 @@ func (node *DataNode) Stop() error {
 
 		if node.taskScheduler != nil {
 			node.taskScheduler.Close()
+			node.taskScheduler.Wait()
 		}
 
 		index.CloseSegcore()

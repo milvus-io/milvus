@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -5926,6 +5927,42 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 			err = task.PreExecute(ctx)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			require.ErrorContains(t, err, key+" is not supported on struct sub-field sub_text_array")
+		})
+	}
+}
+
+func TestCreateCollectionTaskRejectsStructSubFieldOriginMarker(t *testing.T) {
+	ctx := context.Background()
+	for _, preserve := range []bool{false, true} {
+		t.Run("preserve="+strconv.FormatBool(preserve), func(t *testing.T) {
+			mockCache := NewMockCache(t)
+			mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+			collectionName := "TestCreateCollectionTaskRejectsStructSubFieldOriginMarker" + funcutil.GenRandomStr()
+			schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+			schemautil.MarkAddedStructSubField(schema.StructArrayFields[0].Fields[0])
+			marshaledSchema, err := proto.Marshal(schema)
+			require.NoError(t, err)
+
+			var properties []*commonpb.KeyValuePair
+			if preserve {
+				properties = []*commonpb.KeyValuePair{{Key: util.PreserveFieldIdsKey, Value: "true"}}
+			}
+			task := &CreateCollectionTask{
+				Condition: NewTaskCondition(ctx),
+				CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+					CollectionName: collectionName,
+					Schema:         marshaledSchema,
+					ShardsNum:      common.DefaultShardsNum,
+					Properties:     properties,
+				},
+				ctx:      ctx,
+				mixCoord: NewMixCoordMock(),
+			}
+			task.MetaCache = mockCache
+			require.NoError(t, task.OnEnqueue())
+			err = task.PreExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"sub_text_array\" is reserved")
 		})
 	}
 }

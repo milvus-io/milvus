@@ -38,10 +38,12 @@
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexMarisa.h"
 #include "index/VectorDiskIndex.h"
+#include "index/VectorMemIndex.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/expected.h"
+#include "knowhere/version.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
@@ -56,6 +58,7 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
+#include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -80,6 +83,192 @@ class StorageV2IndexRawDataTest : public ::testing::Test {
     int64_t index_build_id = 4001;
     int64_t index_version = 4001;
 };
+
+TEST_F(StorageV2IndexRawDataTest,
+       MilvusTableManifestBindingControlsIndexReads) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder;
+    arrow::Int64Builder second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto first = first_builder.Finish().ValueOrDie();
+    auto second = second_builder.Finish().ValueOrDie();
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {first, second});
+    auto source_path = path_ + "/mapping_index_source";
+    auto target_path = path_ + "/mapping_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101|103");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto source = GetLoonManifest(
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump(),
+        properties);
+    auto groups = source->columnGroups();
+    for (auto& group : groups) {
+        group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"101":"103","103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    auto target_version = transaction->Commit().ValueOrDie();
+    auto target_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+    auto meta = gen_field_meta(collection_id,
+                               partition_id,
+                               segment_id,
+                               101,
+                               DataType::INT64,
+                               DataType::NONE,
+                               false);
+    meta.field_schema.set_external_field("second");
+    std::vector<int64_t> values;
+    IterateFieldDataFromManifest(
+        target_manifest,
+        properties,
+        meta,
+        DataType::INT64,
+        1,
+        DataType::NONE,
+        StorageColumnMapping{"101", "101", true},
+        [&](FieldDataPtr data) {
+            auto begin = static_cast<const int64_t*>(data->Data());
+            values.insert(values.end(), begin, begin + data->get_num_rows());
+        },
+        kStreamingInflightBytes);
+    EXPECT_EQ(values, (std::vector<int64_t>{31, 32}));
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
+
+TEST_F(StorageV2IndexRawDataTest, MissingMappedFieldCannotBuildDefaultIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("existing"),
+                     FieldId(101),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({11, 12}).ok());
+    auto batch = arrow::RecordBatch::Make(
+        schema->ConvertToLoonArrowSchema(), 2, {builder.Finish().ValueOrDie()});
+    auto source_path = path_ + "/missing_index_source";
+    auto target_path = path_ + "/missing_index_target";
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        schema, source_path, {batch}, "101");
+    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    const auto legacy_manifest =
+        nlohmann::json({{"base_path", source_path}, {"ver", version}}).dump();
+    auto groups = GetLoonManifest(legacy_manifest, properties)->columnGroups();
+    for (auto& group : groups) {
+        group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+        for (auto& file : group->files) {
+            file.properties["milvus_table.field_id_mapping"] =
+                R"({"103":"101"})";
+        }
+    }
+    auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                           GetDefaultArrowFileSystem(), target_path)
+                           .ValueOrDie();
+    transaction->AppendFiles(groups);
+    const auto target_version = transaction->Commit().ValueOrDie();
+    const auto mapped_manifest =
+        nlohmann::json({{"base_path", target_path}, {"ver", target_version}})
+            .dump();
+
+    for (const auto& manifest : {legacy_manifest, mapped_manifest}) {
+        for (bool has_default : {false, true}) {
+            SCOPED_TRACE(manifest);
+            SCOPED_TRACE(has_default);
+            auto meta = gen_field_meta(collection_id,
+                                       partition_id,
+                                       segment_id,
+                                       105,
+                                       DataType::INT64,
+                                       DataType::NONE,
+                                       true);
+            meta.field_schema.set_external_field("extra");
+            if (has_default) {
+                meta.field_schema.mutable_default_value()->set_long_data(7);
+            }
+            try {
+                IterateFieldDataFromManifest(
+                    manifest,
+                    properties,
+                    meta,
+                    DataType::INT64,
+                    1,
+                    DataType::NONE,
+                    StorageColumnMapping{"105", "105", true},
+                    [&](FieldDataPtr) {},
+                    kStreamingInflightBytes);
+                ADD_FAILURE() << "an unrefreshed mapped field must not build a "
+                                 "NULL/default index";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::FieldNotLoaded);
+                EXPECT_NE(
+                    std::string(error.what()).find("RefreshExternalCollection"),
+                    std::string::npos);
+            }
+            // Normal internal manifests (without milvus_table.field_id_mapping)
+            // remain eligible for schema-evolution defaults, while explicitly
+            // mapped milvus-table manifests must never synthesize defaults even
+            // when the caller omits external column metadata.
+            meta.field_schema.clear_external_field();
+            if (manifest == legacy_manifest) {
+                size_t visited = 0;
+                EXPECT_NO_THROW(IterateFieldDataFromManifest(
+                    manifest,
+                    properties,
+                    meta,
+                    DataType::INT64,
+                    1,
+                    DataType::NONE,
+                    StorageColumnMapping{"105", "105", false},
+                    [&](FieldDataPtr data) { visited += data->get_num_rows(); },
+                    kStreamingInflightBytes));
+                EXPECT_EQ(visited, 0);
+            } else {
+                try {
+                    IterateFieldDataFromManifest(
+                        manifest,
+                        properties,
+                        meta,
+                        DataType::INT64,
+                        1,
+                        DataType::NONE,
+                        StorageColumnMapping{"105", "105", false},
+                        [&](FieldDataPtr) {},
+                        kStreamingInflightBytes);
+                    ADD_FAILURE() << "an unmapped field on a mapped "
+                                     "milvus-table manifest must not build a "
+                                     "NULL/default index";
+                } catch (const SegcoreError& error) {
+                    EXPECT_EQ(error.get_error_code(),
+                              ErrorCode::FieldNotLoaded);
+                }
+            }
+        }
+    }
+    std::filesystem::remove_all(source_path);
+    std::filesystem::remove_all(target_path);
+}
 
 TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     GTEST_SKIP() << "TODO: fix ut logic after behavior change";
@@ -178,7 +367,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                 storage::FileManagerContext(
                     field_data_meta, index_meta, cm_, fs_));
         auto res = file_manager->CacheRawDataToDisk<float>(config);
-        ASSERT_EQ(res,
+        ASSERT_EQ(res.path,
                   file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
     }
 
@@ -345,7 +534,8 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
 
     auto file_manager =
         std::make_shared<milvus::storage::DiskFileManagerImpl>(ctx);
-    auto local_path = file_manager->CacheRawDataToDisk<float>(config);
+    auto cached_data = file_manager->CacheRawDataToDisk<float>(config);
+    const auto& local_path = cached_data.path;
     ASSERT_EQ(local_path,
               file_manager->GetLocalRawDataObjectPrefix() + "raw_data");
 
@@ -364,6 +554,8 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     in.read(reinterpret_cast<char*>(&got_dim), sizeof(got_dim));
     EXPECT_EQ(got_rows, static_cast<uint32_t>(total_rows));
     EXPECT_EQ(got_dim, static_cast<uint32_t>(kDim));
+    EXPECT_EQ(cached_data.rows, got_rows);
+    EXPECT_EQ(cached_data.dim, got_dim);
 
     // Payload must be finite and fully written; a short read here would
     // mean the tail of the last batch never reached the file.
@@ -375,4 +567,63 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
     }
+}
+
+TEST_F(StorageV2IndexRawDataTest, BuildDenseIndexWithoutManifest) {
+    constexpr int64_t dim = 16;
+    constexpr int64_t rows = 100;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vector = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto arrow_schema = schema->ConvertToArrowSchema();
+    milvus::test::TmpPath temp_path;
+    auto group_path = temp_path.get() / "0";
+    ASSERT_TRUE(fs_->CreateDir(group_path.string(), true).ok());
+    std::vector<std::string> paths{(group_path / "19532.parquet").string()};
+    std::vector<std::vector<int>> column_groups{{0, 1}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto writer = milvus_storage::PackedRecordBatchWriter::Make(
+                      fs_,
+                      paths,
+                      arrow_schema,
+                      storage_config,
+                      column_groups,
+                      16 * 1024 * 1024,
+                      ::parquet::default_writer_properties())
+                      .ValueOrDie();
+    auto data = DataGen(schema, rows);
+    ASSERT_TRUE(
+        writer->Write(ConvertToArrowRecordBatch(data, dim, arrow_schema)).ok());
+    ASSERT_TRUE(writer->Close().ok());
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     vector.get(),
+                                     DataType::VECTOR_FLOAT,
+                                     DataType::NONE,
+                                     false);
+    auto index_meta =
+        gen_index_meta(segment_id, vector.get(), index_build_id, index_version);
+    storage::FileManagerContext context(field_meta, index_meta, cm_, fs_);
+    index::VectorMemIndex<float> index(
+        DataType::NONE,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        true,
+        context);
+    Config config{{STORAGE_VERSION_KEY, STORAGE_V2},
+                  {SEGMENT_MANIFEST_KEY, ""},
+                  {SEGMENT_INSERT_FILES_KEY,
+                   std::vector<std::vector<std::string>>{paths}},
+                  {DATA_TYPE_KEY, DataType::VECTOR_FLOAT},
+                  {ELEMENT_TYPE_KEY, DataType::NONE},
+                  {DIM_KEY, dim},
+                  {INDEX_NUM_ROWS_KEY, rows},
+                  {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+    ASSERT_NO_THROW(index.Prepare(config));
+    ASSERT_NO_THROW(index.Build(config));
+    EXPECT_EQ(index.Count(), rows);
 }

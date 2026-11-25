@@ -279,6 +279,7 @@ func (suite *PackedTestSuite) TestFilesystemMetrics() {
 
 	beforeMetrics, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
+	suite.Contains(beforeMetrics, "origin")
 
 	paths := []string{"/tmp/metrics_test"}
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}
@@ -293,7 +294,8 @@ func (suite *PackedTestSuite) TestFilesystemMetrics() {
 
 	afterWrite, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
-	suite.Greater(afterWrite.WriteBytes, beforeMetrics.WriteBytes, "write bytes should increase")
+	suite.Contains(afterWrite, "origin")
+	suite.Greater(afterWrite["origin"].WriteBytes, beforeMetrics["origin"].WriteBytes, "write bytes should increase")
 
 	reader, err := NewPackedReader(paths, suite.schema, 10*1024*1024, nil, nil)
 	suite.NoError(err)
@@ -303,5 +305,6 @@ func (suite *PackedTestSuite) TestFilesystemMetrics() {
 
 	afterRead, err := storagev2.GetFilesystemMetricsWithConfig(localConfig)
 	suite.NoError(err)
-	suite.Greater(afterRead.ReadBytes, afterWrite.ReadBytes, "read bytes should increase")
+	suite.Contains(afterRead, "origin")
+	suite.Greater(afterRead["origin"].ReadBytes, afterWrite["origin"].ReadBytes, "read bytes should increase")
 }

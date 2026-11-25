@@ -35,15 +35,14 @@ else ()
     set(WITH_CARDINAL OFF CACHE BOOL "" FORCE )
 endif()
 
-if ( MILVUS_GPU_VERSION STREQUAL "ON" )
-    set(WITH_CUVS ON CACHE BOOL "" FORCE )
+if ( WITH_GPU AND NOT WITH_CARDINAL )
     set(raft_DIR "${FETCHCONTENT_BASE_DIR}/raft-build" CACHE PATH "Path to raft build directory" FORCE)
     set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
 # Resolve auto for the target without replacing the user's cached selection.
 if ( WITH_SVS STREQUAL "ON" OR
-     ( WITH_SVS STREQUAL "AUTO" AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     ( WITH_SVS STREQUAL "AUTO" AND NOT USE_TSAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
        CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$" ) )
     set(WITH_SVS ON)
 else ()
@@ -84,7 +83,7 @@ if ( WITH_SVS )
     install(FILES ${_SVS_RUNTIME_LIBS} DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
-if ( WITH_CUVS STREQUAL "ON" )
+if ( WITH_GPU AND NOT WITH_CARDINAL )
     set( _RMM_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" )
     if ( EXISTS "${_RMM_LIB_DIR}" )
         install(DIRECTORY ${_RMM_LIB_DIR}/

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
@@ -49,7 +50,7 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		switch r.URL.Path {
 		case "/source-bucket/", "/source-bucket":
 			w.WriteHeader(http.StatusOK)
-		case "/source-bucket/external/data.json":
+		case "/source-bucket/external/v1:2026/data.json":
 			http.ServeContent(w, r, "data.json", time.Unix(1, 0), bytes.NewReader(data))
 		default:
 			s.T().Errorf("unexpected source path: %s", r.URL.Path)
@@ -72,12 +73,12 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		RootPath: "milvus", AccessKeyID: "destination-key", SecretAccessKey: "destination-secret",
 	}
 	originalConfig := proto.Clone(config)
-	files := []*internalpb.ImportFile{{Paths: []string{"external/data.json"}}}
+	files := []*internalpb.ImportFile{{Paths: []string{"external/v1:2026/data.json"}}}
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		JobID: 10, TaskID: 11, CollectionID: 12, PartitionIDs: []int64{13},
 		Vchannels: []string{"v0"}, Schema: s.schema, ImportFiles: files,
 		Options: options, StorageConfig: config,
-	}, s.manager, destination)
+	}, s.manager, destination, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	s.manager.Add(pre)
 	s.Require().NoError(conc.AwaitAll(pre.Execute()...))
 	s.Equal(int64(1), s.manager.Get(11).(*PreImportTask).GetFileStats()[0].GetTotalRows())
@@ -92,7 +93,7 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		Vchannels: []string{"v0"}, Schema: s.schema, Files: files, Options: options,
 		StorageConfig: config, Ts: 1000, IDRange: &datapb.IDRange{Begin: 1, End: 100},
 		RequestSegments: []*datapb.ImportRequestSegment{{SegmentID: 15, PartitionID: 13, Vchannel: "v0"}},
-	}, s.manager, s.syncMgr, destination)
+	}, s.manager, s.syncMgr, destination, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	s.manager.Add(task)
 	s.Require().NoError(conc.AwaitAll(task.Execute()...))
 	s.True(proto.Equal(originalConfig, config))

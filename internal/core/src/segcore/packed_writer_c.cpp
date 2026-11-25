@@ -87,6 +87,18 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             c_storage_config.tls_min_version != nullptr
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
+            c_storage_config.use_crc32c_checksum,
+            c_storage_config.talon_mode,
+            c_storage_config.talon_enabled_stages,
+            c_storage_config.talon_small_read_threshold,
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "",
+            c_storage_config.talon_block_size,
+            c_storage_config.talon_max_idle_per_addr,
+            c_storage_config.talon_namespace != nullptr
+                ? c_storage_config.talon_namespace
+                : "",
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
@@ -94,7 +106,12 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(schema_result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto trueSchema = std::move(schema_result).ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
@@ -169,7 +186,12 @@ NewPackedWriter(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(schema_result.status());
+            return milvus::FailureCStatus(&error);
+        }
+        auto trueSchema = std::move(schema_result).ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);

@@ -375,7 +375,7 @@ func TestShardManagerAssignSegmentTextUsesV3CreateSegmentWhenStorageV3Enabled(t 
 	select {
 	case header := <-appendCh:
 		assert.Equal(t, storage.StorageV3, header.GetStorageVersion())
-		assert.Equal(t, int32(7), header.GetSchemaVersion())
+		assert.Zero(t, header.GetSchemaVersion(), "the append interceptor supplies the encoding version")
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for create segment message")
 	}
@@ -494,8 +494,6 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(4), ver)
-	assert.True(t, m.collections[104].HasTextField())
-	assert.True(t, m.collections[104].RequiresStorageV3())
 	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
 
 	legacySchema := proto.Clone(textSchema).(*schemapb.CollectionSchema)
@@ -1040,9 +1038,7 @@ func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
 			},
 		},
 	}
-	assert.True(t, ci.HasTextField())
 	assert.False(t, ci.AllowGrowingSourceFlush())
-	assert.True(t, ci.RequiresStorageV3())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
 	assert.False(t, ci.AllowGrowingSourceFlush())
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")

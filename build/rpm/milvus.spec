@@ -59,8 +59,6 @@ for lib in \
     liblzma.so* \
     libmilvus-common.so* \
     libmilvus_core.so* \
-    libmilvus-planparser-cpp.so* \
-    libmilvus-planparser.so* \
     libmilvus-storage.so* \
     libprotobuf.so* \
     librdkafka.so* \
@@ -141,8 +139,6 @@ systemctl daemon-reload
 /lib64/milvus/liblzma.so*
 /lib64/milvus/libmilvus-common.so*
 /lib64/milvus/libmilvus_core.so*
-/lib64/milvus/libmilvus-planparser-cpp.so*
-/lib64/milvus/libmilvus-planparser.so*
 /lib64/milvus/libmilvus-storage.so*
 /lib64/milvus/libprotobuf.so*
 /lib64/milvus/librdkafka.so*

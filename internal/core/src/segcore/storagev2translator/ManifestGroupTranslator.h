@@ -103,7 +103,9 @@ class ManifestGroupTranslator
         std::optional<ColumnSizeEstimateResult> column_size_estimate =
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
-            MmapChunkWritebackMode::Disabled);
+            MmapChunkWritebackMode::Disabled,
+        std::unordered_map<std::string, FieldId> physical_column_to_field_id =
+            {});
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -218,6 +220,7 @@ class ManifestGroupTranslator
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

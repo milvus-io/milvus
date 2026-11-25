@@ -28,23 +28,23 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <string.h>
 #include <unistd.h>
-#include <algorithm>
-#include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <functional>
+#include <map>
 #include <mutex>
-#include <optional>
-#include <set>
 #include <sstream>
-#include <unordered_map>
+#include <string_view>
+#include <tuple>
 #include <utility>
 
 #include "aws/core/Aws.h"
 #include "aws/core/auth/signer/AWSAuthV4Signer.h"
 #include "aws/core/http/Scheme.h"
 #include "aws/core/utils/Outcome.h"
+#include "aws/core/utils/StringUtils.h"
 #include "aws/core/utils/memory/AWSMemory.h"
 #include "aws/core/utils/memory/stl/AWSStringStream.h"
 #include "aws/s3/S3Client.h"
@@ -58,14 +58,18 @@
 #include "fmt/core.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
-#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
 #include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
+#include "milvus-storage/filesystem/s3/s3_options.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
 #include "signal.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
 
 namespace milvus::storage {
@@ -81,101 +85,26 @@ Aws::SDKOptions sdk_options_at_init;
 std::once_flag release_sdk_at_exit;
 
 std::mutex&
-GcsEndpointsMutex() {
+GcpProvidersMutex() {
     static std::mutex mutex;
     return mutex;
 }
 
-std::set<std::string>&
-GcsEndpointHosts() {
-    static std::set<std::string> hosts;
-    return hosts;
-}
-
-// The IAM providers of the GCS buckets Milvus itself is configured with,
-// guarded by GcsEndpointsMutex(). milvus-storage replaces its registry entry
-// for a bucket whenever it opens a filesystem there, possibly with another
-// identity (an external table on the same bucket), so Milvus' own requests do
-// not use the registry entry. Reusing the provider also keeps its cached token.
+using GcpProviderKey =
+    std::tuple<Aws::Http::Scheme, std::uint16_t, Aws::String, std::string>;
 using GcpProviderMap =
-    std::unordered_map<milvus_storage::GcpBucketKey,
-                       std::shared_ptr<milvus_storage::GcpCredentialProvider>,
-                       milvus_storage::GcpBucketKeyHash>;
+    std::map<GcpProviderKey,
+             std::shared_ptr<milvus_storage::GcpCredentialProvider>>;
 
+// Providers are scoped to the primary storage identity and keep the token
+// cache across legacy client lifetimes. Only the client attaches credentials.
 GcpProviderMap&
 MilvusGcpProviders() {
     static GcpProviderMap providers;
     return providers;
 }
 
-std::string
-ToLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return std::tolower(c);
-    });
-    return s;
-}
-
-// Matches a request like GcpCredentialRegistry::Lookup: path-style
-// (<endpoint>/<bucket>/<key>), then virtual-host style (<bucket>.<endpoint>).
-std::shared_ptr<milvus_storage::GcpCredentialProvider>
-LookupMilvusGcpProvider(const Aws::Http::URI& uri) {
-    milvus_storage::GcpEndpointKey endpoint{
-        uri.GetScheme(), uri.GetPort(), ToLower(uri.GetAuthority().c_str())};
-    std::string path = uri.GetPath().c_str();
-    size_t start = (!path.empty() && path.front() == '/') ? 1 : 0;
-    std::string bucket = path.substr(start, path.find('/', start) - start);
-
-    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
-    const auto& providers = MilvusGcpProviders();
-    if (!bucket.empty()) {
-        auto it = providers.find({endpoint, bucket});
-        if (it != providers.end()) {
-            return it->second;
-        }
-    }
-    auto dot = endpoint.host.find('.');
-    if (dot != std::string::npos && dot > 0) {
-        bucket = endpoint.host.substr(0, dot);
-        endpoint.host.erase(0, dot + 1);
-        auto it = providers.find({endpoint, bucket});
-        if (it != providers.end()) {
-            return it->second;
-        }
-    }
-    return nullptr;
-}
-
-// Whether a request to `host` may carry GCP credentials: Google's own
-// endpoints, and the GCS endpoints Milvus is configured with, also in
-// virtual-host form (<bucket>.<endpoint>).
-bool
-IsGcsHostForCredentials(std::string host) {
-    host = ToLower(std::move(host));
-    const std::string google_suffix = ".googleapis.com";
-    if (host.size() > google_suffix.size() &&
-        host.compare(host.size() - google_suffix.size(),
-                     google_suffix.size(),
-                     google_suffix) == 0) {
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
-    const auto& hosts = GcsEndpointHosts();
-    if (hosts.count(host) > 0) {
-        return true;
-    }
-    auto dot = host.find('.');
-    return dot != std::string::npos && hosts.count(host.substr(dot + 1)) > 0;
-}
-
 }  // namespace
-
-void
-AddGcsEndpointForCredentials(const std::string& address, bool use_ssl) {
-    auto endpoint = milvus_storage::NormalizeGcpEndpoint(address, use_ssl);
-    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
-    GcsEndpointHosts().insert(endpoint.host);
-}
 
 void
 ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
@@ -193,41 +122,6 @@ GoogleHttpClientFactory::CreateHttpRequest(
     auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
         GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
     request->SetResponseStreamFactory(streamFactory);
-    if (IsCredentialBrokerEndpoint(uri.GetURIString().c_str())) {
-        return request;
-    }
-    // Only GCS endpoints get a token, and only for buckets with a registered
-    // provider, as in milvus-storage's GCP factory. Requests to any other
-    // host, such as the instance metadata endpoint or an external table
-    // endpoint, carry no GCP credentials.
-    if (!IsGcsHostForCredentials(uri.GetAuthority().c_str())) {
-        return request;
-    }
-    auto provider = LookupMilvusGcpProvider(uri);
-    if (provider == nullptr) {
-        provider =
-            milvus_storage::GcpCredentialRegistry::Instance().Lookup(uri);
-    }
-    if (provider == nullptr) {
-        return request;
-    }
-    // The AWS SDK calls this and is built with -fno-exceptions: an exception
-    // must not unwind through it, on milvus-storage's Arrow IO threads that
-    // ends in std::terminate. google-cloud-cpp can throw while parsing a token
-    // response. A request without a token is rejected by GCS, which is also
-    // what happens when the provider cannot fetch one.
-    std::optional<std::pair<std::string, std::string>> auth_header;
-    try {
-        auth_header = provider->AuthorizationHeader();
-    } catch (const std::exception& e) {
-        LOG_WARN("get GCP authorization header failed: {}", e.what());
-    } catch (...) {
-        LOG_WARN("get GCP authorization header failed: unknown exception");
-    }
-    if (auth_header.has_value() && !auth_header->first.empty()) {
-        request->SetHeaderValue(auth_header->first.c_str(),
-                                auth_header->second.c_str());
-    }
     return request;
 }
 
@@ -510,69 +404,72 @@ void
 MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
-    if (!storage_config.useIAM) {
-        // Preserve the existing access-key validation before building a provider.
-        BuildAccessKeyClient(storage_config, config);
+    milvus_storage::S3Options options;
+    options.cloud_provider = "gcp";
+    options.endpoint_override = storage_config.address;
+    options.scheme = storage_config.useSSL ? "https" : "http";
+
+    const Aws::Http::URI endpoint(
+        milvus_storage::StorageUri::BuildEndpointUrl(storage_config.address,
+                                                     storage_config.useSSL)
+            .c_str());
+    const auto host =
+        Aws::Utils::StringUtils::ToLower(endpoint.GetAuthority().c_str());
+    if (endpoint.GetScheme() != Aws::Http::Scheme::HTTPS ||
+        !std::string_view(host.c_str()).ends_with(".googleapis.com")) {
+        // Opening the primary origin registers its configured endpoint.
+        auto c_config = ToCStorageConfig(storage_config);
+        c_config.storage_type = "remote";
+        c_config.cloud_provider = "gcp";
+        c_config.talon_mode = 0;
+        const auto properties =
+            MakeInternalPropertiesFromStorageConfig(c_config);
+        const auto primary =
+            milvus_storage::FilesystemCache::getInstance().get(*properties);
+        if (!primary.ok()) {
+            throw milvus_storage::ToSegcoreError(primary.status());
+        }
     }
 
-    // Storage may have installed the process-wide GCP HTTP factory first.
-    // Register both IAM and HMAC identities before PreCheck, even if our
-    // InitAPI was ignored. Building an access-key client alone is insufficient.
-    milvus_storage::GcpBucketKey key{
-        milvus_storage::NormalizeGcpEndpoint(storage_config.address,
-                                             storage_config.useSSL),
-        storage_config.bucket_name};
-    std::shared_ptr<milvus_storage::GcpCredentialProvider> provider;
     if (storage_config.useIAM) {
-        // An IAM provider holds no secret, so one per bucket serves every
-        // chunk manager and keeps its cached token.
-        std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
-        auto it = MilvusGcpProviders().find(key);
-        if (it != MilvusGcpProviders().end()) {
-            provider = it->second;
+        const GcpProviderKey key{endpoint.GetScheme(),
+                                 endpoint.GetPort(),
+                                 host,
+                                 storage_config.bucket_name};
+        {
+            std::lock_guard<std::mutex> lock(GcpProvidersMutex());
+            auto& providers = MilvusGcpProviders();
+            if (const auto it = providers.find(key); it != providers.end()) {
+                options.credentials_provider = it->second;
+            } else {
+                milvus_storage::ArrowFileSystemConfig gcp_config;
+                gcp_config.cloud_provider = "gcp";
+                gcp_config.address = storage_config.address;
+                gcp_config.bucket_name = storage_config.bucket_name;
+                gcp_config.use_ssl = storage_config.useSSL;
+                gcp_config.use_iam = true;
+                const auto provider =
+                    milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+                if (!provider.ok()) {
+                    throw milvus_storage::ToSegcoreError(provider.status());
+                }
+                options.credentials_provider =
+                    providers.emplace(key, *provider).first->second;
+            }
         }
-    }
-    if (provider == nullptr) {
-        milvus_storage::ArrowFileSystemConfig gcp_config;
-        gcp_config.use_iam = storage_config.useIAM;
-        gcp_config.access_key_id = storage_config.access_key_id;
-        gcp_config.access_key_value = storage_config.access_key_value;
-        auto built = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
-        if (!built.ok()) {
-            throw milvus_storage::ToSegcoreError(built.status());
-        }
-        provider = std::move(built).ValueOrDie();
-        if (storage_config.useIAM) {
-            std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
-            provider =
-                MilvusGcpProviders().emplace(key, provider).first->second;
-        }
-    }
-    // Milvus's primary storage endpoint comes from operator configuration.
-    auto registered =
-        milvus_storage::GcpCredentialRegistry::Instance().Register(
-            key, provider, /*trusted_endpoint=*/true);
-    if (!registered.ok()) {
-        ThrowInfo(ErrorCode::ConfigInvalid,
-                  "failed to register GCP credentials: {}",
-                  registered.message());
-    }
-    AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
 
-    if (storage_config.useIAM) {
-        // Using S3 client instead of google client because of compatible protocol.
-        // GoogleHttpClientFactory adds the OAuth token, so the S3 client signs
-        // nothing. Without an explicit provider the client uses
-        // DefaultAWSCredentialsProviderChain, which never finds AWS credentials
-        // on GCP and so queries the instance metadata endpoint (the GKE
-        // metadata server) on every request.
         client_ = std::make_shared<Aws::S3::S3Client>(
-            Aws::MakeShared<Aws::Auth::AnonymousAWSCredentialsProvider>(
-                GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG),
+            options.credentials_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(storage_config, config);
+        options.ConfigureAccessKey(storage_config.access_key_id,
+                                   storage_config.access_key_value);
     }
+    milvus_storage::GcpCredentialProvider::ConfigS3HttpClient(options,
+                                                              *client_);
 }
 
 void

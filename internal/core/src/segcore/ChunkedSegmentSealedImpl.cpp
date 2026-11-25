@@ -180,6 +180,7 @@ struct ColumnGroupMaterializationParams {
     std::shared_ptr<const std::vector<std::string>> column_group_columns;
     std::shared_ptr<std::vector<std::string>> needed_columns;
     std::unordered_map<FieldId, FieldMeta> field_metas;
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id;
     bool use_mmap;
     bool mmap_populate;
     MmapChunkWritebackMode writeback_mode;
@@ -240,7 +241,8 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
             context.fallback_bytes_per_row,
             context.insert_channel,
             std::move(column_size_estimate),
-            context.writeback_mode);
+            context.writeback_mode,
+            context.physical_column_to_field_id);
     return translator;
 }
 
@@ -1964,6 +1966,15 @@ ChunkedSegmentSealedImpl::PublishReopenState(
 }
 
 bool
+ChunkedSegmentSealedImpl::HasFieldInLoadedManifest(FieldId field_id) const {
+    auto snapshot = CapturePublishedState();
+    if (!snapshot->load_info || !snapshot->load_info->HasManifestPath()) {
+        return true;
+    }
+    return snapshot->load_info->HasFieldInLoadedManifest(field_id);
+}
+
+bool
 ChunkedSegmentSealedImpl::HasRawDataFromState(
     const PublishedSegmentState& state, FieldId field_id) const {
     const auto& field_meta = state.schema->operator[](field_id);
@@ -2365,9 +2376,12 @@ ChunkedSegmentSealedImpl::TryLoadLazyManifestColumnGroup(
 
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id;
+    physical_column_to_field_id.reserve(milvus_field_ids.size());
     for (const auto& field_id : milvus_field_ids) {
-        needed_columns->push_back(
-            schema_snapshot->get_storage_column_name(field_id));
+        auto column_name = segment_load_info.GetStorageColumnName(field_id);
+        physical_column_to_field_id.emplace(column_name, field_id);
+        needed_columns->push_back(std::move(column_name));
     }
 
     auto mmap_dir_path =
@@ -2384,6 +2398,7 @@ ChunkedSegmentSealedImpl::TryLoadLazyManifestColumnGroup(
         .column_group_columns = column_group_columns,
         .needed_columns = needed_columns,
         .field_metas = field_metas,
+        .physical_column_to_field_id = std::move(physical_column_to_field_id),
         .use_mmap = use_mmap,
         .mmap_populate = mmap_config.GetMmapPopulate(),
         .writeback_mode = CreateMmapChunkWritebackMode(mmap_config),
@@ -2470,19 +2485,23 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
-    auto properties = std::make_shared<milvus_storage::api::Properties>(
-        *milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-             .GetProperties());
-    auto column_groups = segment_load_info.GetColumnGroups();
+    const auto& storage_properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+    auto properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageLoadOpen});
+    const auto column_groups = segment_load_info.GetColumnGroups();
 
     if (schema_snapshot->is_external_collection()) {
-        InjectExternalSpecProperties(*properties,
+        auto external =
+            std::make_shared<milvus_storage::api::Properties>(*properties);
+        InjectExternalSpecProperties(*external,
                                      segment_load_info.GetCollectionID(),
                                      schema_snapshot->get_external_source(),
                                      schema_snapshot->get_external_spec());
+        properties = std::move(external);
     }
 
-    auto needed_columns = schema_snapshot->GetExternalColumnNames();
+    auto needed_columns = segment_load_info.GetExternalColumnNames();
     auto reader = std::shared_ptr<milvus_storage::api::Reader>(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
@@ -2523,9 +2542,15 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         std::vector<int64_t> dropped_fields;
         field_ids.reserve(cg->columns.size());
         for (auto& column : cg->columns) {
-            auto field_id = schema_snapshot->ResolveColumnFieldId(column);
+            auto field_id = segment_load_info.ResolveColumnFieldId(column);
             if (!schema_snapshot->has_field(field_id)) {
                 dropped_fields.push_back(field_id.get());
+                continue;
+            }
+            // A schema-only reopen may revisit the same external manifest.
+            // Keep columns that the staged runtime already owns.
+            if (!is_replace &&
+                committer.runtime()->fields.count(field_id) != 0) {
                 continue;
             }
             field_ids.emplace_back(field_id);
@@ -3272,7 +3297,7 @@ ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_.LoadPush(std::move(pks), timestamps);
 }
 
 void
@@ -3798,7 +3823,7 @@ ChunkedSegmentSealedImpl::GetSkipIndexSnapshot() const {
 int64_t
 ChunkedSegmentSealedImpl::get_deleted_count() const {
     std::shared_lock lck(mutex_);
-    return deleted_record_.size();
+    return deleted_record_.deleted_row_count();
 }
 
 const Schema&
@@ -4449,6 +4474,7 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 }
 
+// Reports a row's matches in input order; DeletedRecord relies on it.
 void
 ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
@@ -4932,6 +4958,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       col_index_meta_(index_meta),
       is_sorted_by_pk_(is_sorted_by_pk),
+      // Every branch reports a row's matches in input order; DeletedRecord
+      // relies on it.
       deleted_record_(
           nullptr,
           [this](const std::vector<PkType>& pks,
@@ -6778,7 +6806,7 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
         sort_pks[i] = pk;
     }
 
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(std::move(sort_pks), sort_timestamps.data());
     return SegcoreError::success();
 }
 
@@ -7667,9 +7695,10 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                               !diff.column_groups_to_lazyload.empty() ||
                               !diff.column_groups_to_lazyreplace.empty();
         if (has_cg_changes) {
-            auto properties =
-                milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                    .GetProperties();
+            const auto& storage_properties =
+                milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+            auto properties = storage_properties.GetProperties(
+                {.talon_stage = milvus::storage::kTalonStageLoadOpen});
             auto column_groups = segment_load_info.GetColumnGroups();
             auto arrow_schema = schema_snapshot->ConvertToLoonArrowSchema(
                 /*text_lob_as_binary=*/true);
@@ -7983,6 +8012,10 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(*current->load_info);
     new_local.ReplaceSchemaForReopen(sch);
+    if (new_local.HasManifestPath() && sch->is_external_collection()) {
+        CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
+        new_local.BindManifestFields();
+    }
 
     auto diff = current_mutable.ComputeDiff(new_local);
     // LoadFieldData may publish a real column without adding binlogs to
@@ -8063,6 +8096,8 @@ ChunkedSegmentSealedImpl::Reopen(
     SegmentLoadInfo current_mutable(*current->load_info);
     SegmentLoadInfo new_local(new_load_info, target_schema);
     new_local.InheritCachedColumnGroupsFrom(*current->load_info);
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
+    new_local.BindManifestFields();
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
     current_mutable.ResolveLegacyBinlogChildFields(nullptr);
     new_local.ResolveLegacyBinlogChildFields(&current_mutable);
@@ -8713,7 +8748,7 @@ ChunkedSegmentSealedImpl::InitTextLobPaths(const std::string& manifest_path,
 void
 ChunkedSegmentSealedImpl::LoadColumnGroups(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     std::vector<std::pair<int, std::vector<FieldId>>>& cg_field_ids,
     const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
@@ -8770,7 +8805,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
 void
 ChunkedSegmentSealedImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     const std::vector<FieldId>& milvus_field_ids,
     const SegmentLoadInfo& segment_load_info,
@@ -8837,9 +8872,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
 
     auto needed_columns = std::make_shared<std::vector<std::string>>();
     needed_columns->reserve(milvus_field_ids.size());
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id;
+    physical_column_to_field_id.reserve(milvus_field_ids.size());
     for (const auto& fid : milvus_field_ids) {
-        needed_columns->push_back(
-            schema_snapshot->get_storage_column_name(fid));
+        auto column_name = segment_load_info.GetStorageColumnName(fid);
+        physical_column_to_field_id.emplace(column_name, fid);
+        needed_columns->push_back(std::move(column_name));
     }
     AssertInfo(
         reader != nullptr,
@@ -8899,7 +8937,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             segment_load_info.GetEstimatedBytesPerRow(),
             segment_load_info.GetInsertChannel(),
             std::move(column_size_estimate),
-            writeback_mode);
+            writeback_mode,
+            std::move(physical_column_to_field_id));
     auto chunked_column_group =
         std::make_shared<ChunkedColumnGroup>(std::move(translator));
 
@@ -9277,8 +9316,11 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto num_rows = snapshot->load_info->GetNumOfRows();
     LOG_DEBUG("Loading segment {} with {} rows", id_, num_rows);
 
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Load()");
     SegmentLoadInfo mutable_copy(snapshot->load_info->GetProto(),
                                  snapshot->schema);
+    mutable_copy.InheritCachedColumnGroupsFrom(*snapshot->load_info);
+    mutable_copy.BindManifestFields();
     mutable_copy.SetFieldsFilledWithDefault(
         snapshot->load_info->GetFieldsFilledWithDefault());
     for (auto fid : snapshot->load_info->GetCreatedTextIndexes()) {
@@ -10003,7 +10045,10 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         }
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
-        auto column_name = schema_snapshot->get_storage_column_name(field_id);
+        auto column_name =
+            snapshot->load_info
+                ? snapshot->load_info->GetStorageColumnName(field_id)
+                : schema_snapshot->get_storage_column_name(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_column_names.push_back(std::move(column_name));
@@ -10289,7 +10334,10 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
         }
         has_vector_output =
             has_vector_output || IsVectorDataType(field_meta.get_data_type());
-        auto column_name = schema_snapshot->get_storage_column_name(field_id);
+        auto column_name =
+            snapshot->load_info
+                ? snapshot->load_info->GetStorageColumnName(field_id)
+                : schema_snapshot->get_storage_column_name(field_id);
         needed_columns->push_back(column_name);
         take_field_ids.push_back(field_id);
         take_field_metas.push_back(&field_meta);

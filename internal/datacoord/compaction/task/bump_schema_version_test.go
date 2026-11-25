@@ -294,7 +294,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 	s.Run("CreateTaskOnWorker fail, segment not found", func() {
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
 	})
 
@@ -324,8 +324,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1))
-		task.CreateTaskOnWorker(1, cluster)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1))
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		// Should remain in pipelining state when CreateCompaction fails
 		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
 		// NodeID should be set to NullNodeID (-1) when CreateCompaction fails
@@ -358,8 +358,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.CreateTaskOnWorker(1, cluster)
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
 		s.Equal(int64(1), task.GetTaskProto().GetNodeID())
 	})

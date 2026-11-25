@@ -85,6 +85,7 @@ type QueryTask struct {
 	fastSkip           bool
 	node               taskmodel.TaskNode
 
+	internalTask         bool
 	reQuery              bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
@@ -830,8 +831,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	t.queryParams = queryParams
 
-	// ORDER BY requires explicit limit to prevent segment-level OOM.
-	// SortBuffer loads all matching rows into memory for sorting;
+	// ORDER BY requires an explicit limit so segcore can use bounded TopK
+	// storage. Without a limit, SortBuffer would retain all matching rows;
 	// MaxOutputSize only guards proxy reduce, not segment sorting.
 	if len(queryParams.orderByFields) > 0 && queryParams.limit == typeutil.Unlimited {
 		return merr.WrapErrParameterInvalidMsg("ORDER BY requires explicit limit")
@@ -1177,6 +1178,11 @@ func (t *QueryTask) formatTimeFields(ctx context.Context) error {
 	}
 	return nil
 }
+
+// MarkInternal excludes synthesized reads from request-level phase observation.
+func (t *QueryTask) MarkInternal() { t.internalTask = true }
+
+func (t *QueryTask) IsInternalTask() bool { return t.internalTask || t.reQuery }
 
 func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery

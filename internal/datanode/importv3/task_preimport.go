@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -48,13 +49,14 @@ type preImportTask struct {
 }
 
 // NewPreImportTask builds the count-only preimport task. The Scheduler admits
-// it once the node has free slots.
-func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Task {
+// it once execution memory is available.
+func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager, resource taskcommon.Resource) Task {
 	return &preImportTask{
 		workerTaskBase: workerTaskBase{
-			taskID: req.GetTaskID(),
-			runID:  PreImportV3RunID,
-			slot:   req.GetTaskSlot(),
+			taskID:   req.GetTaskID(),
+			runID:    PreImportV3RunID,
+			slot:     req.GetTaskSlot(),
+			resource: resource,
 		},
 		req: req,
 		cm:  cm,
@@ -64,7 +66,8 @@ func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Tas
 func (t *preImportTask) Kind() string { return "preimport" }
 
 func (t *preImportTask) Execute(ctx context.Context) (any, error) {
-	if err := importutilv2.ValidateImportSourceOptions(t.req.GetOptions()); err != nil {
+	sourceCM, err := importutilv2.NewSourceChunkManager(ctx, t.req.GetOptions(), t.cm)
+	if err != nil {
 		return nil, err
 	}
 	// A single file failure short-circuits AwaitAll; cancel the shared ctx so
@@ -99,7 +102,7 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 			if backup {
 				stat, err = t.sizeOnlyFile(ctx, file)
 			} else {
-				stat, err = t.countFile(ctx, file, bufferSize)
+				stat, err = t.countFile(ctx, sourceCM, file, bufferSize)
 			}
 			if err != nil {
 				return nil, err
@@ -110,6 +113,7 @@ func (t *preImportTask) Execute(ctx context.Context) (any, error) {
 		futures = append(futures, f)
 	}
 	if err := conc.AwaitAll(futures...); err != nil {
+		cancel()
 		return nil, err
 	}
 	return stats, nil
@@ -154,11 +158,11 @@ func (t *preImportTask) sizeOnlyFile(ctx context.Context, file *internalpb.Impor
 // source file. Parquet and numpy record the exact row count in metadata, so
 // only the footer/header is read; JSON/CSV have no such metadata and fall
 // through to the row scan.
-func (t *preImportTask) countFile(ctx context.Context, file *internalpb.ImportFile, bufferSize int) (*datapb.ImportV3FileStats, error) {
+func (t *preImportTask) countFile(ctx context.Context, sourceCM storage.ChunkManager, file *internalpb.ImportFile, bufferSize int) (*datapb.ImportV3FileStats, error) {
 	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
 
 	start := time.Now()
-	if rows, logicalBytes, fileSize, cheap, err := t.simpleRowCount(ctx, file); err != nil {
+	if rows, logicalBytes, fileSize, cheap, err := t.simpleRowCount(ctx, sourceCM, file); err != nil {
 		return nil, err
 	} else if cheap {
 		if fileSize > int64(maxSize) {
@@ -178,7 +182,7 @@ func (t *preImportTask) countFile(ctx context.Context, file *internalpb.ImportFi
 	}
 
 	// V3 never carries a typed snapshot source, so no delete budget is reserved.
-	reader, err := importutilv2.NewReader(ctx, t.cm, t.req.GetSchema(), file, t.req.GetOptions(), bufferSize, t.req.GetStorageConfig(), 0)
+	reader, err := importutilv2.NewReader(ctx, sourceCM, t.req.GetSchema(), file, t.req.GetOptions(), bufferSize, t.req.GetStorageConfig(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -230,31 +234,17 @@ func (t *preImportTask) countFile(ctx context.Context, file *internalpb.ImportFi
 // footer or the npy header. The fourth return value is false for formats (JSON/CSV)
 // whose exact count requires a scan; the caller then reads the file. Callers on the
 // metadata path use the physical size to avoid a second object-store stat.
-func (t *preImportTask) simpleRowCount(ctx context.Context, file *internalpb.ImportFile) (int64, int64, int64, bool, error) {
+func (t *preImportTask) simpleRowCount(ctx context.Context, sourceCM storage.ChunkManager, file *internalpb.ImportFile) (int64, int64, int64, bool, error) {
 	fileType, err := importutilv2.GetFileType(file)
-	if err != nil {
-		return 0, 0, 0, false, err
-	}
-	if fileType != importutilv2.FileTypeParquet && fileType != importutilv2.FileTypeNumpy {
-		return 0, 0, 0, false, nil
-	}
-	if importutilv2.HasSourceStorageOptions(t.req.GetOptions()) {
-		if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
-			return 0, 0, 0, false, err
-		}
-	}
-	// Metadata-only counting bypasses NewReader, so resolve the same external
-	// source here too. Never replace the task's destination chunk manager.
-	cm, _, err := importutilv2.ResolveSourceStorage(ctx, t.req.GetOptions(), t.cm, t.req.GetStorageConfig())
 	if err != nil {
 		return 0, 0, 0, false, err
 	}
 	switch fileType {
 	case importutilv2.FileTypeParquet:
-		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, cm, t.req.GetSchema(), file.GetPaths()[0])
+		rows, bytes, size, err := parquet.NumRowsAndBytes(ctx, sourceCM, t.req.GetSchema(), file.GetPaths()[0])
 		return rows, bytes, size, true, err
 	case importutilv2.FileTypeNumpy:
-		rows, bytes, size, err := numpy.NumRowsAndBytes(ctx, cm, t.req.GetSchema(), file.GetPaths())
+		rows, bytes, size, err := numpy.NumRowsAndBytes(ctx, sourceCM, t.req.GetSchema(), file.GetPaths())
 		return rows, bytes, size, true, err
 	default:
 		return 0, 0, 0, false, nil

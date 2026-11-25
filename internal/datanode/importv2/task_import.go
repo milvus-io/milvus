@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -49,6 +50,7 @@ type ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	resource     taskcommon.Resource
 
 	allocator  allocator.Interface
 	manager    TaskManager
@@ -61,6 +63,7 @@ func NewImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// During binlog import, even if the primary key's autoID is set to true,
@@ -83,10 +86,14 @@ func NewImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
-		allocator:    alloc,
-		manager:      manager,
-		syncMgr:      syncMgr,
-		cm:           cm,
+		// Every reader of an import reserves from the import allocator; the
+		// hashed batches waiting for sync come on top, covered by the same
+		// factor DataCoord's estimate applies.
+		resource:  resource,
+		allocator: alloc,
+		manager:   manager,
+		syncMgr:   syncMgr,
+		cm:        cm,
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -110,6 +117,10 @@ func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+func (t *ImportTask) GetResource() taskcommon.Resource {
+	return t.resource
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
@@ -159,6 +170,7 @@ func (t *ImportTask) Clone() Task {
 		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		resource:     t.resource,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,
@@ -176,6 +188,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
 	}
+	req := t.req
+	sourceCM, err := importutilv2.NewSourceChunkManager(t.ctx, req.GetOptions(), t.cm)
+	if err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := t.GetBufferSize()
 	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		mlog.Int64("bufferSize", bufferSize),
@@ -185,8 +203,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
-	req := t.req
-	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, req.GetStorageConfig(), req.GetOptions())
+	readers := importutilv2.NewReaderFactory(t.ctx, sourceCM, req.GetStorageConfig(), req.GetOptions())
 
 	fn := func(ctx context.Context, file *internalpb.ImportFile, rowBuffer, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
 		reader, err := readers.NewReader(ctx, t.GetSchema(), file, int(rowBuffer), deleteBudget, shared)

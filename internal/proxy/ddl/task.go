@@ -549,8 +549,17 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	// RootCoord skips this check when preserve_field_ids is set, as for a
-	// snapshot restore, which does not go through proxy.
+	// RootCoord skips these checks when preserve_field_ids is set, as for a
+	// snapshot restore, which does not go through proxy. Client CreateCollection
+	// requests (with or without preserve_field_ids) must not carry the internal
+	// added sub-field marker.
+	for _, structArrayField := range t.schema.GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
+			if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+				return err
+			}
+		}
+	}
 	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
 		return err
 	}

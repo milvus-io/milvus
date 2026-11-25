@@ -44,6 +44,21 @@ namespace milvus::index {
 constexpr const char* VALID_DATA_KEY = "valid_data";
 constexpr const char* VALID_DATA_COUNT_KEY = "valid_data_count";
 
+struct PreparedVectorInput {
+    Config config;
+    DatasetPtr dataset;
+    // File-input shape for admission when dataset is null.
+    int64_t rows = 0;
+    int64_t dim = 0;
+    std::shared_ptr<uint8_t[]> data;
+    std::vector<uint8_t> validity;
+    std::unique_ptr<bool[]> valid_data;
+    std::vector<size_t> offsets;
+    std::vector<knowhere::sparse::SparseRow<SparseValueType>> sparse_data;
+    knowhere::BuildOptions options;
+    bool requires_build = false;
+};
+
 class VectorIndex : public IndexBase {
  public:
     explicit VectorIndex(const IndexType& index_type,
@@ -148,6 +163,12 @@ class VectorIndex : public IndexBase {
     SetDim(int64_t dim) {
         dim_ = dim;
     }
+
+    virtual void
+    Prepare(const Config& config) = 0;
+
+    virtual bool
+    TryReserveBuild(const Config& config) = 0;
 
     virtual void
     CleanLocalData() {

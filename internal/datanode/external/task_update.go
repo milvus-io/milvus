@@ -93,6 +93,10 @@ type RefreshExternalCollectionTask struct {
 
 	milvusTableSourcePKFieldMu sync.Mutex
 	milvusTableSourcePKField   *schemapb.FieldSchema
+	milvusTableSourceSchemaMu  sync.Mutex
+	milvusTableSourceSchema    *schemapb.CollectionSchema
+	milvusTableFieldIDMapping  map[string]string
+	milvusTableMissingBindings map[int64][]string
 
 	milvusTableSourceDeltalogsMu sync.Mutex
 	milvusTableSourceDeltalogs   map[string][]*datapb.FieldBinlog
@@ -156,6 +160,7 @@ func (t *RefreshExternalCollectionTask) Reset() {
 	t.tr = nil
 	t.keptSegmentIDs = nil
 	t.updatedSegments = nil
+	t.milvusTableMissingBindings = nil
 }
 
 func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
@@ -200,6 +205,13 @@ func (t *RefreshExternalCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	t.req.Schema = schema
 	t.columns = packed.GetColumnNamesFromSchema(schema)
+	if spec.Format == externalspec.FormatMilvusTable {
+		// Bind all task reads to the requested snapshot; the collection schema
+		// may still describe the preceding one.
+		schema.ExternalSource = t.req.GetExternalSource()
+		schema.ExternalSpec = t.req.GetExternalSpec()
+		return t.initializeMilvusTableFieldMapping()
+	}
 
 	return nil
 }
@@ -234,7 +246,7 @@ func (t *RefreshExternalCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	// Build current segment -> fragments mapping
-	currentSegmentFragments, err := t.buildCurrentSegmentFragments()
+	currentSegmentFragments, err := t.buildCurrentSegmentFragments(ctx)
 	if err != nil {
 		return merr.Wrap(err, "failed to build current segment fragments")
 	}
@@ -261,7 +273,7 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 		mlog.Int64("fileIndexBegin", t.req.GetFileIndexBegin()),
 		mlog.Int64("fileIndexEnd", t.req.GetFileIndexEnd()))
 
-	return packed.FetchFragmentsFromExternalSourceWithRange(
+	fragments, err := packed.FetchFragmentsFromExternalSourceWithRange(
 		ctx,
 		t.parsedSpec.Format,
 		t.columns,
@@ -276,6 +288,10 @@ func (t *RefreshExternalCollectionTask) fetchFragmentsFromExternalSource(ctx con
 			RowLimit:     t.req.GetTargetRowsPerSegment(),
 		},
 	)
+	if err != nil {
+		return nil, err
+	}
+	return t.bindMilvusTableFragments(fragments)
 }
 
 func (t *RefreshExternalCollectionTask) PostExecute(ctx context.Context) error {
@@ -310,8 +326,16 @@ func fragmentKey(f packed.Fragment) string {
 }
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments
-func (t *RefreshExternalCollectionTask) buildCurrentSegmentFragments() (packed.SegmentFragments, error) {
-	return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig(), t.columns)
+func (t *RefreshExternalCollectionTask) buildCurrentSegmentFragments(ctx context.Context) (packed.SegmentFragments, error) {
+	if t.milvusTableFieldIDMapping == nil {
+		return packed.BuildCurrentSegmentFragments(t.req.GetCurrentSegments(), t.req.GetStorageConfig(), t.columns)
+	}
+	// Validate prior bindings before classifying any segment, even when new
+	// source fragments will replace it.
+	fragments, missing, err := packed.BuildCurrentMilvusTableSegmentFragments(
+		ctx, t.req.GetCurrentSegments(), t.req.GetStorageConfig(), t.columns, t.milvusTableFieldIDMapping)
+	t.milvusTableMissingBindings = missing
+	return fragments, err
 }
 
 // organizeSegments compares fragments and organizes them into segments
@@ -349,15 +373,15 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 	var patchedSegments []*datapb.SegmentInfo
-	// Reason counters count baseline segments. A segment can increment both
-	// patch counters when deltalogs and missing columns are refreshed together.
+	// Reason counters count baseline segments. A segment can increment multiple
+	// counters when deltalogs and physical columns change together.
 	removedFragmentSegments := 0
 	missingFunctionOutputSegments := 0
 	deltalogRefreshedSegments := 0
 	missingColumnPatchedSegments := 0
 
 	var outputColumns []string
-	if t.hasFunctions() {
+	if t.hasFunctions() && (t.parsedSpec == nil || t.parsedSpec.Format != externalspec.FormatMilvusTable) {
 		var err error
 		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
 		if err != nil {
@@ -428,52 +452,32 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		if err != nil {
 			return nil, err
 		}
+		// Reimport missing physical groups using numeric field IDs; the generic
+		// appender cannot interpret source snapshot manifests.
+		refreshMilvusTableColumns := len(missingColumns) > 0 && t.parsedSpec != nil &&
+			t.parsedSpec.Format == externalspec.FormatMilvusTable
 		var patchedSegment *datapb.SegmentInfo
-		if shouldRefreshDeltalogs {
-			if len(outputColumns) > 0 {
-				// ChildFields is sufficient for unchanged segments, but older refreshes
-				// could leave advertised Function outputs absent from the manifest.
-				// Check the pinned manifest before translating deletes or carrying its
-				// outputs. Only confirmed absence triggers a rebuild; read errors must
-				// fail the task rather than turn a storage fault into recomputation.
-				hasOutputs, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
-				if err != nil {
-					return nil, merr.Wrapf(err, "check retained function output columns for segment %d", seg.GetID())
-				}
-				if !hasOutputs {
-					missingFunctionOutputSegments++
-					taskLog.Info(ctx, "Segment invalidated due to missing retained function output columns",
-						mlog.FieldSegmentID(seg.GetID()),
-						mlog.String("updateReason", "missing_function_output_columns"),
-						mlog.String("manifestPath", seg.GetManifestPath()))
-					// Nothing has marked these fragments used or retained this segment.
-					// Rebuild from the latest orphan fragments below, with new segment
-					// IDs and freshly computed Function outputs. Publication of the
-					// replacement remains the existing job-level atomic update.
-					continue
-				}
-			}
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns)
+		if shouldRefreshDeltalogs || refreshMilvusTableColumns {
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, shouldRefreshDeltalogs)
 			if err != nil {
 				return nil, err
 			}
 			patchedSegment = updatedSegment
-			deltalogRefreshedSegments++
-			taskLog.Info(ctx, "Segment kept with refreshed milvus-table deltalogs",
+			if shouldRefreshDeltalogs {
+				deltalogRefreshedSegments++
+			}
+			if refreshMilvusTableColumns {
+				missingColumnPatchedSegments++
+			}
+			taskLog.Info(ctx, "Segment kept with refreshed milvus-table manifest",
 				mlog.FieldSegmentID(seg.GetID()),
-				mlog.String("updateReason", "refreshed_milvus_table_deltalogs"),
+				mlog.String("updateReason", "refreshed_milvus_table_manifest"),
 				mlog.String("oldManifestPath", seg.GetManifestPath()),
 				mlog.String("newManifestPath", updatedSegment.GetManifestPath()))
 		}
 
-		if len(missingColumns) > 0 {
-			segmentToPatch := seg
-			patchFragments := fragments
-			if patchedSegment != nil {
-				segmentToPatch = patchedSegment
-				patchFragments = matchedNewFragments
-			}
-			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+		if len(missingColumns) > 0 && !refreshMilvusTableColumns {
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -485,10 +489,9 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				mlog.Strings("missingColumns", missingColumns))
 		}
 
-		if patchedSegment != nil && len(patchedSegment.GetBinlogs()) == 0 {
-			// Catalog recovery omits V3 fake binlogs. Even when every physical
-			// column exists, DataCoord requires them on a same-ID manifest patch.
-			// Restore metadata from the final manifest without appending columns.
+		if patchedSegment != nil && (refreshMilvusTableColumns || len(patchedSegment.GetBinlogs()) == 0) {
+			// Restore fake binlogs omitted by catalog recovery, and update field
+			// coverage and load sizes when reimporting missing physical columns.
 			patchedSegment, err = t.rebuildSegmentFakeBinlogs(ctx, patchedSegment, patchedSegment.GetManifestPath())
 			if err != nil {
 				return nil, err
@@ -642,6 +645,28 @@ func coveredFieldsFromChildFields(seg *datapb.SegmentInfo) map[int64]struct{} {
 
 func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.SegmentInfo) ([]string, error) {
 	schema := t.req.GetSchema()
+	if schema == nil {
+		return nil, nil
+	}
+	if t.milvusTableFieldIDMapping != nil && seg.GetManifestPath() != "" {
+		missing := t.milvusTableMissingBindings[seg.GetID()]
+		if len(missing) == 0 {
+			return nil, nil
+		}
+		names := make(map[string]string)
+		for _, field := range schema.GetFields() {
+			names[strconv.FormatInt(field.GetFieldID(), 10)] = field.GetExternalField()
+		}
+		columns := make([]string, 0, len(missing))
+		for _, id := range missing {
+			if name := names[id]; name != "" {
+				columns = append(columns, name)
+			} else {
+				columns = append(columns, id)
+			}
+		}
+		return columns, nil
+	}
 	resolver := typeutil.NewStorageColumnResolver(schema,
 		typeutil.WithStorageColumnExternalSpec(t.req.GetExternalSpec()))
 	coveredFields := coveredFieldsFromChildFields(seg)
@@ -1098,6 +1123,7 @@ func (t *RefreshExternalCollectionTask) balanceFragmentsToSegments(ctx context.C
 			NumOfRows:      work.rowCount,
 			ManifestPath:   manifestPaths[i],
 			StorageVersion: storage.StorageV3,
+			SchemaVersion:  t.req.GetSchema().GetVersion(),
 			Level:          datapb.SegmentLevel_L1,
 			// Fake binlog so downstream treats external segments like normal
 			// StorageV3 segments. MemorySize is pre-computed from Take sampling
@@ -1161,6 +1187,9 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	segmentID int64,
 	fragments []packed.Fragment,
 ) (string, error) {
+	if t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+		return "", merr.WrapErrParameterInvalidMsg("milvus-table external collection does not support function output fields")
+	}
 	basePath := storage.SegmentManifestBasePath(
 		t.req.GetStorageConfig().GetRootPath(),
 		t.req.GetCollectionID(),
@@ -1181,9 +1210,6 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 	)
 	if err != nil {
 		return "", err
-	}
-	if t.parsedSpec.Format == externalspec.FormatMilvusTable {
-		return t.postProcessMilvusTableDeltalogs(ctx, basePath, manifestPath, segmentID, fragments)
 	}
 	return manifestPath, nil
 }

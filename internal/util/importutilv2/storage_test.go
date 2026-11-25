@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,13 +47,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestResolveSourceStorageDefault(t *testing.T) {
+func TestNewSourceChunkManagerDefault(t *testing.T) {
 	cm := mocks.NewChunkManager(t)
-	config := &indexpb.StorageConfig{BucketName: "destination"}
-	sourceCM, sourceConfig, err := ResolveSourceStorage(context.Background(), nil, cm, config)
+	sourceCM, err := NewSourceChunkManager(context.Background(), nil, cm)
 	require.NoError(t, err)
 	require.Same(t, cm, sourceCM)
-	require.Same(t, config, sourceConfig)
 }
 
 func TestExternalImportReader(t *testing.T) {
@@ -75,6 +74,7 @@ func TestExternalImportReader(t *testing.T) {
 
 	for name, data := range map[string][]byte{
 		"nested//../data.json": []byte(`{"rows":[{"pk":42},{"pk":43}]}`),
+		"v1:2026/data.json":    []byte(`{"rows":[{"pk":42},{"pk":43}]}`),
 		"data.parquet":         parquetData.Bytes(),
 		"data.csv":             []byte("pk\n42\n43\n"),
 		"data.jsonl":           []byte("{\"pk\":42}\n{\"pk\":43}\n"),
@@ -110,10 +110,14 @@ func TestExternalImportReader(t *testing.T) {
 				AccessKeyID: "destination-key", SecretAccessKey: "destination-secret", UseIAM: true,
 			}
 			before := proto.Clone(destination)
+
+			sourceCM, err := NewSourceChunkManager(context.Background(), options, cm)
+			require.NoError(t, err)
+
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}}
-			reader, err := NewReader(context.Background(), cm, schema,
+			reader, err := NewReader(context.Background(), sourceCM, schema,
 				&internalpb.ImportFile{Paths: []string{"external_folder/" + name}}, options, 1024*1024, destination, 0)
 			require.NoError(t, err)
 			defer reader.Close()
@@ -130,6 +134,44 @@ func TestExternalImportReader(t *testing.T) {
 			require.True(t, proto.Equal(before, destination))
 		})
 	}
+}
+
+func TestExternalImportConnectionReuse(t *testing.T) {
+	paramtable.Init()
+	var newConns atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "data.json", time.Unix(1, 0), strings.NewReader(`[{"pk":1}]`))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			newConns.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	options := externalStorageOptions()
+	options[1].Value = strings.TrimPrefix(server.URL, "http://")
+	options = append(options,
+		&commonpb.KeyValuePair{Key: StorageUseSSL, Value: "false"},
+		&commonpb.KeyValuePair{Key: StorageRegion, Value: "us-east-1"})
+
+	sourceCM, err := NewSourceChunkManager(context.Background(), options, mocks.NewChunkManager(t))
+	require.NoError(t, err)
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	for i := 0; i < 3; i++ {
+		reader, err := NewReader(context.Background(), sourceCM, schema,
+			&internalpb.ImportFile{Paths: []string{fmt.Sprintf("file-%d.json", i)}}, options, 1024, nil, 0)
+		require.NoError(t, err)
+		rows, err := reader.Read()
+		require.NoError(t, err)
+		require.Equal(t, 1, rows.GetRowNum())
+		reader.Close()
+	}
+	require.Equal(t, int32(1), newConns.Load(), "task-scoped ChunkManager must reuse a single keep-alive connection across files")
 }
 
 func TestExternalImportSourceFailures(t *testing.T) {
@@ -168,7 +210,10 @@ func TestExternalImportSourceFailures(t *testing.T) {
 				&commonpb.KeyValuePair{Key: StorageRegion, Value: "us-east-1"})
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			reader, err := NewReader(ctx, mocks.NewChunkManager(t),
+			sourceCM, err := NewSourceChunkManager(ctx, options, mocks.NewChunkManager(t))
+			require.NoError(t, err)
+
+			reader, err := NewReader(ctx, sourceCM,
 				&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				}}, &internalpb.ImportFile{Paths: []string{"data.json"}}, options, 1024, nil, 0)
@@ -178,6 +223,13 @@ func TestExternalImportSourceFailures(t *testing.T) {
 			require.NotContains(t, err.Error(), "external-access-key")
 		})
 	}
+
+	// Terminal options after RemoveSourceStorageCredentials must fail fast as ParameterInvalid instead of
+	// falling back to destination storage.
+	cleaned := RemoveSourceStorageCredentials(externalStorageOptions())
+	cm, err := NewSourceChunkManager(context.Background(), cleaned, mocks.NewChunkManager(t))
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Nil(t, cm)
 }
 
 func TestExternalImportTransientSourceFailure(t *testing.T) {
@@ -203,7 +255,10 @@ func TestExternalImportTransientSourceFailure(t *testing.T) {
 		&commonpb.KeyValuePair{Key: StorageRegion, Value: "us-east-1"})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	reader, err := NewReader(ctx, mocks.NewChunkManager(t),
+	sourceCM, err := NewSourceChunkManager(ctx, options, mocks.NewChunkManager(t))
+	require.NoError(t, err)
+
+	reader, err := NewReader(ctx, sourceCM,
 		&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		}}, &internalpb.ImportFile{Paths: []string{"data.json"}}, options, 1024, nil, 0)
@@ -218,8 +273,7 @@ func TestExternalImportTransientSourceFailure(t *testing.T) {
 func TestExternalImportSourceCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	cm, config, err := ResolveSourceStorage(ctx, externalStorageOptions(), mocks.NewChunkManager(t), nil)
+	cm, err := NewSourceChunkManager(ctx, externalStorageOptions(), mocks.NewChunkManager(t))
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, cm)
-	require.Nil(t, config)
 }

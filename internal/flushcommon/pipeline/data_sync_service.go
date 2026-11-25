@@ -147,6 +147,14 @@ func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParam
 }
 
 func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo, schemaManager metacache.SchemaManager) (metacache.MetaCache, error) {
+	// Check every segment before scheduling stats reads or populating the cache.
+	for _, segments := range [][]*datapb.SegmentInfo{unflushed, flushed} {
+		for _, segment := range segments {
+			if err := storagecommon.ValidateSegmentStorageVersion(segment.GetID(), segment.GetStorageVersion()); err != nil {
+				return nil, retry.Unrecoverable(err)
+			}
+		}
+	}
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()

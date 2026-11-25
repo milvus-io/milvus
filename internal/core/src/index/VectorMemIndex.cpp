@@ -77,6 +77,7 @@
 #include "storage/FileWriter.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 namespace milvus::index {
 
@@ -175,7 +176,8 @@ VectorMemIndex<T>::VectorMemIndex(
     const storage::FileManagerContext& file_manager_context)
     : VectorIndex(index_type, metric_type),
       elem_type_(elem_type),
-      use_knowhere_build_pool_(use_knowhere_build_pool) {
+      use_knowhere_build_pool_(use_knowhere_build_pool),
+      build_context_(file_manager_context) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
                "{} doesn't support metric: {}",
@@ -522,9 +524,37 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
 template <typename T>
 void
-VectorMemIndex<T>::Build(const Config& config) {
+VectorMemIndex<T>::Prepare(const Config& config) {
     LOG_INFO("start build memory index, build_id: {}",
              config.value("build_id", "unknown"));
+    build_input_ = std::make_unique<PreparedVectorInput>();
+    auto& build_config = build_input_->config;
+    build_config = config;
+    build_config.erase(INSERT_FILES_KEY);
+    build_config.erase(VEC_OPT_FIELDS);
+    auto manifest =
+        GetValueFromConfig<std::string>(config, SEGMENT_MANIFEST_KEY);
+    if (elem_type_ == DataType::NONE && !IndexIsSparse(GetIndexType()) &&
+        !config.contains(VEC_OPT_FIELDS) && manifest.has_value() &&
+        !manifest->empty()) {
+        auto rows =
+            GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY).value_or(0);
+        auto dim = GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+        auto bytes = vector_bytes_per_element(
+            static_cast<DataType>(
+                build_context_.fieldDataMeta.field_schema.data_type()),
+            dim);
+        auto read = storage::ReadFieldDataFromManifestInto(
+            *manifest, build_context_, rows, [&] {
+                build_input_->data.reset(new uint8_t[rows * bytes]);
+                return build_input_->data.get();
+            });
+        if (read) {
+            build_input_->dataset =
+                GenDataset(*read, dim, build_input_->data.get());
+            return;
+        }
+    }
     auto field_datas = file_manager_->CacheRawDataToMemory(config);
     LOG_INFO("CacheRawDataToMemory success, build_id: {}",
              config.value("build_id", "unknown"));
@@ -537,11 +567,6 @@ VectorMemIndex<T>::Build(const Config& config) {
             is_partition_key_isolation.value_or(false))) {
         scalar_info = file_manager_->CacheOptFieldToMemory(config);
     }
-
-    Config build_config;
-    build_config.update(config);
-    build_config.erase(INSERT_FILES_KEY);
-    build_config.erase(VEC_OPT_FIELDS);
 
     const bool vector_array = elem_type_ != DataType::NONE;
     const bool embedding_list =
@@ -562,7 +587,7 @@ VectorMemIndex<T>::Build(const Config& config) {
         size_t logical_elements = 0;
         size_t physical_elements = 0;
         size_t bytes = 0;
-        std::vector<uint8_t> validity;
+        auto& validity = build_input_->validity;
         for (const auto& data : field_datas) {
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent vector array dimensions");
@@ -620,7 +645,8 @@ VectorMemIndex<T>::Build(const Config& config) {
             SetDim(dim);
             return;
         }
-        auto payload = bytes > 0 ? std::make_unique<uint8_t[]>(bytes) : nullptr;
+        auto& payload = build_input_->data;
+        payload.reset(bytes > 0 ? new uint8_t[bytes] : nullptr);
         size_t offset = 0;
         for (auto& data : field_datas) {
             const auto* rows =
@@ -648,7 +674,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
                 validity.data(), logical_elements));
         }
-        BuildWithDataset(dataset, build_config);
+        build_input_->dataset = dataset;
         return;
     }
 
@@ -664,7 +690,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             nullable = true;
         }
     }
-    std::unique_ptr<bool[]> valid_data;
+    auto& valid_data = build_input_->valid_data;
     if (nullable) {
         valid_data.reset(new bool[total_num_rows]);
         int64_t chunk_offset = 0;
@@ -709,13 +735,14 @@ VectorMemIndex<T>::Build(const Config& config) {
         }
         if (nullable && total_valid_rows == 0) {
             auto dataset = make_dataset(0, dim, nullptr);
-            BuildWithDataset(dataset, build_config);
+            build_input_->dataset = dataset;
             return;
         }
-        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+        auto& buf = build_input_->data;
+        buf.reset(new uint8_t[total_size]);
 
         size_t lim_offset = 0;
-        std::vector<size_t> offsets;
+        auto& offsets = build_input_->offsets;
 
         int64_t offset = 0;
         // For embedding list index, elem_type_ is not NONE
@@ -773,7 +800,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             if (total_vectors == 0) {
                 if (nullable) {
                     auto dataset = make_dataset(0, dim, nullptr);
-                    BuildWithDataset(dataset, build_config);
+                    build_input_->dataset = dataset;
                 } else {
                     empty_emb_list_offsets_ = std::move(offsets);
                     SetDim(dim);
@@ -797,7 +824,7 @@ VectorMemIndex<T>::Build(const Config& config) {
             dataset->Set(knowhere::meta::EMB_LIST_COUNT,
                          static_cast<int64_t>(offsets.size() - 1));
         }
-        BuildWithDataset(dataset, build_config);
+        build_input_->dataset = dataset;
     } else {
         // sparse
         int64_t dim = 0;
@@ -810,11 +837,11 @@ VectorMemIndex<T>::Build(const Config& config) {
         }
         if (nullable && total_valid_rows == 0) {
             auto dataset = make_dataset(0, dim, nullptr, true);
-            BuildWithDataset(dataset, build_config);
+            build_input_->dataset = dataset;
             return;
         }
-        std::vector<knowhere::sparse::SparseRow<SparseValueType>> vec(
-            total_valid_rows);
+        auto& vec = build_input_->sparse_data;
+        vec.resize(total_valid_rows);
         int64_t offset = 0;
         for (const auto& field_data : field_datas) {
             auto ptr = static_cast<
@@ -834,7 +861,35 @@ VectorMemIndex<T>::Build(const Config& config) {
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
         }
-        BuildWithDataset(dataset, build_config);
+        build_input_->dataset = dataset;
+    }
+}
+
+template <typename T>
+bool
+VectorMemIndex<T>::TryReserveBuild(const Config& config) {
+    AssertInfo(build_input_ != nullptr,
+               "memory index input has not been prepared");
+    if (!build_input_->dataset) {
+        return true;
+    }
+    auto result =
+        index_.TryReserveBuild(build_input_->dataset, build_input_->config);
+    if (!result.has_value()) {
+        ThrowInfo(ErrorCode::IndexBuildError, result.what());
+    }
+    return result.value();
+}
+
+template <typename T>
+void
+VectorMemIndex<T>::Build(const Config& config) {
+    if (!build_input_) {
+        Prepare(config);
+    }
+    auto prepared = std::move(build_input_);
+    if (prepared->dataset) {
+        BuildWithDataset(prepared->dataset, prepared->config);
     }
 }
 

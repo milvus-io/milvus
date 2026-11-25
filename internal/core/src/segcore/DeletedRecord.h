@@ -11,14 +11,18 @@
 
 #pragma once
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <shared_mutex>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <folly/ConcurrentSkipList.h>
+#include <folly/ScopeGuard.h>
 
 #include "AckResponder.h"
 #include "common/Common.h"
@@ -49,6 +53,9 @@ using SortedDeleteList =
     folly::ConcurrentSkipList<std::pair<Timestamp, Offset>, Comparator>;
 
 static int32_t DELETE_PAIR_SIZE = sizeof(std::pair<Timestamp, Offset>);
+// a node of EarliestDeleteIndex plus its bucket pointer
+static int32_t EARLIEST_DELETE_TS_ENTRY_SIZE =
+    sizeof(std::pair<Offset, Timestamp>) + 2 * sizeof(void*);
 
 // atomic snapshot for fast path query optimization
 // contains a consistent view of (max_timestamp, deleted_bitset)
@@ -97,11 +104,13 @@ class DeletedRecord {
     operator=(DeletedRecord<is_sealed>&& delete_record) = delete;
 
     void
-    LoadPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+    LoadPush(std::vector<PkType> pks, const Timestamp* timestamps) {
         if (pks.empty()) {
             return;
         }
 
+        std::vector<Timestamp> sorted_timestamps;
+        timestamps = SortByTimestamp(pks, timestamps, sorted_timestamps);
         auto max_deleted_ts = InternalPush(pks, timestamps);
 
         if (max_deleted_ts > max_load_timestamp_) {
@@ -111,19 +120,15 @@ class DeletedRecord {
         //TODO: add support for dump snapshot when load finished
     }
 
-    // stream push delete timestamps should be sorted outside of the interface
-    // considering concurrent query and push
     void
-    StreamPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
+    StreamPush(std::vector<PkType> pks, const Timestamp* timestamps) {
         if (pks.empty()) {
             return;
         }
 
-        auto max_ts = InternalPush(pks, timestamps);
-
-        if (ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load()) {
-            UpdateLatestSnapshot(max_ts);
-        }
+        std::vector<Timestamp> sorted_timestamps;
+        timestamps = SortByTimestamp(pks, timestamps, sorted_timestamps);
+        InternalPush(pks, timestamps);
 
         bool can_dump = timestamps[0] >= max_load_timestamp_;
         if (can_dump) {
@@ -131,26 +136,102 @@ class DeletedRecord {
         }
     }
 
+    // Sorts pks by timestamp in place and returns the sorted timestamps:
+    // `timestamps` itself when already sorted, otherwise `sorted`.
+    static const Timestamp*
+    SortByTimestamp(std::vector<PkType>& pks,
+                    const Timestamp* timestamps,
+                    std::vector<Timestamp>& sorted) {
+        if (std::is_sorted(timestamps, timestamps + pks.size())) {
+            return timestamps;
+        }
+        std::vector<size_t> order(pks.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return std::tie(timestamps[a], a) < std::tie(timestamps[b], b);
+        });
+        sorted.resize(pks.size());
+        for (size_t i = 0; i < order.size(); ++i) {
+            sorted[i] = timestamps[order[i]];
+        }
+        // move pks[order[i]] to position i, one cycle of the permutation at
+        // a time
+        for (size_t i = 0; i < order.size(); ++i) {
+            if (order[i] == i) {
+                continue;
+            }
+            auto first = std::move(pks[i]);
+            auto j = i;
+            while (order[j] != i) {
+                auto next = order[j];
+                pks[j] = std::move(pks[next]);
+                order[j] = j;
+                j = next;
+            }
+            pks[j] = std::move(first);
+            order[j] = j;
+        }
+        return sorted.data();
+    }
+
+    // timestamps must be sorted
     Timestamp
     InternalPush(const std::vector<PkType>& pks, const Timestamp* timestamps) {
         int64_t removed_num = 0;
         int64_t mem_add = 0;
-        Timestamp max_timestamp = 0;
+        Timestamp max_timestamp = timestamps[pks.size() - 1];
+        // keep counters right if the push throws part way
+        auto account = folly::makeGuard([&] {
+            n_.fetch_add(removed_num);
+            mem_size_.fetch_add(mem_add);
+        });
+        // a push that throws part way must not leave a stale latest snapshot
+        // behind; queries take the slow path until the next push completes
+        auto clear_latest_on_failure =
+            folly::makeGuard([this] { ClearLatestSnapshot(); });
 
         SortedDeleteList::Accessor accessor(deleted_lists_);
-        for (size_t i = 0; i < pks.size(); ++i) {
-            auto deleted_ts = timestamps[i];
-            if (deleted_ts > max_timestamp) {
-                max_timestamp = deleted_ts;
+
+        // search_pk_func_ reports the matches of a row in input order, so a
+        // row's first match in this push is its earliest delete in this push.
+        //
+        // A row's effective delete timestamp is its earliest one. Deletes can
+        // arrive out of timestamp order across pushes (e.g. persisted deltalogs
+        // before a remaining L0 segment, or a re-forwarded delete buffer), so a
+        // deleted row only needs deletes earlier than its earliest entry.
+        // Entries before this push have ts <= max_ts_before_push, which
+        // settles in-order pushes without the per-row index; rows deleted
+        // earlier in this push only see later matches.
+        const Timestamp max_ts_before_push = max_inserted_ts_;
+        // Rows whose earliest delete is settled for the rest of this push
+        // after an older match; their later matches are not earlier. Only
+        // allocated when older deletes arrive.
+        std::vector<bool> settled;
+        auto settle = [&](int64_t row_id) {
+            if (row_id >= static_cast<int64_t>(settled.size())) {
+                settled.resize(
+                    std::max<int64_t>(row_id + 1, deleted_mask_.size()));
             }
-        }
+            settled[row_id] = true;
+        };
         search_pk_func_(
             pks,
             timestamps,
             [&](const SegOffset offset, const Timestamp delete_ts) {
                 auto row_id = offset.get();
-                // if already deleted, no need to add new record
-                if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
+                bool already_deleted =
+                    deleted_mask_.size() > row_id && deleted_mask_[row_id];
+                if (already_deleted && delete_ts >= max_ts_before_push) {
+                    return;
+                }
+                bool older = delete_ts < max_ts_before_push;
+                if (older && row_id < static_cast<int64_t>(settled.size()) &&
+                    settled[row_id]) {
+                    return;
+                }
+                if (already_deleted &&
+                    delete_ts >= EarliestDeleteTs(accessor, row_id)) {
+                    settle(row_id);
                     return;
                 }
                 // Skip delete when delete_ts <= insert_ts.
@@ -168,21 +249,55 @@ class DeletedRecord {
                 if (insert_ts != 0 && delete_ts <= insert_ts) {
                     return;
                 }
-                accessor.insert(std::make_pair(delete_ts, row_id));
-                if constexpr (is_sealed) {
-                    Assert(deleted_mask_.size() > 0);
-                    deleted_mask_.set(row_id);
-                } else {
-                    // need to add mask size firstly for growing segment
-                    deleted_mask_.resize(insert_record_->row_count());
-                    deleted_mask_.set(row_id);
+                // A new row's index entry is added before the delete list
+                // changes and removed if inserting into the list fails, so an
+                // allocation failure leaves both as they were.
+                bool indexed_new_row =
+                    earliest_delete_ts_ != nullptr && !already_deleted &&
+                    earliest_delete_ts_->try_emplace(row_id, delete_ts).second;
+                auto entry = std::make_pair(delete_ts, Offset(row_id));
+                bool inserted;
+                try {
+                    inserted = accessor.insert(entry).second;
+                } catch (...) {
+                    if (indexed_new_row) {
+                        earliest_delete_ts_->erase(row_id);
+                    }
+                    throw;
                 }
-                removed_num++;
-                mem_add += DELETE_PAIR_SIZE;
+                if (inserted) {
+                    mem_add += DELETE_PAIR_SIZE;
+                }
+                max_inserted_ts_ = std::max(max_inserted_ts_, delete_ts);
+                if (indexed_new_row) {
+                    mem_add += EARLIEST_DELETE_TS_ENTRY_SIZE;
+                } else if (earliest_delete_ts_ != nullptr) {
+                    // the row is already indexed, so this does not allocate
+                    earliest_delete_ts_->at(row_id) = delete_ts;
+                }
+                if (!already_deleted) {
+                    if constexpr (is_sealed) {
+                        Assert(deleted_mask_.size() > 0);
+                        deleted_mask_.set(row_id);
+                    } else {
+                        // need to add mask size firstly for growing segment
+                        deleted_mask_.resize(insert_record_->row_count());
+                        deleted_mask_.set(row_id);
+                    }
+                    removed_num++;
+                }
+                InvalidateSnapshotsCovering(entry);
+                if (older) {
+                    settle(row_id);
+                }
             });
 
-        n_.fetch_add(removed_num);
-        mem_size_.fetch_add(mem_add);
+        if (ENABLE_LATEST_DELETE_SNAPSHOT_OPTIMIZATION.load()) {
+            UpdateLatestSnapshot(max_inserted_ts_);
+        } else {
+            ClearLatestSnapshot();
+        }
+        clear_latest_on_failure.dismiss();
 
         if constexpr (is_sealed) {
             // update estimated memory size to caching layer only when the delta is large enough (64KB)
@@ -210,6 +325,62 @@ class DeletedRecord {
         }
 
         return max_timestamp;
+    }
+
+    // Earliest delete timestamp of a deleted row. The index is built from the
+    // delete list on first use, i.e. on the first delete for an already
+    // deleted row that is older than the list's max when its push started,
+    // and maintained by later inserts.
+    Timestamp
+    EarliestDeleteTs(SortedDeleteList::Accessor& accessor, int64_t row_id) {
+        if (earliest_delete_ts_ == nullptr) {
+            auto index = std::make_unique<EarliestDeleteIndex>();
+            index->reserve(n_.load());
+            // the list is sorted by timestamp, so a row's first entry is its
+            // earliest one
+            for (const auto& [ts, row] : accessor) {
+                index->try_emplace(row, ts);
+            }
+            mem_size_.fetch_add(index->size() * EARLIEST_DELETE_TS_ENTRY_SIZE);
+            earliest_delete_ts_ = std::move(index);
+        }
+        auto it = earliest_delete_ts_->find(Offset(row_id));
+        AssertInfo(it != earliest_delete_ts_->end(),
+                   "deleted row {} has no delete record in segment {}",
+                   row_id,
+                   segment_id_);
+        return it->second;
+    }
+
+    // A snapshot covers the delete list prefix before its next position.
+    // Discard all snapshots when an entry lands in that prefix; the next
+    // DumpSnapshot rebuilds them from scratch.
+    void
+    InvalidateSnapshotsCovering(const std::pair<Timestamp, Offset>& entry) {
+        // snapshots are only changed by pushes, so the pushing thread can
+        // read them without the lock
+        if (snap_next_pos_.empty() ||
+            !Comparator()(entry, snap_next_pos_.back())) {
+            return;
+        }
+        std::unique_lock<std::shared_mutex> lock(snap_lock_);
+        auto discarded = snapshots_.size();
+        snapshots_.clear();
+        snap_next_pos_.clear();
+        dumped_entry_count_.store(0);
+        LOG_INFO(
+            "delete record inserted before snapshot cursor at ts: {}, "
+            "discarded {} snapshots for segment: {}",
+            entry.first,
+            discarded,
+            segment_id_);
+    }
+
+    void
+    ClearLatestSnapshot() {
+        std::lock_guard<std::mutex> lock(snapshot_update_mutex_);
+        std::atomic_store(&latest_snapshot_,
+                          std::shared_ptr<const DeleteSnapshot>());
     }
 
     // update the atomic snapshot with current deleted_mask_ and max timestamp
@@ -385,6 +556,11 @@ class DeletedRecord {
         return mem_size_.load();
     }
 
+    int64_t
+    deleted_row_count() const {
+        return n_.load();
+    }
+
     void
     set_sealed_row_count(size_t row_count) {
         sealed_row_count_ = row_count;
@@ -406,6 +582,8 @@ class DeletedRecord {
     std::atomic<int64_t> mem_size_ = 0;
     std::conditional_t<is_sealed, InsertRecordSealed, InsertRecordGrowing>*
         insert_record_;
+    // reports every row inserted before a delete, and a row's matches in input
+    // order (InternalPush relies on it)
     std::function<void(const std::vector<PkType>& pks,
                        const Timestamp* timestamps,
                        std::function<void(SegOffset offset, Timestamp ts)>)>
@@ -414,6 +592,14 @@ class DeletedRecord {
     std::shared_ptr<SortedDeleteList> deleted_lists_;
     // max timestamp of deleted records which replayed in load process
     Timestamp max_load_timestamp_{0};
+    // max timestamp of entries in deleted_lists_, maintained by pushes
+    // under the same single-writer assumption as deleted_mask_
+    Timestamp max_inserted_ts_{0};
+    // row -> earliest delete timestamp, see EarliestDeleteTs
+    // folly F14 is avoided: on x86 the conan folly is built in SSE4.2 mode,
+    // which segcore is not compiled with
+    using EarliestDeleteIndex = std::unordered_map<Offset, Timestamp>;
+    std::unique_ptr<EarliestDeleteIndex> earliest_delete_ts_;
     int32_t sealed_row_count_;
     // used to remove duplicated deleted records for fast access
     BitsetType deleted_mask_;

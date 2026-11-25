@@ -48,8 +48,10 @@ SegmentLoadInfo::GetColumnGroups() const {
     if (column_groups_ != nullptr) {
         return column_groups_;
     }
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
+    auto properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .GetProperties(
+                {.talon_stage = milvus::storage::kTalonStageManifest});
 
     auto loon_manifest = ::GetLoonManifest(manifest_path, properties);
     column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
@@ -57,6 +59,18 @@ SegmentLoadInfo::GetColumnGroups() const {
     return column_groups_;
 }
 
+void
+SegmentLoadInfo::BindManifestFields() {
+    if (!schema_ || !schema_->is_external_collection() || !HasManifestPath()) {
+        field_id_mapping_.reset();
+        return;
+    }
+    auto groups = GetColumnGroups();
+    field_id_mapping_ = IsMilvusTableExternalSpec(schema_->get_external_spec())
+                            ? ResolveMilvusTableFieldIdMapping(*groups)
+                            : ReadMilvusTableFieldIdMapping(*groups);
+    PruneRuntimeStateNotInSchema();
+}
 // Looks up a storage column in the cached manifest column groups only.
 bool
 SegmentLoadInfo::HasManifestColumn(const std::string& column_name) const {
@@ -833,7 +847,8 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
 
     // Compute: new schema fields - new_info_fields - current_handled
     for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (field_id.get() < START_USER_FIELDID) {
+        if (field_id.get() < START_USER_FIELDID ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
 
@@ -894,7 +909,9 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {
-        current_text_indexed.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_text_indexed.insert(FieldId(field_id));
+        }
     }
     // Also include text indexes created from raw data
     for (const auto& field_id : created_text_indexes_) {
@@ -929,7 +946,8 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
 
     // Find text indexes to create: enable_match fields without pre-built index
     for (const auto& [field_id, field_meta] : new_info.schema_->get_fields()) {
-        if (!field_meta.enable_match()) {
+        if (!field_meta.enable_match() ||
+            !new_info.HasFieldInSchema(field_id)) {
             continue;
         }
         // Skip if has pre-built index in new_info
@@ -964,7 +982,9 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
     const auto expected_format = CurrentJsonStatsDataFormatVersion();
     std::set<FieldId> current_fields;
     for (const auto& [field_id, stats] : GetJsonKeyStatsLogs()) {
-        current_fields.insert(FieldId(field_id));
+        if (HasFieldInSchema(FieldId(field_id))) {
+            current_fields.insert(FieldId(field_id));
+        }
     }
 
     std::set<FieldId> new_fields;
@@ -974,7 +994,8 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
             continue;
         }
         new_fields.insert(fid);
-        auto current_stats = GetJsonKeyStatsLog(field_id);
+        auto current_stats =
+            HasFieldInSchema(fid) ? GetJsonKeyStatsLog(field_id) : nullptr;
         if (stats.json_key_stats_data_format() != expected_format) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "
@@ -1067,6 +1088,13 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
         if (schema_->is_external_collection()) {
             if (diff.manifest_updated) {
                 diff.load_external_manifest = true;
+            }
+            for (const auto& [field_id, _] : new_info.schema_->get_fields()) {
+                if (new_info.HasFieldInSchema(field_id) &&
+                    !HasFieldInSchema(field_id)) {
+                    diff.load_external_manifest = true;
+                    break;
+                }
             }
         } else {
             ComputeDiffColumnGroups(diff, new_info);

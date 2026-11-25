@@ -94,7 +94,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     int64_t fallback_bytes_per_row,
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
-    MmapChunkWritebackMode writeback_mode)
+    MmapChunkWritebackMode writeback_mode,
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -106,6 +107,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              column_group_index,
                              cache_key_suffix)),
       field_metas_(field_metas),
+      physical_column_to_field_id_(std::move(physical_column_to_field_id)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -665,8 +667,11 @@ ManifestGroupTranslator::load_group_chunk(
     for (int i = 0; i < schema->num_fields(); ++i) {
         auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
-        if (auto parsed_fid = ParseFieldIdColumnName(column_name);
-            parsed_fid.has_value()) {
+        if (auto mapped_it = physical_column_to_field_id_.find(column_name);
+            mapped_it != physical_column_to_field_id_.end()) {
+            field_id = mapped_it->second.get();
+        } else if (auto parsed_fid = ParseFieldIdColumnName(column_name);
+                   parsed_fid.has_value()) {
             field_id = parsed_fid->get();
         } else {
             // External collection fallback: column_name is non-numeric, so it
