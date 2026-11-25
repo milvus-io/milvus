@@ -19,6 +19,7 @@ package fileresource
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -33,8 +34,12 @@ import (
 // Local paths may be relative to the allowed directory; object keys stay complete.
 func RestrictSource(cm storage.ChunkManager) storage.ChunkManager {
 	root := paramtable.Get().CommonCfg.FileResourceAllowedPath.GetValue()
-	if _, local := cm.(*storage.LocalChunkManager); local && root == "" {
-		root = filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "file_resource")
+	if root == "" {
+		if _, local := cm.(*storage.LocalChunkManager); local {
+			root = filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "file_resource")
+		} else {
+			root = path.Join(cm.RootPath(), "file_resource")
+		}
 	}
 	return &restrictedSource{ChunkManager: cm, root: strings.TrimRight(root, "/")}
 }

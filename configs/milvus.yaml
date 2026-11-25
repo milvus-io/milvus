@@ -1365,7 +1365,7 @@ common:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
       proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
-    allowedPath: "" # Absolute local base directory (empty: localStorage.path/file_resource), or complete object-key prefix (empty: remote access disabled). Local paths may be relative to the base. Restart required.
+    allowedPath: "" # Complete object-key prefix; empty uses minio.rootPath/file_resource. With local storage, empty uses localStorage.path/file_resource and request paths may be relative to that base. Restart required.
     maxFileSize: 64m # Maximum bytes per file resource at admission and download; must be positive.
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:

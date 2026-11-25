@@ -1884,7 +1884,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Key:          "common.fileResource.allowedPath",
 		Version:      "3.0",
 		DefaultValue: "",
-		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty uses localStorage.path/file_resource for local storage and disables remote access. Local request paths may be relative to this directory. Restart required.",
+		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.",
 		Export:       true,
 		Forbidden:    true,
 	}
