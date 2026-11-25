@@ -14,10 +14,18 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from common.compaction_utils import compact_segments, is_segment_not_found, reload_collection_with_deadline
+from common.compaction_utils import (
+    call_compaction_rpc,
+    is_segment_not_found,
+    list_persistent_segments_once,
+    reload_collection_with_deadline,
+    submit_compaction_once,
+)
 from pymilvus import AnnSearchRequest, DataType, FieldSchema, Function, FunctionType, WeightedRanker
+from pymilvus.client.grpc_handler import GrpcHandler
 from pymilvus.client.types import CompactionTaskState, CompactionType, LoadState
 from pymilvus.exceptions import MilvusException
+from pymilvus.grpc_gen import common_pb2
 from utils.util_log import test_log as log
 
 DIM = 16
@@ -807,23 +815,26 @@ def prepare_compaction_sources(testcase, client, collection_name, rows, batch_si
 
     # Wait before delete/flush introduces an L0. Auto-compaction may already
     # have combined batches, and the sorted outputs build fresh vector indexes.
-    for field in (VECTOR_FIELD, CONTENT_SPARSE_FIELD, CONTENT_ZH_SPARSE_FIELD, CONTENT_DEFAULT_SPARSE_FIELD):
-        deadline = time.monotonic() + 120
-        while (remaining := deadline - time.monotonic()) > 0:
-            segments = testcase.wait_for_compaction_eligible_segments(
-                client, collection_name, minimum_segment_count=1, index_name=field, timeout=remaining
-            )
-            if sum(segment.num_rows for segment in segments) == len(rows):
-                break
-        else:
-            pytest.fail(f"Index {field} did not cover all {len(rows)} flushed rows in {collection_name}")
-
+    segments = testcase.wait_for_compaction_eligible_segments(
+        client,
+        collection_name,
+        minimum_segment_count=1,
+        timeout=120,
+        expected_rows=len(rows),
+        index_names=(VECTOR_FIELD, CONTENT_SPARSE_FIELD, CONTENT_ZH_SPARSE_FIELD, CONTENT_DEFAULT_SPARSE_FIELD),
+    )
     sources = {segment.segment_id for segment in segments}
     testcase.load_collection(client, collection_name)
     testcase.delete(client, collection_name, ids=sorted(deleted))
     testcase.flush(client, collection_name)
     # Include in-flight plans: a late completion can publish data written before the delete.
-    plans = client.list_compaction_tasks(collection_name, timeout=30).plans
+    plans = call_compaction_rpc(
+        client._get_connection(),
+        GrpcHandler.get_compaction_tasks,
+        collection_name,
+        deadline=time.monotonic() + 30,
+        context=client._generate_call_context(),
+    ).plans
     return sources, {plan.plan_id for plan in plans}
 
 
@@ -858,19 +869,25 @@ def mix_compaction_frontier(source_ids, prior_plan_ids, plans):
 
 
 def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan_ids):
+    handler = client._get_connection()
+    context = client._generate_call_context()
     deadline = time.monotonic() + 120
-    while (submit_timeout := deadline - time.monotonic()) > 0:
-        compact_id, _ = testcase.compact(client, collection_name, timeout=submit_timeout)
+
+    def rpc(method, *args, **kwargs):
+        return call_compaction_rpc(handler, method, *args, context=context, deadline=deadline, **kwargs)
+
+    # Retry an explicit rejection or no-plan response. A transport error on a
+    # submission is ambiguous: the server may already have created a job.
+    while True:
+        compact_id = rpc(
+            submit_compaction_once,
+            collection_name,
+            retry_transport=False,
+            timeout_message=f"No manual compaction job for {collection_name} within 120s; sources={sorted(source_ids)}",
+        )
         if compact_id != -1:
             break
         time.sleep(min(2, max(0, deadline - time.monotonic())))
-    else:
-        segments = client.list_persistent_segments(collection_name, timeout=10)
-        indexes = [
-            client.describe_index(collection_name, name, timeout=10)
-            for name in client.list_indexes(collection_name, timeout=10)
-        ]
-        pytest.fail(f"No manual compaction plan for {collection_name} within 120s: {segments=}, {indexes=}")
 
     expected = uncovered = source_ids
     active = loaded = set()
@@ -886,7 +903,7 @@ def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan
 
     def wait_for_job(job_id, requested_sources=None):
         assert testcase.wait_for_compaction_ready(client, job_id, timeout=remaining())
-        plans = client.get_compaction_plans(job_id, timeout=min(30, remaining())).plans
+        plans = rpc(GrpcHandler.get_compaction_plans, job_id).plans
         inputs = {source for plan in plans for source in plan.sources}
         outputs = {target for plan in plans for target in plan.targets}
         if requested_sources is not None:
@@ -908,10 +925,10 @@ def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan
         CompactionTaskState.Timeout,
     }
     while True:
-        plans = client.list_compaction_tasks(collection_name, timeout=remaining()).plans
+        plans = rpc(GrpcHandler.get_compaction_tasks, collection_name).plans
         expected, uncovered = mix_compaction_frontier(source_ids, prior_plan_ids, plans)
         try:
-            segments = client.list_persistent_segments(collection_name, timeout=remaining())
+            segments = rpc(list_persistent_segments_once, collection_name)
         except MilvusException as error:
             # DataCoord can retire a segment between the Proxy's ID and detail lookups.
             if not is_segment_not_found(error):
@@ -930,7 +947,7 @@ def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan
                 }
                 candidates = uncovered - busy
                 if candidates:
-                    job_id = compact_segments(client, collection_name, candidates, timeout=remaining())
+                    job_id = rpc(submit_compaction_once, collection_name, segment_ids=candidates, retry_transport=False)
                     if job_id != -1:
                         wait_for_job(job_id, candidates)
             elif not reloaded:
@@ -938,11 +955,11 @@ def compact_and_reload(testcase, client, collection_name, source_ids, prior_plan
                 reloaded = True
                 continue  # Re-read both coordinator views after reload.
             else:
-                placements = client.list_loaded_segments(collection_name, timeout=remaining())
-                data = [s for s in placements if s.level_name != "L0"]
-                loaded = {s.segment_id for s in data}
+                placements = rpc(GrpcHandler.get_query_segment_info, collection_name)
+                data = [s for s in placements if s.level != common_pb2.SegmentLevel.L0]
+                loaded = {s.segmentID for s in data}
                 remaining()
-                if loaded == expected and all(s.node_ids for s in data):
+                if loaded == expected and all(s.nodeIds for s in data):
                     return
         time.sleep(min(2, remaining()))
 
