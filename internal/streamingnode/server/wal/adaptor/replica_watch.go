@@ -9,17 +9,14 @@ import (
 )
 
 func (w *walAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (wal.ReplicaWatchStream, error) {
-	if w.readSide != nil {
-		return w.readSide.AcquireReplicaWatchStream(ctx)
-	}
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("replica directory WAL is unavailable")
 	}
 	defer w.lifetime.Done()
-	if w.queryViewHandler == nil {
+	if w.queryViewHandler == nil || w.strongCtx.Err() != nil {
 		return nil, status.NewOnShutdownError("replica directory is unavailable")
 	}
-	return w.queryViewHandler.AcquireReplicaWatchStream(ctx, w.Channel().Name, w.Unavailable()), nil
+	return w.queryViewHandler.AcquireReplicaWatchStream(ctx, w.Channel().Name, w.strongCtx.Done()), nil
 }
 
 func (w *roWALAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (wal.ReplicaWatchStream, error) {

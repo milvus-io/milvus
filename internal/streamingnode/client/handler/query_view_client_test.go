@@ -55,7 +55,7 @@ func TestHandlerClientGetQueryPlanRoutesByShardPChannel(t *testing.T) {
 func TestQueryPlanExecutionKeepsMVCCSourceAcrossAssignmentChange(t *testing.T) {
 	shard := qviews.ShardID{VChannel: "p0_100v0"}
 	source := types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "p0", AccessMode: types.AccessModeRO, WALReplicaID: 5},
+		Channel: types.PChannelInfo{Name: "p0", Term: 7, AccessMode: types.AccessModeRW, WALReplicaID: 5},
 		Node:    types.StreamingNodeInfo{ServerID: 101},
 	}
 	planService := &fakeQueryPlanServiceClient{
@@ -77,18 +77,20 @@ func TestQueryPlanExecutionKeepsMVCCSourceAcrossAssignmentChange(t *testing.T) {
 		},
 	}
 	client := newTestHandlerClient(planService, viewService, nil)
-	client.readable = func(string) ([]types.PChannelInfoAssigned, <-chan struct{}) {
-		return []types.PChannelInfoAssigned{source}, nil
-	}
+	client.watcher = fakeAssignmentWatcher{assignment: &source}
 	_, selected, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard,
 		&viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}})
 	require.NoError(t, err)
-	require.Equal(t, source, *selected)
-	source.Node.ServerID = 102
-	source.Channel.WALReplicaID = 6
+	require.Equal(t, source.Node, selected.Node)
+	require.Equal(t, types.AccessModeRW, selected.Channel.AccessMode)
+	require.Zero(t, selected.Channel.Term)
 	ctx := contextutil.WithQueryWALReplica(t.Context(), selected)
 	_, err = client.QueryViewClient().SearchOnView(ctx, types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
-	require.True(t, viewerror.AsViewError(err).IsRetryable())
+	require.Equal(t, "replica retired", viewerror.AsViewError(err).Cause)
+	source.Node.ServerID = 102
+	source.Channel.WALReplicaID = 6
+	_, err = client.QueryViewClient().SearchOnView(ctx, types.PChannelInfo{Name: "p0"}, &viewpb.SearchOnViewRequest{})
+	require.Equal(t, "WAL writer changed after query planning", viewerror.AsViewError(err).Cause)
 }
 
 func TestHandlerClientViewQueryRoutesByStreamingWorkNode(t *testing.T) {
@@ -429,38 +431,4 @@ func (s *noopViewSyncClientStream) RecvMsg(interface{}) error {
 func decodeOutgoingQueryViewPChannel(ctx context.Context) (types.PChannelInfo, error) {
 	md, _ := metadata.FromOutgoingContext(ctx)
 	return worknodehandler.DecodeQueryViewPChannelFromIncomingContext(metadata.NewIncomingContext(ctx, md))
-}
-
-func TestBoundedPlanTriesReadersBeforeWriter(t *testing.T) {
-	shard := qviews.ShardID{VChannel: "p0_100v0"}
-	routes := []types.PChannelInfoAssigned{
-		{Node: types.StreamingNodeInfo{ServerID: 1}, Channel: types.PChannelInfo{Name: "p0", WALReplicaID: 1, AccessMode: types.AccessModeRO}},
-		{Node: types.StreamingNodeInfo{ServerID: 2}, Channel: types.PChannelInfo{Name: "p0", WALReplicaID: 2, AccessMode: types.AccessModeRO}},
-		{Node: types.StreamingNodeInfo{ServerID: 3}, Channel: types.PChannelInfo{Name: "p0", WALReplicaID: 3, Term: 8, AccessMode: types.AccessModeRW}},
-	}
-	var selected []int64
-	client := newTestHandlerClient(&fakeQueryPlanServiceClient{getQueryPlan: func(ctx context.Context, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-		target, _ := contextutil.GetPickServerID(ctx)
-		selected = append(selected, target)
-		switch target {
-		case 1:
-			return nil, viewerror.NewViewNotFound("not locally up")
-		case 2:
-			return nil, viewerror.NewOnShutdownError("closing")
-		}
-		return &viewpb.GetQueryPlanResponse{}, nil
-	}}, nil, nil)
-	client.readable = func(string) ([]types.PChannelInfoAssigned, <-chan struct{}) { return routes, nil }
-	req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}}
-	_, source, err := client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
-	require.NoError(t, err)
-	require.Equal(t, []int64{1, 2, 3}, selected)
-	require.EqualValues(t, 3, source.Node.ServerID)
-	require.Zero(t, source.Channel.Term)
-	routes = routes[:2]
-	_, _, err = client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
-	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
-	routes = nil
-	_, _, err = client.QueryViewClient().GetQueryPlan(t.Context(), shard, req)
-	require.ErrorIs(t, err, ErrClientClosed)
 }

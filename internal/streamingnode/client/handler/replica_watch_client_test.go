@@ -36,7 +36,7 @@ func TestReplicaWatchClientSelectsOwner(t *testing.T) {
 	for _, mode := range []string{"local", "remote", "retiring local", "terminal local"} {
 		mockey.PatchConvey(mode, t, func() {
 			assigned := &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: 7}, Node: types.StreamingNodeInfo{ServerID: 17}}
-
+			mockey.Mock((*analyzerWatcher).Get).Return(assigned).Build()
 			var lookupErr error
 			switch mode {
 			case "remote":
@@ -61,9 +61,7 @@ func TestReplicaWatchClientSelectsOwner(t *testing.T) {
 				require.Equal(t, assigned, opt.Assignment)
 				return remoteStream, nil
 			}).Build()
-			hc := &handlerClientImpl{lifetime: typeutil.NewLifetime(), readable: func(string) ([]types.PChannelInfoAssigned, <-chan struct{}) {
-				return []types.PChannelInfoAssigned{*assigned}, nil
-			}, service: &analyzerService{}}
+			hc := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}}
 			stream, err := hc.AcquireReplicaWatchStream(t.Context(), "p")
 			switch mode {
 			case "local":
@@ -94,9 +92,20 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		mockey.Mock(registry.GetLocalAvailableWAL).Return(nil, registry.ErrNoStreamingNodeDeployed).Build()
-		var term atomic.Int64
+		var term, reports atomic.Int64
 		term.Store(1)
-		changed := make(chan struct{})
+		mockey.Mock((*analyzerWatcher).Get).To(func(_ *analyzerWatcher, _ context.Context, _ string) *types.PChannelInfoAssigned {
+			return &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: term.Load()}, Node: types.StreamingNodeInfo{ServerID: 10}}
+		}).Build()
+		mockey.Mock((*analyzerWatcher).Watch).Return(nil).Build()
+		mockey.Mock((*analyzerTrigger).ReportAssignmentError).To(func(_ *analyzerTrigger, ctx context.Context, channel types.PChannelInfo, err error) error {
+			require.NoError(t, ctx.Err())
+			require.True(t, status.AsStreamingError(err).IsWrongStreamingNode())
+			require.EqualValues(t, 1, channel.Term)
+			reports.Add(1)
+			term.Store(2)
+			return nil
+		}).Build()
 		directory := snview.NewReplicaDirectoryForTest()
 		defer directory.Close()
 		directory.Set("p_1v0", 9, &qviews.QueryViewVersion{}, false)
@@ -107,8 +116,6 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 				return err
 			}
 			if pc.Term == 1 {
-				term.Store(2)
-				close(changed)
 				return status.NewGRPCStatusFromStreamingError(status.NewChannelNotExist(pc.Name)).Err()
 			}
 			watch := directory.AcquireStream(stream.Context(), pc.Name, nil)
@@ -128,9 +135,7 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 		conn, err := grpc.NewClient("passthrough:///replica-watch", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))
 		require.NoError(t, err)
 		defer conn.Close()
-		owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), readable: func(string) ([]types.PChannelInfoAssigned, <-chan struct{}) {
-			return []types.PChannelInfoAssigned{{Channel: types.PChannelInfo{Name: "p", Term: term.Load()}, Node: types.StreamingNodeInfo{ServerID: 10}}}, changed
-		}}
+		owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, rebalanceTrigger: &analyzerTrigger{}}
 		owner.service = &analyzerService{}
 		mockey.Mock((*analyzerService).GetService).Return(streamingpb.NewStreamingNodeHandlerServiceClient(conn), nil).Build()
 		stream, err := owner.AcquireReplicaWatchStream(ctx, "p")
@@ -154,7 +159,7 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 		}
 	ready:
 
-		require.EqualValues(t, 2, term.Load())
+		require.EqualValues(t, 1, reports.Load())
 		_, err = owner.AcquireReplicaWatchStream(ctx, "")
 		require.Error(t, err)
 		owner.lifetime.SetState(typeutil.LifetimeStateStopped)

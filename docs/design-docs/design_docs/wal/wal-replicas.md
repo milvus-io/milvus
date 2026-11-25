@@ -1,6 +1,6 @@
 # WAL 多副本工作流
 
-同一 PChannel 的各副本独立读取共享 WAL。RW 负责 Append、Strong 查询和完整 RecoveryStorage 的持久化；RO 持有本地 WAL Buffer、scanner 及按需加载的 QueryRuntime。RW 仅把已发布的 WALCheckpoint 和 QueryView 信号发给 RO。两端共享恢复所需的 etcd、对象存储及 WAL。[协议与时序](wal-replica-protocol.md) · [截断与加载的正确性条件](wal-replica-commit.md)
+同一 PChannel 的各副本独立读取共享 WAL。RW 负责 Append、Strong 查询和完整 RecoveryStorage 的持久化；RO 持有本地 WAL Buffer、scanner 及按需加载的 QueryRuntime。RW 仅把已发布的 WALCheckpoint 和 QueryView 信号发给 RO。两端共享恢复所需的 etcd、对象存储及 WAL。[副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [协议与时序](wal-replica-protocol.md) · [截断与加载的正确性条件](wal-replica-commit.md)
 
 | 流程 | 输入和完成条件 |
 | --- | --- |
@@ -12,18 +12,20 @@
 
 接任者在交接中退出时，Coord 根据 SN session 重新选主，持久化更高任期的目标拓扑并广播 Sync。各 SN 按最新目标收敛。底层旧 writer 的隔离由 WAL fence 提供，本 PR 直接使用这一前置条件。[接任者退出时序](wal-replica-protocol.md#接任者在交接中退出)
 
+全频道显式关闭后若立即收到重新开放的意图，Coord 先确认所有存活 SN 已接受包含空拓扑的全量 Sync，且本频道在途实例均已排空，再分配新 ID 与更高任期。其他 PChannel 可继续收敛。[关闭与重新开放](wal-replica-state-machine.md)
+
 ## 重构外层 WALLifetime
 
 现有 walLifetime 按 (term, available) 排序，一旦更换 term 就关闭整个 WAL 再 Open。多副本模式须改造外层 WALManager 的状态收敛与请求准入。一个本机 PChannel + WALReplicaID 持有同一个读侧实例。跨节点迁移创建新 ID；同一实例的角色切换由本地 WALLifetime 串行推进。拓扑修订去除陈旧目标；同一目标的 Sync 或交接重试复用已完成的动作。[当前生命周期](../../../../internal/streamingnode/server/walmanager/wal_lifetime.go) · [当前请求准入](../../../../internal/streamingnode/server/walmanager/manager_impl.go)
 
 | 转换 | 实例持有的资源和动作 |
 | --- | --- |
-| Closed → RO / RW | 创建 scanner、事务组装器、Buffer 和查询资源管理器，按上表相应的冷启动流程初始化。 |
+| 新分配的 ID → RO / RW | 创建 scanner、事务组装器、Buffer 和查询资源管理器，按上表相应的冷启动流程初始化。 |
 | RO → RW | 保留读侧实例、QueryRuntime 和在途查询。在 Prepare 成功后从稳定基线**新建 writer 侧 RecoveryStorage**，对它单独重放尚未覆盖的 Buffer 尾部。写侧恢复重放只投递给 writer，既有查询只继续接收原 scanner 的一次实时分发。 |
-| RW → RO | 在 Prepare 排尽持久化，Seal 时关闭 Append 和 Strong 准入并排尽在途写。仍属目标成员时将同一条 session 公告改为 RO；交还写权后释放专属 writer 状态。实例的 Buffer 在 RW 期间也持续维护，已有 scanner、QueryRuntime、发现订阅和查询引用继续工作。 |
-| RO / RW → Closed | 退出或被新 ID 替换时停止准入，撤下路由并履行旧主的交接或隔离义务。取消订阅、停止后台任务、排空引用，再关闭实例并移出本地清单。 |
+| RW → RO | 在 Prepare 排尽持久化，Seal 时关闭 Append 和 Strong 准入并排尽在途写。仍属目标成员时将同一条 session 公告改为 RO；交还写权后释放专属 writer 状态。实例的 Buffer 在 RW 期间也持续维护，已有 scanner、QueryRuntime 和查询引用继续工作。 |
+| RO / RW → Closed | 退出或被新 ID 替换时停止准入，撤下路由并履行旧主的交接或隔离义务。取消订阅、停止后台任务、排空引用，再关闭实例。目标仍含旧 ID 时重报 Closed，目标移除该 ID 且本地排空后移出清单。 |
 
-Strong 向 RW 取 MVCC，Bounded 向可服务的 RO 取本地 MVCC。查询的 WAL 部分在提供 MVCC 的同一实例执行，按主键回查也沿用此实例。Append 和 Strong 另行检查写准入和 writer term；从 A Seal 到 B 完成本任屏障且被客户端发现，两者会有等待窗口。角色切换本身不触发已 Up View 的重建。[查询发现](../qviews/query/replica_discovery.md)
+所有查询均向当前 RW 取 MVCC，RO 持续追赶 WAL 和准备 QueryView。RO 查询路由留待后续接入。查询的 WAL 部分在提供 MVCC 的同一实例执行，按主键回查也沿用此实例。Append 和 Strong 另行检查写准入和 writer term；从 A Seal 到 B 完成本任屏障且被客户端发现，两者会有等待窗口。角色切换本身不触发已 Up View 的重建。[查询发现](../qviews/query/replica_discovery.md)
 
 ## QueryView 多副本确认
 

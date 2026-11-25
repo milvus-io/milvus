@@ -21,23 +21,15 @@ func sessionAssignments(state resolver.VersionedState) *types.VersionedStreaming
 			continue
 		}
 		node := types.StreamingNodeAssignment{
-			NodeInfo:         types.StreamingNodeInfo{ServerID: id, Address: s.Address},
-			Channels:         make(map[string]types.PChannelInfo),
-			ReadOnlyChannels: make(map[string]types.PChannelInfo),
+			NodeInfo: types.StreamingNodeInfo{ServerID: id, Address: s.Address},
+			Channels: make(map[string]types.PChannelInfo),
 		}
 		result.Assignments[id] = node
 		for _, ad := range s.WALReplicas {
-			if ad.GetPchannel() == "" || ad.GetWalReplicaId() <= 0 {
+			if ad.GetPchannel() == "" || ad.GetWalReplicaId() <= 0 || ad.GetWriterTerm() <= 0 {
 				continue
 			}
-			ch := types.PChannelInfo{Name: ad.Pchannel, WALReplicaID: ad.WalReplicaId, AccessMode: types.AccessModeRO}
-			if ad.WriterTerm == nil {
-				node.ReadOnlyChannels[ch.Name] = ch
-				continue
-			}
-			if ad.GetWriterTerm() <= 0 {
-				continue
-			}
+			ch := types.PChannelInfo{Name: ad.Pchannel, WALReplicaID: ad.WalReplicaId, AccessMode: types.AccessModeRW, Term: ad.GetWriterTerm()}
 			if ad.IsCchannel {
 				controls = append(controls, ch.Name)
 			}
@@ -48,7 +40,6 @@ func sessionAssignments(state resolver.VersionedState) *types.VersionedStreaming
 				writers[ch.Name] = 0
 				continue
 			}
-			ch.AccessMode, ch.Term = types.AccessModeRW, ad.GetWriterTerm()
 			node.Channels[ch.Name] = ch
 			writers[ch.Name] = id
 		}

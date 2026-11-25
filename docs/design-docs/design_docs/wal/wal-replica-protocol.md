@@ -1,6 +1,6 @@
 # WAL 多副本协议设计
 
-字段与 RPC 签名以生产源文件 [streaming.proto](../../../../pkg/proto/streaming.proto) 为准。四个 RPC 属于 StreamingNodeWALReplicaService。下表将它们对应到[多副本工作流](wal-replicas.md)。当前节点仍运行单分配流程，接入这些 RPC 后才启用多副本。
+四个 RPC 属于 StreamingNodeWALReplicaService。现有线上字段见[生产 proto](../../../../pkg/proto/streaming.proto)。本设计对 LocalWALReplica 的调整、当前代码差距和验收条件见[副本状态机与 Coord 收敛](wal-replica-state-machine.md)。下表将 RPC 对应到[多副本工作流](wal-replicas.md)。
 
 | 使用点 | 消息和责任 |
 | --- | --- |
@@ -14,7 +14,7 @@
 
 **Coord catalog。** 每个 `streamingcoord-meta/pchannel/<name>` 只存一份 WALReplicaTopology。非空成员集合有唯一的目标 writer，其余为 RO；空集合表示关闭。成员 ID 绑定节点，角色切换保留 ID。拓扑 revision 来自全局单调分配器，任期也须防止复用；单纯改变 RO 不换 writer term。空目标保留修订和已分配的任期上界，writer ID 为零。SN 取全量 topologies（含空目标）的最大 revision 作为全集版本，空全集取 0。查询成员确认和实况回报均不推进它。副本地址及实例进度由运行时提供。多副本模式下，Coord 持久化的目标只包含该拓扑。原均衡冷却时间可在恢复首轮 Sync 后重新计时，仅影响可选重平衡。
 
-**全量 Sync。** Coord 对每个存活 SN 下发同一完整目标。SN 在接受对应版本时隔离旧 Open；完整本地清单列出所有可能装入及尚未排空的实例，关闭完毕才移除。每个实例按本次 observed_revision 回报 Preparing、Ready 或 Unrecoverable。Preparing 包括初始化、排空和可重试的公告更新。Ready 表示该修订要求的角色、writer 任期及相应公告均已生效。Unrecoverable 表示本实例已无法完成当前目标。已迁出但仍在排空的实例继续列为 Preparing。实际可服务角色从 SN session 发现。Coord 按当前注册、连接顺序和 observed_revision 判断，幂等补发相同修订。恢复时必须覆盖所有存活 SN，包括不属于当前目标成员的节点。多个 RG 的可服务查询路由独立生效。
+**全量 Sync。** Coord 向所有存活 SN 下发完整目标。SN 接受目标后回报 observed_revision 及完整本地清单。每个实例在操作执行中报 Preparing，结束后报实际的 RO、RW(term) 或 Closed。目标中仍包含已关闭 ID 时持续重报 Closed；拓扑移除该 ID 且本机已排空后才可从清单省略。Coord 用当前控制流的同版本报告驱动下一次规划，客户端从 SN session 获取实际服务端点。[完整判断规则](wal-replica-state-machine.md)
 
 **为什么还要 confirmed_query_memberships。** 例如从 A/B/C 收缩到 A/C，B 已摘掉路由，仍可能正在排空一个 View。Coord 收齐覆盖当前目标的完整清单或取得 B 的 session 退出证明后，才确认 A/C 已包括所有仍可能服务者。此字段按包内 PChannel 的修订解释，可在同一全集修订下稍后补发。它不要求所有成员的所有 View 已 Ready，也不写入拓扑。控制连接重建时重新确认；RW 只在当前授权和当前成员确认有效时提交新 View 结果。
 
@@ -28,9 +28,9 @@ SessionRaw.WALReplicas 保存本节点可服务实例的 WALAdvertisement 列表
 
 **客户端。** 对 SN 注册前缀做一致的全量读取，再从下一 revision watch。PUT 替换该 SN 全表，DELETE、原 lease 失效或 Stopping 撤下对应路由。断线或 compaction 时重新对账。找不到唯一 RW 时等待刷新；旧客户端缓存打到已 Seal 的 A，由服务端拒绝。普通 session watcher 需区分新注册和同一次注册的内容更新。[现有 session resolver](../../../../internal/util/streamingutil/service/discoverer/session_discoverer.go)
 
-接入多副本后，AssignmentDiscover 只保留复制配置、StreamingVersion、控制版本及原有错误反馈用途。其响应字段 2 (assignments) 和 3 (cchannel) 退出客户端发现路径。现有 QueryView 端点发现仍使用 SubscribeReplicas，在候选物理实例上独立查看已 Up 的逻辑查询副本。对已替换实例的旧连接需按 ID 拒绝。
+接入多副本后，AssignmentDiscover 只保留复制配置、StreamingVersion、控制版本及原有错误反馈用途。其响应字段 2 (assignments) 和 3 (cchannel) 退出客户端发现路径。现有 QueryView 端点发现仍使用 SubscribeReplicas，订阅当前 RW 上已 Up 的逻辑查询副本。对已替换实例的旧连接需按 ID 拒绝。
 
-Strong 由当前 RW 提供 MVCC，客户端携带 writer term。Bounded 由可服务的 RO 提供已覆盖 GuaranteeTimestamp 的本地 MVCC，请求携带 WALReplicaID。单副本拓扑或当前没有可服务 RO 时，Bounded 可在取点前选择 RW。客户端把取点成功的 NodeID 和 WALReplicaID 与该分片的计划一起保留。Search、Retrieve、两阶段搜索和按主键回查中所有需要访问 WAL 的操作都发往这个实例，sealed 部分按计划发往相应 QN。SN 执行时校验实例身份、View 版本和 MVCC。来源失效时，客户端丢弃该分片本次的部分结果，重新取点和执行。已经依赖归并结果的回查失败则由外层重试整个操作。副本选择保存在调用方内存中，QueryView 和 WAL 同步协议无需增加字段。
+Strong 由当前 RW 提供 MVCC，客户端携带 writer term。Bounded 也向 RW 取点，携带 WALReplicaID 并等待覆盖 GuaranteeTimestamp。RW Seal 时结束目录订阅，客户端在新主上重新订阅并取得首份快照。TODO：按所选物理副本订阅目录后接入 RO 查询。客户端把取点成功的 NodeID 和 WALReplicaID 与该分片的计划一起保留。Search、Retrieve、两阶段搜索和按主键回查中所有需要访问 WAL 的操作都发往这个实例，sealed 部分按计划发往相应 QN。SN 执行时校验实例身份、View 版本和 MVCC。来源失效时，客户端丢弃该分片本次的部分结果，重新取点和执行。已经依赖归并结果的回查失败则由外层重试整个操作。副本选择保存在调用方内存中，QueryView 和 WAL 同步协议无需增加字段。
 
 旧升级用途的 access_mode、Assign/Remove 分配流程及其专用类型退出该设计。CollectStatus 的节点指标用途可继续沿用。
 
@@ -68,7 +68,7 @@ RW 将参与集合变化、收票和提交决定在同一个 PChannel 上串行�
 
 ## 5. 协作交接的时序
 
-首次恢复期间，目标 writer 的 SN session 仍有效、尚未公告该 WALReplicaID 和 writer term 时，Coord 暂缓将该 PChannel 改派给其他 writer，继续同步原拓扑。原目标发布 RW 公告后可以发起协作交接；其 session 退出后走故障接管。若本任 writer 已销毁且不能在同一 term 下重新打开，SN 对当前目标回报 Unrecoverable。Coord 核对当前连接、修订及 writer 副本身份，保持原节点和副本 ID，持久化新的 revision 与 writer term 后再发 Sync。旧回报无法推进新修订。RO 的回报只描述 RO 目标，不触发 writer 换任。Coord 重启按相同条件判断，无需持久化就绪历史。
+首次恢复期间，目标 writer 的注册仍有效、操作还在进行且尚无首次 RW 公告时，Coord 暂缓改派。若操作结束，SN 对该目标报实际状态。RO 表示保留读侧，再次授予此 ID 写权时使用更高 term；Closed 表示该 ID 已终结，重新部署分配新 ID，重新授予写权也提高 term。Coord 优先处理当前版本的确定结果。目标注册退出则按故障接管处理，Coord 重启从持久期望和全量清单恢复。[Coord 的响应与异常时序](wal-replica-state-machine.md)
 
 | 时刻 | A/7（旧 RW） | B（原 RO，目标 RW/8） |
 | --- | --- | --- |
@@ -77,7 +77,7 @@ RW 将参与集合变化、收票和提交决定在同一个 PChannel 上串行�
 | Seal 成功 | 关闭 Append 和 Strong 准入、排尽写，确认 session 已改为 RO 或撤下，再返回 SealWALHandoffResponse | 预恢复完成后才请求 SealWALHandoff(P, 8)。核验最新拓扑并 CAS 领取 WALCheckpoint.term，隔离旧后端 writer。 |
 | B 激活 | 继续按本地能力读，发现 B/8 后订阅其 checkpoint 和 QueryView 信号 | 写入本任 RecoveryBarrier，使用原 scanner 观察并完成 writer 恢复；随后开放写入和持久化，发布 B/8。 |
 
-两次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。追近依据在接入时验证。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
+两次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。 已经发起 Seal 后，A 负责把旧任排空并完成公告更新，B 重试未决的 Seal 或核实其效果。即使旧 RW 公告尚未撤下，也不能要求 A 重新写入近期 TimeTick 才允许这项收尾。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。追近依据在接入时验证。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
 
 ### AlterWAL 与升主并发
 
@@ -89,7 +89,7 @@ RO 从持久 checkpoint 的物理位置打开逻辑 scanner。读到旧后端的
 
 A/7 正在向 B/8 交接时，若 B 的 SN session 已退出，Coord 重新选定 writer，例如 C/9，持久化目标拓扑后向所有存活 SN 广播 Sync。Coord 若同时重启，从持久拓扑和当前 session 重新执行相同的分配流程。目标节点仍存活、仅 Sync 或应答丢失时，Coord 补发同一拓扑，SN 幂等处理。
 
-若 A 仍公告 A/7，C 按新授权向 A 发起 Prepare 和 Seal；已冻结的 A 确认在途持久化已排尽即可继续。若 A 已 Seal 并公告为 RO，C 按 C/9 的新授权和常规故障恢复流程接管。A 的 session 可以继续存活，C 无需取得 B/8 的 Seal 应答。旧任期的迟到请求按最新授权丢弃。
+若 A/7 仍可接受写入，C 追近后按新授权向 A 发起 Prepare 和 Seal，已冻结持久化的 A 可复用排空结果。若 A 已开始 Seal 且旧公告尚可见，A 继续排尽并更新公告，C 在等待追近时需重新发现写源，随后按最新实况接管。若 A 已 Seal 并公告为 RO，C 按 C/9 的新授权和常规故障恢复流程接管。A 的 session 可以继续存活，C 无需取得 B/8 的 Seal 应答。旧任期的迟到请求按最新授权丢弃。
 
 ## 6. 实现验收
 

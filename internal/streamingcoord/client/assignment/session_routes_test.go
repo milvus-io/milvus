@@ -70,7 +70,18 @@ func TestSessionRoutesFollowAdvertisements(t *testing.T) {
 	s := at(revision)
 	require.Equal(t, "p", s.PChannelOfCChannel())
 	require.EqualValues(t, 7, s.Assignments[1].Channels["p"].Term)
-	require.EqualValues(t, 22, s.Assignments[2].ReadOnlyChannels["p"].WALReplicaID)
+	require.Empty(t, s.Assignments[2].Channels)
+	// Across Seal the only live advertisements can be read-only.
+	a.WALReplicas[0].WriterTerm = nil
+	a.WALReplicas[0].IsCchannel = false
+	s = at(put("a", a))
+	require.Empty(t, s.Assignments[1].Channels)
+	require.Empty(t, s.Assignments[2].Channels)
+	require.Empty(t, s.PChannelOfCChannel())
+	a.WALReplicas[0].WriterTerm = proto.Int64(7)
+	a.WALReplicas[0].IsCchannel = true
+	s = at(put("a", a))
+	require.EqualValues(t, 7, s.Assignments[1].Channels["p"].Term)
 	// Conflicting writer claims cannot be resolved by map iteration or term comparison.
 	b.WALReplicas[0].WriterTerm = proto.Int64(8)
 	b.WALReplicas[0].IsCchannel = true
@@ -81,7 +92,7 @@ func TestSessionRoutesFollowAdvertisements(t *testing.T) {
 	a.WALReplicas[0].WriterTerm = nil
 	a.WALReplicas[0].IsCchannel = false
 	s = at(put("a", a))
-	require.EqualValues(t, 11, s.Assignments[1].ReadOnlyChannels["p"].WALReplicaID)
+	require.Empty(t, s.Assignments[1].Channels)
 	require.EqualValues(t, 8, s.Assignments[2].Channels["p"].Term)
 	require.Equal(t, "p", s.PChannelOfCChannel())
 	malformed, err := etcd.Put(ctx, prefix+"b", "{", clientv3.WithLease(lease.ID))
@@ -92,7 +103,6 @@ func TestSessionRoutesFollowAdvertisements(t *testing.T) {
 	b.WALReplicas = append(b.WALReplicas, nil, &streamingpb.WALAdvertisement{Pchannel: "invalid", WalReplicaId: 23, WriterTerm: proto.Int64(0)})
 	s = at(put("b", b, clientv3.WithLease(lease.ID)))
 	require.Len(t, s.Assignments[2].Channels, 1)
-	require.Empty(t, s.Assignments[2].ReadOnlyChannels)
 	require.Equal(t, "p", s.PChannelOfCChannel())
 	a.Stopping = true
 	s = at(put("a", a))

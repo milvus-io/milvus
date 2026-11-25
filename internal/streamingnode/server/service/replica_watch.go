@@ -32,6 +32,9 @@ func acquireAndServeReplicaWatch(manager walmanager.Manager, rpc streamingpb.Str
 		return status.NewInvalidArgument("replica watch requires a PChannel and WAL instance")
 	}
 	route := types.PChannelInfo{Name: channel.Name, Term: channel.Term, WALReplicaID: req.WalReplicaId}
+	if route.Term == 0 {
+		route.AccessMode = types.AccessModeRO
+	}
 	raw, err := manager.GetAvailableWAL(route)
 	if err != nil {
 		return err

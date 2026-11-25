@@ -143,7 +143,11 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	defer m.lifetime.Done()
 
 	l := m.localWAL(channel.Name)
-	if channel.WALReplicaID != 0 && channel.Term == 0 {
+	if l != nil && channel.WALReplicaID != 0 && channel.Term == 0 {
+		// A termless query planned on the writer must replan after demotion.
+		if channel.AccessMode == types.AccessModeRW && l.Channel().AccessMode != types.AccessModeRW {
+			return nil, status.NewChannelNotExist(channel.Name)
+		}
 		if writer, ok := l.(interface{ ReadReplica() wal.WAL }); ok {
 			l = writer.ReadReplica()
 		}

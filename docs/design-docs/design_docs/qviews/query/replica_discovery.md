@@ -9,7 +9,9 @@ service owns only connection/subscription lifetimes. QN does not implement Watch
 
 ## WAL multi-replica integration
 
-StreamingClient watches StreamingNode sessions to select physical WAL endpoints for a PChannel. Each endpoint advertises its WAL replica ID. A present writer term identifies the RW. Only the writer for the control PChannel sets is_cchannel. Strong requests require the advertised RW. Bounded queries try serving ROs in rotating order, with the RW as a fallback. The selected replica must cover the guarantee timestamp. All WAL-side execution of a shard plan uses the WAL replica that supplied its MVCC. Each endpoint continues to publish its locally Up logical query replicas through `SubscribeReplicas`. A WAL advertisement can therefore appear before that endpoint can serve a particular View. On handoff the client updates writer routing from the session watch. Read discovery can retain a subscription to the same readable WAL replica across a role change. A newly recovered RO advertises a logical View only after loading its versioned resources and catching up locally. QueryView keys retain their existing logical replica IDs. [WAL session discovery protocol](../../wal/wal-replica-protocol.md#2-sn-session-发布-wal-路由)
+StreamingClient obtains the current writer for each PChannel from StreamingNode sessions. The Proxy subscribes to that writer's local directory and sends all WAL-side query plans, including Bounded, to the writer. At Seal, the directory stream ends. The resumable client invalidates its cached candidates, reconnects to the next writer, and requests a fresh snapshot. RO replicas continue to consume the WAL and prepare the same logical Views.
+
+TODO: Add RO query routing with directory subscriptions scoped to the selected WAL replica. [WAL session discovery protocol](../../wal/wal-replica-protocol.md#2-sn-session-发布-wal-路由)
 
 A Ready report for a logical View is scoped to the WAL replica on its active watch. The RW matches the shard and QueryView version; the RO opens query admission only after its own resources are ready and the View has been durably published Up. On process restart, a persisted Up resumes as UpRecovering without an inherited serving lease. [WAL replica confirmations](../../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
 
@@ -107,9 +109,7 @@ and direct local stream are private implementations inside `wal/snview`; clients
 depend on the WAL contracts and qviews values, not the directory implementation.
 There is no separate `internal/views/replicadiscovery` package.
 
-`HandlerClient.AcquireReplicaWatchStream` tries the advertised RO endpoints, followed by the writer.
-For each candidate it looks up the local WAL by instance ID and, for a writer,
-term. A matching local provider returns its directory stream directly. When the
+`HandlerClient.AcquireReplicaWatchStream` selects the advertised writer and looks up the local WAL by instance ID and term. A matching local provider returns its directory stream directly. When the
 WAL is remote, the RPC is addressed to the candidate's specific SN. The
 resuming client owns sharing, reconnects, and logical subscriptions.
 
@@ -133,7 +133,7 @@ bounded physical close handshake before canceling its attempt context, and does
 not consume failure backoff. Failed attempts and owner shutdown cancel first to
 unblock transport operations; they do not guarantee a graceful handshake.
 A failed attempt invalidates cached availability,
-selects a serving WAL endpoint from the current sessions, backs off, and recreates desired subscriptions. Local to
+selects the current writer from the sessions, backs off, and recreates desired subscriptions. Local to
 remote and remote to local migration use this same loop. A replacement physical
 attempt starts only after the old one closes. Old callbacks are checked against
 the logical registration and attempt context before changing current state.

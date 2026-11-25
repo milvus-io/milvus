@@ -53,8 +53,7 @@ func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
 type StreamingNodeAssignment struct {
 	NodeInfo StreamingNodeInfo
 	// Channels contains only primary read-write WAL assignments.
-	Channels         map[string]PChannelInfo
-	ReadOnlyChannels map[string]PChannelInfo
+	Channels map[string]PChannelInfo
 }
 
 // NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.

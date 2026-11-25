@@ -7,6 +7,7 @@ import (
 	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -21,8 +22,8 @@ func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pcha
 	if pchannel == "" {
 		return nil, status.NewInvalidArgument("pchannel is required")
 	}
-
-	result, err := hc.createOnReadable(ctx, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "replica-watch"))
+	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		local, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
 			provider, ok := wal.Unwrap(local).(wal.ReplicaWatchProvider)

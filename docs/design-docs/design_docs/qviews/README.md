@@ -461,9 +461,9 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 ### StreamingNode session routing
 
 The query client watches StreamingNode sessions for the physical WAL replicas of each PChannel.
-It subscribes to a readable replica's [directory](query/replica_discovery.md) for locally Up logical QueryView replicas.
+It subscribes to the writer's [directory](query/replica_discovery.md) for locally Up logical QueryView replicas.
 Strong sampling and `GetMVCCTimestamp` use the advertised writer and its term.
-Bounded sampling prefers a read-only WAL and can use the writer when no reader can serve the View.
+Bounded sampling also goes to the writer. Routing queries to RO replicas is deferred.
 The selected endpoint must cover the guarantee timestamp. Growing-segment execution and requery
 stay on the WAL replica that supplied the plan's MVCC. The next shard plan can select a new endpoint after handoff.
 

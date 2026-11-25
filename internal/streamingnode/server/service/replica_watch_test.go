@@ -39,6 +39,10 @@ func TestReplicaWatchServiceOwnerFence(t *testing.T) {
 		d.Set("p_1v0", 17, &qviews.QueryViewVersion{}, false)
 		unavailable := make(chan struct{})
 		mockey.Mock((*replicaManager).GetAvailableWAL).To(func(_ *replicaManager, pc types.PChannelInfo) (wal.WAL, error) {
+			if pc.Term == 0 {
+				require.EqualValues(t, types.AccessModeRO, pc.AccessMode)
+				require.EqualValues(t, 10, pc.WALReplicaID)
+			}
 			if pc.Term != 7 {
 				return nil, status.NewChannelNotExist(pc.Name)
 			}
@@ -67,6 +71,10 @@ func TestReplicaWatchServiceOwnerFence(t *testing.T) {
 		metadata := func(term int64) context.Context {
 			return contextutil.WithCreateReplicaWatchStream(ctx, &streamingpb.CreateReplicaWatchStreamRequest{Pchannel: &streamingpb.PChannelInfo{Name: "p", Term: term}})
 		}
+		reader, err := client.SubscribeReplicas(contextutil.WithCreateReplicaWatchStream(ctx, &streamingpb.CreateReplicaWatchStreamRequest{Pchannel: &streamingpb.PChannelInfo{Name: "p"}, WalReplicaId: 10}))
+		require.NoError(t, err)
+		_, err = reader.Recv()
+		require.True(t, status.AsStreamingError(status.ConvertStreamingError("SubscribeReplicas", err)).IsWrongStreamingNode())
 		wrong, err := client.SubscribeReplicas(metadata(6))
 		require.NoError(t, err)
 		_, err = wrong.Recv()
