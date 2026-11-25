@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <cstdint>
 #include <string>
 #include <unordered_set>
@@ -61,6 +62,12 @@ class IndexEntryWriter {
     PutMeta(const std::string& key, T&& value) {
         AssertInfo(!meta_json_.contains(key), "Duplicate meta key: {}", key);
         meta_json_[key] = std::forward<T>(value);
+    }
+
+    // Report the concrete writer mode, not global plugin availability.
+    virtual std::optional<bool>
+    IsEncrypted() const {
+        return std::nullopt;
     }
 
     virtual void

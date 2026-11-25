@@ -394,7 +394,7 @@ TEST(LoadIndexCTest, SerializedResourceEstimatePreservesMmapAdmissionCosts) {
     }
 }
 
-TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
+TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesArtifactMetadata) {
     milvus::proto::cgo::LoadIndexInfo proto;
     proto.set_collectionid(100);
     proto.set_partitionid(20);
@@ -416,19 +416,23 @@ TEST(LoadIndexCTest, FinishLoadIndexInfoPreservesIndexStorePathVersion) {
         milvus::proto::index::IndexStorePathVersion::
             INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
 
-    std::string serialized;
-    ASSERT_TRUE(proto.SerializeToString(&serialized));
-
     milvus::segcore::LoadIndexInfo load_index_info;
-    auto status =
-        FinishLoadIndexInfo(static_cast<CLoadIndexInfo>(&load_index_info),
-                            reinterpret_cast<const uint8_t*>(serialized.data()),
-                            serialized.size());
-
-    ASSERT_EQ(status.error_code, milvus::Success);
-    EXPECT_EQ(load_index_info.index_store_path_version,
-              milvus::proto::index::IndexStorePathVersion::
-                  INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+    for (const auto& [state, encrypted] :
+         std::vector<std::pair<int, std::optional<bool>>>{
+             {1, false}, {2, true}, {0, std::nullopt}, {99, std::nullopt}}) {
+        proto.set_encryption_state(
+            static_cast<milvus::proto::index::IndexEncryptionState>(state));
+        const auto serialized = proto.SerializeAsString();
+        auto status = FinishLoadIndexInfo(
+            static_cast<CLoadIndexInfo>(&load_index_info),
+            reinterpret_cast<const uint8_t*>(serialized.data()),
+            serialized.size());
+        ASSERT_EQ(status.error_code, milvus::Success);
+        EXPECT_EQ(load_index_info.encrypted, encrypted);
+        EXPECT_EQ(load_index_info.index_store_path_version,
+                  milvus::proto::index::IndexStorePathVersion::
+                      INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED);
+    }
 }
 
 TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {

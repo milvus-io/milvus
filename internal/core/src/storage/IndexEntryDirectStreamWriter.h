@@ -36,6 +36,11 @@ class IndexEntryDirectStreamWriter : public IndexEntryWriter {
     WriteEntry(const std::string& name, const void* data, size_t size) override;
     void
     WriteEntry(const std::string& name, int fd, size_t size) override;
+    std::optional<bool>
+    IsEncrypted() const override {
+        return false;
+    }
+
     void
     Finish() override;
     size_t

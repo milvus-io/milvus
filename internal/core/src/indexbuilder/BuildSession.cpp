@@ -1047,7 +1047,9 @@ BuildSession::Publish() const {
             is_index ? manager.GetRemoteIndexObjectPrefix() + "/" + basename
                      : basename;
         return storage::ArtifactStats(
-            size, {storage::SerializedFileInfo(location, size)});
+            size,
+            {storage::SerializedFileInfo(location, size)},
+            writer->IsEncrypted());
     }
     auto sink = std::make_unique<storage::V1DiskSink>(
         file_manager_context_, req_.output.storage_namespace);

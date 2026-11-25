@@ -84,3 +84,11 @@ func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {
 	require.Equal(t, "HNSW_SQ", GetIndexType(info.GetIndexParams()))
 	require.Equal(t, "custom_vector", info.GetIndexName())
 }
+
+func TestManifestIndexFilePathInfoPreservesEncryption(t *testing.T) {
+	for _, state := range []indexpb.IndexEncryptionState{indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED} {
+		info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{IndexName: "index", IndexType: "STL_SORT", Path: "files/insert_log/1/2/3/_index/102/4", IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, IndexFileKeys: []string{"index.bin"}, Properties: packed.IndexEncryptionProperties(state)})
+		require.True(t, ok)
+		require.Equal(t, state, info.GetEncryptionState())
+	}
+}

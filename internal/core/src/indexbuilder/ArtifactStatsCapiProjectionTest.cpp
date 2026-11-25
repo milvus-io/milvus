@@ -62,6 +62,17 @@ ExpectStatsAndCapiProjection(
     }
 }
 
+TEST(ArtifactStatsCapiProjectionTest, EncryptionStatePreservesUnknown) {
+    EXPECT_EQ(AdaptArtifactStats(ArtifactStats{}).encryption_state(),
+              proto::index::INDEX_ENCRYPTION_UNKNOWN);
+    EXPECT_EQ(
+        AdaptArtifactStats(ArtifactStats(10, {}, false)).encryption_state(),
+        proto::index::INDEX_ENCRYPTION_PLAIN);
+    EXPECT_EQ(
+        AdaptArtifactStats(ArtifactStats(10, {}, true)).encryption_state(),
+        proto::index::INDEX_ENCRYPTION_ENCRYPTED);
+}
+
 TEST(ArtifactStatsCapiProjectionTest,
      ConstructionAndAppendPreserveOrderedFileMetadata) {
     constexpr int64_t large_file_size = (int64_t{1} << 32) + 17;

@@ -766,6 +766,7 @@ func buildTargetManifestIndexes(
 			MemSize:                   int64(metautil.CopiedIndexMemSize(info)),
 			CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
+			Properties:                packed.IndexEncryptionProperties(info.GetEncryptionState()),
 			IndexStorePathVersion:     info.GetIndexStorePathVersion(),
 			IndexFileKeys:             fileKeys,
 		})
@@ -1153,6 +1154,7 @@ func buildIndexInfoFromSource(
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			EncryptionState:           srcIndex.GetEncryptionState(),
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),

@@ -306,3 +306,12 @@ func TestSTLSortMmapAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCLoadIndexInfoPreservesEncryptionState(t *testing.T) {
+	paramtable.Init()
+	for _, state := range []indexpb.IndexEncryptionState{indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED} {
+		info, err := buildCLoadIndexInfo(&schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64}, &querypb.SegmentLoadInfo{}, &querypb.FieldIndexInfo{EncryptionState: state, IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}}})
+		require.NoError(t, err)
+		require.Equal(t, state, info.GetEncryptionState())
+	}
+}

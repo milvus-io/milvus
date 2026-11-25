@@ -773,6 +773,7 @@ func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*ind
 				NumRows:                   segIdx.NumRows,
 				CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 				CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+				EncryptionState:           segIdx.EncryptionState,
 				IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 			})
 		}

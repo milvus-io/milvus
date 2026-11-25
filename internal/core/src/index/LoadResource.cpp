@@ -495,7 +495,8 @@ IndexLoadResource(DataType field_type,
                   const std::map<std::string, std::string>& index_params,
                   bool mmap_enable,
                   int64_t num_rows,
-                  int64_t dim) {
+                  int64_t dim,
+                  std::optional<bool> encrypted) {
     return IsVectorDataType(field_type)
                ? VecIndexLoadResource(field_type,
                                       element_type,
@@ -510,7 +511,8 @@ IndexLoadResource(DataType field_type,
                                          index_size_in_bytes,
                                          index_params,
                                          mmap_enable,
-                                         num_rows);
+                                         num_rows,
+                                         encrypted);
 }
 
 LoadResourceRequest
@@ -519,7 +521,8 @@ ScalarIndexLoadResource(DataType field_type,
                         uint64_t index_size_in_bytes,
                         const std::map<std::string, std::string>& index_params,
                         bool mmap_enable,
-                        int64_t num_rows) {
+                        int64_t num_rows,
+                        std::optional<bool> encrypted) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -533,8 +536,10 @@ ScalarIndexLoadResource(DataType field_type,
     // Without file metadata, plugin state provides the compatibility fallback.
     auto encrypted_stream =
         scalar_version >= 3 &&
-        milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
-            nullptr;
+        (encrypted.has_value()
+             ? *encrypted
+             : milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
+                   nullptr);
     auto file_stream = index_type == milvus::index::INVERTED_INDEX_TYPE ||
                        index_type == milvus::index::NGRAM_INDEX_TYPE ||
                        index_type == milvus::index::RTREE_INDEX_TYPE;

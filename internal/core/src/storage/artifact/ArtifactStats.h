@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,8 +43,10 @@ class ArtifactStats {
  public:
     ArtifactStats() = default;
 
-    ArtifactStats(int64_t mem_size, std::vector<SerializedFileInfo> files)
-        : mem_size_(mem_size), files_(std::move(files)) {
+    ArtifactStats(int64_t mem_size,
+                  std::vector<SerializedFileInfo> files,
+                  std::optional<bool> encrypted = std::nullopt)
+        : mem_size_(mem_size), files_(std::move(files)), encrypted_(encrypted) {
     }
 
     void
@@ -67,9 +70,16 @@ class ArtifactStats {
         return mem_size_;
     }
 
+    // Unknown for producers that do not report actual output encryption.
+    std::optional<bool>
+    IsEncrypted() const {
+        return encrypted_;
+    }
+
  private:
     int64_t mem_size_{0};
     std::vector<SerializedFileInfo> files_;
+    std::optional<bool> encrypted_;
 };
 
 }  // namespace milvus::storage

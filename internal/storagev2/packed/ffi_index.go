@@ -52,7 +52,7 @@ func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
 // ManifestIndexInfo identifies a completed index artifact registered in a
 // StorageV3 manifest. Path is the artifact root, IndexFileKeys are relative to
 // it. Properties preserves optional storage metadata from older manifests;
-// Milvus publishers leave it empty rather than copying collection parameters.
+// Milvus publishers use it for artifact facts, never collection parameters.
 //
 // The index bytes must already exist before this metadata is published. A
 // manifest transaction only makes the metadata visible atomically with a new
@@ -78,6 +78,30 @@ type ManifestIndexInfo struct {
 	IndexStorePathVersion     indexpb.IndexStorePathVersion
 	IndexFileKeys             []string
 	Properties                map[string]string
+}
+
+// IndexEncryptionProperties records facts about this artifact, not collection configuration.
+func IndexEncryptionProperties(state indexpb.IndexEncryptionState) map[string]string {
+	switch state {
+	case indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN:
+		return map[string]string{"milvus.index.encryption_state": "plain"}
+	case indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED:
+		return map[string]string{"milvus.index.encryption_state": "encrypted"}
+	default:
+		return nil
+	}
+}
+
+// EncryptionState treats absent or unrecognized historical properties as unknown.
+func (i ManifestIndexInfo) EncryptionState() indexpb.IndexEncryptionState {
+	switch i.Properties["milvus.index.encryption_state"] {
+	case "plain":
+		return indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN
+	case "encrypted":
+		return indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED
+	default:
+		return indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN
+	}
 }
 
 // DropIndexEntry removes one index's metadata from a manifest revision.

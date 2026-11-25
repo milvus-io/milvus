@@ -1905,6 +1905,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 				MemSize:             metautil.CopiedIndexMemSize(indexInfo),
 				VectorEngineVersion: indexInfo.GetCurrentIndexVersion(),
 				ScalarEngineVersion: indexInfo.GetCurrentScalarIndexVersion(),
+				EncryptionState:     indexInfo.GetEncryptionState(),
 				IndexType:           indexInfo.GetIndexType(),
 			})
 			continue
@@ -1925,6 +1926,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
+			EncryptionState:           indexInfo.GetEncryptionState(),
 			CreatedUTCTime:            uint64(now),
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   numRows,

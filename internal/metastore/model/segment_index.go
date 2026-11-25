@@ -7,6 +7,7 @@ import (
 )
 
 type SegmentIndex struct {
+	EncryptionState indexpb.IndexEncryptionState
 	// ArtifactPresent is set on transient projections of SegmentInfo summaries.
 	ArtifactPresent bool
 	SegmentID       int64
@@ -74,6 +75,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		EncryptionState:           segIndex.EncryptionState,
 	}
 }
 
@@ -104,6 +106,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+		EncryptionState:           segIdx.EncryptionState,
 	}
 }
 
@@ -131,6 +134,7 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		EncryptionState:           segIndex.EncryptionState,
 		ManifestPublished:         segIndex.ManifestPublished,
 	}
 }

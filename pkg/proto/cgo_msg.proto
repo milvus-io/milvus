@@ -25,11 +25,13 @@ message LoadIndexInfo {
   int64 num_rows = 17;
   int32 current_scalar_index_version = 18;
   index.IndexStorePathVersion index_store_path_version = 19;
+  index.IndexEncryptionState encryption_state = 20;
 }
 
 message IndexStats {
   int64 mem_size = 1;
   repeated SerializedIndexFileInfo serialized_index_infos = 3;
+  index.IndexEncryptionState encryption_state = 4;
 }
 
 message SerializedIndexFileInfo {
