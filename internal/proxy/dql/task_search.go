@@ -1261,11 +1261,12 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	// The final Scores are the distances of the vector search unless a
 	// rerank, a Boost scorer in the plan (it runs in segcore and leaves no
 	// rerank on the proxy), a score-writing function chain or an aggregation
-	// produces them, or order_by moves the rows.
+	// produces them. order_by does not change that: it moves the scores with
+	// the rows (orderByOperator.reorderResults).
 	scoresAreDistances := t.rerankMeta == nil && t.request.GetFunctionScore() == nil && len(plan.GetScorers()) == 0 &&
-		t.aggCtx == nil && len(t.orderByFields) == 0 &&
-		!chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains())
-	t.outputProjection.configureSearch(t.needRequery, scoresAreDistances)
+		t.aggCtx == nil && !chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains())
+	// The order_by pipeline always requeries, whatever the requery policy says.
+	t.outputProjection.configureSearch(t.needRequery || len(t.orderByFields) > 0, scoresAreDistances)
 	plan.ProjectionItems = t.outputProjection.planItems(true)
 	plan.QuerynodeFunctionChains = querynodeFunctionChains
 

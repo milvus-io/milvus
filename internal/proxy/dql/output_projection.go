@@ -134,8 +134,8 @@ func (v *virtualItem) inSearchPlan() bool {
 // Search; without one they travel with the Search rows.
 //
 // $distance is the Scores of the final result when nothing between the
-// vector search and the result changes the scores or the order of the rows
-// (scoresAreDistances). Otherwise the QueryNode returns it as a column.
+// vector search and the result rewrites the scores (scoresAreDistances).
+// Otherwise the QueryNode returns it as a column.
 func (p *outputProjection) configureSearch(needRequery bool, scoresAreDistances bool) {
 	if p == nil {
 		return
