@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -172,6 +173,9 @@ func TestManifestIndexBackfillSkippedBuildRoundTrip(t *testing.T) {
 	m := BootMigrationMeta(t, catalog, meta.RestartCollID)
 	indexMeta := m.IndexCatalog.(*IndexMeta)
 	SeedRestartTask(t, m, indexMeta)
+	m.AddCollection(&meta.CollectionInfo{ID: meta.RestartCollID, Schema: &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: meta.RestartFieldID, Name: "vec", DataType: schemapb.DataType_FloatVector}},
+	}})
 	require.NoError(t, indexMeta.UpdateIndexStateWithContext(ctx, meta.RestartBuildID,
 		commonpb.IndexState_Finished, model.SkippedIndexBuildReason))
 	before := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()

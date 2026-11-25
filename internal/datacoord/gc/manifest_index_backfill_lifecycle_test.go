@@ -83,6 +83,9 @@ func TestManifestIndexSkippedBuildGC(t *testing.T) {
 	m := index.BootMigrationMeta(t, catalog, meta.RestartCollID)
 	im := m.IndexCatalog.(*index.IndexMeta)
 	index.SeedRestartTask(t, m, im)
+	m.AddCollection(&meta.CollectionInfo{ID: meta.RestartCollID, Schema: &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: meta.RestartFieldID, Name: "vec", DataType: schemapb.DataType_FloatVector}},
+	}})
 	require.NoError(t, im.UpdateIndexStateWithContext(ctx, meta.RestartBuildID,
 		commonpb.IndexState_Finished, model.SkippedIndexBuildReason))
 	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
