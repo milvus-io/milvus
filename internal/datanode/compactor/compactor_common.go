@@ -124,8 +124,7 @@ func createTextIndex(ctx context.Context,
 
 	for _, field := range plan.GetSchema().GetFields() {
 		field := field
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if !h.EnableMatch() {
+		if !typeutil.IsTextMatchEnabled(field) {
 			continue
 		}
 		log.Info(ctx, "field enable match, ready to create text index", mlog.Int64("field id", field.GetFieldID()))

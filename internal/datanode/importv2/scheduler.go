@@ -26,12 +26,14 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 type Scheduler interface {
 	Start()
 	Slots() int64
+	Resource() taskcommon.Resource
 	Close()
 }
 
@@ -40,7 +42,7 @@ type scheduler struct {
 
 	// futuresMu protects futures during submission and collection.
 	futuresMu sync.Mutex
-	// futures tracks in-flight file futures by task ID.
+	// futures tracks submitted file work until completion or cancellation.
 	futures map[int64][]*conc.Future[any]
 
 	// submitMu allows only one goroutine to submit tasks at a time.
@@ -48,6 +50,10 @@ type scheduler struct {
 
 	closeOnce sync.Once
 	closeChan chan struct{}
+}
+
+func allDone(fs []*conc.Future[any]) bool {
+	return lo.EveryBy(fs, func(f *conc.Future[any]) bool { return f.Done() })
 }
 
 func NewScheduler(manager TaskManager) Scheduler {
@@ -106,9 +112,7 @@ func (s *scheduler) scheduleTasks() {
 		defer s.submitMu.Unlock()
 
 		for _, task := range tasks {
-			// Execute may block, so do not hold futuresMu while submitting.
 			fs := task.Execute()
-
 			s.futuresMu.Lock()
 			s.futures[task.GetTaskID()] = fs
 			s.futuresMu.Unlock()
@@ -116,24 +120,21 @@ func (s *scheduler) scheduleTasks() {
 	}()
 }
 
-// collectCompletedTasks marks successful tasks Completed and removes failed or
-// deleted tasks from tracking without waiting for unfinished futures.
+// collectCompletedTasks marks successful tasks Completed and forgets canceled work.
 func (s *scheduler) collectCompletedTasks() {
 	s.futuresMu.Lock()
 	defer s.futuresMu.Unlock()
 
 	for taskID, fs := range s.futures {
 		task := s.manager.Get(taskID)
-		if task == nil {
+		if task == nil || task.GetState() == datapb.ImportTaskStateV2_Failed {
+			if task != nil {
+				mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.String("reason", task.GetReason()))...)
+			}
 			delete(s.futures, taskID)
 			continue
 		}
-		if task.GetState() == datapb.ImportTaskStateV2_Failed {
-			delete(s.futures, taskID)
-			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.String("reason", task.GetReason()))...)
-			continue
-		}
-		if !lo.EveryBy(fs, func(f *conc.Future[any]) bool { return f.Done() }) {
+		if !allDone(fs) {
 			continue
 		}
 		delete(s.futures, taskID)
@@ -152,6 +153,17 @@ func (s *scheduler) Slots() int64 {
 	used := lo.SumBy(tasks, func(t Task) int64 {
 		return t.GetSlots()
 	})
+	return used
+}
+
+// Resource reports accepted live tasks and the buffers retained by their readers.
+// Canceled readers release their allocator reservations when they exit.
+func (s *scheduler) Resource() taskcommon.Resource {
+	var used taskcommon.Resource
+	for _, task := range s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress)) {
+		used = used.Add(task.GetResource())
+	}
+	used.Memory = max(used.Memory, GetMemoryAllocator().Used())
 	return used
 }
 

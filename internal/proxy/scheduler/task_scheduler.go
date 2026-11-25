@@ -27,9 +27,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -101,6 +104,9 @@ func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, er
 
 	if queue.utFull() {
 		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+	}
+	if observeDQLTask(t) {
+		extension.ObserveDQLPhase(t.TraceCtx(), "queue")
 	}
 	element := queue.unissuedTasks.PushBack(t)
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
@@ -494,7 +500,14 @@ func (sched *TaskScheduler) ClearDQLQueue(taskType string, reason string) ClearT
 }
 
 func (sched *TaskScheduler) processTask(t taskmodel.Task, q TaskQueue) {
-	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(t.TraceCtx(), t.Name())
+	sched.processTaskWithContext(t.TraceCtx(), t, q)
+}
+
+func (sched *TaskScheduler) processTaskWithContext(ctx context.Context, t taskmodel.Task, q TaskQueue) {
+	if observeDQLTask(t) {
+		extension.ObserveDQLPhase(t.TraceCtx(), "execute")
+	}
+	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, t.Name())
 	defer span.End()
 
 	span.AddEvent("scheduler process AddActiveTask")
@@ -585,9 +598,65 @@ func (sched *TaskScheduler) controlLoop() {
 	}
 }
 
+// dmlExecutionSlot belongs to one task's serial execution. The scheduler limits
+// active DML work, while suspended read retries keep their stack and task state.
+type dmlExecutionSlot struct {
+	limit       *semaphore.Weighted
+	readRetries *semaphore.Weighted
+	capacity    int64
+	held        bool
+}
+
+func (slot *dmlExecutionSlot) acquire(ctx context.Context) error {
+	if err := slot.limit.Acquire(ctx, 1); err != nil {
+		return context.Cause(ctx)
+	}
+	slot.held = true
+	return nil
+}
+
+func (slot *dmlExecutionSlot) release() {
+	if slot.held {
+		slot.held = false
+		slot.limit.Release(1)
+	}
+}
+
+func (slot *dmlExecutionSlot) retryRead(ctx context.Context, retry taskmodel.ReadRetry, read func(context.Context) error) error {
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	// Bound suspended requests separately, without making ordinary DML wait
+	// behind collections that cannot become ready. Reads within this retry loop
+	// count against both budgets; no extra task is created on a retry.
+	if !slot.readRetries.TryAcquire(1) {
+		return merr.WrapErrTooManyRequests(int32(slot.capacity), "read-dependent DML capacity exhausted")
+	}
+	defer slot.readRetries.Release(1)
+	slot.release()
+	err := retry(ctx, func(ctx context.Context) error {
+		if err := slot.acquire(ctx); err != nil {
+			return err
+		}
+		defer slot.release()
+		return read(ctx)
+	})
+	// Even on a read error, return to task code only after restoring the slot.
+	// A canceled request cannot resume its preparation or mutation.
+	if resumeErr := slot.acquire(ctx); resumeErr != nil {
+		return resumeErr
+	}
+	return err
+}
+
 func (sched *TaskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
-	pool := conc.NewPool[struct{}](paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt())
+	capacity := paramtable.Get().ProxyCfg.MaxTaskNum.GetAsInt64()
+	limit := semaphore.NewWeighted(capacity)
+	readRetries := semaphore.NewWeighted(capacity)
+	// Capacity is enforced by execution slots. Waiting for collection readiness
+	// must not retain a pool worker needed by an unrelated collection's writes.
+	pool := conc.NewPool[struct{}](2 * int(capacity))
 	defer pool.Release()
 	for {
 		select {
@@ -596,8 +665,21 @@ func (sched *TaskScheduler) manipulationLoop() {
 		case <-sched.DmQueue.utChan():
 			for t := sched.scheduleDmTask(); t != nil; t = sched.scheduleDmTask() {
 				task := t
+				ctx, cancel := context.WithCancelCause(task.TraceCtx())
+				stop := context.AfterFunc(sched.ctx, func() { cancel(context.Cause(sched.ctx)) })
+				slot := &dmlExecutionSlot{limit: limit, readRetries: readRetries, capacity: capacity}
+				if err := slot.acquire(ctx); err != nil {
+					stop()
+					cancel(nil)
+					task.Notify(err)
+					continue
+				}
 				pool.Submit(func() (struct{}, error) {
-					sched.processTask(task, sched.DmQueue)
+					defer stop()
+					defer cancel(nil)
+					defer slot.release()
+					ctx = taskmodel.WithDMLReadRetry(ctx, slot.retryRead)
+					sched.processTaskWithContext(ctx, task, sched.DmQueue)
 					return struct{}{}, nil
 				})
 			}
@@ -772,4 +854,12 @@ func (sched *TaskScheduler) GetMetrics() []metricsinfo.TaskQueueMetrics {
 		dqlQueueMetrics,
 		dcQueueMetrics,
 	}
+}
+
+func observeDQLTask(t taskmodel.Task) bool {
+	if internal, ok := t.(interface{ IsInternalTask() bool }); ok && internal.IsInternalTask() {
+		return false
+	}
+	msgType := t.Type()
+	return !t.IsSubTask() && (msgType == commonpb.MsgType_Search || msgType == commonpb.MsgType_Retrieve)
 }

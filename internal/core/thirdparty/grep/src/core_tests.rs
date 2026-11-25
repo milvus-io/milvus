@@ -144,7 +144,194 @@ fn lf_policy_preserves_cr_whitespace_nul_and_bom() {
 }
 
 #[test]
-fn empty_patterns_only_emit_character_boundaries() {
+fn byte_mode_preserves_partial_character_spans_and_context() {
+    let mut session = Session::new(&plan(&[r"(?-u:.)"], MatchOptions::default()));
+    assert!(matches!(
+        session.execute_accounted(&[b"\xff"], execution_limits(), ResultOverhead::default()),
+        Err(Error::InvalidUtf8 {
+            kind: InputKind::Text,
+            ..
+        })
+    ));
+    for context in [0, 1] {
+        let options = MatchOptions {
+            before_context: context,
+            after_context: context,
+            ..Default::default()
+        };
+        let all_bytes = search(&[r"(?-u:.)"], options, &["é中a"]);
+        assert_eq!(
+            rows(&all_bytes.texts[0]),
+            [("é中a", (0..6).map(|i| (i, i + 1)).collect())]
+        );
+        let unicode = search(&["."], options, &["é中a"]);
+        assert_eq!(
+            rows(&unicode.texts[0]),
+            [("é中a", vec![(0, 2), (2, 5), (5, 6)])]
+        );
+        let partial = search(&[r"(?-u:\xA9)"], options, &["before\né中a\nafter"]);
+        let lines = &partial.texts[0].lines;
+        let hit = &lines[context as usize];
+        assert_eq!(hit.content.as_ref(), "é中a");
+        assert_eq!((hit.line_number, hit.line_start_offset), (2, 7));
+        assert_eq!(hit.spans.as_ref(), &[Span { start: 1, end: 2 }]);
+        assert_eq!(lines.len(), 1 + 2 * context as usize);
+        if context != 0 {
+            assert!(lines[0].spans.is_empty() && lines[2].spans.is_empty());
+        }
+    }
+    let capped = search(
+        &[r"(?-u:\xA9)"],
+        MatchOptions {
+            max_count: Some(1),
+            after_context: 1,
+            ..Default::default()
+        },
+        &["é\né\né"],
+    );
+    assert_eq!(
+        rows(&capped.texts[0]),
+        [("é", vec![(1, 2)]), ("é", vec![(1, 2)])]
+    );
+}
+
+#[test]
+fn rg_json_printer_agrees_for_common_patterns() {
+    use grep::{
+        printer::JSONBuilder,
+        searcher::{BinaryDetection, SearcherBuilder},
+    };
+    fn check(pattern: &str, options: MatchOptions, inputs: &[&str]) {
+        let plan = plan(&[pattern], options);
+        let matcher = plan.matcher();
+        let mut session = Session::new(&plan);
+        let bytes: Vec<_> = inputs.iter().map(|s| s.as_bytes()).collect();
+        let actual = session
+            .execute_accounted(&bytes, execution_limits(), ResultOverhead::default())
+            .unwrap();
+        let mut searcher = SearcherBuilder::new()
+            .before_context(options.before_context as usize)
+            .after_context(options.after_context as usize)
+            .max_matches(options.max_count)
+            .line_number(true)
+            .binary_detection(BinaryDetection::none())
+            .encoding(None)
+            .bom_sniffing(false)
+            .build();
+        for (text, actual) in inputs.iter().zip(&actual.texts) {
+            let mut printer = JSONBuilder::new().build(Vec::new());
+            searcher
+                .search_reader(&matcher, text.as_bytes(), printer.sink(&matcher))
+                .unwrap();
+            let json = printer.into_inner();
+            let mut expected = Vec::new();
+            for record in json.split(|&b| b == b'\n').filter(|b| !b.is_empty()) {
+                let record: serde_json::Value = serde_json::from_slice(record).unwrap();
+                if record["type"] != "match" && record["type"] != "context" {
+                    continue;
+                }
+                let d = &record["data"];
+                let text = d["lines"]["text"].as_str().unwrap();
+                expected.push(Line {
+                    is_match: record["type"] == "match",
+                    content: text.strip_suffix('\n').unwrap_or(text).into(),
+                    line_number: d["line_number"].as_u64().unwrap(),
+                    line_start_offset: d["absolute_offset"].as_u64().unwrap(),
+                    spans: d["submatches"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|m| Span {
+                            start: m["start"].as_u64().unwrap(),
+                            end: m["end"].as_u64().unwrap(),
+                        })
+                        .collect(),
+                });
+            }
+            assert_eq!(
+                actual.lines.as_ref(),
+                expected,
+                "{pattern:?}, {options:?}, input bytes={}",
+                text.len()
+            );
+        }
+    }
+    let inputs = [
+        "",
+        "\n",
+        "ab",
+        "ab\n",
+        "é中",
+        "aé",
+        "error",
+        "error\n",
+        "error\r\n",
+        "\u{feff}é中🙂\0",
+        "prefix\nerror\nlast\n",
+        "prefix\nerror\nerror x\nerror\r\nerror",
+        "é\n中🙂\r\nerror\n\n",
+        "error\0error",
+    ];
+    for pattern in ["error", r"^error$", r"\berror\b", r"(?-u:.)", r"(?-u:\xA9)"] {
+        for (before, after) in [(0, 0), (1, 0), (0, 1), (2, 2)] {
+            for max_count in [None, Some(0), Some(1), Some(2)] {
+                check(
+                    pattern,
+                    MatchOptions {
+                        before_context: before,
+                        after_context: after,
+                        max_count,
+                        ..Default::default()
+                    },
+                    &inputs,
+                );
+            }
+        }
+    }
+    let large = format!(
+        "{}error\n{}error",
+        "miss\n".repeat(20000),
+        "miss\n".repeat(20000)
+    );
+    for pattern in ["error", r"^error$"] {
+        for context in [0, 2] {
+            check(
+                pattern,
+                MatchOptions {
+                    before_context: context,
+                    after_context: context,
+                    ..Default::default()
+                },
+                &[&large],
+            );
+        }
+    }
+    let long_line = format!("{}error", "é".repeat(50000));
+    let long_line_lf = format!("{long_line}\n");
+    for pattern in [r"error$", r"^.*error$"] {
+        for max_count in [None, Some(0), Some(1)] {
+            check(
+                pattern,
+                MatchOptions {
+                    max_count,
+                    ..Default::default()
+                },
+                &[
+                    &long_line,
+                    "prefix\nerror\nlast\n",
+                    &long_line_lf,
+                    "",
+                    "error",
+                ],
+            );
+        }
+    }
+    let result = search(&["$"], MatchOptions::default(), &["ab"]);
+    assert_eq!(rows(&result.texts[0]), [("ab", vec![(2, 2)])]);
+}
+
+#[test]
+fn empty_patterns_include_line_end_byte_positions() {
     let r = search(
         &[""],
         MatchOptions::default(),
@@ -152,7 +339,10 @@ fn empty_patterns_only_emit_character_boundaries() {
     );
     assert!(r.texts[0].lines.is_empty());
     assert_eq!(rows(&r.texts[1]), [("", vec![(0, 0)])]);
-    assert_eq!(rows(&r.texts[2]), [("é中", vec![(0, 0), (2, 2), (5, 5)])]);
+    assert_eq!(
+        rows(&r.texts[2]),
+        [("é中", (0..=5).map(|i| (i, i)).collect())]
+    );
     assert_eq!(rows(&r.texts[3]), [("a", vec![(0, 0), (1, 1)])]);
     assert_eq!(rows(&r.texts[4]), [("", vec![(0, 0)]), ("", vec![(0, 0)])]);
 }
@@ -160,12 +350,15 @@ fn empty_patterns_only_emit_character_boundaries() {
 #[test]
 fn empty_after_nonempty_matches_follow_upstream_suppression() {
     let r = search(&["a*"], MatchOptions::default(), &["aé", "aa"]);
-    assert_eq!(rows(&r.texts[0]), [("aé", vec![(0, 1), (3, 3)])]);
+    assert_eq!(rows(&r.texts[0]), [("aé", vec![(0, 1), (2, 2), (3, 3)])]);
     assert_eq!(rows(&r.texts[1]), [("aa", vec![(0, 2)])]);
 }
 
 #[test]
-fn anchors_use_whole_logical_lines_not_extracted_fragments() {
+fn anchors_follow_pinned_rg_non_multiline_line_selection() {
+    // rg 15.2.0 selects these same lines in its default non-multiline mode.
+    // Absolute anchors do not imply field-wide matching in that mode.
+    // Span extraction uses the same independent logical line.
     for regex in [r"\Aerror\z", r"^error$", r"(?-m:^error$)"] {
         let r = search(
             &[regex],
@@ -199,7 +392,7 @@ fn patterns_never_cross_fields_or_lines() {
 }
 
 #[test]
-fn syntax_and_unicode_policy_are_checked_before_engine_build() {
+fn syntax_is_checked_before_engine_build() {
     for regex in ["[", r"(?=a)", r"(a)\1", r"\p{NotAProperty}"] {
         assert!(
             matches!(
@@ -214,14 +407,7 @@ fn syntax_and_unicode_policy_are_checked_before_engine_build() {
         );
     }
     for regex in ["(?-u)a", "(?i-u:a)", "(?-u:(?u:a))"] {
-        assert!(matches!(
-            Plan::compile(
-                &[regex.as_bytes()],
-                MatchOptions::default(),
-                compile_limits()
-            ),
-            Err(Error::PatternPolicy(_))
-        ));
+        plan(&[regex], MatchOptions::default());
     }
     for regex in [r"\(\?-u\)", "[(?-u)]", "(?u:a)"] {
         plan(&[regex], MatchOptions::default());
@@ -563,7 +749,10 @@ fn max_count_zero_unlimited_and_empty_pattern() {
         assert_eq!(result.texts[0].lines.len(), expected);
         assert!(result.texts[1].lines.is_empty());
         if expected > 1 {
-            assert_eq!(rows(&result.texts[0])[1], ("中", vec![(0, 0), (3, 3)]));
+            assert_eq!(
+                rows(&result.texts[0])[1],
+                ("中", vec![(0, 0), (1, 1), (2, 2), (3, 3)])
+            );
         }
     }
 }
@@ -614,5 +803,171 @@ fn max_count_does_not_bypass_validation_or_cancellation() {
             session.execute_accounted(&[b"error"], execution_limits(), ResultOverhead::default()),
             Err(Error::Cancelled)
         ));
+    }
+}
+
+#[test]
+fn context_windows_match_a_line_union_oracle() {
+    // Independently form the union of windows around the first -m hits.
+    // Repeated content, CR, Unicode, NUL, blank lines and terminal LF all
+    // retain their original byte coordinates. Each input is independent.
+    let inputs = [
+        "",
+        "\n",
+        "前\r\nhit\n\n中\0\nhit hit\n尾\n",
+        "hit\nhit\nx\nx\nx\nhit",
+        "no hit here",
+        "miss\nmiss",
+    ];
+    for before in [0, 1, 2, u64::MAX] {
+        for after in [0, 1, 2, u64::MAX] {
+            for max_count in [None, Some(0), Some(1), Some(2)] {
+                for pattern in ["hit", ""] {
+                    let options = MatchOptions {
+                        before_context: before,
+                        after_context: after,
+                        max_count,
+                        ..Default::default()
+                    };
+                    let result = search(&[pattern], options, &inputs);
+                    for (text, actual) in inputs.iter().zip(&result.texts) {
+                        let lines: Vec<_> = text.split_terminator('\n').collect();
+                        let hits: Vec<_> = lines
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, line)| line.contains(pattern))
+                            .take(max_count.unwrap_or(u64::MAX).min(usize::MAX as u64) as usize)
+                            .map(|(i, _)| i)
+                            .collect();
+                        let mut expected = Vec::new();
+                        let mut offset = 0;
+                        for (i, line) in lines.iter().enumerate() {
+                            if hits.iter().any(|&hit| {
+                                if i <= hit {
+                                    (hit - i) as u64 <= before
+                                } else {
+                                    (i - hit) as u64 <= after
+                                }
+                            }) {
+                                expected.push((
+                                    i as u64 + 1,
+                                    offset,
+                                    *line,
+                                    line.contains(pattern),
+                                ));
+                            }
+                            offset += line.len() as u64 + 1;
+                        }
+                        let actual: Vec<_> = actual
+                            .lines
+                            .iter()
+                            .map(|line| {
+                                (
+                                    line.line_number,
+                                    line.line_start_offset,
+                                    line.content.as_ref(),
+                                    !line.spans.is_empty(),
+                                )
+                            })
+                            .collect();
+                        assert_eq!(
+                            actual, expected,
+                            "{options:?}, pattern={pattern:?}, text={text:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn context_budget_validation_and_session_reuse() {
+    let text = format!("{}\nhit\n{}", "前".repeat(1000), "后".repeat(1000));
+    let overhead = ResultOverhead::default();
+    let mut plain = Session::new(&plan(&["hit"], MatchOptions::default()));
+    assert!(plain
+        .execute_accounted(&[text.as_bytes()], 1024, overhead)
+        .is_ok());
+    for (before_context, after_context) in [(1, 0), (0, 1), (u64::MAX, u64::MAX)] {
+        let options = MatchOptions {
+            before_context,
+            after_context,
+            max_count: Some(1),
+            ..Default::default()
+        };
+        let p = plan(&["hit"], options);
+        // Context never changes the necessary NGRAM condition.
+        assert_eq!(
+            p.condition_payload(),
+            plan(&["hit"], MatchOptions::default()).condition_payload()
+        );
+        let mut session = Session::new(&p);
+        assert!(matches!(
+            session.execute_accounted(&[text.as_bytes()], 1024, overhead),
+            Err(Error::ResourceLimit(LimitKind::ResultBytes))
+        ));
+        let result = session
+            .execute_accounted(&[b"a\nhit\nb", b"miss"], execution_limits(), overhead)
+            .unwrap();
+        assert_eq!(
+            result.texts[0].lines.len(),
+            1 + usize::from(before_context > 0) + usize::from(after_context > 0)
+        );
+        assert!(result.texts[1].lines.is_empty());
+        assert!(matches!(
+            session.execute_accounted(&[b"hit\n\xff"], execution_limits(), overhead),
+            Err(Error::InvalidUtf8 {
+                kind: InputKind::Text,
+                ..
+            })
+        ));
+        session.cancellation_token().cancel();
+        assert!(matches!(
+            session.execute_accounted(&[text.as_bytes()], execution_limits(), overhead),
+            Err(Error::Cancelled)
+        ));
+    }
+}
+
+#[test]
+fn line_local_spans_ignore_buffer_position_and_terminal_lf() {
+    let large_prefix = "miss\n".repeat(20000);
+    for (pattern, line, spans) in [
+        (r"\Aerror", "error", vec![(0, 5)]),
+        (r"error\z", "error", vec![(0, 5)]),
+        (r"\Aerror\z", "error", vec![(0, 5)]),
+        (r"(?-m:^error$)", "error", vec![(0, 5)]),
+        ("$", "ab", vec![(2, 2)]),
+        ("", "ab", vec![(0, 0), (1, 1), (2, 2)]),
+        (r"(?-u:\xA9)", "é", vec![(1, 2)]),
+    ] {
+        for before_context in [0, 1, 2] {
+            for after_context in [0, 1, 2] {
+                for prefix in ["", "prefix\n", large_prefix.as_str()] {
+                    for suffix in ["", "\n", "\nlast\n"] {
+                        let input = format!("{prefix}{line}{suffix}");
+                        let result = search(
+                            &[pattern],
+                            MatchOptions {
+                                before_context,
+                                after_context,
+                                ..Default::default()
+                            },
+                            &[&input],
+                        );
+                        let hit = result.texts[0]
+                            .lines
+                            .iter()
+                            .find(|hit| hit.line_start_offset == prefix.len() as u64)
+                            .unwrap();
+                        assert!(hit.is_match, "{pattern:?}");
+                        assert_eq!(hit.content.as_ref(), line);
+                        assert_eq!(hit.spans.iter().map(|s| (s.start, s.end)).collect::<Vec<_>>(), spans,
+                            "{pattern:?}, {before_context}/{after_context}, prefix bytes={}, suffix={suffix:?}", prefix.len());
+                    }
+                }
+            }
+        }
     }
 }

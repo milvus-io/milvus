@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,11 +29,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -97,17 +100,17 @@ func assertViewMatchesModel(t *testing.T, mt *MetaTable, collectionID int64) *me
 	want := mt.buildCollectionViewLocked(coll)
 	assert.True(t, proto.Equal(want.Schema, view.Schema))
 	// Compare the rest on copies: the published view must stay untouched.
-	// PropertyPairs holds protos too; it is checked against describe below.
+	// Properties holds protos too; it is checked against describe below.
 	wantRest, gotRest := *want, *view
 	wantRest.Schema, gotRest.Schema = nil, nil
-	wantRest.PropertyPairs, gotRest.PropertyPairs = nil, nil
+	wantRest.Properties, gotRest.Properties = nil, nil
 	assert.Equal(t, wantRest, gotRest)
 	desc := convertModelToDesc(coll, nil, viewTestDBName)
 	assert.True(t, proto.Equal(desc.GetSchema(), view.Schema))
 	assert.Equal(t, desc.GetShardsNum(), view.ShardsNum)
 	assert.Equal(t, desc.GetConsistencyLevel(), view.ConsistencyLevel)
 	assert.Equal(t, desc.GetUpdateTimestamp(), view.UpdateTimestamp)
-	assert.True(t, slices.EqualFunc(desc.GetProperties(), view.PropertyPairs, func(a, b *commonpb.KeyValuePair) bool {
+	assert.True(t, slices.EqualFunc(desc.GetProperties(), view.Properties, func(a, b *commonpb.KeyValuePair) bool {
 		return proto.Equal(a, b)
 	}))
 	return view
@@ -199,7 +202,9 @@ func TestCollectionView_FollowsDDL(t *testing.T) {
 		assert.Equal(t, step.names, view.PartitionIDsByName, step.name)
 		assert.Equal(t, viewTestDBName, view.DatabaseName, step.name)
 		assert.Equal(t, viewTestDBName, view.Schema.GetDbName(), step.name)
-		assert.Equal(t, map[string]string{"k": "v"}, view.Properties, step.name)
+		got, ok := common.GetStringValue(view.Properties, "k")
+		assert.True(t, ok, step.name)
+		assert.Equal(t, "v", got, step.name)
 		assert.Equal(t, []int64{viewTestCollID}, mt.CollectionSource().GetCollectionIDs(), step.name)
 	}
 	assert.Equal(t, []int64{viewTestCollID}, droppingIDs, "dropping fires once, on drop collection")
@@ -506,4 +511,255 @@ func TestDatabaseView_FollowsDDL(t *testing.T) {
 	_, ok = mt.CollectionSource().GetDatabase("db9")
 	assert.False(t, ok)
 	assert.NotContains(t, mt.dbID2Name, int64(9))
+}
+
+// newSharedSchemaTestCollection extends newViewTestCollection with the
+// fields the schema DDLs below act on: a VarChar in a non-default State, a
+// sparse vector a function can output to, and a struct field.
+func newSharedSchemaTestCollection() *model.Collection {
+	coll := newViewTestCollection()
+	coll.Fields = append(coll.Fields,
+		&model.Field{
+			FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}},
+			State:      schemapb.FieldState_FieldCreating,
+		},
+		&model.Field{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+	)
+	coll.StructArrayFields = []*model.StructArrayField{{
+		FieldID: 103,
+		Name:    "s",
+		Fields: []*model.Field{{
+			FieldID: 104, Name: typeutil.ConcatStructFieldName("s", "a"),
+			DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+		}},
+	}}
+	// Schema evolution checks require the max_field_id property, as on a
+	// collection created through RootCoord.
+	ensureCollectionMaxFieldIDProperty(coll)
+	return coll
+}
+
+// A published view shares its field schemas with RootCoord's model. Each
+// schema DDL builds its new schema from a copy (ToCollectionSchemaPB) and
+// writes into that copy, so a view taken before the DDL stays unchanged.
+func TestCollectionView_SnapshotStableAcrossDDL(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(t *testing.T, coll *model.Collection) *schemapb.CollectionSchema
+	}{
+		{
+			name: "add field",
+			build: func(t *testing.T, coll *model.Collection) *schemapb.CollectionSchema {
+				schema, _, err := buildAlterSchemaAddSchema(coll, &schemautil.AlterSchemaAddPlan{
+					Kind:  schemautil.AlterSchemaAddField,
+					Field: &schemapb.FieldSchema{Name: "added", DataType: schemapb.DataType_Int64, Nullable: true},
+				})
+				require.NoError(t, err)
+				return schema
+			},
+		},
+		{
+			name: "alter field description and type params",
+			build: func(t *testing.T, coll *model.Collection) *schemapb.CollectionSchema {
+				schema, err := buildAlterCollectionFieldSchema(coll, &milvuspb.AlterCollectionFieldRequest{
+					FieldName:  "text",
+					Properties: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "512"}, {Key: common.FieldDescriptionKey, Value: "altered"}},
+				})
+				require.NoError(t, err)
+				// A struct sub-field goes through applyStructFieldAlter on
+				// the same schema copy.
+				require.NoError(t, applyStructFieldAlter(schema,
+					&milvuspb.AlterCollectionFieldRequest{FieldName: typeutil.ConcatStructFieldName("s", "a")},
+					[]*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+					&commonpb.KeyValuePair{Key: common.FieldDescriptionKey, Value: "altered sub-field"}))
+				return schema
+			},
+		},
+		{
+			name: "alter schema add struct sub-field",
+			build: func(t *testing.T, coll *model.Collection) *schemapb.CollectionSchema {
+				schema, _, err := buildAlterSchemaAddSchema(coll, &schemautil.AlterSchemaAddPlan{
+					Kind:       schemautil.AlterSchemaAddStructSubField,
+					StructPath: "s",
+					Field: &schemapb.FieldSchema{
+						Name:     typeutil.ConcatStructFieldName("s", "b"),
+						DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: true, Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					},
+				})
+				require.NoError(t, err)
+				return schema
+			},
+		},
+		{
+			name: "add function",
+			build: func(t *testing.T, coll *model.Collection) *schemapb.CollectionSchema {
+				// Marks the output field as a function output in the copy.
+				schema, _, err := buildAlterSchemaAddSchema(coll, &schemautil.AlterSchemaAddPlan{
+					Kind: schemautil.AlterSchemaAddFunction,
+					Function: &schemapb.FunctionSchema{
+						Name: "bm25", Type: schemapb.FunctionType_BM25,
+						InputFieldNames: []string{"text"}, OutputFieldNames: []string{"sparse"},
+					},
+				})
+				require.NoError(t, err)
+				return schema
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := mocks.NewRootCoordCatalog(t)
+			catalog.EXPECT().CreateCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mt := newViewTestMetaTable(t, catalog)
+			ctx := context.Background()
+			require.NoError(t, mt.AddCollection(ctx, newSharedSchemaTestCollection()))
+
+			before, ok := mt.CollectionSource().GetCollection(viewTestCollID)
+			require.True(t, ok)
+			snapshot := proto.Clone(before.Schema).(*schemapb.CollectionSchema)
+			oldModel := mt.collID2Meta[viewTestCollID]
+			require.Same(t, oldModel.Fields[0], before.Schema.Fields[0], "the view shares the model's fields")
+
+			// The collection a DDL callback reads, as GetCollectionByName
+			// returns it: it shares fields with the model and the view.
+			coll, err := mt.GetCollectionByID(ctx, viewTestDBName, viewTestCollID, typeutil.MaxTimestamp, false)
+			require.NoError(t, err)
+			schema := tc.build(t, coll)
+			require.NoError(t, mt.AlterCollection(ctx, buildAlterCollectionSchemaResult(viewTestCollID, schema, 2500)))
+
+			assert.True(t, proto.Equal(snapshot, before.Schema), "the old view changed")
+			assert.True(t, proto.Equal(snapshot, collectionSchemaPB(oldModel, viewTestDBName)), "the old model changed")
+			after := assertViewMatchesModel(t, mt, viewTestCollID)
+			assert.NotSame(t, before, after)
+			assert.False(t, proto.Equal(snapshot, after.Schema), "the DDL is published")
+		})
+	}
+}
+
+// Readers marshal published schemas, whose fields are RootCoord's own
+// objects, while DDLs replace them. Run with -race.
+func TestCollectionView_ConcurrentDDLAndMarshal(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().CreateCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().CreatePartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mt := newViewTestMetaTable(t, catalog)
+	mt.setDatabaseLocked(&model.Database{ID: viewTestDBID, Name: viewTestDBName})
+	ctx := context.Background()
+	require.NoError(t, mt.AddCollection(ctx, newSharedSchemaTestCollection()))
+	// The model's DBName is stale; map the name under the resolved one.
+	mt.names.insert(viewTestDBName, "coll", viewTestCollID)
+	first, _ := mt.CollectionSource().GetCollection(viewTestCollID)
+	firstSnapshot := proto.Clone(first.Schema)
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	marshal := func(schema *schemapb.CollectionSchema) {
+		_, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+	}
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			src := mt.CollectionSource()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if view, ok := src.GetCollection(viewTestCollID); ok {
+					marshal(view.Schema)
+				}
+				for _, view := range src.GetCollections() {
+					marshal(view.Schema)
+				}
+				if view, ok := src.GetCollectionByName(viewTestDBName, "coll"); ok {
+					marshal(view.Schema)
+				}
+				marshal(first.Schema)
+				// Describe shares the fields too.
+				if coll, err := mt.GetCollectionByID(ctx, viewTestDBName, viewTestCollID, typeutil.MaxTimestamp, false); err == nil {
+					_, err := proto.Marshal(convertModelToDesc(coll, nil, viewTestDBName))
+					assert.NoError(t, err)
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < 50; i++ {
+		coll, err := mt.GetCollectionByID(ctx, viewTestDBName, viewTestCollID, typeutil.MaxTimestamp, false)
+		require.NoError(t, err)
+		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
+		for _, field := range schema.GetFields() {
+			if field.GetName() == "text" {
+				field.Description = "altered"
+				field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: "k", Value: "v"})
+			}
+		}
+		require.NoError(t, mt.AlterCollection(ctx, buildAlterCollectionSchemaResult(viewTestCollID, schema, uint64(3000+i))))
+		// Partition DDLs republish the view over the same field objects.
+		partitionID := int64(1000 + i)
+		require.NoError(t, mt.AddPartition(ctx, &model.Partition{
+			PartitionID: partitionID, PartitionName: "p", CollectionID: viewTestCollID,
+			State: pb.PartitionState_PartitionCreated,
+		}))
+		require.NoError(t, mt.DropPartition(ctx, viewTestCollID, partitionID, uint64(4000+i)))
+		require.NoError(t, mt.RemovePartition(ctx, viewTestCollID, partitionID, uint64(5000+i)))
+	}
+	close(stop)
+	readers.Wait()
+
+	assert.True(t, proto.Equal(firstSnapshot, first.Schema), "the first view changed")
+	view := assertViewMatchesModel(t, mt, viewTestCollID)
+	assert.Equal(t, int32(50), view.Schema.GetVersion())
+}
+
+// Describe and the collection view build their schema from the model as
+// a deep copy: ToCollectionSchemaPB with the resolved DbName, field State
+// included. This compares them with that copy, and over the wire; it does
+// not compare with an earlier version of the schema.
+func TestDescribeCollection_SchemaMatchesDeepCopy(t *testing.T) {
+	coll := newSharedSchemaTestCollection()
+	coll.Description = "desc"
+	coll.SchemaVersion = 3
+	coll.EnableDynamicField = true
+	coll.Functions = []*model.Function{{
+		ID: 1, Name: "bm25", Type: schemapb.FunctionType_BM25,
+		InputFieldIDs: []int64{101}, InputFieldNames: []string{"text"},
+		OutputFieldIDs: []int64{102}, OutputFieldNames: []string{"sparse"},
+	}}
+	coll.FileResourceIds = []int64{9}
+
+	golden := coll.ToCollectionSchemaPB()
+	golden.DbName = viewTestDBName
+
+	desc := convertModelToDesc(coll, nil, viewTestDBName)
+	assert.True(t, proto.Equal(golden, desc.GetSchema()))
+	mt := newViewTestMetaTable(t, mocks.NewRootCoordCatalog(t))
+	assert.True(t, proto.Equal(golden, mt.buildCollectionViewLocked(coll).Schema))
+
+	// Over the wire too, State included.
+	wire, err := proto.Marshal(desc)
+	require.NoError(t, err)
+	got := &milvuspb.DescribeCollectionResponse{}
+	require.NoError(t, proto.Unmarshal(wire, got))
+	assert.True(t, proto.Equal(golden, got.GetSchema()))
+	var text *schemapb.FieldSchema
+	for _, field := range got.GetSchema().GetFields() {
+		if field.GetName() == "text" {
+			text = field
+		}
+	}
+	require.NotNil(t, text)
+	assert.Equal(t, schemapb.FieldState_FieldCreating, text.GetState())
 }

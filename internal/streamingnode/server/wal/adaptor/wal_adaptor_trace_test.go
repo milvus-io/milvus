@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -99,7 +100,7 @@ func TestAppendWithOptionalChunkingUsesSuccessfulHeadIDOnDurableAssembly(t *test
 	defer writeMetrics.Close()
 	w := &walAdaptorImpl{
 		roWALAdaptorImpl: roWAL,
-		rwWALImpls:       walImpls,
+		rwWALImpls:       autowalimpls.New(walImpls, nil),
 		writeMetrics:     writeMetrics,
 	}
 
@@ -156,7 +157,7 @@ func TestAppendWithOptionalChunkingDisabledUsesSingleRecord(t *testing.T) {
 		return walimplstest.NewTestMessageID(int64(len(persisted))), nil
 	})
 	w := &walAdaptorImpl{
-		rwWALImpls: &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner},
+		rwWALImpls: autowalimpls.New(&chunkRetryTestWALImpls{firstTimeTickWALImpls: inner}, nil),
 	}
 	msg := newOversizedTestInsertMessage(t, chunkBudget).
 		WithTimeTick(100).
@@ -191,7 +192,7 @@ func TestAppendWithOptionalChunkingObservesSplitChunkSNHotUpdate(t *testing.T) {
 		return walimplstest.NewTestMessageID(int64(len(persisted))), nil
 	})
 	w := &walAdaptorImpl{
-		rwWALImpls: &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner},
+		rwWALImpls: autowalimpls.New(&chunkRetryTestWALImpls{firstTimeTickWALImpls: inner}, nil),
 	}
 
 	appendWithSwitch := func(timeTick uint64, enabled bool) []message.MutableMessage {
@@ -228,10 +229,10 @@ func TestAppendWithOptionalChunkingDoesNotChunkWithoutRecordLimit(t *testing.T) 
 
 	var persisted []message.MutableMessage
 	w := &walAdaptorImpl{
-		rwWALImpls: newFirstTimeTickWALImpls(func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		rwWALImpls: autowalimpls.New(newFirstTimeTickWALImpls(func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			persisted = append(persisted, msg)
 			return walimplstest.NewTestMessageID(1), nil
-		}),
+		}), nil),
 	}
 	msg := message.CreateTestEmptyInsertMesage(1, nil).
 		WithTimeTick(100).
@@ -261,10 +262,10 @@ func TestAppendWithOptionalChunkingOverwritesTraceContextWithAppendImplSpan(t *t
 
 	var capturedCtx context.Context
 	w := &walAdaptorImpl{
-		rwWALImpls: newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		rwWALImpls: autowalimpls.New(newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			capturedCtx = ctx
 			return walimplstest.NewTestMessageID(1), nil
-		}),
+		}), nil),
 	}
 
 	_, err := w.appendWithOptionalChunking(sourceCtx, msg)
@@ -309,10 +310,10 @@ func TestAppendWithOptionalChunkingSkipsTraceForTimeTickMessage(t *testing.T) {
 
 	var capturedCtx context.Context
 	w := &walAdaptorImpl{
-		rwWALImpls: newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		rwWALImpls: autowalimpls.New(newFirstTimeTickWALImpls(func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 			capturedCtx = ctx
 			return msgID, nil
-		}),
+		}), nil),
 	}
 
 	_, err := w.appendWithOptionalChunking(sourceCtx, msg)

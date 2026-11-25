@@ -245,14 +245,16 @@ func TestMeta_Basic(t *testing.T) {
 		// comparing the argument against the result would compare an object
 		// with itself and pass whatever the store did. Assert against
 		// independently-built expectations instead.
-		collInfo.Properties = map[string]string{
-			common.CollectionTTLConfigKey: "3600",
+		collInfo.Properties = []*commonpb.KeyValuePair{
+			{Key: common.CollectionTTLConfigKey, Value: "3600"},
 		}
 		meta.AddCollection(collInfo)
 		ret = meta.GetCollection(collInfo.ID)
 		require.NotNil(t, ret)
 		assert.Equal(t, collInfo.ID, ret.ID)
-		assert.Equal(t, "3600", ret.Properties[common.CollectionTTLConfigKey])
+		ttl, ok := common.GetStringValue(ret.Properties, common.CollectionTTLConfigKey)
+		assert.True(t, ok)
+		assert.Equal(t, "3600", ttl)
 		assert.Empty(t, ret.StartPositions)
 
 		// A re-add must replace the entry wholesale, not merge into it.

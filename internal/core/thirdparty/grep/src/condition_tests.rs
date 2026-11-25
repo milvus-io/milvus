@@ -295,12 +295,56 @@ fn generated_small_regexes_obey_implication_on_exhaustive_texts() {
 }
 
 #[test]
+fn byte_mode_conditions_remain_necessary_on_utf8_text() {
+    let texts = [
+        "",
+        "a",
+        "é",
+        "中",
+        "🙂",
+        "éerror",
+        "préerror",
+        "error中",
+        "aéerror🙂",
+        "é\nerror",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    for pattern in [
+        r"(?-u:.)",
+        r"(?-u:\xA9)",
+        r"(?-u:\xC3\xA9)",
+        r"(?-u:\xA9)error",
+        r"error(?-u:\xE4)",
+        r"(?-u:[\x80-\xff])",
+        r"(?-u:a*)",
+    ] {
+        for case_mode in [CaseMode::Sensitive, CaseMode::Insensitive] {
+            let plan = compile(
+                &[pattern],
+                MatchOptions {
+                    case_mode,
+                    ..Default::default()
+                },
+            );
+            check_bounds(plan.literal_condition());
+            assert!(check_implication(&plan, &texts) > 0, "{pattern}");
+        }
+    }
+    assert_eq!(
+        compile(&[r"(?-u:\xA9)"], MatchOptions::default()).literal_condition(),
+        &C::True
+    );
+}
+
+#[test]
 fn retaining_conditions_does_not_relax_validation_or_plan_ownership() {
     let limits = CompileLimits {
         max_regex_bytes: 8 * 1024 * 1024,
         max_dfa_cache_bytes: 1024 * 1024,
     };
-    for pattern in ["(", "(?-u:a)", r"\n", "literal\nLF", "literal\0NUL"] {
+    for pattern in ["(", r"\n", "literal\nLF", "literal\0NUL"] {
         assert!(
             Plan::compile(&[pattern.as_bytes()], MatchOptions::default(), limits).is_err(),
             "{pattern:?}"

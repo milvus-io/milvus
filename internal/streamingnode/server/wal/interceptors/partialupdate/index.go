@@ -46,8 +46,8 @@ type pkVersionIndex struct {
 	channels sync.Map // map[string]*vchannelPKVersionIndex
 }
 
-// versionByteBudget bounds the estimated memory retained by all WAL indexes on
-// one StreamingNode.
+// versionByteBudget bounds the estimated bytes charged for live PK entries
+// across all WAL indexes on one StreamingNode.
 type versionByteBudget struct {
 	limit        int64
 	used         atomic.Int64
@@ -173,10 +173,8 @@ func (idx *pkVersionIndex) channel(vchannel string) *vchannelPKVersionIndex {
 		return existing.(*vchannelPKVersionIndex)
 	}
 	created := &vchannelPKVersionIndex{
-		ttl:            idx.ttl,
-		budget:         idx.budget,
-		int64Versions:  make(map[int64]*versionEntry),
-		stringVersions: make(map[string]*versionEntry),
+		ttl:    idx.ttl,
+		budget: idx.budget,
 	}
 	actual, _ := idx.channels.LoadOrStore(vchannel, created)
 	return actual.(*vchannelPKVersionIndex)
@@ -219,8 +217,8 @@ func (idx *vchannelPKVersionIndex) clear() {
 	for _, entry := range idx.stringVersions {
 		releasedBytes += entry.estimatedBytes
 	}
-	idx.int64Versions = make(map[int64]*versionEntry)
-	idx.stringVersions = make(map[string]*versionEntry)
+	idx.int64Versions = nil
+	idx.stringVersions = nil
 	idx.expirations = nil
 	idx.forgottenWriteTS = 0
 	idx.budget.release(releasedBytes)
@@ -261,6 +259,9 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint6
 			commitTS:       commitTS,
 			estimatedBytes: estimatedVersionEntryFixedBytes,
 		}
+		if idx.int64Versions == nil {
+			idx.int64Versions = make(map[int64]*versionEntry)
+		}
 		idx.int64Versions[pk] = entry
 		heap.Push(&idx.expirations, entry)
 	}
@@ -288,6 +289,9 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint6
 			stringKey:      true,
 			commitTS:       commitTS,
 			estimatedBytes: estimatedBytes,
+		}
+		if idx.stringVersions == nil {
+			idx.stringVersions = make(map[string]*versionEntry)
 		}
 		idx.stringVersions[pk] = entry
 		heap.Push(&idx.expirations, entry)
@@ -384,6 +388,13 @@ func (idx *vchannelPKVersionIndex) sweepLocked(evictUntilTS uint64) {
 			delete(idx.int64Versions, entry.int64PK)
 		}
 		idx.budget.release(entry.estimatedBytes)
+	}
+	if len(idx.expirations) == 0 && idx.expirations != nil {
+		// Release the backing storage when the last entry expires. Keep the
+		// forgotten-write boundary for CAS validation on this vchannel.
+		idx.int64Versions = nil
+		idx.stringVersions = nil
+		idx.expirations = nil
 	}
 }
 

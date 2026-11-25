@@ -115,6 +115,18 @@ func (m *WriteMetrics) ObserveRetry() {
 	m.walimplsRetryTotal.Inc()
 }
 
+// UpdateWALName publishes the current writer without resetting append statistics.
+// The caller serializes WAL switches and waits for appends before Close.
+func (m *WriteMetrics) UpdateWALName(walName message.WALName) {
+	metrics.WALInfo.DeleteLabelValues(
+		paramtable.GetStringNodeID(), m.pchannel.Name, strconv.FormatInt(m.pchannel.Term, 10), m.walName,
+	)
+	m.walName = walName.String()
+	metrics.WALInfo.WithLabelValues(
+		paramtable.GetStringNodeID(), m.pchannel.Name, strconv.FormatInt(m.pchannel.Term, 10), m.walName,
+	).Set(1)
+}
+
 func (m *WriteMetrics) Close() {
 	metrics.WALAppendMessageBeforeInterceptorDurationSeconds.DeletePartialMatch(m.constLabel)
 	metrics.WALAppendMessageAfterInterceptorDurationSeconds.DeletePartialMatch(m.constLabel)

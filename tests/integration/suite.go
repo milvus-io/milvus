@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration/cluster"
@@ -44,7 +43,6 @@ func init() {
 		panic(err)
 	}
 	flag.DurationVar(&caseTimeout, "caseTimeout", defaultTimeout, "timeout duration for single case")
-	streamingutil.SetStreamingServiceEnabled()
 }
 
 func caseTimeoutFromEnvironment(getenv func(string) string) (time.Duration, error) {

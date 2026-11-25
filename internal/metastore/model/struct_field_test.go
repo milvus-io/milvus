@@ -74,25 +74,25 @@ var (
 
 func TestMarshalStructArrayFieldModel(t *testing.T) {
 	ret := MarshalStructArrayFieldModel(structFieldModel)
-	assert.Equal(t, structFieldPb, ret)
+	assert.EqualExportedValues(t, structFieldPb, ret)
 	assert.Nil(t, MarshalStructArrayFieldModel(nil))
 }
 
 func TestMarshalStructArrayFieldModels(t *testing.T) {
 	ret := MarshalStructArrayFieldModels([]*StructArrayField{structFieldModel})
-	assert.Equal(t, []*schemapb.StructArrayFieldSchema{structFieldPb}, ret)
+	assert.EqualExportedValues(t, []*schemapb.StructArrayFieldSchema{structFieldPb}, ret)
 	assert.Nil(t, MarshalStructArrayFieldModels(nil))
 }
 
 func TestUnmarshalStructArrayFieldModel(t *testing.T) {
 	ret := UnmarshalStructArrayFieldModel(structFieldPb)
-	assert.Equal(t, structFieldModel, ret)
+	assert.EqualExportedValues(t, structFieldModel, ret)
 	assert.Nil(t, UnmarshalStructArrayFieldModel(nil))
 }
 
 func TestUnmarshalStructArrayFieldModels(t *testing.T) {
 	ret := UnmarshalStructArrayFieldModels([]*schemapb.StructArrayFieldSchema{structFieldPb})
-	assert.Equal(t, []*StructArrayField{structFieldModel}, ret)
+	assert.EqualExportedValues(t, []*StructArrayField{structFieldModel}, ret)
 	assert.Nil(t, UnmarshalStructArrayFieldModels(nil))
 }
 

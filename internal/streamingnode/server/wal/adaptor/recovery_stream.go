@@ -1,6 +1,8 @@
 package adaptor
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
@@ -8,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -20,7 +23,6 @@ var (
 func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl, buffer wab.ROWriteAheadBuffer, liveReady <-chan struct{}) *recoveryStreamBuilderImpl {
 	return &recoveryStreamBuilderImpl{
 		roWALAdaptorImpl: roWALImpls,
-		basicWAL:         roWALImpls.roWALImpls.(walimpls.WALImpls),
 		writeAheadBuffer: buffer,
 		liveReady:        liveReady,
 	}
@@ -29,25 +31,32 @@ func newRecoveryStreamBuilder(roWALImpls *roWALAdaptorImpl, buffer wab.ROWriteAh
 // recoveryStreamBuilerImpl is the implementation of RecoveryStreamBuilder.
 type recoveryStreamBuilderImpl struct {
 	*roWALAdaptorImpl
-	basicWAL         walimpls.WALImpls
 	writeAheadBuffer wab.ROWriteAheadBuffer
 	liveReady        <-chan struct{}
 }
 
 // Build builds a recovery stream.
 func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamParam) recovery.RecoveryStream {
+	policy := options.DeliverPolicyStartFrom(param.StartCheckpoint)
+	if param.StartAfterCheckpoint {
+		policy = options.DeliverPolicyStartAfter(param.StartCheckpoint)
+	}
 	scanner := newScannerAdaptor(
 		"recovery",
 		b.roWALImpls,
 		wal.ReadOption{
-			DeliverPolicy:          options.DeliverPolicyStartFrom(param.StartCheckpoint),
+			DeliverPolicy:          policy,
 			IgnorePauseConsumption: true,
 		},
 		b.scanMetrics.NewScannerMetrics(),
 		func() {},
 		scannerConfig{
-			writeAheadBuffer: b.writeAheadBuffer,
-			startupBarrier:   &scannerStartupBarrier{message: param.RecoveryBarrier, resume: b.liveReady},
+			deliverWALControl: true,
+			writeAheadBuffer:  b.writeAheadBuffer,
+			startupBarrier: &scannerStartupBarrier{
+				message: param.RecoveryBarrier, resume: b.liveReady, stopAtWALSwitch: param.StopAtWALSwitch,
+				liveSource: func() (walimpls.ROWALImpls, wab.ROWriteAheadBuffer) { return b.roWALImpls, b.writeAheadBuffer },
+			},
 		},
 	)
 	recoveryStream := &recoveryStreamImpl{
@@ -61,7 +70,16 @@ func (b *recoveryStreamBuilderImpl) Build(param recovery.BuildRecoveryStreamPara
 }
 
 func (b *recoveryStreamBuilderImpl) RWWALImpls() walimpls.WALImpls {
-	return b.basicWAL
+	return b.roWALImpls.(walimpls.WALImpls)
+}
+
+// SwitchWAL is called only by RecoveryStorage after observing an AlterWAL.
+func (b *recoveryStreamBuilderImpl) SwitchWAL(ctx context.Context, start message.MessageID) (message.ImmutableMessage, error) {
+	w := b.roWALImpls.(*autowalimpls.WAL)
+	if err := w.SwitchWriterForRecovery(ctx, start.WALName()); err != nil {
+		return nil, err
+	}
+	return sendFirstTimeTick(ctx, w, start)
 }
 
 // recoveryStreamImpl is the implementation of RecoveryStream.

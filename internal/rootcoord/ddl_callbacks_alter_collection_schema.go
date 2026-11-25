@@ -381,7 +381,8 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 		field.TypeSchema.Nullable = parent.Nullable
 	}
-	merged := proto.Clone(model.MarshalStructArrayFieldModel(parent)).(*schemapb.StructArrayFieldSchema)
+	// MarshalStructArrayFieldModel already deep-copies the sub-fields.
+	merged := model.MarshalStructArrayFieldModel(parent)
 	merged.Fields = append(merged.Fields, proto.Clone(field).(*schemapb.FieldSchema))
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{merged}); err != nil {
 		return err
@@ -468,6 +469,9 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 
 // broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
 func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+	if typeutil.IsExternalCollection(coll.ToCollectionSchemaPB()) {
+		return merr.WrapErrOperationNotSupportedMsg("external collections do not support dropping fields or functions")
+	}
 	dropReq := req.GetAction().GetDropRequest()
 	if dropReq == nil {
 		return merr.WrapErrParameterInvalidMsg("drop_request is nil")
@@ -563,7 +567,7 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 			droppedField = f
 			continue
 		}
-		newFields = append(newFields, model.MarshalFieldModel(f))
+		newFields = append(newFields, model.CloneField(f))
 	}
 	if droppedField != nil {
 		// Mirror the proxy guard for direct-coord callers: a field a function
@@ -734,7 +738,7 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	newFields := make([]*schemapb.FieldSchema, 0, len(coll.Fields))
 	for _, field := range coll.Fields {
 		if _, ok := outputFieldIDSet[field.FieldID]; !ok {
-			newFields = append(newFields, model.MarshalFieldModel(field))
+			newFields = append(newFields, model.CloneField(field))
 		}
 	}
 

@@ -211,6 +211,10 @@ func TestReplicaLoadCheckAllQueryEntrypoints(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
 	_, err = client.statistics(ctx, "p_100v0", 100, &viewpb.StatisticsRequest{}, 0)
 	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	_, _, err = client.SearchStreams(ctx, &ShardSearchRequest{VChannel: "p_100v0", Req: &internalpb.SearchRequest{CollectionID: 100}}, 128)
+	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
+	_, _, err = client.QueryStream(ctx, &ShardQueryRequest{VChannel: "p_100v0", Req: &internalpb.RetrieveRequest{CollectionID: 100}}, 128)
+	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
 	require.Empty(t, checks.collections)
 }
 

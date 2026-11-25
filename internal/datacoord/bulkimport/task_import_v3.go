@@ -29,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -92,6 +94,18 @@ func (t *importTaskV3) GetTaskSlot() int64 {
 
 func (t *importTaskV3) GetTaskVersion() int64 { return t.task.Load().GetRunId() }
 
+// GetTaskResource prices the final merge on the same reshardmem working set
+// the slot charge is derived from (importV3WorkingSet), so the two never
+// disagree. A job that is gone is priced at the floor so the task can be
+// retired.
+func (t *importTaskV3) GetTaskResource() taskcommon.Resource {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default()
+	}
+	return taskresource.ImportV3(importV3WorkingSet(len(t.task.Load().GetFragments()), getImportV3Config(), job.GetSchema()))
+}
+
 func (t *importTaskV3) SetTaskTime(tt taskcommon.TimeType, tm time.Time) { t.times.SetTaskTime(tt, tm) }
 
 func (t *importTaskV3) GetTaskTime(tt taskcommon.TimeType) time.Time { return tt.GetTaskTime(t.times) }
@@ -131,7 +145,7 @@ func (t *importTaskV3) setOldSegmentIDs(segmentIDs []UniqueID) {
 	t.task.Load().OldSegmentIds = append([]int64(nil), segmentIDs...)
 }
 
-func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	p := t.task.Load()
 	if p.GetRunId() == 0 || p.GetLogRange() == nil {
 		t.Fail("import v3 task has no run resources")
@@ -195,7 +209,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		mlog.Warn(context.TODO(), "persist import v3 task running state failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID())
+	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic
@@ -373,7 +387,7 @@ func (t *importTaskV3) acceptResult(results []*datapb.ImportTaskV3Result) error 
 	if err := validateImportResults(results, 1); err != nil {
 		return err
 	}
-	namespaceSorted := job.GetSchema().GetEnableNamespace()
+	namespaceSorted := common.UsesNamespacePartitionKey(job.GetSchema())
 	return applyImportResults(context.TODO(), t.meta, p.GetCollectionId(), schemaVersion, []int64{p.GetSegmentId()}, !namespaceSorted, namespaceSorted, results)
 }
 

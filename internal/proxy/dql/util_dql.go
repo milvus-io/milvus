@@ -345,7 +345,7 @@ func AssignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName st
 }
 
 func NamespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
-	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+	return common.UsesNamespacePartitionKey(schema)
 }
 
 func NamespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {

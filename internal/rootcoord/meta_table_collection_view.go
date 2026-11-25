@@ -22,15 +22,19 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // collectionSchemaPB builds the schema RootCoord reports for coll, with
 // DbName set to dbName: the model's DBName may be out of sync with the
-// database resolved from DBID.
+// database resolved from DBID. The schema shares coll's field schemas
+// (see model.Collection.SchemaView), so callers must not modify them.
 func collectionSchemaPB(coll *model.Collection, dbName string) *schemapb.CollectionSchema {
-	schema := coll.ToCollectionSchemaPB()
+	schema := coll.SchemaView()
 	schema.DbName = dbName
+	// Hide legacy create-only directives (such as preserve_field_ids persisted
+	// on v3.0.0–v3.0.6) from DescribeCollection and downstream views/snapshots
+	// without mutating coll.Properties in MetaTable.
+	schema.Properties = stripCreateOnlyProperties(schema.Properties)
 	return schema
 }
 
@@ -76,16 +80,16 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 	if shardsNum == 0 {
 		shardsNum = int32(len(coll.VirtualChannelNames))
 	}
+	schema := collectionSchemaPB(coll, dbName)
 	return &metacache.CollectionInfo{
 		ID:                 coll.CollectionID,
-		Schema:             collectionSchemaPB(coll, dbName),
+		Schema:             schema,
 		State:              state,
 		Partitions:         partitions,
 		DroppingPartitions: dropping,
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
-		Properties:         funcutil.KeyValuePair2Map(coll.Properties),
-		PropertyPairs:      coll.Properties,
+		Properties:         schema.Properties,
 		DatabaseName:       dbName,
 		DatabaseID:         coll.DBID,
 		StartPositions:     coll.StartPositions,

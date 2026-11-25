@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/snapshotio"
@@ -786,7 +787,7 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 	assert.Equal(t, []int64{10}, persistedTask.GetOwnedSegmentIds())
 
 	cluster := &stubCluster{}
-	mgr.wrapTask(persistedTask).CreateTaskOnWorker(1, cluster)
+	mgr.wrapTask(persistedTask).CreateTaskOnWorker(1, cluster, taskresource.ExternalRefresh())
 	require.NotNil(t, cluster.refreshReq)
 	assert.Equal(t, "manifest-path", cluster.refreshReq.GetExploreManifestPath())
 	assert.Equal(t, int64(0), cluster.refreshReq.GetFileIndexBegin())
@@ -1711,6 +1712,31 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	assert.Equal(t, 0, updateCalls)
 }
 
+// Physical column checks belong to the DataNode manifest readers, not planning.
+func TestExploreMilvusTableDoesNotScanSourceColumns(t *testing.T) {
+	paramtable.Init()
+	source := testMilvusTableRefreshSchema(false)
+	source.Fields = append(source.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "extra", DataType: schemapb.DataType_Int64, Nullable: true})
+	target := testMilvusTableTargetRefreshSchema()
+	target.Fields = append(target.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "mapped_extra", ExternalField: "extra", DataType: schemapb.DataType_Int64, Nullable: true})
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&meta.CollectionInfo{ID: 100, Schema: target})
+	manager := &Manager{mt: &meta.Meta{MetaStore: ms}, allocator: &stubAllocator{nextID: 1000}}
+	read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+	defer read.UnPatch()
+	expected := []packed.FileInfo{{FilePath: "source-manifest", SourceSegmentID: 20, NumRows: 3}}
+	explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).Return(expected, "explore", nil).Build()
+	defer explore.UnPatch()
+	// A source manifest read would fail here. Planning must still return its files.
+	columns := mockey.Mock(packed.GetManifestHandleWithExtfs).Return(nil, merr.WrapErrServiceUnavailableMsg("must not read source manifests in DataCoord")).Build()
+	defer columns.UnPatch()
+	files, manifest, err := manager.exploreExternalFiles(context.Background(), &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100, ExternalSource: target.ExternalSource, ExternalSpec: target.ExternalSpec})
+	require.NoError(t, err)
+	require.Equal(t, expected, files)
+	require.Equal(t, "explore", manifest)
+	require.Zero(t, columns.Times())
+}
+
 func TestValidateMilvusTableRefreshSchemaErrorClass(t *testing.T) {
 	job := &datapb.ExternalCollectionRefreshJob{
 		JobId:          1,
@@ -1761,7 +1787,7 @@ func TestValidateMilvusTableRefreshSchemaErrorClass(t *testing.T) {
 
 	t.Run("schema_mismatch_is_non_retriable", func(t *testing.T) {
 		sourceSchema := testMilvusTableRefreshSchema(false)
-		sourceSchema.Fields[0].FieldID = 101
+		sourceSchema.Fields[0].DataType = schemapb.DataType_VarChar
 		mockRead := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 			Return(&datapb.SnapshotMetadata{
 				Collection: &datapb.CollectionDescription{

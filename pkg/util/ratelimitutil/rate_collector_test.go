@@ -24,6 +24,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRateCollector(t *testing.T) {
@@ -138,6 +139,44 @@ func TestRateCollector(t *testing.T) {
 			assert.True(t, math.Abs(want-actual) < 0.000001)
 		}
 	})
+}
+
+func TestRateCollectorExpiresIdleWindow(t *testing.T) {
+	for _, idle := range []time.Duration{DefaultWindow, time.Hour + 2750*time.Millisecond} {
+		t.Run(idle.String(), func(t *testing.T) {
+			const subLabel = "db.collection"
+			start := time.Unix(100, 0)
+			rc, err := newRateCollector(DefaultWindow, DefaultGranularity, start, false)
+			require.NoError(t, err)
+			rc.Register("query")
+			rc.Register("insert")
+			rc.add("query", 10, start, subLabel)
+			lastActivity := start.Add(3 * time.Second)
+			rc.add("query", 20, lastActivity, subLabel)
+			rc.add("insert", 30, lastActivity)
+
+			resume := lastActivity.Add(idle)
+			rc.add("query", 40, resume, subLabel)
+			boundary := start.Add(resume.Sub(start).Truncate(DefaultGranularity))
+			require.Equal(t, boundary, rc.last)
+			require.Equal(t, int(boundary.Sub(start)%DefaultWindow/DefaultGranularity), rc.position)
+
+			for _, label := range []string{"query", FormatSubLabel("query", subLabel)} {
+				value, err := rc.rate(label, DefaultWindow, resume)
+				require.NoError(t, err)
+				assert.Equal(t, 4.0, value)
+			}
+			value, err := rc.rate("insert", DefaultWindow, resume)
+			require.NoError(t, err)
+			assert.Zero(t, value)
+
+			nextBoundary := boundary.Add(DefaultGranularity)
+			rc.add("query", 5, nextBoundary, subLabel)
+			value, err = rc.rate("query", DefaultGranularity, nextBoundary)
+			require.NoError(t, err)
+			assert.Equal(t, 5.0, value)
+		})
+	}
 }
 
 func TestRateSubLabel(t *testing.T) {

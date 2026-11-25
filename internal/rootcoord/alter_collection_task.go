@@ -83,28 +83,6 @@ func DeleteProperties(oldProps []*commonpb.KeyValuePair, deleteKeys []string) []
 	return propKV
 }
 
-func ResetFieldProperties(coll *model.Collection, fieldName string, newProps []*commonpb.KeyValuePair) error {
-	for i, field := range coll.Fields {
-		if field.Name == fieldName {
-			coll.Fields[i].TypeParams = newProps
-			return nil
-		}
-	}
-	for i, structField := range coll.StructArrayFields {
-		if structField.Name == fieldName {
-			coll.StructArrayFields[i].TypeParams = newProps
-			return nil
-		}
-		for j, field := range structField.Fields {
-			if field.Name == fieldName {
-				coll.StructArrayFields[i].Fields[j].TypeParams = newProps
-				return nil
-			}
-		}
-	}
-	return merr.WrapErrParameterInvalidMsg("field %s does not exist in collection", fieldName)
-}
-
 func GetFieldProperties(coll *model.Collection, fieldName string) ([]*commonpb.KeyValuePair, error) {
 	for _, field := range coll.Fields {
 		if field.Name == fieldName {

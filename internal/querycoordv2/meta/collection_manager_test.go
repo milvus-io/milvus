@@ -723,7 +723,7 @@ func TestCollectionManager_GetCollectionLoadInfo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := metacache.NewMetaStore(nil)
 			if !tc.noCollection {
-				store.PutCollection(&metacache.CollectionInfo{ID: 1, DatabaseName: "db", PropertyPairs: tc.collProps})
+				store.PutCollection(&metacache.CollectionInfo{ID: 1, DatabaseName: "db", Properties: tc.collProps})
 			}
 			if !tc.noDatabase {
 				metacachetest.Collections(store).PutDatabase(&metacache.DatabaseInfo{Name: "db", Properties: tc.dbProps})

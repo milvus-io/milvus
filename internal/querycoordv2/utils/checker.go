@@ -18,7 +18,6 @@ package utils
 
 import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -52,18 +51,6 @@ var checkerNames = map[CheckerType]string{
 
 func (s CheckerType) String() string {
 	return checkerNames[s]
-}
-
-func FilterReleased[E interface{ GetCollectionID() int64 }](elems []E, collections []int64) []E {
-	collectionSet := typeutil.NewUniqueSet(collections...)
-	ret := make([]E, 0, len(elems))
-	for i := range elems {
-		collection := elems[i].GetCollectionID()
-		if !collectionSet.Contain(collection) {
-			ret = append(ret, elems[i])
-		}
-	}
-	return ret
 }
 
 func FindMaxVersionSegments(segments []*meta.Segment) []*meta.Segment {

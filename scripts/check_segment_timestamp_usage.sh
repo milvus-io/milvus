@@ -28,8 +28,6 @@ ALLOWLIST_PATTERNS=(
     "segment_allocation_policy.go"
     # Empty Growing segment cleanup — import segments have rows
     "segment_manager.go"
-    # Growing segment release — import segments are never Growing
-    "segment_checker.go"
     # DML pipeline for Growing segments — import segments don't receive DML messages
     "flow_graph_dd_node.go"
     # Meta update validation guard — compares within same segment, not temporal decision

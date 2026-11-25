@@ -86,6 +86,36 @@ func TestHandleAlterConfig(t *testing.T) {
 
 	coord := &mixCoordImpl{}
 
+	t.Run("reject summary mode writes and resets", func(t *testing.T) {
+		source, ok := mgr.GetEtcdSource()
+		require.True(t, ok)
+		key := paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.Key
+		formatted := pkgconfig.FormatKey(key)
+		before, beforeErr := source.GetConfigurationByKey(formatted)
+		enabled := "true"
+		for _, spelling := range []string{key, "DATACOORD_INDEX_SEGMENTINDEXSUMMARIESENABLED", "datacoordindexsegmentindexsummariesenabled"} {
+			for _, value := range []*string{nil, &enabled} {
+				body, err := json.Marshal(map[string]any{
+					"configs": []map[string]any{{"key": spelling, "value": value}},
+				})
+				require.NoError(t, err)
+				response := httptest.NewRecorder()
+				coord.HandleAlterConfig(response, httptest.NewRequest(http.MethodPost, "/management/config/alter", bytes.NewReader(body)))
+				require.Equal(t, http.StatusBadRequest, response.Code, spelling)
+				require.Contains(t, response.Body.String(), key)
+			}
+		}
+		require.NoError(t, source.RefreshConfigurationsLinearizable())
+		after, afterErr := source.GetConfigurationByKey(formatted)
+		if beforeErr != nil {
+			require.ErrorIs(t, beforeErr, pkgconfig.ErrKeyNotFound)
+			require.ErrorIs(t, afterErr, pkgconfig.ErrKeyNotFound)
+		} else {
+			require.NoError(t, afterErr)
+		}
+		require.Equal(t, before, after)
+	})
+
 	t.Run("single config update", func(t *testing.T) {
 		reqBody := map[string]interface{}{
 			"configs": []map[string]interface{}{

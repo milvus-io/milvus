@@ -267,3 +267,42 @@ func TestEstimateIndexLoadResourceReturnsErrorWithoutIndexType(t *testing.T) {
 	require.Error(t, err)
 	require.Zero(t, usage)
 }
+
+func TestSTLSortMmapAdmission(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key
+	original := paramtable.Get().QueryNodeCfg.MmapScalarIndex.GetValue()
+	t.Cleanup(func() { paramtable.Get().Save(key, original) })
+	for _, global := range []string{"false", "true"} {
+		for _, explicit := range []string{"", "false", "true"} {
+			t.Run("global="+global+"/explicit="+explicit, func(t *testing.T) {
+				paramtable.Get().Save(key, global)
+				index := &querypb.FieldIndexInfo{
+					IndexSize: 1024 * 1024, NumRows: 1024, CurrentScalarIndexVersion: 3,
+					IndexParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+					IndexFilePaths: []string{"/must/not/read/index.v3"},
+				}
+				if explicit != "" {
+					index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: explicit})
+				}
+				want := global == "true"
+				if explicit != "" {
+					want = explicit == "true"
+				}
+				field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64}
+				info, err := buildCLoadIndexInfo(field, &querypb.SegmentLoadInfo{}, index)
+				require.NoError(t, err)
+				require.Equal(t, want, info.GetEnableMmap())
+				usage, err := EstimateIndexLoadResource(context.Background(), field, &querypb.SegmentLoadInfo{}, index)
+				require.NoError(t, err)
+				if want {
+					require.EqualValues(t, index.IndexSize, usage.FinalDiskBytes)
+					require.Less(t, usage.FinalMemoryBytes, uint64(index.IndexSize))
+				} else {
+					require.Zero(t, usage.FinalDiskBytes)
+					require.GreaterOrEqual(t, usage.FinalMemoryBytes, uint64(index.IndexSize))
+				}
+			})
+		}
+	}
+}

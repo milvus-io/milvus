@@ -23,7 +23,7 @@
 
 #include "folly/coro/BlockingWait.h"
 #include "common/OpContext.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/MemFileManagerImpl.h"
 
@@ -45,6 +45,7 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
     const bool is_index_file =
         storage_namespace == storage::ArtifactStorageNamespace::Index;
     folly::Try<std::shared_ptr<InputStream>> opened;
+    int64_t sync_size = 0;
     if (use_async_load) {
         auto metadata_lease =
             co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
@@ -54,20 +55,33 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
                 folly::CancellationToken{},
                 manager.OpenInputStreamAsync(files.front(), is_index_file)));
     } else {
-        opened = folly::makeTryWith([&] {
-            return manager.OpenInputStream(files.front(), is_index_file);
-        });
+        auto open = folly::via(&milvus::ThreadPools::GetExecutor(
+                                   milvus::PriorityForLoad(priority)),
+                               [&] {
+                                   auto input = manager.OpenInputStream(
+                                       files.front(), is_index_file);
+                                   AssertInfo(input != nullptr,
+                                              "Failed to open packed index");
+                                   sync_size = input->Size();
+                                   return input;
+                               })
+                        .semi();
+        opened =
+            co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
+                folly::CancellationToken{}, std::move(open)));
     }
     storage::ThrowIfCancelled(token, "open packed index metadata");
     auto input = std::move(opened).value();
     AssertInfo(input != nullptr, "Failed to open packed scalar index");
     if (!use_async_load) {
-        co_return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
-            storage::IndexEntryReader::Open(input,
-                                            input->Size(),
-                                            context.fieldDataMeta.collection_id,
-                                            milvus::PriorityForLoad(priority),
-                                            token))};
+        auto reader = co_await storage::IndexEntryReader::OpenAsync(
+            input,
+            sync_size,
+            context.fieldDataMeta.collection_id,
+            milvus::PriorityForLoad(priority),
+            token);
+        co_return PackedIndexSource{
+            std::shared_ptr<storage::IndexEntryReader>(std::move(reader))};
     }
     auto reader = co_await storage::AsyncIndexEntryReader::Open(
         std::move(input), context.fieldDataMeta.collection_id, priority, token);
@@ -83,7 +97,7 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
                        storage::ArtifactStorageNamespace storage_namespace,
                        milvus::OpContext* op_ctx) {
     const bool use_async = context.use_async_load.value_or(
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+        milvus::storage::LoadAsyncReadEnabled());
     const auto priority =
         op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW

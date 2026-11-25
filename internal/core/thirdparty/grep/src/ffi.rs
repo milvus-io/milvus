@@ -67,6 +67,8 @@ pub struct MgGrepMatchOptions {
     /// 0: unlimited; 1: max_count is present (including zero).
     pub has_max_count: u32,
     pub max_count: u64,
+    pub before_context: u64,
+    pub after_context: u64,
 }
 
 /// At least one pattern; ordered OR. Empty patterns are valid. No literal
@@ -87,7 +89,7 @@ pub struct MgGrepCompileLimits {
 }
 
 /// UTF-8 byte interval [start,end) relative to the owning line.content.
-/// Empty matches have start == end; endpoints are character boundaries.
+/// Empty matches have start == end; endpoints may lie inside UTF-8 code points.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MgGrepSpan {
@@ -95,8 +97,10 @@ pub struct MgGrepSpan {
     pub end: u64,
 }
 
-/// Complete matching line, minus only its terminal LF. Other bytes remain.
-/// Every returned line has at least one span. Empty content is {NULL,0}.
+/// Complete matching or context line, minus only its terminal LF. Other bytes remain.
+/// Context lines have zero spans; matching spans are line-local and include
+/// zero-length matches at the end of the line. Selection depends on line_count.
+/// Empty content is {NULL,0}.
 #[repr(C)]
 pub struct MgGrepLine {
     pub content: MgGrepBytes,
@@ -106,6 +110,8 @@ pub struct MgGrepLine {
     pub line_number: u64,
     /// Zero-based UTF-8 byte offset in the original field, including preceding LFs.
     pub line_start_offset: u64,
+    /// True for matching lines, even when span_count is zero.
+    pub is_match: bool,
 }
 
 /// One entry per input. line_count > 0 means selected; lines are in original
@@ -394,6 +400,7 @@ fn make_result(
                 span_count: n,
                 line_number: line.line_number,
                 line_start_offset: line.line_start_offset,
+                is_match: line.is_match,
             });
             span_at += n;
         }
@@ -491,6 +498,8 @@ unsafe fn inputs<'a>(
 
 fn options(o: MgGrepMatchOptions) -> Result<MatchOptions, Error> {
     Ok(MatchOptions {
+        before_context: o.before_context,
+        after_context: o.after_context,
         max_count: match o.has_max_count {
             0 => None,
             1 => Some(o.max_count),
@@ -755,15 +764,17 @@ mod tests {
                 offset_of!(MgGrepMatchOptions, boundary),
                 offset_of!(MgGrepMatchOptions, has_max_count),
                 offset_of!(MgGrepMatchOptions, max_count),
+                offset_of!(MgGrepMatchOptions, before_context),
+                offset_of!(MgGrepMatchOptions, after_context),
             ),
-            (24, 8, 12, 16)
+            (40, 8, 12, 16, 24, 32)
         );
         assert_eq!(
             (
                 size_of::<MgGrepSpecView>(),
                 offset_of!(MgGrepSpecView, options)
             ),
-            (40, 16)
+            (56, 16)
         );
         assert_eq!(
             (
@@ -783,9 +794,10 @@ mod tests {
                 offset_of!(MgGrepLine, spans),
                 offset_of!(MgGrepLine, span_count),
                 offset_of!(MgGrepLine, line_number),
-                offset_of!(MgGrepLine, line_start_offset)
+                offset_of!(MgGrepLine, line_start_offset),
+                offset_of!(MgGrepLine, is_match)
             ),
-            (48, 16, 24, 32, 40)
+            (56, 16, 24, 32, 40, 48)
         );
         assert_eq!(
             (

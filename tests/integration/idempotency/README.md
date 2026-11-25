@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Verify idempotent inserts across ambiguous WAL acknowledgements, client deadlines,
+Verify idempotent inserts across interrupted append completion, client deadlines,
 and StreamingNode owner replacement. The suite uses the subprocess MiniCluster
 with Pulsar, etcd, and MinIO, and covers both single-message inserts and
 multi-message transactions with auto-generated primary keys.
@@ -11,17 +11,15 @@ multi-message transactions with auto-generated primary keys.
 
 | Scenario | Boundary | Expected behavior |
 | --- | --- | --- |
-| Lost backend acknowledgement | A successful `walimpls.Append`, before the adaptor evaluates its result | The real retry loop persists another record with the same TimeTick; reader deduplication prevents extra rows |
 | Crash before window completion | A successful append, before idempotency `Window.Complete` | SIGKILL followed by owner recovery preserves the original IDs and row offsets |
 | Partial shard completion | One shard paused before append or transaction commit; three other shards durably appended | Recovery preserves the committed shards and completes the remaining shard once |
 | Client deadline | A successful append paused before window completion | The client times out; releasing the barrier and retrying the same key returns the original IDs |
-| Unrelated request | A backend fault armed for a different idempotency key | The unrelated write succeeds without consuming the selected request's one-shot fault |
+| Unrelated request | A pre-append observation armed for a different idempotency key | The unrelated write succeeds without consuming the selected request's one-shot observation |
 
-The backend fault changes the return value at the WAL implementation boundary,
-inside the existing adaptor retry loop. Timestamp allocation and interceptor
-callbacks remain intact. Changing a successful whole interceptor chain into an
-error above this loop would cause an outer retry with a new TimeTick and model a
-different failure.
+Ordinary backend failures are retried inside `autowalimpls.Append` until success
+or writer loss. Injecting an error above that retry loop after a durable append
+would violate Forward Recovery and incorrectly release the pending idempotency
+key. This suite does not inject append errors.
 
 The idempotency boundaries only observe or pause execution. Process termination
 and client deadlines supply the actual failures; the controller never forces
@@ -55,10 +53,6 @@ from missing a release because its directory was removed too early.
 
 ## Correctness checks
 
-Backend retries must preserve the logical message's TimeTick while producing
-distinct persisted message IDs. This exercises physical reader deduplication,
-which exists independently of request-level idempotency.
-
 Request-level checks compare the IDs returned by explicit same-key retries with
 the server's original IDs at their recorded row offsets, including after owner
 recovery. Queries verify every ordinal/primary-key pair. Flushed collection
@@ -67,6 +61,12 @@ deduplication can hide duplicate physical rows. Compaction is disabled to preser
 this check.
 
 ## Scope
+
+Backend lost-acknowledgement retry is covered separately by auto WAL unit tests:
+the mocked physical backend records the message before returning an error, and
+the retry preserves its TimeTick and contents while producing a different
+physical message ID. This suite no longer covers that fault end to end against
+real Pulsar.
 
 The suite covers local WAL behavior with Pulsar. Woodpecker, CDC switchover, and
 real storage/network chaos require separate coverage. Recovery follows the
