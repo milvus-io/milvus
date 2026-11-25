@@ -14,12 +14,14 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // ModuleConfig contains the initial state and dependencies for one vchannel
@@ -651,6 +653,10 @@ func (m *VChannelRecoveryModule) completeDropsLocked() []message.RetainedImmutab
 
 func releaseDropHandles(handles []message.RetainedImmutableMessage) {
 	for _, handle := range handles {
+		if msg := handle.Message(); msg.MessageType() == message.MessageTypeDropCollection {
+			drop := message.MustAsImmutableDropCollectionMessageV1(msg)
+			metrics.CleanupDataNodeWriteMetrics(paramtable.GetNodeID(), drop.Header().GetCollectionId())
+		}
 		handle.Release()
 	}
 }
