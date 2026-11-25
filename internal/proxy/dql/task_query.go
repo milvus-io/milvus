@@ -1463,7 +1463,7 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 				if capacity <= 0 {
 					capacity = int64(rowCount)
 				}
-				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), capacity)
+				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), min(maxStreamResultPreallocRows, capacity))
 			}
 			if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 				return nil, merr.WrapErrServiceInternalMsg(
