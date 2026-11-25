@@ -64,7 +64,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "write_data_count",
-			Help:      "byte size of datanode write to object storage, including flushed size",
+			Help:      "Number of insert rows or delete entries written by flush and compaction",
 		}, []string{
 			nodeIDLabelName,
 			dataSourceLabelName,
@@ -591,14 +591,22 @@ func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel 
 	DataNodeCompactionMissingDeleteCount.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
+}
 
-	DataNodeWriteDataCount.Delete(prometheus.Labels{
+// CleanupDataNodeWriteMetrics removes this node's write counters for a dropped collection.
+func CleanupDataNodeWriteMetrics(nodeID, collectionID int64) {
+	DataNodeWriteDataCount.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:       fmt.Sprint(nodeID),
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
 
 func CleanupDataNodeCompactionMetrics(nodeID int64) {
 	nodeIDLabel := fmt.Sprint(nodeID)
+	DataNodeWriteDataCount.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:     nodeIDLabel,
+		dataSourceLabelName: CompactionDataSourceLabel,
+	})
 	DataNodeCompactionLatency.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName: nodeIDLabel,
 	})

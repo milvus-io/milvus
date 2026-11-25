@@ -300,6 +300,8 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		// TODO: Current drop collection message will be handled by the underlying data sync service.
 		defer func() {
 			impl.flusherComponents.WhenDropCollection(msg.VChannel())
+			drop := message.MustAsImmutableDropCollectionMessageV1(msg)
+			metrics.CleanupDataNodeWriteMetrics(paramtable.GetNodeID(), drop.Header().GetCollectionId())
 		}()
 	case message.MessageTypeRollbackImport:
 		// No-op: DataCoord DDL ack callback handles all state changes.
