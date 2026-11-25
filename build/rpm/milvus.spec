@@ -6,11 +6,17 @@
 %global release 1%{?dist}
 %endif
 
+%bcond_without svs
+
 Name:             milvus
 Version:          %{version}
 Release:          %{release}
 Summary:          Milvus V2 RPM
+%if %{with svs}
+License:          Apache-2.0 AND LicenseRef-Intel-Simplified-Software-License
+%else
 License:          Apache License 2.0
+%endif
 Requires(preun):  libstdc++ libgomp tbb-devel tzdata
 # tbb-devel actually provides it, but not defined
 Provides:         libtbb.so()(64bit)
@@ -19,6 +25,13 @@ BuildArch:        x86_64
 %description
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. 
 Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
+
+%if %{with svs}
+# Ship Intel's prebuilt ELF byte-for-byte after the distribution's strip hooks.
+%global __os_install_post %{__os_install_post} \
+    cp -a lib/libsvs_runtime.so* "$RPM_BUILD_ROOT/lib64/milvus/" \
+%{nil}
+%endif
 
 %install
 # dir
@@ -77,6 +90,10 @@ for lib in \
     cp -a lib/${lib} %{buildroot}/lib64/milvus/
 done
 
+%if %{with svs}
+install -Dm644 lib/svs-notices.txt %{buildroot}%{_defaultlicensedir}/%{name}/svs-notices.txt
+%endif
+
 # conf
 install -m 755 configs/milvus.yaml %{buildroot}/etc/milvus/configs/milvus.yaml
 install -m 755 configs/advanced/etcd.yaml %{buildroot}/etc/milvus/configs/advanced/etcd.yaml
@@ -129,6 +146,10 @@ systemctl daemon-reload
 /lib64/milvus/libicudata.so*
 /lib64/milvus/libjemalloc.so*
 /lib64/milvus/libknowhere.so*
+%if %{with svs}
+/lib64/milvus/libsvs_runtime.so*
+%license %{_defaultlicensedir}/%{name}/svs-notices.txt
+%endif
 /lib64/milvus/liblzma.so*
 /lib64/milvus/libmilvus-common.so*
 /lib64/milvus/libmilvus_core.so*

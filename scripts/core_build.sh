@@ -188,7 +188,7 @@ parameter:
 -a: build milvus with AddressSanitizer(default: false)
 -T: build milvus with ThreadSanitizer (ON/OFF, default: OFF; Linux CPU only)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--S: build milvus with SVS (AUTO/ON/OFF, default: AUTO enables SVS on Linux x86-64)
+-S: build milvus with SVS (AUTO/ON/OFF, default: AUTO enables SVS on Linux x86-64 without TSan)
 -R: build milvus-storage with AWS S3 CRT read path(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help

@@ -41,8 +41,11 @@ if ( WITH_GPU AND NOT WITH_CARDINAL )
 endif ()
 
 # Resolve auto for the target without replacing the user's cached selection.
+if ( USE_TSAN AND WITH_SVS STREQUAL "ON" )
+    message(FATAL_ERROR "WITH_SVS=ON is incompatible with USE_TSAN: the SVS runtime links GNU libgomp, but TSan requires LLVM libomp")
+endif()
 if ( WITH_SVS STREQUAL "ON" OR
-     ( WITH_SVS STREQUAL "AUTO" AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+     ( WITH_SVS STREQUAL "AUTO" AND NOT USE_TSAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
        CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$" ) )
     set(WITH_SVS ON)
 else ()
@@ -77,7 +80,23 @@ if ( WITH_SVS )
     if ( NOT _SVS_RUNTIME_LIBS )
         message(FATAL_ERROR "SVS runtime libraries not found for package config at ${_SVS_CONFIG_DIR}")
     endif()
+    # Use the notices from the same package as the binary. Early v0.5.1
+    # bundles shipped without these files, including existing offline installs.
+    get_filename_component(_SVS_PREFIX "${_SVS_CONFIG_DIR}/../../.." ABSOLUTE)
+    if ( EXISTS "${_SVS_PREFIX}/LICENSE" AND EXISTS "${_SVS_PREFIX}/THIRD-PARTY-PROGRAMS" )
+        file(READ "${_SVS_PREFIX}/LICENSE" _SVS_LICENSE)
+        file(READ "${_SVS_PREFIX}/THIRD-PARTY-PROGRAMS" _SVS_THIRD_PARTY)
+        set(_SVS_NOTICES "${CMAKE_CURRENT_BINARY_DIR}/svs-notices.txt")
+        file(WRITE "${_SVS_NOTICES}" "Intel® Scalable Vector Search: Copyright (C) Intel Corporation\n\n${_SVS_LICENSE}\n${_SVS_THIRD_PARTY}")
+    else()
+        get_directory_property(_SVS_VERSION DIRECTORY "${knowhere_SOURCE_DIR}" DEFINITION svs_runtime_VERSION)
+        if ( NOT _SVS_VERSION VERSION_EQUAL "0.5.1" )
+            message(FATAL_ERROR "Missing LICENSE and/or THIRD-PARTY-PROGRAMS for SVS ${_SVS_VERSION} at ${_SVS_PREFIX}")
+        endif()
+        set(_SVS_NOTICES "${CMAKE_CURRENT_SOURCE_DIR}/svs-0.5.1-notices.txt")
+    endif()
     install(FILES ${_SVS_RUNTIME_LIBS} DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(FILES "${_SVS_NOTICES}" DESTINATION "${CMAKE_INSTALL_LIBDIR}" RENAME svs-notices.txt)
 endif()
 
 if ( WITH_GPU AND NOT WITH_CARDINAL )
