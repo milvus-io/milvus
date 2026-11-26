@@ -142,6 +142,12 @@ func (t *mixCompactionTask) preCompact() error {
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
+	if maxSegmentRows := t.plan.GetMaxSegmentRows(); maxSegmentRows > 0 {
+		// The writer also cuts an output segment on rows, so one input can
+		// split into several outputs while its bytes stay under targetSize.
+		t.estimatedOutputSegmentCount = max(t.estimatedOutputSegmentCount,
+			int64(math.Ceil(float64(t.maxRows)/float64(maxSegmentRows))))
+	}
 	mlog.Info(context.TODO(), "preCompaction analyze",
 		mlog.Int64("planID", t.GetPlanID()),
 		mlog.Int64("inputSize", currSize),
@@ -231,6 +237,7 @@ func (t *mixCompactionTask) mergeSplit(
 	if err != nil {
 		return nil, err
 	}
+	mWriter.SetSegmentMaxRows(t.plan.GetMaxSegmentRows())
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -241,8 +248,9 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 
-	for _, seg := range t.plan.GetSegmentBinlogs() {
-		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField, writerSchema)
+	lineage := newTextSizeLineage(writerSchema, t.lobContext, t.plan.GetSegmentBinlogs())
+	for i, seg := range t.plan.GetSegmentBinlogs() {
+		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField, writerSchema, lineage, i)
 		if err != nil {
 			mWriter.Close()
 			return nil, err
@@ -255,6 +263,7 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 	res := mWriter.GetCompactionSegments()
+	lineage.finish(res)
 	if len(res) == 0 {
 		// append an empty segment
 		id, err := segIDAlloc.AllocOne()
@@ -284,7 +293,7 @@ func (t *mixCompactionTask) mergeSplit(
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
-	writerSchema *schemapb.CollectionSchema,
+	writerSchema *schemapb.CollectionSchema, lineage *textSizeLineage, source int,
 ) (deletedRowCount, expiredRowCount int64, err error) {
 	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
 		storage.WithDownloader(t.binlogIO.Download),
@@ -318,6 +327,17 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer materializer.Close()
 
+	write := mWriter.Write
+	if lineage != nil {
+		lineage.sources[source].present = existingFields
+		write = func(r storage.Record) error {
+			if err := mWriter.Write(r); err != nil {
+				return err
+			}
+			lineage.recordRange(mWriter.currentSegmentID, source, r, 0, r.Len())
+			return nil
+		}
+	}
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	var totalRowsRead int64
 
@@ -412,7 +432,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 					if out != rec {
 						defer out.Release()
 					}
-					return mWriter.Write(out)
+					return write(out)
 				}()
 				if err != nil {
 					rb.Release()
@@ -423,7 +443,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			rb.Release()
 		} else {
 			out := overwriteRecordTimestamps(r, seg.GetCommitTimestamp())
-			err := mWriter.Write(out)
+			err := write(out)
 			if out != r {
 				out.Release()
 			}
@@ -435,6 +455,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		cleanupMaterializedRecord(r)
 	}
 
+	if lineage != nil {
+		lineage.sources[source].read = totalRowsRead
+	}
 	deltalogDeleteEntriesCount := len(delta)
 	deletedRowCount = int64(entityFilter.GetDeletedCount())
 	expiredRowCount = int64(entityFilter.GetExpiredCount())

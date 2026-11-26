@@ -111,9 +111,11 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 		captured = msg
 	})
 
-	require.NoError(t, server.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+	released, err := server.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		CollectionID: collectionID,
-	}))
+	}, false)
+	require.NoError(t, err)
+	require.True(t, released)
 	require.NotNil(t, captured)
 	// The broadcaster resolves an empty target list to the control channel.
 	assert.Empty(t, captured.BroadcastHeader().VChannels)
