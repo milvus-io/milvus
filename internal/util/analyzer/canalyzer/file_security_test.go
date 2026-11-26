@@ -31,11 +31,11 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 		"valid": "the\n", "synonym": "FILE_SECRET_MARKER=>a=>b", "jieba": "FILE_SECRET_MARKER invalid_frequency",
 		"large": strings.Repeat("x", 129), "invalid_utf8": "FILE_SECRET_MARKER\xff",
 	} {
-		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(data), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(data), 0o600))
 	}
-	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("FILE_SECRET_MARKER"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("FILE_SECRET_MARKER"), 0o600))
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
-	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0600))
+	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0o600))
 	for _, tc := range []struct {
 		name, kind, path string
 		allowed          bool
@@ -93,8 +93,8 @@ func TestAnalyzerResourceNamespaceStaysUnderCache(t *testing.T) {
 		require.NoError(t, updateParams())
 	})
 	dir := filepath.Join(pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()), "namespace", "7")
-	require.NoError(t, os.MkdirAll(dir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the"), 0600))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the"), 0o600))
 	params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dict","file_name":"stop.txt"}}]}`
 	for _, namespace := range []string{"namespace", "/namespace"} {
 		extra, err := json.Marshal(map[string]any{"storage_name": namespace, "resource_map": map[string]int64{"dict": 7}})

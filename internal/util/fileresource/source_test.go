@@ -61,11 +61,11 @@ func TestFileResourceSourceRejectsBeforeProbing(t *testing.T) {
 func TestFileResourceLocalSourceIsConfined(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "dict"), []byte("ok"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("SECRET_MARKER"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dict"), []byte("ok"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret"), []byte("SECRET_MARKER"), 0o600))
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
 	require.NoError(t, os.Symlink(filepath.Join(outside, "secret"), filepath.Join(root, "file_link")))
-	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0600))
+	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0o600))
 	source := &restrictedSource{ChunkManager: storage.NewLocalChunkManager(), root: root}
 	for _, key := range []string{"dict", filepath.Join(root, "dict")} {
 		exists, err := source.Exist(context.Background(), key)
@@ -95,8 +95,8 @@ func TestFileResourceLocalDefaultDirectory(t *testing.T) {
 	old := setting.SwapTempValue(storageRoot)
 	t.Cleanup(func() { setting.SwapTempValue(old) })
 	root := filepath.Join(storageRoot, "file_resource")
-	require.NoError(t, os.Mkdir(root, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "dict"), []byte("ok"), 0600))
+	require.NoError(t, os.Mkdir(root, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "dict"), []byte("ok"), 0o600))
 	source := RestrictSource(storage.NewLocalChunkManager())
 	size, err := source.Size(context.Background(), "dict")
 	require.NoError(t, err)
@@ -108,7 +108,6 @@ func TestFileResourceLocalDefaultDirectory(t *testing.T) {
 	content, err := os.ReadFile(destination)
 	require.NoError(t, err)
 	require.Equal(t, "ok", string(content))
-
 }
 
 func TestFileResourceDownloadEnforcesActualReadLimit(t *testing.T) {

@@ -28,7 +28,8 @@ Reads reject traversal, symlinks and non-regular
 files, then take a bounded snapshot before parsing. `function.analyzer.max_dict_size`
 limits each local or downloaded dictionary to 64 MiB by default. Parser errors
 must not echo dictionary contents, and native errors must not append analyzer
-parameters. Lindera's path-only parser receives a private temporary snapshot.
+parameters. Lindera's CSV parser receives a private temporary snapshot; binary
+dictionaries are parsed directly from the bounded bytes.
 
 `common.fileResource.allowedPath` is a startup-only source boundary. For S3 and
 other remote storage, empty uses `<storage-root>/file_resource`, normally
