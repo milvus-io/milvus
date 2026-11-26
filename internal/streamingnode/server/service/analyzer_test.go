@@ -467,7 +467,9 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		conn, err := grpc.NewClient("passthrough:///missing-validation-file", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
-		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + filepath.Join(t.TempDir(), "missing.txt") + `"}}]}`
+		// A relative name stays within the configured dictionary base.
+		missingPath := "missing-" + filepath.Base(filepath.Dir(t.TempDir())) + ".txt"
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + missingPath + `"}}]}`
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		resp, err := streamingpb.NewStreamingNodeHandlerServiceClient(conn).ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
@@ -477,7 +479,7 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		require.False(t, resp.GetStatus().GetRetriable())
 		require.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(resp.GetStatus())))
 		require.Contains(t, resp.GetStatus().GetReason(), "body")
-		require.Contains(t, resp.GetStatus().GetReason(), "missing.txt")
+		require.NotContains(t, resp.GetStatus().GetReason(), missingPath)
 		require.Contains(t, resp.GetStatus().GetReason(), "No such file or directory")
 		require.Empty(t, resp.GetResourceIds())
 	})
