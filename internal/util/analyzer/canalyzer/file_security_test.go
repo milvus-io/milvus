@@ -154,8 +154,7 @@ func TestAnalyzerRestoreIgnoresAdmissionPolicyChanges(t *testing.T) {
 	restored, err := RestoreAnalyzer(string(data), "")
 	require.NoError(t, err)
 	defer restored.Destroy()
-	stream, err := restored.NewTokenStream("the cat")
-	require.NoError(t, err)
+	stream := restored.NewTokenStream("the cat")
 	// TokenStream creation is implemented by the same native tokenizer used after recovery.
 	require.True(t, stream.Advance())
 	require.Equal(t, "cat", stream.Token())
@@ -188,6 +187,15 @@ func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
 		require.NoError(t, err)
 		restored.Destroy()
 	}
-	_, err := RestoreAnalyzer(params, `{"resource_map":{}}`)
+	// Linux permits backslashes in basenames that predate admission restrictions.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, `legacy\stop.txt`), []byte("the\n"), 0600))
+	legacy := strings.Replace(params, `"file_name":"stop.txt"`, `"file_name":"legacy\\stop.txt"`, 1)
+	restored, err := RestoreAnalyzer(legacy, "")
+	require.NoError(t, err)
+	restored.Destroy()
+	_, err = ValidateAnalyzer(legacy, "")
+	require.Error(t, err)
+
+	_, err = RestoreAnalyzer(params, `{"resource_map":{}}`)
 	require.Error(t, err, "explicit empty bindings must not fall back to global names")
 }
