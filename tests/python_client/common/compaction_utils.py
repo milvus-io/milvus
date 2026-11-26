@@ -13,7 +13,7 @@ from pymilvus.client.types import SegmentInfo, Status
 from pymilvus.client.utils import check_status
 from pymilvus.decorators import IGNORE_RETRY_CODES
 from pymilvus.exceptions import ErrorCode, MilvusException
-from pymilvus.grpc_gen import common_pb2
+from pymilvus.grpc_gen import common_pb2, milvus_pb2
 
 UNSUCCESSFUL_COMPACTION_STATES = frozenset({"UndefiedState", "UndefinedState"})
 INITIAL_RETRY_BACKOFF = 0.01
@@ -28,6 +28,49 @@ class CompactionStateInfo:
     completed_plan_no: int = 0
     failed_plan_no: int = 0
     timeout_plan_no: int = 0
+
+
+def submit_compaction_once(handler, collection_name, *, timeout, context=None, segment_ids=None, is_l0=False):
+    """Submit a collection-wide or source-restricted manual compaction in one RPC."""
+    request = milvus_pb2.ManualCompactionRequest(collection_name=collection_name, l0Compaction=is_l0)
+    if segment_ids is not None:
+        request.segment_ids.extend(sorted(set(segment_ids)))
+        if not request.segment_ids:
+            raise ValueError("segment_ids must be nonempty for a targeted compaction")
+    response = handler._stub.ManualCompaction(request, timeout=timeout, metadata=_api_level_md(context))
+    # DataCoord rejects the selection if a requested segment was claimed or retired after our snapshot.
+    if (
+        segment_ids is not None
+        and response.status.code == 5
+        and "not all segment ids provided could be compacted" in response.status.reason
+    ):
+        return -1
+    check_status(response.status)
+    return response.compactionID
+
+
+def reload_collection_with_deadline(client, collection_name, remaining, poll_interval=1, *, retry_progress=True):
+    """Release and load once, then poll progress within the caller's remaining budget."""
+    handler = client._get_connection()
+    context = client._generate_call_context()
+    deadline = time.monotonic() + remaining()
+    # The synchronous SDK load owns its polling loop, so start asynchronously
+    # and keep each progress read within the original deadline.
+    unwrap(GrpcHandler.release_collection)(handler, collection_name, timeout=remaining(), context=context)
+    unwrap(GrpcHandler.load_collection)(handler, collection_name, timeout=remaining(), context=context, _async=True)
+    while True:
+        if retry_progress:
+            progress = call_compaction_rpc(
+                handler, GrpcHandler.get_loading_progress, collection_name, deadline=deadline, context=context
+            )
+        else:
+            progress = unwrap(GrpcHandler.get_loading_progress)(
+                handler, collection_name, timeout=remaining(), context=context
+            )
+        budget = remaining()
+        if progress >= 100:
+            return
+        time.sleep(min(poll_interval, budget))
 
 
 def reload_compaction_outputs(
@@ -66,20 +109,7 @@ def reload_compaction_outputs(
             )
         return budget
 
-    handler = client._get_connection()
-    context = client._generate_call_context()
-    # Single-attempt SDK calls: decorators and synchronous loading polls reuse
-    # the supplied timeout, so neither may own this helper's total deadline.
-    unwrap(GrpcHandler.release_collection)(handler, collection_name, timeout=remaining(), context=context)
-    unwrap(GrpcHandler.load_collection)(handler, collection_name, timeout=remaining(), context=context, _async=True)
-    while True:
-        progress = unwrap(GrpcHandler.get_loading_progress)(
-            handler, collection_name, timeout=remaining(), context=context
-        )
-        budget = remaining()
-        if progress >= 100:
-            break
-        time.sleep(min(poll_interval, budget))
+    reload_collection_with_deadline(client, collection_name, remaining, poll_interval, retry_progress=False)
     while True:
         # Bypass the SDK retry decorator so each observation has a fresh budget.
         response = client._get_connection()._stub.GetQuerySegmentInfo(
@@ -96,67 +126,60 @@ def reload_compaction_outputs(
         time.sleep(min(poll_interval, budget))
 
 
-def get_compaction_state_info(handler, compact_id: int, timeout: float, context=None) -> CompactionStateInfo:
-    deadline = time.monotonic() + timeout
+def call_compaction_rpc(
+    handler, method, *args, deadline, context=None, retry_transport=True, timeout_message=None, **kwargs
+):
+    """Run single-attempt handler calls under one deadline, including retries and reconnects."""
+    message = timeout_message or f"timed out calling {method.__name__} for {args}"
+
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise TimeoutError(message)
+        return budget
+
+    attempt = unwrap(method)
     backoff = INITIAL_RETRY_BACKOFF
     while True:
         try:
-            state = _get_compaction_state_info(handler, compact_id, deadline=deadline, context=context)
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"timed out getting state for compaction {compact_id}")
-            return state
+            result = attempt(handler, *args, timeout=remaining(), context=context, **kwargs)
+            remaining()  # A late success cannot start the next phase with a fresh budget.
+            return result
         except grpc.RpcError as error:
-            if error.code() in IGNORE_RETRY_CODES:
+            if not retry_transport or error.code() in IGNORE_RETRY_CODES:
                 raise
-
-            # GrpcHandler.reconnect() is a synchronous, timeout-aware SDK
-            # interface. It replaces a shutdown/stale channel before the next
-            # raw RPC without leaving a recovery worker behind after timeout.
             if error.code() == grpc.StatusCode.UNAVAILABLE and hasattr(handler, "reconnect"):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
                 try:
-                    handler.reconnect(timeout=remaining)
+                    handler.reconnect(timeout=remaining())
                 except MilvusException as reconnect_error:
                     if reconnect_error.code != Status.CONNECT_FAILED:
                         raise
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
-
-            remaining = deadline - time.monotonic()
-            # Never start a backoff that consumes the remaining RPC budget.
-            if remaining <= backoff:
-                raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
-            time.sleep(backoff)
-            backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_BACKOFF)
         except MilvusException as error:
-            should_retry = error.code == ErrorCode.RATE_LIMIT or error.compatible_code == common_pb2.RateLimit
-            if not should_retry:
+            if error.code != ErrorCode.RATE_LIMIT and error.compatible_code != common_pb2.RateLimit:
                 raise
-
-            remaining = deadline - time.monotonic()
-            if remaining <= backoff:
-                raise TimeoutError(f"timed out getting state for compaction {compact_id}") from error
-            time.sleep(backoff)
-            backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_BACKOFF)
+        if remaining() <= backoff:
+            raise TimeoutError(message)
+        time.sleep(backoff)
+        backoff = min(backoff * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_BACKOFF)
 
 
-def _get_compaction_state_info(
-    handler,
-    compact_id: int,
-    *,
-    deadline: float,
-    context=None,
-) -> CompactionStateInfo:
+def get_compaction_state_info(handler, compact_id: int, timeout: float, context=None) -> CompactionStateInfo:
+    return call_compaction_rpc(
+        handler,
+        _get_compaction_state_info,
+        compact_id,
+        deadline=time.monotonic() + timeout,
+        context=context,
+        timeout_message=f"timed out getting state for compaction {compact_id}",
+    )
+
+
+def _get_compaction_state_info(handler, compact_id: int, *, timeout: float, context=None) -> CompactionStateInfo:
     # The high-level PySDK API returns only state_name and drops failedPlanNo.
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError(f"timed out getting state for compaction {compact_id}")
     request = Prepare.get_compaction_state(compact_id)
     response = handler._stub.GetCompactionState(
         request,
-        timeout=remaining,
+        timeout=timeout,
         metadata=_api_level_md(context),
     )
     check_status(response.status)
@@ -292,6 +315,12 @@ def run_compaction_with_workload(trigger, get_state, operation, timeout=300, pol
     return observed_overlap
 
 
+def is_segment_not_found(error):
+    return (error.code == 600 or error.compatible_code == common_pb2.SegmentNotFound) and (
+        "segment not found" in error.message.lower()
+    )
+
+
 def list_persistent_segments_once(handler, collection_name, timeout, context=None):
     """Issue exactly one persistent-segment RPC with the supplied budget."""
     request = Prepare.get_persistent_segment_info_request(collection_name)
@@ -316,6 +345,36 @@ def list_persistent_segments_once(handler, collection_name, timeout, context=Non
     ]
 
 
+def _segment_snapshot(segments):
+    return tuple(sorted((s.segment_id, s.num_rows, s.state_name, s.level_name, s.is_sorted) for s in segments))
+
+
+def _index_coverage(descriptions, names, required_rows, collection_name):
+    progress = {}
+    ready = True
+    for index in descriptions:
+        name = index.index_name
+        if name not in names:
+            continue
+        if index.state == common_pb2.Failed:
+            raise AssertionError(f"Index {name} for {collection_name} failed: {index.index_state_fail_reason}")
+        ready = ready and (
+            name not in progress
+            and index.state == common_pb2.Finished
+            and required_rows > 0
+            and index.total_rows == required_rows
+            and index.indexed_rows >= required_rows
+            and index.pending_index_rows == 0
+        )
+        progress[name] = {
+            "state": common_pb2.IndexState.Name(index.state),
+            "indexed_rows": index.indexed_rows,
+            "total_rows": index.total_rows,
+            "pending_index_rows": index.pending_index_rows,
+        }
+    return ready and progress.keys() == names, progress
+
+
 def wait_for_compaction_eligible_segments(
     handler,
     collection_name,
@@ -323,11 +382,27 @@ def wait_for_compaction_eligible_segments(
     timeout=30,
     poll_interval=2,
     context=None,
+    index_name=None,
+    *,
+    index_names=(),
+    expected_rows=None,
 ):
+    """Wait for stable sorted sources, optionally including their index readiness.
+
+    A manual compaction may skip sorted sources while their vector index is still
+    building. The opt-in index check shares this waiter's deadline and requires
+    row coverage for the latest source snapshot before counting a stable poll.
+    """
     deadline = time.monotonic() + timeout
+    required_indexes = set(index_names)
+    if index_name is not None:
+        required_indexes.add(index_name)
+    # DescribeIndex with an empty name returns all indexes for the same DataCoord view.
+    request_name = next(iter(required_indexes)) if len(required_indexes) == 1 else ""
     previous_snapshot = None
     stable_observations = 0
     latest_segments = []
+    latest_index = None
     retry_backoff = INITIAL_RETRY_BACKOFF
 
     while time.monotonic() < deadline:
@@ -336,6 +411,33 @@ def wait_for_compaction_eligible_segments(
             latest_segments = list_persistent_segments_once(
                 handler, collection_name, timeout=remaining, context=context
             )
+            snapshot = _segment_snapshot(latest_segments)
+            required_rows = sum(segment.num_rows for segment in latest_segments)
+            all_segments_eligible = (
+                len(snapshot) >= minimum_segment_count
+                and (expected_rows is None or required_rows == expected_rows)
+                and all(s.state_name == "Flushed" and s.level_name == "L1" and s.is_sorted for s in latest_segments)
+            )
+            if all_segments_eligible and required_indexes:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                response = handler._stub.DescribeIndex(
+                    Prepare.describe_index_request(collection_name, request_name),
+                    timeout=remaining,
+                    metadata=_api_level_md(context),
+                )
+                check_status(response.status)
+                all_segments_eligible, latest_index = _index_coverage(
+                    response.index_descriptions, required_indexes, required_rows, collection_name
+                )
+                if all_segments_eligible and len(required_indexes) > 1:
+                    # Equal row totals alone cannot distinguish a replacement segment.
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    after = list_persistent_segments_once(handler, collection_name, timeout=remaining, context=context)
+                    all_segments_eligible = snapshot == _segment_snapshot(after)
         except grpc.RpcError as error:
             if error.code() in IGNORE_RETRY_CODES:
                 raise
@@ -362,16 +464,14 @@ def wait_for_compaction_eligible_segments(
             )
             continue
         except MilvusException as error:
-            is_segment_not_found = (error.code == 600 or error.compatible_code == common_pb2.SegmentNotFound) and (
-                "segment not found" in error.message.lower()
-            )
+            segment_disappeared = is_segment_not_found(error)
             is_rate_limit = error.code == ErrorCode.RATE_LIMIT or error.compatible_code == common_pb2.RateLimit
-            if not (is_segment_not_found or is_rate_limit):
+            if not (segment_disappeared or is_rate_limit):
                 raise
             previous_snapshot = None
             stable_observations = 0
             remaining = deadline - time.monotonic()
-            delay = poll_interval if is_segment_not_found else retry_backoff
+            delay = poll_interval if segment_disappeared else retry_backoff
             if remaining <= delay:
                 break
             time.sleep(delay)
@@ -384,22 +484,6 @@ def wait_for_compaction_eligible_segments(
         if time.monotonic() >= deadline:
             break
         retry_backoff = INITIAL_RETRY_BACKOFF
-        snapshot = tuple(
-            sorted(
-                (
-                    segment.segment_id,
-                    segment.num_rows,
-                    segment.state_name,
-                    segment.level_name,
-                    segment.is_sorted,
-                )
-                for segment in latest_segments
-            )
-        )
-        all_segments_eligible = len(snapshot) >= minimum_segment_count and all(
-            segment.state_name == "Flushed" and segment.level_name == "L1" and segment.is_sorted
-            for segment in latest_segments
-        )
         if all_segments_eligible and snapshot == previous_snapshot:
             stable_observations += 1
             if stable_observations >= 2:
@@ -416,4 +500,6 @@ def wait_for_compaction_eligible_segments(
         f"Segments for {collection_name} did not become stable compaction candidates "
         f"(Flushed, L1, sorted) within {timeout} seconds; "
         f"last snapshot: {previous_snapshot}"
+        + (f"; expected rows: {expected_rows}" if expected_rows is not None else "")
+        + (f"; index {request_name or sorted(required_indexes)}: {latest_index}" if required_indexes else "")
     )
