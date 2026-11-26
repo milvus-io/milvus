@@ -623,6 +623,13 @@ func TestCompactionExecutor(t *testing.T) {
 	})
 }
 
+func compactionHistogramCount(t *testing.T, h prometheus.Observer) uint64 {
+	t.Helper()
+	sample := &dto.Metric{}
+	require.NoError(t, h.(prometheus.Metric).Write(sample))
+	return sample.GetHistogram().GetSampleCount()
+}
+
 func TestCompactionAttemptLatency(t *testing.T) {
 	paramtable.Init()
 	q, run := metrics.DataNodeCompactionLatencyInQueue, metrics.DataNodeCompactionLatency
@@ -631,11 +638,6 @@ func TestCompactionAttemptLatency(t *testing.T) {
 	t.Cleanup(q.Reset)
 	t.Cleanup(run.Reset)
 	node := paramtable.GetStringNodeID()
-	count := func(h prometheus.Observer) uint64 {
-		m := &dto.Metric{}
-		require.NoError(t, h.(prometheus.Metric).Write(m))
-		return m.GetHistogram().GetSampleCount()
-	}
 	for _, tc := range []struct {
 		kind    datapb.CompactionType
 		state   datapb.CompactionTaskState
@@ -661,8 +663,8 @@ func TestCompactionAttemptLatency(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, ok)
 		e.executeTask(<-e.taskCh)
-		require.EqualValues(t, 1, count(q.WithLabelValues(node, tc.kind.String(), "started")))
-		require.EqualValues(t, 1, count(run.WithLabelValues(node, tc.kind.String(), tc.outcome)))
+		require.EqualValues(t, 1, compactionHistogramCount(t, q.WithLabelValues(node, tc.kind.String(), "started")))
+		require.EqualValues(t, 1, compactionHistogramCount(t, run.WithLabelValues(node, tc.kind.String(), tc.outcome)))
 	}
 	e := NewExecutor()
 	task := NewMockCompactor(t)
@@ -676,7 +678,7 @@ func TestCompactionAttemptLatency(t *testing.T) {
 	require.NoError(t, err)
 	e.cancelQueued()
 	e.executeTask(<-e.taskCh)
-	require.EqualValues(t, 1, count(q.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
-	require.Zero(t, count(run.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
+	require.EqualValues(t, 1, compactionHistogramCount(t, q.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
+	require.Zero(t, compactionHistogramCount(t, run.WithLabelValues(node, kind.String(), metrics.CancelLabel)))
 	require.Zero(t, e.Slots())
 }

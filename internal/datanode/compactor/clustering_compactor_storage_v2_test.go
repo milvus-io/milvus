@@ -42,9 +42,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -74,9 +76,17 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
 	s.preparScalarCompactionNormalTask()
-	compactionResult, err := s.task.Compact()
+	latency := metrics.DataNodeCompactionLatency.WithLabelValues(
+		paramtable.GetStringNodeID(), s.task.GetCompactionType().String(), metrics.SuccessLabel)
+	before := compactionHistogramCount(s.T(), latency)
+	executor := NewExecutor()
+	accepted, err := executor.Enqueue(s.task, taskcommon.Resource{})
 	s.Require().NoError(err)
-	s.Equal(len(compactionResult.GetSegments()), len(compactionResult.GetSegments()))
+	s.Require().True(accepted)
+	executor.executeTask(<-executor.taskCh)
+	compactionResult := executor.getCompactionResult(s.task.GetPlanID())
+	s.Require().Equal(datapb.CompactionTaskState_completed, compactionResult.GetState())
+	s.Equal(before+1, compactionHistogramCount(s.T(), latency))
 
 	for i := 0; i < len(compactionResult.GetSegments()); i++ {
 		seg := compactionResult.GetSegments()[i]
