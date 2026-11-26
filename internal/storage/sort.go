@@ -574,6 +574,10 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		hasLast = true
 	}
 
+	// A compaction writer may need the input of each row in its next batch.
+	// Report emission, not predicate evaluation: seedNext reads one head ahead
+	// per reader, which need not land in the output currently being written.
+	lineage, _ := rw.(interface{ RecordSourceRow(readerIndex int) })
 	for h.len() > 0 {
 		idx := h.pop()
 
@@ -586,6 +590,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 
 		if err := rb.appendColumns(outputColumns[idx.ri], int(idx.i), int(idx.i)+1); err != nil {
 			return 0, err
+		}
+		if lineage != nil {
+			lineage.RecordSourceRow(int(idx.ri))
 		}
 		numRows++
 

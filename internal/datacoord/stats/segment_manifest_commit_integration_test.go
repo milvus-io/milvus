@@ -27,8 +27,29 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )
+
+func TestLegacySortFieldLogicalSizes(t *testing.T) {
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	before := packed.MarshalManifestPath("files/insert_log/1/2/231", 7)
+	after := packed.MarshalManifestPath("files/insert_log/1/2/231", 8)
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 231, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+		NumOfRows: 3, ManifestPath: before, FieldLogicalSizesManifest: before,
+		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{100: {}}}},
+	})))
+	st := &StatsTask{Meta: mt, StatsTask: &indexpb.StatsTask{TaskID: 8, CollectionID: 1, TargetSegmentID: 231, SubJobType: indexpb.StatsSubJob_Sort}}
+	require.NoError(t, st.SetJobInfo(ctx, &workerpb.StatsResult{Manifest: before}))
+	require.NotNil(t, meta.SegmentFieldLogicalSizes(mt.GetSegment(ctx, 231).SegmentInfo).GetFields()[100])
+	require.NoError(t, st.SetJobInfo(ctx, &workerpb.StatsResult{BaseManifest: before, Manifest: after}))
+	updated := mt.GetSegment(ctx, 231)
+	require.Equal(t, after, updated.GetManifestPath())
+	require.Nil(t, updated.GetStats().GetFieldLogicalSizes())
+}
 
 // shouldPublishPreparedManifest is the guard that keeps a dropped segment from
 // entering CommitSegmentManifest in the first place: GetSegment returns dropped

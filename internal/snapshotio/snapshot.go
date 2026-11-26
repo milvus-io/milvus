@@ -20,7 +20,10 @@ package snapshotio
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 
@@ -86,6 +89,16 @@ func ManifestSchema() (avro.Schema, error) {
 			`{"name": "index_store_path_version", "type": "int", "default": 0}`,
 			`{"name": "index_store_path_version", "type": "int", "default": 0},
 			{"name": "index_type", "type": "string", "default": ""}`, 1)
+		schema = strings.Replace(schema, `{"name": "manifest_has_index", "type": "boolean", "default": false},`,
+			`{"name": "manifest_has_index", "type": "boolean", "default": false},
+			{"name": "field_logical_sizes", "default": null, "type": ["null", {"type": "record", "name": "FieldLogicalSizes", "fields": [
+				{"name": "version", "type": "long"}, {"name": "row_count", "type": "long"},
+				{"name": "fields", "type": {"type": "array", "items": {"type": "record", "name": "FieldLogicalSize", "fields": [
+					{"name": "field_id", "type": "long"},
+					{"name": "payload_bytes", "type": {"name": "Unsigned64BE", "type": "fixed", "size": 8}},
+					{"name": "validity_bits", "type": "Unsigned64BE"}
+				]}}}
+			]}]},`, 1)
 		manifestSchema, manifestSchemaErr = avro.Parse(schema)
 	})
 	return manifestSchema, manifestSchemaErr
@@ -194,11 +207,58 @@ type ManifestEntry struct {
 	IsSorted          bool                    `avro:"is_sorted"`
 	CommitTimestamp   int64                   `avro:"commit_timestamp"`
 	ManifestHasIndex  bool                    `avro:"manifest_has_index"`
+	FieldLogicalSizes *AvroFieldLogicalSizes  `avro:"field_logical_sizes"`
 
 	// manifestHasIndexPresent follows the embedded OCF writer schema or the
 	// legacy binary format version. It is not serialized, so an absent marker
 	// remains distinguishable from an explicit false value.
 	manifestHasIndexPresent bool
+}
+
+// Avro has no uint64. A fixed eight-byte big-endian value retains the full
+// unsigned range (including an explicitly measured zero) across languages.
+// The array is FieldID-sorted for deterministic conversion.
+type AvroFieldLogicalSizes struct {
+	Version  int64                  `avro:"version"`
+	RowCount int64                  `avro:"row_count"`
+	Fields   []AvroFieldLogicalSize `avro:"fields"`
+}
+
+type AvroFieldLogicalSize struct {
+	FieldID      int64   `avro:"field_id"`
+	PayloadBytes [8]byte `avro:"payload_bytes"`
+	ValidityBits [8]byte `avro:"validity_bits"`
+}
+
+func fieldLogicalSizesToAvro(s *datapb.FieldLogicalSizes) *AvroFieldLogicalSizes {
+	if s == nil {
+		return nil
+	}
+	out := &AvroFieldLogicalSizes{Version: int64(s.GetVersion()), RowCount: s.GetRowCount(), Fields: make([]AvroFieldLogicalSize, 0, len(s.Fields))}
+	for id, size := range s.Fields {
+		if size != nil {
+			entry := AvroFieldLogicalSize{FieldID: id}
+			binary.BigEndian.PutUint64(entry.PayloadBytes[:], size.PayloadBytes)
+			binary.BigEndian.PutUint64(entry.ValidityBits[:], size.ValidityBits)
+			out.Fields = append(out.Fields, entry)
+		}
+	}
+	sort.Slice(out.Fields, func(i, j int) bool { return out.Fields[i].FieldID < out.Fields[j].FieldID })
+	return out
+}
+
+func fieldLogicalSizesFromAvro(s *AvroFieldLogicalSizes) *datapb.FieldLogicalSizes {
+	if s == nil || s.Version < 0 || s.Version > math.MaxUint32 {
+		return nil
+	}
+	out := &datapb.FieldLogicalSizes{Version: uint32(s.Version), RowCount: s.RowCount, Fields: make(map[int64]*datapb.FieldLogicalSize, len(s.Fields))}
+	for _, e := range s.Fields {
+		if _, duplicate := out.Fields[e.FieldID]; duplicate {
+			return nil // ambiguous optional statistics are unknown
+		}
+		out.Fields[e.FieldID] = &datapb.FieldLogicalSize{PayloadBytes: binary.BigEndian.Uint64(e.PayloadBytes[:]), ValidityBits: binary.BigEndian.Uint64(e.ValidityBits[:])}
+	}
+	return out
 }
 
 // AvroFieldBinlog represents datapb.FieldBinlog in Avro-compatible format.
@@ -439,6 +499,7 @@ func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
 		IsSorted:          segment.GetIsSorted(),
 		CommitTimestamp:   int64(segment.GetCommitTimestamp()),
 		ManifestHasIndex:  segment.GetManifestHasIndex(),
+		FieldLogicalSizes: fieldLogicalSizesToAvro(segment.GetFieldLogicalSizes()),
 
 		manifestHasIndexPresent: segment.ManifestHasIndex != nil,
 	}
@@ -447,16 +508,17 @@ func SegmentToManifestEntry(segment *datapb.SegmentDescription) ManifestEntry {
 // ManifestEntryToSegment converts an Avro manifest record to a protobuf segment.
 func ManifestEntryToSegment(record ManifestEntry) *datapb.SegmentDescription {
 	segment := &datapb.SegmentDescription{
-		SegmentId:       record.SegmentID,
-		PartitionId:     record.PartitionID,
-		SegmentLevel:    datapb.SegmentLevel(record.SegmentLevel),
-		ChannelName:     record.ChannelName,
-		NumOfRows:       record.NumOfRows,
-		StartPosition:   AvroToMsgPosition(record.StartPosition),
-		DmlPosition:     AvroToMsgPosition(record.DmlPosition),
-		StorageVersion:  record.StorageVersion,
-		IsSorted:        record.IsSorted,
-		CommitTimestamp: uint64(record.CommitTimestamp),
+		SegmentId:         record.SegmentID,
+		PartitionId:       record.PartitionID,
+		SegmentLevel:      datapb.SegmentLevel(record.SegmentLevel),
+		ChannelName:       record.ChannelName,
+		NumOfRows:         record.NumOfRows,
+		StartPosition:     AvroToMsgPosition(record.StartPosition),
+		DmlPosition:       AvroToMsgPosition(record.DmlPosition),
+		StorageVersion:    record.StorageVersion,
+		IsSorted:          record.IsSorted,
+		CommitTimestamp:   uint64(record.CommitTimestamp),
+		FieldLogicalSizes: fieldLogicalSizesFromAvro(record.FieldLogicalSizes),
 	}
 	if record.manifestHasIndexPresent {
 		segment.ManifestHasIndex = proto.Bool(record.ManifestHasIndex)

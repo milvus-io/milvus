@@ -31,10 +31,10 @@ type ImportV3TwoPCSuite struct {
 }
 
 func (s *ImportV3TwoPCSuite) SetupSuite() {
+	s.setupConfig()
 	configureImportV3(&s.MiniClusterSuite)
-	// TwoPCImportSuite.SetupSuite still selects the DML channel count and the
-	// small import scheduling intervals.
-	s.TwoPCImportSuite.SetupSuite()
+	// importSuite.SetupSuite selects the small import scheduling intervals.
+	s.importSuite.SetupSuite()
 }
 
 func TestImportV3TwoPCSuite(t *testing.T) {

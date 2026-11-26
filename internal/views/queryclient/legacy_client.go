@@ -28,6 +28,9 @@ type Client interface {
 // LegacyClient returns batch results or the final ReduceStream.
 // Errors are business merr errors; ViewError and StreamingError remain internal.
 type LegacyClient interface {
+	// HasAvailableReplicas waits for replica discovery and checks that every VChannel has a candidate.
+	HasAvailableReplicas(ctx context.Context, vchannels []string) (bool, error)
+
 	// Statistics uses the outer BarrierMVCC; zero selects ordinary Strong sampling.
 	Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error)
 
@@ -125,6 +128,20 @@ func (c *legacyOnlyClient) Legacy() LegacyClient {
 type legacyClient struct {
 	shardClient   *shardViewQueryClient
 	shardResolver resolver.ShardResolver
+}
+
+func (c *legacyClient) HasAvailableReplicas(ctx context.Context, vchannels []string) (bool, error) {
+	for _, channel := range vchannels {
+		route, err := c.shardClient.replicas.route(channel)
+		if err != nil {
+			return false, ToMilvusError(err)
+		}
+		available, err := route.hasAvailableReplica(ctx)
+		if err != nil || !available {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func NewLegacyViewQueryClient(

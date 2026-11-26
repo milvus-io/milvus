@@ -123,6 +123,7 @@ func TestGetJSONParams(t *testing.T) {
 		TextInlineThreshold:       getTextInlineThreshold(),
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
+		SegmentMaxRows:            paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64(),
 	}, result)
 }
 

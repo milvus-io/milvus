@@ -529,36 +529,18 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         self.assert_rows(client, name, model)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("guard", ["last_child", "last_original", "last_vector"])
+    @pytest.mark.parametrize("guard", ["last_child", "last_original"])
     def test_drop_protection_reasons_are_independently_reachable(self, guard):
         """
-        target: reach each last-child/original/vector deletion guard independently
+        target: reach each last-child/original deletion guard independently
         method: construct distinct valid schemas and compare complete metadata after rejection
         expected: the intended protection reason and unchanged schema/index inventory
         """
         client = self._client()
-        if guard != "last_vector":
-            name, schema = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
-            if guard == "last_original":
-                self.add_collection_field(client, name, "clips[added]", DataType.INT64, nullable=True)
-            target = "clips[anchor]"
-        else:
-            name = cf.gen_unique_str("struct_last_vector")
-            schema = client.create_schema(auto_id=False)
-            schema.add_field("id", DataType.INT64, is_primary=True)
-            children = client.create_struct_field_schema()
-            children.add_field("anchor", DataType.INT64)
-            children.add_field("emb", DataType.FLOAT_VECTOR, dim=8, nullable=True)
-            schema.add_field(
-                "clips",
-                DataType.ARRAY,
-                element_type=DataType.STRUCT,
-                struct_schema=children,
-                max_capacity=8,
-                nullable=True,
-            )
-            self.create_collection(client, name, schema=schema)
-            target = "clips[emb]"
+        name, schema = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
+        if guard == "last_original":
+            self.add_collection_field(client, name, "clips[added]", DataType.INT64, nullable=True)
+        target = "clips[anchor]"
         before = copy.deepcopy(client.describe_collection(name))
         indexes = set(client.list_indexes(name))
         result, ok = self.drop_collection_field(client, name, field_name=target, check_task=CheckTasks.check_nothing)
@@ -566,11 +548,49 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         word = {
             "last_child": "last sub-field",
             "last_original": "every remaining sub-field was added after the struct was created",
-            "last_vector": "last vector",
         }[guard]
         assert word in str(result), result
         assert client.describe_collection(name) == before
         assert set(client.list_indexes(name)) == indexes
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_last_vector_sub_field_leaves_collection_without_vector(self):
+        """
+        target: drop the only vector of a collection when it is a struct sub-field
+        method: create a struct with one scalar and one vector sub-field and no other vector, drop the vector sub-field
+        expected: with common.enableCollectionWithoutVector at its default (true) the drop succeeds,
+                  the collection has no vector field left and the scalar sub-field is kept
+        """
+        client = self._client()
+        name = cf.gen_unique_str("struct_last_vector")
+        schema = client.create_schema(auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        children = client.create_struct_field_schema()
+        children.add_field("anchor", DataType.INT64)
+        children.add_field("emb", DataType.FLOAT_VECTOR, dim=8, nullable=True)
+        schema.add_field(
+            "clips",
+            DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=children,
+            max_capacity=8,
+            nullable=True,
+        )
+        self.create_collection(client, name, schema=schema)
+        self.drop_collection_field(client, name, field_name="clips[emb]")
+        desc = client.describe_collection(name)
+        fields = {f["name"]: f for f in desc["fields"]}
+        assert set(fields) == {"id", "clips"}, desc
+        assert [(f["name"], f["type"]) for f in fields["clips"]["struct_fields"]] == [("anchor", DataType.INT64)], desc
+        self.search(
+            client,
+            name,
+            data=[[0.0] * 8],
+            anns_field="clips[emb]",
+            limit=1,
+            check_task=CheckTasks.err_res,
+            check_items={"err_code": 1100, "err_msg": "has no vector field, search is not supported"},
+        )
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_stale_schema_omits_added_child_and_rejects_dropped_child(self):
