@@ -124,6 +124,7 @@ func TestGetClusterInfo(t *testing.T) {
 func TestGetConnectedClients(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
 
 	clientInfo := &commonpb.ClientInfo{
 		SdkType:    "Golang",
