@@ -53,6 +53,10 @@ type EZBackupCipher interface {
 	// ResolveImportEZ unwraps a backup using the source KMS and returns its
 	// original EZ ID and raw keyset without publishing it to the ordinary cache.
 	ResolveImportEZ(artifact string) (int64, []byte, error)
+
+	// GetDecryptorForKeyset creates a decryptor using an explicit raw keyset
+	// without reading from or mutating the ordinary zone cache.
+	GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error)
 }
 
 // GetCipher returns singleton hook.Cipher instance.
@@ -518,6 +522,10 @@ func (d testCipher) GetEncryptor(ezID, collectionID int64) (encryptor hook.Encry
 }
 
 func (d testCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
+	return createTestCryptoImpl(ezID, collectionID), nil
+}
+
+func (d testCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
 	return createTestCryptoImpl(ezID, collectionID), nil
 }
 

@@ -255,6 +255,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	var pluginContext *indexcgopb.StoragePluginContext
 	if rwOptions.pluginContext != nil {
 		pluginContext = rwOptions.pluginContext
+		binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionPluginContext(pluginContext))
 	} else if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
 		if ez != nil {

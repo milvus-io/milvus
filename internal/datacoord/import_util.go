@@ -273,25 +273,6 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-const maxImportDispatchRetries = 3
-
-func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
-	log.Warn("failed to dispatch import task", WrapTaskLog(task, zap.Error(cause))...)
-	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) {
-		return
-	}
-	*nonRetryableFailures++
-	if *nonRetryableFailures < maxImportDispatchRetries {
-		return
-	}
-	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
-		UpdateJobState(internalpb.ImportJobState_Failed),
-		UpdateJobReason(cause.Error()),
-	); err != nil {
-		log.Warn("failed to update import job", zap.Int64("jobID", task.GetJobID()), zap.Error(err))
-	}
-}
-
 func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {

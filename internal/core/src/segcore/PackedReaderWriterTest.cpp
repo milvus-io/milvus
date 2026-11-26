@@ -144,14 +144,14 @@ class OrdinaryCipher : public plugin::ICipherPlugin {
 
 class ImportCipher : public OrdinaryCipher {
  public:
-    MOCK_METHOD(void,
-                RegisterReadKeyset,
-                (int64_t, int64_t, const std::string&),
-                (override));
     MOCK_METHOD(EncryptorResult,
                 GetEncryptorForKeyset,
                 (int64_t, int64_t, const std::string&),
                 (override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
+                (const, override));
 };
 
 class ParquetFileKey : public plugin::IEncryptor, public plugin::IDecryptor {
@@ -264,19 +264,41 @@ TEST_F(CPackedImportTest, EncryptedReaderRequiresImportCipher) {
     EXPECT_EQ(reader, nullptr);
 }
 
-TEST_F(CPackedImportTest, DecryptsUsingFileMetadataAfterRegistration) {
+TEST_F(CPackedImportTest, DecryptsStatelessWithBoundKeysetAndFallsBack) {
     auto cipher = std::make_shared<StrictMock<ImportCipher>>();
     milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
     CPluginContext source{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, source.key));
-    milvus::storage::RegisterReaderKeys(&source);
-    auto key = std::make_shared<StrictMock<ParquetFileKey>>();
-    EXPECT_CALL(*cipher, GetDecryptor(18, 23, "wrapped")).WillOnce(Return(key));
-    EXPECT_CALL(*key, GetKey()).WillOnce(Return("file-key"));
-    auto properties = milvus::storage::GetReaderProperties();
-    EXPECT_EQ(properties.file_decryption_properties()->key_retriever()->GetKey(
+    auto bound_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    auto fallback_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, "c291cmNl", "wrapped"))
+        .WillOnce(Return(bound_key));
+    EXPECT_CALL(*bound_key, GetKey()).WillOnce(Return("bound-file-key"));
+    EXPECT_CALL(*cipher, GetDecryptor(18, 23, "wrapped"))
+        .WillOnce(Return(fallback_key));
+    EXPECT_CALL(*fallback_key, GetKey()).WillOnce(Return("fallback-file-key"));
+
+    auto properties = milvus::storage::GetReaderProperties(&source);
+    auto retriever = properties.file_decryption_properties()->key_retriever();
+    EXPECT_EQ(retriever->GetKey(
+                  milvus::storage::EncodeKeyMetadata(17, 23, "wrapped")),
+              "bound-file-key");
+    EXPECT_EQ(retriever->GetKey(
                   milvus::storage::EncodeKeyMetadata(18, 23, "wrapped")),
-              "file-key");
+              "fallback-file-key");
+
+    // Default ICipherPlugin::GetDecryptorForKeyset falls back to GetDecryptor.
+    auto ordinary = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(
+        ordinary);
+    auto ordinary_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*ordinary, GetDecryptor(17, 23, "wrapped"))
+        .WillOnce(Return(ordinary_key));
+    EXPECT_CALL(*ordinary_key, GetKey()).WillOnce(Return("ordinary-file-key"));
+    auto ordinary_props = milvus::storage::GetReaderProperties(&source);
+    EXPECT_EQ(
+        ordinary_props.file_decryption_properties()->key_retriever()->GetKey(
+            milvus::storage::EncodeKeyMetadata(17, 23, "wrapped")),
+        "ordinary-file-key");
 }
 
 TEST_F(CPackedImportTest, ReportsWriterKeysetErrors) {
@@ -363,24 +385,29 @@ TEST_F(CPackedImportTest, ReportsReaderKeysetErrors) {
     std::string file = TestLocalPath + "rejected-reader.parquet";
     char* path = file.data();
 
+    CPluginContext null_key{17, 0, nullptr};
     CPluginContext empty_key{17, 0, ""};
-    CPluginContext bad_key{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, bad_key.key))
-        .WillOnce(::testing::Throw(std::runtime_error("conflicting key ID")));
-
-    for (auto [ctx, expected_code] : {
-             std::pair{&empty_key, milvus::ErrorCode::InvalidParameter},
-             std::pair{&bad_key, milvus::ErrorCode::UnexpectedError},
-         }) {
+    for (auto* ctx : {&null_key, &empty_key}) {
         ArrowSchema c_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
         CPackedReader reader = nullptr;
         auto status = NewPackedReader(&path, 1, &c_schema, 1024, &reader, ctx);
         ArrowSchemaRelease(&c_schema);
-        EXPECT_EQ(status.error_code, expected_code);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
         EXPECT_FALSE(CheckStatus(status));
         EXPECT_EQ(reader, nullptr);
     }
+
+    CPluginContext bad_key{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, bad_key.key, "wrapped"))
+        .WillOnce(::testing::Throw(std::runtime_error("invalid keyset")))
+        .WillOnce(Return(nullptr));
+    auto retriever = milvus::storage::GetReaderProperties(&bad_key)
+                         .file_decryption_properties()
+                         ->key_retriever();
+    auto meta = milvus::storage::EncodeKeyMetadata(17, 23, "wrapped");
+    EXPECT_THROW(retriever->GetKey(meta), std::runtime_error);
+    EXPECT_THROW(retriever->GetKey(meta), milvus::SegcoreError);
 }
 
 TEST_F(CPackedImportTest, PluginContextUpdateExceptionsReturnStatus) {
@@ -451,19 +478,18 @@ TEST_F(CPackedImportTest, ReadsSourceFooterAndWritesWithTargetKeyset) {
         &c_schema, buffer_size, &target_path, 1, 0, groups, &writer, &target)));
 
     CPluginContext import_source{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl"))
-        .Times(AtLeast(1));
-    EXPECT_CALL(*cipher, GetDecryptor(17, 23, source_edek))
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, "c291cmNl", source_edek))
         .Times(AtLeast(1))
         .WillRepeatedly(Return(source_key));
     ASSERT_NO_FATAL_FAILURE(ReadImport(source_path, &import_source, 11));
 
+    EXPECT_CALL(*cipher, GetDecryptor(17, 23, source_edek))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(source_key));
     ASSERT_NO_FATAL_FAILURE(ReadImport(source_path, nullptr, 11));
 
     ASSERT_NO_FATAL_FAILURE(WriteAndClose(writer, 22));
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 45, "dGFyZ2V0"))
-        .Times(AtLeast(1));
-    EXPECT_CALL(*cipher, GetDecryptor(17, 45, target_edek))
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 45, "dGFyZ2V0", target_edek))
         .Times(AtLeast(1))
         .WillRepeatedly(Return(target_key));
     ASSERT_NO_FATAL_FAILURE(ReadImport(target_path, &target, 22));

@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"strconv"
@@ -97,14 +98,28 @@ func (data *descriptorEventData) GetEdek() (string, bool) {
 
 func (data *descriptorEventData) GetEzID() (int64, bool) {
 	ezidInterface, ok := data.Extras[ezIDKey]
-	// previous descriptorEventData not store edek
+	// previous descriptorEventData not store ezID
 	if !ok {
 		return 0, false
 	}
 
-	// won't be not ok, already checked format when write with FinishExtra
-	ezid, _ := ezidInterface.(int64)
-	return ezid, true
+	switch v := ezidInterface.(type) {
+	case int64:
+		return v, true
+	case json.Number:
+		ezid, err := v.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return ezid, true
+	case float64:
+		if v == float64(int64(v)) {
+			return int64(v), true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.
@@ -203,7 +218,9 @@ func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 	if err := binary.Read(buffer, common.Endian, &event.ExtraBytes); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(event.ExtraBytes, &event.Extras); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(event.ExtraBytes))
+	dec.UseNumber()
+	if err := dec.Decode(&event.Extras); err != nil {
 		// Malformed extras read back from a stored descriptor event is corrupt
 		// stored data, consistent with the other ErrDataIntegrity checks here.
 		return nil, merr.WrapErrDataIntegrity(err, "failed to unmarshal descriptor event extras")

@@ -33,7 +33,6 @@ import (
 
 const (
 	// Used in Plugins
-	CipherConfigImportEZ       = "cipher.ez.import"
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
@@ -111,21 +110,13 @@ func CreateEZ(ezID int64, kmsKeyArn string) error {
 }
 
 func CreateLocalEZ(ezID int64, encryptionKey string) error {
-	return registerLocalEZ(CipherConfigCreateEZ, ezID, encryptionKey)
-}
-
-func RegisterLocalImportEZ(ezID int64, encryptionKey string) error {
-	return registerLocalEZ(CipherConfigImportEZ, ezID, encryptionKey)
-}
-
-func registerLocalEZ(configKey string, ezID int64, encryptionKey string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		return nil
 	}
 
 	config := map[string]string{
-		configKey:             strconv.FormatInt(ezID, 10),
+		CipherConfigCreateEZ:  strconv.FormatInt(ezID, 10),
 		CipherConfigUnsafeEZK: encryptionKey,
 	}
 
@@ -320,14 +311,9 @@ func RegisterImportCipherContexts(
 	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
 		return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register import cipher contexts")
 	}
-	// Register the authoritative target before checking a same-zone source.
+	// Only register the authoritative target zone; source decryption is stateless via GetDecryptorForKeyset.
 	if target != nil {
 		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
-			return err
-		}
-	}
-	if source != nil {
-		if err := RegisterLocalImportEZ(source.GetEncryptionZoneId(), source.GetEncryptionKey()); err != nil {
 			return err
 		}
 	}

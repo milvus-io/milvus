@@ -78,6 +78,13 @@ func (s *CipherSuite) TestGetTestCipher() {
 	s.NoError(err)
 	s.Equal(plainText, gotPlainText)
 
+	statelessDecryptor, err := cipher.(testCipher).GetDecryptorForKeyset(ezID, collectionID, []byte("keyset"), safeKey)
+	s.NoError(err)
+	s.NotNil(statelessDecryptor)
+	gotPlainText, err = statelessDecryptor.Decrypt(cipherText)
+	s.NoError(err)
+	s.Equal(plainText, gotPlainText)
+
 	// test GetUnsafeKey
 	s.Equal([]byte("unsafe key"), GetCipher().GetUnsafeKey(1, 2))
 }
@@ -859,9 +866,6 @@ func TestRegisterImportCipherContexts(t *testing.T) {
 			} else {
 				require.Nil(t, target)
 			}
-			if tc.wantSource {
-				want = append(want, map[string]string{CipherConfigImportEZ: "7", CipherConfigUnsafeEZK: "b2xk"})
-			}
 			require.Empty(t, c.calls)
 			err = RegisterImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
 			require.NoError(t, err)
@@ -916,18 +920,14 @@ func TestRegisterImportCipherContextsRejectsInvalidRequest(t *testing.T) {
 		t.Cleanup(SetTestCipher(nil))
 		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
 		err = RegisterImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
 		err = RegisterImportCipherContexts("", nil, nil, collectionID)
 		require.NoError(t, err)
 	})
-	t.Run("incompatible cached read key", func(t *testing.T) {
-		conflict := errors.New("CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
-		t.Cleanup(SetTestCipher(&importReadCipher{err: conflict}))
-		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
-		require.ErrorIs(t, err, conflict)
-	})
-	t.Run("target failure stops before source", func(t *testing.T) {
+	t.Run("target registration failure", func(t *testing.T) {
 		targetErr := merr.WrapErrServiceUnavailable("target key cache unavailable")
 		c := &importReadCipher{err: targetErr}
 		t.Cleanup(SetTestCipher(c))

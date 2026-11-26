@@ -40,11 +40,10 @@ var _ ImportTask = (*preImportTask)(nil)
 type preImportTask struct {
 	task atomic.Pointer[datapb.PreImportTask]
 
-	importMeta           ImportMeta
-	tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	retryTimes           int64
-	nonRetryableFailures int64
+	importMeta ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func (p *preImportTask) GetJobID() int64 {
@@ -115,14 +114,15 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	}
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
+		log.Warn("assemble preimport request failed", WrapTaskLog(p, zap.Error(err))...)
+		p.retryTimes++
 		return
 	}
 
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
 	if err != nil {
+		log.Warn("preimport failed", WrapTaskLog(p, zap.Error(err))...)
 		p.retryTimes++
-		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),

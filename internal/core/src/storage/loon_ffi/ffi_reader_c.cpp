@@ -61,8 +61,8 @@ GetLoonReader(
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
+        auto key_retriever =
+            std::make_shared<milvus::storage::KeyRetriever>(c_plugin_context);
         reader->set_keyretriever(
             [key_retriever](const std::string& metadata) -> std::string {
                 return key_retriever->GetKey(metadata);

@@ -763,13 +763,9 @@ type workerImportCipher struct {
 	hook.Cipher
 	registered []map[string]string
 	targetErr  error
-	sourceErr  error
 }
 
 func (c *workerImportCipher) Init(cfg map[string]string) error {
-	if _, source := cfg[hookutil.CipherConfigImportEZ]; source && c.sourceErr != nil {
-		return c.sourceErr
-	}
 	if _, target := cfg[hookutil.CipherConfigCreateEZ]; target && c.targetErr != nil {
 		return c.targetErr
 	}
@@ -788,7 +784,6 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "7:bmV3"},
 	}
 	target := map[string]string{hookutil.CipherConfigCreateEZ: "7", hookutil.CipherConfigUnsafeEZK: "bmV3"}
-	source := map[string]string{hookutil.CipherConfigImportEZ: "7", hookutil.CipherConfigUnsafeEZK: "b2xk"}
 	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	for _, scenario := range []struct {
 		name     string
@@ -860,15 +855,6 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 			require.Empty(t, cipher.registered)
 
 			cipher.targetErr = nil
-			cipher.sourceErr = errors.New("init key manager failed: CipherPlugin: cannot register ezk, ezID=7, err=conflicting key ID 24 for ezID=7")
-			status, err = submit(wire)
-			require.Error(t, merr.CheckRPCCall(status, err))
-			require.Contains(t, status.GetReason(), "conflicting key ID")
-			require.Nil(t, node.importTaskMgr.Get(taskID))
-			require.Equal(t, []map[string]string{target}, cipher.registered)
-
-			cipher.registered = nil
-			cipher.sourceErr = nil
 			status, err = submit(wire)
 			require.NoError(t, merr.CheckRPCCall(status, err))
 			task := node.importTaskMgr.Get(taskID)
@@ -880,7 +866,7 @@ func TestDataNodeImportCipherContext(t *testing.T) {
 					require.Equal(t, importv2.L0ImportTaskType, task.GetType())
 				}
 			}
-			require.Equal(t, []map[string]string{target, source}, cipher.registered)
+			require.Equal(t, []map[string]string{target}, cipher.registered)
 		})
 	}
 }

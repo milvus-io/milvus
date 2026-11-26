@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -1595,6 +1596,10 @@ func (c *importRequestCipher) ResolveImportEZ(artifact string) (int64, []byte, e
 	return c.resolve(artifact)
 }
 
+func (*importRequestCipher) GetDecryptorForKeyset(int64, int64, []byte, []byte) (hook.Decryptor, error) {
+	panic("dispatch does not decrypt binlogs")
+}
+
 func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
 	for _, tc := range []struct {
@@ -1662,86 +1667,7 @@ type temporaryImportError struct {
 func (e temporaryImportError) Error() string   { return e.msg }
 func (e temporaryImportError) Temporary() bool { return e.temporary }
 
-func TestImportDispatchRetriesOnEZKError(t *testing.T) {
-	ctx := context.Background()
-	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
-	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
-	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
-		t.Run(state.String(), func(t *testing.T) {
-			var sourceErr error
-			var resolves int
-			cipher := &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t), resolve: func(artifact string) (int64, []byte, error) {
-				resolves++
-				require.Equal(t, backup, artifact)
-				return 73, []byte("old"), sourceErr
-			}}
-			t.Cleanup(hookutil.SetTestCipher(cipher))
-
-			catalog := mocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
-				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
-			}}, nil)
-			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-			cluster := session.NewMockCluster(t)
-			alloc := allocator.NewMockAllocator(t)
-			if state == internalpb.ImportJobState_PreImporting {
-				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
-					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
-				}}, nil)
-				catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-			} else {
-				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
-					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
-				}}, nil)
-			}
-			im, err := NewImportMeta(ctx, catalog, alloc, nil)
-			require.NoError(t, err)
-			task := im.GetTask(ctx, 2)
-
-			// Non-retryable errors tolerate up to maxImportDispatchRetries-1 retries.
-			sourceErr = errors.New("source KMS denied Decrypt")
-			for i := 0; i < maxImportDispatchRetries-1; i++ {
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			}
-
-			// Transient Temporary() source errors and retryable target errors keep task pending past maxImportDispatchRetries.
-			sourceErr = temporaryImportError{msg: "source KMS throttled", temporary: true}
-			for i := 0; i < 2; i++ {
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			}
-
-			sourceErr = nil
-			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return(nil).Twice()
-			for i := 0; i < 2; i++ {
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			}
-			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
-			alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
-			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
-
-			// Non-retryable source error fails the job once retries are exhausted.
-			sourceErr = errors.New("source KMS denied Decrypt")
-			task.CreateTaskOnWorker(10, cluster)
-			job := im.GetJob(ctx, 1)
-			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
-			require.Contains(t, job.GetReason(), sourceErr.Error())
-
-			// Once failed, subsequent scheduler visits stop calling ResolveImportEZ.
-			resolvesBefore := resolves
-			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, resolvesBefore, resolves)
-		})
-	}
-}
-
-func TestImportDispatchCountsOnlyNonRetryableFailures(t *testing.T) {
+func TestImportDispatchKeepsPendingAndIncrementsRetryOnError(t *testing.T) {
 	ctx := context.Background()
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
 	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
@@ -1758,7 +1684,6 @@ func TestImportDispatchCountsOnlyNonRetryableFailures(t *testing.T) {
 			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
 				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
 			}}, nil)
-			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 			cluster := session.NewMockCluster(t)
 			alloc := allocator.NewMockAllocator(t)
 			rpcErr := merr.WrapErrNodeNotFound(10)
@@ -1767,45 +1692,36 @@ func TestImportDispatchCountsOnlyNonRetryableFailures(t *testing.T) {
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-				cluster.EXPECT().CreatePreImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Times(maxImportDispatchRetries)
+				cluster.EXPECT().CreatePreImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
 			} else {
 				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
 					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
 				}}, nil)
-				alloc.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(20000), nil).Times(maxImportDispatchRetries)
-				cluster.EXPECT().CreateImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Times(maxImportDispatchRetries)
+				alloc.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(20000), nil).Once()
+				cluster.EXPECT().CreateImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
 			}
 			im, err := NewImportMeta(ctx, catalog, alloc, nil)
 			require.NoError(t, err)
 			task := im.GetTask(ctx, 2)
 
-			// Exceed maxImportDispatchRetries with retryable errors first.
-			sourceErr = temporaryImportError{msg: "source KMS throttled", temporary: true}
-			for i := 0; i < maxImportDispatchRetries+1; i++ {
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-				require.Equal(t, int64(0), task.GetTaskVersion())
-			}
-
-			// Prior retryable attempts must not consume the non-retryable failure budget.
-			sourceErr = nil
-			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("target-key")).Times(maxImportDispatchRetries)
-			for i := 0; i < maxImportDispatchRetries-1; i++ {
-				task.CreateTaskOnWorker(10, cluster)
-				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-				require.Equal(t, int64(i+1), task.GetTaskVersion())
-			}
-			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
-
-			// Only the maxImportDispatchRetries-th non-retryable failure fails the job.
+			// Assemble errors keep the task pending, increment retryTimes, and do not fail the job or allocate ranges.
+			sourceErr = errors.New("source KMS denied Decrypt")
 			task.CreateTaskOnWorker(10, cluster)
-			job := im.GetJob(ctx, 1)
-			require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
-			require.Contains(t, job.GetReason(), rpcErr.Error())
-			require.Equal(t, int64(maxImportDispatchRetries), task.GetTaskVersion())
+			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			require.Equal(t, int64(1), task.GetTaskVersion())
+			alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+
+			// Dispatch RPC errors also keep the task pending and increment retryTimes.
+			sourceErr = nil
+			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("target-key")).Once()
+			task.CreateTaskOnWorker(10, cluster)
+			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			require.Equal(t, int64(2), task.GetTaskVersion())
+			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
 		})
 	}
 }
@@ -1888,7 +1804,7 @@ func TestWrapStoragePluginContext(t *testing.T) {
 	}
 }
 
-func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
+func TestCompactionTasksFailWithoutAllocOnPluginContextError(t *testing.T) {
 	const collectionID = 7
 	const ezID = 91
 	schema := &schemapb.CollectionSchema{
@@ -1909,8 +1825,8 @@ func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
 			State:         commonpb.SegmentState_Flushed,
 			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogIDs(101, 1)},
 		}}).Once()
+		compMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Once()
 
 		task := newMixCompactionTask(&datapb.CompactionTask{
 			PlanID:        1,
@@ -1926,8 +1842,8 @@ func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
 
 		cluster := session.NewMockCluster(t)
 		task.CreateTaskOnWorker(11, cluster)
-		require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-		compMeta.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
+		require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 	})
 
 	t.Run("l0_compaction", func(t *testing.T) {
@@ -1951,8 +1867,8 @@ func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
 			InsertChannel: "ch-1",
 			State:         commonpb.SegmentState_Flushed,
 		}}}).Once()
+		compMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 		alloc := allocator.NewMockAllocator(t)
-		alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil).Once()
 
 		task := newL0CompactionTask(&datapb.CompactionTask{
 			PlanID:        2,
@@ -1968,7 +1884,7 @@ func TestCompactionTasksRetryTemporaryPluginContextError(t *testing.T) {
 
 		cluster := session.NewMockCluster(t)
 		task.CreateTaskOnWorker(11, cluster)
-		require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-		compMeta.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
+		require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 	})
 }
