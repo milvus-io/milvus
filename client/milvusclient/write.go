@@ -75,6 +75,9 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 		}
 		req, err := option.InsertRequest(collection)
 		if err != nil {
+			if errors.Is(err, errWriteConditionUnsupportedForDML) {
+				return collection.UpdateTimestamp, err
+			}
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
@@ -137,6 +140,7 @@ func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ..
 type UpsertResult struct {
 	UpsertCount int64
 	IDs         column.Column
+	SuccIndex   []uint32
 }
 
 func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
@@ -168,6 +172,7 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 			}
 			c.collCache.UpdateWriteTs(newCollectionCacheKey(db, collectionName), resp.GetTimestamp())
 			result.UpsertCount = resp.GetUpsertCnt()
+			result.SuccIndex = resp.GetSuccIndex()
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {
 				return err
