@@ -6,11 +6,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
-// beginStopping rejects preparation while existing Ready views continue serving
-// until the coordinator migrates them. It serializes with readiness callbacks.
+// beginStopping rejects preparation and cancels prewarm while existing Ready
+// views continue serving until the coordinator migrates them. It serializes with
+// readiness callbacks.
 func (h *QNQueryViewHandler) beginStopping() []<-chan struct{} {
 	h.mu.Lock()
 	h.stopping = true
+	h.cancelPrewarm()
 	shards := h.shardsLocked()
 	h.mu.Unlock()
 	var dropped []<-chan struct{}

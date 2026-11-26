@@ -357,6 +357,7 @@ DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_count_file,
 // async cgo metrics
 std::map<std::string, std::string> cgoSearchPoolLabel = {{"pool", "search"}};
 std::map<std::string, std::string> cgoLoadPoolLabel = {{"pool", "load"}};
+std::map<std::string, std::string> cgoPrewarmPoolLabel = {{"pool", "prewarm"}};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds,
                                    "[cpp]async cgo queue duration");
@@ -369,6 +370,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_cgo_queue_duration_seconds_load,
     internal_cgo_queue_duration_seconds,
     cgoLoadPoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_queue_duration_seconds_prewarm,
+    internal_cgo_queue_duration_seconds,
+    cgoPrewarmPoolLabel,
     secondsBuckets);
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_execute_duration_seconds,
@@ -383,6 +389,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_cgo_execute_duration_seconds,
     cgoLoadPoolLabel,
     secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_cgo_execute_duration_seconds_prewarm,
+    internal_cgo_execute_duration_seconds,
+    cgoPrewarmPoolLabel,
+    secondsBuckets);
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_before_execute_total,
                                  "[cpp]async cgo cancel before execute count");
@@ -392,6 +403,9 @@ DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_search,
 DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_load,
                           internal_cgo_cancel_before_execute_total,
                           cgoLoadPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_before_execute_total_prewarm,
+                          internal_cgo_cancel_before_execute_total,
+                          cgoPrewarmPoolLabel);
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cgo_cancel_during_execute_total,
                                  "[cpp]async cgo cancel during execute count");
@@ -401,6 +415,9 @@ DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_search,
 DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_load,
                           internal_cgo_cancel_during_execute_total,
                           cgoLoadPoolLabel);
+DEFINE_PROMETHEUS_COUNTER(internal_cgo_cancel_during_execute_total_prewarm,
+                          internal_cgo_cancel_during_execute_total,
+                          cgoPrewarmPoolLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_pool_size,
                                "[cpp]async cgo pool size");
@@ -410,6 +427,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_search,
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_load,
                         internal_cgo_pool_size,
                         cgoLoadPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_pool_size_prewarm,
+                        internal_cgo_pool_size,
+                        cgoPrewarmPoolLabel);
 
 std::map<std::string, std::string> untypedCgoExceptionLabel = {};
 DEFINE_PROMETHEUS_COUNTER_FAMILY(
@@ -429,6 +449,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_search,
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_load,
                         internal_cgo_inflight_task_total,
                         cgoLoadPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_inflight_task_total_prewarm,
+                        internal_cgo_inflight_task_total,
+                        cgoPrewarmPoolLabel);
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_cgo_executing_task_total,
                                "[cpp]async cgo executing task");
@@ -438,6 +461,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_search,
 DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load,
                         internal_cgo_executing_task_total,
                         cgoLoadPoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_prewarm,
+                        internal_cgo_executing_task_total,
+                        cgoPrewarmPoolLabel);
 
 // storage thread pool metrics
 std::map<std::string, std::string> highPoolLabel = {{"priority", "high"}};

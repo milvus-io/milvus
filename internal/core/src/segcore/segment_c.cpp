@@ -470,8 +470,8 @@ AsyncSegmentPrewarm(CSegmentInterface c_segment,
     }
 
     auto future = milvus::futures::Future<bool>::async(
-        milvus::futures::getLoadCPUExecutor(),
-        milvus::futures::ExecutePriority::LOW,
+        milvus::futures::getPrewarmCPUExecutor(),
+        folly::Executor::MID_PRI,
         [segment, fields = std::move(fields)](
             folly::CancellationToken cancel_token) -> bool* {
             auto* sealed =
@@ -483,7 +483,7 @@ AsyncSegmentPrewarm(CSegmentInterface c_segment,
             sealed->Prewarm(&op_ctx, fields);
             return nullptr;
         },
-        milvus::futures::PoolType::kLoad);
+        milvus::futures::PoolType::kPrewarm);
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
 }

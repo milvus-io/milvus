@@ -77,6 +77,8 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "futures/Executor.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
@@ -86,6 +88,7 @@
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/transaction/transaction.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -97,6 +100,7 @@
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/Types.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
@@ -1376,7 +1380,24 @@ TEST_P(TestLazyManifest, PrewarmLoadsLazyColumnsAndPkIndex) {
     EXPECT_TRUE(runtime->timestamp_index_slot->IsCached(0));
 }
 
-TEST_P(TestLazyManifest, PrewarmCancellationDuringColdMetadataOpen) {
+TEST_P(TestLazyManifest, AsyncPrewarmKeepsForegroundLoadAvailable) {
+    auto* load_executor = futures::getLoadCPUExecutor();
+    auto load_threads = load_executor->numThreads();
+    load_executor->setNumThreads(1);
+    auto restore_load_threads =
+        folly::makeGuard([&] { load_executor->setNumThreads(load_threads); });
+    auto await_future = [](CFuture* future) {
+        while (!future_is_ready(future)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        void* result = nullptr;
+        auto status = future_leak_and_get(future, &result);
+        auto code = status.error_code;
+        if (code != ErrorCode::Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        return code;
+    };
     LazyColumnGroupGuard lazy_group_guard(true);
     const auto previous_async =
         storagev2translator::StorageV2AsyncLoadEnabled();
@@ -1443,23 +1464,50 @@ TEST_P(TestLazyManifest, PrewarmCancellationDuringColdMetadataOpen) {
         runtime->fields.insert_or_assign(field, column);
         sealed->TestPublishRuntimeResourceState(std::move(runtime));
 
-        folly::CancellationSource cancellation;
-        OpContext ctx(cancellation.getToken());
+        auto foreground = CreateSealedSegment(schema_, nullptr, 3196);
+        auto* load_segment =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(foreground.get());
+        ASSERT_NE(load_segment, nullptr);
+        load_segment->SetLoadInfo(MakeV3ManifestLoadInfo(data, 3196));
+
+        auto load_executing =
+            milvus::monitor::internal_cgo_executing_task_total_load.Value();
+        auto prewarm_executing =
+            milvus::monitor::internal_cgo_executing_task_total_prewarm.Value();
         reader->Arm();
         auto started = reader->Started();
-        auto warming = std::async(std::launch::async,
-                                  [&] { sealed->Prewarm(&ctx, {field}); });
+        const int64_t field_id = field.get();
+        using FuturePtr = std::unique_ptr<CFuture, decltype(&future_destroy)>;
+        FuturePtr warm(
+            AsyncSegmentPrewarm(
+                static_cast<SegmentInterface*>(sealed), &field_id, 1),
+            future_destroy);
+        auto warming = std::async(std::launch::async, await_future, warm.get());
+        FuturePtr load(nullptr, future_destroy);
+        std::future<int> loading;
         auto release = folly::makeGuard([&] { reader->Release(); });
         ASSERT_EQ(started.wait_for(std::chrono::seconds(5)),
                   std::future_status::ready);
-        cancellation.requestCancellation();
+        EXPECT_EQ(milvus::monitor::internal_cgo_pool_size_prewarm.Value(), 1);
+        EXPECT_EQ(
+            milvus::monitor::internal_cgo_executing_task_total_prewarm.Value(),
+            prewarm_executing + 1);
+        EXPECT_EQ(
+            milvus::monitor::internal_cgo_executing_task_total_load.Value(),
+            load_executing);
+
+        load.reset(AsyncSegmentLoad(
+            CTraceContext{}, static_cast<SegmentInterface*>(load_segment)));
+        loading = std::async(std::launch::async, await_future, load.get());
+        EXPECT_EQ(loading.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready)
+            << "foreground load waited for the blocked prewarm";
+        EXPECT_FALSE(future_is_ready(warm.get()));
+
+        future_cancel(warm.get());
         reader->Release();
-        try {
-            warming.get();
-            FAIL() << "expected cancellation during cold metadata open";
-        } catch (const SegcoreError& error) {
-            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
-        }
+        EXPECT_EQ(warming.get(), ErrorCode::FollyCancel);
+        EXPECT_EQ(loading.get(), ErrorCode::Success);
         EXPECT_FALSE(proxy->IsMaterialized());
         EXPECT_EQ(reader->async_calls, async_enabled ? 1 : 0);
         EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 1);

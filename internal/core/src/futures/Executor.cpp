@@ -141,6 +141,17 @@ getLoadCPUExecutor() {
 }
 
 folly::CPUThreadPoolExecutor*
+getPrewarmCPUExecutor() {
+    static auto executor = [] {
+        auto pool = std::make_unique<folly::CPUThreadPoolExecutor>(
+            1, std::make_shared<folly::NamedThreadFactory>("MILVUS_PREWARM_"));
+        monitor::internal_cgo_pool_size_prewarm.Set(pool->numThreads());
+        return pool;
+    }();
+    return executor.get();
+}
+
+folly::CPUThreadPoolExecutor*
 getJsonStatsBuildExecutor() {
     auto max_thread_num = static_cast<size_t>(std::max(1, milvus::CPU_NUM));
     static folly::CPUThreadPoolExecutor executor(

@@ -10,6 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/worknode/handler"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 type warmupCall struct {
@@ -135,6 +138,59 @@ func TestPrewarmFailureDoesNotRequeueOrFollowReplacement(t *testing.T) {
 		f.drop(t, req)
 		expectNoWarmup(t, warms)
 		f.drop(t, next)
+	})
+}
+
+func TestPrewarmHandlerCloseCancelsDuringMigration(t *testing.T) {
+	mockey.PatchConvey("handler close cancels prewarm while the RPC and migration are still live", t, func() {
+		f := setupResourceTest(t, nil)
+		warms := recordWarmups(t)
+		h := NewQNQueryViewHandler(f.manager)
+		req := f.request(1, 1, 1)
+		view := qviews.NewQueryViewAtQueryNode(req.Meta, req.View)
+		reports := make(chan qviews.QueryViewState, 4)
+		h.ApplyViews([]handler.ApplyView{{View: view, OnReport: func(v qviews.QueryViewAtWorkNode) {
+			reports <- v.State()
+		}}})
+		select {
+		case state := <-reports:
+			require.Equal(t, qviews.QueryViewStateReady, state)
+		case <-time.After(5 * time.Second):
+			t.Fatal("view did not become ready")
+		}
+
+		warmReq := &viewpb.PrewarmOnViewRequest{ShardId: req.Key.ShardID.IntoProto(), Version: req.Key.QueryViewVersion.IntoProto()}
+		rpcCtx, cancelRPC := context.WithCancel(t.Context())
+		defer cancelRPC()
+		warmed := make(chan error, 1)
+		go func() { warmed <- h.Prewarm(rpcCtx, warmReq) }()
+		call := awaitWarmup(t, warms)
+
+		migrationCtx, cancelMigration := context.WithTimeout(t.Context(), 5*time.Second)
+		closed := make(chan error, 1)
+		go func() { closed <- h.Close(migrationCtx) }()
+		defer func() {
+			cancelMigration()
+			cancelRPC()
+			awaitShutdown(t, h.closed)
+		}()
+
+		select {
+		case err := <-warmed:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-migrationCtx.Done():
+			t.Fatal("prewarm did not cancel during migration")
+		}
+		require.NoError(t, rpcCtx.Err())
+		require.NoError(t, migrationCtx.Err())
+		require.ErrorIs(t, call.ctx.Err(), context.Canceled)
+		require.Equal(t, qviews.QueryViewStateReady, shutdownViewState(h, req.Key))
+		require.ErrorIs(t, h.Prewarm(migrationCtx, warmReq), context.Canceled)
+		require.Empty(t, warms)
+
+		h.ApplyViews([]handler.ApplyView{{View: newDroppedQNView(1, 1)}})
+		require.NoError(t, <-closed)
+		require.EqualValues(t, 1, f.releases.Load())
 	})
 }
 
