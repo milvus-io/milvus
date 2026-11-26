@@ -1003,9 +1003,9 @@ Changes:
   pipeline. A requery with projection items stays off the Materialize path,
   which carries schema fields only.
 - **`$distance` without a column.** When nothing between the vector search
-  and the result changes the scores or the row order (no rerank, no Boost
-  scorer in the plan, no score-writing function chain, no aggregation, no
-  `order_by`), the final `Scores` are the distances, and `$distance` is
+  and the result rewrites the scores (no rerank, no Boost scorer in the plan,
+  no score-writing function chain, no aggregation), the final `Scores` are
+  the distances, and `$distance` is
   copied from them as `$score` is; the Search plan does not ask the worker
   for the column. In the other cases the worker returns the column, and a
   requery would drop it: the proxy keeps the column of the reduced result
@@ -1020,8 +1020,9 @@ Changes:
   `search_pipeline.go:3619`). The pipeline always requeries and then reorders
   every `FieldsData` column generically (`reorderResults`, `:2573`), so
   `$seg_id` and `$seg_offset` arrive with the requery fields and are
-  reordered with them. `$distance` is added back after the `order_by` node,
-  by key.
+  reordered with them. The node reorders `Scores` with the rows, and
+  `order_by` cannot be combined with a rerank or a function chain, so
+  `$distance` is taken from the final `Scores` here as well.
 - **Search iterator.** An iterator request is an ordinary Search whose
   `QueryInfo` carries iterator state; the proxy derives the continuation bound
   from the final result (`task_search.go:1736`). It uses the same worker path
