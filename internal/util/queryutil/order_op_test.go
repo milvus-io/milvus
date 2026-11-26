@@ -851,8 +851,8 @@ func TestOrderByTopKCancellation(t *testing.T) {
 	ctx := &orderCancelContext{Context: t.Context()}
 	_, err := op.Run(ctx, nil, input)
 	require.ErrorIs(t, err, context.Canceled)
-	cancelled, cancel := context.WithCancel(t.Context())
+	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = op.Run(cancelled, nil, input)
+	_, err = op.Run(canceled, nil, input)
 	require.ErrorIs(t, err, context.Canceled)
 }
