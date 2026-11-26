@@ -345,11 +345,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
+        // One offsets object per group, also indexed by each physical field ID.
         std::unordered_map<std::string,
                            std::shared_ptr<StructElementOffsetsSealed>>
-            struct_to_element_offsets;
+            element_offsets_by_group;
         std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
-            struct_element_offsets_map;
+            element_offsets_by_field;
         IndexInventory indexes;
         uint64_t next_local_index_registration_id{0};
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
@@ -1970,7 +1971,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const RuntimeResourceState& runtime,
         const SealedFieldLayout& schema,
         const SegmentLoadInfo& load_info,
-        const std::string& struct_name,
+        const std::string& group,
         const std::unordered_set<FieldId>& newly_loaded_fields,
         const std::unordered_set<FieldId>& excluded_fields);
 

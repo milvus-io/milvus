@@ -370,9 +370,8 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
                           GetValueFromConfigOrFallback<bool>(
                               request.params, "is_text_match", false);
         if (text) {
-            AssertInfo(
-                request.is_nested && request.element_type == DataType::VARCHAR,
-                "array text index requires a VarChar struct sub-field");
+            AssertInfo(request.element_type == DataType::VARCHAR,
+                       "array text index requires VarChar elements");
             result.family =
                 ScalarFamily(request.index_type, result.value_type, true);
         } else if (request.is_nested) {

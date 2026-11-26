@@ -188,7 +188,8 @@ RawStringLiteral: [rR] ('"' DoubleRChar* '"' | '\'' SingleRChar* '\'');
 JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | RawStringLiteral | DecimalConstant) ']')+;
 StructIndexFieldIdentifier: Identifier '[' DecimalConstant ']' '[' Identifier ']';
 StructFieldIdentifier: Identifier '[' Identifier ']';
-StructSubFieldIdentifier: '$[' Identifier ']';
+// The visitor resolves the element binding against its enclosing collection.
+StructSubFieldIdentifier: '$' ('[' Identifier ']')?;
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

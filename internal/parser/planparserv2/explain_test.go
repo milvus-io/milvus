@@ -1461,6 +1461,7 @@ func TestExplainPlan_TextNodeDetails(t *testing.T) {
 		{`Int64Field is null`, "null IsNull Int64Field"},
 		{`match_least(struct_array, $[sub_int] > 1, threshold=2)`, "match MatchLeast struct=struct_array count=2"},
 		{`match_any(struct_array, $[sub_int] > 1)`, "match MatchAny struct=struct_array"},
+		{`match_any(StringArrayField, $ == "a")`, "match MatchAny StringArrayField"},
 		{`random_sample(0.01)`, "random_sample sample_factor=0.01"},
 		{`st_equals(GeometryField, "POINT(0 0)")`, "gis Equals GeometryField wkt=POINT(0 0)"},
 	}

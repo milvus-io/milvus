@@ -23,7 +23,6 @@
 #include "boost/cstdint.hpp"
 #include "common/Common.h"
 #include "common/SystemProperty.h"
-#include "common/Utils.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
@@ -175,15 +174,14 @@ ArrayTextFlag(const TypeParams& params, const char* key) {
 }  // namespace
 
 bool
-FieldMeta::is_struct_varchar() const {
+FieldMeta::is_varchar_array() const {
     return data_->type_ == DataType::ARRAY &&
-           data_->element_type_ == DataType::VARCHAR &&
-           IsStructSubField(data_->name_.get());
+           data_->element_type_ == DataType::VARCHAR;
 }
 
 bool
 FieldMeta::enable_match() const {
-    if (is_struct_varchar()) {
+    if (is_varchar_array()) {
         return enable_analyzer() &&
                ArrayTextFlag(data_->array_type_params_, "enable_match");
     }
@@ -198,7 +196,7 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_analyzer() const {
-    if (is_struct_varchar()) {
+    if (is_varchar_array()) {
         return ArrayTextFlag(data_->array_type_params_, "enable_analyzer");
     }
     if (!IsStringDataType(data_->type_)) {
@@ -217,7 +215,7 @@ FieldMeta::get_analyzer_params() const {
             Unsupported,
             fmt::format("unsupported text index when not enable analyzer"));
     }
-    return ParseTokenizerParams(is_struct_varchar()
+    return ParseTokenizerParams(is_varchar_array()
                                     ? data_->array_type_params_
                                     : data_->string_info_->params);
 }

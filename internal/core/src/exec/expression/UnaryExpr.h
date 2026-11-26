@@ -990,6 +990,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    RequiresRawArrayElements() const override {
+        return IsElementLevelExpression() &&
+               !IsTextIndexOpType(expr_->op_type_);
+    }
+
+    bool
     IsSource() const override {
         return true;
     }

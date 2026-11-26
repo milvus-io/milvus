@@ -65,6 +65,7 @@
 #include "pb/segcore.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
+#include "query/PlanProto.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -382,6 +383,57 @@ class MatchExprTest : public ::testing::Test {
     static constexpr int array_len_ = 5;
     int64_t saved_batch_size_{0};
 };
+
+TEST(MatchTargetPlanTest, BindByParentIdAndReadLegacyNameOnly) {
+    proto::schema::CollectionSchema schema_proto;
+    auto* pk = schema_proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::Int64);
+    pk->set_is_primary_key(true);
+    auto* scores = schema_proto.add_fields();
+    scores->set_fieldid(101);
+    scores->set_name("scores");
+    scores->set_data_type(proto::schema::Array);
+    scores->set_element_type(proto::schema::Int64);
+    auto* items = schema_proto.add_struct_array_fields();
+    items->set_fieldid(102);
+    items->set_name("items");
+    auto* price = items->add_fields();
+    price->CopyFrom(*scores);
+    price->set_fieldid(103);
+    price->set_name("items[price]");
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    EXPECT_EQ(schema->GetMatchTargetField(FieldId(101)).get_id(), FieldId(101));
+    EXPECT_EQ(schema->GetMatchTargetField(FieldId(102)).get_id(), FieldId(103));
+    Schema copy(*schema);
+    Schema assigned;
+    assigned = copy;
+    EXPECT_EQ(assigned.GetMatchTargetField(FieldId(102)).get_id(),
+              FieldId(103));
+
+    ProtoParser parser(schema);
+    proto::plan::Expr expr;
+    auto* match = expr.mutable_match_expr();
+    match->mutable_predicate()->mutable_always_true_expr();
+    match->set_struct_name("items");
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // old writer
+    match->set_target_field_id(102);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // dual-written StructArray
+    match->set_target_field_id(104);
+    EXPECT_THROW(parser.ParseExprs(expr), SegcoreError);  // stale ID, live name
+    match->set_target_field_id(103);
+    EXPECT_THROW(parser.ParseExprs(expr),
+                 SegcoreError);  // child is not a target
+    match->clear_struct_name();
+    match->set_target_field_id(102);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // parent ID alone is sufficient
+    match->set_target_field_id(101);
+    EXPECT_NO_THROW(parser.ParseExprs(expr));  // ordinary ARRAY
+    match->clear_target_field_id();
+    EXPECT_THROW(parser.ParseExprs(expr), SegcoreError);
+}
 
 TEST_F(MatchExprTest, MatchAny) {
     auto filter_expr = CreateFilterExpr("MatchAny", 0);
@@ -4787,9 +4839,11 @@ TEST_F(MatchExprTest, WholeFilterCacheDistinguishesInnerPredicates) {
     }
 }
 
-class MatchExprStructText : public ::testing::TestWithParam<bool> {};
+class MatchExprArrayText
+    : public ::testing::TestWithParam<std::tuple<bool, bool>> {};
 
-TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
+TEST_P(MatchExprArrayText, QuantifiesTextDocumentsOnGrowingAndSealed) {
+    const auto [plain_array, element_nullable] = GetParam();
     const auto previous = EXEC_EVAL_EXPR_BATCH_SIZE.exchange(2);
     auto restore =
         folly::makeGuard([&] { EXEC_EVAL_EXPR_BATCH_SIZE.store(previous); });
@@ -4801,10 +4855,10 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
     const FieldId body(220);
     proto::schema::FieldSchema field;
     field.set_fieldid(body.get());
-    field.set_name("reviews[body]");
+    field.set_name(plain_array ? "tags" : "reviews[body]");
     field.set_data_type(proto::schema::DataType::Array);
     field.set_element_type(proto::schema::DataType::VarChar);
-    field.set_element_nullable(GetParam());
+    field.set_element_nullable(element_nullable);
     for (const char* key : {"enable_match", "enable_analyzer"}) {
         auto* param = field.add_type_params();
         param->set_key(key);
@@ -4821,7 +4875,7 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
         auto* strings = bodies[i].mutable_string_data();
         auto* integers = scores[i].mutable_int_data();
         for (size_t j = 0; j < texts[i].size(); ++j) {
-            if (GetParam()) {
+            if (element_nullable) {
                 bodies[i].add_valid_data(!(i == 3 && j == 1));
             }
             strings->add_data(texts[i][j]);
@@ -4848,7 +4902,7 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
         SCOPED_TRACE(sealed);
         std::unique_ptr<SegmentInternalInterface> segment;
         if (sealed) {
-            if (GetParam()) {
+            if (element_nullable) {
                 // Element-nullable arrays are written as native lists in Storage V3.
                 auto storage_proto = schema->ToProto();
                 for (auto [id, name] :
@@ -4892,7 +4946,9 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
                     storage_schema->ConvertToLoonArrowSchema(),
                     n,
                     std::move(columns));
-                const auto path = TestRemotePath + "/struct-text";
+                const auto path =
+                    TestRemotePath +
+                    (plain_array ? "/array-text" : "/struct-text");
                 auto version = test::WriteRecordBatchesToV3(
                     storage_schema,
                     path,
@@ -4929,30 +4985,64 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
                             generated.SharedRaw());
             segment = std::move(growing);
         }
-        const std::vector<std::pair<std::string, std::vector<bool>>> cases{
-            {R"(match_any(reviews, $[body] == "new" && $[body] == "york"))",
+        const auto target = plain_array ? "tags" : "reviews";
+        const auto text = plain_array ? "$" : "$[body]";
+        std::vector<std::pair<std::string, std::vector<bool>>> cases{
+            {fmt::format(R"(match_any({}, {} == "new" && {} == "york"))",
+                         target,
+                         text,
+                         text),
              {false, false, false, false, false}},
-            {R"(match_any(reviews, $[body] == "new" || $[body] == "york"))",
+            {fmt::format(R"(match_any({}, {} == "new" || {} == "york"))",
+                         target,
+                         text,
+                         text),
              {true, false, false, false, false}},
-            {R"(match_all(reviews, $[body] >= "new" && $[body] < "z"))",
-             {true, true, true, !GetParam(), true}},
-            {R"(match_all(reviews, not ($[body] == "new" && $[body] == "york")))",
-             {true, true, true, !GetParam(), true}},
-            {R"(match_any(reviews, phrase_match($[body], "new york", 99)))",
+            {fmt::format(R"(match_all({}, {} >= "new" && {} < "z"))",
+                         target,
+                         text,
+                         text),
+             {true, true, true, !element_nullable, true}},
+            {fmt::format(R"(match_all({}, not ({} == "new" && {} == "york")))",
+                         target,
+                         text,
+                         text),
+             {true, true, true, !element_nullable, true}},
+            {fmt::format(R"(match_any({}, phrase_match({}, "new york", 99)))",
+                         target,
+                         text),
              {false, true, false, true, false}},
-            {R"(match_all(reviews, text_match($[body], "new")))",
+            {fmt::format(
+                 R"(match_all({}, text_match({}, "new")))", target, text),
              {false, true, true, false, true}},
-            {R"(match_exact(reviews, phrase_match($[body], "new york"), threshold=2))",
+            {fmt::format(
+                 R"(match_exact({}, phrase_match({}, "new york"), threshold=2))",
+                 target,
+                 text),
              {false, true, false, false, false}},
-            {R"(match_least(reviews, text_match($[body], "new york", minimum_should_match=2), threshold=1))",
+            {fmt::format(
+                 R"(match_least({}, text_match({}, "new york", minimum_should_match=2), threshold=1))",
+                 target,
+                 text),
              {false, true, false, true, false}},
-            {R"(match_most(reviews, text_match($[body], "york"), threshold=0))",
+            {fmt::format(
+                 R"(match_most({}, text_match({}, "york"), threshold=0))",
+                 target,
+                 text),
              {false, false, true, false, true}},
-            {R"(match_any(reviews, not text_match($[body], "new")))",
-             {true, false, false, !GetParam(), false}},
-            {R"(match_any(reviews, $[score] == 1 && phrase_match($[body], "new york")))",
-             {false, true, false, false, false}},
+            {fmt::format(
+                 R"(match_any({}, not text_match({}, "new")))", target, text),
+             {true, false, false, !element_nullable, false}},
         };
+        if (plain_array) {
+            cases.push_back(
+                {R"(match_any(tags, $ == "new" && text_match($, "york")))",
+                 {false, false, false, false, false}});
+        } else {
+            cases.push_back(
+                {R"(match_any(reviews, $[score] == 1 && phrase_match($[body], "new york")))",
+                 {false, true, false, false, false}});
+        }
         for (const auto& [query, expected] : cases) {
             SCOPED_TRACE(query);
             auto bytes = handle.Parse(query);
@@ -4976,5 +5066,6 @@ TEST_P(MatchExprStructText, QuantifiesTextDocumentsOnGrowingAndSealed) {
 }
 
 INSTANTIATE_TEST_SUITE_P(StorageFormats,
-                         MatchExprStructText,
-                         ::testing::Bool());
+                         MatchExprArrayText,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
