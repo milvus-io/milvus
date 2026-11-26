@@ -80,6 +80,16 @@ message DataViewOfCollection {
     uint64 shard_set_epoch = 5;
 }
 
+// Cluster-local published read identity. Shards retain membership and lineage
+// only; their physical segment snapshots are owned by DataViews.
+message ServingGeneration {
+    int64 collection_id = 1;
+    uint64 load_info_version = 2;
+    int32 read_schema_version = 3;
+    uint64 shard_set_epoch = 4;
+    repeated DataViewOfShard shards = 5;
+}
+
 // DataViewOfShard groups loadable segments by partition for one vchannel.
 message DataViewOfShard {
     string vchannel = 1;
@@ -338,6 +348,8 @@ service QueryPlanService {
 
 message GetQueryPlanRequest {
     uint64 shard_set_epoch = 10;
+    uint64 load_info_version = 11;
+    int32 read_schema_version = 12;
     int64 collection_id = 1;
     ShardID shard_id = 2;
     // Mutually exclusive MVCC source:

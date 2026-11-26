@@ -1266,6 +1266,7 @@ message GetQueryViewLoadInfoResponse {
     bool split_admission_allowed = 10;
     uint64 shard_set_epoch = 8;
     repeated view.DataViewOfShard serving_shards = 9;
+    int32 read_schema_version = 11;
     repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
 }
 
