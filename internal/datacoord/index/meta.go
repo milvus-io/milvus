@@ -1741,23 +1741,32 @@ func (m *IndexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 }
 
 func (m *IndexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
-	indexInfos := m.GetIndexesForCollection(collectionID, "")
-
-	// dense vector fields only, struct vector sub-fields included
-	vectorFields := lo.Filter(typeutil.GetVectorFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) bool {
-		return !typeutil.IsSparseFloatVectorType(field.GetDataType())
-	})
-	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, meta.GetIndexType(t.IndexParams)
-	})
-	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
-			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
+	m.fieldIndexLock.RLock()
+	indexes := m.Indexes[collectionID]
+	fieldIndexTypes := make(map[int64]indexparamcheck.IndexType, len(indexes))
+	for _, index := range indexes {
+		if !index.IsDeleted {
+			fieldIndexTypes[index.FieldID] = meta.GetIndexType(index.IndexParams)
 		}
-		return false
-	})
+	}
+	m.fieldIndexLock.RUnlock()
 
-	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	// A collection without a vector field has no DiskANN index and keeps the
+	// default segment size; without this guard the empty loop selected the
+	// DiskANN size. Sparse-only collections keep their pre-existing result.
+	if !typeutil.HasVectorField(schema) {
+		return false
+	}
+	for _, field := range typeutil.GetVectorFieldSchemas(schema) {
+		if typeutil.IsSparseFloatVectorType(field.GetDataType()) {
+			continue
+		}
+		indexType, ok := fieldIndexTypes[field.GetFieldID()]
+		if !ok || !vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *IndexMeta) HasIndex(collectionID int64) bool {

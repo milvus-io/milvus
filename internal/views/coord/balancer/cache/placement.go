@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"slices"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -43,6 +44,7 @@ func (c *CollectionEntry) PlacementNode(id int64) *PlacementNode {
 	node, _ := c.placements.get(key[:])
 	return node
 }
+
 func (c *CollectionEntry) RangePlacementNodes(fn func(*PlacementNode) bool) { c.placements.each(fn) }
 
 func resourceKey(key coordview.ResourceKey) [40]byte {
@@ -58,6 +60,37 @@ func (s *ShardEntry) PreparingNodes() []int64 { return s.preparingNodes }
 func (s *ShardEntry) ResidentNodes() []int64  { return s.residentNodes }
 
 func (c *CollectionEntry) replacePlacements(id qviews.ShardID, old, next *ShardEntry) {
+	const (
+		up = iota
+		preparing
+		resident
+		footprintCount
+	)
+	var before, after [footprintCount][]int64
+	if old != nil {
+		before = [footprintCount][]int64{up: old.upNodes, preparing: old.preparingNodes, resident: old.residentNodes}
+	}
+	if next != nil {
+		after = [footprintCount][]int64{up: next.upNodes, preparing: next.preparingNodes, resident: next.residentNodes}
+	}
+	replicaDeltas := make(map[int64][footprintCount]int)
+	for kind, oldNodes := range before {
+		newNodes := after[kind]
+		if slices.Equal(oldNodes, newNodes) {
+			continue
+		}
+		for _, node := range oldNodes {
+			delta := replicaDeltas[node]
+			delta[kind]--
+			replicaDeltas[node] = delta
+		}
+		for _, node := range newNodes {
+			delta := replicaDeltas[node]
+			delta[kind]++
+			replicaDeltas[node] = delta
+		}
+	}
+
 	changed := make(map[int64]*PlacementNode)
 	get := func(id int64) *PlacementNode {
 		if n := changed[id]; n != nil {
@@ -70,34 +103,10 @@ func (c *CollectionEntry) replacePlacements(id qviews.ShardID, old, next *ShardE
 		changed[id] = n
 		return n
 	}
-	apply := func(shard, counterpart *ShardEntry, delta int) {
+	applyResources := func(shard, counterpart *ShardEntry, delta int) {
 		if shard == nil {
 			return
 		}
-		adjust := func(nodes []int64, kind int) {
-			for _, node := range nodes {
-				n := get(node)
-				key := idKey(id.ReplicaID)
-				ref, _ := n.replicas.get(key[:])
-				ref.ReplicaID = id.ReplicaID
-				switch kind {
-				case 0:
-					ref.Up += delta
-				case 1:
-					ref.Preparing += delta
-				case 2:
-					ref.Resident += delta
-				}
-				if ref.Up == 0 && ref.Preparing == 0 && ref.Resident == 0 {
-					n.replicas = n.replicas.remove(key[:])
-				} else {
-					n.replicas = n.replicas.set(key[:], ref)
-				}
-			}
-		}
-		adjust(shard.upNodes, 0)
-		adjust(shard.preparingNodes, 1)
-		adjust(shard.residentNodes, 2)
 		for node, resources := range shard.stats.Resources {
 			for resource := range resources {
 				if counterpart != nil {
@@ -118,8 +127,26 @@ func (c *CollectionEntry) replacePlacements(id qviews.ShardID, old, next *ShardE
 			}
 		}
 	}
-	apply(old, next, -1)
-	apply(next, old, 1)
+	applyResources(old, next, -1)
+	applyResources(next, old, 1)
+	// Apply each node's net change with one write to the immutable replica index.
+	for node, delta := range replicaDeltas {
+		if delta == ([footprintCount]int{}) {
+			continue
+		}
+		n := get(node)
+		key := idKey(id.ReplicaID)
+		ref, _ := n.replicas.get(key[:])
+		ref.ReplicaID = id.ReplicaID
+		ref.Up += delta[up]
+		ref.Preparing += delta[preparing]
+		ref.Resident += delta[resident]
+		if ref.Up == 0 && ref.Preparing == 0 && ref.Resident == 0 {
+			n.replicas = n.replicas.remove(key[:])
+		} else {
+			n.replicas = n.replicas.set(key[:], ref)
+		}
+	}
 	for id, n := range changed {
 		key := idKey(id)
 		if n.replicas.len() == 0 && n.resources.len() == 0 {

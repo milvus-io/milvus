@@ -134,7 +134,8 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 
 		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
 		manager := NewTaskManager(ctx)
-		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
+		attempt := &StatsTaskInfo{SegID: 1}
+		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, attempt)
 		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,
 			PartitionID:     s.partitionID,
@@ -150,7 +151,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
+		}, manager, attempt, s.mockChunkManager, nil, taskcommon.Resource{})
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -186,7 +187,8 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 
 		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
 		manager := NewTaskManager(ctx)
-		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
+		attempt := &StatsTaskInfo{SegID: 1}
+		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, attempt)
 		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
 			CollectionID:    s.collectionID,
 			PartitionID:     s.partitionID,
@@ -202,7 +204,7 @@ func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
 			StorageConfig: &indexpb.StorageConfig{
 				RootPath: "root_path",
 			},
-		}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
+		}, manager, attempt, s.mockChunkManager, nil, taskcommon.Resource{})
 		task.binlogIO = s.mockBinlogIO
 
 		err = task.PreExecute(ctx)
@@ -238,7 +240,7 @@ func (s *TaskStatsSuite) TestPreExecuteDoesNotLogStorageCredentials() {
 			SslCACert:         caCert,
 			GcpCredentialJSON: statsLogCredentialJSON(gcpCredential),
 		},
-	}, manager, s.mockChunkManager, nil, taskcommon.Resource{})
+	}, manager, nil, s.mockChunkManager, nil, taskcommon.Resource{})
 
 	err := task.PreExecute(ctx)
 	s.Require().NoError(err)
@@ -348,8 +350,9 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 		InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
 	}
 	manager := NewTaskManager(ctx)
-	manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), &StatsTaskInfo{})
-	task := NewStatsTask(ctx, cancel, req, manager, nil, pluginContext, taskcommon.Resource{})
+	attempt := &StatsTaskInfo{}
+	manager.LoadOrStoreStatsTask(s.clusterID, req.GetTaskID(), attempt)
+	task := NewStatsTask(ctx, cancel, req, manager, attempt, nil, pluginContext, taskcommon.Resource{})
 
 	var captured *indexcgopb.BuildIndexInfo
 	buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
@@ -410,7 +413,8 @@ func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
 			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
 		require.NoError(t, err)
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		attempt := &StatsTaskInfo{}
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, attempt)
 		req := &workerpb.CreateStatsRequest{
 			EnableManifestDelta:    enableDelta,
 			ClusterID:              clusterID,
@@ -432,7 +436,7 @@ func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
 			}},
 			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
 		}
-		st := NewStatsTask(ctx, nil, req, mgr, nil, nil, taskcommon.Resource{})
+		st := NewStatsTask(ctx, nil, req, mgr, attempt, nil, nil, taskcommon.Resource{})
 		// Execute() seeds manifestPath from the request; call the sub-job directly here.
 		st.manifestPath = baseManifest
 
@@ -499,7 +503,8 @@ func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
 			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
 		require.NoError(t, err)
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		attempt := &StatsTaskInfo{}
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, attempt)
 		req := &workerpb.CreateStatsRequest{
 			EnableManifestDelta: enableDelta,
 			ClusterID:           clusterID,
@@ -524,7 +529,7 @@ func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
 			}},
 			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
 		}
-		st := NewStatsTask(ctx, nil, req, mgr, nil, nil, taskcommon.Resource{})
+		st := NewStatsTask(ctx, nil, req, mgr, attempt, nil, nil, taskcommon.Resource{})
 		st.manifestPath = baseManifest
 
 		buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
@@ -640,7 +645,8 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	mgr := NewTaskManager(ctx)
-	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+	attempt := &StatsTaskInfo{SegID: 10}
+	mgr.LoadOrStoreStatsTask("c1", 1, attempt)
 
 	req := &workerpb.CreateStatsRequest{
 		ClusterID:              "c1",
@@ -665,7 +671,7 @@ func TestCreateJSONKeyStats_NullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
+	st := NewStatsTask(ctx2, cancel, req, mgr, attempt, nil, nil, taskcommon.Resource{})
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -694,7 +700,8 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	mgr := NewTaskManager(ctx)
-	mgr.LoadOrStoreStatsTask("c1", 2, &StatsTaskInfo{SegID: 10})
+	attempt := &StatsTaskInfo{SegID: 10}
+	mgr.LoadOrStoreStatsTask("c1", 2, attempt)
 
 	req := &workerpb.CreateStatsRequest{
 		ClusterID:              "c1",
@@ -718,7 +725,7 @@ func TestCreateJSONKeyStats_NonNullableJSONMissingFieldBinlog(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
+	st := NewStatsTask(ctx2, cancel, req, mgr, attempt, nil, nil, taskcommon.Resource{})
 
 	insertBinlogs := []*datapb.FieldBinlog{
 		{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}},
@@ -741,7 +748,8 @@ func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
 	mgr := NewTaskManager(ctx)
-	mgr.LoadOrStoreStatsTask("c1", 1, &StatsTaskInfo{SegID: 10})
+	attempt := &StatsTaskInfo{SegID: 10}
+	mgr.LoadOrStoreStatsTask("c1", 1, attempt)
 
 	req := &workerpb.CreateStatsRequest{
 		ClusterID:       "c1",
@@ -766,7 +774,7 @@ func TestStatsExecute_EmptyInsertLogsProceedsWhenManifestSet(t *testing.T) {
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
-	st := NewStatsTask(ctx2, cancel, req, mgr, nil, nil, taskcommon.Resource{})
+	st := NewStatsTask(ctx2, cancel, req, mgr, attempt, nil, nil, taskcommon.Resource{})
 
 	var called bool
 	m := mockey.Mock((*statsTask).createTextIndex).To(

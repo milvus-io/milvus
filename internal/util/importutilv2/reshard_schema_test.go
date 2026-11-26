@@ -20,28 +20,42 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
 func TestSortFieldIDsDerivesFromSchema(t *testing.T) {
-	pkOnly := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-	}}
-	ids, err := SortFieldIDs(pkOnly)
-	require.NoError(t, err)
-	require.Equal(t, []int64{100}, ids)
-
-	namespace := &schemapb.CollectionSchema{
-		EnableNamespace: true,
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 101, DataType: schemapb.DataType_Int64, IsPartitionKey: true},
-		},
+	pkOnly := []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}
+	withPartitionKey := append(pkOnly, &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_VarChar, IsPartitionKey: true})
+	for _, tc := range []struct {
+		name      string
+		namespace bool
+		mode      string
+		fields    []*schemapb.FieldSchema
+		want      []int64
+	}{
+		{"ordinary", false, "", pkOnly, []int64{100}},
+		{"ordinary with partition key", false, "", withPartitionKey, []int64{100}},
+		{"partition namespace", true, common.NamespaceModePartition, pkOnly, []int64{100}},
+		{"partition key namespace", true, common.NamespaceModePartitionKey, withPartitionKey, []int64{101, 100}},
+		{"legacy namespace", true, "", withPartitionKey, []int64{101, 100}},
+		{"namespace missing partition key", true, common.NamespaceModePartitionKey, pkOnly, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{EnableNamespace: tc.namespace, Fields: tc.fields}
+			if tc.mode != "" {
+				schema.Properties = []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: tc.mode}}
+			}
+			ids, err := SortFieldIDs(schema)
+			if tc.want == nil {
+				require.ErrorContains(t, err, "partition key field is not found")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ids)
+		})
 	}
-	ids, err = SortFieldIDs(namespace)
-	require.NoError(t, err)
-	require.Equal(t, []int64{101, 100}, ids)
 }
 
 func TestFragmentSchemaDerivesFromCollectionSchema(t *testing.T) {

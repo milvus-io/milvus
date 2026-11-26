@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zilliztech/woodpecker/common/config"
+	"github.com/zilliztech/woodpecker/common/fileutil"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
 	wpStorageClient "github.com/zilliztech/woodpecker/common/objectstorage"
 	"github.com/zilliztech/woodpecker/woodpecker"
@@ -51,6 +52,17 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	cfg, err := b.getWpConfig()
 	if err != nil {
 		return nil, err
+	}
+	if cfg.Woodpecker.Storage.RootPath == "default" {
+		base := paramtable.Get().LocalStorageCfg.Path.GetValue()
+		cfg.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/%s", base, common.WoodpeckerRootPath)
+		if cfg.Woodpecker.Storage.IsStorageLocal() {
+			// Milvus owns the default wp subdirectory. Sync it through the provisioned
+			// localStorage.path before startup. Explicit roots are provisioned by the operator.
+			if err := fileutil.MkdirAllSyncUnder(base, cfg.Woodpecker.Storage.RootPath, 0o755); err != nil {
+				return nil, err
+			}
+		}
 	}
 	wpMetrics.RegisterClientMetricsWithRegisterer(metrics.GetRegisterer())
 	var storageClient wpStorageClient.ObjectStorage
@@ -246,15 +258,7 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 
 	// storage
 	wpConfig.Woodpecker.Storage.Type = cfg.StorageType.GetValue()
-
-	// Set RootPath based on configuration
-	if cfg.RootPath.GetValue() == "default" {
-		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
-		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/%s", paramtable.Get().LocalStorageCfg.Path.GetValue(), common.WoodpeckerRootPath)
-	} else {
-		// Use custom directory as-is
-		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
-	}
+	wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()

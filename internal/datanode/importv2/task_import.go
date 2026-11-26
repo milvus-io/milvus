@@ -57,6 +57,7 @@ type ImportTask struct {
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
+	picker     *SegmentPicker
 }
 
 func NewImportTask(req *datapb.ImportRequest,
@@ -94,6 +95,7 @@ func NewImportTask(req *datapb.ImportRequest,
 		manager:   manager,
 		syncMgr:   syncMgr,
 		cm:        cm,
+		picker:    NewSegmentPicker(),
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -176,6 +178,7 @@ func (t *ImportTask) Clone() Task {
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		picker:       t.picker,
 	}
 }
 
@@ -360,7 +363,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				continue
 			}
 			partitionID := t.GetPartitionIDs()[partitionIdx]
-			segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+			segmentID, err := t.picker.PickSegment(t.req.GetRequestSegments(), channel, partitionID, int64(data.GetMemorySize()))
 			if err != nil {
 				return nil, nil, err
 			}

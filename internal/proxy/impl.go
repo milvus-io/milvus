@@ -2721,6 +2721,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // un-optimized retry, the recall-evaluation ground truth, a retry.Handle
 // re-entry -- and those runs must not move the feature counters again.
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2979,6 +2981,8 @@ func (l *hybridSearchRequestExprLogger) String() string {
 // countFeatures carries the same meaning as in search: only the first task
 // built for a user request moves the feature counters.
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3296,8 +3300,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
-				"no vector field found in schema")
+			return nil, merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", request.GetCollectionName())
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
@@ -3729,6 +3732,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 }
 
 func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
@@ -6747,10 +6752,9 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 
 	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetQuotaMetrics fail",
+		mlog.Warn(ctx, "GetQuotaMetrics fail",
 			mlog.Err(err))
-		metricsResp.Status = merr.Status(err)
-		return metricsResp, nil
+		return &internalpb.GetQuotaMetricsResponse{Status: merr.Status(err)}, nil
 	}
 	err = merr.Error(metricsResp.GetStatus())
 	if err != nil {

@@ -52,6 +52,13 @@ func newPartitionSegmentManager(
 	return m
 }
 
+// withCollectionInfo attaches the collection info the partition belongs to, so
+// that new segments know whether the collection is row capped.
+func (m *partitionManager) withCollectionInfo(info *CollectionInfo) *partitionManager {
+	m.collection = info
+	return m
+}
+
 // partitionManager is a assign manager of determined partition on determined vchannel.
 type partitionManager struct {
 	mlog.Binder
@@ -67,6 +74,7 @@ type partitionManager struct {
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
 	metrics              *metricsutil.SegmentAssignMetrics
+	collection           *CollectionInfo // shared with the shard manager; nil in tests that build a bare partition manager
 }
 
 // AddSegment adds a segment to the partition segment manager.
@@ -89,7 +97,6 @@ func (m *partitionManager) GetSegmentManager(segmentID int64) *segmentAllocManag
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-// req.SchemaVersion must be set by the caller before invoking.
 func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
 	// So it's just a promise check here.
@@ -210,6 +217,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment(req.SchemaVersion, req.RequiresStorageV3)
+	m.asyncAllocSegment()
 	return nil, ErrWaitForNewSegment
 }

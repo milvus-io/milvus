@@ -16,8 +16,13 @@
 
 #include "segcore/TextColumnCache.h"
 
+#include <exception>
+#include <new>
+
 #include "common/EasyAssert.h"
-#include "log/Log.h"
+#include "cachinglayer/Utils.h"
+#include "folly/OperationCancelled.h"
+#include "folly/futures/Future.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 
@@ -31,6 +36,42 @@ DefaultTextLobReaderFactory(
     const milvus_storage::lob_column::LobColumnConfig& config) {
     return milvus_storage::lob_column::CreateLobColumnReader(std::move(fs),
                                                              config);
+}
+
+// Drive unbound continuations on the synchronous caller without imposing a
+// background executor. The reader retains native scans until fan-in.
+std::vector<std::string>
+ReadLobBatch(const std::shared_ptr<CachedTextLobReader>& cached_reader,
+             const std::vector<milvus_storage::lob_column::EncodedRef>& refs,
+             const std::string& lob_base_path) {
+    try {
+        auto result = cachinglayer::SemiInlineGet(
+            cached_reader->reader->ReadBatchAsync(refs));
+        if (!result.ok()) {
+            auto error = milvus_storage::ToSegcoreError(result.status());
+            ThrowInfo(error.get_error_code(),
+                      "Failed to read text batch from {}: {}",
+                      lob_base_path,
+                      error.what());
+        }
+        return std::move(result).ValueOrDie();
+    } catch (const std::bad_alloc& error) {
+        throw SegcoreError(ErrorCode::MemAllocateFailed, error.what());
+    } catch (const folly::OperationCancelled& error) {
+        throw SegcoreError(ErrorCode::FollyCancel, error.what());
+    } catch (const folly::FutureCancellation& error) {
+        throw SegcoreError(ErrorCode::FollyCancel, error.what());
+    } catch (const folly::FutureException& error) {
+        throw SegcoreError(ErrorCode::FollyOtherException, error.what());
+    } catch (const std::exception&) {
+        // Preserve typed errors and let the caller's boundary classify other
+        // standard exceptions. Keep allocation/cancellation codes above.
+        throw;
+    } catch (...) {
+        // Async callers do not all have a non-standard exception catch tail.
+        throw SegcoreError(ErrorCode::UnexpectedError,
+                           "Unknown async load exception");
+    }
 }
 
 }  // namespace
@@ -132,20 +173,7 @@ TextColumnCache::ReadBatch(
     if (!pending_refs.empty()) {
         auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        std::vector<std::string> texts;
-        {
-            std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
-            auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
-            if (!batch_result.ok()) {
-                auto error =
-                    milvus_storage::ToSegcoreError(batch_result.status());
-                ThrowInfo(error.get_error_code(),
-                          "Failed to read text batch from {}: {}",
-                          lob_base_path,
-                          error.what());
-            }
-            texts = std::move(batch_result).ValueOrDie();
-        }
+        auto texts = ReadLobBatch(cached_reader, pending_refs, lob_base_path);
 
         for (size_t i = 0; i < pending_indices.size() && i < texts.size();
              i++) {
@@ -192,20 +220,7 @@ TextColumnCache::ReadBatchInto(
     if (!pending_refs.empty()) {
         auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        std::vector<std::string> texts;
-        {
-            std::lock_guard<std::mutex> reader_lock(cached_reader->mutex);
-            auto batch_result = cached_reader->reader->ReadBatch(pending_refs);
-            if (!batch_result.ok()) {
-                auto error =
-                    milvus_storage::ToSegcoreError(batch_result.status());
-                ThrowInfo(error.get_error_code(),
-                          "Failed to read text batch from {}: {}",
-                          lob_base_path,
-                          error.what());
-            }
-            texts = std::move(batch_result).ValueOrDie();
-        }
+        auto texts = ReadLobBatch(cached_reader, pending_refs, lob_base_path);
 
         for (size_t i = 0; i < pending_indices.size() && i < texts.size();
              i++) {

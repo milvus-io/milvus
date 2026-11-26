@@ -160,9 +160,9 @@ PersistAndLoad(storage::ArtifactPtr artifact,
                const Config& params) {
     auto directory = storage::LocalDirectory::CreateOwned(
         TestRemotePath, "consumer_index_XXXXXX", "consumer index test");
-    storage::StorageConfig config;
-    config.storage_type = "local";
-    config.root_path = directory->Path();
+    auto config = std::make_shared<milvus_storage::api::Properties>();
+    (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*config)[PROPERTY_FS_ROOT_PATH] = std::string(directory->Path());
     storage::FileManagerContext context(storage::FieldDataMeta{1, 2, 3, 100},
                                         storage::IndexMeta{3, 100, 1000, 1},
                                         storage::CreateChunkManager(config),

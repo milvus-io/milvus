@@ -220,8 +220,8 @@ class ManifestGroupTranslator
     using CellResult = std::pair<milvus::cachinglayer::cid_t,
                                  std::unique_ptr<milvus::GroupChunk>>;
 
-    // Loads cells through the existing batched future-based implementation.
-    std::vector<CellResult>
+    // Awaits admission and HIGH/LOW tasks while retaining synchronous reads.
+    folly::coro::Task<CellResults>
     get_cells_legacy(milvus::OpContext* ctx,
                      const std::vector<milvus::cachinglayer::cid_t>& cids,
                      std::vector<milvus::segcore::CellSpec> cell_specs) const;

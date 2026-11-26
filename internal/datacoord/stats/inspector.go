@@ -305,14 +305,10 @@ func getStatsFields(collection *meta.CollectionInfo) statsFields {
 	fields := statsFields{external: collection.IsExternal()}
 	jsonEnabled := Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() && !jsonShreddingDisabledByDeprecatedConfig()
 	for _, field := range collection.Schema.GetFields() {
-		if !typeutil.IsStringType(field.GetDataType()) && !typeutil.IsJSONType(field.GetDataType()) {
-			continue
-		}
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if h.EnableMatch() {
+		switch {
+		case typeutil.IsTextMatchEnabled(field):
 			fields.text = append(fields.text, field.GetFieldID())
-		}
-		if jsonEnabled && h.EnableJSONKeyStatsIndex() {
+		case jsonEnabled && typeutil.IsJSONType(field.GetDataType()):
 			fields.json = append(fields.json, field.GetFieldID())
 		}
 	}
@@ -603,12 +599,10 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 	switch subJobType {
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		predicate = func(field *schemapb.FieldSchema) bool {
-			return typeutil.CreateFieldSchemaHelper(field).EnableJSONKeyStatsIndex()
+			return typeutil.IsJSONType(field.GetDataType())
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
-		predicate = func(field *schemapb.FieldSchema) bool {
-			return typeutil.CreateFieldSchemaHelper(field).EnableMatch()
-		}
+		predicate = typeutil.IsTextMatchEnabled
 	default:
 		return nil
 	}

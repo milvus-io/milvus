@@ -47,9 +47,12 @@ CreateSearchPlanByExpr(CCollection c_col,
             schema, serialized_expr_plan, size);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
-        AssertInfo(col_index_meta != nullptr, "index meta not exist");
-
-        if (!col_index_meta->HasField(milvus::FieldId(field_id))) {
+        // A collection loaded while it had no vector field and no index
+        // carries no index meta at all. Once a vector field is added to it,
+        // a search on that field is in the same state as a search on any
+        // vector field whose index is not loaded.
+        if (col_index_meta == nullptr ||
+            !col_index_meta->HasField(milvus::FieldId(field_id))) {
             auto status = CStatus();
             status.error_code = milvus::FieldNotLoaded;
             auto field_name =
@@ -254,18 +257,13 @@ SetRetrievePlanTakeForOutputAllowed(CRetrievePlan c_plan, bool allowed) {
 }
 
 CStatus
-SetRetrievePlanMode(CRetrievePlan c_plan,
-                    CRetrieveMode mode,
-                    int64_t max_candidate_rows) {
+SetRetrievePlanMode(CRetrievePlan c_plan, CRetrieveMode mode) {
     try {
         AssertInfo(c_plan != nullptr, "retrieve plan is null");
         AssertInfo(mode == RetrieveModeNormal || mode == RetrieveModeCandidates,
                    "invalid retrieve mode: {}",
                    static_cast<int>(mode));
-        AssertInfo(max_candidate_rows >= 0,
-                   "candidate row cap must be non-negative");
         auto* plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
-        plan->max_candidate_rows_ = max_candidate_rows;
         plan->mode_ = mode == RetrieveModeCandidates
                           ? milvus::query::RetrieveMode::Candidates
                           : milvus::query::RetrieveMode::Normal;

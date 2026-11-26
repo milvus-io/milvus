@@ -111,6 +111,12 @@ func SetActualConsistencyLevel(ctx context.Context, acl commonpb.ConsistencyLeve
 	}
 }
 
+func SetColdSearch(ctx context.Context, cold bool) {
+	if accessInfo, ok := ctx.Value(AccessKey{}).(info.AccessInfo); ok {
+		accessInfo.SetColdSearch(cold)
+	}
+}
+
 type ConsistencyLevelCarrier interface {
 	GetConsistencyLevel() commonpb.ConsistencyLevel
 }

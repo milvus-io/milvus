@@ -58,20 +58,20 @@ const (
 	DefaultLoadTransientBudgetBytes       = 2 * 1024 * 1024 * 1024
 	DefaultLoadAdmissionSlotsPerCPU       = 2
 	DefaultJSONStatsBuildMaxInflightBytes = 512 * 1024 * 1024
-	// DefaultStorageV2AsyncLoadReadWindowSizeBytes is the historical-key
-	// default for the Storage V3 async read-window threshold.
-	DefaultStorageV2AsyncLoadReadWindowSizeBytes = 16 * 1024 * 1024
-	DefaultGracefulTime                          = 60000 // ms
-	DefaultGracefulStopTimeout                   = 1800  // s, for node
-	DefaultProxyGracefulStopTimeout              = 30    // s，for proxy
-	DefaultCoordGracefulStopTimeout              = 5     // s，for coord
-	DefaultHighPriorityThreadCoreCoefficient     = 10
-	DefaultMiddlePriorityThreadCoreCoefficient   = 5
-	DefaultLowPriorityThreadCoreCoefficient      = 1
-	DefaultThreadPoolMaxThreadsSize              = 16
-	DefaultStorageIopsInitialRate                = uint32(2000)
-	DefaultStorageIopsMaxRate                    = uint32(5000)
-	DefaultSearchFanoutPoolSizeRatio             = 2
+	// DefaultLoadFieldDataReadWindowSizeBytes is the default threshold
+	// for a Storage V3 field-data async read window.
+	DefaultLoadFieldDataReadWindowSizeBytes    = 16 * 1024 * 1024
+	DefaultGracefulTime                        = 60000 // ms
+	DefaultGracefulStopTimeout                 = 1800  // s, for node
+	DefaultProxyGracefulStopTimeout            = 30    // s，for proxy
+	DefaultCoordGracefulStopTimeout            = 5     // s，for coord
+	DefaultHighPriorityThreadCoreCoefficient   = 10
+	DefaultMiddlePriorityThreadCoreCoefficient = 5
+	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultThreadPoolMaxThreadsSize            = 16
+	DefaultStorageIopsInitialRate              = uint32(2000)
+	DefaultStorageIopsMaxRate                  = uint32(5000)
+	DefaultSearchFanoutPoolSizeRatio           = 2
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -228,6 +228,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.DataCoordCfg.EnableImportV3,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
 	}
@@ -360,8 +361,6 @@ type commonConfig struct {
 	DefaultIndexName     ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	LoadTransientBudgetBytes            ParamItem `refreshable:"true"`
-	LoadAdmissionSlots                  ParamItem `refreshable:"true"`
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
@@ -393,7 +392,6 @@ type commonConfig struct {
 	StorageType                   ParamItem `refreshable:"false"`
 	ManifestTransactionRetryLimit ParamItem `refreshable:"true"`
 	ManifestFFIConcurrency        ParamItem `refreshable:"false"`
-	UseArrowFSChunkManager        ParamItem `refreshable:"false"`
 	SimdType                      ParamItem `refreshable:"false"`
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
@@ -449,6 +447,7 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
+	EnableCollectionWithoutVector        ParamItem `refreshable:"true"`
 
 	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
 	credentialBrokerPolicy              *specutil.BrokerPolicy
@@ -525,20 +524,6 @@ type commonConfig struct {
 
 	// group by
 	GroupByMaxGroups ParamItem `refreshable:"false"`
-}
-
-// ResolveLoadAdmissionLimits returns QueryNode's effective byte and slot limits.
-// The declared defaults apply only to async loading. Use the lookup's missing
-// status, not its numeric value, so explicit values (including 0) always win.
-func (p *commonConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetBytes, slots int64) {
-	resolve := func(item *ParamItem) int64 {
-		value, err := item.get()
-		if err != nil && !asyncEnabled {
-			return 0
-		}
-		return getAsInt64(value)
-	}
-	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
 // TalonNamespace returns the cloud namespace shared by Talon reads and prewarming.
@@ -783,56 +768,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	}
 	p.IndexSliceSize.Init(base.mgr)
 
-	p.LoadTransientBudgetBytes = ParamItem{
-		Key:          "common.loadTransientBudgetBytes",
-		Version:      "3.0.0",
-		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
-		Doc: `QueryNode transient memory budget in bytes shared by scalar ` +
-			`index V3 entry streaming and storage v2/v3 field-data loading. It gates ` +
-			`in-flight transient data across concurrent load tasks. Lower ` +
-			`values reduce peak transient memory at the cost of load throughput. ` +
-			`Oversized requests are still allowed to proceed exclusively to ` +
-			`guarantee progress. When unset, defaults to 2 GiB with ` +
-			`queryNode.segcore.storageV2.enableAsyncLoad enabled, otherwise 0. ` +
-			`Explicit values apply regardless of that switch; 0 disables the limit.`,
-		Export: false,
-		Formatter: func(v string) string {
-			parsed, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || parsed < 0 {
-				mlog.Warn(context.TODO(), "common.loadTransientBudgetBytes must be non-negative, using default",
-					mlog.String("configured", v))
-				return strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10)
-			}
-			return v
-		},
-	}
-	p.LoadTransientBudgetBytes.Init(base.mgr)
-
-	p.LoadAdmissionSlots = ParamItem{
-		Key:          "common.loadAdmissionSlots",
-		Version:      "3.0.1",
-		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
-		Doc: `QueryNode limit on admitted, unfinished load work shared by scalar ` +
-			`index V3 entry streaming and storage v2/v3 field-data loading. Each ` +
-			`window, batch, or stream slice reserves one slot together with its ` +
-			`transient bytes until its temporary data is released after consumption ` +
-			`or finalization. When unset, defaults to twice the CPU count reported ` +
-			`by Milvus at initialization with queryNode.segcore.storageV2.enableAsyncLoad ` +
-			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
-			`0 disables the slot limit. Reader opens are controlled separately.`,
-		Export: false,
-		Formatter: func(v string) string {
-			parsed, err := strconv.ParseInt(v, 10, 64)
-			if err != nil || parsed < 0 {
-				mlog.Warn(context.TODO(), "common.loadAdmissionSlots must be non-negative, using default",
-					mlog.String("configured", v))
-				return p.LoadAdmissionSlots.DefaultValue
-			}
-			return v
-		},
-	}
-	p.LoadAdmissionSlots.Init(base.mgr)
-
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
 		Version:      "2.4.6",
@@ -961,18 +896,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ManifestFFIConcurrency.Init(base.mgr)
-
-	p.UseArrowFSChunkManager = ParamItem{
-		Key:          "common.storage.useArrowFileSystemChunkManager",
-		Version:      "3.0.1",
-		DefaultValue: "false",
-		Doc: "Whether segcore routes chunk manager IO (segment load, index build/load) " +
-			"through the milvus-storage Arrow FileSystem, unified with storage v2. " +
-			"Applies to both remote and local storage types; when false, the legacy chunk managers are used. " +
-			"Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.",
-		Export: true,
-	}
-	p.UseArrowFSChunkManager.Init(base.mgr)
 
 	p.HighPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.highPriority",
@@ -1581,6 +1504,22 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.EnableGrowingSourceFlush.Init(base.mgr)
+
+	p.EnableCollectionWithoutVector = ParamItem{
+		Key:          "common.enableCollectionWithoutVector",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether a collection may have no vector field: CreateCollection accepts such a schema, and the last
+vector field of a collection may be dropped. Such a collection supports every operation except search;
+a nullable vector field can be added to it later, which makes it a vector collection.
+Turning it off rejects new requests to create such a collection, or to drop the last vector field of one,
+on this cluster. Collections that already exist keep working, and collections received through
+replication are not affected.
+It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
+is still running cannot be loaded or compacted until every role is upgraded.`,
+		Export: true,
+	}
+	p.EnableCollectionWithoutVector.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
@@ -4964,17 +4903,13 @@ type queryNodeConfig struct {
 	// as CPUNum * factor.
 	DeletePoolSizeFactor ParamItem `refreshable:"true"`
 
-	// Target average byte size per storage v2 cache cell. Parquet row groups
-	// are packed into cells so rgs_per_cell * avg_rg_size ≈ this value.
-	StorageV2CellTargetSizeBytes ParamItem `refreshable:"true"`
-	// StorageV2EnableAsyncLoad is the historical-key rollout switch for the
-	// Storage V3 async field-data pipeline.
-	StorageV2EnableAsyncLoad ParamItem `refreshable:"true"`
-	// StorageV2AsyncLoadThreadPoolSize bounds workers in the shared async executor.
-	StorageV2AsyncLoadThreadPoolSize ParamItem `refreshable:"true"`
-	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
-	// by one Storage V3 async window.
-	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
+	// Load settings are internal and independent of the persisted storage format.
+	LoadAsyncReadEnabled             ParamItem `refreshable:"true"`
+	LoadExecutorThreads              ParamItem `refreshable:"true"`
+	LoadTransientBudgetBytes         ParamItem `refreshable:"true"`
+	LoadAdmissionSlots               ParamItem `refreshable:"true"`
+	LoadFieldDataCellTargetSizeBytes ParamItem `refreshable:"true"`
+	LoadFieldDataReadWindowSizeBytes ParamItem `refreshable:"true"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -5052,6 +4987,20 @@ func formatDurationWithMillisecondFallback(v string) string {
 		return v + "ms"
 	}
 	return v
+}
+
+// ResolveLoadAdmissionLimits returns QueryNode's effective byte and slot limits.
+// The declared defaults apply only to async loading. Use the lookup's missing
+// status, not its numeric value, so explicit values (including 0) always win.
+func (p *queryNodeConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetBytes, slots int64) {
+	resolve := func(item *ParamItem) int64 {
+		value, err := item.get()
+		if err != nil && !asyncEnabled {
+			return 0
+		}
+		return getAsInt64(value)
+	}
+	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
@@ -6379,43 +6328,91 @@ user-task-polling:
 	}
 	p.DeletePoolSizeFactor.Init(base.mgr)
 
-	p.StorageV2CellTargetSizeBytes = ParamItem{
-		Key:          "queryNode.segcore.storageV2.cellTargetSizeBytes",
+	p.LoadTransientBudgetBytes = ParamItem{
+		Key:          "queryNode.segcore.load.admission.transientBudgetBytes",
+		Version:      "3.0.0",
+		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
+		Doc: `QueryNode transient memory budget in bytes shared by supported ` +
+			`field-data and index loaders. It gates ` +
+			`in-flight transient data across concurrent load tasks. Lower ` +
+			`values reduce peak transient memory at the cost of load throughput. ` +
+			`Oversized requests are still allowed to proceed exclusively to ` +
+			`guarantee progress. When unset, defaults to 2 GiB with ` +
+			`queryNode.segcore.load.asyncReadEnabled enabled, otherwise 0. ` +
+			`Explicit values apply regardless of that switch; 0 disables the limit.`,
+		Export: false,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.load.admission.transientBudgetBytes must be non-negative, using default",
+					mlog.String("configured", v))
+				return strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10)
+			}
+			return v
+		},
+	}
+	p.LoadTransientBudgetBytes.Init(base.mgr)
+
+	p.LoadAdmissionSlots = ParamItem{
+		Key:          "queryNode.segcore.load.admission.slots",
+		Version:      "3.0.1",
+		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
+		Doc: `QueryNode limit on admitted, unfinished work shared by supported ` +
+			`field-data and index loaders. Each ` +
+			`window, batch, or stream slice reserves one slot together with its ` +
+			`transient bytes until its temporary data is released after consumption ` +
+			`or finalization. When unset, defaults to twice the CPU count reported ` +
+			`by Milvus at initialization with queryNode.segcore.load.asyncReadEnabled ` +
+			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
+			`0 disables the slot limit. Async metadata operations also reserve one slot.`,
+		Export: false,
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed < 0 {
+				mlog.Warn(context.TODO(), "queryNode.segcore.load.admission.slots must be non-negative, using default",
+					mlog.String("configured", v))
+				return p.LoadAdmissionSlots.DefaultValue
+			}
+			return v
+		},
+	}
+	p.LoadAdmissionSlots.Init(base.mgr)
+
+	p.LoadFieldDataCellTargetSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.load.fieldData.cellTargetSizeBytes",
 		Version:      "3.0.0",
 		DefaultValue: "4194304", // 4 MiB
-		Doc: `Target average byte size per storage v2 cache cell. Parquet row groups are ` +
+		Doc: `Target average byte size per field-data cell. Parquet row groups are ` +
 			`greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. ` +
 			`Each cell always contains at least one row group and cells never cross file ` +
 			`boundaries. Tune larger for bigger batch IO (fewer cells) or smaller to get ` +
 			`finer cache granularity. Default 4 MiB.`,
-		Export: true,
+		Export: false,
 		Formatter: func(v string) string {
 			if getAsInt64(v) <= 0 {
-				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.cellTargetSizeBytes must be positive, using default 4 MiB",
+				mlog.Warn(context.TODO(), "queryNode.segcore.load.fieldData.cellTargetSizeBytes must be positive, using default 4 MiB",
 					mlog.String("configured", v))
 				return "4194304"
 			}
 			return v
 		},
 	}
-	p.StorageV2CellTargetSizeBytes.Init(base.mgr)
+	p.LoadFieldDataCellTargetSizeBytes.Init(base.mgr)
 
-	// TODO: Complete async loading support for data and indexes and validate
-	// the default admission limits before supporting enableAsyncLoad=true.
-	p.StorageV2EnableAsyncLoad = ParamItem{
-		Key:          "queryNode.segcore.storageV2.enableAsyncLoad",
+	p.LoadAsyncReadEnabled = ParamItem{
+		Key:          "queryNode.segcore.load.asyncReadEnabled",
 		Version:      "3.0.1",
 		DefaultValue: "false",
-		Doc:          "Async loading support is incomplete; enabling it is currently unsupported. Existing translators keep the mode captured at construction.",
+		Doc:          "Enable asynchronous storage reads for supported field data and index loaders. Change this setting by restarting QueryNode; existing translators retain their mode.",
 		Export:       false,
 	}
-	p.StorageV2EnableAsyncLoad.Init(base.mgr)
+	p.LoadAsyncReadEnabled.Init(base.mgr)
 
-	p.StorageV2AsyncLoadThreadPoolSize = ParamItem{
-		Key:          "queryNode.segcore.storageV2.asyncLoadThreadPoolSize",
+	p.LoadExecutorThreads = ParamItem{
+		Key:          "queryNode.segcore.load.executorThreads",
 		Version:      "3.0.1",
 		DefaultValue: strconv.Itoa(max(1, min(hardware.GetCPUNum(), DefaultThreadPoolMaxThreadsSize))),
-		Doc: `Worker count for the shared Storage V3 async-load executor. ` +
+		Doc: `Worker count for the shared QueryNode async-load executor. ` +
 			`Must be a positive integer; defaults to min(CPUNUM, 16). ` +
 			`Independent of admission slots and the legacy load-pool thread coefficients. ` +
 			`The executor is created on first use; updates resize the existing executor.`,
@@ -6423,34 +6420,34 @@ user-task-polling:
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 32)
 			if err != nil || parsed <= 0 {
-				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadThreadPoolSize must be a positive int32, using default",
+				mlog.Warn(context.TODO(), "queryNode.segcore.load.executorThreads must be a positive int32, using default",
 					mlog.String("configured", v))
-				return p.StorageV2AsyncLoadThreadPoolSize.DefaultValue
+				return p.LoadExecutorThreads.DefaultValue
 			}
 			return v
 		},
 	}
-	p.StorageV2AsyncLoadThreadPoolSize.Init(base.mgr)
+	p.LoadExecutorThreads.Init(base.mgr)
 
-	p.StorageV2AsyncLoadReadWindowSizeBytes = ParamItem{
-		Key:          "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes",
+	p.LoadFieldDataReadWindowSizeBytes = ParamItem{
+		Key:          "queryNode.segcore.load.fieldData.readWindowSizeBytes",
 		Version:      "3.0.0",
-		DefaultValue: strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes),
-		Doc: `Target estimated loaded-byte threshold for one Storage V3 async read window. ` +
+		DefaultValue: strconv.Itoa(DefaultLoadFieldDataReadWindowSizeBytes),
+		Doc: `Target estimated loaded-byte threshold for one Storage V3 field-data async read window. ` +
 			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
 			`The value must be positive. Default 16 MiB.`,
-		Export: true,
+		Export: false,
 		Formatter: func(v string) string {
 			parsed, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || parsed <= 0 {
-				mlog.Warn(context.TODO(), "queryNode.segcore.storageV2.asyncLoadReadWindowSizeBytes must be positive, using default 16 MiB",
+				mlog.Warn(context.TODO(), "queryNode.segcore.load.fieldData.readWindowSizeBytes must be positive, using default 16 MiB",
 					mlog.String("configured", v))
-				return strconv.Itoa(DefaultStorageV2AsyncLoadReadWindowSizeBytes)
+				return strconv.Itoa(DefaultLoadFieldDataReadWindowSizeBytes)
 			}
 			return v
 		},
 	}
-	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
+	p.LoadFieldDataReadWindowSizeBytes.Init(base.mgr)
 
 	p.EnableWorkerSQCostMetrics = ParamItem{
 		Key:          "queryNode.enableWorkerSQCostMetrics",
@@ -6781,6 +6778,7 @@ type dataCoordConfig struct {
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxRows                 ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
@@ -7111,6 +7109,22 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
+
+	p.SegmentMaxRows = ParamItem{
+		Key:          "dataCoord.segment.maxRows",
+		Version:      "3.0.0",
+		DefaultValue: "4000000",
+		Doc: `The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+0 disables the row limit.`,
+		Export: true,
+	}
+	p.SegmentMaxRows.Init(base.mgr)
 
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
@@ -8548,12 +8562,23 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Key:     "dataCoord.import.enableImportV3",
 		Version: "3.0.0",
 		Doc: "One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. " +
-			"Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. " +
-			"The gate only selects the version for new requests; persisted WAL messages and jobs always resume " +
-			"with their stored version. Disabling the gate again after activation is unsupported.",
-		DefaultValue: "false",
+			"auto: switch on automatically once all online DataNodes, StreamingNodes, and DataCoords reach the " +
+			"gate version and the stability window elapses; false: keep disabled (safe while any older DataNode, " +
+			"StreamingNode, or potentially-active DataCoord is still online); true: force enable and bypass the " +
+			"version gate (safe only once all DataNodes, StreamingNodes, and DataCoords support Import V3, such as " +
+			"when upgrading from a release that already ships V3). The gate only selects the version for new " +
+			"requests; persisted WAL messages and jobs always resume with their stored version. Disabling the " +
+			"gate again after activation is unsupported.",
+		DefaultValue: "auto",
 		PanicIfEmpty: false,
 		Export:       true,
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.7",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
 	}
 	p.EnableImportV3.Init(base.mgr)
 

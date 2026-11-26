@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -198,7 +200,17 @@ func (s *StructSubFieldSuite) TestDropProviderMiddleAndLastGuards() {
 
 	lastVector := collectionName("lastvec")
 	s.create(ctx, baseSchema(lastVector, false, true, vectorSchema("vec", false), scalarSchema("mid", schemapb.DataType_Int64, false)))
+	// With common.enableCollectionWithoutVector off the last vector field is protected.
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key: "false",
+	})
 	s.Require().ErrorContains(s.alterDrop(ctx, lastVector, "S[vec]"), "last vector field")
+	revertGuard()
+	// With the default (on) the drop leaves a collection without a vector field.
+	s.drop(ctx, lastVector, "S[vec]")
+	schemaAfter := s.describe(ctx, lastVector).GetSchema()
+	s.Require().False(typeutil.HasVectorField(schemaAfter))
+	s.Require().Len(schemaAfter.GetStructArrayFields()[0].GetFields(), 1)
 }
 
 func (s *StructSubFieldSuite) TestDropAndReaddSameNameDifferentType() {

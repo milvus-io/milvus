@@ -581,11 +581,11 @@ func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schem
 }
 
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
-	sche, err := helper.GetFieldFromID(fieldId)
+	field, err := helper.GetFieldFromID(fieldId)
 	if err != nil {
 		return false
 	}
-	return CreateFieldSchemaHelper(sche).EnableMatch()
+	return IsTextMatchEnabled(field)
 }
 
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
@@ -3080,6 +3080,15 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 	}
 
 	return ret
+}
+
+// HasVectorField reports whether the schema declares at least one vector typed
+// field, counting top-level fields, struct array sub-fields and function output
+// fields (function outputs are materialized as fields). A collection created
+// without a vector field keeps that property for its lifetime; every decision of
+// the form "does this collection have vectors" goes through this predicate.
+func HasVectorField(schema *schemapb.CollectionSchema) bool {
+	return len(GetVectorFieldSchemas(schema)) > 0
 }
 
 func GetDenseVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
