@@ -24,17 +24,10 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 namespace {
-
-// Map the optional operation priority to storage admission priority.
-proto::common::LoadPriority
-Priority(milvus::OpContext* context) {
-    return context && context->runtime_load_priority.value_or(0) != 0
-               ? proto::common::LoadPriority::LOW
-               : proto::common::LoadPriority::HIGH;
-}
 
 // Copy the operation token; inherited coroutine cancellation is merged by callers.
 folly::CancellationToken
@@ -82,7 +75,7 @@ SetSourceContext(OpenedIndexSource& source,
 // Open storage metadata or retain an existing source; family decoding happens later.
 folly::coro::Task<OpenedIndexSource>
 OpenIndexSource(const IndexLoadRequest& request) {
-    const auto priority = Priority(request.options.op_ctx);
+    const auto priority = milvus::ResolveLoadPriority(request.options.op_ctx);
     const auto operation_token =
         OperationCancellationToken(request.options.op_ctx);
     const auto caller_token =
@@ -185,7 +178,7 @@ CreateIndexLoader(const LoaderEntry& loader_entry, IndexLoadRequest request) {
     AssertInfo(loader_entry.create != nullptr,
                "Index family has no loader factory");
     auto* context = request.options.op_ctx;
-    const auto priority = Priority(context);
+    const auto priority = milvus::ResolveLoadPriority(context);
     const auto operation_token = OperationCancellationToken(context);
     const auto caller_token =
         co_await folly::coro::co_current_cancellation_token;
@@ -229,16 +222,16 @@ LoaderEntry::Load(IndexLoadRequest request) const {
                          std::shared_ptr<storage::AsyncIndexEntryReader>>(
                          std::get<PackedIndexSource>(opened_source).reader);
     }
-    const auto priority = Priority(request.options.op_ctx);
+    const auto priority = milvus::ResolveLoadPriority(request.options.op_ctx);
     auto* context = request.options.op_ctx;
     auto cache = std::move(request.cache);
     auto prepare = CreateIndexLoader(*this, std::move(request));
     auto loader =
-        use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                        storage::ResolveAsyncLoadExecutor(
-                            {}, priority, context ? context->sequence_id : 0),
-                        std::move(prepare)))
-                  : folly::coro::blockingWait(std::move(prepare));
+        use_async
+            ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                  storage::ResolveAsyncLoadExecutor({}, context, priority),
+                  std::move(prepare)))
+            : folly::coro::blockingWait(std::move(prepare));
     // Synchronous warmup must not block the executor that loads its cells.
     return loader->Load(context, cache);
 }

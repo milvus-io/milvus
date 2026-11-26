@@ -6435,7 +6435,7 @@ user-task-polling:
 		FallbackKeys: []string{"queryNode.segcore.storageV2.asyncLoadSchedulingWeights"},
 		Version:      "3.0.1",
 		DefaultValue: "32,8,1",
-		Doc:          "POC CPU task-count and admission request-count weights in URGENT,HIGH,LOW order. Three positive int32 values; restart QueryNode to apply. Does not assign Search to URGENT.",
+		Doc:          "CPU task-count and admission request-count weights in URGENT,HIGH,LOW order. Three positive int32 values; restart QueryNode to apply.",
 		Export:       true,
 		Formatter: func(v string) string {
 			parts := strings.Split(v, ",")

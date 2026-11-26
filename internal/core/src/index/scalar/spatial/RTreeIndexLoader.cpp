@@ -46,6 +46,7 @@
 #include <array>
 #include "index/scalar/spatial/RTreeIndexParams.h"
 #include "common/EasyAssert.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSourceUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
@@ -217,10 +218,7 @@ ReadNullOffsets(bool use_async,
                 bool has_null,
                 int64_t total_num_rows,
                 const std::string& staging_parent) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto run_io =
         [&]() -> folly::coro::Task<std::shared_ptr<const std::vector<size_t>>> {
         if (!has_null) {
@@ -294,10 +292,7 @@ folly::coro::Task<std::unique_ptr<RTreeIndexState>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     ValidateGeometryParams(opts.params);
     const auto total_num_rows = ReadRequiredRowCount(opts.params);
     AssertInfo(opts.mmap_dir_path.find('\0') == std::string::npos,
@@ -474,10 +469,7 @@ RTreeIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
         plan.load_context);
     AssertInfo(state != nullptr, "RTree packed load context is null");
     const auto& directory = state->targets.directory;
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::shared_ptr<RTreeQueryEngine> engine;
     auto local_io = [&] {
         engine = std::make_shared<RTreeQueryEngine>(

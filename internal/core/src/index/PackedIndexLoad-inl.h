@@ -26,6 +26,7 @@
 #include "common/OpContext.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 namespace detail {
@@ -54,10 +55,7 @@ RunPackedIndexLoad(PackedIndexSource& source,
                    std::type_identity_t<PackedFinish<Result>> finish,
                    milvus::OpContext* context) {
     options.op_ctx = context;
-    const auto priority =
-        context && context->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(context);
     const auto operation_token =
         context ? context->cancellation_token : folly::CancellationToken{};
     const auto caller_token =

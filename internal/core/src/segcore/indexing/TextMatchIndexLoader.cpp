@@ -41,6 +41,7 @@
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
@@ -165,10 +166,8 @@ TextMatchIndexLoader::TextMatchIndexLoader(
             folly::coro::blockingWait(folly::coro::co_withExecutor(
                 storage::ResolveAsyncLoadExecutor(
                     {},
-                    metadata_ctx.ctx.runtime_load_priority.value_or(0) != 0
-                        ? proto::common::LoadPriority::LOW
-                        : proto::common::LoadPriority::HIGH,
-                    metadata_ctx.ctx.sequence_id),
+                    &metadata_ctx.ctx,
+                    milvus::ResolveLoadPriority(&metadata_ctx.ctx)),
                 inspect()));
         if (meta_.cache_warmup_policy ==
             CacheWarmupPolicy::CacheWarmupPolicy_Disable) {

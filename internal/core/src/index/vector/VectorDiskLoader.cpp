@@ -48,6 +48,7 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/DiskEngineFileHandle.h"
 
 namespace milvus::index {
@@ -338,10 +339,7 @@ OpenEngine(bool use_async,
            const DiskOpenOptions& open_options,
            const EntryPlan& plan,
            const storage::LoadOptions& opts) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     // Handles precede the engine so failed construction/deserialization always
     // destroys the native node before its manager and local generation.
     std::shared_ptr<storage::DiskEngineFileHandle> local_handle, stream_handle,

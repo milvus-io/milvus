@@ -20,6 +20,7 @@
 #include "index/IndexCacheConfig.h"
 #include "index/IndexLoadContext.h"
 #include "storage/AsyncLoadExecutor.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 
@@ -98,10 +99,8 @@ class SingleCellIndexStorageTranslator final
             storage = co_await folly::coro::co_withExecutor(
                 storage::ResolveAsyncLoadExecutor(
                     {},
-                    context.ctx.runtime_load_priority.value_or(0) != 0
-                        ? proto::common::LoadPriority::LOW
-                        : proto::common::LoadPriority::HIGH,
-                    context.ctx.sequence_id),
+                    &context.ctx,
+                    milvus::ResolveLoadPriority(&context.ctx)),
                 std::move(task));
         } else {
             storage = co_await std::move(task);

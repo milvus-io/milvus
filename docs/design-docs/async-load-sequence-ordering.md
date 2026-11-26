@@ -43,8 +43,13 @@ The executor adapter captures the sequence in Folly `RequestContext` before
 each submission, including resumption from an I/O completion thread. Executor
 switches bind the sequence from the currently awaited executor. Other executors
 retain their own queue policies. The adapter also preserves an explicitly bound
-`URGENT` class across these switches. The wire priority still has `HIGH` and
-`LOW`, and Search keeps its existing priority.
+`URGENT` class across these switches. Search sets a local runtime override
+in its operation context. When Search misses the cache and reaches the async
+load pipeline, CPU work and resource admission use `URGENT`. Two-class
+readers handle the override as `HIGH`. The Search CPU pool and wire priorities
+are unchanged. Detached warmup creates its own context and keeps its
+configured priority. A Search that joins an existing cache load waits for
+that load at the priority it was submitted with.
 
 ## Resource admission
 

@@ -45,6 +45,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "index/scalar/ScalarIndexUtils.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSourceUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
@@ -207,10 +208,7 @@ ReadNullOffsets(bool use_async,
                 const std::string& staging_parent,
                 size_t count,
                 bool nested) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto run_io =
         [&]() -> folly::coro::Task<std::shared_ptr<const std::vector<size_t>>> {
         if (!has_null) {
@@ -332,10 +330,7 @@ LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts,
           RuntimeParams params) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     const auto effective = ResolveLoadOptions(opts);
     const auto entries = ReadPersistedEntries(source);
 
@@ -503,10 +498,7 @@ FinishPackedState(IndexLoadPlan& plan,
             plan.load_context);
     AssertInfo(state != nullptr, "Inverted packed load context is null");
     const auto& directory = state->targets.directory;
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine;
     size_t materialized_bytes = 0;
     auto local_io = [&] {

@@ -83,12 +83,7 @@ SplitNumericSuffix(const std::string& name) {
 
 milvus::proto::common::LoadPriority
 LoadPriority(const LoadOptions& options) {
-    if (options.op_ctx != nullptr &&
-        options.op_ctx->runtime_load_priority.has_value() &&
-        *options.op_ctx->runtime_load_priority != 0) {
-        return milvus::proto::common::LoadPriority::LOW;
-    }
-    return milvus::proto::common::LoadPriority::HIGH;
+    return milvus::ResolveLoadPriority(options.op_ctx);
 }
 
 ThreadPoolPriority

@@ -41,6 +41,7 @@
 #include "index/scalar/PackedDirectoryLoad.h"
 #include <array>
 #include "common/EasyAssert.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSourceUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
@@ -207,10 +208,7 @@ ReadNullOffsets(bool use_async,
     if (!has_null) {
         co_return std::make_shared<const std::vector<size_t>>();
     }
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::shared_ptr<storage::LocalDirectory> directory;
     std::string path;
     auto read = [&]() -> std::shared_ptr<const std::vector<size_t>> {
@@ -322,10 +320,7 @@ LoadState(bool use_async,
           const storage::LoadOptions& opts,
           RuntimeParams params,
           TextLoadState& result) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     const auto effective = ResolveLoadOptions(opts);
     const auto entries = ReadPersistedEntries(source);
 
@@ -530,10 +525,7 @@ TextIndexLoader::LoadLegacyStorage(storage::FileSource& source,
         co_return MakeStorage(state, opts);
     };
     auto result = co_await folly::coro::co_awaitTry(load());
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto cleanup = [&] {
         state.engine.reset();
         state.directory.reset();
@@ -575,10 +567,7 @@ TextIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
         plan.load_context);
     AssertInfo(state != nullptr, "Text packed load context is null");
     const auto& directory = state->targets.directory;
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine;
     size_t file_bytes = 0;
     auto local_io = [&] {

@@ -59,6 +59,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -3195,6 +3196,37 @@ TEST_F(AsyncLoadPipelineTest, HighPriorityAdmissionPassesQueuedLowLoad) {
     EXPECT_EQ(Get(std::move(high)).size(), 1);
     EXPECT_EQ(Get(std::move(low)).size(), 1);
     EXPECT_EQ(read_order, (std::vector<int64_t>{2, 1}));
+}
+
+TEST_F(AsyncLoadPipelineTest, UrgentOperationPassesEarlierHighLoad) {
+    budget_.SetCapacityBytes(1);
+    auto blocker = folly::coro::blockingWait(
+        budget_.AcquireAsync({1, 1}, storage::LoadAdmissionPriority::High));
+    OpContext high_context;
+    OpContext search_context;
+    search_context.runtime_load_priority = kUrgentRuntimeLoadPriority;
+    EXPECT_EQ(
+        ResolveLoadPriority(&search_context, proto::common::LoadPriority::LOW),
+        proto::common::LoadPriority::HIGH);
+    std::vector<int> read_order;
+    auto start_load = [&](OpContext& ctx, int marker) {
+        auto reader = std::make_shared<FakeChunkReader>(&executor_);
+        reader->SetOnAsyncCall([&, marker] { read_order.push_back(marker); });
+        return Start(LoadCellsAsync(&ctx,
+                                    kTestSegmentId,
+                                    {{0, 0, 0, 1, 1}},
+                                    reader,
+                                    Finalizer(),
+                                    Options()));
+    };
+    auto high = start_load(high_context, 1);
+    auto search = start_load(search_context, 2);
+    EXPECT_TRUE(read_order.empty());
+
+    blocker.Release();
+    EXPECT_EQ(Get(std::move(search)).size(), 1);
+    EXPECT_EQ(Get(std::move(high)).size(), 1);
+    EXPECT_EQ(read_order, (std::vector<int>{2, 1}));
 }
 
 TEST_F(AsyncLoadPipelineTest, CancelsWhileWaitingForBudget) {

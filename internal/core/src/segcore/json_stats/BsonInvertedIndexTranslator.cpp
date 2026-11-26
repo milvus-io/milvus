@@ -41,6 +41,7 @@
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadConfig.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore {
 
@@ -96,11 +97,7 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
         };
         folly::coro::blockingWait(folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor(
-                {},
-                load_ctx.ctx.runtime_load_priority.value_or(0) != 0
-                    ? proto::common::LoadPriority::LOW
-                    : proto::common::LoadPriority::HIGH,
-                load_ctx.ctx.sequence_id),
+                {}, &load_ctx.ctx, milvus::ResolveLoadPriority(&load_ctx.ctx)),
             inspect()));
         if (meta_.cache_warmup_policy ==
             CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
@@ -184,9 +181,7 @@ BsonInvertedIndexTranslator::get_cells_async(
                       load_info_.segment_id,
                       "BsonInvertedIndexTranslator::get_cells()");
 
-    const auto priority = load_ctx.ctx.runtime_load_priority.value_or(0) != 0
-                              ? proto::common::LoadPriority::LOW
-                              : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(&load_ctx.ctx);
     const bool use_async = *file_manager_context_.use_async_load;
     storage::LoadOptions options;
     options.enable_mmap = load_info_.enable_mmap;
@@ -245,8 +240,7 @@ BsonInvertedIndexTranslator::get_cells_async(
         // Files are absolute remote paths (basePath already prepended by caller)
         if (use_async) {
             index = co_await folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor(
-                    {}, priority, load_ctx.ctx.sequence_id),
+                storage::ResolveAsyncLoadExecutor({}, &load_ctx.ctx, priority),
                 load());
         } else {
             index = co_await load();

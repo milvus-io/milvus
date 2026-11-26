@@ -617,6 +617,18 @@ ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
         std::move(executor), local_priority, sequence_id);
 }
 
+folly::Executor::KeepAlive<>
+ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
+                         const OpContext* ctx,
+                         milvus::proto::common::LoadPriority load_priority) {
+    const auto priority =
+        ctx && ctx->runtime_load_priority == kUrgentRuntimeLoadPriority
+            ? AsyncLoadPriority::Urgent
+            : ResolveAsyncLoadPriority(executor.get(), load_priority);
+    return ResolveAsyncLoadExecutor(
+        std::move(executor), priority, ctx ? ctx->sequence_id : 0);
+}
+
 AsyncLoadPriority
 ResolveAsyncLoadPriority(
     const folly::Executor* executor,

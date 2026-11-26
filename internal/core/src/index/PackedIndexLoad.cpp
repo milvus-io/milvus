@@ -26,6 +26,7 @@
 #include "storage/LoadConfig.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 namespace {
@@ -98,10 +99,7 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
                        milvus::OpContext* op_ctx) {
     const bool use_async = context.use_async_load.value_or(
         milvus::storage::LoadAsyncReadEnabled());
-    const auto priority =
-        op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(op_ctx);
     auto task = InspectPackedScalarIndex(
         files,
         context,
@@ -109,11 +107,11 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
         use_async,
         priority,
         op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{});
-    return use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                           storage::ResolveAsyncLoadExecutor(
-                               {}, priority, op_ctx ? op_ctx->sequence_id : 0),
-                           std::move(task)))
-                     : folly::coro::blockingWait(std::move(task));
+    return use_async
+               ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                     storage::ResolveAsyncLoadExecutor({}, op_ctx, priority),
+                     std::move(task)))
+               : folly::coro::blockingWait(std::move(task));
 }
 
 }  // namespace milvus::index

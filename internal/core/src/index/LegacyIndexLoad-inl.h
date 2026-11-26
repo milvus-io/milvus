@@ -21,6 +21,7 @@
 #include "folly/coro/WithCancellation.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
 
@@ -32,10 +33,7 @@ RunLegacyLoad(LegacyIndexSource& source,
               milvus::OpContext* context) {
     auto options = fixed_options;
     options.op_ctx = context;
-    const auto priority =
-        options.op_ctx && options.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(options.op_ctx);
     auto set_context = [](storage::FileSource& source,
                           proto::common::LoadPriority priority,
                           folly::CancellationToken token) {
@@ -68,9 +66,7 @@ RunLegacyLoad(LegacyIndexSource& source,
     co_return co_await folly::coro::co_withCancellation(
         token,
         folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor(
-                {}, priority, context ? context->sequence_id : 0),
-            run()));
+            storage::ResolveAsyncLoadExecutor({}, context, priority), run()));
 }
 
 }  // namespace milvus::index

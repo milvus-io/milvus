@@ -48,6 +48,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/File.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSourceUtils.h"
 #include "storage/FileWriter.h"
 #include "storage/EntryStreamUtils.h"
@@ -564,10 +565,7 @@ DecodeFrozenPostings(const uint8_t* data,
     }
     const auto* cursor = data;
     const auto* end = data + size;
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::optional<TemporaryFileGuard> file;
     std::unique_ptr<storage::FileWriter> writer;
     FrozenPostings<T> result;
@@ -826,11 +824,7 @@ LoadBitmapPayload(bool use_async,
 
     if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
         if (opts.enable_mmap) {
-            const auto priority =
-                opts.op_ctx &&
-                        opts.op_ctx->runtime_load_priority.value_or(0) != 0
-                    ? proto::common::LoadPriority::LOW
-                    : proto::common::LoadPriority::HIGH;
+            const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
             std::optional<TemporaryFileGuard> portable_file;
             size_t size = 0;
             int fd = -1;
@@ -1217,9 +1211,7 @@ BitmapIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
             file.Path(), bytes, false);
         // The plan must own even an unprepared temporary file on failure.
         state->file->Prepare(storage::io::GetPriorityFromLoadPriority(
-            opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH));
+            milvus::ResolveLoadPriority(opts.op_ctx)));
         static_cast<void>(file.ReleasePath());
         plan.entries.push_back(
             {BITMAP_INDEX_DATA,
@@ -1248,10 +1240,7 @@ BitmapIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
     }
     std::unique_ptr<BitmapPostingStorage<T, Posting>> storage;
     if (state->file) {
-        const auto priority =
-            opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH;
+        const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
         int fd = -1;
         char* mapped = nullptr;
         std::exception_ptr failure;

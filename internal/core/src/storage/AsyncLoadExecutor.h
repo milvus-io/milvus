@@ -21,6 +21,10 @@
 #include "folly/Executor.h"
 #include "pb/common.pb.h"
 
+namespace milvus {
+struct OpContext;
+}  // namespace milvus
+
 namespace milvus::storage {
 
 // Configures workers without creating an unused executor. Positive values only.
@@ -65,10 +69,16 @@ ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          AsyncLoadPriority priority,
                          uint64_t sequence_id = 0);
 
-// Existing wire priorities map to High/Low; this does not promote Search.
+// Existing wire priorities map to High/Low.
 [[nodiscard]] folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          milvus::proto::common::LoadPriority load_priority,
                          uint64_t sequence_id = 0);
+
+// Bind the operation's sequence and preserve its local Urgent override.
+[[nodiscard]] folly::Executor::KeepAlive<>
+ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
+                         const OpContext* ctx,
+                         milvus::proto::common::LoadPriority load_priority);
 
 }  // namespace milvus::storage

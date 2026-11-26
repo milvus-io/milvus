@@ -653,8 +653,7 @@ AsyncSearch(CTraceContext c_trace,
                 plan->plan_node_->search_info_.field_id_;
 
             milvus::OpContext op_ctx(cancel_token);
-            op_ctx.runtime_load_priority =
-                milvus::proto::common::LoadPriority::HIGH;
+            op_ctx.runtime_load_priority = milvus::kUrgentRuntimeLoadPriority;
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
             ValidateSegmentSchemaCompatibility(

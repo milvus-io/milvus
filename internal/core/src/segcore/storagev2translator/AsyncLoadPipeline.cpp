@@ -446,10 +446,8 @@ ReadCellsAsync(const milvus::OpContext* ctx,
                CellReadCallback consume_cell,
                AsyncLoadPipelineOptions options) {
     try {
-        auto executor_keep_alive =
-            storage::ResolveAsyncLoadExecutor(std::move(options.executor),
-                                              options.load_priority,
-                                              ctx ? ctx->sequence_id : 0);
+        auto executor_keep_alive = storage::ResolveAsyncLoadExecutor(
+            std::move(options.executor), ctx, options.load_priority);
         auto finalization_executor_provider =
             std::move(options.finalization_executor_provider);
         const auto admission_priority = storage::ResolveAsyncLoadPriority(

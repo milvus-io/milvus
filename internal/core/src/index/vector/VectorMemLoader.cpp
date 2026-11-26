@@ -41,6 +41,7 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "nlohmann/json.hpp"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index {
@@ -277,10 +278,7 @@ PopulateState(bool use_async,
               const storage::LoadOptions& opts,
               const RuntimeParams& params,
               const EntryPlan& plan) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto config = params.knowhere_config;
     config.erase(MMAP_FILE_PATH);
     config.erase(EMB_LIST_META_PATH);
