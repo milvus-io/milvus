@@ -343,6 +343,7 @@ func TestBuildRuntimeOptions(t *testing.T) {
 	defer params.Reset(urlKey)
 
 	options := BuildRuntimeOptions()
+	assert.Equal(t, params.TLSAllowedPath.GetValue(), options["tls_allowed_path"])
 	assert.Equal(t, localResourcePath, options[DefaultDictPathKey])
 	assert.Equal(t, pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()), options[ResourcePathKey])
 	assert.Equal(t,

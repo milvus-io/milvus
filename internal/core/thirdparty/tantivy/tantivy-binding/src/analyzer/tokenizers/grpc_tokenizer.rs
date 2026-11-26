@@ -7,7 +7,7 @@ use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tokio::runtime::Runtime;
 use tonic::transport::Channel;
 #[cfg(feature = "analyzer-remote-tls")]
-use tonic::transport::ClientTlsConfig;
+use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 
 use tokenizer::tokenization_request::Parameter;
 use tokenizer::tokenizer_client::TokenizerClient;
@@ -65,17 +65,6 @@ impl GrpcTokenizer {
     pub fn from_json(
         params: &json::Map<String, json::Value>,
     ) -> crate::error::Result<GrpcTokenizer> {
-        if let Some(tls) = params.get("tls") {
-            if ["ca_cert", "client_cert", "client_key"]
-                .iter()
-                .any(|key| tls.get(key).is_some())
-            {
-                return Err(TantivyBindingError::InvalidArgument(
-                    "grpc tokenizer TLS file paths cannot be supplied in analyzer parameters"
-                        .into(),
-                ));
-            }
-        }
         let endpoint = params
             .get(ENDPOINTKEY)
             .ok_or(TantivyBindingError::InvalidArgument(
@@ -183,39 +172,29 @@ impl GrpcTokenizer {
             }
         }
 
-        let channel = match TOKIO_RT.block_on(async {
-            #[cfg(feature = "analyzer-remote-tls")]
-            {
-                let endpoint_domain = url::Url::parse(endpoint)
-                    .ok()
-                    .and_then(|u| u.host_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| endpoint.to_string());
-                // if the endpoint starts with "https://", we need to configure TLS
-                if endpoint.starts_with("https://") {
-                    let tls_config = match params.get(TLSKEY) {
-                        Some(tls_val) => {
-                            let domain = tls_val
-                                .get("domain")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| endpoint_domain);
-
-                            ClientTlsConfig::new().domain_name(domain)
-                        }
-                        None => ClientTlsConfig::new().domain_name(endpoint_domain),
-                    };
-
-                    return tonic::transport::Endpoint::new(endpoint.to_string())?
-                        .tls_config(tls_config)?
-                        .connect()
-                        .await;
-                }
-            }
-
-            tonic::transport::Endpoint::new(endpoint.to_string())?
-                .connect()
-                .await
-        }) {
+        let channel_endpoint =
+            tonic::transport::Endpoint::new(endpoint.to_string()).map_err(|_| {
+                TantivyBindingError::InvalidArgument("grpc tokenizer endpoint is invalid".into())
+            })?;
+        #[cfg(feature = "analyzer-remote-tls")]
+        let channel_endpoint = if endpoint.starts_with("https://") {
+            let domain = url::Url::parse(endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| endpoint.to_string());
+            let root = crate::analyzer::options::get_options("tls_allowed_path")
+                .and_then(|v| v.as_str().map(std::path::PathBuf::from))
+                .unwrap_or_default();
+            let config = build_tls_config(params.get(TLSKEY), domain, &root)?;
+            channel_endpoint.tls_config(config).map_err(|_| {
+                TantivyBindingError::InvalidArgument(
+                    "grpc tokenizer TLS configuration is invalid".into(),
+                )
+            })?
+        } else {
+            channel_endpoint
+        };
+        let channel = match TOKIO_RT.block_on(channel_endpoint.connect()) {
             Ok(client) => client,
             Err(e) => {
                 warn!(
@@ -287,27 +266,51 @@ impl Tokenizer for GrpcTokenizer {
     }
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
+fn build_tls_config(
+    tls: Option<&json::Value>,
+    endpoint_domain: String,
+    root: &std::path::Path,
+) -> crate::error::Result<ClientTlsConfig> {
+    let Some(tls) = tls else {
+        return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
+    };
+    let tls = tls.as_object().ok_or_else(|| {
+        TantivyBindingError::InvalidArgument("grpc tokenizer tls must be an object".into())
+    })?;
+    if tls.contains_key("client_cert") != tls.contains_key("client_key") {
+        return Err(TantivyBindingError::InvalidArgument(
+            "grpc tokenizer TLS client_cert and client_key must be supplied together".into(),
+        ));
+    }
+    let read = |key: &str| -> crate::error::Result<Option<Vec<u8>>> {
+        let Some(value) = tls.get(key) else {
+            return Ok(None);
+        };
+        let path = value.as_str().filter(|p| !p.is_empty()).ok_or_else(|| {
+            TantivyBindingError::InvalidArgument(
+                "grpc tokenizer TLS file path must be a non-empty string".into(),
+            )
+        })?;
+        crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
+            .map(Some)
+    };
+    let domain = tls
+        .get("domain")
+        .and_then(json::Value::as_str)
+        .unwrap_or(&endpoint_domain);
+    let mut config = ClientTlsConfig::new().domain_name(domain);
+    if let Some(ca) = read("ca_cert")? {
+        config = config.ca_certificate(Certificate::from_pem(ca));
+    }
+    if let (Some(cert), Some(key)) = (read("client_cert")?, read("client_key")?) {
+        config = config.identity(Identity::from_pem(cert, key));
+    }
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn rejects_tls_file_paths_before_connecting() {
-        for field in ["ca_cert", "client_cert", "client_key"] {
-            for value in [
-                serde_json::json!("/unread/SECRET_MARKER"),
-                serde_json::Value::Null,
-            ] {
-                let params =
-                    serde_json::json!({"endpoint":"https://127.0.0.1:1", "tls":{field:value}});
-                let error = match super::GrpcTokenizer::from_json(params.as_object().unwrap()) {
-                    Ok(_) => panic!("TLS file path accepted"),
-                    Err(error) => error.to_string(),
-                };
-                assert!(error.contains("TLS file paths cannot be supplied"));
-                assert!(!error.contains("SECRET_MARKER"));
-            }
-        }
-    }
-
     use super::*;
     use serde_json::json;
 

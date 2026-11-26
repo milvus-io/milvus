@@ -94,6 +94,7 @@ func walMessageSizeFormatter(key string, defaultSize int) func(string) string {
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
+	TLSAllowedPath  ParamItem `refreshable:"false"`
 	LocalStorageCfg LocalStorageConfig
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
@@ -109,6 +110,25 @@ type ServiceParam struct {
 
 func (p *ServiceParam) init(bt *BaseTable) {
 	p.LocalStorageCfg.Init(bt)
+	localStoragePath := p.LocalStorageCfg.Path.GetValue()
+	p.TLSAllowedPath = ParamItem{
+		Key:          "tls.allowedPath",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Forbidden:    true,
+		Export:       true,
+		Doc:          "Base directory for request-selected TLS files, currently used by the gRPC tokenizer. Empty uses localStorage.path/tls. Must be separate from dictionary and file-resource source directories. Restart required.",
+		Formatter: func(value string) string {
+			if value == "" {
+				value = filepath.Join(localStoragePath, "tls")
+			}
+			if !filepath.IsAbs(value) || filepath.Clean(value) == "/" {
+				panic(merr.WrapErrParameterInvalidMsg("tls.allowedPath must be an absolute non-root directory"))
+			}
+			return filepath.Clean(value)
+		},
+	}
+	p.TLSAllowedPath.Init(bt.mgr)
 	p.MetaStoreCfg.Init(bt)
 	p.EtcdCfg.Init(bt)
 	p.TiKVCfg.Init(bt)

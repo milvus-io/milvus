@@ -267,3 +267,8 @@ and non-regular files. Analyzer local dictionaries use the separate
 `<localStorage.path>/analyzer`. Both source reads have finite byte limits; a
 prior size check alone is not sufficient. Source directories are provisioned by
 operators and are separate from the disposable per-node resource cache.
+
+Request-selected TLS files have a separate `tls.allowedPath` base, defaulting to
+`<localStorage.path>/tls`. The gRPC tokenizer uses the same descriptor-relative
+file reader with a fixed 1 MiB limit. Operators must keep TLS credentials outside
+all dictionary and file-resource source trees.
