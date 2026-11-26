@@ -183,7 +183,7 @@ func validateUpdateAssignments(schema *schemapb.CollectionSchema, assignments []
 			}
 			fd := &schemapb.FieldData{FieldName: field.GetName(), FieldId: field.GetFieldID(), Type: field.GetDataType(), Field: &schemapb.FieldData_Scalars{Scalars: scalars}}
 			if field.GetNullable() {
-				fd.ValidData = []bool{true}
+				typeutil.SetFieldDataValidData(fd, []bool{true})
 			}
 			// UpdateLiteral carries already typed UTC microseconds, unlike the
 			// insert API's timestamp string conversion.

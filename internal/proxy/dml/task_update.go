@@ -108,7 +108,7 @@ func (t *UpdateTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partitionID := int64(common.AllPartitionsID)
+	partitionID := common.AllPartitionsID
 	if request.GetPartitionName() != "" {
 		if partitionKey, _ := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema); partitionKey != nil {
 			return merr.WrapErrParameterInvalidMsg("cannot specify a partition in partition-key mode")
