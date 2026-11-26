@@ -258,6 +258,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 			MVCC:            read.mvcc,
 			BarrierMVCC:     read.barrierMVCC,
 			OnPlan:          read.onPlan,
+			awaitPlans:      read.awaitPlans,
 			Reducer:         searchReducer,
 		})
 		if err != nil {
@@ -291,6 +292,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 			MVCC:        read.mvcc,
 			BarrierMVCC: read.barrierMVCC,
 			OnPlan:      read.onPlan,
+			awaitPlans:  read.awaitPlans,
 			Reducer:     retrieveReducer,
 		})
 		if err != nil {

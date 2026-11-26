@@ -22,14 +22,7 @@ func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *
 	counts := make([]int64, len(shards))
 	// Zero barrierMVCC samples at Strong, the zero consistency level.
 	err = c.shardClient.fanOutShards(ctx, shards, requestReadPoint{barrierMVCC: barrierMVCC}, func(ctx context.Context, i int, read shardReadPoint) error {
-		var rows int64
-		var err error
-		if read.mvcc == nil && read.onPlan == nil {
-			// An ordinary shard: the request's own barrier, as before.
-			rows, err = c.shardClient.statistics(ctx, read.vchannel, collectionID, req, read.barrierMVCC)
-		} else {
-			rows, err = c.shardClient.statisticsAt(ctx, collectionID, req, read)
-		}
+		rows, err := c.shardClient.statisticsAt(ctx, collectionID, req, read)
 		counts[i] = rows
 		return err
 	})
@@ -55,6 +48,7 @@ func (s *shardViewQueryClient) statisticsAt(ctx context.Context, collectionID in
 		mvcc:         read.mvcc,
 		barrierMVCC:  read.barrierMVCC,
 		observePlan:  read.onPlan,
+		awaitPlans:   read.awaitPlans,
 		buildPlanReq: func(shard qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: collectionID, ShardId: shard.IntoProto(),

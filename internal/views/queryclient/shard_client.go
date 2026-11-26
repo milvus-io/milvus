@@ -169,7 +169,8 @@ type ShardSearchRequest struct {
 	setupCtx        context.Context          // Cancels initial shard setup if another vchannel fails.
 	registerCancel  func(context.CancelFunc) // Registers worker cancellation during initial setup only.
 	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
-	OnPlan func(*viewpb.QueryPlan)
+	OnPlan     func(*viewpb.QueryPlan)
+	awaitPlans func(context.Context) error
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
@@ -184,7 +185,8 @@ type ShardQueryRequest struct {
 	setupCtx       context.Context          // Cancels initial shard setup if another vchannel fails.
 	registerCancel func(context.CancelFunc) // Registers worker cancellation during initial setup only.
 	// OnPlan, when set, observes every plan Phase 1 returns for this shard.
-	OnPlan func(*viewpb.QueryPlan)
+	OnPlan     func(*viewpb.QueryPlan)
+	awaitPlans func(context.Context) error
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -198,6 +200,8 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
 		observePlan:      req.OnPlan,
+		awaitPlans:       req.awaitPlans,
+		retryErrors:      req.retryErrors,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -282,6 +286,8 @@ func (s *shardViewQueryClient) SearchStreams(
 			barrierMVCC:      req.BarrierMVCC,
 			retryErrors:      req.retryErrors,
 			retryState:       retry,
+			observePlan:      req.OnPlan,
+			awaitPlans:       req.awaitPlans,
 			cancelStreams:    cancelWorkers,
 			buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 				return &viewpb.GetQueryPlanRequest{
@@ -424,7 +430,7 @@ func (s *shardViewQueryClient) SearchStreams(
 		cancel()
 		return nil, nil, err
 	}
-	streams[0] = &shardReduceStream[*internalpb.SearchResults]{
+	shardStream := &shardReduceStream[*internalpb.SearchResults]{
 		stream: streams[0], ctx: ctx, cancel: cancel, workerCancel: workerCancels[0], plan: plan,
 		restart: func(err error) (reduce.ReduceStream[*internalpb.SearchResults], context.CancelFunc, *ShardPlan, error) {
 			retry.recordFailure(err)
@@ -435,6 +441,10 @@ func (s *shardViewQueryClient) SearchStreams(
 			return next[0], cancels[0], nextPlan, nil
 		},
 	}
+	if req.awaitPlans != nil {
+		shardStream.restart = nil
+	}
+	streams[0] = shardStream
 	return streams, plan, nil
 }
 
@@ -448,6 +458,8 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
 		observePlan:      req.OnPlan,
+		awaitPlans:       req.awaitPlans,
+		retryErrors:      req.retryErrors,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: req.Req.CollectionID,
@@ -518,6 +530,8 @@ func (s *shardViewQueryClient) QueryStream(
 			barrierMVCC:      req.BarrierMVCC,
 			retryErrors:      req.retryErrors,
 			retryState:       retry,
+			observePlan:      req.OnPlan,
+			awaitPlans:       req.awaitPlans,
 			cancelStreams:    cancelWorkers,
 			buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 				return &viewpb.GetQueryPlanRequest{
@@ -582,13 +596,17 @@ func (s *shardViewQueryClient) QueryStream(
 		cancel()
 		return nil, nil, err
 	}
-	return &shardReduceStream[*internalpb.RetrieveResults]{
+	shardStream := &shardReduceStream[*internalpb.RetrieveResults]{
 		stream: stream, ctx: ctx, cancel: cancel, workerCancel: workerCancel, plan: plan,
 		restart: func(err error) (reduce.ReduceStream[*internalpb.RetrieveResults], context.CancelFunc, *ShardPlan, error) {
 			retry.recordFailure(err)
 			return open(ctx, nil)
 		},
-	}, plan, nil
+	}
+	if req.awaitPlans != nil {
+		shardStream.restart = nil
+	}
+	return shardStream, plan, nil
 }
 
 // ============================================================================
@@ -607,6 +625,9 @@ type shardExecParams struct {
 	cancelStreams    func()                    // Cancels worker opens in a failed streaming attempt.
 	// observePlan sees every plan Phase 1 returns, before any dispatch.
 	observePlan func(*viewpb.QueryPlan)
+	// awaitPlans gates all execution, including two-stage preparation, on the
+	// complete request's accepted plans. It is called at most once per shard.
+	awaitPlans func(context.Context) error
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
@@ -739,9 +760,6 @@ func (s *shardViewQueryClient) executeShard(
 		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
 			return nil, err
 		}
-		if params.observePlan != nil {
-			params.observePlan(plan)
-		}
 		// A newer advertised version does not certify removal of a dead QN.
 		// Recheck the actual exact-schema plan before accepting inline results.
 		blocked := false
@@ -759,6 +777,14 @@ func (s *shardViewQueryClient) executeShard(
 		}
 		if params.consumeResponse != nil {
 			if err := params.consumeResponse(response); err != nil {
+				return nil, err
+			}
+		}
+		if params.observePlan != nil {
+			params.observePlan(plan)
+		}
+		if params.awaitPlans != nil {
+			if err := params.awaitPlans(ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -792,7 +818,7 @@ func (s *shardViewQueryClient) executeShard(
 			}
 		}
 		if err != nil {
-			if retryableQueryError(err) {
+			if params.awaitPlans == nil && retryableQueryError(err) {
 				retry.recordFailure(err)
 				params.resetShard(shardID)
 				continue

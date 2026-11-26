@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -78,8 +79,8 @@ func TestOpenVchannelStreamsCancelsLateRegistration(t *testing.T) {
 	primaryErr := errors.New("vchannel failed")
 	failed := make(chan struct{})
 	registered := make(chan struct{})
-	_, _, _, err := openVchannelStreams(t.Context(), 2,
-		func(setupCtx context.Context, register func(context.CancelFunc), i int) (int, *ShardPlan, error) {
+	_, _, _, err := openVchannelStreams(t.Context(), &shardViewQueryClient{}, []resolver.Shard{{VChannel: "a"}, {VChannel: "b"}}, requestReadPoint{},
+		func(setupCtx context.Context, register func(context.CancelFunc), i int, _ shardReadPoint) (int, *ShardPlan, error) {
 			if i == 0 {
 				close(failed)
 				return 0, nil, primaryErr
@@ -103,8 +104,8 @@ func TestOpenVchannelStreamsCancelsLateRegistration(t *testing.T) {
 func TestOpenVchannelStreamsKeepsWorkerContextAfterSetup(t *testing.T) {
 	workerCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	_, _, _, err := openVchannelStreams(t.Context(), 1,
-		func(_ context.Context, register func(context.CancelFunc), _ int) (int, *ShardPlan, error) {
+	_, _, _, err := openVchannelStreams(t.Context(), &shardViewQueryClient{}, []resolver.Shard{{VChannel: "a"}}, requestReadPoint{},
+		func(_ context.Context, register func(context.CancelFunc), _ int, _ shardReadPoint) (int, *ShardPlan, error) {
 			register(cancel)
 			return 1, &ShardPlan{}, nil
 		}, func(int) {})
@@ -941,6 +942,7 @@ func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *vi
 
 type legacyServiceClient struct {
 	ViewQueryServiceClient
+	statisticsOnView   func(context.Context, qviews.WorkNode, *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 	searchResults      map[string]*internalpb.SearchResults
 	searchOnView       func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
@@ -949,6 +951,10 @@ type legacyServiceClient struct {
 	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 	queryMu            sync.Mutex
 	queryCallCount     int
+}
+
+func (c *legacyServiceClient) StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	return c.statisticsOnView(ctx, node, req)
 }
 
 func (c *legacyServiceClient) SearchOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {

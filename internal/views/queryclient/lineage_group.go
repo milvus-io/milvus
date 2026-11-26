@@ -31,6 +31,7 @@ type shardReadPoint struct {
 	mvcc        *viewpb.QueryPlanMVCC
 	barrierMVCC uint64
 	onPlan      func(*viewpb.QueryPlan)
+	awaitPlans  func(context.Context) error
 }
 
 // runShard executes both phases of the shard at position index of the serving list.
@@ -102,6 +103,18 @@ func (s *shardViewQueryClient) fanOutShards(ctx context.Context, shards []resolv
 	if err != nil {
 		return err
 	}
+	needsBarrier := len(groups) > 0
+	for _, shard := range shards {
+		needsBarrier = needsBarrier || shard.ShardSetEpoch > 0 || shard.LoadInfoVersion > 0
+	}
+	if needsBarrier {
+		barrier := &requestPlanningBarrier{remaining: len(shards), ready: make(chan struct{})}
+		originalRun := run
+		run = func(ctx context.Context, index int, read shardReadPoint) error {
+			read.awaitPlans = barrier.arriveAndWait
+			return originalRun(ctx, index, read)
+		}
+	}
 	g, gCtx := errgroup.WithContext(ctx)
 	for _, i := range ordinary {
 		g.Go(func() error {
@@ -114,6 +127,30 @@ func (s *shardViewQueryClient) fanOutShards(ctx context.Context, shards []resolv
 		})
 	}
 	return g.Wait()
+}
+
+// Each shard arrives exactly once after accepting its Phase 1 response. Once
+// released, failures end this request attempt instead of replanning one shard.
+// The request's errgroup cancellation releases waiters on any planning failure.
+type requestPlanningBarrier struct {
+	mu        sync.Mutex
+	remaining int
+	ready     chan struct{}
+}
+
+func (b *requestPlanningBarrier) arriveAndWait(ctx context.Context) error {
+	b.mu.Lock()
+	b.remaining--
+	if b.remaining == 0 {
+		close(b.ready)
+	}
+	b.mu.Unlock()
+	select {
+	case <-b.ready:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // runLineageGroup reads a split source shard S and its targets at one point B:
