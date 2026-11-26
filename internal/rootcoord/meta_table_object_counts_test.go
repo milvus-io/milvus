@@ -18,9 +18,9 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
