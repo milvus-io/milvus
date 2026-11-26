@@ -296,7 +296,7 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         scalar_type == DataType::VARCHAR;
     if (field_meta.get_id().get() >= START_USER_FIELDID && mutable_scalar &&
         segcore_config.get_enable_mutable_scalar_index()) {
-        auto created = index::CreateMutableScalarGrowingIndex(
+        auto owner = index::CreateMutableScalarGrowingIndex(
             scalar_type,
             {segcore_config.get_mutable_scalar_hot_bitmap_bytes(),
              segcore_config.get_mutable_scalar_hot_query_threshold(),
@@ -305,8 +305,7 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                           index::ReaderCaps{.predicate = true,
                                             .pattern_match = scalar_type ==
                                                              DataType::VARCHAR},
-                          std::move(created.owner));
-        appender.resident_bytes = std::move(created.resident_bytes);
+                          std::move(owner));
         LOG_INFO(
             "growing mutable scalar index created: segment={}, field={}, "
             "backend=btree, hot_bitmap_bytes={}",
@@ -476,8 +475,8 @@ GrowingIndexSet::ResidentBytes() const {
     std::shared_lock lock(mutex_);
     size_t bytes = 0;
     for (const auto& [field_id, appender] : appenders_) {
-        if (appender.resident_bytes) {
-            bytes += appender.resident_bytes();
+        if (const auto usage = appender.owner->MemoryUsage()) {
+            bytes += *usage;
         }
     }
     return bytes;

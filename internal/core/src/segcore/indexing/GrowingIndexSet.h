@@ -66,8 +66,6 @@ class GrowingIndexSet {
         // families can release the column after a covering reader owns raw.
         bool source_backed{false};
         FieldIndexCapability capability;
-        // Optional reporting of self-charged storage; no methods on IIndex.
-        std::function<size_t()> resident_bytes;
     };
 
     using AppenderMap = std::map<FieldId, Appender>;
@@ -98,6 +96,8 @@ class GrowingIndexSet {
     bool
     Has(FieldId field_id) const;
 
+    // Sum available owner reports only; unsupported owners remain unreported.
+    // Reporting does not charge resources or alter Segment tracking.
     size_t
     ResidentBytes() const;
 

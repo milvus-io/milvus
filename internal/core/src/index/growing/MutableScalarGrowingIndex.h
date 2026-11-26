@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 
 #include "index/contracts/growing/IGrowingIndex.h"
@@ -32,15 +31,9 @@ struct MutableScalarIndexOptions {
 
 // Construction is the only place that knows the backend. Segment and Expr use
 // the existing growing and reader contracts. Accounting stays with storage,
-// including allocations retained by older pins, rather than on IIndex.
-struct MutableScalarIndexOwner {
-    std::unique_ptr<IGrowingIndex> owner;
-    // Reporting only: all storage charges/refunds the cache manager directly.
-    // The Segment must not add these bytes to its resource-tracking estimate.
-    std::function<size_t()> resident_bytes;
-};
-
-MutableScalarIndexOwner
+// including allocations retained by older pins; the owner reports it through
+// MemoryUsage() without charging it again.
+std::unique_ptr<IGrowingIndex>
 CreateMutableScalarGrowingIndex(DataType type,
                                 const MutableScalarIndexOptions& options);
 

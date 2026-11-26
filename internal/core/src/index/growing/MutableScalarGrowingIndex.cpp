@@ -484,6 +484,10 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
     Family() const override {
         return "MUTABLE_SCALAR_BTREE";
     }
+    std::optional<size_t>
+    MemoryUsage() const override {
+        return storage_->bytes->bytes.load(std::memory_order_relaxed);
+    }
     void
     CommitIfNeeded() override {
         // Synchronous appends publish before ACK. Pinning must not wait for an
@@ -588,18 +592,17 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
 };
 
 template <typename T>
-MutableScalarIndexOwner
+std::unique_ptr<IGrowingIndex>
 MakeMutableScalarOwner(DataType type,
                        const MutableScalarIndexOptions& options) {
     auto bytes = std::make_shared<ScalarAllocationCounter>();
-    return {
-        std::make_unique<MutableScalarGrowingOwner<T>>(type, options, bytes),
-        [bytes] { return bytes->bytes.load(std::memory_order_relaxed); }};
+    return std::make_unique<MutableScalarGrowingOwner<T>>(
+        type, options, std::move(bytes));
 }
 
 }  // namespace
 
-MutableScalarIndexOwner
+std::unique_ptr<IGrowingIndex>
 CreateMutableScalarGrowingIndex(DataType type,
                                 const MutableScalarIndexOptions& options) {
     switch (type) {

@@ -94,8 +94,11 @@ hot-cache allocations use one counter that charges/refunds the cache manager dir
 allocation/release. Storage objects and shared validity buffers use the same accounting through
 lifetime guards; old readers retain their buffer charges until release. Segment resource
 estimation and its existing tracking calls remain unchanged and exclude these self-charged
-bytes. The segment's memory-size report includes the counter without charging it again. These
-are allocation counts, not process RSS. Automatic whole-index eviction is outside this draft.
+bytes. The scalar owner's `IGrowingIndex::MemoryUsage()` returns this counter without charging
+it again. Other owners inherit `nullopt` until they implement reporting; `GrowingIndexSet`
+sums available reports for the segment's memory-size report, not a complete total for all index
+families. The factory returns only the owner, with no separate accounting callback. These are
+allocation counts, not process RSS. Automatic whole-index eviction is outside this draft.
 
 ## Draft verification and follow-up
 

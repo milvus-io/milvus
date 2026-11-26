@@ -273,6 +273,11 @@ Reader `Count()`. No scalar index version or new file format is required solely 
 
 ## Growing publication protocol
 
+- `IGrowingIndex::MemoryUsage()` optionally reports tracked index-owned allocation bytes,
+  including storage retained by older pins and excluding borrowed raw columns. It is a
+  thread-safe, read-only report, not RSS or a charge/refund operation. The default is `nullopt`
+  (unavailable), distinct from a measured zero. This owner report is separate from the published
+  `IIndex` and request-reader contracts; accounting remains with concrete storage.
 - `IAppendable<Batch>` is a separate input mixin. `ScalarBatch<T>`, `TextBatch`, and
   `VectorBatch<T>` are flat views borrowed for the duration of the call; they must be fully consumed
   or copied before `Append` returns. Nested input requires explicit offsets/validity.

@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -126,6 +127,15 @@ class IGrowingIndex {
     ValueType() const = 0;
     virtual std::string
     Family() const = 0;
+
+    // Report tracked index-owned allocation bytes, including storage retained
+    // by older pins. Excludes borrowed raw columns; this is not process RSS.
+    // nullopt means unavailable, not zero. Implementations must support
+    // concurrent append/read and must not load, charge or refund resources here.
+    virtual std::optional<size_t>
+    MemoryUsage() const {
+        return std::nullopt;
+    }
 
  protected:
     // The writer must serialize append/publication work and supply an Index
