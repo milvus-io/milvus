@@ -76,7 +76,7 @@ class LoadExecutor final : public folly::Executor {
         folly::ShallowCopyRequestContextScopeGuard context(
             kLoadSequenceToken,
             std::make_unique<LoadSequenceData>(sequence_, group_));
-        if (executor_->getNumPriorities() > 1) {
+        if (supports_priorities_) {
             executor_->addWithPriority(std::move(func), priority_);
         } else {
             executor_->add(std::move(func));
@@ -105,6 +105,7 @@ class LoadExecutor final : public folly::Executor {
                  std::shared_ptr<LoadTaskGroup> group,
                  AsyncLoadPriority load_priority)
         : executor_(std::move(executor)),
+          supports_priorities_(executor_->getNumPriorities() > 1),
           priority_(priority),
           load_priority_(load_priority),
           sequence_(sequence),
@@ -126,6 +127,8 @@ class LoadExecutor final : public folly::Executor {
 
     std::atomic<size_t> references_{1};
     folly::Executor::KeepAlive<> executor_;
+    // Resolve this during setup because Folly can call add() from noexcept code.
+    const bool supports_priorities_;
     const int8_t priority_;
     const AsyncLoadPriority load_priority_;
     const uint64_t sequence_;
