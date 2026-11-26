@@ -685,7 +685,7 @@ func TestCheckStructArrayFieldSchema_NullableValidation(t *testing.T) {
 
 // checkStructArrayFieldSchema also runs on stored structs, whose sub-fields may
 // carry enable_match or enable_analyzer from an earlier version; the callers
-// check only user input with schemautil.RejectStructSubFieldTextMatch.
+// check only user input with schemautil.ValidateStructSubFieldTextMatch.
 func TestCheckStructArrayFieldSchemaAcceptsStoredTextMatch(t *testing.T) {
 	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
 		require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{

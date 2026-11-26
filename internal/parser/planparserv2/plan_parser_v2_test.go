@@ -6160,3 +6160,42 @@ func TestExpr_ElementLevelLikeAndRegex(t *testing.T) {
 	_, err = ParseExpr(helper, `MATCH_ANY(struct_array, $[en_str] =~ "a(")`, nil)
 	require.ErrorIs(t, err, merr.ErrQueryPlan)
 }
+
+func TestStructTextMatchOperand(t *testing.T) {
+	schema := newTestSchema(false)
+	field := schema.StructArrayFields[0].Fields[0]
+	field.ElementNullable = true
+	field.TypeParams = []*commonpb.KeyValuePair{{Key: common.EnableMatchKey, Value: "true"}, {Key: common.EnableAnalyzerKey, Value: "true"}}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	for _, filter := range []string{
+		`ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`,
+		`ELEMENT_FILTER(struct_array, PHRASE_MATCH($[sub_str], "a b", 2))`,
+		`MATCH_ANY(struct_array, TEXT_MATCH($[sub_str], "a b", minimum_should_match=2))`,
+		`MATCH_EXACT(struct_array, PHRASE_MATCH($[sub_str], "a b", 2), threshold=1)`,
+	} {
+		plan, err := ParseExpr(helper, filter, nil)
+		require.NoError(t, err)
+		predicate := plan.GetMatchExpr().GetPredicate()
+		if ef := plan.GetElementFilterExpr(); ef != nil {
+			predicate = ef.GetElementExpr()
+		}
+		leaf := predicate.GetUnaryRangeExpr()
+		require.Equal(t, field.FieldID, leaf.GetColumnInfo().GetFieldId())
+		require.True(t, leaf.GetColumnInfo().GetIsElementLevel())
+		require.True(t, leaf.GetColumnInfo().GetNullable())
+		require.EqualValues(t, 2, leaf.GetExtraValues()[0].GetInt64Val())
+	}
+	for _, filter := range []string{
+		`TEXT_MATCH($[sub_str], "x")`, `TEXT_MATCH(StringArrayField, "x")`,
+		`MATCH_ANY(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
+		`element_filter(struct_array, PHRASE_MATCH($[sub_int], "x"))`,
+		`element_filter(struct_array, TEXT_MATCH($[missing], "x"))`,
+		`MATCH_ANY(StringArrayField, TEXT_MATCH($, "x"))`,
+	} {
+		_, err := ParseExpr(helper, filter, nil)
+		require.Error(t, err, filter)
+	}
+	_, err = ParseExpr(newTestSchemaHelper(t), `ELEMENT_FILTER(struct_array, TEXT_MATCH($[sub_str], "x"))`, nil)
+	require.ErrorContains(t, err, "does not enable match")
+}

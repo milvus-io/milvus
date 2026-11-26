@@ -35,6 +35,7 @@
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/IndexBuildCapiAdapter.h"
 #include "knowhere/version.h"
+#include "segcore/indexing/TextMatchIndexLoader.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
@@ -376,6 +377,65 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
         EXPECT_EQ(compound[1], std::string(tokenizer) == "standard");
         EXPECT_FALSE(compound[2]);
     }
+}
+
+TEST_F(BuildSessionTest, StructTextRoundTripsElementDocuments) {
+    const std::vector<std::vector<std::string>> values{
+        {"new", "york"}, {}, {"new york", "new york", "other"}};
+    auto info = BuildInfo(schemapb::DataType::Array,
+                          index::INVERTED_INDEX_TYPE,
+                          values.size(),
+                          3);
+    auto* schema = info.mutable_field_schema();
+    schema->set_name("reviews[body]");
+    schema->set_element_type(schemapb::DataType::VarChar);
+    for (const char* key : {"enable_analyzer", "enable_match"}) {
+        auto* parameter = schema->add_type_params();
+        parameter->set_key(key);
+        parameter->set_value("true");
+    }
+    info.add_insert_files(InsertPath());
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::TextIndex);
+    ASSERT_EQ(prepared.request.family, index::families::kText);
+    auto data = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    std::vector<Array> rows;
+    for (const auto& row : values) {
+        ScalarFieldProto array;
+        auto* strings = array.mutable_string_data();
+        for (const auto& value : row) {
+            strings->add_data(value);
+        }
+        rows.emplace_back(array);
+    }
+    data->FillFieldData(rows.data(), rows.size());
+    WriteInsert(prepared.file_manager_context, data);
+    BuildSession session(std::move(prepared.request),
+                         prepared.file_manager_context);
+    session.BuildFromSource();
+    const auto stats = session.Publish();
+    ASSERT_EQ(stats.Files().size(), 1);
+    const auto& artifact = stats.Files().front();
+    segcore::TextMatchIndexLoadInfo load_info{false,
+                                              info.segmentid(),
+                                              schema->fieldid(),
+                                              "{}",
+                                              artifact.file_size,
+                                              info.num_rows(),
+                                              "disable",
+                                              ""};
+    segcore::TextMatchIndexLoader loader(
+        load_info,
+        prepared.file_manager_context,
+        {{index::INDEX_FILES, std::vector<std::string>{artifact.file_name}},
+         {INDEX_NUM_ROWS_KEY, info.num_rows()}});
+    auto reader = loader.CreateIndex(nullptr)->CreateReader(nullptr);
+    ASSERT_EQ(reader->Count(), 5);
+    const auto& text = dynamic_cast<const index::ITextMatchReader&>(*reader);
+    const auto hits = text.PhraseMatchQuery("new york", 50);
+    ASSERT_EQ(hits.size(), 5);
+    EXPECT_EQ(hits.count(), 2);
+    EXPECT_TRUE(hits[2]);
+    EXPECT_TRUE(hits[3]);
 }
 
 TEST_F(BuildSessionTest, EmptyNestedSourceSkipsPersistence) {

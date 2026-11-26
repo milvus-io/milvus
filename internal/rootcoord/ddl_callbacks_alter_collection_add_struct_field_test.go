@@ -112,26 +112,29 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 }
 
-func TestDDLCallbacksAlterCollectionAddStructFieldRejectsTextMatch(t *testing.T) {
+func TestDDLCallbacksAlterCollectionAddStructFieldTextMatch(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 	createCollectionForTest(t, ctx, core, dbName, collectionName)
 
-	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
-		structField := newRootAddStructFieldSchema("profile")
-		structField.Fields[0].ElementType = schemapb.DataType_VarChar
-		structField.Fields[0].TypeParams = append(structField.Fields[0].TypeParams,
-			&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "16"},
-			&commonpb.KeyValuePair{Key: key, Value: "true"})
-		resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
-			DbName: dbName, CollectionName: collectionName, StructArrayFieldSchema: structField,
-		})
-		err = merr.CheckRPCCall(resp, err)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-		require.ErrorContains(t, err, key+" is not supported on struct sub-field profile[ints]")
+	structField := newRootAddStructFieldSchema("profile")
+	body := structField.Fields[0]
+	body.Name = "body"
+	body.ElementType = schemapb.DataType_VarChar
+	body.TypeParams = append(body.TypeParams,
+		&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "16"},
+		&commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"})
+	req := &milvuspb.AddCollectionStructFieldRequest{
+		DbName: dbName, CollectionName: collectionName, StructArrayFieldSchema: structField,
 	}
+	resp, err := core.AddCollectionStructField(ctx, req)
+	require.ErrorContains(t, merr.CheckRPCCall(resp, err), "requires enable_analyzer")
+
+	body.TypeParams = append(body.TypeParams, &commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+	resp, err = core.AddCollectionStructField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
 }
 
 func TestDDLCallbacksExternalCollectionRejectsAddStructField(t *testing.T) {

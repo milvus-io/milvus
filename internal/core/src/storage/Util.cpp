@@ -1653,7 +1653,8 @@ detail::VisitFieldDataFromStorageV2Paged(
     const FieldDataVisitor& visitor,
     size_t max_rows,
     size_t offset,
-    size_t window_bytes) {
+    size_t window_bytes,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
     if (!(remote_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "[StorageV2] remote files size is 0");
@@ -1929,7 +1930,8 @@ detail::VisitFieldDataFromStorageV2Paged(
                                                  element_type,
                                                  field_schema->nullable(),
                                                  dim,
-                                                 num_rows);
+                                                 num_rows,
+                                                 array_type);
                     for (const auto& chunked_array : chunked_arrays) {
                         field_data->FillFieldData(chunked_array);
                     }
@@ -1969,16 +1971,20 @@ VisitFieldDataFromStorageV2(
     DataType element_type,
     int64_t dim,
     milvus_storage::ArrowFileSystemPtr fs,
-    const FieldDataVisitor& visitor) {
-    return detail::VisitFieldDataFromStorageV2Paged(remote_files,
-                                                    field_id,
-                                                    data_type,
-                                                    element_type,
-                                                    dim,
-                                                    std::move(fs),
-                                                    visitor,
-                                                    /*max_rows=*/0,
-                                                    /*offset=*/0);
+    const FieldDataVisitor& visitor,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
+    return detail::VisitFieldDataFromStorageV2Paged(
+        remote_files,
+        field_id,
+        data_type,
+        element_type,
+        dim,
+        std::move(fs),
+        visitor,
+        /*max_rows=*/0,
+        /*offset=*/0,
+        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+        array_type);
 }
 
 std::vector<FieldDataPtr>
@@ -2205,7 +2211,8 @@ VisitFieldDataFromManifestPaged(
     const FieldDataVisitor& visitor,
     int64_t max_inflight_bytes,
     size_t max_rows,
-    size_t offset) {
+    size_t offset,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
     AssertInfo(max_inflight_bytes > 0,
                "max_inflight_bytes must be positive, got {}",
                max_inflight_bytes);
@@ -2525,6 +2532,7 @@ VisitFieldDataFromManifestPaged(
                      dim,
                      nullable,
                      normalize_field_meta,
+                     array_type,
                      num_rows]() -> FieldDataPtr {
                         auto raw_column = batch->GetColumnByName(column_name);
                         if (is_external) {
@@ -2542,7 +2550,8 @@ VisitFieldDataFromManifestPaged(
                                                           element_type_v,
                                                           nullable,
                                                           dim,
-                                                          num_rows);
+                                                          num_rows,
+                                                          array_type);
                         field_data->FillFieldData(chunked_array);
                         return field_data;
                     })
@@ -2704,8 +2713,12 @@ VisitFieldDataFromManifestPaged(
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
-            auto field_data = CreateFieldData(
-                data_type_v, element_type_v, nullable, dim, num_rows);
+            auto field_data = CreateFieldData(data_type_v,
+                                              element_type_v,
+                                              nullable,
+                                              dim,
+                                              num_rows,
+                                              array_type);
             field_data->FillFieldData(chunked_array);
             if (visitor(std::move(field_data)) == VisitControl::Stop) {
                 stopped = true;
@@ -2769,7 +2782,8 @@ VisitFieldDataFromManifest(
     std::optional<DataType> element_type,
     std::optional<StorageColumnMapping> storage_column_mapping,
     const FieldDataVisitor& visitor,
-    int64_t max_inflight_bytes) {
+    int64_t max_inflight_bytes,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
     return VisitFieldDataFromManifestPaged(manifest_path,
                                            loon_ffi_properties,
                                            field_meta,
@@ -2780,7 +2794,8 @@ VisitFieldDataFromManifest(
                                            visitor,
                                            max_inflight_bytes,
                                            /*max_rows=*/0,
-                                           /*offset=*/0);
+                                           /*offset=*/0,
+                                           array_type);
 }
 
 void
@@ -2811,7 +2826,8 @@ IterateFieldDataFromManifest(
         },
         max_inflight_bytes,
         max_rows,
-        offset);
+        offset,
+        std::nullopt);
     switch (outcome) {
         case VisitOutcome::Exhausted:
         case VisitOutcome::FieldMissing:

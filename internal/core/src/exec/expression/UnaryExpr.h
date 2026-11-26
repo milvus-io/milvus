@@ -969,7 +969,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     SupportOffsetInput() override {
         if (IsTextIndexOpType(expr_->op_type_)) {
-            return false;
+            return expr_->column_.element_level_;
         }
         return true;
     }
@@ -1085,7 +1085,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     CanUseIndexForArray();
 
     VectorPtr
-    ExecTextMatch();
+    ExecTextMatch(const OffsetVector* offsets);
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);

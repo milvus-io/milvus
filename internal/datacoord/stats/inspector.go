@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -304,9 +305,9 @@ type statsFields struct {
 func getStatsFields(collection *meta.CollectionInfo) statsFields {
 	fields := statsFields{external: collection.IsExternal()}
 	jsonEnabled := Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() && !jsonShreddingDisabledByDeprecatedConfig()
-	for _, field := range collection.Schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
 		switch {
-		case typeutil.IsTextMatchEnabled(field):
+		case schemautil.BuildTextStats(field):
 			fields.text = append(fields.text, field.GetFieldID())
 		case jsonEnabled && typeutil.IsJSONType(field.GetDataType()):
 			fields.json = append(fields.json, field.GetFieldID())
@@ -602,13 +603,13 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 			return typeutil.IsJSONType(field.GetDataType())
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
-		predicate = typeutil.IsTextMatchEnabled
+		predicate = schemautil.BuildTextStats
 	default:
 		return nil
 	}
 
 	fieldIDs := make([]int64, 0)
-	for _, field := range schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		if predicate(field) {
 			fieldIDs = append(fieldIDs, field.GetFieldID())
 		}

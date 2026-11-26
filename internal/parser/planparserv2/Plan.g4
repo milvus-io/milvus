@@ -21,9 +21,9 @@ expr:
 	| expr LIKE expr                                                                                        # Like
 	| expr REGEXMATCH expr                                                                                  # RegexMatch
 	| expr REGEXNOTMATCH expr                                                                               # RegexNotMatch
-	| TEXTMATCH'('fieldName',' expr (',' textMatchOption)? ')'                                             # TextMatch
+	| TEXTMATCH'('textField',' expr (',' textMatchOption)? ')'                                             # TextMatch
 	| TEXTMATCHFUZZY'('fieldName',' expr ',' Identifier ASSIGN IntegerConstant ')'                         # TextMatchFuzzy
-	| PHRASEMATCH'('fieldName',' expr (',' expr)? ')'       			                                    # PhraseMatch
+	| PHRASEMATCH'('textField',' expr (',' expr)? ')'       			                                    # PhraseMatch
 	| RANDOMSAMPLE'(' expr ')'						     						                            # RandomSample
 	| ElementFilter'('fieldName',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' fieldName ',' expr ')'                                                 # MatchSimple
@@ -89,6 +89,8 @@ fieldReference:
 	| StructFieldIdentifier
 	| StructIndexFieldIdentifier
 	| StructSubFieldIdentifier;
+
+textField: fieldName | StructSubFieldIdentifier;
 
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;

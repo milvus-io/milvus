@@ -42,16 +42,29 @@ func (h *FieldSchemaHelper) GetDim() (int64, error) {
 	return getDim(h.indexParams)
 }
 
+func supportsTextAnalysis(field *schemapb.FieldSchema) bool {
+	return IsStringType(field.GetDataType()) || (field.GetDataType() == schemapb.DataType_Array &&
+		field.GetElementType() == schemapb.DataType_VarChar && IsStructSubField(field.GetName()))
+}
+
 // IsTextMatchEnabled reports whether the field enables text matching.
 func IsTextMatchEnabled(field *schemapb.FieldSchema) bool {
-	if !IsStringType(field.GetDataType()) {
+	if !supportsTextAnalysis(field) {
 		return false
 	}
+	// Restored array fields may carry a formerly ignored match flag without an analyzer.
+	if field.GetDataType() == schemapb.DataType_Array && !fieldBoolTypeParam(field, common.EnableAnalyzerKey) {
+		return false
+	}
+	return fieldBoolTypeParam(field, common.EnableMatchKey)
+}
+
+func fieldBoolTypeParam(field *schemapb.FieldSchema, key string) bool {
 	params := field.GetTypeParams()
 	// Repeated keys use the last value, as in the parameter map.
 	for i := len(params) - 1; i >= 0; i-- {
 		param := params[i]
-		if param.GetKey() == common.EnableMatchKey {
+		if param.GetKey() == key {
 			enabled, err := strconv.ParseBool(param.GetValue())
 			return err == nil && enabled
 		}
@@ -64,15 +77,7 @@ func (h *FieldSchemaHelper) EnableJSONKeyStatsIndex() bool {
 }
 
 func (h *FieldSchemaHelper) EnableAnalyzer() bool {
-	if !IsStringType(h.schema.GetDataType()) {
-		return false
-	}
-	s, err := h.typeParams.Get("enable_analyzer")
-	if err != nil {
-		return false
-	}
-	enable, err := strconv.ParseBool(s)
-	return err == nil && enable
+	return supportsTextAnalysis(h.schema) && fieldBoolTypeParam(h.schema, common.EnableAnalyzerKey)
 }
 
 func (h *FieldSchemaHelper) GetMultiAnalyzerParams() (string, bool) {

@@ -61,6 +61,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
+#include "common/StructTextValues.h"
 #include "common/ColumnarArrayChunkBuilder.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
@@ -5933,9 +5934,11 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                "text index field {} has negative row count",
                field_id.get());
     const auto declared_row_count = static_cast<size_t>(row_count);
+    const bool elements = field_meta.is_struct_varchar();
+    size_t document_count = elements ? 0 : declared_row_count;
     index::TextIndexBuildParams params{
         .field_name = unique_id,
-        .value_type = field_meta.get_data_type(),
+        .value_type = elements ? DataType::VARCHAR : field_meta.get_data_type(),
         .analyzer_name = "milvus_tokenizer",
         .analyzer_params = field_meta.get_analyzer_params(),
         .tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION,
@@ -5953,7 +5956,10 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
             // their current-source pins. Neither policy retains old batches.
             const auto scan_options = ScanOptions::ForData(
                 0,
-                TargetType::StringView,
+                elements ? (field_meta.is_native_list_array()
+                                ? TargetType::ArrayValueView
+                                : TargetType::ArrayView)
+                         : TargetType::StringView,
                 dynamic_cast<const ChunkedColumnBase*>(column.get()) != nullptr
                     ? ScanPinPolicy::AllCells
                     : ScanPinPolicy::CursorOwned);
@@ -5962,7 +5968,42 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               id_,
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
-            if (field_meta.get_data_type() == DataType::TEXT) {
+            if (elements) {
+                auto cursor = column->Scan(op_ctx, scan_options);
+                AssertInfo(cursor != nullptr,
+                           "struct text scan is unsupported");
+                ScanBatch batch;
+                size_t rows = 0;
+                while (cursor->Next(kTextLobIndexBuildBatchSize,
+                                    ScanReadMode::DataAndValidity,
+                                    &batch)) {
+                    CheckCancellation(
+                        op_ctx, id_, field_id.get(), "build struct text index");
+                    AssertInfo(batch.row_id_start == rows && batch.size > 0 &&
+                                   batch.size <= declared_row_count - rows,
+                               "invalid struct text scan range");
+                    StructTextValues documents;
+                    for (int64_t i = 0; i < batch.size; ++i) {
+                        if (batch.validity && !batch.validity[i]) {
+                            continue;
+                        }
+                        if (field_meta.is_native_list_array()) {
+                            documents.Append(
+                                batch.values.data_as<ArrayValueView>()[i]);
+                        } else {
+                            documents.Append(
+                                batch.values.data_as<ArrayView>()[i]);
+                        }
+                    }
+                    builder.AddBatch(
+                        {documents.values,
+                         ValidityView::FromExpanded(documents.Validity())});
+                    document_count += documents.values.size();
+                    rows += batch.size;
+                }
+                AssertInfo(rows == declared_row_count,
+                           "incomplete struct text scan");
+            } else if (field_meta.get_data_type() == DataType::TEXT) {
                 const auto* path_map = &target_runtime->text_lob_paths;
                 auto it = path_map->find(field_id);
                 AssertInfo(it != path_map->end(),
@@ -6143,24 +6184,34 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
             AssertInfo(value_reader != nullptr,
                        "failed to create text index, field index cannot be "
                        "converted to a string value reader");
-            AssertInfo(index_reader->CoordDomain() == index::Domain::Row &&
-                           index_reader->Count() == row_count,
-                       "text source index for field {} has row domain/count "
-                       "mismatch: expected {}, got {}",
-                       field_id.get(),
-                       row_count,
-                       index_reader->Count());
+            if (elements) {
+                const auto it =
+                    target_runtime->struct_element_offsets_map.find(field_id);
+                AssertInfo(
+                    it != target_runtime->struct_element_offsets_map.end(),
+                    "missing struct element offsets");
+                document_count = it->second->GetTotalElementCount();
+            }
+            AssertInfo(
+                index_reader->CoordDomain() == (elements
+                                                    ? index::Domain::Element
+                                                    : index::Domain::Row) &&
+                    index_reader->Count() == document_count,
+                "text source index for field {} has unexpected coordinates "
+                "or document count: expected {}, got {}",
+                field_id.get(),
+                document_count,
+                index_reader->Count());
 
             std::vector<int64_t> offsets(kTextLobIndexBuildBatchSize);
             std::vector<std::string> values(kTextLobIndexBuildBatchSize);
             std::vector<std::string_view> views(kTextLobIndexBuildBatchSize);
             FixedVector<bool> validity(kTextLobIndexBuildBatchSize, false);
             std::vector<uint8_t> seen(kTextLobIndexBuildBatchSize, 0);
-            for (size_t batch_start = 0; batch_start < declared_row_count;
+            for (size_t batch_start = 0; batch_start < document_count;
                  batch_start += kTextLobIndexBuildBatchSize) {
-                const auto batch_size =
-                    std::min(kTextLobIndexBuildBatchSize,
-                             declared_row_count - batch_start);
+                const auto batch_size = std::min(kTextLobIndexBuildBatchSize,
+                                                 document_count - batch_start);
                 for (size_t i = 0; i < batch_size; ++i) {
                     offsets[i] = static_cast<int64_t>(batch_start + i);
                     values[i].clear();
@@ -6183,11 +6234,14 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                                    "text gather produced output {} twice",
                                    i);
                         seen[pos] = 1;
-                        AssertInfo(valid || field_meta.is_nullable(),
-                                   "non-nullable text field {} produced a "
-                                   "null row at offset {}",
-                                   field_id.get(),
-                                   offsets[pos]);
+                        AssertInfo(
+                            valid ||
+                                (elements ? field_meta.is_element_nullable()
+                                          : field_meta.is_nullable()),
+                            "non-nullable text field {} produced a "
+                            "null row at offset {}",
+                            field_id.get(),
+                            offsets[pos]);
                         validity[pos] = valid;
                         if (valid) {
                             AssertInfo(
@@ -6205,7 +6259,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                 }
                 builder.AddBatch(index::ScalarBuildBatch<std::string_view>{
                     std::span<const std::string_view>(views.data(), batch_size),
-                    field_meta.is_nullable()
+                    (elements ? field_meta.is_element_nullable()
+                              : field_meta.is_nullable())
                         ? ValidityView::FromExpanded(validity.data())
                         : ValidityView{}});
                 CheckCancellation(
@@ -6223,7 +6278,7 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                       field_id.get(),
                       "ChunkedSegmentSealedImpl::CreateTextIndex()");
 
-    auto artifact = std::move(builder).Finish(declared_row_count);
+    auto artifact = std::move(builder).Finish(document_count);
     auto storage = std::move(*artifact).IntoStorage();
     const index::IndexMetadata metadata{index::ReaderCaps{.text_match = true},
                                         index::Domain::Row,
