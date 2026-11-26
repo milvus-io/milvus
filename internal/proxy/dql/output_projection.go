@@ -82,6 +82,9 @@ type virtualItem struct {
 	// source is where a Search takes the column from; see
 	// outputProjection.configureSearch. Query does not use it.
 	source virtualItemSource
+	// grepMatches is set for a GREP_MATCHES item; column is then the item
+	// text as written.
+	grepMatches *planpb.GrepMatches
 }
 
 // virtualItemSource is where a Search takes a virtual column from.
@@ -102,6 +105,9 @@ const (
 // text is the item as written in output_fields, without optional whitespace
 // and without the alias.
 func (v *virtualItem) text() string {
+	if v.grepMatches != nil {
+		return v.column
+	}
 	switch v.argKind {
 	case planparserv2.VirtualColumnArgField:
 		return v.column + "(" + v.argField + ")"
@@ -115,6 +121,9 @@ func (v *virtualItem) text() string {
 // step. The other items are computed on the QueryNode and travel in
 // fields_data under their output ID.
 func (v *virtualItem) evaluatedAtProxy(isSearch bool) bool {
+	if v.grepMatches != nil {
+		return false
+	}
 	if v.argKind != planparserv2.VirtualColumnNoArg {
 		return true
 	}
@@ -278,6 +287,39 @@ func (b *outputBinding) addVirtualColumn(names *outputNameSet, userOutputFieldsM
 	if item.VirtualColumn == planparserv2.VirtualColumnDistance && item.VirtualArgKind != planparserv2.VirtualColumnNoArg {
 		p.hiddenDistance = true
 	}
+	return nil
+}
+
+// addGrepMatches records a GREP_MATCHES item. The field is resolved against
+// the schema and the argument string is parsed here, so that a wrong field or
+// option is reported by the proxy. Two items with the same text and output
+// name are one item.
+func (b *outputBinding) addGrepMatches(names *outputNameSet, userOutputFieldsMap map[string]bool, item planparserv2.SelectItem, field *schemapb.FieldSchema) error {
+	grepMatches, err := planparserv2.NewGrepMatches(field, item.GrepArguments)
+	if err != nil {
+		return err
+	}
+	name := item.Source
+	if item.Alias != "" {
+		name = item.Alias
+	}
+	if err := names.claim(name, "virtual:"+item.Source, true); err != nil {
+		return err
+	}
+	userOutputFieldsMap[name] = true
+	p := b.projection
+	for _, existing := range p.virtualItems {
+		if existing.name == name {
+			return nil
+		}
+	}
+	p.virtualItems = append(p.virtualItems, &virtualItem{
+		id:          requestLocalOutputIDStart - int64(len(p.virtualItems)),
+		column:      item.Source,
+		name:        name,
+		dataType:    schemapb.DataType_JSON,
+		grepMatches: grepMatches,
+	})
 	return nil
 }
 
@@ -627,6 +669,14 @@ func (p *outputProjection) planItems(isSearch bool) []*planpb.ProjectionItem {
 		if v.evaluatedAtProxy(isSearch) || (isSearch && !v.inSearchPlan()) {
 			continue
 		}
+		if v.grepMatches != nil {
+			items = append(items, &planpb.ProjectionItem{
+				OutputId:    v.id,
+				DataType:    v.dataType,
+				GrepMatches: v.grepMatches,
+			})
+			continue
+		}
 		items = append(items, &planpb.ProjectionItem{
 			OutputId:      v.id,
 			VirtualColumn: planVirtualColumn(v.column),
@@ -709,11 +759,16 @@ func columnRowCount(fd *schemapb.FieldData) int {
 
 func emptyVirtualColumn(v *virtualItem) *schemapb.FieldData {
 	fd := &schemapb.FieldData{Type: v.dataType, FieldName: v.name, FieldId: v.id}
-	if v.dataType == schemapb.DataType_Int64 {
+	switch {
+	case v.dataType == schemapb.DataType_JSON:
+		fd.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{}},
+		}}
+	case v.dataType == schemapb.DataType_Int64:
 		fd.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}},
 		}}
-	} else {
+	default:
 		fd.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{}},
 		}}

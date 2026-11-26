@@ -85,19 +85,3 @@ func TestPlan(t *testing.T) {
 	paramtable.Init()
 	suite.Run(t, new(PlanSuite))
 }
-
-func (suite *PlanSuite) TestCandidateMode() {
-	expr, err := proto.Marshal(&planpb.PlanNode{
-		Node:           &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{Limit: 2}},
-		OutputFieldIds: []int64{100},
-	})
-	suite.Require().NoError(err)
-	plan, err := segcore.NewRetrievePlan(suite.collection, expr, 100, 0, 0, 0, 0)
-	suite.Require().NoError(err)
-	defer plan.Delete()
-	suite.Require().NoError(plan.EnableCandidateMode())
-	suite.True(plan.ShouldIgnoreNonPk())
-	suite.True(plan.IsIgnoreNonPk())
-	plan.SetIgnoreNonPk(false)
-	suite.True(plan.IsIgnoreNonPk())
-}

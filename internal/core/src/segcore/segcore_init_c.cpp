@@ -123,6 +123,19 @@ SegcoreSetEnableGISSplitFusion(const bool value) {
 }
 
 extern "C" void
+SegcoreSetGrepLimits(const uint64_t max_regex_bytes,
+                     const uint64_t max_dfa_cache_bytes,
+                     const int64_t batch_size,
+                     const uint64_t max_result_bytes) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_grep_max_regex_bytes(max_regex_bytes);
+    config.set_grep_max_dfa_cache_bytes(max_dfa_cache_bytes);
+    config.set_grep_batch_size(batch_size);
+    config.set_grep_max_result_bytes(max_result_bytes);
+}
+
+extern "C" void
 SegcoreSetScanCursorOwnsPin(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

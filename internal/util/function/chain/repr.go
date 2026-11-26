@@ -87,7 +87,9 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("function chain proto is nil")
 	}
 
-	if pb.GetStage() != schemapb.FunctionChainStage_FunctionChainStageQueryScan && len(pb.GetOutputColumns()) != 0 {
+	// output_columns belongs to the QueryScan stage, which the proxy rewrites
+	// into a filter predicate and an output item before any chain is built.
+	if len(pb.GetOutputColumns()) != 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("output_columns is currently supported only by QueryScan chains")
 	}
 
@@ -108,7 +110,7 @@ func ProtoChainToRepr(pb *schemapb.FunctionChain) (*ChainRepr, error) {
 		if err != nil {
 			return nil, merr.WrapErrParameterInvalidMsg("op[%d]: %v", i, err)
 		}
-		if opRepr.Type == types.OpTypeGrep && stage != types.StageQueryScan {
+		if opRepr.Type == types.OpTypeGrep {
 			return nil, merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
 		}
 		repr.Operators = append(repr.Operators, *opRepr)
@@ -257,7 +259,7 @@ func FunctionChainExprArgInput(arg *schemapb.FunctionChainExprArg) (string, erro
 func ProtoStageToReprStage(stage schemapb.FunctionChainStage) (string, error) {
 	switch stage {
 	case schemapb.FunctionChainStage_FunctionChainStageQueryScan:
-		return types.StageQueryScan, nil
+		return "", merr.WrapErrParameterInvalidMsg("the QueryScan stage is only available in Query, where it is rewritten into a grep filter predicate")
 	case schemapb.FunctionChainStage_FunctionChainStageIngestion:
 		return types.StageIngestion, nil
 	case schemapb.FunctionChainStage_FunctionChainStagePreProcess:
@@ -380,12 +382,9 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 	}
 
 	for _, op := range repr.Operators {
-		if op.Type == types.OpTypeGrep && repr.Stage != types.StageQueryScan {
+		if op.Type == types.OpTypeGrep {
 			return nil, merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
 		}
-	}
-	if repr.Stage == types.StageQueryScan && (len(repr.Operators) != 1 || repr.Operators[0].Type != types.OpTypeGrep) {
-		return nil, merr.WrapErrParameterInvalidMsg("QueryScan requires exactly one grep operator")
 	}
 	chain := NewFuncChainWithAllocator(alloc)
 	if repr.Name != "" {

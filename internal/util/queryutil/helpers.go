@@ -77,12 +77,8 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 // still participate in type inference, nullable checks, and bounds validation.
 func buildMergedRetrieveResultsRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end int, schema *schemapb.CollectionSchema) (*internalpb.RetrieveResults, error) {
 	pageRows := selectedRows[start:end]
-	computed, err := selectComputedResults(results, pageRows)
-	if err != nil {
-		return nil, err
-	}
 	if len(selectedRows) == 0 || len(results) == 0 {
-		return &internalpb.RetrieveResults{ComputedResults: computed}, nil
+		return &internalpb.RetrieveResults{}, nil
 	}
 
 	// Use first result as template for field count / metadata
@@ -148,8 +144,7 @@ func buildMergedRetrieveResultsRange(results []*internalpb.RetrieveResults, sele
 	}
 
 	merged := &internalpb.RetrieveResults{
-		ComputedResults: computed,
-		FieldsData:      make([]*schemapb.FieldData, numFields),
+		FieldsData: make([]*schemapb.FieldData, numFields),
 	}
 
 	// Build merged IDs only for the output page.
@@ -853,27 +848,13 @@ func buildMergedVectorFieldRange(results []*internalpb.RetrieveResults, selected
 // This is more efficient than sliceRetrieveResults for contiguous ranges since it uses
 // direct sub-slicing instead of element-by-element copying.
 func rangeSliceRetrieveResults(result *internalpb.RetrieveResults, start, end int) (*internalpb.RetrieveResults, error) {
-	var computed []*schemapb.FieldData
-	if result.GetComputedResults() != nil {
-		refs := make([]rowRef, 0, max(0, end-start))
-		for i := start; i < end; i++ {
-			refs = append(refs, rowRef{rowIdx: int64(i)})
-		}
-		var err error
-		computed, err = selectComputedResults([]*internalpb.RetrieveResults{result}, refs)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if start >= end {
-		return &internalpb.RetrieveResults{ComputedResults: computed}, nil
+		return &internalpb.RetrieveResults{}, nil
 	}
 
 	newResult := &internalpb.RetrieveResults{
-		ComputedResults: computed,
-		Ids:             rangeSliceIDs(result.GetIds(), start, end),
-		FieldsData:      make([]*schemapb.FieldData, len(result.GetFieldsData())),
+		Ids:        rangeSliceIDs(result.GetIds(), start, end),
+		FieldsData: make([]*schemapb.FieldData, len(result.GetFieldsData())),
 	}
 
 	for i, fd := range result.GetFieldsData() {
@@ -1443,7 +1424,6 @@ func usesCompactNullableVectorData(vf *schemapb.VectorField, validData []bool) b
 // to decide when to emit a Chunk.
 type rowSizeCalculator struct {
 	fields         []*schemapb.FieldData
-	computedFields []*schemapb.FieldData
 	compactIndices [][]int
 	// The cursor computes compact slots as rows advance; Batch's compactIndices stores a slot per row.
 	compactIndexCursor *typeutil.FieldDataIdxComputer
@@ -1484,7 +1464,6 @@ func newRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator
 	fieldsData := result.GetFieldsData()
 	c := &rowSizeCalculator{
 		fields:         fieldsData,
-		computedFields: result.GetComputedResults(),
 		compactIndices: make([][]int, len(fieldsData)),
 	}
 	for fieldIdx, fd := range fieldsData {
@@ -1546,17 +1525,14 @@ func (c *rowSizeCalculator) withArrowRecord(rec arrow.Record) *rowSizeCalculator
 	return c
 }
 
-// rowSize sums the column bytes at logical rowIdx, including computed columns
-// and any group or Arrow columns supplied to this calculator.
+// rowSize sums the column bytes at logical rowIdx, including any group or
+// Arrow columns supplied to this calculator.
 func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	var size int64
 	if c.compactIndexCursor != nil {
 		dataRows := c.compactIndexCursor.Compute(rowIdx)
 		for i, field := range c.fields {
 			size += calcFieldElementSizeWithDataRow(field, int(rowIdx), int(dataRows[i]))
-		}
-		for _, field := range c.computedFields {
-			size += calcFieldElementSizeWithDataRow(field, int(rowIdx), int(rowIdx))
 		}
 		for i, field := range c.groupFields {
 			dataRow := int(rowIdx)
@@ -1571,9 +1547,6 @@ func (c *rowSizeCalculator) rowSize(rowIdx int64) int64 {
 	}
 	for fieldIdx, fd := range c.fields {
 		size += calcFieldElementSizeWithCompactIndex(fd, int(rowIdx), c.compactIndices[fieldIdx])
-	}
-	for _, fd := range c.computedFields {
-		size += calcFieldElementSize(fd, int(rowIdx))
 	}
 	size += c.arrowFixed
 	for _, nc := range c.arrowNullable {

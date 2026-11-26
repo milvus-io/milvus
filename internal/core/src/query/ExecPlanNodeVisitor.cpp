@@ -28,6 +28,7 @@
 #include "opentelemetry/trace/span.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
+#include "query/LimitPredicate.h"
 #include "query/PlanImpl.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentInterface.h"
@@ -264,15 +265,6 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     retrieve_result.total_data_cnt_ = 0;
 
     auto active_count = segment->get_active_count(timestamp_);
-    if (retrieve_candidate_budget_ && active_count == 0) {
-        retrieve_result.has_more_result = false;
-        retrieve_result.element_level_ =
-            dynamic_cast<const plan::ElementFilterBitsNode*>(
-                node.plannodes_.get()) != nullptr;
-        retrieve_result_opt_ = std::move(retrieve_result);
-        return;
-    }
-
     // Get plan
     auto plan = plan::PlanFragment(node.plannodes_);
 
@@ -354,35 +346,39 @@ ExecPlanNodeVisitor::setupRetrieveResult(
                 "Element Level Find", tracer::GetRootSpan(), true);
             auto struct_element_offsets =
                 query_context->get_struct_element_offsets();
+            const auto limit = node.limit_;
+            // With a limit predicate every candidate is listed and the limit
+            // is applied to the rows that pass it.
             auto [doc_offsets, element_indices, has_more] =
-                segment->find_first_n_element(retrieve_candidate_budget_
-                                                  ? segcore::Unlimited
-                                                  : node.limit_,
-                                              view,
-                                              struct_element_offsets.get(),
-                                              node.query_iterator_cursor_);
+                segment->find_first_n_element(
+                    node.limit_predicate_ ? segcore::Unlimited : limit,
+                    view,
+                    struct_element_offsets.get(),
+                    node.query_iterator_cursor_);
+            if (node.limit_predicate_) {
+                has_more = EvalLimitPredicate(query_context.get(),
+                                              node.limit_predicate_,
+                                              limit,
+                                              doc_offsets,
+                                              &element_indices) ||
+                           has_more;
+            }
             tmp_retrieve_result.result_offsets_ = std::move(doc_offsets);
             tmp_retrieve_result.element_indices_ = std::move(element_indices);
             tmp_retrieve_result.has_more_result = has_more;
         } else {
             tracer::AutoSpan _("Find Limit Pk", tracer::GetRootSpan());
             auto limit = node.limit_;
-            if (retrieve_candidate_budget_) {
-                // Candidate extraction stays complete; Grep applies its soft
-                // scan threshold after optional index filtering.
-                const auto reserved_rows = view.size() - view.count();
-                limit = segcore::Unlimited;
-                if (reserved_rows >
-                    static_cast<uint64_t>(*retrieve_candidate_budget_) /
-                        sizeof(int64_t)) {
-                    ThrowInfo(InvalidParameter,
-                              "grep candidate offsets exceed the retrieve byte "
-                              "budget "
-                              "(limit={} bytes); add a more selective filter",
-                              *retrieve_candidate_budget_);
-                }
+            auto results_pair = segment->find_first_n(
+                node.limit_predicate_ ? segcore::Unlimited : limit, view);
+            if (node.limit_predicate_) {
+                results_pair.second = EvalLimitPredicate(query_context.get(),
+                                                         node.limit_predicate_,
+                                                         limit,
+                                                         results_pair.first,
+                                                         nullptr) ||
+                                      results_pair.second;
             }
-            auto results_pair = segment->find_first_n(limit, view);
             tmp_retrieve_result.result_offsets_ = std::move(results_pair.first);
             tmp_retrieve_result.has_more_result = results_pair.second;
         }

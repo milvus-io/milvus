@@ -26,7 +26,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -75,20 +74,17 @@ func TestFieldDefinitionsSurviveSelectionAndPruning(t *testing.T) {
 	require.Equal(t, "1024", pruned.fieldMetadata["text"].field.TypeParams[0].Value)
 	require.False(t, pruned.IsComputedColumn("text"))
 	require.True(t, pruned.IsComputedColumn("computed"))
-	query, err := ToRetrieveResults(pruned)
-	require.NoError(t, err)
 	search, err := ToSearchResultDataWithOptions(pruned, &ExportOptions{SkipColumns: []string{"$timestamp"}})
 	require.NoError(t, err)
-	require.Equal(t, []int64{10, 30}, query.Ids.GetIntId().Data)
-	require.Equal(t, []string{"a", "c"}, query.FieldsData[0].GetScalars().GetStringData().Data)
-	require.Equal(t, []bool{true, true}, typeutil.GetFieldDataValidData(query.FieldsData[0]))
+	require.Equal(t, []int64{10, 30}, search.Ids.GetIntId().Data)
+	require.Equal(t, []string{"a", "c"}, search.FieldsData[0].GetScalars().GetStringData().Data)
 	require.Nil(t, typeutil.GetFieldDataValidData(search.FieldsData[0])) // Response-only compatibility policy.
 	require.Equal(t, schemapb.DataType_Text, search.FieldsData[0].Type)
 	byName := make(map[string]*schemapb.FieldData)
 	for _, field := range search.FieldsData {
 		byName[field.FieldName] = field
 	}
-	require.True(t, proto.Equal(byName["computed"], query.ComputedResults[0]))
+	require.NotNil(t, byName["computed"])
 }
 
 func TestFieldDefinitionCopyOnWriteAndReplacement(t *testing.T) {
@@ -148,12 +144,9 @@ func TestNullableComputedScalarUsesSameExport(t *testing.T) {
 	builder.SetFieldNullable("computed", true)
 	frame := builder.Build()
 	defer frame.Release()
-	query, err := ToRetrieveResults(frame)
-	require.NoError(t, err)
 	search, err := ToSearchResultDataWithOptions(frame, &ExportOptions{SkipColumns: []string{"$timestamp"}})
 	require.NoError(t, err)
-	require.True(t, proto.Equal(query.ComputedResults[0], search.FieldsData[0]))
-	require.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(query.ComputedResults[0]))
+	require.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(search.FieldsData[0]))
 }
 
 func TestMergePreservesFieldDefinitions(t *testing.T) {
@@ -191,9 +184,8 @@ func TestMergePreservesFieldDefinitions(t *testing.T) {
 	require.False(t, output.IsComputedColumn("label"))
 	require.True(t, output.IsComputedColumn("computed"))
 	require.Equal(t, "128", output.fieldMetadata["label"].field.TypeParams[0].Value)
-	result, err := ToRetrieveResults(output)
+	result, err := ToSearchResultDataWithOptions(output, &ExportOptions{SkipColumns: []string{"$timestamp"}})
 	require.NoError(t, err)
-	require.Len(t, result.ComputedResults, 1)
 	require.Equal(t, []int64{2, 1}, result.Ids.GetIntId().Data)
 	var ordinary *schemapb.FieldData
 	for _, field := range result.FieldsData {
@@ -286,7 +278,7 @@ func TestComputedJSONDeclarationSurvivesSelectionAndPruning(t *testing.T) {
 	b.Release()
 	column := arrow.NewChunked(values.DataType(), []arrow.Array{values})
 	values.Release()
-	field := grepOutputField("matches")
+	field := jsonOutputField("matches")
 	field.Nullable = true
 	result := &OperatorResult{Columns: []NamedColumn{{Field: field, Data: column}}}
 	frame, err := assembleOperatorResult(types.NewFuncContext(pool), input, []string{"matches"}, result)
@@ -323,7 +315,7 @@ func TestComputedLogicalTypeMetadataValidation(t *testing.T) {
 	for name, field := range map[string]arrow.Field{
 		"malformed": {Name: "x", Type: arrow.BinaryTypes.Binary, Metadata: arrow.NewMetadata([]string{ArrowDataTypeMetadataKey}, []string{"JSON"})},
 		"unknown":   {Name: "x", Type: arrow.BinaryTypes.Binary, Metadata: arrow.NewMetadata([]string{ArrowDataTypeMetadataKey}, []string{"999999"})},
-		"mismatch":  {Name: "x", Type: arrow.BinaryTypes.String, Metadata: grepOutputField("x").Metadata},
+		"mismatch":  {Name: "x", Type: arrow.BinaryTypes.String, Metadata: jsonOutputField("x").Metadata},
 	} {
 		t.Run(name, func(t *testing.T) {
 			builder := NewDataFrameBuilder()

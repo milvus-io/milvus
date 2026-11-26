@@ -56,6 +56,19 @@ pub struct MgGrepBytes {
     pub len: usize,
 }
 
+/// Line selection of one session: the matching-line cap and the context of
+/// MgGrepMatchOptions, without the fields that shape the compiled matcher.
+/// Zero initialization means no cap and no context.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MgGrepLineSelection {
+    /// 0: unlimited; 1: max_count is present (including zero).
+    pub has_max_count: u32,
+    pub max_count: u64,
+    pub before_context: u64,
+    pub after_context: u64,
+}
+
 /// Zero initialization means regex, sensitive, no boundary or match-count restriction.
 /// Unknown values are rejected. Unicode and LF line semantics are fixed.
 #[repr(C)]
@@ -236,6 +249,43 @@ pub unsafe extern "C" fn mg_grep_session_create(
     boundary(error, None, || unsafe {
         reset_output(out_session)?;
         let inner = Session::new(&required(plan)?.plan);
+        let session = MgGrepSession {
+            cancellation: inner.cancellation_token(),
+            inner: Mutex::new(inner),
+            poisoned: AtomicBool::new(false),
+        };
+        out_session.write(Box::into_raw(Box::new(session)));
+        Ok(())
+    })
+}
+
+/// Like mg_grep_session_create, but the session selects lines by `selection`
+/// instead of the cap and context the plan was compiled with. One plan can
+/// then serve sessions that differ only in these values.
+/// Required: plan, selection, out_session. A valid output slot is NULL on failure.
+/// # Safety
+/// plan is a live handle; selection/out_session/error obey the header's memory rules.
+#[no_mangle]
+pub unsafe extern "C" fn mg_grep_session_create_with_selection(
+    plan: *const MgGrepPlan,
+    selection: *const MgGrepLineSelection,
+    out_session: *mut *mut MgGrepSession,
+    error: *mut MgGrepError,
+) -> MgGrepStatus {
+    boundary(error, None, || unsafe {
+        reset_output(out_session)?;
+        let selection = *required(selection)?;
+        let max_count = match selection.has_max_count {
+            0 => None,
+            1 => Some(selection.max_count),
+            _ => return Err(invalid("unknown max-count presence")),
+        };
+        let inner = Session::with_selection(
+            &required(plan)?.plan,
+            max_count,
+            selection.before_context,
+            selection.after_context,
+        );
         let session = MgGrepSession {
             cancellation: inner.cancellation_token(),
             inner: Mutex::new(inner),
@@ -771,6 +821,15 @@ mod tests {
         );
         assert_eq!(
             (
+                size_of::<MgGrepLineSelection>(),
+                offset_of!(MgGrepLineSelection, max_count),
+                offset_of!(MgGrepLineSelection, before_context),
+                offset_of!(MgGrepLineSelection, after_context),
+            ),
+            (32, 8, 16, 24)
+        );
+        assert_eq!(
+            (
                 size_of::<MgGrepSpecView>(),
                 offset_of!(MgGrepSpecView, options)
             ),
@@ -847,6 +906,106 @@ mod tests {
 
     fn limits() -> u64 {
         100_000_000
+    }
+
+    // One plan, compiled without a cap or context, serves sessions with
+    // different line selections; each returns what a plan compiled with that
+    // selection returns.
+    #[test]
+    fn selection_of_a_session_overrides_the_plan() {
+        let text = b"x\nhit one\ny\nhit two\nz";
+        let lines = |session: *mut MgGrepSession| unsafe {
+            let bytes = MgGrepBytes {
+                data: text.as_ptr(),
+                len: text.len(),
+            };
+            let mut result = ptr::null_mut();
+            assert_eq!(
+                mg_grep_execute_batch(session, &bytes, 1, limits(), &mut result, ptr::null_mut()),
+                MG_GREP_OK
+            );
+            let view = mg_grep_result_view(result);
+            assert_eq!((*view).text_count, 1);
+            let count = (*(*view).texts).line_count;
+            mg_grep_result_free(result);
+            mg_grep_session_free(session);
+            count
+        };
+        let pattern = MgGrepBytes {
+            data: b"hit".as_ptr(),
+            len: 3,
+        };
+        let compile_limits = MgGrepCompileLimits {
+            max_regex_bytes: 1_000_000,
+            max_dfa_cache_bytes: 1_000_000,
+        };
+        let plan_with = |options: MgGrepMatchOptions| unsafe {
+            let spec = MgGrepSpecView {
+                patterns: &pattern,
+                pattern_count: 1,
+                options,
+            };
+            let mut plan = ptr::null_mut();
+            assert_eq!(
+                mg_grep_compile(&spec, &compile_limits, &mut plan, ptr::null_mut()),
+                MG_GREP_OK
+            );
+            plan
+        };
+        let shared = plan_with(MgGrepMatchOptions::default());
+        for (has_max_count, max_count, before, after) in [
+            (0, 0, 0, 0),
+            (1, 1, 0, 0),
+            (1, 1, 1, 0),
+            (0, 0, 1, 1),
+            (1, 2, 0, 1),
+        ] {
+            let selection = MgGrepLineSelection {
+                has_max_count,
+                max_count,
+                before_context: before,
+                after_context: after,
+            };
+            let own = plan_with(MgGrepMatchOptions {
+                has_max_count,
+                max_count,
+                before_context: before,
+                after_context: after,
+                ..Default::default()
+            });
+            unsafe {
+                let mut expected = ptr::null_mut();
+                assert_eq!(
+                    mg_grep_session_create(own, &mut expected, ptr::null_mut()),
+                    MG_GREP_OK
+                );
+                let mut actual = ptr::null_mut();
+                assert_eq!(
+                    mg_grep_session_create_with_selection(
+                        shared,
+                        &selection,
+                        &mut actual,
+                        ptr::null_mut()
+                    ),
+                    MG_GREP_OK
+                );
+                mg_grep_plan_free(own);
+                assert_eq!(lines(actual), lines(expected), "{selection:?}");
+            }
+        }
+        unsafe {
+            let bad = MgGrepLineSelection {
+                has_max_count: 2,
+                ..Default::default()
+            };
+            let mut session = ptr::dangling_mut();
+            assert_eq!(
+                mg_grep_session_create_with_selection(shared, &bad, &mut session, ptr::null_mut()),
+                MG_GREP_INVALID_ARGUMENT
+            );
+            assert!(session.is_null());
+            mg_grep_plan_free(shared);
+        }
     }
 
     #[test]

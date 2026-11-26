@@ -13,7 +13,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -68,7 +67,6 @@ type QueryTask struct {
 	segmentManager *segments.Manager
 	req            *querypb.QueryRequest
 	plan           *planpb.PlanNode // used by RunQNQueryPipeline for reduce
-	queryChain     *chain.QueryChainPlan
 	result         *internalpb.RetrieveResults
 	notifier       chan error
 	tr             *timerecord.TimeRecorder
@@ -124,15 +122,11 @@ func (t *QueryTask) PreExecute() error {
 		return err
 	}
 
-	var err error
-	t.queryChain, err = chain.PrepareQueryPlanChainExecution(t.plan, t.collection.Schema(), t.req.GetReq().GetIsIterator())
-	if err != nil {
-		return err
-	}
-	// A query chain replies with candidate rows and computed columns, which
-	// a Materialize batch does not carry; the proxy falls back to Query.
-	if t.materialize && t.queryChain != nil {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "materialize: query function chains are not supported")
+	// The proxy rewrites a QueryScan Grep chain into the grep predicate and a
+	// GREP_MATCHES output item, so a Query plan never carries a chain. One
+	// that does comes from a proxy older than that rewrite.
+	if len(t.plan.GetQuerynodeFunctionChains()) > 0 {
+		return merr.WrapErrParameterInvalidMsg("Query function chains are not executed on the QueryNode: upgrade the proxy that sent this request")
 	}
 	return nil
 }
@@ -167,11 +161,6 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		return err
 	}
 	defer retrievePlan.Delete()
-	if t.queryChain != nil {
-		if err = retrievePlan.EnableCandidateMode(); err != nil {
-			return err
-		}
-	}
 	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), t.plan)
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
@@ -221,16 +210,10 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		// empty gather; nil means "protobuf path" unambiguously.
 		arrowRecords = nil
 	}
-	var reducedResult *segcorepb.RetrieveResults
-	var arrowSelection *queryutil.ArrowSelection
-	if t.queryChain != nil {
-		reducedResult, err = segments.RunQueryScanPipeline(t.ctx, t.req, t.collection.Schema(), t.queryChain, results, retrievePlan)
-	} else {
-		reducedResult, arrowSelection, err = segments.RunQNQueryPipeline(
-			t.ctx, t.req, t.collection.Schema(), t.plan,
-			reduceResults, arrowRecords, querySegments, t.segmentManager, retrievePlan,
-		)
-	}
+	reducedResult, arrowSelection, err := segments.RunQNQueryPipeline(
+		t.ctx, t.req, t.collection.Schema(), t.plan,
+		reduceResults, arrowRecords, querySegments, t.segmentManager, retrievePlan,
+	)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		paramtable.GetStringNodeID(),
@@ -272,7 +255,6 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 			SourceID: paramtable.GetNodeID(),
 		},
 		Status:             merr.Success(),
-		ComputedResults:    reducedResult.GetComputedResults(),
 		Ids:                reducedResult.Ids,
 		FieldsData:         reducedResult.FieldsData,
 		CostAggregation:    cost,

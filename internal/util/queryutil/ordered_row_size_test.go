@@ -80,7 +80,7 @@ func TestFieldDataRowSizeScalars(t *testing.T) {
 			require.NoError(t, proto.Unmarshal(encoded, scalar.ProtoReflect().Mutable(variant).Message().Interface()))
 			field := &schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: scalar}}
 			fields := []*schemapb.FieldData{field}
-			ordered := NewOrderedRowSizeCalculator(fields, nil, nil)
+			ordered := NewOrderedRowSizeCalculator(fields, nil)
 			batch := newRowSizeCalculator(&internalpb.RetrieveResults{FieldsData: fields})
 			for row, want := range expected {
 				require.EqualValues(t, want, ordered.RowSize(int64(row)), "row %d", row)
@@ -106,7 +106,7 @@ func TestFieldDataRowSizeVectors(t *testing.T) {
 	} {
 		tc.vector.ValidData = []bool{true, false, true}
 		fields := []*schemapb.FieldData{{Type: tc.kind, Field: &schemapb.FieldData_Vectors{Vectors: tc.vector}}}
-		ordered := NewOrderedRowSizeCalculator(fields, nil, nil)
+		ordered := NewOrderedRowSizeCalculator(fields, nil)
 		batch := newRowSizeCalculator(&internalpb.RetrieveResults{FieldsData: fields})
 		require.Nil(t, ordered.compactIndices, "stream sizing must not allocate a row-sized vector index")
 		for row, want := range []int{tc.first, 0, tc.last} {
@@ -123,14 +123,14 @@ func TestFieldDataRowSizeNested(t *testing.T) {
 	structArray := &schemapb.FieldData{Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{field}}}}
 	for _, input := range []*schemapb.FieldData{field, structArray} {
 		fields := []*schemapb.FieldData{input}
-		ordered := NewOrderedRowSizeCalculator(fields, nil, nil)
+		ordered := NewOrderedRowSizeCalculator(fields, nil)
 		batch := newRowSizeCalculator(&internalpb.RetrieveResults{FieldsData: fields})
 		require.EqualValues(t, proto.Size(value), ordered.RowSize(0))
 		require.EqualValues(t, proto.Size(value), batch.rowSize(0))
 	}
 	field.GetVectors().ValidData = []bool{false}
 	vectorArray.Data = nil
-	calc := NewOrderedRowSizeCalculator([]*schemapb.FieldData{field}, nil, nil)
+	calc := NewOrderedRowSizeCalculator([]*schemapb.FieldData{field}, nil)
 	require.Zero(t, calc.RowSize(0))
 }
 
@@ -157,7 +157,7 @@ func BenchmarkNullableVectorSizeCalculatorMemory(b *testing.B) {
 			b.Run("ordered", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					_ = NewOrderedRowSizeCalculator(fields, nil, nil)
+					_ = NewOrderedRowSizeCalculator(fields, nil)
 				}
 			})
 			b.Run("batch", func(b *testing.B) {

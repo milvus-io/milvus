@@ -40,6 +40,7 @@
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "grep/CompiledPlan.h"
 #include "expr/ITypeExpr.h"
 #include "glog/logging.h"
 #include "knowhere/comp/index_param.h"
@@ -842,6 +843,21 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     return plan_node;
 }
 
+// Flattens the AND chain at the root of a predicate into its items, left to
+// right. Anything that is not a logical AND is one item.
+static void
+CollectTopLevelConjuncts(const proto::plan::Expr& expr,
+                         std::vector<const proto::plan::Expr*>& out) {
+    if (expr.expr_case() == proto::plan::Expr::kBinaryExpr &&
+        expr.binary_expr().op() ==
+            proto::plan::BinaryExpr_BinaryOp_LogicalAnd) {
+        CollectTopLevelConjuncts(expr.binary_expr().left(), out);
+        CollectTopLevelConjuncts(expr.binary_expr().right(), out);
+        return;
+    }
+    out.push_back(&expr);
+}
+
 std::unique_ptr<RetrievePlanNode>
 ProtoParser::RetrievePlanNodeFromProto(
     const planpb::PlanNode& plan_node_proto) {
@@ -874,9 +890,56 @@ ProtoParser::RetrievePlanNodeFromProto(
         std::string struct_name;
         bool is_element_level = false;
 
+        // A query that only needs its first `limit` rows in primary-key
+        // order does not have to evaluate an expensive predicate on every
+        // row. In that case grep items of the top-level AND are taken out of
+        // the filter operator and evaluated on the candidates it leaves,
+        // until enough rows passed (query/LimitPredicate.h). Ordering and
+        // aggregation need every matching row, and a predicate under OR/NOT
+        // cannot be postponed, so those keep grep in the filter operator.
+        const bool can_bound_by_limit =
+            query.limit() > 0 && !query.is_count() &&
+            query.group_by_field_ids_size() == 0 &&
+            query.aggregates_size() == 0 && query.order_by_fields_size() == 0 &&
+            !(query.has_predicates() &&
+              query.predicates().expr_case() ==
+                  proto::plan::Expr::kRandomSampleExpr);
+
         auto parse_expr_to_filter_node =
             [&](const proto::plan::Expr& predicate_proto) {
-                auto expr = ParseExprs(predicate_proto);
+                expr::TypedExprPtr expr;
+                if (can_bound_by_limit) {
+                    std::vector<const proto::plan::Expr*> conjuncts;
+                    CollectTopLevelConjuncts(predicate_proto, conjuncts);
+                    expr::TypedExprPtr bounded;
+                    for (const auto* conjunct : conjuncts) {
+                        auto parsed = ParseExprs(*conjunct);
+                        auto& target = conjunct->expr_case() ==
+                                               proto::plan::Expr::kGrepExpr
+                                           ? bounded
+                                           : expr;
+                        target =
+                            target == nullptr
+                                ? parsed
+                                : std::make_shared<expr::LogicalBinaryExpr>(
+                                      expr::LogicalBinaryExpr::OpType::And,
+                                      target,
+                                      parsed);
+                    }
+                    plan_node->limit_predicate_ = std::move(bounded);
+                } else {
+                    expr = ParseExprs(predicate_proto);
+                }
+                if (expr == nullptr) {
+                    // Every item was taken out. The namespace condition still
+                    // belongs to the filter operator. An entity-TTL condition
+                    // needs no operator here: expression compilation merges
+                    // it into the limit predicate as well.
+                    if (!plan_node_proto.has_namespace_()) {
+                        return;
+                    }
+                    expr = std::make_shared<expr::AlwaysTrueExpr>();
+                }
                 if (plan_node_proto.has_namespace_()) {
                     expr = MergeExprWithNamespace(
                         schema, expr, plan_node_proto.namespace_());
@@ -1281,7 +1344,12 @@ ProtoParser::CreatePlanImpl(const proto::plan::PlanNode& plan_node_proto) {
     for (const auto& dynamic_field : plan_node_proto.dynamic_fields()) {
         plan->target_dynamic_fields_.push_back(dynamic_field);
     }
-    plan->projection_items_ = ProjectionItemsFromProto(plan_node_proto);
+    plan->projection_items_ =
+        ProjectionItemsFromProto(plan_node_proto, grep_plans_);
+    for (const auto& item : plan->projection_items_) {
+        AssertInfo(item.grep_matches == nullptr,
+                   "grep_matches is not available in a search");
+    }
     plan->plan_node_->search_info_.keep_raw_distance_ = plan->OutputsDistance();
 
     return plan;
@@ -1317,11 +1385,12 @@ ProtoParser::CreateRetrievePlanImpl(
         retrieve_plan->target_dynamic_fields_.push_back(dynamic_field);
     }
     retrieve_plan->projection_items_ =
-        ProjectionItemsFromProto(plan_node_proto);
+        ProjectionItemsFromProto(plan_node_proto, grep_plans_);
     for (const auto& item : retrieve_plan->projection_items_) {
-        AssertInfo(IsPlacementProjectionItem(item),
-                   "virtual column {} is not available in a query",
-                   ProjectionItemName(item));
+        AssertInfo(
+            IsPlacementProjectionItem(item) || item.grep_matches != nullptr,
+            "virtual column {} is not available in a query",
+            ProjectionItemName(item));
         retrieve_plan->field_ids_.push_back(item.output_id);
     }
     return retrieve_plan;
@@ -1464,6 +1533,40 @@ ProtoParser::ParseRoaringFilterExprs(
     auto membership = RoaringMembership::Parse(expr_pb.bitmap_blob());
     return std::make_shared<expr::RoaringFilterExpr>(
         expr::ColumnInfo(column_info), std::move(membership));
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseGrepExprs(const proto::plan::GrepExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
+    auto& field = schema->operator[](field_id);
+    auto data_type = field.get_data_type();
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    // Mirrors the proxy's accepted type set: schema VARCHAR or TEXT, no JSON
+    // path, no struct-array element.
+    if ((data_type != DataType::VARCHAR && data_type != DataType::TEXT) ||
+        column_info.nested_path_size() != 0 || column_info.is_element_level()) {
+        ThrowInfo(ExprInvalid,
+                  "grep does not support field data type: {}",
+                  data_type);
+    }
+    if (!expr_pb.select_none() && expr_pb.patterns_size() == 0) {
+        ThrowInfo(ExprInvalid, "grep requires at least one pattern");
+    }
+    if (expr_pb.pattern_kind() > 1 || expr_pb.case_mode() > 1 ||
+        expr_pb.boundary() > 2) {
+        ThrowInfo(ExprInvalid, "invalid normalized grep options");
+    }
+    std::vector<std::string> patterns(expr_pb.patterns().begin(),
+                                      expr_pb.patterns().end());
+    auto plan = grep_plans_.Compile(expr_pb);
+    return std::make_shared<expr::GrepExpr>(expr::ColumnInfo(column_info),
+                                            std::move(patterns),
+                                            expr_pb.pattern_kind(),
+                                            expr_pb.case_mode(),
+                                            expr_pb.boundary(),
+                                            expr_pb.select_none(),
+                                            std::move(plan));
 }
 
 expr::TypedExprPtr
@@ -1821,6 +1924,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kRoaringFilterExpr: {
             result = ParseRoaringFilterExprs(expr_pb.roaring_filter_expr());
+            break;
+        }
+        case ppe::kGrepExpr: {
+            result = ParseGrepExprs(expr_pb.grep_expr());
             break;
         }
         default: {

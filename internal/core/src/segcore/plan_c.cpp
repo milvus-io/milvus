@@ -253,28 +253,9 @@ SetRetrievePlanTakeForOutputAllowed(CRetrievePlan c_plan, bool allowed) {
     plan->take_for_output_allowed_ = allowed;
 }
 
-CStatus
-SetRetrievePlanMode(CRetrievePlan c_plan, CRetrieveMode mode) {
-    try {
-        AssertInfo(c_plan != nullptr, "retrieve plan is null");
-        AssertInfo(mode == RetrieveModeNormal || mode == RetrieveModeCandidates,
-                   "invalid retrieve mode: {}",
-                   static_cast<int>(mode));
-        auto* plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
-        plan->mode_ = mode == RetrieveModeCandidates
-                          ? milvus::query::RetrieveMode::Candidates
-                          : milvus::query::RetrieveMode::Normal;
-        return CStatus{milvus::Success, ""};
-    }
-    CGO_CATCH_AND_RETURN_CSTATUS
-}
-
 bool
 ShouldIgnoreNonPk(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
-    if (plan->mode_ == milvus::query::RetrieveMode::Candidates) {
-        return true;
-    }
     // ORDER BY queries must not use two-phase retrieval: the pipeline
     // returns data in a positional layout [pk, orderby, remaining] that
     // the Go-side Remap depends on.  RetrieveByOffsets would re-fetch

@@ -309,6 +309,24 @@ message BloomFilterExpr {
   bytes filter_blob = 2;
 }
 
+// GrepExpr: line-oriented text match on one VARCHAR/TEXT field, evaluated by
+// the ripgrep-based matcher. The proxy parses the rg-style argument string and
+// forwards the normalized specification, so segcore never parses arguments.
+message GrepExpr {
+  ColumnInfo column_info = 1;
+  // Patterns are combined with OR, in request order.
+  repeated string patterns = 2;
+  // 0 = regex, 1 = literal (-F).
+  uint32 pattern_kind = 3;
+  // 0 = case sensitive, 1 = case insensitive (-i).
+  uint32 case_mode = 4;
+  // 0 = none, 1 = word (-w), 2 = line (-x).
+  uint32 boundary = 5;
+  // Set for a final "-m 0": the predicate selects no row and the patterns are
+  // never compiled, matching rg.
+  bool select_none = 6;
+}
+
 message RoaringFilterExpr {
   ColumnInfo column_info = 1;
   // MRB1-enveloped portable Roaring64 bitmap for exact signed-integer
@@ -342,6 +360,7 @@ message Expr {
     MatchExpr match_expr = 21;
     BloomFilterExpr bloom_filter_expr = 22;
     RoaringFilterExpr roaring_filter_expr = 23;
+    GrepExpr grep_expr = 24;
   };
   bool is_template = 20;
 }
@@ -447,6 +466,22 @@ message ProjectionItem {
   int64 output_id = 1;
   VirtualColumn virtual_column = 2;
   schema.DataType data_type = 3;
+  // Set instead of virtual_column for a GREP_MATCHES(field, args) item.
+  GrepMatches grep_matches = 4;
+}
+
+// The matching and context lines of one VarChar or Text field value, as the
+// nullable JSON column of a GREP_MATCHES output item. The value is NULL for a
+// row whose field is NULL or has no matching line.
+message GrepMatches {
+  // Field and match options. select_none (a final "-m 0") makes every value
+  // NULL.
+  GrepExpr spec = 1;
+  // Cap on matching lines per field value ("-m N" with N > 0).
+  bool has_max_count = 2;
+  uint64 max_count = 3;
+  uint64 before_context = 4;
+  uint64 after_context = 5;
 }
 
 message PlanNode {
@@ -461,9 +496,9 @@ message PlanNode {
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
   optional string namespace = 9;
-  // Worker-owned chains: Search L0/L1 or QueryScan-stage chains for a QueryPlanNode.
-  // Query chains retain raw expression arguments and output_columns here; do
-  // not duplicate their configuration in the enclosing RetrieveRequest.
+  // Worker-owned chains of a Search: L0/L1. A Query plan carries none: the
+  // proxy rewrites a QueryScan Grep chain into a grep predicate and a
+  // GREP_MATCHES projection item.
   repeated schema.FunctionChain querynode_function_chains = 10;
   // Projection items evaluated on the QueryNode. Items evaluated at the proxy
   // are not sent.

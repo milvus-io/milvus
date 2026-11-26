@@ -154,6 +154,8 @@ func CollectExprFeatures(expr *planpb.Expr, set *FeatureSet) {
 		markColumn(e.BloomFilterExpr.GetColumnInfo(), set)
 	case *planpb.Expr_RoaringFilterExpr:
 		markColumn(e.RoaringFilterExpr.GetColumnInfo(), set)
+	case *planpb.Expr_GrepExpr:
+		markColumn(e.GrepExpr.GetColumnInfo(), set)
 	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
 		// No user-facing feature of its own.
 	}

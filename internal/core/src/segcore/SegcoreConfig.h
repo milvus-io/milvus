@@ -331,6 +331,48 @@ class SegcoreConfig {
         return enable_gis_split_fusion_;
     }
 
+    // Compile budgets and text read batch of the grep filter predicate,
+    // mirrored from function.grep.* and refreshed at runtime.
+    void
+    set_grep_max_regex_bytes(uint64_t value) {
+        grep_max_regex_bytes_.store(value);
+    }
+
+    uint64_t
+    get_grep_max_regex_bytes() const {
+        return grep_max_regex_bytes_.load();
+    }
+
+    void
+    set_grep_max_dfa_cache_bytes(uint64_t value) {
+        grep_max_dfa_cache_bytes_.store(value);
+    }
+
+    uint64_t
+    get_grep_max_dfa_cache_bytes() const {
+        return grep_max_dfa_cache_bytes_.load();
+    }
+
+    void
+    set_grep_batch_size(int64_t value) {
+        grep_batch_size_.store(value);
+    }
+
+    int64_t
+    get_grep_batch_size() const {
+        return grep_batch_size_.load();
+    }
+
+    void
+    set_grep_max_result_bytes(uint64_t value) {
+        grep_max_result_bytes_.store(value);
+    }
+
+    uint64_t
+    get_grep_max_result_bytes() const {
+        return grep_max_result_bytes_.load();
+    }
+
     void
     set_scan_cursor_owns_pin(bool value) {
         scan_cursor_owns_pin_ = value;
@@ -377,6 +419,12 @@ class SegcoreConfig {
     inline static bool enable_geometry_cache_ = false;
     inline static bool enable_gis_split_fusion_ = false;
     inline static bool scan_cursor_owns_pin_ = false;
+    inline static std::atomic<uint64_t> grep_max_regex_bytes_ = 10485760;
+    inline static std::atomic<uint64_t> grep_max_dfa_cache_bytes_ = 8388608;
+    inline static std::atomic<int64_t> grep_batch_size_ = 128;
+    // Cap on the serialized GREP_MATCHES column of one segment read
+    // (quotaAndLimits.limits.maxOutputSize).
+    inline static std::atomic<uint64_t> grep_max_result_bytes_ = 104857600;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
     inline static std::atomic<bool> lazy_index_slot_enabled_ = false;
     inline static std::atomic<bool> lazy_column_group_enabled_ = false;

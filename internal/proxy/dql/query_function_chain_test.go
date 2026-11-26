@@ -59,23 +59,100 @@ func queryStageTestTask() *QueryTask {
 	}
 }
 
-func TestQueryChainCreatePlanPreservesArgumentsAndProjection(t *testing.T) {
+// The chain is rewritten into `filter AND grep(...)` plus a GREP_MATCHES
+// output item; nothing is forwarded to the QueryNode as a chain.
+func TestQueryChainIsRewrittenIntoPredicateAndOutputItem(t *testing.T) {
 	paramtable.Init()
 	task := queryStageTestTask()
 	before := proto.Clone(task.request)
 	require.NoError(t, task.createPlan(context.Background()))
 	require.True(t, proto.Equal(before, task.request))
-	require.Len(t, task.plan.GetQuerynodeFunctionChains(), 1)
-	require.True(t, proto.Equal(task.request.FunctionChains[0], task.plan.QuerynodeFunctionChains[0]))
+	require.Empty(t, task.plan.GetQuerynodeFunctionChains())
 	require.NotContains(t, task.plan.GetOutputFieldIds(), int64(101))
+
+	and := task.plan.GetQuery().GetPredicates().GetBinaryExpr()
+	require.NotNil(t, and)
+	require.Equal(t, planpb.BinaryExpr_LogicalAnd, and.GetOp())
+	require.NotNil(t, and.GetLeft().GetUnaryRangeExpr())
+	grep := and.GetRight().GetGrepExpr()
+	require.NotNil(t, grep)
+	require.Equal(t, int64(101), grep.GetColumnInfo().GetFieldId())
+	require.Equal(t, []string{"timeout"}, grep.GetPatterns())
+	require.False(t, grep.GetSelectNone())
+
+	require.Len(t, task.plan.GetProjectionItems(), 1)
+	item := task.plan.GetProjectionItems()[0]
+	require.Equal(t, requestLocalOutputIDStart, item.GetOutputId())
+	require.Equal(t, schemapb.DataType_JSON, item.GetDataType())
+	require.True(t, proto.Equal(grep, item.GetGrepMatches().GetSpec()))
+	require.Equal(t, uint64(2), item.GetGrepMatches().GetBeforeContext())
+	require.Equal(t, uint64(2), item.GetGrepMatches().GetAfterContext())
+	require.False(t, item.GetGrepMatches().GetHasMaxCount())
+	require.Equal(t, []string{"id", "matches"}, task.userOutputFields)
+	require.Equal(t, []int64{requestLocalOutputIDStart}, task.outputProjection.queryNodeItemIDs(false))
+
 	data, err := proto.Marshal(task.plan)
 	require.NoError(t, err)
 	got := &planpb.PlanNode{}
 	require.NoError(t, proto.Unmarshal(data, got))
 	require.True(t, proto.Equal(task.plan, got))
-	task.request.FunctionChains[0].OutputColumns[0] = "changed"
-	require.Equal(t, []string{"matches"}, got.QuerynodeFunctionChains[0].OutputColumns)
-	require.Equal(t, []string{"matches"}, task.plan.QuerynodeFunctionChains[0].OutputColumns)
+}
+
+func TestQueryChainRewriteVariants(t *testing.T) {
+	paramtable.Init()
+	t.Run("empty filter", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.Expr = ""
+		require.NoError(t, task.createPlan(context.Background()))
+		require.NotNil(t, task.plan.GetQuery().GetPredicates().GetGrepExpr())
+	})
+	t.Run("not exported", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.FunctionChains[0].OutputColumns = nil
+		require.NoError(t, task.createPlan(context.Background()))
+		require.NotNil(t, task.plan.GetQuery().GetPredicates().GetBinaryExpr().GetRight().GetGrepExpr())
+		require.Empty(t, task.plan.GetProjectionItems())
+		require.Equal(t, []string{"id"}, task.userOutputFields)
+	})
+	t.Run("max count stays on the output item", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.FunctionChains[0].Ops[0].Params["arguments"] = &schemapb.FunctionParamValue{
+			Value: &schemapb.FunctionParamValue_StringValue{StringValue: `-F -m 3 -e timeout`},
+		}
+		require.NoError(t, task.createPlan(context.Background()))
+		item := task.plan.GetProjectionItems()[0].GetGrepMatches()
+		require.True(t, item.GetHasMaxCount())
+		require.Equal(t, uint64(3), item.GetMaxCount())
+		require.False(t, item.GetSpec().GetSelectNone())
+	})
+	t.Run("zero max count selects no row", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.FunctionChains[0].Ops[0].Params["arguments"] = &schemapb.FunctionParamValue{
+			Value: &schemapb.FunctionParamValue_StringValue{StringValue: `-e timeout -m 0`},
+		}
+		require.NoError(t, task.createPlan(context.Background()))
+		require.True(t, task.plan.GetQuery().GetPredicates().GetBinaryExpr().GetRight().GetGrepExpr().GetSelectNone())
+	})
+	t.Run("invalid arguments", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.FunctionChains[0].Ops[0].Params["arguments"] = &schemapb.FunctionParamValue{
+			Value: &schemapb.FunctionParamValue_StringValue{StringValue: `--no-such-option`},
+		}
+		require.Error(t, task.createPlan(context.Background()))
+	})
+	t.Run("output conflicts with an output field alias", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.OutputFields = []string{"id", "message AS matches"}
+		require.ErrorIs(t, task.createPlan(context.Background()), merr.ErrParameterInvalid)
+	})
+	t.Run("ids follow the request's own virtual columns", func(t *testing.T) {
+		task := queryStageTestTask()
+		task.request.OutputFields = []string{"id", "$seg_id"}
+		require.NoError(t, task.createPlan(context.Background()))
+		require.Len(t, task.plan.GetProjectionItems(), 2)
+		require.Equal(t, requestLocalOutputIDStart-1, task.plan.GetProjectionItems()[1].GetOutputId())
+		require.NotNil(t, task.plan.GetProjectionItems()[1].GetGrepMatches())
+	})
 }
 
 func TestQueryChainPlanRejectsUnsupportedQueryModes(t *testing.T) {
@@ -108,43 +185,41 @@ func TestSearchRejectsQueryOutputDeclarations(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
-func TestQueryChainProxyOnlyChecksEnvelope(t *testing.T) {
+func TestQueryChainProxyRejectsInvalidChain(t *testing.T) {
 	paramtable.Init()
-	for name, mutate := range map[string]func(*schemapb.FunctionChain){
-		"unknown operator": func(p *schemapb.FunctionChain) { p.Ops[0].Op = "future_operator" },
-		"unknown field":    func(p *schemapb.FunctionChain) { p.Ops[0].Inputs = []string{"missing"} },
-		"nil operator":     func(p *schemapb.FunctionChain) { p.Ops[0] = nil },
-		"legacy limit": func(p *schemapb.FunctionChain) {
-			p.Ops[0].Params["limit"] = &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 10}}
-		},
-		"multiple operators": func(p *schemapb.FunctionChain) {
-			p.Ops = append(p.Ops, &schemapb.FunctionChainOp{Op: "future_operator"})
-		},
-		"unknown output":       func(p *schemapb.FunctionChain) { p.OutputColumns = []string{"not_produced"} },
-		"unchanged parameters": func(p *schemapb.FunctionChain) {},
-	} {
-		t.Run(name, func(t *testing.T) {
-			task := queryStageTestTask()
-			task.plan = &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{}}}
-			mutate(task.request.FunctionChains[0])
-			before := proto.Clone(task.request.FunctionChains[0])
-			require.NoError(t, task.prepareQueryFunctionChains())
-			require.True(t, proto.Equal(before, task.plan.QuerynodeFunctionChains[0]))
-			require.NotSame(t, task.request.FunctionChains[0], task.plan.QuerynodeFunctionChains[0])
-		})
-	}
-}
-
-func TestQueryChainProxyRejectsInvalidEnvelope(t *testing.T) {
 	for name, mutate := range map[string]func(*QueryTask){
 		"nil chain": func(t *QueryTask) { t.request.FunctionChains[0] = nil },
 		"wrong stage": func(t *QueryTask) {
 			t.request.FunctionChains[0].Stage = schemapb.FunctionChainStage_FunctionChainStageL0Rerank
 		},
-		"duplicate stage": func(t *QueryTask) {
+		"two chains": func(t *QueryTask) {
 			t.request.FunctionChains = append(t.request.FunctionChains, proto.Clone(t.request.FunctionChains[0]).(*schemapb.FunctionChain))
 		},
-		"empty operators": func(t *QueryTask) { t.request.FunctionChains[0].Ops = nil },
+		"empty operators":  func(t *QueryTask) { t.request.FunctionChains[0].Ops = nil },
+		"unknown operator": func(t *QueryTask) { t.request.FunctionChains[0].Ops[0].Op = "future_operator" },
+		"unknown field":    func(t *QueryTask) { t.request.FunctionChains[0].Ops[0].Inputs = []string{"missing"} },
+		"non-text field":   func(t *QueryTask) { t.request.FunctionChains[0].Ops[0].Inputs = []string{"id"} },
+		"nil operator":     func(t *QueryTask) { t.request.FunctionChains[0].Ops[0] = nil },
+		"legacy limit": func(t *QueryTask) {
+			t.request.FunctionChains[0].Ops[0].Params["limit"] = &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 10}}
+		},
+		"multiple operators": func(t *QueryTask) {
+			t.request.FunctionChains[0].Ops = append(t.request.FunctionChains[0].Ops, &schemapb.FunctionChainOp{Op: "future_operator"})
+		},
+		"unknown output":   func(t *QueryTask) { t.request.FunctionChains[0].OutputColumns = []string{"not_produced"} },
+		"duplicate output": func(t *QueryTask) { t.request.FunctionChains[0].OutputColumns = []string{"matches", "matches"} },
+		"output is a schema field": func(t *QueryTask) {
+			t.request.FunctionChains[0].Ops[0].Outputs = []string{"id"}
+			t.request.FunctionChains[0].OutputColumns = []string{"id"}
+		},
+		"output equals input":     func(t *QueryTask) { t.request.FunctionChains[0].Ops[0].Outputs = []string{"message"} },
+		"exported without a name": func(t *QueryTask) { t.request.FunctionChains[0].Name = " " },
+		"expression operator": func(t *QueryTask) {
+			t.request.FunctionChains[0].Ops[0].Expr = &schemapb.FunctionChainExpr{}
+		},
+		"arguments not a string": func(t *QueryTask) {
+			t.request.FunctionChains[0].Ops[0].Params["arguments"] = &schemapb.FunctionParamValue{Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 1}}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			task := queryStageTestTask()
@@ -152,6 +227,8 @@ func TestQueryChainProxyRejectsInvalidEnvelope(t *testing.T) {
 			mutate(task)
 			require.ErrorIs(t, task.prepareQueryFunctionChains(), merr.ErrParameterInvalid)
 			require.Empty(t, task.plan.QuerynodeFunctionChains)
+			require.Nil(t, task.plan.GetQuery().GetPredicates())
+			require.Empty(t, task.plan.GetProjectionItems())
 		})
 	}
 }

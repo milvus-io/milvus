@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func projectionTestSchema(dynamic bool) *schemaInfo {
@@ -917,4 +918,79 @@ func TestBindOutputFields_PlainItemsSharingAName(t *testing.T) {
 		_, err := bindOutputFields(in, schema, false)
 		require.ErrorContains(t, err, "duplicate output field name title", in)
 	}
+}
+
+func TestBindOutputFields_GrepMatches(t *testing.T) {
+	paramtable.Init()
+	schema := projectionTestSchema(true)
+
+	b, err := bindOutputFields([]string{"id", `GREP_MATCHES(title, "-i -C1 -e timeout") AS matches`, "$seg_id"}, schema, false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"id", "matches", "$seg_id"}, b.userOutputFields)
+	// The text field itself is not read as an output field.
+	require.NotContains(t, b.resultFieldNames, "title")
+	items := b.projection.planItems(false)
+	require.Len(t, items, 2)
+	require.Equal(t, int64(-1000), items[0].GetOutputId())
+	require.Equal(t, schemapb.DataType_JSON, items[0].GetDataType())
+	require.Equal(t, planpb.VirtualColumn_VirtualColumnInvalid, items[0].GetVirtualColumn())
+	matches := items[0].GetGrepMatches()
+	require.Equal(t, int64(101), matches.GetSpec().GetColumnInfo().GetFieldId())
+	require.Equal(t, []string{"timeout"}, matches.GetSpec().GetPatterns())
+	require.Equal(t, uint32(1), matches.GetSpec().GetCaseMode())
+	require.Equal(t, uint64(1), matches.GetBeforeContext())
+	require.Equal(t, uint64(1), matches.GetAfterContext())
+	require.Equal(t, int64(-1001), items[1].GetOutputId())
+	require.Equal(t, []int64{-1000, -1001}, b.projection.queryNodeItemIDs(false))
+
+	// Without an alias the output name is the item text.
+	b, err = bindOutputFields([]string{`grep_matches(title, "-e a")`}, schema, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{`grep_matches(title, "-e a")`}, b.userOutputFields)
+
+	// The same item twice is one item; two items may differ by alias only.
+	b, err = bindOutputFields([]string{`GREP_MATCHES(title, "-e a") AS m`, `GREP_MATCHES(title, "-e a") AS m`, `GREP_MATCHES(title, "-e b") AS n`}, schema, false)
+	require.NoError(t, err)
+	require.Len(t, b.projection.planItems(false), 2)
+
+	for name, fields := range map[string][]string{
+		"search":             nil,
+		"unknown field":      {`GREP_MATCHES(missing, "-e a") AS m`},
+		"non-text field":     {`GREP_MATCHES(price, "-e a") AS m`},
+		"invalid option":     {`GREP_MATCHES(title, "--no-such-option") AS m`},
+		"no pattern":         {`GREP_MATCHES(title, "") AS m`},
+		"alias is a field":   {"price", `GREP_MATCHES(title, "-e a") AS price`},
+		"alias used twice":   {`GREP_MATCHES(title, "-e a") AS m`, `GREP_MATCHES(title, "-e b") AS m`},
+		"alias is the pk":    {`GREP_MATCHES(title, "-e a") AS id`},
+		"one argument":       {`GREP_MATCHES(title) AS m`},
+		"template arguments": {`GREP_MATCHES(title, {args}) AS m`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if fields == nil {
+				_, err := bindOutputFields([]string{`GREP_MATCHES(title, "-e a") AS m`}, schema, true)
+				require.ErrorContains(t, err, "only available in a query")
+				return
+			}
+			_, err := bindOutputFields(fields, schema, false)
+			require.Error(t, err)
+		})
+	}
+
+	// The column is named and typed when it comes back, and is added empty
+	// to a result without rows.
+	b, err = bindOutputFields([]string{`GREP_MATCHES(title, "-e a") AS m`}, schema, false)
+	require.NoError(t, err)
+	column := &schemapb.FieldData{FieldId: -1000, Type: schemapb.DataType_JSON, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`[]`), nil}}},
+	}}, ValidData: []bool{true, false}}
+	out, err := b.projection.completeQueryNodeColumns([]*schemapb.FieldData{longColumn(100, 1, 2), column}, false, -1)
+	require.NoError(t, err)
+	require.Equal(t, []string{"", "m"}, columnNames(out))
+	require.Equal(t, []bool{true, false}, out[1].GetValidData())
+	out, err = b.projection.completeQueryNodeColumns([]*schemapb.FieldData{longColumn(100)}, false, -1)
+	require.NoError(t, err)
+	require.Equal(t, schemapb.DataType_JSON, out[1].GetType())
+	require.NotNil(t, out[1].GetScalars().GetJsonData())
+	_, err = b.projection.completeQueryNodeColumns([]*schemapb.FieldData{longColumn(100, 1)}, false, -1)
+	require.ErrorContains(t, err, "is missing from the result")
 }

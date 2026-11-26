@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <numeric>
+#include "grep/GrepMatchesColumn.h"
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "exec/expression/ExprCache.h"
@@ -11130,7 +11131,7 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
 
         if (auto item = plan->FindProjectionItem(field_id)) {
             fields_data->AddAllocated(
-                query::BuildPlacementProjectionColumn(*item, id_, offsets, size)
+                grep::BuildProjectionColumn(this, *item, offsets, size, op_ctx)
                     .release());
             continue;
         }

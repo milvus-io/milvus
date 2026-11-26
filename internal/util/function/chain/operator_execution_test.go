@@ -638,6 +638,10 @@ func BenchmarkSelectionStringUUID(b *testing.B) {
 	}
 }
 
+// A "$"-prefixed List<Int32> system column, one list of element positions per
+// document.
+const queryElementIndicesTestName = "$query_element_indices"
+
 // The companion list follows document selection and survives pruning/source release.
 func TestQueryElementIndicesSelection(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
@@ -648,7 +652,7 @@ func TestQueryElementIndicesSelection(t *testing.T) {
 	lists := selectionTestColumn(t, pool, dt, `[[99],[1,null,3],[],null,[8,9]]`, `[]`, `[[0],[2,4]]`)
 	// A nonzero parent offset must not change child indexing.
 	sliced := array.NewSlice(lists.Chunk(0), 1, 5)
-	require.NoError(t, b.AddColumnFromChunks(types.QueryElementIndicesFieldName,
+	require.NoError(t, b.AddColumnFromChunks(queryElementIndicesTestName,
 		[]arrow.Array{sliced, array.NewSlice(lists.Chunk(1), 0, 0), array.NewSlice(lists.Chunk(2), 0, 2)}))
 	lists.Release()
 	require.NoError(t, b.addColumn(types.SegOffsetFieldName, selectionTestColumn(t, pool, arrow.PrimitiveTypes.Int64, `[10,20,30,40]`, `[]`, `[50,60]`)))
@@ -664,12 +668,12 @@ func TestQueryElementIndicesSelection(t *testing.T) {
 	out.Release()
 	defer pruned.Release()
 	require.False(t, pruned.HasColumn("unused"))
-	require.True(t, IsFunctionChainSystemName(types.QueryElementIndicesFieldName))
+	require.True(t, IsFunctionChainSystemName(queryElementIndicesTestName))
 	want := selectionTestColumn(t, pool, dt, `[[8,9],[1,null,3],[1,null,3],null,[]]`, `[]`, `[[2,4]]`)
 	defer want.Release()
-	require.True(t, arrow.TypeEqual(dt, pruned.Column(types.QueryElementIndicesFieldName).DataType()))
+	require.True(t, arrow.TypeEqual(dt, pruned.Column(queryElementIndicesTestName).DataType()))
 	for i := range want.Chunks() {
-		require.True(t, array.Equal(want.Chunk(i), pruned.Column(types.QueryElementIndicesFieldName).Chunk(i)))
+		require.True(t, array.Equal(want.Chunk(i), pruned.Column(queryElementIndicesTestName).Chunk(i)))
 	}
 	require.Equal(t, []int64{40, 10, 10, 30, 20}, pruned.Column(types.SegOffsetFieldName).Chunk(0).(*array.Int64).Int64Values())
 }

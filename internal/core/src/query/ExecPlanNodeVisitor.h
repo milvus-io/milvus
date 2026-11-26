@@ -159,11 +159,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return filter_only_;
     }
 
-    void
-    SetRetrieveCandidateBudget(int64_t max_bytes) {
-        retrieve_candidate_budget_ = max_bytes;
-    }
-
     ExecPlanNodeVisitor&
     SetEnableExprCache(bool enable) {
         enable_expr_cache_ = enable;
@@ -202,7 +197,6 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
-    std::optional<int64_t> retrieve_candidate_budget_;
     bool enable_expr_cache_ = false;
     SchemaPtr read_schema_;
     milvus::tracer::SpanPtr trace_span_ = nullptr;

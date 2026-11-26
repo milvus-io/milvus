@@ -1656,6 +1656,9 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 			"%s is not supported; use %s(field, {blob}) with optional type=bloom|roaring",
 			functionName, MembershipMatchFunctionName)
 	}
+	if functionName == GrepFunctionName {
+		return v.visitGrepCall(ctx)
+	}
 	if isMembershipFunctionName(functionName) {
 		// membership_match is compiled on the proxy into a deferred CallExpr that
 		// carries the client pre-built blob; FillExpressionValue materializes it

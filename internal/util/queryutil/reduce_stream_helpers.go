@@ -41,21 +41,6 @@ func BuildMergedRetrieveResults(results []*internalpb.RetrieveResults, rows []Ro
 	return buildMergedRetrieveResults(results, rows, schema)
 }
 
-// PrepareComputedResults validates incoming computed columns and returns empty typed columns.
-func PrepareComputedResults(results []*internalpb.RetrieveResults) ([]*schemapb.FieldData, error) {
-	return prepareComputedResults(results)
-}
-
-// IndexComputedResults aligns computed columns by name without rescanning payloads.
-func IndexComputedResults(results []*internalpb.RetrieveResults) ([]*schemapb.FieldData, []map[string]*schemapb.FieldData, error) {
-	return indexComputedResults(results)
-}
-
-// AppendComputedField copies a selected value with the shared computed-column validity rules.
-func AppendComputedField(dst, src *schemapb.FieldData, row int64, previous int) {
-	appendComputedField(dst, src, []int64{row}, previous)
-}
-
 // ComparePK uses the existing Query primary-key ordering.
 func ComparePK(a, b any) int {
 	return comparePK(a, b)
@@ -83,10 +68,9 @@ func NewRowSizeCalculator(result *internalpb.RetrieveResults) *rowSizeCalculator
 
 // NewOrderedRowSizeCalculator prepares Chunk sizing with a vector cursor and
 // compact group-key lookups for rows consumed in source order.
-func NewOrderedRowSizeCalculator(fields, computed, groups []*schemapb.FieldData) *rowSizeCalculator {
+func NewOrderedRowSizeCalculator(fields, groups []*schemapb.FieldData) *rowSizeCalculator {
 	c := &rowSizeCalculator{
 		fields:             fields,
-		computedFields:     computed,
 		compactIndexCursor: typeutil.NewFieldDataIdxComputer(fields),
 		groupFields:        groups,
 		groupIndices:       make([][]int, len(groups)),

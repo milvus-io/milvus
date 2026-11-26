@@ -708,6 +708,14 @@ func SetupCoreConfigChangelCallback() {
 
 		registerLoadFieldDataReadWindowConfig(paramtable.Get())
 
+		refreshGrepLimits := func(ctx context.Context, key, oldValue, newValue string) error {
+			return InitGrepLimits(paramtable.Get())
+		}
+		paramtable.Get().FunctionCfg.GrepMaxRegexBytes.RegisterCallback(refreshGrepLimits)
+		paramtable.Get().FunctionCfg.GrepMaxDFACacheBytes.RegisterCallback(refreshGrepLimits)
+		paramtable.Get().FunctionCfg.GrepBatchSize.RegisterCallback(refreshGrepLimits)
+		paramtable.Get().QuotaConfig.MaxOutputSize.RegisterCallback(refreshGrepLimits)
+
 		paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			factor, err := strconv.ParseFloat(newValue, 64)
 			if err != nil {
@@ -984,6 +992,20 @@ func InitGeometryCache(params *paramtable.ComponentParam) error {
 func InitGISSplitFusion(params *paramtable.ComponentParam) error {
 	enableGISSplitFusion := C.bool(params.QueryNodeCfg.EnableGISSplitFusion.GetAsBool())
 	C.SegcoreSetEnableGISSplitFusion(enableGISSplitFusion)
+	return nil
+}
+
+// InitGrepLimits passes the compile budgets and text read batch of the grep
+// filter predicate and the GREP_MATCHES output item to segcore, together with
+// the byte cap of one GREP_MATCHES column. The settings are refreshable; see
+// SetupCoreConfigChangelCallback.
+func InitGrepLimits(params *paramtable.ComponentParam) error {
+	cfg := &params.FunctionCfg
+	C.SegcoreSetGrepLimits(
+		C.uint64_t(cfg.GrepMaxRegexBytes.GetAsInt64()),
+		C.uint64_t(cfg.GrepMaxDFACacheBytes.GetAsInt64()),
+		C.int64_t(cfg.GrepBatchSize.GetAsInt64()),
+		C.uint64_t(params.QuotaConfig.MaxOutputSize.GetAsInt64()))
 	return nil
 }
 

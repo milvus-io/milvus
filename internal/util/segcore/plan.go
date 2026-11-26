@@ -215,7 +215,6 @@ type RetrievePlan struct {
 	msgID                 int64 // only used to debug.
 	maxLimitSize          int64
 	ignoreNonPk           bool
-	candidateMode         bool
 	consistencyLevel      commonpb.ConsistencyLevel
 	collectionTTL         typeutil.Timestamp
 	entityTTLPhysicalTime typeutil.Timestamp
@@ -249,31 +248,12 @@ func NewRetrievePlan(col *CCollection,
 	}, nil
 }
 
-// EnableCandidateMode prepares a candidate read before segment fan-out.
-// Candidate offsets remain complete; Grep limits text scanning separately.
-// The caller supplies the execution budget. The Query limit and projection
-// remain unchanged, including for subsequent explicit reads by offsets.
-func (plan *RetrievePlan) EnableCandidateMode() error {
-	status := C.SetRetrievePlanMode(plan.cRetrievePlan, C.RetrieveModeCandidates)
-	if err := ConsumeCStatusIntoError(&status); err != nil {
-		return merr.Wrap(err, "enable candidate retrieve mode")
-	}
-	plan.ignoreNonPk = true
-	plan.candidateMode = true
-	return nil
-}
-
-// IsCandidateMode reports whether Retrieve exports QueryScan offsets only.
-func (plan *RetrievePlan) IsCandidateMode() bool {
-	return plan.candidateMode
-}
-
 func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
 	return bool(C.ShouldIgnoreNonPk(plan.cRetrievePlan))
 }
 
 func (plan *RetrievePlan) SetIgnoreNonPk(ignore bool) {
-	plan.ignoreNonPk = ignore || plan.candidateMode
+	plan.ignoreNonPk = ignore
 }
 
 func (plan *RetrievePlan) SetTakeForOutputAllowed(allowed bool) {

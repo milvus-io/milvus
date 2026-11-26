@@ -41,6 +41,8 @@ const (
 	SelectItemAggregate
 	// SelectItemVirtualColumn is one of the predefined "$" columns.
 	SelectItemVirtualColumn
+	// SelectItemGrepMatches is GREP_MATCHES(field, "rg-style arguments").
+	SelectItemGrepMatches
 )
 
 // Virtual column names accepted in output_fields.
@@ -85,6 +87,11 @@ type SelectItem struct {
 	VirtualArgKind  VirtualColumnArgKind
 	VirtualArgField string
 	VirtualArgIndex int64
+
+	// GrepField is the field name and GrepArguments the decoded argument
+	// string of a GREP_MATCHES item. Set only for SelectItemGrepMatches.
+	GrepField     string
+	GrepArguments string
 }
 
 // selectItemCacheKeyPrefix separates output_fields entries from filter
@@ -194,6 +201,14 @@ func parseSelectItemUncached(item string) (SelectItem, error) {
 			if err := fillVirtualColumn(&result, e); err != nil {
 				return SelectItem{}, merr.WrapErrParameterInvalidMsg("invalid output field %q: %s", item, err.Error())
 			}
+		case *planparserv2.CallContext:
+			if strings.ToLower(e.Identifier().GetText()) != GrepMatchesFunctionName {
+				return SelectItem{}, merr.WrapErrParameterInvalidMsg("invalid output field %q: %s", item, unsupportedSelectExprMsg)
+			}
+			result.Kind = SelectItemGrepMatches
+			if err := fillGrepMatches(&result, e); err != nil {
+				return SelectItem{}, merr.WrapErrParameterInvalidMsg("invalid output field %q: %s", item, err.Error())
+			}
 		default:
 			return SelectItem{}, merr.WrapErrParameterInvalidMsg("invalid output field %q: %s", item, unsupportedSelectExprMsg)
 		}
@@ -235,6 +250,34 @@ func fillVirtualColumn(result *SelectItem, ctx *planparserv2.VirtualColumnContex
 		if result.VirtualArgKind == VirtualColumnNoArg {
 			return selectItemSyntaxError(name + " requires a sub-request argument: a field name or a position")
 		}
+	}
+	return nil
+}
+
+// fillGrepMatches extracts the field name and the argument string of a
+// GREP_MATCHES call. The field is resolved and the arguments are parsed by
+// the caller, which has the schema.
+func fillGrepMatches(result *SelectItem, ctx *planparserv2.CallContext) error {
+	args := ctx.AllExpr()
+	if len(args) != 2 {
+		return selectItemSyntaxError(GrepMatchesFunctionName + " requires exactly 2 arguments: a VarChar or Text field and an argument string")
+	}
+	if _, ok := args[0].(*planparserv2.IdentifierContext); !ok {
+		return selectItemSyntaxError("the first argument of " + GrepMatchesFunctionName + " must be a VarChar or Text field name, got: " + args[0].GetText())
+	}
+	result.GrepField = args[0].GetText()
+	switch literal := args[1].(type) {
+	case *planparserv2.StringContext:
+		decoded, err := convertEscapeSingle(literal.GetText())
+		if err != nil {
+			return selectItemSyntaxError("the second argument of " + GrepMatchesFunctionName + " is not a valid string literal: " + err.Error())
+		}
+		result.GrepArguments = decoded
+	case *planparserv2.RawStringContext:
+		text := literal.GetText()
+		result.GrepArguments = text[2 : len(text)-1]
+	default:
+		return selectItemSyntaxError("the second argument of " + GrepMatchesFunctionName + " must be a string literal, got: " + args[1].GetText())
 	}
 	return nil
 }

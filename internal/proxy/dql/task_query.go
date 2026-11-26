@@ -1447,19 +1447,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 			return nil, merr.Error(chunk.GetStatus())
 		}
 
-		computed, err := queryutil.PrepareComputedResults([]*internalpb.RetrieveResults{chunk})
-		if err != nil {
-			return nil, err
-		}
-		// Check only headers against accumulated output; never rescan earlier rows.
-		_, computedSources, err := queryutil.IndexComputedResults([]*internalpb.RetrieveResults{output, chunk})
-		if err != nil {
-			return nil, err
-		}
-		if len(output.GetComputedResults()) == 0 {
-			output.ComputedResults = computed
-		}
-		computedSize := queryutil.NewRowSizeCalculator(&internalpb.RetrieveResults{ComputedResults: chunk.GetComputedResults()})
 		rowCount := queryutil.GetRowCount(chunk)
 		if rowCount == 0 && len(output.GetFieldsData()) == 0 && chunk.GetElementLevel() {
 			output.ElementLevel = true
@@ -1496,11 +1483,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 			// ORDER BY keeps receiving Chunks for duplicate validation after the
 			// requested window is full, but must not append rows from those Chunks.
 			for row := 0; row < rowCount && (limit <= 0 || collected < limit); row++ {
-				previous := queryutil.GetRowCount(output)
-				for _, column := range output.GetComputedResults() {
-					queryutil.AppendComputedField(column, computedSources[1][column.GetFieldName()], int64(row), previous)
-				}
-				outputSize += computedSize.RowSize(int64(row))
 				fieldIndexes := indexComputer.Compute(int64(row))
 				outputSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), int64(row), fieldIndexes...)
 				if idCount > 0 {

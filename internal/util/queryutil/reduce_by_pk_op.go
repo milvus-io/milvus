@@ -66,14 +66,10 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
-	emptyComputed, computedErr := prepareComputedResults(results)
-	if computedErr != nil {
-		return nil, computedErr
-	}
 
 	validResults, hasMoreResult := filterPKResults(results)
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{}}, nil
 	}
 
 	// If only one result, return as-is
@@ -111,11 +107,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 		return nil, err
 	}
 	if len(selectedRows) == 0 {
-		computed, err := selectComputedResults(results, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
 	}
 
 	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
@@ -231,10 +223,6 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
-	emptyComputed, computedErr := prepareComputedResults(results)
-	if computedErr != nil {
-		return nil, computedErr
-	}
 
 	// Positional agreement is a precondition, not something to tolerate. A
 	// short arrowRecords slice would leave later results with a nil record
@@ -270,7 +258,7 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{}}, nil
 	}
 
 	// No single-result shortcut: even a single result may contain duplicate PKs
@@ -300,11 +288,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 	}
 
 	if len(selectedRows) == 0 {
-		computed, err := selectComputedResults(origResults, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
 	}
 
 	// buildMergedRetrieveResults merges whatever FieldsData the inputs carry. On

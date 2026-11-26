@@ -252,6 +252,11 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	err = InitGrepLimits(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = InitScanPinPolicy(paramtable.Get())
 	if err != nil {
 		return err

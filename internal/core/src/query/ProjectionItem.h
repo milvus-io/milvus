@@ -22,7 +22,9 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
 #include "common/Types.h"
+#include "grep/CompiledPlan.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 
@@ -35,7 +37,39 @@ namespace milvus::query {
 struct ProjectionItem {
     FieldId output_id;
     proto::plan::VirtualColumn column;
+    // Set for a GREP_MATCHES(field, args) item; column is then
+    // VirtualColumnInvalid. The column is nullable JSON, built by
+    // grep::BuildGrepMatchesColumn at the points that read output fields.
+    std::shared_ptr<const proto::plan::GrepMatches> grep_matches;
+    // The compiled patterns of grep_matches, shared by every segment of the
+    // request and with a predicate of the same pattern. Null for other items
+    // and for an item that selects no line.
+    std::shared_ptr<const grep::Plan> grep_plan;
 };
+
+// Name of the column in Arrow exports and diagnostics.
+inline constexpr const char* kGrepMatchesProjectionName = "grep_matches";
+
+// The schema-less description of a GREP_MATCHES column, for the code that
+// merges and exports output columns by FieldMeta.
+inline FieldMeta
+GrepMatchesFieldMeta(const ProjectionItem& item) {
+    return FieldMeta(FieldName(kGrepMatchesProjectionName),
+                     item.output_id,
+                     DataType::JSON,
+                     /*nullable=*/true,
+                     std::nullopt);
+}
+
+// An empty GREP_MATCHES column: no rows, typed as nullable JSON.
+inline std::unique_ptr<proto::schema::FieldData>
+BuildEmptyGrepMatchesColumn(const ProjectionItem& item) {
+    auto column = std::make_unique<proto::schema::FieldData>();
+    column->set_field_id(item.output_id.get());
+    column->set_type(proto::schema::DataType::JSON);
+    column->mutable_scalars()->mutable_json_data();
+    return column;
+}
 
 inline const ProjectionItem*
 FindProjectionItem(const std::vector<ProjectionItem>& items, FieldId id) {
@@ -49,6 +83,9 @@ FindProjectionItem(const std::vector<ProjectionItem>& items, FieldId id) {
 
 inline std::string
 ProjectionItemName(const ProjectionItem& item) {
+    if (item.grep_matches != nullptr) {
+        return kGrepMatchesProjectionName;
+    }
     switch (item.column) {
         case proto::plan::VirtualColumn::VirtualColumnSegmentID:
             return "$seg_id";
@@ -99,19 +136,32 @@ BuildPlacementProjectionColumn(const ProjectionItem& item,
 }
 
 inline std::vector<ProjectionItem>
-ProjectionItemsFromProto(const proto::plan::PlanNode& plan_node_proto) {
+ProjectionItemsFromProto(const proto::plan::PlanNode& plan_node_proto,
+                         grep::PlanCompiler& grep_plans) {
     std::vector<ProjectionItem> items;
     items.reserve(plan_node_proto.projection_items_size());
     for (const auto& item : plan_node_proto.projection_items()) {
-        AssertInfo(item.virtual_column() !=
-                       proto::plan::VirtualColumn::VirtualColumnInvalid,
+        AssertInfo(item.has_grep_matches() ||
+                       item.virtual_column() !=
+                           proto::plan::VirtualColumn::VirtualColumnInvalid,
                    "projection item {} has no virtual column",
                    item.output_id());
         AssertInfo(
             FindProjectionItem(items, FieldId(item.output_id())) == nullptr,
             "duplicate projection item id {}",
             item.output_id());
-        items.push_back({FieldId(item.output_id()), item.virtual_column()});
+        if (item.has_grep_matches()) {
+            items.push_back({FieldId(item.output_id()),
+                             proto::plan::VirtualColumn::VirtualColumnInvalid,
+                             std::make_shared<const proto::plan::GrepMatches>(
+                                 item.grep_matches()),
+                             grep_plans.Compile(item.grep_matches().spec())});
+            continue;
+        }
+        items.push_back({FieldId(item.output_id()),
+                         item.virtual_column(),
+                         nullptr,
+                         nullptr});
     }
     return items;
 }

@@ -295,6 +295,19 @@ func bindOutputFields(outputFields []string, schema *schemaInfo, isSearch bool) 
 			}
 			continue
 
+		case planparserv2.SelectItemGrepMatches:
+			if isSearch {
+				return nil, merr.WrapErrParameterInvalidMsg("%s is only available in a query", planparserv2.GrepMatchesFunctionName)
+			}
+			grepField, ok := allFieldNameMap[item.GrepField]
+			if !ok {
+				return nil, merr.WrapErrParameterInvalidMsg("field %s of %s does not exist", item.GrepField, planparserv2.GrepMatchesFunctionName)
+			}
+			if err := b.addGrepMatches(names, userOutputFieldsMap, item, grepField); err != nil {
+				return nil, err
+			}
+			continue
+
 		case planparserv2.SelectItemAggregate:
 			aggregateName, aggFieldName := item.AggregateOp, item.AggregateArg
 			if aggField, ok := allFieldNameMap[aggFieldName]; ok {

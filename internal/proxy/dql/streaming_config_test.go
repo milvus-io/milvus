@@ -248,7 +248,10 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 		prepared := queryStageTestTask()
 		require.NoError(t, prepared.createPlan(t.Context()))
 		query.request.FunctionChains, query.plan = prepared.request.FunctionChains, prepared.plan
-		require.NotEmpty(t, query.plan.GetQuerynodeFunctionChains())
+		// The chain was rewritten into the plan's predicate and projection
+		// items; nothing travels as a chain.
+		require.Empty(t, query.plan.GetQuerynodeFunctionChains())
+		require.NotEmpty(t, query.plan.GetProjectionItems())
 		require.NoError(t, query.Execute(t.Context()))
 		require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
 	}

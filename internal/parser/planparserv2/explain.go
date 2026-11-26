@@ -75,6 +75,7 @@ const (
 	NodeMatch                   = "match"
 	NodeBloomFilter             = "bloom_filter"
 	NodeRoaringFilter           = "roaring_filter"
+	NodeGrep                    = "grep"
 	NodeUnknown                 = "unknown"
 )
 
@@ -936,6 +937,11 @@ func (e *explainer) expr(expr *planpb.Expr) *PredicateNode {
 			Node:  NodeRoaringFilter,
 			Field: e.column(node.RoaringFilterExpr.GetColumnInfo()),
 			Blob:  &BlobSummary{Bytes: len(node.RoaringFilterExpr.GetBitmapBlob())},
+		}
+	case *planpb.Expr_GrepExpr:
+		return &PredicateNode{
+			Node:  NodeGrep,
+			Field: e.column(node.GrepExpr.GetColumnInfo()),
 		}
 	default:
 		e.unknown++

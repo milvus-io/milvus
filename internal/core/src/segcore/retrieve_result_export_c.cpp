@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "grep/GrepMatchesColumn.h"
 #include "segcore/retrieve_result_export_c.h"
 
 #include <arrow/api.h>
@@ -105,6 +106,21 @@ BuildEmptyRetrieveBatch(milvus::query::RetrievePlan* plan, int64_t total_rows) {
     arrays.reserve(plan->field_ids_.size());
 
     for (auto field_id : plan->field_ids_) {
+        if (auto item = plan->FindProjectionItem(field_id);
+            item != nullptr && item->grep_matches != nullptr) {
+            auto field_meta = milvus::query::GrepMatchesFieldMeta(*item);
+            ARROW_ASSIGN_OR_RAISE(auto arrow_type,
+                                  EmptyExtraFieldArrowType(field_meta));
+            ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
+            fields.push_back(
+                MilvusField(milvus::query::ProjectionItemName(*item),
+                            arrow_type,
+                            true,
+                            field_id,
+                            milvus::DataType::JSON));
+            arrays.push_back(std::move(arr));
+            continue;
+        }
         if (auto item = plan->FindProjectionItem(field_id)) {
             auto arrow_type = arrow::int64();
             ARROW_ASSIGN_OR_RAISE(auto arr, arrow::MakeEmptyArray(arrow_type));
@@ -170,6 +186,24 @@ BuildRetrieveFieldsBatch(
                 "missing ordered field data for field id ", field_id.get());
         }
         const auto* projection_item = plan->FindProjectionItem(field_id);
+        if (projection_item != nullptr &&
+            projection_item->grep_matches != nullptr) {
+            auto field_meta =
+                milvus::query::GrepMatchesFieldMeta(*projection_item);
+            auto name = milvus::query::ProjectionItemName(*projection_item);
+            ARROW_ASSIGN_OR_RAISE(auto converted,
+                                  FieldDataToArrow(name,
+                                                   *it->second,
+                                                   total_rows,
+                                                   false,
+                                                   nullptr,
+                                                   &field_meta));
+            auto array = converted.second;
+            fields.push_back(MilvusField(
+                name, array->type(), true, field_id, milvus::DataType::JSON));
+            arrays.push_back(std::move(array));
+            continue;
+        }
         if (projection_item != nullptr ||
             milvus::SystemProperty::Instance().IsSystem(field_id)) {
             auto name =
@@ -277,8 +311,17 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // output fields. Reuse ordinary Retrieve's per-field statistics.
             int64_t estimated_size = 0;
             const auto stored_field_ids = plan->StoredFieldIds();
-            const auto projection_row_size = static_cast<int64_t>(
-                plan->projection_items_.size() * sizeof(int64_t));
+            int64_t projection_row_size = 0;
+            std::vector<FieldId> grep_source_field_ids;
+            for (const auto& item : plan->projection_items_) {
+                if (item.grep_matches != nullptr) {
+                    // Estimated like the text field it is extracted from.
+                    grep_source_field_ids.emplace_back(
+                        item.grep_matches->spec().column_info().field_id());
+                } else {
+                    projection_row_size += sizeof(int64_t);
+                }
+            }
             for (const auto& [segment_index, selected] : segment_fields) {
                 if (selected.segment_offsets.empty()) {
                     continue;
@@ -286,6 +329,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 milvus::futures::throwIfCancelled(cancel_token);
                 estimated_size +=
                     (selected.segment->get_fields_avg_size(stored_field_ids) +
+                     selected.segment->get_fields_avg_size(
+                         grep_source_field_ids) +
                      projection_row_size) *
                     static_cast<int64_t>(selected.segment_offsets.size());
             }
@@ -315,11 +360,12 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 auto fetch_one = [&](FieldId field_id,
                                      milvus::OpContext* field_ctx) {
                     if (auto item = plan->FindProjectionItem(field_id)) {
-                        return milvus::query::BuildPlacementProjectionColumn(
+                        return milvus::grep::BuildProjectionColumn(
+                            materialized.segment,
                             *item,
-                            materialized.segment->get_segment_id(),
                             materialized.segment_offsets.data(),
-                            materialized.segment_offsets.size());
+                            materialized.segment_offsets.size(),
+                            field_ctx);
                     }
                     if (milvus::SystemProperty::Instance().IsSystem(field_id)) {
                         auto system_type = milvus::SystemProperty::Instance()
@@ -424,6 +470,13 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
             // Merge into ordered fields.
             std::map<FieldId, std::unique_ptr<DataArray>> ordered_fields;
             for (auto field_id : plan->field_ids_) {
+                if (auto item = plan->FindProjectionItem(field_id);
+                    item != nullptr && item->grep_matches != nullptr) {
+                    ordered_fields[field_id] = MergeDataArray(
+                        result_pairs,
+                        milvus::query::GrepMatchesFieldMeta(*item));
+                    continue;
+                }
                 if (milvus::SystemProperty::Instance().IsSystem(field_id) ||
                     plan->FindProjectionItem(field_id) != nullptr) {
                     auto merged = std::make_unique<DataArray>();

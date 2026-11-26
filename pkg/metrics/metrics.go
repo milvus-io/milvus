@@ -107,9 +107,8 @@ const (
 
 	BatchReduce = "batch_reduce"
 
-	FunctionChainLevelL0        = "l0"
-	FunctionChainLevelL1        = "l1"
-	FunctionChainLevelQueryScan = "query_scan"
+	FunctionChainLevelL0 = "l0"
+	FunctionChainLevelL1 = "l1"
 
 	Pending   = "pending"
 	Executing = "executing"

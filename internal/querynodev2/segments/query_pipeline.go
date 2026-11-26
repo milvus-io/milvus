@@ -141,6 +141,7 @@ func buildIgnoreNonPkPipeline(
 		fieldSchemaMap[item.GetOutputId()] = &schemapb.FieldSchema{
 			FieldID:  item.GetOutputId(),
 			DataType: item.GetDataType(),
+			Nullable: item.GetGrepMatches() != nil,
 		}
 	}
 

@@ -81,6 +81,15 @@ struct MatchOptions {
     uint64_t after_context = 0;
 };
 
+// Which lines of a value one Session selects: the matching-line cap and the
+// context of MatchOptions, without the options that shape the compiled
+// matcher.
+struct LineSelection {
+    std::optional<uint64_t> max_count;
+    uint64_t before_context = 0;
+    uint64_t after_context = 0;
+};
+
 // Compile limits have no production defaults; callers supply positive budgets.
 struct CompileLimits {
     uint64_t max_regex_bytes = 0;
@@ -117,6 +126,12 @@ class Plan {
     // destroy this C++ object during a method call. Sessions retain Rust's Plan.
     Session
     CreateSession() const;
+
+    // A Session that selects lines by `selection` instead of the cap and
+    // context this Plan was compiled with. The compiled matcher does not
+    // depend on them, so one Plan can serve uses that differ only in these.
+    Session
+    CreateSession(const LineSelection& selection) const;
 
     // An owning copy of the cached binary Protobuf condition, including NULs.
     // The returned string outlives this Plan. No reader/regex parsing occurs.

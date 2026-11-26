@@ -85,10 +85,9 @@ func TestProtoContract_FieldDescriptorsPinned(t *testing.T) {
 		want string
 	}{
 		// top-level fast-pathed types (TryUnmarshal dispatch)
-		// mvcc_timestamp (20) and computed_results (22) use retrieveResults'
-		// protoMerge fallback. TestRetrieveComputedResultsFallback covers field 22.
+		// mvcc_timestamp (20) uses retrieveResults' protoMerge fallback.
 		// feature_bits (21) is a varint scalar decoded directly.
-		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, "1cf7b4488682e204ed35e686b9ccde33a0794a3210ba0db790f3a9c9bc082c6f"},
+		{"internalpb.RetrieveResults", &internalpb.RetrieveResults{}, "b44a0fef5dc74453366b7f2e0da7e4e35c67f0babe20b369efa60ce7cc38f2cc"},
 		{"milvuspb.InsertRequest", &milvuspb.InsertRequest{}, "a334da7b112573d379549d8c81c1afcf0a8526488947c4868b6ff4d9413b29a7"},
 		// write_condition (14) is a non-oneof message preserved by upsertRequest's
 		// protoMerge fallback; the equivalence tests and
