@@ -112,14 +112,15 @@ var (
 	// DataCoordShardSplitResidualWaitSeconds is how long the SplitShard ack
 	// callback of a collection has been waiting for the consumer ack of the
 	// copy on the source, while it keeps the broadcast resource key of the
-	// collection. The series exists only while a callback waits.
-	DataCoordShardSplitResidualWaitSeconds = prometheus.NewGaugeVec(
+	// collection. The series exists only while a callback waits in full mode;
+	// aggregate mode suppresses it because independent wait ages cannot share Set.
+	DataCoordShardSplitResidualWaitSeconds = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "shard_split_residual_wait_seconds",
 			Help:      "seconds the shard split callback of a collection has waited so far for the residual of its source to flush",
-		}, []string{collectionIDLabelName})
+		}, []string{collectionIDLabelName}, collectionGaugeAggregateDisabled)
 
 	DataCoordL0DeleteEntriesNum = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
