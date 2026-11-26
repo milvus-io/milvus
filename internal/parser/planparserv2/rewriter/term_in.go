@@ -333,7 +333,7 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 func resolveInRangeComparisonType(col *planpb.ColumnInfo, value *planpb.GenericValue) (schemapb.DataType, bool) {
 	dt := effectiveDataType(col)
 	if dt != schemapb.DataType_JSON {
-		if !isSupportedScalarForRange(dt) || !valueMatchesType(dt, value) {
+		if !isSupportedScalarForRange(dt) || !valueMatchesType(col, dt, value) {
 			return schemapb.DataType_None, false
 		}
 		return dt, true

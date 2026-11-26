@@ -645,7 +645,7 @@ func TestRewrite_CommonFactor_UnsupportedColumnsAndExpressions(t *testing.T) {
 
 func TestRewrite_CommonFactor_MatchExprBoundary(t *testing.T) {
 	// Two identical OR-of-AND trees: one at the top level, one inside a
-	// MatchExpr predicate. Optional rewrites do not descend into MatchExpr, so
+	// MatchExpr predicate. Common-factor extraction is scoped to row expressions, so
 	// only the top-level copy may be factored.
 	col := func(id int64) *planpb.ColumnInfo {
 		return &planpb.ColumnInfo{FieldId: id, DataType: schemapb.DataType_Int64, Nullable: true}

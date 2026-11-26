@@ -18,6 +18,7 @@
 
 #include <cassert>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -58,6 +59,19 @@ class EvalCtx {
     inline void
     set_offset_input(OffsetVector* offset_input) {
         offset_input_ = offset_input;
+    }
+
+    // Sequential element expressions consume a window of parent rows. A
+    // constant has no column from which to derive the size of that window
+    // in element coordinates. Zero denotes a batch of empty arrays.
+    void
+    set_input_batch_size(int64_t size) {
+        input_batch_size_ = size;
+    }
+
+    std::optional<int64_t>
+    get_input_batch_size() const {
+        return input_batch_size_;
     }
 
     // Candidate masks are read-only. A borrowed view must outlive Eval and
@@ -119,6 +133,7 @@ class EvalCtx {
     ExecContext* exec_ctx_ = nullptr;
     // we may accept offsets array as input and do expr filtering on these data
     OffsetVector* offset_input_ = nullptr;
+    std::optional<int64_t> input_batch_size_;
 
     // used for expr pre filter, that avoid unnecessary execution on filtered data
     BitmapInput bitmap_input_;

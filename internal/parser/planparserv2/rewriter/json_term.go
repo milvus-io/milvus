@@ -132,28 +132,27 @@ func normalizeTermExpr(original *planpb.Expr, term *planpb.TermExpr) *planpb.Exp
 	return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 }
 
-func valueGroupKey(col *planpb.ColumnInfo, value *planpb.GenericValue) (string, bool) {
-	if col == nil || !canBuildTermExpr(value) {
+func valueGroupKey(col *planpb.ColumnInfo, values ...*planpb.GenericValue) (string, bool) {
+	if col == nil || !canBuildTermExpr(values...) {
 		return "", false
 	}
-	kind := valueCase(value)
+	// IN intersections and exclusions compare plan literals. Distinct literals
+	// can represent the same element after narrowing (e.g. FLOAT 2^24+1).
+	if col.GetIsElementLevel() {
+		dt := effectiveDataType(col)
+		for _, value := range values {
+			if !elementLiteralIsExact(dt, value) {
+				return "", false
+			}
+		}
+	}
 	key := columnKey(col)
-	// Statically typed columns are cast before rewriting. JSON is the only
-	// column type whose predicates must remain partitioned by literal kind.
 	if col.GetDataType() == schemapb.DataType_JSON {
-		key += "|" + kind
+		key += "|" + valueCase(values[0])
 	}
 	return key, true
 }
 
 func termGroupKey(term *planpb.TermExpr) (string, bool) {
-	if term == nil || term.GetColumnInfo() == nil || !canBuildTermExpr(term.GetValues()...) {
-		return "", false
-	}
-	kind := valueCase(term.GetValues()[0])
-	key := columnKey(term.GetColumnInfo())
-	if term.GetColumnInfo().GetDataType() != schemapb.DataType_JSON {
-		return key, true
-	}
-	return key + "|" + kind, true
+	return valueGroupKey(term.GetColumnInfo(), term.GetValues()...)
 }
