@@ -122,9 +122,10 @@ pub fn get_resource_path(
                     resource_key
                 )))?;
 
-            if file_name.is_empty()
-                || file_name.contains(['/', '\\'])
-                || matches!(file_name, "." | "..")
+            if helper.enforce_file_access
+                && (file_name.is_empty()
+                    || file_name.contains(['/', '\\'])
+                    || matches!(file_name, "." | ".."))
             {
                 return Err(TantivyBindingError::InvalidArgument(
                     "file resource name must be a single filename".into(),
