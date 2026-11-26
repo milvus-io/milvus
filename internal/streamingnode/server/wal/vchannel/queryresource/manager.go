@@ -218,6 +218,9 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	m.mu.Unlock()
 	cancelTask(task)
+	if runtime != nil {
+		runtime.stop()
+	}
 	if task != nil {
 		// Release can run under the shard/owner lock. Neither that caller nor
 		// a scheduler worker may wait for a build that needs the same lock/worker.
@@ -230,7 +233,6 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 		return
 	}
 	if runtime != nil {
-		runtime.stop()
 		m.scheduler.Submit(resourceReleaseTask{runtime: runtime, resources: resources, closeRuntime: true, onDropped: func() {
 			defer m.releasing.Done()
 			if req.OnDropped != nil {
@@ -307,6 +309,9 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 
 	cancelTask(task)
+	if runtime != nil {
+		runtime.stop()
+	}
 	if task != nil {
 		_, _ = task.Result()
 	}

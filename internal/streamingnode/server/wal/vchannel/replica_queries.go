@@ -32,6 +32,7 @@ import (
 type ReplicaQueries struct {
 	writer   atomic.Bool
 	ctx      context.Context
+	cancel   context.CancelFunc
 	channel  string
 	buffer   *replica.Buffer
 	dispatch *queryresource.Dispatcher
@@ -40,8 +41,11 @@ type ReplicaQueries struct {
 	// while holding the recovery module lock used to serialize admission.
 	active   *typeutil.ConcurrentMap[string, *queryChannel]
 	recovery *PChannelRecoveryManager // bound while this replica has writer recovery
-	through  uint64
-	changed  chan struct{}
+	// events serializes snapshot installation, live delivery and readiness barriers.
+	// Releasing a view must remain possible while delivery waits for queue space.
+	events  sync.Mutex
+	through uint64
+	changed chan struct{}
 }
 type queryChannel struct {
 	resources *queryresource.Manager
@@ -51,7 +55,16 @@ type queryChannel struct {
 }
 
 func NewReplicaQueries(ctx context.Context, channel string, b *replica.Buffer, through uint64) *ReplicaQueries {
-	return &ReplicaQueries{ctx: ctx, channel: channel, buffer: b, through: through, dispatch: queryresource.NewConfiguredDispatcher(), active: typeutil.NewConcurrentMap[string, *queryChannel](), changed: make(chan struct{})}
+	q := &ReplicaQueries{
+		channel:  channel,
+		buffer:   b,
+		through:  through,
+		dispatch: queryresource.NewConfiguredDispatcher(),
+		active:   typeutil.NewConcurrentMap[string, *queryChannel](),
+		changed:  make(chan struct{}),
+	}
+	q.ctx, q.cancel = context.WithCancel(ctx) //nolint:gosec // ReplicaQueries.Close cancels blocked observers before draining resources.
+	return q
 }
 
 // RetryFailedPreparation reports whether local failures should be retried for
@@ -196,6 +209,7 @@ func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
 }
 
 func (q *ReplicaQueries) Close() {
+	q.cancel()
 	q.mu.Lock()
 	var active []*queryChannel
 	q.active.Range(func(name string, ch *queryChannel) bool {
@@ -203,8 +217,6 @@ func (q *ReplicaQueries) Close() {
 		q.active.Remove(name)
 		return true
 	})
-	close(q.changed)
-	q.changed = make(chan struct{})
 	q.mu.Unlock()
 	for _, ch := range active {
 		ch.resources.Close()
@@ -242,8 +254,8 @@ func (q *ReplicaQueries) PrepareUp(ctx context.Context, key qviews.QueryViewKey)
 }
 
 func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint64) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	q.events.Lock()
+	defer q.events.Unlock()
 	if through <= q.through {
 		return
 	}
@@ -308,17 +320,17 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 	if err != nil {
 		return err
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	q.events.Lock()
+	defer q.events.Unlock()
 	for q.through < frontier {
 		changed := q.changed
-		q.mu.Unlock()
+		q.events.Unlock()
 		select {
 		case <-ctx.Done():
 		case <-q.ctx.Done():
 		case <-changed:
 		}
-		q.mu.Lock()
+		q.events.Lock()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -337,7 +349,7 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 	view.PChannel = q.channel
 	view.TransformLogStream = walsummary.NewQuerySnapshot(store, manifest, tail, q.through)
 	view.RefreshSealedVersions = func(ctx context.Context) error { return q.refreshSealedVersions(ctx, meta.Vchannel) }
-	view.WithResourceEventLock = func(work func()) { q.mu.Lock(); defer q.mu.Unlock(); work() }
+	view.WithResourceEventLock = func(work func()) { q.events.Lock(); defer q.events.Unlock(); work() }
 	view.CaptureQueryView = func(m *viewpb.QueryViewMeta, cb func(walview.VChannelWALView)) bool {
 		return q.capture(q.ctx, m, cb) == nil
 	}
@@ -365,7 +377,7 @@ func (q *ReplicaQueries) refreshSealedVersions(ctx context.Context, vchannel str
 			segments[s.SegmentId] = s
 		}
 	}
-	q.mu.Lock()
+	q.events.Lock()
 	ch, _ := q.active.Get(vchannel)
 	if ch != nil {
 		for id := range ch.awaitingSealed {
@@ -374,15 +386,15 @@ func (q *ReplicaQueries) refreshSealedVersions(ctx context.Context, vchannel str
 			}
 		}
 	}
-	q.mu.Unlock()
+	q.events.Unlock()
 	if ch == nil {
 		return nil
 	}
 	if err := readSealedVersions(ctx, segments); err != nil {
 		return err
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	q.events.Lock()
+	defer q.events.Unlock()
 	if current, _ := q.active.Get(vchannel); current == ch {
 		for id, s := range segments {
 			if version := s.SealedAtDataVersion; version != nil {
@@ -448,6 +460,14 @@ func buildReplicaView(meta *viewpb.QueryViewMeta, vc *VChannelView, segments map
 			if vc != nil {
 				vc.ObserveDropCollectionMessageV1(message.MustAsImmutableDropCollectionMessageV1(msg))
 			}
+		case message.MessageTypeCreatePartition:
+			if vc != nil {
+				vc.ObserveCreatePartitionMessageV1(message.MustAsImmutableCreatePartitionMessageV1(msg))
+			}
+		case message.MessageTypeDropPartition:
+			if vc != nil {
+				vc.ObserveDropPartitionMessageV1(message.MustAsImmutableDropPartitionMessageV1(msg))
+			}
 		case message.MessageTypeCreateSegment:
 			create := message.MustAsImmutableCreateSegmentMessageV2(msg)
 			if id := create.Header().GetSegmentId(); segments[id] == nil {
@@ -480,7 +500,11 @@ func buildReplicaView(meta *viewpb.QueryViewMeta, vc *VChannelView, segments map
 		return empty, merr.WrapErrServiceNotReadyMsg("missing replica schema for %s", meta.Vchannel)
 	}
 	snapshot := walview.VisibleSegmentSnapshot{VChannel: meta.Vchannel, CollectionID: meta.CollectionId, DataVersion: version, BaseGrowingTimeTick: through}
+	partitions := typeutil.NewSet(state.PartitionIDs...)
 	for _, s := range segments {
+		if !partitions.Contain(s.PartitionId) {
+			continue
+		}
 		if s.SealedAtDataVersion != nil && !qviews.FromProtoDataVersion(s.SealedAtDataVersion).GT(version) {
 			snapshot.FlushedSegments = append(snapshot.FlushedSegments, walview.FlushedSegment{SegmentID: s.SegmentId, PartitionID: s.PartitionId, FlushTimeTick: s.CheckpointTimeTick, SealedAtDataVersion: qviews.FromProtoDataVersion(s.SealedAtDataVersion)})
 			continue

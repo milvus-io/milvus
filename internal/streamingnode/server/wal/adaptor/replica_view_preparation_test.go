@@ -290,3 +290,36 @@ func (f *replicaPreparationTest) checkDurableViews(expected ...qviews.QueryViewK
 	require.NoError(f.t, err)
 	lease.Release()
 }
+
+func TestWriterViewDirectDropRetiresDurableUp(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	f.key = f.v1
+	f.template = newQueryShutdownTestView("p_1v0", 10, viewpb.QueryViewState_QueryViewStateDropped)
+	f.reports = f.push(qviews.QueryViewStateDropped)
+	// Readers joining during retirement must still see the Down intent.
+	sub, snapshot, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer sub.Close()
+	id := &viewpb.QueryViewKey{Shard: f.key.ShardID.IntoProto(), Version: f.key.QueryViewVersion.IntoProto()}
+	var state viewpb.QueryViewState
+	for _, signal := range snapshot.QueryViews {
+		if proto.Equal(signal.View, id) {
+			state = signal.State
+		}
+	}
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, state)
+	two := f.subscribe(3)
+	sub.Report(&streamingpb.WALQueryViewReport{View: id, LocalState: viewpb.QueryViewState_QueryViewStateDown})
+	f.expectPending()
+	durable, err := f.catalog.ListQueryViews(f.ctx, "p")
+	require.NoError(t, err)
+	require.Len(t, durable, 1)
+	require.Equal(t, f.key, viewKey(durable[0]))
+	two(viewpb.QueryViewState_QueryViewStateDropped)
+	f.expectReport(qviews.QueryViewStateDropped)
+	durable, err = f.catalog.ListQueryViews(f.ctx, "p")
+	require.NoError(t, err)
+	require.Empty(t, durable)
+	f.reports = f.push(qviews.QueryViewStateDropped)
+	f.expectReport(qviews.QueryViewStateDropped)
+}

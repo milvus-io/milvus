@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	sncatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -20,6 +21,8 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -282,4 +285,70 @@ func TestReplicaQueryCaptureReleasesPinOnShutdown(t *testing.T) {
 			require.ErrorIs(t, q.capture(captureCtx, meta, nil), io.EOF)
 		})
 	}
+}
+
+func TestReplicaViewReplaysPartitionLifecycle(t *testing.T) {
+	tail := []message.ImmutableMessage{
+		message.NewCreatePartitionMessageBuilderV1().WithVChannel("v1").
+			WithHeader(&message.CreatePartitionMessageHeader{CollectionId: 1, PartitionId: 20}).WithBody(&message.CreatePartitionRequest{}).
+			MustBuildMutable().WithTimeTick(31).IntoImmutableMessage(walimplstest.NewTestMessageID(31)),
+		message.NewCreateSegmentMessageBuilderV2().WithVChannel("v1").
+			WithHeader(&message.CreateSegmentMessageHeader{CollectionId: 1, PartitionId: 20, SegmentId: 201, SchemaVersion: 1}).WithBody(&message.CreateSegmentMessageBody{}).
+			MustBuildMutable().WithTimeTick(32).IntoImmutableMessage(walimplstest.NewTestMessageID(32)),
+		message.NewSchemaChangeMessageBuilderV2().WithVChannel("v1").
+			WithHeader(&message.SchemaChangeMessageHeader{CollectionId: 1}).WithBody(&message.SchemaChangeMessageBody{Schema: &schemapb.CollectionSchema{Version: 2}}).
+			MustBuildMutable().WithTimeTick(33).IntoImmutableMessage(walimplstest.NewTestMessageID(33)),
+		message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+			WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 10}).WithBody(&message.DropPartitionRequest{}).
+			MustBuildMutable().WithTimeTick(34).IntoImmutableMessage(walimplstest.NewTestMessageID(34)),
+	}
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		101: {PartitionId: 10, SegmentId: 101, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
+		102: {PartitionId: 10, SegmentId: 102, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1}},
+	}
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v1", SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 2}}}
+	got, err := buildReplicaView(meta, NewVChannelViewFromMeta(restoreSchemaTestMeta()), segments, tail, 34)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, got.WriteSchema.GetVersion())
+	require.Empty(t, got.SegmentSnapshot.FlushedSegments)
+	require.Len(t, got.SegmentSnapshot.Segments, 1)
+	growing := got.SegmentSnapshot.Segments[0]
+	require.EqualValues(t, 201, growing.SegmentID)
+	require.EqualValues(t, 1, growing.Schema.GetVersion())
+}
+
+func TestReplicaQueryReleaseWithFullQueue(t *testing.T) {
+	q, _ := newTestReplicaQueries(t, nil)
+	started, resume := make(chan struct{}), make(chan struct{})
+	patch := mockey.Mock((*queryresource.QueryRuntime).Initialize).To(func(_ *queryresource.QueryRuntime, ctx context.Context, _ walview.VChannelWALView) error {
+		close(started)
+		<-resume
+		return ctx.Err()
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	defer close(resume)
+	key, _ := acquireReplicaView(q, 1)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initialization did not start")
+	}
+	// The scanner must resume on detach even while a preparing module is busy.
+	for tick := uint64(11); tick < 11+1024; tick++ {
+		q.Observe(nil, tick)
+	}
+	done := make(chan struct{})
+	go func() { q.Observe(nil, 1100); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("queue did not apply backpressure")
+	case <-time.After(20 * time.Millisecond):
+	}
+	go q.Release(snview.ReleaseResource{Key: key})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dropping the blocked runtime did not unblock the scanner")
+	}
+	require.EqualValues(t, 1100, q.through)
 }

@@ -153,12 +153,22 @@ func (r *QueryRuntime) ObserveEvent(ctx context.Context, event walview.VChannelR
 		r.mu.Unlock()
 		return false
 	}
-	for r.pendingLimit > 0 && len(r.pending) >= r.pendingLimit && r.state != queryRuntimeClosed {
-		r.cond.Wait()
-	}
-	if r.state == queryRuntimeClosed {
-		r.mu.Unlock()
-		return false
+	if r.pendingLimit > 0 && len(r.pending) >= r.pendingLimit {
+		// Cancel can race the transition into Wait. Take the same lock before
+		// waking producers so a cancellation cannot miss the waiter.
+		stop := context.AfterFunc(ctx, func() {
+			r.mu.Lock()
+			r.cond.Broadcast()
+			r.mu.Unlock()
+		})
+		for len(r.pending) >= r.pendingLimit && r.state != queryRuntimeClosed && ctx.Err() == nil {
+			r.cond.Wait()
+		}
+		stop()
+		if r.state == queryRuntimeClosed || ctx.Err() != nil {
+			r.mu.Unlock()
+			return false
+		}
 	}
 	r.pending = append(r.pending, event)
 	drain := r.markDrainScheduledLocked()

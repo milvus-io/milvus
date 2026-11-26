@@ -53,8 +53,10 @@ type writerViewControl struct {
 	stopped    bool
 	publisher  *replica.Publisher
 	operations map[qviews.QueryViewKey]*viewOperation
-	up         map[qviews.QueryViewKey]bool
-	readSide   *roWALAdaptorImpl
+	// An entry tracks a published or in-flight Up until its fenced deletion.
+	// A failed RPC can leave the catalog outcome unknown.
+	up       map[qviews.QueryViewKey]bool
+	readSide *roWALAdaptorImpl
 }
 
 func newWriterViewControl(ctx context.Context, r *roWALAdaptorImpl, p *replica.Publisher, durable []*viewpb.QueryViewOfShard) *writerViewControl {
@@ -90,19 +92,23 @@ func (h *writerViewControl) ApplyViews(batch []handler.ApplyView) {
 		ctx, cancel := context.WithCancel(h.ctx)
 		op := &viewOperation{cancel: cancel}
 		h.operations[key] = op
-		committed := h.up[key]
+		committed, mayBeUp := h.up[key]
+		if target == viewpb.QueryViewState_QueryViewStateUp && !mayBeUp {
+			h.up[key] = false
+		}
 		h.mu.Unlock()
-		initial := target
+		initial, signal := target, target
 		if target == viewpb.QueryViewState_QueryViewStateUp {
 			initial = viewpb.QueryViewState_QueryViewStatePreparing
-			if committed {
-				h.publisher.PublishView(key, target)
-			} else {
-				h.publisher.PublishView(key, initial)
+			if !committed {
+				signal = initial
 			}
-		} else {
-			h.publisher.PublishView(key, target)
 		}
+		retireUp := target == viewpb.QueryViewState_QueryViewStateDropped && mayBeUp
+		if retireUp {
+			signal = viewpb.QueryViewState_QueryViewStateDown
+		}
+		h.publisher.PublishView(key, signal)
 		// Track all local keys so switching this instance to a reader can
 		// retire omissions in the new writer's first snapshot.
 		f := h.readSide.follower
@@ -121,13 +127,26 @@ func (h *writerViewControl) ApplyViews(batch []handler.ApplyView) {
 			}
 			reported := viewpb.QueryViewState(result.State())
 			if target == viewpb.QueryViewState_QueryViewStateDropped && reported == target {
-				h.mu.Lock()
-				if h.operations[key] == op {
+				h.run(ctx, func() {
+					if retireUp && !h.confirm(ctx, key, viewpb.QueryViewState_QueryViewStateDown, def) {
+						return
+					}
+					h.mu.Lock()
+					if h.operations[key] != op || ctx.Err() != nil {
+						h.mu.Unlock()
+						return
+					}
+					if retireUp {
+						h.publisher.PublishView(key, target)
+					}
 					delete(h.operations, key)
-					delete(h.up, key)
-				}
-				h.mu.Unlock()
-				cancel()
+					h.mu.Unlock()
+					cancel()
+					if cmd.OnReport != nil {
+						cmd.OnReport(result)
+					}
+				})
+				return
 			}
 			if target == viewpb.QueryViewState_QueryViewStateUp && (reported == viewpb.QueryViewState_QueryViewStateReady || reported == viewpb.QueryViewState_QueryViewStateUp) {
 				h.run(ctx, func() {
@@ -196,6 +215,10 @@ func (h *writerViewControl) confirm(ctx context.Context, key qviews.QueryViewKey
 		})
 		if err == nil {
 			h.mu.Lock()
+			if ctx.Err() != nil {
+				h.mu.Unlock()
+				return false
+			}
 			if v.Meta.State == viewpb.QueryViewState_QueryViewStateUp {
 				h.up[key] = true
 			} else {
