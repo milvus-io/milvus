@@ -42,9 +42,7 @@
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_writer_c.h"
 #include "storage/KeyRetriever.h"
-#include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
-#include "storage/plugin/PluginInterface.h"
 
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
@@ -119,7 +117,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         parquet::WriterProperties::Builder builder;
         if (c_plugin_context != nullptr) {
             auto [key, metadata] =
-                milvus::storage::GetPackedWriterKeys(c_plugin_context);
+                milvus::storage::GetWriterEncryptionParams(c_plugin_context);
             parquet::FileEncryptionProperties::Builder file_encryption_builder(
                 key);
 
@@ -189,7 +187,7 @@ NewPackedWriter(struct ArrowSchema* schema,
         parquet::WriterProperties::Builder builder;
         if (c_plugin_context != nullptr) {
             auto [key, metadata] =
-                milvus::storage::GetPackedWriterKeys(c_plugin_context);
+                milvus::storage::GetWriterEncryptionParams(c_plugin_context);
             parquet::FileEncryptionProperties::Builder file_encryption_builder(
                 key);
             builder.encryption(

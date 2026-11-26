@@ -617,6 +617,22 @@ func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
 		require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
 		require.Equal(t, map[string]string{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="}, cipher.calls[len(cipher.calls)-1])
 	}
+
+	// Same-EZ backup import must register target (CreateEZ) before source (ImportEZ).
+	cipher.calls = nil
+	options := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
+	sameZoneEntries := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b2xk"},
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="},
+	}
+	keys, err := prepareImportCipher(options, properties, sameZoneEntries, 23)
+	require.NoError(t, err)
+	require.Equal(t, "b2xk", keys.Source.GetEncryptionKey())
+	require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
+	require.Equal(t, []map[string]string{
+		{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="},
+		{hookutil.CipherConfigImportEZ: "17", hookutil.CipherConfigUnsafeEZK: "b2xk"},
+	}, cipher.calls)
 }
 
 func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
@@ -624,8 +640,9 @@ func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
 	options := []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
 	entries := []*commonpb.KeyValuePair{{Key: "cipher.ezk", Value: "17:b2xk"}}
 	for kind, req := range map[string]proto.Message{
-		taskcommon.PreImport: &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
-		taskcommon.Import:    &datapb.ImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.PreImport:   &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.PreImportV3: &datapb.PreImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
+		taskcommon.Import:      &datapb.ImportRequest{TaskID: 73, Options: options, Schema: &schemapb.CollectionSchema{Properties: properties}, PluginContext: entries},
 	} {
 		s.Run(kind, func() {
 			payload, err := proto.Marshal(req)

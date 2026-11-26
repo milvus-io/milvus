@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -47,10 +48,11 @@ var _ ImportTask = (*preImportV3Task)(nil)
 type preImportV3Task struct {
 	task atomic.Pointer[datapb.PreImportTaskV3]
 
-	importMeta ImportMeta
-	tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	retryTimes int64
+	importMeta           ImportMeta
+	tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	retryTimes           int64
+	nonRetryableFailures int64
 }
 
 func newPreImportTaskV3(p *datapb.PreImportTaskV3, importMeta ImportMeta) *preImportV3Task {
@@ -179,25 +181,30 @@ func (p *preImportV3Task) setV3FileStats(fileStats []*datapb.ImportV3FileStats) 
 func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport v3 task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
-		if retryableImportSourceError(err) {
-			p.retryTimes++
+		if errors.Is(err, errSnapshotTaskSource) {
+			mlog.Warn(context.TODO(), "assemble preimport v3 request failed terminally", WrapTaskLog(p, mlog.Err(err))...)
+			failImportDispatch(p, p.importMeta, err)
 			return
 		}
-		failImportDispatch(p, p.importMeta, err)
+		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport v3 failed", WrapTaskLog(p, mlog.Err(err))...)
+		p.retryTimes++
 		// Raw transport errors are not terminal and retry; a deterministic
 		// rejection fails the task.
 		if importcommon.IsTerminalImportV3Err(err) {
 			p.Fail(err.Error())
 			return
 		}
-		p.retryTimes++
+		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),

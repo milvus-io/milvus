@@ -17,12 +17,17 @@
 package hookutil
 
 import (
+	"context"
+	"encoding/base64"
+	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -53,15 +58,28 @@ type importResolverCipher struct {
 	resolve func(string) (int64, []byte, error)
 }
 
+func (importResolverCipher) Backup(int64) (string, error) {
+	return "test-backup", nil
+}
+
 func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	return c.resolve(artifact)
 }
+
+type temporaryError struct {
+	msg       string
+	temporary bool
+}
+
+func (e temporaryError) Error() string   { return e.msg }
+func (e temporaryError) Temporary() bool { return e.temporary }
 
 func TestBackupSourcePluginContext(t *testing.T) {
 	paramtable.Init()
 	previous := GetCipher()
 	t.Cleanup(func() { storeCipher(previous) })
 	denied := errors.New("source KMS denied Decrypt")
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17}`))
 	for _, tc := range []struct {
 		name   string
 		cipher hook.Cipher
@@ -72,29 +90,98 @@ func TestBackupSourcePluginContext(t *testing.T) {
 		{"empty resolved keyset", importResolverCipher{resolve: func(string) (int64, []byte, error) {
 			return 17, nil, nil
 		}}, merr.ErrServiceInternal},
+		{"mismatched resolved ezID", importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 18, []byte("k"), nil
+		}}, merr.ErrServiceInternal},
 		{"provider error survives", importResolverCipher{resolve: func(string) (int64, []byte, error) {
 			return 0, nil, denied
 		}}, denied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storeCipher(tc.cipher)
-			ctx, err := ResolveImportEZ("artifact")
+			ctx, err := ResolveImportEZ(artifact)
 			require.ErrorIs(t, err, tc.err)
 			require.Nil(t, ctx)
 		})
 	}
 
+	t.Run("rejects malformed artifact before calling resolver", func(t *testing.T) {
+		called := false
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			called = true
+			return 17, []byte("k"), nil
+		}})
+		for _, invalid := range []string{"%%", base64.StdEncoding.EncodeToString([]byte(`not-json`)), base64.StdEncoding.EncodeToString([]byte(`{"ez_id":0}`))} {
+			ctx, err := ResolveImportEZ(invalid)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Nil(t, ctx)
+		}
+		require.False(t, called)
+	})
+
+	t.Run("transient non-merr error maps to retryable service unavailable", func(t *testing.T) {
+		transient := temporaryError{msg: "source KMS throttled", temporary: true}
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, errors.Wrap(transient, "kms call failed")
+		}})
+		ctx, err := ResolveImportEZ(artifact)
+		require.Nil(t, ctx)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, transient)
+		require.True(t, merr.IsRetryableErr(err))
+
+		// Joined error with non-retryable first and temporary second must map to ServiceUnavailable.
+		joined := fmt.Errorf("%w: %w", merr.ErrParameterInvalid, transient)
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, joined
+		}})
+		ctx, err = ResolveImportEZ(artifact)
+		require.Nil(t, ctx)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(err))
+
+		// Non-temporary error stays non-retryable.
+		nonTransient := temporaryError{msg: "permanent error", temporary: false}
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, nonTransient
+		}})
+		ctx, err = ResolveImportEZ(artifact)
+		require.Nil(t, ctx)
+		require.ErrorIs(t, err, nonTransient)
+		require.NotErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.False(t, merr.IsRetryableErr(err))
+
+		// Existing retryable merr code and context timeout are preserved as-is.
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, merr.WrapErrTooManyRequests(10)
+		}})
+		_, err = ResolveImportEZ(artifact)
+		require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+		require.NotErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(err))
+
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, fmt.Errorf("rpc call: %w", context.DeadlineExceeded)
+		}})
+		_, err = ResolveImportEZ(artifact)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.True(t, merr.IsCanceledOrTimeout(err))
+		require.NotErrorIs(t, err, merr.ErrServiceUnavailable)
+	})
+
 	t.Run("same EZ returns the bytes of each artifact", func(t *testing.T) {
-		storeCipher(importResolverCipher{resolve: func(artifact string) (int64, []byte, error) {
-			if artifact == "before rotation" {
+		beforeArtifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17,"v":1}`))
+		afterArtifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17,"v":2}`))
+		storeCipher(importResolverCipher{resolve: func(a string) (int64, []byte, error) {
+			if a == beforeArtifact {
 				return 17, []byte{0xff, 0x00}, nil
 			}
 			return 17, []byte{0x01, 0xff}, nil
 		}})
 		for _, backup := range []struct{ artifact, wire string }{
-			{"before rotation", "17:/wA="},
-			{"after rotation", "17:Af8="},
-			{"before rotation", "17:/wA="},
+			{beforeArtifact, "17:/wA="},
+			{afterArtifact, "17:Af8="},
+			{beforeArtifact, "17:/wA="},
 		} {
 			ctx, err := ResolveImportEZ(backup.artifact)
 			require.NoError(t, err)
@@ -102,5 +189,31 @@ func TestBackupSourcePluginContext(t *testing.T) {
 			require.Equal(t, CipherConfigUnsafeEZK, ctx[0].GetKey())
 			require.Equal(t, backup.wire, ctx[0].GetValue())
 		}
+	})
+
+	t.Run("decodeEZContext does not echo raw context", func(t *testing.T) {
+		_, _, err := decodeEZContext("super-secret-value")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NotContains(t, err.Error(), "super-secret-value")
+
+		_, _, err = decodeEZContext("not-an-int:super-secret-key")
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NotContains(t, err.Error(), "super-secret-key")
+	})
+
+	t.Run("GetImportStoragePluginContext validates target properties", func(t *testing.T) {
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 17, []byte("src"), nil
+		}})
+		_, err := GetImportStoragePluginContext(artifact, []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEzIDKey, Value: "17"},
+			{Key: common.EncryptionEzIDKey, Value: "18"},
+		}, 23)
+		require.ErrorContains(t, err, "duplicate")
+
+		_, err = GetImportStoragePluginContext(artifact, []*commonpb.KeyValuePair{
+			{Key: common.EncryptionEzIDKey, Value: "0"},
+		}, 23)
+		require.ErrorContains(t, err, "invalid target")
 	})
 }

@@ -3550,7 +3550,7 @@ func TestBinlogReaderReadFilterResults(t *testing.T) {
 			defer owner.Close()
 			// A small buffer exercises repeated Read calls, including filtered
 			// prefixes/tails. Do not prescribe batch sizes or empty batches.
-			r := newReader(context.Background(), nil, schema, nil, storage.StorageV1, 1, "")
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV1, 1)
 			r.dr = storage.NewDeserializeReader(owner, func(rec storage.Record, dst []*storage.Value) error {
 				return storage.ValueDeserializerWithSchema(rec, dst, schema, true)
 			})

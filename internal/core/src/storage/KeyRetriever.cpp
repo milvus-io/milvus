@@ -23,9 +23,13 @@ parquet::ArrowReaderProperties arrow_reader_properties =
 }  // namespace
 
 std::pair<std::string, std::string>
-GetPackedWriterKeys(const CPluginContext* context) {
-    AssertInfo(context && context->key && *context->key,
-               "missing cipher keyset");
+GetWriterEncryptionParams(const CPluginContext* context) {
+    if (context == nullptr) {
+        ThrowInfo(ErrorCode::InvalidParameter, "c_plugin_context is nullptr");
+    }
+    if (!context->key || !*context->key) {
+        ThrowInfo(ErrorCode::InvalidParameter, "missing writer keyset");
+    }
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     if (!plugin) {
         ThrowInfo(ErrorCode::Unsupported, "missing cipher plugin");
@@ -33,14 +37,14 @@ GetPackedWriterKeys(const CPluginContext* context) {
     auto result = plugin->GetEncryptorForKeyset(
         context->ez_id, context->collection_id, context->key);
     if (!result.first) {
-        ThrowInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::InvalidParameter,
                   "cipher plugin returned no encryptor");
     }
     auto key = result.first->GetKey();
     if ((key.size() != 16 && key.size() != 24 && key.size() != 32) ||
         result.second.empty() ||
         result.second.find('\0') != std::string::npos) {
-        ThrowInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::InvalidParameter,
                   "cipher plugin returned unusable encryption parameters");
     }
     return {
@@ -51,15 +55,18 @@ GetPackedWriterKeys(const CPluginContext* context) {
 
 void
 RegisterReaderKeys(const CPluginContext* context) {
-    if (context) {
-        auto cipher = PluginLoader::GetInstance().getCipherPlugin();
-        if (!cipher) {
-            ThrowInfo(ErrorCode::Unsupported, "missing cipher plugin");
-        }
-        AssertInfo(context->key && *context->key, "missing reader keyset");
-        cipher->RegisterReadKeyset(
-            context->ez_id, context->collection_id, context->key);
+    if (!context) {
+        return;
     }
+    if (!context->key || !*context->key) {
+        ThrowInfo(ErrorCode::InvalidParameter, "missing reader keyset");
+    }
+    auto cipher = PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(ErrorCode::Unsupported, "missing cipher plugin");
+    }
+    cipher->RegisterReadKeyset(
+        context->ez_id, context->collection_id, context->key);
 }
 
 std::string
@@ -142,6 +149,11 @@ EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) {
 
 std::shared_ptr<CPluginContext>
 DecodeKeyMetadata(const std::string& key_metadata) {
+    // Keep the wrapped key alive for as long as its C context is used.
+    struct OwnedContext : CPluginContext {
+        std::string wrapped_key;
+    };
+    auto context = std::make_shared<OwnedContext>();
     try {
         auto first_pos = key_metadata.find("_");
         if (first_pos == std::string::npos) {
@@ -153,18 +165,11 @@ DecodeKeyMetadata(const std::string& key_metadata) {
             return nullptr;
         }
 
-        auto context = std::shared_ptr<CPluginContext>(
-            new CPluginContext{0, 0, nullptr}, [](CPluginContext* ctx) {
-                free(const_cast<char*>(ctx->key));
-                delete ctx;
-            });
         context->ez_id = std::stoll(key_metadata.substr(0, first_pos));
         context->collection_id = std::stoll(
             key_metadata.substr(first_pos + 1, second_pos - (first_pos + 1)));
-        context->key = strdup(key_metadata.substr(second_pos + 1).c_str());
-        if (context->key == nullptr) {
-            return nullptr;
-        }
+        context->wrapped_key = key_metadata.substr(second_pos + 1);
+        context->key = context->wrapped_key.c_str();
         return context;
     } catch (const std::exception& e) {
         LOG_WARN("failed to decode key metadata, reason: {}", e.what());

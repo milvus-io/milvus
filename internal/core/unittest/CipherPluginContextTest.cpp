@@ -259,7 +259,7 @@ TEST(CipherPluginContextTest, ImportWriterRejectsUnusableEncryptionParameters) {
         char* key = nullptr;
         char* metadata = nullptr;
         auto status = GetEncParams(&context, &key, &metadata);
-        ASSERT_EQ(status.error_code, ErrorCode::Unsupported);
+        ASSERT_EQ(status.error_code, ErrorCode::InvalidParameter);
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(key, nullptr);
         EXPECT_EQ(metadata, nullptr);

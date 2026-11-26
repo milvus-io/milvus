@@ -50,12 +50,13 @@ var _ ImportTask = (*Task)(nil)
 type Task struct {
 	Task atomic.Pointer[datapb.ImportTaskV2]
 
-	Alloc      allocator.Allocator
-	Meta       *meta.Meta
-	ImportMeta ImportMeta
-	Tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	retryTimes int64
+	Alloc                allocator.Allocator
+	Meta                 *meta.Meta
+	ImportMeta           ImportMeta
+	Tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	retryTimes           int64
+	nonRetryableFailures int64
 }
 
 func (t *Task) GetJobID() int64 {
@@ -196,27 +197,24 @@ func (t *Task) NodeMemoryShare() float64 {
 func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssembleImportRequest(t, job, t.Meta, t.Alloc)
 	if err != nil {
-		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.IsAny(err, importid.ErrIDRangeTooSmall, errSnapshotTaskSource) ||
-			(errors.Is(err, errImportSourceKey) && !retryableImportSourceError(err)) {
-			// Persist the source rejection or invalid reservation before the job
-			// times out and loses the cause. The checker fails its tasks on the next tick.
+		if errors.IsAny(err, importid.ErrIDRangeTooSmall, errSnapshotTaskSource) {
+			mlog.Warn(context.TODO(), "assemble import request failed terminally", WrapTaskLog(t, mlog.Err(err))...)
+			// Persist the invalid reservation or snapshot source error immediately.
 			failImportDispatch(t, t.ImportMeta, err)
 			return
 		}
-		t.retryTimes++
+		handleImportDispatchError(t, t.ImportMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
-		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
-		if isBackupCipherRejection(req.GetOptions(), err) {
-			failImportDispatch(t, t.ImportMeta, err)
-			return
-		}
 		t.retryTimes++
+		handleImportDispatchError(t, t.ImportMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	err = t.ImportMeta.UpdateTask(context.TODO(), t.GetTaskID(),

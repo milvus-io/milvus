@@ -56,9 +56,6 @@ import (
 // An immutable job/task source mismatch cannot be repaired by rescheduling.
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
 
-// Mark source resolution separately from target and inventory failures.
-var errImportSourceKey = errors.New("cannot resolve backup encryption key")
-
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -104,6 +101,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       meta.NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format(time.RFC3339),
@@ -391,20 +389,7 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
-func resolveImportReadContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
-	ctx, err := meta.GetReadPluginContext(options)
-	if err != nil {
-		return nil, merr.Mark(err, errImportSourceKey)
-	}
-	return ctx, nil
-}
-
-func retryableImportSourceError(err error) bool {
-	if !errors.Is(err, errImportSourceKey) {
-		return false
-	}
-	return retryableKMSCause(err)
-}
+const maxImportDispatchRetries = 3
 
 func retryableKMSCause(err error) bool {
 	for ; err != nil; err = errors.Unwrap(err) {
@@ -429,17 +414,6 @@ func retryableKMSCause(err error) bool {
 	return false
 }
 
-// New workers report a deterministic backup cipher rejection as an import
-// system error at CreateTask. Older workers and transient RPC failures retain
-// their existing retry behavior.
-func isBackupCipherRejection(options importutilv2.Options, err error) bool {
-	if !errors.Is(err, merr.ErrImportSysFailed) || merr.IsRetryableErr(err) {
-		return false
-	}
-	artifact, _ := importutilv2.GetEZK(options)
-	return artifact != "" || importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)
-}
-
 func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
 	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
 		UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
@@ -447,14 +421,22 @@ func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
 	}
 }
 
+func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
+	mlog.Warn(context.TODO(), "failed to dispatch import task", WrapTaskLog(task, mlog.Err(cause))...)
+	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) || retryableKMSCause(cause) {
+		return
+	}
+	*nonRetryableFailures++
+	if *nonRetryableFailures < maxImportDispatchRetries {
+		return
+	}
+	failImportDispatch(task, im, cause)
+}
+
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, err
-	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
-		return nil, err
+		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),
@@ -467,10 +449,9 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    readContext,
 		SnapshotL0Source: l0Source,
 	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+	if err := meta.WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
 		return nil, err
 	}
 	return req, nil
@@ -484,10 +465,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
-		return nil, err
-	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
 		segment := mt.GetSegment(context.TODO(), segmentID)
@@ -500,6 +477,32 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 			Vchannel:    segment.GetInsertChannel(),
 		})
 	}
+
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	storageVersion := importStorageVersion(isL0Import)
+	useLoonFFI := importUseLoonFFI(isL0Import)
+
+	req := &datapb.ImportRequest{
+		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		Files:            importFiles,
+		Options:          job.GetOptions(),
+		RequestSegments:  requestSegments,
+		StorageConfig:    meta.CreateStorageConfig(),
+		StorageVersion:   storageVersion,
+		UseLoonFfi:       useLoonFFI,
+		SnapshotL0Source: l0Source,
+	}
+	// Resolve and validate cipher contexts before allocating timestamps/IDs so retries do not waste ranges.
+	if err := meta.WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
@@ -532,33 +535,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		mlog.Uint64("ts", ts))...,
 	)
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	storageVersion := importStorageVersion(isL0Import)
-	useLoonFFI := importUseLoonFFI(isL0Import)
-
-	req := &datapb.ImportRequest{
-		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:            task.GetJobID(),
-		TaskID:           task.GetTaskID(),
-		CollectionID:     task.GetCollectionID(),
-		PartitionIDs:     importTaskPartitionIDs(task, job),
-		Vchannels:        job.GetVchannels(),
-		Schema:           job.GetSchema(),
-		Files:            importFiles,
-		Options:          job.GetOptions(),
-		Ts:               ts,
-		IDRange:          idRange,
-		RequestSegments:  requestSegments,
-		StorageConfig:    meta.CreateStorageConfig(),
-		TaskSlot:         task.GetTaskSlot(),
-		StorageVersion:   storageVersion,
-		PluginContext:    readContext,
-		UseLoonFfi:       useLoonFFI,
-		SnapshotL0Source: l0Source,
-	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		return nil, err
-	}
+	req.Ts = ts
+	req.IDRange = idRange
+	req.TaskSlot = task.GetTaskSlot()
 	return req, nil
 }
 

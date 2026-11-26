@@ -199,12 +199,7 @@ func (s *propagationImportSuite) SetupSuite() {
 	s.WithMilvusConfig("dataCoord.import.enableIDRangeMsg", "true")
 	// Leave time to replace DN between independently dispatched stages. The
 	// test checks task metadata, so an unexpected early dispatch fails it.
-	checkInterval := "15"
-	if s.faultStage == "preimport" {
-		// The fault is terminal, so there is no next stage to isolate.
-		checkInterval = "2"
-	}
-	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", checkInterval)
+	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "15")
 	s.WithMilvusConfig("dataCoord.import.scheduleInterval", "0.1")
 	s.WithMilvusConfig("dataCoord.taskCheckInterval", "1")
 	s.setupRawData(2) // backup input is a real packed-binlog collection
@@ -328,21 +323,6 @@ func (s *propagationImportSuite) TestBackup() {
 	s.Require().NoError(err)
 	prefixes := []string{fmt.Sprintf("insert_log/%d", collectionID), fmt.Sprintf("stats_log/%d", collectionID), fmt.Sprintf("import_v3/%d", jobID)}
 	before := s.objectSnapshot(ctx, prefixes...)
-	if s.faultStage == "preimport" {
-		s.Require().Eventually(func() bool {
-			progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{DbName: s.dbName, JobID: response.GetJobID()})
-			s.Require().NoError(merr.CheckRPCCall(progress, err))
-			return progress.GetState() == internalpb.ImportJobState_Failed
-		}, 90*time.Second, 200*time.Millisecond)
-		s.Require().NotEmpty(s.fixture.faultHits(s.T(), fault))
-		s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)))
-		s.fixture.assertNotRegistered(s.T(), nodeID, s.ezID)
-		for _, task := range s.stageTasks(ctx, jobID, "preimport") {
-			s.Require().LessOrEqual(task.nodeID, int64(0))
-		}
-		s.T().Logf("job=%d stage=preimport outcome=failed-before-dispatch", jobID)
-		return // Existing PreImport assembly failures are terminal.
-	}
 	stages := []string{"preimport", "import"}
 	if s.protocol == 3 {
 		stages = []string{"preimport", "reshard", "import"}

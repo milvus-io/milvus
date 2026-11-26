@@ -20,7 +20,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "PluginInterface.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/CGoCatch.h"
@@ -35,7 +34,6 @@
 #include "milvus-storage/reader.h"
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
-#include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
 #include <arrow/array.h>

@@ -31,7 +31,7 @@ RegisterReaderKeys(const CPluginContext* context);
 // Raw Parquet DEK and footer metadata. Import writers request a fresh DEK
 // from the supplied target keyset without changing the ordinary primary.
 std::pair<std::string, std::string>
-GetPackedWriterKeys(const CPluginContext* context);
+GetWriterEncryptionParams(const CPluginContext* context);
 
 parquet::ReaderProperties
 GetReaderProperties();

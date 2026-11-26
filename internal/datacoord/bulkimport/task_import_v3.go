@@ -44,13 +44,14 @@ import (
 )
 
 type importTaskV3 struct {
-	task       atomic.Pointer[datapb.ImportTaskV3]
-	importMeta ImportMeta
-	meta       *meta.Meta
-	alloc      allocator.Allocator
-	tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	metrics    importTaskMetrics
+	task                 atomic.Pointer[datapb.ImportTaskV3]
+	importMeta           ImportMeta
+	meta                 *meta.Meta
+	alloc                allocator.Allocator
+	tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	metrics              importTaskMetrics
+	nonRetryableFailures int64
 }
 
 func NewImportTaskV3(p *datapb.ImportTaskV3, importMeta ImportMeta, mt *meta.Meta, alloc allocator.Allocator) *importTaskV3 {
@@ -169,15 +170,18 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		t.Fail("import v3 task job is missing")
 		return
 	}
+	if job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	if job.GetState() != internalpb.ImportJobState_Planning && job.GetState() != internalpb.ImportJobState_Importing {
 		t.Fail(fmt.Sprintf("import v3 task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
+	// Resolve both source and target cipher contexts before mutating segment
+	// metadata so transient key failures do not drop old segments or create new ones.
+	pluginContext, err := meta.GetImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions())
 	if err != nil {
-		if !retryableImportSourceError(err) {
-			failImportDispatch(t, t.importMeta, err)
-		}
+		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	plan, slot, err := importPlan(job, p, getImportV3Config())
@@ -214,12 +218,8 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
 		LogRange: p.GetLogRange(), Slot: slot,
 		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: readContext,
+		PluginContext: pluginContext,
 		Plan:          plan,
-	}
-	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
 	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.

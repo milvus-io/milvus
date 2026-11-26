@@ -43,13 +43,14 @@ import (
 )
 
 type reshardTask struct {
-	task       atomic.Pointer[datapb.ReshardTask]
-	importMeta ImportMeta
-	meta       *meta.Meta
-	alloc      allocator.Allocator
-	tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	metrics    importTaskMetrics
+	task                 atomic.Pointer[datapb.ReshardTask]
+	importMeta           ImportMeta
+	meta                 *meta.Meta
+	alloc                allocator.Allocator
+	tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	metrics              importTaskMetrics
+	nonRetryableFailures int64
 
 	// sourceProgress is the latest per-source hashed rows the worker reported.
 	// It is deliberately in-memory only: progress is transient, so it is not
@@ -200,6 +201,9 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 		return
 	}
 	if !reshardDispatchable(job.GetState()) {
+		if job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+			return
+		}
 		if importV3PreReshardState(job.GetState()) {
 			// ReshardTasks are persisted a moment before the job advances to
 			// Resharding (see createReshardTasks). The async dispatch
@@ -214,11 +218,9 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 		t.Fail(fmt.Sprintf("reshard task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
+	pluginContext, err := meta.GetImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions())
 	if err != nil {
-		if !retryableImportSourceError(err) {
-			failImportDispatch(t, t.importMeta, err)
-		}
+		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	cfg := getImportV3Config()
@@ -230,12 +232,8 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
 		Slot: reshardSlot(job, cfg), StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: readContext,
+		PluginContext: pluginContext,
 		Plan:          plan,
-	}
-	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
 	}
 	// PrepareRun: persist the intended run/node before the uncertain Create RPC.
 	// If we crash after the RPC was accepted but before this write, recovery can

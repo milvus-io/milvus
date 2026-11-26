@@ -18,7 +18,6 @@ package hookutil
 
 import (
 	"encoding/base64"
-	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -36,22 +35,25 @@ func registerTaskKey(context *indexcgopb.StoragePluginContext, readOnly bool) er
 	if context == nil {
 		return nil
 	}
-	cipher := GetCipher()
-	if cipher == nil {
+	if GetCipher() == nil {
 		return merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
 	}
-	config := map[string]string{
-		CipherConfigCreateEZ:  strconv.FormatInt(context.GetEncryptionZoneId(), 10),
-		CipherConfigUnsafeEZK: context.GetEncryptionKey(),
-	}
+	var err error
 	if readOnly {
-		config[CipherConfigReadOnly] = "true"
+		err = RegisterLocalImportEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
+	} else {
+		err = CreateLocalEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
 	}
-	err := cipher.Init(config)
-	if err != nil && !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
-		err = merr.Combine(err, merr.ErrImportSysFailed)
+	if err != nil {
+		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) && isTemporaryError(err) {
+			return merr.WrapErrServiceUnavailableErr(err, "register import encryption context")
+		}
+		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
+			err = merr.Combine(err, merr.ErrImportSysFailed)
+		}
+		return merr.Wrap(err, "register import encryption context")
 	}
-	return merr.Wrap(err, "register import encryption context")
+	return nil
 }
 
 // PrepareImportCipher validates the entire ordered wire context before making
@@ -73,6 +75,11 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 }
 
 func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
+	targetEZ, hasTarget, err := parseTargetEzID(properties)
+	if err != nil {
+		return ImportCipherContext{}, merr.Combine(err, merr.ErrImportSysFailed)
+	}
+
 	var cipherEntries []*commonpb.KeyValuePair
 	for _, entry := range entries {
 		if entry.GetKey() == CipherConfigUnsafeEZK {
@@ -98,15 +105,13 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 
 	var result ImportCipherContext
 	if sourceEZ != 0 {
-		var err error
 		result.Source, err = take(sourceEZ, 0)
 		if err != nil {
 			return ImportCipherContext{}, err
 		}
 	}
-	if target := GetEzByCollProperties(properties, collectionID); target != nil {
-		var err error
-		result.Target, err = take(target.EzID, collectionID)
+	if hasTarget {
+		result.Target, err = take(targetEZ, collectionID)
 		if err != nil {
 			return ImportCipherContext{}, err
 		}
@@ -114,10 +119,11 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 	if len(cipherEntries) != 0 {
 		return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("import task has unexpected cipher.ezk entries")
 	}
-	if err := registerTaskKey(result.Source, true); err != nil {
+	// Register the authoritative target before registering a same-zone read-only source.
+	if err := registerTaskKey(result.Target, false); err != nil {
 		return ImportCipherContext{}, err
 	}
-	if err := registerTaskKey(result.Target, false); err != nil {
+	if err := registerTaskKey(result.Source, true); err != nil {
 		return ImportCipherContext{}, err
 	}
 	return result, nil

@@ -40,8 +40,11 @@
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
 #include "storage/PluginLoader.h"
+#include "storage/KeyRetriever.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/PlannerCipherPlugin.h"
 
@@ -449,4 +452,110 @@ TEST(CPackedTest, PackedReaderEagerPrebuffer) {
         status = CloseReader(reader);
         EXPECT_EQ(status.error_code, 0);
     }
+}
+
+TEST(CPackedTest, ReportsWriterAndReaderKeysetErrors) {
+    auto& loader = milvus::storage::PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+
+    auto cipher = std::make_shared<testing::StrictMock<PackedImportCipher>>();
+    loader.registerPluginForTest(cipher);
+
+    auto schema = arrow::schema(
+        {arrow::field("int64",
+                      arrow::int64(),
+                      false,
+                      arrow::key_value_metadata(
+                          {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
+
+    CPluginContext empty_key{17, 23, ""};
+    CPluginContext bad_reader_key{17, 0, "c291cmNl"};
+    CPluginContext valid_target{17, 23, "dGFyZ2V0"};
+
+    // Writer keyset errors: empty key -> InvalidParameter; null encryptor -> InvalidParameter.
+    char* enc_key = nullptr;
+    char* enc_meta = nullptr;
+    auto empty_status = GetEncParams(&empty_key, &enc_key, &enc_meta);
+    EXPECT_EQ(empty_status.error_code, milvus::ErrorCode::InvalidParameter);
+    free(const_cast<char*>(empty_status.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "dGFyZ2V0"))
+        .WillOnce(testing::Return(
+            PackedImportCipher::EncryptorResult{nullptr, "edek"}));
+    auto no_enc_status = GetEncParams(&valid_target, &enc_key, &enc_meta);
+    EXPECT_EQ(no_enc_status.error_code, milvus::ErrorCode::InvalidParameter);
+    free(const_cast<char*>(no_enc_status.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    // Reader keyset errors: empty key -> InvalidParameter; runtime_error -> UnexpectedError.
+    std::string file = TestLocalPath + "rejected-reader.parquet";
+    char* path = file.data();
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl"))
+        .WillOnce(testing::Throw(std::runtime_error("conflicting key ID")));
+    for (auto [ctx, expected_code] : {
+             std::pair{&empty_key, milvus::ErrorCode::InvalidParameter},
+             std::pair{&bad_reader_key, milvus::ErrorCode::UnexpectedError},
+         }) {
+        ArrowSchema c_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        CPackedReader reader = nullptr;
+        auto status =
+            NewPackedReader(&path, 1, &c_schema, 1024, 0, &reader, ctx);
+        if (c_schema.release != nullptr) {
+            c_schema.release(&c_schema);
+        }
+        EXPECT_EQ(status.error_code, expected_code);
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(reader, nullptr);
+    }
+
+    // Missing cipher plugin -> Unsupported for both writer and reader.
+    loader.unregisterPluginForTest("CipherPlugin");
+    auto no_plugin_writer = GetEncParams(&valid_target, &enc_key, &enc_meta);
+    EXPECT_EQ(no_plugin_writer.error_code, milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(no_plugin_writer.error_msg));
+}
+
+TEST(CPackedTest, PluginContextUpdateExceptionsReturnStatus) {
+    auto& loader = milvus::storage::PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+
+    for (CPluginContext invalid :
+         {CPluginContext{17, 23, nullptr}, CPluginContext{17, 23, ""}}) {
+        auto status = PutOrRefPluginContext(invalid);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        free(const_cast<char*>(status.error_msg));
+    }
+
+    auto cipher = std::make_shared<testing::StrictMock<PackedImportCipher>>();
+    loader.registerPluginForTest(cipher);
+    CPluginContext context{17, 23, "dGFyZ2V0"};
+
+    EXPECT_CALL(*cipher, Update(17, 23, context.key))
+        .WillOnce(testing::Throw(milvus::SegcoreError(
+            milvus::ErrorCode::InvalidParameter, "invalid plugin context")));
+    auto status = PutOrRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+    free(const_cast<char*>(status.error_msg));
+
+    EXPECT_CALL(*cipher, Update(17, 23, ""))
+        .WillOnce(testing::Throw(std::runtime_error("unref failed")));
+    status = UnRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::UnexpectedError);
+    free(const_cast<char*>(status.error_msg));
 }

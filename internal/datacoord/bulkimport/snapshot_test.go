@@ -1448,6 +1448,9 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	// No worker/allocator is supplied: malformed immutable inventories must
 	// fail before dispatch/allocation, not keep the job retrying until timeout.
 	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())
+	require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
+	job.State = internalpb.ImportJobState_Importing
+	job.Reason = ""
 	imp.CreateTaskOnWorker(1, nil, imp.GetTaskResource())
 	require.Equal(t, 2, updates)
 	require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
@@ -1455,6 +1458,7 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	require.Zero(t, pre.retryTimes)
 	require.Zero(t, imp.retryTimes)
 	updateJob.UnPatch()
+	job.State = internalpb.ImportJobState_PreImporting
 	persistFailure := mockey.Mock((*failedSourceMeta).UpdateJob).Return(merr.ErrIoKeyNotFound).Build()
 	defer persistFailure.UnPatch()
 	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())

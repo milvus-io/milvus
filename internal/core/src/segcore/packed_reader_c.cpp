@@ -38,10 +38,8 @@
 #include "milvus-storage/properties.h"
 #include "monitor/scope_metric.h"
 #include "storage/KeyRetriever.h"
-#include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/Util.h"
-#include "storage/plugin/PluginInterface.h"
 
 namespace {
 

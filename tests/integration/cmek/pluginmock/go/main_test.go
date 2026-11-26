@@ -53,19 +53,23 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(17), zone)
 	require.Equal(t, payload.Key, key)
-	require.NoError(t, receiver.Init(map[string]string{createEZKey: "17", unsafeEZK: base64.StdEncoding.EncodeToString(key), "cipher.ez.readOnly": "true"}))
+	require.NoError(t, receiver.Init(map[string]string{importEZKey: "17", unsafeEZK: base64.StdEncoding.EncodeToString(key)}))
 	_, edek, err := sender.GetEncryptor(17, 42)
 	require.NoError(t, err)
 	_, err = receiver.GetDecryptor(17, 42, edek)
 	require.NoError(t, err)
 	require.Empty(t, receiver.GetUnsafeKey(17, 0))
-	require.NoError(t, receiver.Init(map[string]string{"cipher.ez.import": backup}))
-	require.Equal(t, payload.Key, receiver.GetUnsafeKey(17, 0))
+	_, _, err = receiver.GetEncryptor(17, 42)
+	require.Error(t, err, "read-only import registration must not enable encryption")
 	require.Empty(t, receiver.GetUnsafeKey(18, 0))
+	require.Error(t, receiver.Init(map[string]string{importEZKey: "0", unsafeEZK: base64.StdEncoding.EncodeToString(key)}))
+	require.Error(t, receiver.Init(map[string]string{importEZKey: "17", unsafeEZK: ""}))
 	payload.Key[0] ^= 1
 	invalid, err := json.Marshal(payload)
 	require.NoError(t, err)
-	require.Error(t, receiver.Init(map[string]string{"cipher.ez.import": base64.StdEncoding.EncodeToString(invalid)}))
+	_, _, err = receiver.ResolveImportEZ(base64.StdEncoding.EncodeToString(invalid))
+	require.Error(t, err)
+	require.Error(t, receiver.Init(map[string]string{importEZKey: "17", unsafeEZK: base64.StdEncoding.EncodeToString(payload.Key)}))
 }
 
 func TestFixtureDataNodeRequiresReceivedKey(t *testing.T) {

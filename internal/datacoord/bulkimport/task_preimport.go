@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
@@ -39,10 +41,11 @@ var _ ImportTask = (*PreImportTask)(nil)
 type PreImportTask struct {
 	Task atomic.Pointer[datapb.PreImportTask]
 
-	ImportMeta ImportMeta
-	Tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	retryTimes int64
+	ImportMeta           ImportMeta
+	Tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	retryTimes           int64
+	nonRetryableFailures int64
 }
 
 func (p *PreImportTask) GetJobID() int64 {
@@ -158,24 +161,23 @@ func (p *PreImportTask) setFileStats(fileStats []*datapb.ImportFileStats) {
 func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		if retryableImportSourceError(err) {
-			p.retryTimes++
+		if errors.Is(err, errSnapshotTaskSource) {
+			mlog.Warn(context.TODO(), "assemble preimport request failed terminally", WrapTaskLog(p, mlog.Err(err))...)
+			failImportDispatch(p, p.ImportMeta, err)
 			return
 		}
-		// Report source inventory, source key, and target key errors to the job.
-		failImportDispatch(p, p.ImportMeta, err)
+		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
-		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
-		if isBackupCipherRejection(req.GetOptions(), err) {
-			failImportDispatch(p, p.ImportMeta, err)
-			return
-		}
 		p.retryTimes++
+		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = p.ImportMeta.UpdateTask(context.TODO(), p.GetTaskID(),

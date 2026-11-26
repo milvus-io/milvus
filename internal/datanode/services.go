@@ -468,6 +468,10 @@ func (node *DataNode) preImportV3(ctx context.Context, req *datapb.PreImportRequ
 		return merr.Status(err), nil
 	}
 
+	if _, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
+		return merr.Status(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
