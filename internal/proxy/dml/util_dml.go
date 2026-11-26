@@ -1091,25 +1091,6 @@ func verifyDynamicFieldDataWithUnmarshal(schema *schemapb.CollectionSchema, rowD
 	return nil
 }
 
-// validDynamicFieldJSONNumbers preserves the float64 range checks performed
-// when encoding/json unmarshals arbitrary JSON values into interface{}.
-func validDynamicFieldJSONNumbers(value gjson.Result) bool {
-	switch value.Type {
-	case gjson.Number:
-		_, err := strconv.ParseFloat(value.Raw, 64)
-		return err == nil
-	case gjson.JSON:
-		valid := true
-		value.ForEach(func(_, child gjson.Result) bool {
-			valid = validDynamicFieldJSONNumbers(child)
-			return valid
-		})
-		return valid
-	default:
-		return true
-	}
-}
-
 func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, skipStaticFieldNameCheck bool) error {
 	var staticFieldIndexes map[string]int
 	staticFieldCount := len(schema.GetFields())
@@ -1141,16 +1122,18 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 				}
 
 				containsMetaField := false
-				requireUnmarshalFallback := false
+				var keyDecodeErr error
 				staticFieldIndex := staticFieldCount
 				staticFieldName := ""
-				jsonData.ForEach(func(key, value gjson.Result) bool {
+				jsonData.ForEach(func(key, _ gjson.Result) bool {
 					fieldName := key.Str
-					// Keep encoding/json's key decoding for escaped names, including
-					// malformed surrogate pairs that it replaces with U+FFFD.
-					if strings.Contains(key.Raw, `\`) || !validDynamicFieldJSONNumbers(value) {
-						requireUnmarshalFallback = true
-						return false
+					// Use encoding/json's escape handling for the key alone, including
+					// replacement of malformed surrogate pairs with U+FFFD.
+					if strings.Contains(key.Raw, `\`) {
+						if err := json.Unmarshal([]byte(key.Raw), &fieldName); err != nil {
+							keyDecodeErr = err
+							return false
+						}
 					}
 					if fieldName == common.MetaFieldName {
 						containsMetaField = true
@@ -1178,11 +1161,8 @@ func verifyDynamicFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstr
 					return true
 				})
 
-				if requireUnmarshalFallback {
-					if err := verifyDynamicFieldDataWithUnmarshal(schema, rowData, skipStaticFieldNameCheck); err != nil {
-						return err
-					}
-					continue
+				if keyDecodeErr != nil {
+					return merr.WrapErrParameterInvalidErr(keyDecodeErr, "invalid dynamic field name")
 				}
 				if containsMetaField {
 					return merr.WrapErrParameterInvalidMsg("cannot set json key to: %s", common.MetaFieldName)

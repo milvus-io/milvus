@@ -63,7 +63,6 @@ func TestVerifyDynamicFieldDataJSONCompatibility(t *testing.T) {
 		{name: "empty object", row: `{}`},
 		{name: "system field name is allowed", row: `{"RowID":1}`},
 		{name: "escaped system field name is allowed", row: `{"\u0052owID":1}`},
-		{name: "invalid value takes precedence over static conflict", row: `{"Int64Field":1,"bad":1e10000}`, wantErr: true, contains: "only json map is supported"},
 		{name: "empty object with whitespace", row: " { \n\t } "},
 		{name: "null remains accepted", row: `null`},
 		{name: "nested reserved name is allowed", row: `{"nested":{"$meta":1}}`},
@@ -74,10 +73,7 @@ func TestVerifyDynamicFieldDataJSONCompatibility(t *testing.T) {
 		{name: "boolean is rejected", row: `true`, wantErr: true, contains: "only json map is supported"},
 		{name: "malformed json is rejected", row: `{invalid`, wantErr: true, contains: "only json map is supported"},
 		{name: "trailing content is rejected", row: `{"color":"blue"} trailing`, wantErr: true, contains: "only json map is supported"},
-		{name: "number overflow is rejected", row: `{"number":1e10000}`, wantErr: true, contains: "only json map is supported"},
 		{name: "number underflow remains accepted", row: `{"number":1e-10000}`},
-		{name: "nested number overflow is rejected", row: `{"nested":{"number":1e10000}}`, wantErr: true, contains: "only json map is supported"},
-		{name: "array number overflow is rejected", row: `{"numbers":[1,1e10000]}`, wantErr: true, contains: "only json map is supported"},
 		{name: "invalid utf8 key follows legacy behavior", row: "{\"\xff\":1}"},
 		{name: "reserved name is rejected", row: `{"$meta":1}`, wantErr: true, contains: "$meta"},
 		{name: "escaped reserved name is rejected", row: `{"\u0024meta":1}`, wantErr: true, contains: "$meta"},
@@ -130,6 +126,35 @@ func TestVerifyDynamicFieldDataJSONCompatibility(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "fieldA")
 	})
+}
+
+func TestVerifyDynamicFieldDataChecksNamesWithoutNumberRange(t *testing.T) {
+	schema := newDynamicFieldValidationSchema()
+	tests := []struct {
+		name    string
+		row     string
+		partial bool
+		wantErr string
+	}{
+		{name: "top-level number", row: `{"number":1e10000,"color":"blue"}`},
+		{name: "nested numbers", row: `{"nested":{"numbers":[1e10000]}}`},
+		{name: "escaped key", row: `{"\u006eumber":1e10000}`},
+		{name: "static name after large number", row: `{"number":1e10000,"Int64Field":1}`, wantErr: "dynamic field name cannot include the static field name: Int64Field"},
+		{name: "escaped reserved name after large number", row: `{"number":1e10000,"\u0024meta":1}`, wantErr: "cannot set json key to: $meta"},
+		{name: "partial update allows static name", row: `{"Int64Field":1e10000}`, partial: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			msg := newDynamicFieldValidationMsg(schema, [][]byte{[]byte(test.row)})
+			err := doCheckDynamicFieldData(schema, msg, test.partial)
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []byte(test.row), msg.FieldsData[0].GetScalars().GetJsonData().GetData()[0])
+		})
+	}
 }
 
 func BenchmarkVerifyDynamicFieldData(b *testing.B) {
