@@ -51,9 +51,9 @@ var errNodeNotEnough = errors.New("nodes not enough")
 
 type ResourceManager struct {
 	incomingNode typeutil.UniqueSet // Nodes awaiting resource group assignment.
-	// A timed-out removal may have committed. Keep the affected node IDs by
-	// group so the observer can reconcile them against current sessions.
-	failedRemovals map[string]typeutil.UniqueSet
+	// A timed-out removal may have committed. Track nodes across group transfers
+	// until their current membership is durably reconciled.
+	failedRemovals typeutil.UniqueSet
 	groups         map[string]*ResourceGroup // primary index from resource group name to resource group
 	nodeIDMap      map[int64]string          // secondary index from node id to resource group
 
@@ -76,7 +76,7 @@ func NewResourceManager(catalog metastore.QueryCoordCatalog, nodeMgr *session.No
 	groups[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupName, newResourceGroupConfig(0, defaultResourceGroupCapacity), nodeMgr)
 	return &ResourceManager{
 		incomingNode:   typeutil.NewUniqueSet(),
-		failedRemovals: make(map[string]typeutil.UniqueSet),
+		failedRemovals: typeutil.NewUniqueSet(),
 		groups:         groups,
 		nodeIDMap:      make(map[int64]string),
 		catalog:        catalog,
@@ -434,7 +434,8 @@ func (rm *ResourceManager) CheckIfResourceGroupDropable(ctx context.Context, rgN
 func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	if _, ok := rm.groups[rgName]; !ok {
+	rg := rm.groups[rgName]
+	if rg == nil {
 		// Idempotent promise: delete a non-exist rg should be ok
 		return nil
 	}
@@ -448,10 +449,12 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 		return merr.WrapErrResourceGroupServiceUnAvailable()
 	}
 
-	// After recovering, all node assigned to these rg has been removed.
-	// no secondary index need to be removed.
+	// A label filter may have hidden physical members during removal.
+	for node := range rg.nodes {
+		rm.failedRemovals.Remove(node)
+		delete(rm.nodeIDMap, node)
+	}
 	delete(rm.groups, rgName)
-	delete(rm.failedRemovals, rgName)
 	metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
 		metrics.ResourceGroupLabelName: rgName,
 	})
@@ -730,11 +733,14 @@ func (rm *ResourceManager) AssignPendingIncomingNode(ctx context.Context) {
 func (rm *ResourceManager) ReconcileNodeRemovals(ctx context.Context, rgName string) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	nodes := rm.failedRemovals[rgName]
+	rg := rm.groups[rgName]
+	if rg == nil || len(rm.failedRemovals) == 0 {
+		return nil
+	}
+	nodes := rm.failedRemovals.Intersection(rg.nodes)
 	if len(nodes) == 0 {
 		return nil
 	}
-	rg := rm.groups[rgName]
 	update := rg.CopyForWrite()
 	for node := range nodes {
 		info := rm.nodeMgr.Get(node)
@@ -748,7 +754,7 @@ func (rm *ResourceManager) ReconcileNodeRemovals(ctx context.Context, rgName str
 	if err := rm.catalog.SaveResourceGroup(ctx, current.GetMeta()); err != nil {
 		return err
 	}
-	delete(rm.failedRemovals, rgName)
+	rm.failedRemovals.Remove(nodes.Collect()...)
 	if len(current.nodes) != len(rg.nodes) {
 		rm.setupInMemResourceGroup(current)
 		rm.nodeChangedNotifier.NotifyAll()
@@ -1138,16 +1144,14 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 			return rm.catalog.SaveResourceGroup(saveCtx, rg.GetMeta())
 		}, retry.RetryErr(etcd.IsRetriableEtcdErr))
 		if err != nil {
-			if rm.failedRemovals[rg.GetName()] == nil {
-				rm.failedRemovals[rg.GetName()] = typeutil.NewUniqueSet()
-			}
-			rm.failedRemovals[rg.GetName()].Insert(node)
+			rm.failedRemovals.Insert(node)
 			mlog.Warn(ctx, "failed to persist node removal from resource group",
 				mlog.String("rgName", rg.GetName()), mlog.FieldNodeID(node), mlog.Err(err))
 			return "", err
 		}
 
 		// Commit updates to memory.
+		rm.failedRemovals.Remove(node)
 		rm.setupInMemResourceGroup(rg)
 		mlog.Info(context.TODO(), "unassign node from resource group",
 			mlog.String("rgName", rg.GetName()),
@@ -1242,7 +1246,10 @@ func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
 				metrics.ResourceGroupLabelName: r.GetName(),
 				metrics.NodeIDLabelName:        strconv.FormatInt(nodeID, 10),
 			})
-			delete(rm.nodeIDMap, nodeID)
+			// A batch swap may have already published the new owner.
+			if rm.nodeIDMap[nodeID] == r.GetName() {
+				delete(rm.nodeIDMap, nodeID)
+			}
 		}
 	}
 	// add new metrics and nodeIDMap entries.
