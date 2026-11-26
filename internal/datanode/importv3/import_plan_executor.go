@@ -167,6 +167,13 @@ func executeImportPlan(
 			// coordinator persists SegmentInfo from the manifest/stats, not from
 			// FieldBinlog arrays.
 			segmentResult.ManifestPath = manifestPath
+			if provider, ok := writer.(interface {
+				GetFieldLogicalSizes() *datapb.FieldLogicalSizes
+			}); ok {
+				if sizes := provider.GetFieldLogicalSizes(); storage.FieldLogicalSizesCover(sizes, rows) {
+					statistics.FieldLogicalSizes = sizes
+				}
+			}
 		} else {
 			segmentResult.InsertLogs = insertLogs
 			segmentResult.PkLog = statsLog

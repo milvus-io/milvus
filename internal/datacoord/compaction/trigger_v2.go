@@ -506,13 +506,14 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	}
 
 	expectedSegmentSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(collection, cv, expectedSegmentSize)
+	maxRows := policy.GetSegmentMaxRows()
+	totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(collection, cv, expectedSegmentSize, maxRows)
 	if err != nil {
 		log.Warn(ctx, "Failed to calculate cluster compaction config fail", mlog.Err(err))
 		return
 	}
 
-	totalSize := cv.GetTotalSize()
+	totalSize := policy.RowCappedSize(cv.GetTotalSize(), totalRows, expectedSegmentSize, maxRows)
 	preferSegmentSize := float64(expectedSegmentSize) * paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat()
 	planID, analyzeTaskID, preAllocatedSegmentIDs, err := allocClusteringCompactionPlanIDs(m.allocator, totalSize, preferSegmentSize)
 	if err != nil {
@@ -574,17 +575,23 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		return
 	}
 
+	var totalRows int64 = 0
+	for _, s := range cv.GetSegmentsView() {
+		totalRows += s.NumOfRows
+	}
+
 	expectedSize := policy.GetExpectedSegmentSize(m.indexMeta, collection.ID, collection.Schema)
-	totalSize := cv.GetTotalSize()
+	maxRows := policy.GetSegmentMaxRows()
+	if triggerType.GetCompactionType() == datapb.CompactionType_SortCompaction {
+		// A sort compaction rewrites one segment into one segment; its
+		// writer does not split, so the plan carries no row limit.
+		maxRows = 0
+	}
+	totalSize := policy.RowCappedSize(cv.GetTotalSize(), totalRows, expectedSize, maxRows)
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(expectedSize))
 	if err != nil {
 		log.Warn(ctx, "Failed to submit compaction view to scheduler because allocate id fail", mlog.Err(err))
 		return
-	}
-
-	var totalRows int64 = 0
-	for _, s := range cv.GetSegmentsView() {
-		totalRows += s.NumOfRows
 	}
 
 	now := time.Now().Unix()
@@ -604,6 +611,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		TotalRows:              totalRows,
 		LastStateStartTime:     now,
 		MaxSize:                expectedSize,
+		MaxSegmentRows:         maxRows,
 		PreAllocatedSegmentIDs: preAllocatedSegmentIDs,
 	}
 	err = m.inspector.EnqueueCompaction(task)
@@ -742,6 +750,9 @@ func (m *CompactionTriggerManager) SubmitForceMergeViewToScheduler(ctx context.C
 	segmentViews := cv.GetSegmentsView()
 	totalRows := lo.SumBy(segmentViews, func(v *view.SegmentView) int64 { return v.NumOfRows })
 
+	// A force merge is sized by the target the caller asked for, which may be
+	// several times the configured segment size; the row cap of the collection
+	// is not applied to it.
 	forceMergeView := cv.(*view.ForceMergeSegmentView)
 	totalSize := view.SumSegmentSize(segmentViews)
 	planID, preAllocatedSegmentIDs, err := allocCompactionPlanIDs(m.allocator, totalSize, float64(forceMergeView.GetTargetSegmentSize()))

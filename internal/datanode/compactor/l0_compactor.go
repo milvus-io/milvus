@@ -329,7 +329,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 					// L0 output: only delta side has data; no stats blobs
 					// are written so statsBlobSize is 0. Insert aggregates
 					// are zero by construction since insertLogs is nil.
-					Stats: buildCompactionOutputStats(nil, deltalogs, 0),
+					Stats: buildCompactionOutputStats(nil, deltalogs, nil, 0),
 				}, nil
 			}
 			// V1: Return deltalog in FieldBinlog format
@@ -354,7 +354,7 @@ func (t *LevelZeroCompactionTask) splitAndWrite(
 				Deltalogs: deltalogs,
 				NumOfRows: int64(len(deletes.pks)),
 				// L0 output: only delta side has data; no stats blobs.
-				Stats: buildCompactionOutputStats(nil, deltalogs, 0),
+				Stats: buildCompactionOutputStats(nil, deltalogs, nil, 0),
 			}, nil
 		}()
 		if err != nil {

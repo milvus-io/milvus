@@ -18,6 +18,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -253,19 +255,85 @@ func newPackedRecordWriter(
 	}, nil
 }
 
-type packedRecordBatchWriter struct {
-	writer                  *packed.FFIPackedWriter
-	bufferSize              int64
-	columnGroups            []storagecommon.ColumnGroup
-	bucketName              string
-	pathsMap                map[typeutil.UniqueID]string
-	schema                  *schemapb.CollectionSchema
-	arrowSchema             *arrow.Schema
+// v3BatchStats belongs to one writer/segment across all of its batches, column
+// groups and native flushes. A failed Write (including its buffered flush) must
+// not advance either the row prefix or its logical-size snapshot.
+type v3BatchStats struct {
 	rowNum                  int64
 	writtenUncompressed     uint64
 	columnGroupUncompressed map[typeutil.UniqueID]uint64
-	columnGroupCompressed   map[typeutil.UniqueID]uint64
-	storageConfig           *indexpb.StorageConfig
+	logicalLayout           *logicalSizeLayout
+	fieldLogicalSizes       *datapb.FieldLogicalSizes
+}
+
+func (s *v3BatchStats) writeBatch(rec arrow.Record, schema *schemapb.CollectionSchema, groups []storagecommon.ColumnGroup, write func(uint64) error) error {
+	rows := rec.NumRows()
+	if rows < 0 || rows > math.MaxInt64-s.rowNum {
+		return merr.WrapErrServiceInternalMsg("V3 writer row count overflows int64")
+	}
+	if s.logicalLayout == nil {
+		s.logicalLayout = newLogicalSizeLayout(schema, schema, nil)
+	}
+	batch := s.logicalLayout.newBatch(rows)
+	groupBytes := make([]uint64, len(groups))
+	var batchBytes uint64
+	for i, a := range rec.Columns() {
+		s.logicalLayout.columns[i].measure(batch, a)
+		n := calculateActualDataSize(a)
+		batchBytes += n
+		for j, group := range groups {
+			if lo.Contains(group.Columns, i) {
+				groupBytes[j] += n
+				break
+			}
+		}
+	}
+	if err := write(batchBytes); err != nil {
+		return err
+	}
+	s.fieldLogicalSizes = AppendFieldLogicalSizes(s.fieldLogicalSizes, s.rowNum, batch, rows)
+	s.rowNum += rows
+	s.writtenUncompressed += batchBytes
+	for j, group := range groups {
+		s.columnGroupUncompressed[group.GroupID] += groupBytes[j]
+	}
+	return nil
+}
+
+func (s *v3BatchStats) GetFieldLogicalSizes() *datapb.FieldLogicalSizes {
+	return cloneFieldLogicalSizes(s.fieldLogicalSizes)
+}
+
+func (s *v3BatchStats) GetWrittenRowNum() int64 { return s.rowNum }
+
+func (s *v3BatchStats) GetWrittenUncompressed() uint64 { return s.writtenUncompressed }
+
+func (s *v3BatchStats) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
+	return s.columnGroupUncompressed[columnGroup]
+}
+
+type packedRecordBatchWriter struct {
+	v3BatchStats
+	writer                *packed.FFIPackedWriter
+	bufferSize            int64
+	columnGroups          []storagecommon.ColumnGroup
+	bucketName            string
+	pathsMap              map[typeutil.UniqueID]string
+	schema                *schemapb.CollectionSchema
+	arrowSchema           *arrow.Schema
+	columnGroupCompressed map[typeutil.UniqueID]uint64
+	storageConfig         *indexpb.StorageConfig
+}
+
+// SetFieldLogicalSizeSchema supplies parent struct identities for a partial
+// materialization whose writer schema contains only flattened leaf fields.
+// It never changes the physical projection or the native writer schema.
+func (pw *packedRecordBatchWriter) SetFieldLogicalSizeSchema(target *schemapb.CollectionSchema) error {
+	if pw.rowNum != 0 {
+		return merr.WrapErrServiceInternalMsg("cannot change V3 logical-size schema after writing rows")
+	}
+	pw.logicalLayout = newLogicalSizeLayout(pw.schema, target, nil)
+	return nil
 }
 
 func (pw *packedRecordBatchWriter) Write(r Record) error {
@@ -274,29 +342,9 @@ func (pw *packedRecordBatchWriter) Write(r Record) error {
 		return err
 	}
 	defer release()
-	pw.rowNum += int64(r.Len())
-	for col, arr := range rec.Columns() {
-		size := calculateActualDataSize(arr)
-		pw.writtenUncompressed += size
-		for _, columnGroup := range pw.columnGroups {
-			if lo.Contains(columnGroup.Columns, col) {
-				pw.columnGroupUncompressed[columnGroup.GroupID] += size
-				break
-			}
-		}
-	}
-	return pw.writer.WriteRecordBatch(rec)
-}
-
-func (pw *packedRecordBatchWriter) GetWrittenUncompressed() uint64 {
-	return pw.writtenUncompressed
-}
-
-func (pw *packedRecordBatchWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
-	if size, ok := pw.columnGroupUncompressed[columnGroup]; ok {
-		return size
-	}
-	return 0
+	return pw.writeBatch(rec, pw.schema, pw.columnGroups, func(uint64) error {
+		return pw.writer.WriteRecordBatch(rec)
+	})
 }
 
 func (pw *packedRecordBatchWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
@@ -313,10 +361,6 @@ func (pw *packedRecordBatchWriter) GetWrittenPaths(columnGroup typeutil.UniqueID
 	return ""
 }
 
-func (pw *packedRecordBatchWriter) GetWrittenRowNum() int64 {
-	return pw.rowNum
-}
-
 // Close closes the underlying FFI writer and returns the resulting
 // column-groups payload. The writer never touches the manifest — the
 // caller passes the returned handle to packed.CommitManifestUpdates and
@@ -327,6 +371,7 @@ func (pw *packedRecordBatchWriter) Close() (packed.WriterOutput, error) {
 	}
 	out, err := pw.writer.Close()
 	if err != nil {
+		pw.fieldLogicalSizes = nil
 		return nil, err
 	}
 	pw.writer = nil
@@ -347,6 +392,7 @@ func (pw *packedRecordBatchWriter) Abort() {
 	}
 	pw.writer.Destroy()
 	pw.writer = nil
+	pw.fieldLogicalSizes = nil
 }
 
 func (pw *packedRecordBatchWriter) AsNewColumnGroups() {
@@ -477,15 +523,15 @@ func newPackedRecordBatchWriter(
 	}
 
 	return &packedRecordBatchWriter{
-		writer:                  writer,
-		schema:                  schema,
-		arrowSchema:             arrowSchema,
-		bufferSize:              bufferSize,
-		pathsMap:                pathsMap,
-		columnGroups:            columnGroups,
-		columnGroupUncompressed: columnGroupUncompressed,
-		columnGroupCompressed:   columnGroupCompressed,
-		storageConfig:           storageConfig,
+		v3BatchStats:          v3BatchStats{columnGroupUncompressed: columnGroupUncompressed},
+		writer:                writer,
+		schema:                schema,
+		arrowSchema:           arrowSchema,
+		bufferSize:            bufferSize,
+		pathsMap:              pathsMap,
+		columnGroups:          columnGroups,
+		columnGroupCompressed: columnGroupCompressed,
+		storageConfig:         storageConfig,
 	}, nil
 }
 
@@ -505,18 +551,16 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 // packedTextBatchWriter wraps FFISegmentWriter for TEXT column support during compaction.
 // it handles TEXT column rewriting with LOB file management in REWRITE_ALL mode.
 type packedTextBatchWriter struct {
-	writer                  *packed.FFISegmentWriter
-	bufferSize              int64
-	columnGroups            []storagecommon.ColumnGroup
-	bucketName              string
-	pathsMap                map[typeutil.UniqueID]string
-	schema                  *schemapb.CollectionSchema
-	arrowSchema             *arrow.Schema
-	rowNum                  int64
-	writtenUncompressed     uint64
-	columnGroupUncompressed map[typeutil.UniqueID]uint64
-	columnGroupCompressed   map[typeutil.UniqueID]uint64
-	storageConfig           *indexpb.StorageConfig
+	v3BatchStats
+	writer                *packed.FFISegmentWriter
+	bufferSize            int64
+	columnGroups          []storagecommon.ColumnGroup
+	bucketName            string
+	pathsMap              map[typeutil.UniqueID]string
+	schema                *schemapb.CollectionSchema
+	arrowSchema           *arrow.Schema
+	columnGroupCompressed map[typeutil.UniqueID]uint64
+	storageConfig         *indexpb.StorageConfig
 	// unflushedInput is the record bytes accepted since the last flush, measured
 	// here because only this writer still sees the raw TEXT payload: the writer
 	// below decides its own flush from the batch it receives, where a TEXT value
@@ -530,31 +574,18 @@ func (pw *packedTextBatchWriter) Write(r Record) error {
 		return err
 	}
 	defer release()
-	pw.rowNum += int64(r.Len())
-	for col, arr := range rec.Columns() {
-		size := calculateActualDataSize(arr)
-		pw.writtenUncompressed += size
-		pw.unflushedInput += size
-		for _, columnGroup := range pw.columnGroups {
-			if lo.Contains(columnGroup.Columns, col) {
-				pw.columnGroupUncompressed[columnGroup.GroupID] += size
-				break
-			}
+	return pw.writeBatch(rec, pw.schema, pw.columnGroups, func(bytes uint64) error {
+		if err := pw.writer.Write(rec); err != nil {
+			return err
 		}
-	}
-
-	if err := pw.writer.Write(rec); err != nil {
-		return err
-	}
-	// Cap the input the writer keeps unflushed at the writer's own buffer size,
-	// the cadence a plain writer gets from the storage writer's buffer
-	// accounting: import and compaction each pass the write buffer size they
-	// run with, and streaming flush passes 0 because every sync already closes
-	// its writer, which disables the bound.
-	if pw.bufferSize > 0 && pw.unflushedInput >= uint64(pw.bufferSize) {
-		return pw.SyncBuffered()
-	}
-	return nil
+		// Bound unflushed input including raw TEXT, not just its encoded
+		// references. Streaming passes zero because each sync closes its writer.
+		pw.unflushedInput += bytes
+		if pw.bufferSize > 0 && pw.unflushedInput >= uint64(pw.bufferSize) {
+			return pw.SyncBuffered()
+		}
+		return nil
+	})
 }
 
 // SyncBuffered flushes the buffered column groups to storage without closing the
@@ -571,17 +602,6 @@ func (pw *packedTextBatchWriter) SyncBuffered() error {
 	return nil
 }
 
-func (pw *packedTextBatchWriter) GetWrittenUncompressed() uint64 {
-	return pw.writtenUncompressed
-}
-
-func (pw *packedTextBatchWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
-	if size, ok := pw.columnGroupUncompressed[columnGroup]; ok {
-		return size
-	}
-	return 0
-}
-
 func (pw *packedTextBatchWriter) GetColumnGroupWrittenCompressed(columnGroup typeutil.UniqueID) uint64 {
 	if size, ok := pw.columnGroupCompressed[columnGroup]; ok {
 		return size
@@ -596,8 +616,31 @@ func (pw *packedTextBatchWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) 
 	return ""
 }
 
-func (pw *packedTextBatchWriter) GetWrittenRowNum() int64 {
-	return pw.rowNum
+func (pw *packedTextBatchWriter) finishTextSizes(rowsWritten int64, totals map[int64]uint64) {
+	if rowsWritten != pw.rowNum {
+		// The native output doesn't cover exactly the accepted prefix (e.g.
+		// cleanup after a buffered flush failed). No column total is proven.
+		pw.fieldLogicalSizes = nil
+		pw.rowNum = rowsWritten
+		return
+	}
+	if len(totals) == 0 || !FieldLogicalSizesCover(pw.fieldLogicalSizes, rowsWritten) {
+		return
+	}
+	for _, col := range pw.logicalLayout.columns {
+		n, ok := totals[col.id]
+		if !ok || !col.nativeText {
+			continue
+		}
+		if pw.fieldLogicalSizes.Fields == nil {
+			pw.fieldLogicalSizes.Fields = make(map[int64]*datapb.FieldLogicalSize)
+		}
+		size := &datapb.FieldLogicalSize{PayloadBytes: n}
+		if col.nullable {
+			size.ValidityBits = uint64(rowsWritten)
+		}
+		pw.fieldLogicalSizes.Fields[col.id] = size
+	}
 }
 
 // Close closes the underlying segment writer and returns the resulting
@@ -612,10 +655,11 @@ func (pw *packedTextBatchWriter) Close() (packed.WriterOutput, error) {
 	out, err := pw.writer.Close()
 	pw.writer = nil
 	if err != nil {
+		pw.fieldLogicalSizes = nil
 		return nil, err
 	}
 	if so, ok := out.(*packed.SegmentOutput); ok {
-		pw.rowNum = so.RowsWritten()
+		pw.finishTextSizes(so.RowsWritten(), so.TextLogicalBytes())
 	}
 	for id := range pw.pathsMap {
 		pw.columnGroupCompressed[id] = uint64(0)
@@ -654,11 +698,10 @@ func NewPackedTextBatchWriter(
 	// In rewrite mode, TEXT columns arrive as binary (LOB references) from the reader.
 	// Override the arrow schema to match the actual input type.
 	hasRewrite := false
+	nativeText := typeutil.NewUniqueSet()
 	for _, tc := range textColumnConfigs {
-		if tc.RewriteMode {
-			hasRewrite = true
-			break
-		}
+		nativeText.Insert(tc.FieldID)
+		hasRewrite = hasRewrite || tc.RewriteMode
 	}
 	if hasRewrite {
 		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
@@ -702,15 +745,18 @@ func NewPackedTextBatchWriter(
 	}
 
 	return &packedTextBatchWriter{
-		writer:                  writer,
-		schema:                  schema,
-		arrowSchema:             arrowSchema,
-		bufferSize:              bufferSize,
-		bucketName:              bucketName,
-		pathsMap:                pathsMap,
-		columnGroups:            columnGroups,
-		columnGroupUncompressed: columnGroupUncompressed,
-		columnGroupCompressed:   columnGroupCompressed,
-		storageConfig:           storageConfig,
+		v3BatchStats: v3BatchStats{
+			columnGroupUncompressed: columnGroupUncompressed,
+			logicalLayout:           newLogicalSizeLayout(schema, schema, nativeText),
+		},
+		writer:                writer,
+		schema:                schema,
+		arrowSchema:           arrowSchema,
+		bufferSize:            bufferSize,
+		bucketName:            bucketName,
+		pathsMap:              pathsMap,
+		columnGroups:          columnGroups,
+		columnGroupCompressed: columnGroupCompressed,
+		storageConfig:         storageConfig,
 	}, nil
 }

@@ -190,6 +190,36 @@ func TestApplyImportResultsRejectsReplayConflict(t *testing.T) {
 	require.Equal(t, int64(10), mt.GetSegment(ctx, 100).GetNumOfRows())
 }
 
+func TestImportV3FieldLogicalSizes(t *testing.T) {
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	_, err = addImportSegment(ctx, mt, 100, 1, 10, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV3, 4)
+	require.NoError(t, err)
+	sizes := &datapb.FieldLogicalSizes{Version: 1, RowCount: 10, Fields: map[int64]*datapb.FieldLogicalSize{101: {}, 102: {PayloadBytes: 40, ValidityBits: 10}}}
+	results := []*datapb.ImportTaskV3Result{{Rows: 10, Statistics: &datapb.Statistics{FieldLogicalSizes: sizes}}}
+	require.Error(t, validateImportResults(results, 1)) // no V3 manifest
+	results[0].ManifestPath = "manifest"
+	require.Error(t, validateImportResults(results, 1)) // opaque legacy pointer
+	results[0].ManifestPath = `{"base_path":"files/insert_log/2/3/100","ver":1}`
+	sizes.RowCount = 9
+	require.Error(t, validateImportResults(results, 1))
+	apply := func() error { return applyImportResults(ctx, mt, 2, 4, []int64{100}, true, false, results) }
+	require.Error(t, apply())
+	require.Equal(t, int64(0), mt.GetSegment(ctx, 100).GetNumOfRows())
+	sizes.RowCount = 10
+	require.NoError(t, validateImportResults(results, 1))
+	require.NoError(t, apply())
+	sizes.Fields = map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: 40, ValidityBits: 10}, 101: {}}
+	require.NoError(t, apply())
+	delete(sizes.Fields, 101)
+	require.ErrorContains(t, apply(), "conflicts with segment")
+	stored := mt.GetSegment(ctx, 100)
+	require.Empty(t, stored.GetBinlogs())
+	require.Contains(t, stored.GetStats().GetFieldLogicalSizes().GetFields(), int64(101))
+	require.True(t, importV3SegmentStatsNonZero(&datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{}}))
+}
+
 func TestValidateReshardManifest(t *testing.T) {
 	manifest := &importv3pb.ReshardManifest{Fragments: []*importv3pb.FragmentDescriptor{{
 		Path: "fragment.parquet", Rows: 10, LogicalBytes: 100, PartitionId: 3,
