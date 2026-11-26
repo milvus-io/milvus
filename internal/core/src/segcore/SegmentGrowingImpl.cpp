@@ -459,41 +459,36 @@ LoadInfoHasTextField(const LoadFieldDataInfo& load_info, const Schema& schema) {
 
 void
 SegmentGrowingImpl::InitializeStructElementOffsets() {
-    std::unique_lock lock(struct_element_offsets_map_mutex_);
+    std::unique_lock lock(element_offsets_mutex_);
     auto schema = get_schema_snapshot();
 
-    // Group fields by struct_name
-    std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
+    std::unordered_map<std::string, std::vector<FieldId>> fields_by_group;
 
     for (auto field_id : schema->get_field_ids()) {
         const auto& field_meta = (*schema)[field_id];
-        auto struct_name = GetStructNameForArrayField(field_meta);
-        if (struct_name.has_value()) {
-            struct_fields[*struct_name].push_back(field_id);
+        auto group = GetElementOffsetsGroup(field_meta);
+        if (group.has_value()) {
+            fields_by_group[*group].push_back(field_id);
         }
     }
 
-    // Create one StructElementOffsetsGrowing per struct, shared by all its fields
-    for (const auto& [struct_name, field_ids] : struct_fields) {
-        auto struct_element_offsets =
-            std::make_shared<StructElementOffsetsGrowing>();
+    for (const auto& [group, field_ids] : fields_by_group) {
+        auto offsets = std::make_shared<StructElementOffsetsGrowing>();
 
-        // The first sub-field in schema order supplies lengths for inserts.
+        // The first field of each group supplies lengths for inserts.
         FieldId representative_field = field_ids[0];
 
-        // Map all field_ids from this struct to the same StructElementOffsetsGrowing
         for (auto field_id : field_ids) {
-            struct_element_offsets_map_[field_id] = struct_element_offsets;
+            element_offsets_by_field_[field_id] = offsets;
         }
 
-        // Record representative field for Insert-time updates
-        struct_representative_fields_.insert(representative_field);
+        element_offset_representatives_.insert(representative_field);
 
         LOG_INFO(
-            "Created StructElementOffsetsGrowing for struct '{}' with {} "
+            "Created element offsets for group '{}' with {} "
             "fields, "
             "representative field_id={}",
-            struct_name,
+            group,
             field_ids.size(),
             representative_field.get());
     }
@@ -999,10 +994,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
         std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
         {
-            std::shared_lock lock(struct_element_offsets_map_mutex_);
-            if (struct_representative_fields_.count(field_id) > 0) {
-                auto offsets_it = struct_element_offsets_map_.find(field_id);
-                if (offsets_it != struct_element_offsets_map_.end()) {
+            std::shared_lock lock(element_offsets_mutex_);
+            if (element_offset_representatives_.count(field_id) > 0) {
+                auto offsets_it = element_offsets_by_field_.find(field_id);
+                if (offsets_it != element_offsets_by_field_.end()) {
                     struct_element_offsets = offsets_it->second;
                 }
             }
@@ -1021,7 +1016,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
         // The array writer reads the stored column so inserts and binlog
         // loads use the same element order and validity.
-        if (field_meta.is_struct_varchar() && field_meta.enable_match()) {
+        if (field_meta.is_varchar_array() && field_meta.enable_match()) {
             auto pinned = GetTextIndex(nullptr, field_id);
             AppendArrayTextRows(
                 *pinned.get(), field_meta, reserved_offset, num_rows);
@@ -1316,7 +1311,7 @@ SegmentGrowingImpl::load_field_data_common(
         } else {
             auto pinned = GetTextIndex(nullptr, field_id);
             auto index = pinned.get();
-            if (field_meta.is_struct_varchar()) {
+            if (field_meta.is_varchar_array()) {
                 AppendArrayTextRows(
                     *index, field_meta, reserved_offset, num_rows);
             } else {
@@ -1331,10 +1326,10 @@ SegmentGrowingImpl::load_field_data_common(
 
     std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
     {
-        std::shared_lock lock(struct_element_offsets_map_mutex_);
-        if (struct_representative_fields_.count(field_id) > 0) {
-            auto offsets_it = struct_element_offsets_map_.find(field_id);
-            if (offsets_it != struct_element_offsets_map_.end()) {
+        std::shared_lock lock(element_offsets_mutex_);
+        if (element_offset_representatives_.count(field_id) > 0) {
+            auto offsets_it = element_offsets_by_field_.find(field_id);
+            if (offsets_it != element_offsets_by_field_.end()) {
                 struct_element_offsets = offsets_it->second;
             }
         }
@@ -3031,7 +3026,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     const auto& field_meta = (*schema)[field_id];
     auto index = BuildTextIndexForMeta(field_meta);
     std::unique_lock lock(mutex_);
-    if (field_meta.is_struct_varchar()) {
+    if (field_meta.is_varchar_array()) {
         std::lock_guard progress_lock(array_text_mutex_);
         array_text_progress_.erase(field_id);
     }
@@ -3043,7 +3038,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
 std::unique_ptr<index::TextMatchIndex>
 SegmentGrowingImpl::BuildTextIndexForMeta(const FieldMeta& field_meta) {
     AssertInfo(IsStringDataType(field_meta.get_data_type()) ||
-                   field_meta.is_struct_varchar(),
+                   field_meta.is_varchar_array(),
                "text index requires a string field or VarChar array");
     std::string unique_id = GetUniqueFieldId(field_meta.get_id().get());
     // todo: make this(200) configurable.
@@ -3237,7 +3232,7 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             if (field_meta.enable_match() &&
                 text_indexes_.find(field_id) == text_indexes_.end()) {
                 auto index = BuildTextIndexForMeta(field_meta);
-                if (field_meta.is_struct_varchar()) {
+                if (field_meta.is_varchar_array()) {
                     AppendArrayTextRows(
                         *index, field_meta, 0, row_count, /*rebuilding=*/true);
                 } else if (row_count > 0) {
@@ -3285,26 +3280,25 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
         // offsets object, so a kept alias is always correct; field IDs are
         // never reused, so it cannot be mistaken for a later field.
         //
-        // The representative sub-field of each struct, which Insert uses to
+        // The representative field of each offsets group, which Insert uses to
         // append element counts, is staged here and swapped in with the
         // schema: Insert holds sch_mutex_ shared, so it runs either before
         // this Reopen or after the schema store, never in between.
         std::unordered_set<FieldId> staged_representatives;
         {
-            std::shared_lock lock(struct_element_offsets_map_mutex_);
-            std::unordered_set<std::string> represented_structs;
+            std::shared_lock lock(element_offsets_mutex_);
+            std::unordered_set<std::string> represented_groups;
             for (auto field_id : sch->get_field_ids()) {
-                auto struct_name = GetStructNameForArrayField((*sch)[field_id]);
-                if (struct_name &&
-                    struct_element_offsets_map_.count(field_id) > 0 &&
-                    represented_structs.insert(*struct_name).second) {
+                auto group = GetElementOffsetsGroup((*sch)[field_id]);
+                if (group && element_offsets_by_field_.count(field_id) > 0 &&
+                    represented_groups.insert(*group).second) {
                     staged_representatives.insert(field_id);
                 }
             }
         }
         {
-            std::unique_lock lock(struct_element_offsets_map_mutex_);
-            struct_representative_fields_.swap(staged_representatives);
+            std::unique_lock lock(element_offsets_mutex_);
+            element_offset_representatives_.swap(staged_representatives);
         }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
@@ -3423,9 +3417,9 @@ SegmentGrowingImpl::FillAbsentFields() {
                 continue;
             }
             provider = sibling_id;
-            std::shared_lock lock(struct_element_offsets_map_mutex_);
-            auto it = struct_element_offsets_map_.find(sibling_id);
-            if (it != struct_element_offsets_map_.end()) {
+            std::shared_lock lock(element_offsets_mutex_);
+            auto it = element_offsets_by_field_.find(sibling_id);
+            if (it != element_offsets_by_field_.end()) {
                 offsets = it->second;
             }
             break;
@@ -3452,13 +3446,13 @@ SegmentGrowingImpl::FillAbsentFields() {
                 offsets->Insert(begin, lengths.data(), count);
             }
         }
-        std::unique_lock lock(struct_element_offsets_map_mutex_);
+        std::unique_lock lock(element_offsets_mutex_);
         for (auto sibling_id : schema->get_field_ids()) {
             if (GetStructNameForArrayField((*schema)[sibling_id]) == name) {
-                struct_representative_fields_.erase(sibling_id);
+                element_offset_representatives_.erase(sibling_id);
             }
         }
-        struct_representative_fields_.insert(provider);
+        element_offset_representatives_.insert(provider);
     }
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
@@ -3828,14 +3822,14 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
                         ? GetStructNameForArrayField(field_meta)
                         : std::nullopt) {
         auto schema = get_schema_snapshot();
-        std::shared_lock lock(struct_element_offsets_map_mutex_);
+        std::shared_lock lock(element_offsets_mutex_);
         for (auto sibling_id : schema->get_field_ids()) {
             if (sibling_id == field_id ||
                 GetStructNameForArrayField((*schema)[sibling_id]) != name) {
                 continue;
             }
-            auto it = struct_element_offsets_map_.find(sibling_id);
-            if (it != struct_element_offsets_map_.end() &&
+            auto it = element_offsets_by_field_.find(sibling_id);
+            if (it != element_offsets_by_field_.end() &&
                 it->second->GetRowCount() >= total_row_num) {
                 struct_offsets = it->second;
                 struct_provider = sibling_id;
@@ -3924,28 +3918,27 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
 void
 SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
-    auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value()) {
+    auto group = GetElementOffsetsGroup(field_meta);
+    if (!group.has_value()) {
         return;
     }
 
-    std::unique_lock lock(struct_element_offsets_map_mutex_);
+    std::unique_lock lock(element_offsets_mutex_);
 
     std::shared_ptr<StructElementOffsetsGrowing> struct_element_offsets;
     FieldId representative = field_meta.get_id();
     bool first_child = true;
     for (auto field_id : schema.get_field_ids()) {
-        auto existing_struct_name =
-            GetStructNameForArrayField(schema[field_id]);
-        if (existing_struct_name != struct_name) {
+        auto existing_group = GetElementOffsetsGroup(schema[field_id]);
+        if (existing_group != group) {
             continue;
         }
         if (first_child) {
             representative = field_id;
             first_child = false;
         }
-        auto it = struct_element_offsets_map_.find(field_id);
-        if (it != struct_element_offsets_map_.end()) {
+        auto it = element_offsets_by_field_.find(field_id);
+        if (it != element_offsets_by_field_.end()) {
             struct_element_offsets = it->second;
             break;
         }
@@ -3954,7 +3947,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     if (!struct_element_offsets) {
         struct_element_offsets =
             std::make_shared<StructElementOffsetsGrowing>();
-        struct_representative_fields_.insert(representative);
+        element_offset_representatives_.insert(representative);
     }
 
     auto current_row_count = struct_element_offsets->GetRowCount();
@@ -3971,7 +3964,7 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
             current_row_count, empty_lengths.data(), missing_row_count);
     }
 
-    struct_element_offsets_map_[field_meta.get_id()] = struct_element_offsets;
+    element_offsets_by_field_[field_meta.get_id()] = struct_element_offsets;
 }
 
 void

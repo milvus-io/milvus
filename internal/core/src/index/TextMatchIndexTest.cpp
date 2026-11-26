@@ -493,7 +493,6 @@ TEST(TextMatch, ArrayElementDocumentsSurviveUploadAndLoad) {
         auto ctx = CreateTextMatchTestFileManagerContext(
             native ? 1032 : 1031, proto::schema::DataType::Array);
         auto& field = ctx.fieldDataMeta.field_schema;
-        field.set_name("reviews[body]");
         field.set_element_type(proto::schema::DataType::VarChar);
         field.set_element_nullable(true);
         field.set_nullable(true);

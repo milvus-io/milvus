@@ -19,7 +19,6 @@
 #include <optional>
 
 #include "Consts.h"
-#include "common/Utils.h"
 #include "NamedType/named_type_impl.hpp"
 #include "boost/cstdint.hpp"
 #include "common/Common.h"
@@ -175,14 +174,13 @@ ArrayTextFlag(const TypeParams& params, const char* key) {
 }  // namespace
 
 bool
-FieldMeta::is_struct_varchar() const {
-    return type_ == DataType::ARRAY && element_type_ == DataType::VARCHAR &&
-           IsStructSubField(name_.get());
+FieldMeta::is_varchar_array() const {
+    return type_ == DataType::ARRAY && element_type_ == DataType::VARCHAR;
 }
 
 bool
 FieldMeta::enable_match() const {
-    if (is_struct_varchar()) {
+    if (is_varchar_array()) {
         return enable_analyzer() &&
                ArrayTextFlag(array_type_params_, "enable_match");
     }
@@ -197,7 +195,7 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_analyzer() const {
-    if (is_struct_varchar()) {
+    if (is_varchar_array()) {
         return ArrayTextFlag(array_type_params_, "enable_analyzer");
     }
     if (!IsStringDataType(type_)) {
@@ -216,7 +214,7 @@ FieldMeta::get_analyzer_params() const {
             Unsupported,
             fmt::format("unsupported text index when not enable analyzer"));
     }
-    return ParseTokenizerParams(is_struct_varchar() ? array_type_params_
+    return ParseTokenizerParams(is_varchar_array() ? array_type_params_
                                                    : string_info_->params);
 }
 

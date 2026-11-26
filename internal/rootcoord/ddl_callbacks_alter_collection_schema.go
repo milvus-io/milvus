@@ -307,6 +307,9 @@ func prepareAlterSchemaAddField(coll *model.Collection, plan *schemautil.AlterSc
 	}
 
 	fieldSchema := plan.Field
+	if err := schemautil.ValidateVarCharArrayTextMatch(fieldSchema); err != nil {
+		return err
+	}
 	if err := checkFieldSchema([]*schemapb.FieldSchema{fieldSchema}); err != nil {
 		return merr.Wrap(err, "failed to check field schema")
 	}
