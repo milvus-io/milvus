@@ -63,10 +63,6 @@ const (
 
 var errSessionVersionCheckFailure = errors.New("session version check failure")
 
-// transientEtcdErrRetryInterval is how long ProcessActiveStandBy waits before
-// retrying a registration that failed with a transient etcd error.
-var transientEtcdErrRetryInterval = time.Second
-
 // errSessionExpiredAtClientSide is a keepalive deadline cause compared by
 // identity via errors.Is(context.Cause(ctx), ...). It must stay a bare
 // package-level sentinel rather than a merr error: merr's errors.Is walks the
@@ -371,8 +367,8 @@ func (s *Session) isCoordinator() bool {
 }
 
 // checkVersion checks the version of the session and returns the error if the version is not found or expired.
-func (s *Session) checkVersionForCoordinator() (*mvccpb.KeyValue, error) {
-	resp, err := s.etcdCli.Get(s.ctx, s.versionKey)
+func (s *Session) checkVersionForCoordinator(ctx context.Context) (*mvccpb.KeyValue, error) {
+	resp, err := s.etcdCli.Get(ctx, s.versionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +530,7 @@ func (s *Session) registerService() error {
 		// if enable active-standby, we don't need to check the version now,
 		// only check the version when the standby is activated.
 		if s.isCoordinator() && !s.enableActiveStandBy {
-			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(s.ctx, ops, compareOps, sessionJSON); err != nil {
 				return err
 			}
 		}
@@ -557,8 +553,8 @@ func (s *Session) registerService() error {
 }
 
 // getOpsForCoordinator gets the ops and compare ops for coordinator.
-func (s *Session) getOpsForCoordinator(ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
-	previousVersion, err := s.checkVersionForCoordinator()
+func (s *Session) getOpsForCoordinator(ctx context.Context, ops []clientv3.Op, compareOps []clientv3.Cmp, sessionJSON []byte) ([]clientv3.Op, []clientv3.Cmp, error) {
+	previousVersion, err := s.checkVersionForCoordinator(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -771,6 +767,14 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 	return res, resp.Header.Revision, nil
 }
 
+func sessionRequestContext(parent context.Context) (context.Context, context.CancelFunc) {
+	timeout := paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
 func (s *Session) GoingStop() error {
 	if s == nil || s.etcdCli == nil || s.LeaseID == nil {
 		return merr.WrapErrServiceInternalMsg("the session hasn't been init")
@@ -781,11 +785,7 @@ func (s *Session) GoingStop() error {
 	}
 
 	completeKey := s.getCompleteKey()
-	timeout := paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	ctx, cancel := sessionRequestContext(s.ctx)
 	defer cancel()
 	// Publishing Stopping is idempotent, including when a successful Put loses
 	// its response. Bound the entire operation so graceful shutdown cannot
@@ -1131,10 +1131,12 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	}
 
 	registerActiveFn := func() (bool, int64, error) {
+		ctx, cancel := sessionRequestContext(s.ctx)
+		defer cancel()
 		for _, role := range oldRoles {
-			sessions, _, err := s.GetSessions(s.ctx, role)
+			sessions, _, err := s.GetSessions(ctx, role)
 			if err != nil {
-				if etcd.IsRetriableEtcdErr(err) {
+				if etcd.IsRetriableStartupErr(err) {
 					// Do not skip the legacy session check just because etcd is
 					// briefly unavailable; retry the whole registration instead.
 					return false, -1, err
@@ -1170,12 +1172,12 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		}
 
 		if s.isCoordinator() {
-			if ops, compareOps, err = s.getOpsForCoordinator(ops, compareOps, sessionJSON); err != nil {
+			if ops, compareOps, err = s.getOpsForCoordinator(ctx, ops, compareOps, sessionJSON); err != nil {
 				return false, -1, err
 			}
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
+		txnResp, err := s.etcdCli.Txn(ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
 		if err != nil {
 			mlog.Error(context.TODO(), "register active key to etcd failed", mlog.Err(err))
 			return false, -1, err
@@ -1214,7 +1216,13 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	}()
 
 	for {
-		registered, revision, err := registerActiveFn()
+		var registered bool
+		var revision int64
+		err := etcd.RetryAtStartup(s.ctx, func() error {
+			var err error
+			registered, revision, err = registerActiveFn()
+			return err
+		})
 		if err != nil {
 			if err == merr.ErrOldSessionExists {
 				// If old session exists, wait and retry
@@ -1225,21 +1233,6 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 				}
 				continue
 			}
-			if etcd.IsRetriableEtcdErr(err) {
-				// etcd is briefly unavailable, e.g. a member restart or a leader
-				// election. Txn is not retried by clientv3, so retry the
-				// registration here; registerActiveFn detects an attempt that
-				// was applied despite the error.
-				mlog.Warn(s.ctx, "register active key hit a transient etcd error, retry", mlog.Err(err))
-				select {
-				case <-time.After(transientEtcdErrRetryInterval):
-				case <-s.ctx.Done():
-					return s.ctx.Err()
-				}
-				continue
-			}
-			// Some error such as ErrLeaseNotFound, is not retryable.
-			// Just return error to stop the standby process and wait for retry.
 			return err
 		}
 		if registered {

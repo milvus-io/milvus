@@ -28,6 +28,8 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -39,13 +41,20 @@ import (
 // comparisons, so recovery must use the Else branch without rewriting the keys.
 type appliedRegistrationKV struct {
 	clientv3.KV
-	kvs      map[string]*mvccpb.KeyValue
-	leaseID  int64
-	txnCalls int
+	kvs         map[string]*mvccpb.KeyValue
+	leaseID     int64
+	txnCalls    int
+	lostReply   error
+	firstGetErr error
 }
 
 func (k *appliedRegistrationKV) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if k.firstGetErr != nil {
+		err := k.firstGetErr
+		k.firstGetErr = nil
 		return nil, err
 	}
 	resp := &clientv3.GetResponse{Header: &etcdserverpb.ResponseHeader{Revision: 20}}
@@ -115,44 +124,55 @@ func (t *appliedRegistrationTxn) Commit() (*clientv3.TxnResponse, error) {
 			Key: op.KeyBytes(), Value: op.ValueBytes(), Lease: t.kv.leaseID, ModRevision: 20, Version: 1,
 		}
 	}
-	return nil, rpctypes.ErrTimeout
+	return nil, t.kv.lostReply
 }
 
 func TestSessionProcessActiveStandBy_RecoversCommittedMixCoordTxn(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	kv := &appliedRegistrationKV{kvs: make(map[string]*mvccpb.KeyValue), leaseID: 7}
-	cli := clientv3.NewCtxClient(ctx)
-	cli.KV = kv
-	defer cli.Close()
-	leaseID := clientv3.LeaseID(kv.leaseID)
-	s := &Session{
-		ctx: ctx, etcdCli: cli, metaRoot: "review", versionKey: "review/session/version",
-		SessionRaw: SessionRaw{ServerName: typeutil.MixCoordRole, ServerID: 42, LeaseID: &leaseID},
-	}
-	defer s.updateStandby(false)
-	activated := false
-	err := s.ProcessActiveStandBy(func() error {
-		activated = true
-		return nil
-	})
-	require.NoError(t, err)
-	require.True(t, activated)
-	require.Equal(t, 2, kv.txnCalls)
-	require.Len(t, kv.kvs, 5, "MixCoord activation includes all three legacy session keys")
-	require.EqualValues(t, 20, s.GetRegisteredRevision())
-	for _, role := range []string{typeutil.RootCoordRole, typeutil.DataCoordRole, typeutil.QueryCoordRole} {
-		stored := &Session{}
-		require.NoError(t, json.Unmarshal(kv.kvs[path.Join("review/session", role)].Value, stored))
-		require.Equal(t, s.ServerID, stored.ServerID)
-		require.Equal(t, s.LeaseID, stored.LeaseID)
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"etcd timeout", rpctypes.ErrTimeout},
+		{"RPC deadline", status.Error(codes.DeadlineExceeded, "transaction response lost")},
+		{"request deadline", context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			kv := &appliedRegistrationKV{kvs: make(map[string]*mvccpb.KeyValue), leaseID: 7, lostReply: tc.err}
+			cli := clientv3.NewCtxClient(ctx)
+			cli.KV = kv
+			defer cli.Close()
+			leaseID := clientv3.LeaseID(kv.leaseID)
+			s := &Session{
+				ctx: ctx, etcdCli: cli, metaRoot: "review", versionKey: "review/session/version",
+				SessionRaw: SessionRaw{ServerName: typeutil.MixCoordRole, ServerID: 42, LeaseID: &leaseID},
+			}
+			defer s.updateStandby(false)
+			activations := 0
+			err := s.ProcessActiveStandBy(func() error {
+				activations++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, 1, activations)
+			require.Equal(t, 2, kv.txnCalls)
+			require.Len(t, kv.kvs, 5, "MixCoord activation includes all three legacy session keys")
+			require.EqualValues(t, 20, s.GetRegisteredRevision())
+			for _, role := range []string{typeutil.RootCoordRole, typeutil.DataCoordRole, typeutil.QueryCoordRole} {
+				stored := &Session{}
+				require.NoError(t, json.Unmarshal(kv.kvs[path.Join("review/session", role)].Value, stored))
+				require.Equal(t, s.ServerID, stored.ServerID)
+				require.Equal(t, s.LeaseID, stored.LeaseID)
+			}
+		})
 	}
 }
 
 func TestSessionProcessActiveStandBy_PreservesForeignLegacySession(t *testing.T) {
 	for _, key := range []string{typeutil.RootCoordRole, typeutil.RootCoordRole + "-99"} {
 		t.Run(key, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			leaseID, foreignLeaseID := clientv3.LeaseID(7), clientv3.LeaseID(8)
 			foreignJSON, err := json.Marshal(SessionRaw{ServerName: typeutil.RootCoordRole, ServerID: 99, LeaseID: &foreignLeaseID})
@@ -167,6 +187,7 @@ func TestSessionProcessActiveStandBy_PreservesForeignLegacySession(t *testing.T)
 			activeKey := path.Join("review/session", typeutil.MixCoordRole)
 			kv.kvs[activeKey] = &mvccpb.KeyValue{Key: []byte(activeKey), Value: ownJSON, Lease: int64(leaseID), Version: 1}
 			if key != typeutil.RootCoordRole {
+				kv.firstGetErr = context.DeadlineExceeded
 				ownKey := path.Join("review/session", typeutil.RootCoordRole)
 				kv.kvs[ownKey] = &mvccpb.KeyValue{Key: []byte(ownKey), Value: ownJSON, Lease: int64(leaseID), Version: 1}
 			}
