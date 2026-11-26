@@ -445,7 +445,7 @@ func TestLineageGroupNextToOrdinaryShard(t *testing.T) {
 	client := &viewQueryClientImpl{shardClient: newShardViewQueryClient(2, sn, workers)}
 
 	req := &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded, GuaranteeTimestamp: 90}
-	plans, err := client.searchAllShards(context.Background(), shards, req, nil, 0, fakeSearchResultReducer{})
+	plans, err := client.searchAllShards(context.Background(), shards, req, nil, 0, fakeSearchResultReducer{}, nil)
 	require.NoError(t, err)
 	require.Len(t, plans, 4)
 	require.Equal(t, plainA, plans[0].ShardID.VChannel)
@@ -487,7 +487,7 @@ func TestLineageGroupNextToOrdinaryShard(t *testing.T) {
 	sn.setPrefix(lineageT1, 125, 125)
 	sn.setPrefix(lineageT2, 135, 135)
 	client = &viewQueryClientImpl{shardClient: newShardViewQueryClient(2, sn, workers)}
-	queryPlans, err := client.queryAllShards(context.Background(), shards, &internalpb.RetrieveRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}, nil, 0, newLegacyQueryCollector())
+	queryPlans, err := client.queryAllShards(context.Background(), shards, &internalpb.RetrieveRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}, nil, 0, newLegacyQueryCollector(), nil)
 	require.NoError(t, err)
 	require.True(t, proto.Equal(sourceMVCC(125, 125, 125), queryPlans[1].Mvcc))
 	require.Equal(t, commonpb.ConsistencyLevel_Eventually, sn.planRequests(plainA)[0].GetConsistencyLevel())
@@ -734,9 +734,9 @@ func TestGroupShards(t *testing.T) {
 	require.Error(t, err)
 	malformed := []resolver.Shard{{VChannel: "s", Lineage: lineage(100, "t1")}}
 	native := &viewQueryClientImpl{shardClient: newShardViewQueryClient(2, sn, newLineageTestWorkers())}
-	_, err = native.searchAllShards(context.Background(), malformed, &internalpb.SearchRequest{CollectionID: 100}, nil, 0, fakeSearchResultReducer{})
+	_, err = native.searchAllShards(context.Background(), malformed, &internalpb.SearchRequest{CollectionID: 100}, nil, 0, fakeSearchResultReducer{}, nil)
 	require.Error(t, err)
-	_, err = native.queryAllShards(context.Background(), malformed, &internalpb.RetrieveRequest{CollectionID: 100}, nil, 0, newLegacyQueryCollector())
+	_, err = native.queryAllShards(context.Background(), malformed, &internalpb.RetrieveRequest{CollectionID: 100}, nil, 0, newLegacyQueryCollector(), nil)
 	require.Error(t, err)
 	require.Empty(t, sn.eventLog())
 }

@@ -2,6 +2,7 @@ package queryclient
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -50,7 +51,7 @@ type LegacySearchRequest struct {
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
-	// RetryErrors retain failed workers from earlier whole-Proxy stream attempts.
+	// RetryErrors retain failed workers from earlier whole-request attempts.
 	RetryErrors []error
 }
 
@@ -89,7 +90,7 @@ type LegacyQueryRequest struct {
 	AllowStreaming bool
 	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
-	// RetryErrors retain failed workers from earlier whole-Proxy stream attempts.
+	// RetryErrors retain failed workers from earlier whole-request attempts.
 	RetryErrors []error
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
@@ -542,11 +543,16 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 }
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
-	attempts := defaultMaxRetries
-	if c.shardClient != nil {
-		attempts = c.shardClient.maxRetries
-	}
-	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.search(ctx, req); return err })
+	attempts := c.shardClient.maxRetries
+	request := *req
+	request.RetryErrors = slices.Clone(req.RetryErrors)
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.search(ctx, &request)
+		if err != nil {
+			request.RetryErrors = append(request.RetryErrors, err)
+		}
+		return err
+	})
 	return result, ToMilvusError(err)
 }
 
@@ -555,10 +561,15 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 		result, err = c.query(ctx, req)
 		return result, ToMilvusError(err)
 	}
-	attempts := defaultMaxRetries
-	if c.shardClient != nil {
-		attempts = c.shardClient.maxRetries
-	}
-	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.query(ctx, req); return err })
+	attempts := c.shardClient.maxRetries
+	request := *req
+	request.RetryErrors = slices.Clone(req.RetryErrors)
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.query(ctx, &request)
+		if err != nil {
+			request.RetryErrors = append(request.RetryErrors, err)
+		}
+		return err
+	})
 	return result, ToMilvusError(err)
 }

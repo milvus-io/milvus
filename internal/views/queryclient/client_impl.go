@@ -75,7 +75,7 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 }
 
 // Search implements ViewQueryClient.Search.
-func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
+func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest, retryErrors []error) (result *SearchResult, err error) {
 	// === Stage: Plan ===
 
 	// Resolve shards first — the provider reports the collection's shard layout;
@@ -131,7 +131,7 @@ func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest) (r
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	// (requires field name → ID resolution from collection schema).
 	_ = fieldPlan
-	shardPlans, err := c.searchAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, searchReducer)
+	shardPlans, err := c.searchAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, searchReducer, retryErrors)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest) (r
 }
 
 // Query implements ViewQueryClient.Query.
-func (c *viewQueryClientImpl) query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
+func (c *viewQueryClientImpl) query(ctx context.Context, req *QueryRequest, retryErrors []error) (result *QueryResult, err error) {
 	// === Stage: Plan ===
 
 	// Resolve shards first — the provider reports the collection's shard layout;
@@ -209,7 +209,7 @@ func (c *viewQueryClientImpl) query(ctx context.Context, req *QueryRequest) (res
 	// === Stage: Search/Query (per-shard pipelined) ===
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	_ = fieldPlan
-	shardPlans, err := c.queryAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, retrieveReducer)
+	shardPlans, err := c.queryAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, retrieveReducer, retryErrors)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +244,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 	mvcc *viewpb.QueryPlanMVCC,
 	barrierMVCC uint64,
 	searchReducer reducer.SearchResultReducer,
+	retryErrors []error,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(shards))
 	err := c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
@@ -257,6 +258,7 @@ func (c *viewQueryClientImpl) searchAllShards(
 			BarrierMVCC:     read.barrierMVCC,
 			OnPlan:          read.onPlan,
 			awaitPlans:      read.awaitPlans,
+			retryErrors:     retryErrors,
 			Reducer:         searchReducer,
 		})
 		if err != nil {
@@ -279,6 +281,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 	mvcc *viewpb.QueryPlanMVCC,
 	barrierMVCC uint64,
 	retrieveReducer reducer.RetrieveResultReducer,
+	retryErrors []error,
 ) ([]ShardPlan, error) {
 	shardPlans := make([]ShardPlan, len(shards))
 	err := c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
@@ -291,6 +294,7 @@ func (c *viewQueryClientImpl) queryAllShards(
 			BarrierMVCC: read.barrierMVCC,
 			OnPlan:      read.onPlan,
 			awaitPlans:  read.awaitPlans,
+			retryErrors: retryErrors,
 			Reducer:     retrieveReducer,
 		})
 		if err != nil {
@@ -310,19 +314,27 @@ func (c *viewQueryClientImpl) Close() {
 }
 
 func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
-	attempts := defaultMaxRetries
-	if c.shardClient != nil {
-		attempts = c.shardClient.maxRetries
-	}
-	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.search(ctx, req); return err })
+	attempts := c.shardClient.maxRetries
+	var retryErrors []error
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.search(ctx, req, retryErrors)
+		if err != nil {
+			retryErrors = append(retryErrors, err)
+		}
+		return err
+	})
 	return result, ToMilvusError(err)
 }
 
 func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
-	attempts := defaultMaxRetries
-	if c.shardClient != nil {
-		attempts = c.shardClient.maxRetries
-	}
-	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error { result, err = c.query(ctx, req); return err })
+	attempts := c.shardClient.maxRetries
+	var retryErrors []error
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.query(ctx, req, retryErrors)
+		if err != nil {
+			retryErrors = append(retryErrors, err)
+		}
+		return err
+	})
 	return result, ToMilvusError(err)
 }

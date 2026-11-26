@@ -32,7 +32,8 @@ func servingCacheInfo(load uint64, schema int32) *querypb.GetQueryViewLoadInfoRe
 		Status: merr.Success(), CollectionID: 100, Version: load, ReadSchemaVersion: schema, ShardSetEpoch: 2,
 		ServingShards: []*viewpb.DataViewOfShard{
 			{Vchannel: "s", Lineage: &viewpb.QueryViewLineage{Vchannels: []string{"t1", "t2"}, SwitchTimetick: 100}},
-			{Vchannel: "t1"}, {Vchannel: "t2"},
+			{Vchannel: "t1"},
+			{Vchannel: "t2"},
 		},
 	}
 }
