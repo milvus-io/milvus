@@ -336,7 +336,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		return merr.Status(err), nil
 	}
 
-	if err := s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, req); err != nil {
+	if _, err := s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, req, false); err != nil {
 		if errors.Is(err, errReleaseCollectionNotLoaded) {
 			logger.Info(ctx, "release collection ignored, collection is not loaded")
 			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()

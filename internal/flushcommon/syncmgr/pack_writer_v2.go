@@ -63,8 +63,7 @@ func (bw *BulkPackWriterV2) PreparedStats() *metacache.SegmentStats {
 // untouched, mutated only by SyncTask.Run (via the installed preparedStats)
 // after the DataCoord ack. The clone is stashed as preparedStats and its
 // Publish() returned to DataCoord, so the two are one object. Shared by V2 and
-// the embedding V3 writer; only the statsBlobSize source differs (V2 sums the
-// returned stats/bm25 arrays, V3 tracks bw.statsBlobSize). digested is false for
+// the embedding V3 writer, which also provides measured field sizes. digested is false for
 // an empty sync, where the publish returns the segment's prior cumulative value.
 func (bw *BulkPackWriterV2) finalizeStats(
 	pack *SyncPack,
@@ -72,6 +71,7 @@ func (bw *BulkPackWriterV2) finalizeStats(
 	inserts map[int64]*datapb.FieldBinlog,
 	deltas *datapb.FieldBinlog,
 	statsBlobSize int64,
+	fieldSizes *datapb.FieldLogicalSizes,
 ) (*datapb.Statistics, error) {
 	seg, ok := bw.metaCache.GetSegmentByID(pack.segmentID)
 	if !ok {
@@ -79,7 +79,7 @@ func (bw *BulkPackWriterV2) finalizeStats(
 	}
 	clone := seg.Statistics().Clone()
 	if digested {
-		clone.Digest(inserts, deltas, statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo)
+		clone.DigestWithFieldSizes(inserts, deltas, statsBlobSize, pack.batchRows, pack.tsFrom, pack.tsTo, fieldSizes)
 	}
 	bw.preparedStats = clone
 	return clone.Publish(), nil
@@ -150,7 +150,7 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		}
 	}
 
-	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, statsBlobSize)
+	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, statsBlobSize, nil)
 	return
 }
 

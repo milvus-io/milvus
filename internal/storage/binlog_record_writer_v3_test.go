@@ -60,6 +60,7 @@ func TestPackedManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 
 	_, statsLog, _, manifestPath, _ := w.GetLogs()
 	assert.Empty(t, manifestPath, "no Write means no manifest should be produced")
+	assert.Nil(t, w.GetFieldLogicalSizes())
 	assert.Nil(t, statsLog, "no Write means no statsLog should be produced")
 }
 
@@ -88,6 +89,7 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 
 	_, _, _, manifestPath, _ := w.GetLogs()
 	assert.Empty(t, manifestPath, "no Write means no manifest should be produced")
+	assert.Nil(t, w.GetFieldLogicalSizes())
 }
 
 func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
@@ -111,8 +113,17 @@ func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
 	}
 	rec, err := ValueSerializer([]*Value{value}, schema)
 	require.NoError(t, err)
+	defer rec.Release()
 	require.NoError(t, w.Write(rec))
+	require.Nil(t, w.GetFieldLogicalSizes())
 	require.NoError(t, w.Close())
+	sizes := w.GetFieldLogicalSizes()
+	require.EqualValues(t, 1, sizes.GetRowCount())
+	requireLogicalSize(t, sizes.Fields[common.RowIDField], 8, 0)
+	requireLogicalSize(t, sizes.Fields[common.TimeStampField], 8, 0)
+	requireLogicalSize(t, sizes.Fields[100], 1, 0)
+	requireLogicalSize(t, sizes.Fields[101], 7, 0) // function input "varchar"
+	requireLogicalSize(t, sizes.Fields[102], 8, 0) // one BM25 sparse pair
 
 	_, statsLog, bm25Logs, manifestPath, _ := w.GetLogs()
 	require.NotEmpty(t, manifestPath)
@@ -139,6 +150,30 @@ func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
 
 	assert.Nil(t, statsLog, "V3 manifest stats must not be returned as legacy PK statslog")
 	assert.Empty(t, bm25Logs, "V3 manifest stats must not be returned as legacy BM25 statslog")
+}
+
+func TestPackedManifestRecordWriter_FailedCloseFieldLogicalSizes(t *testing.T) {
+	schema := genCollectionSchemaWithBM25()
+	rec, err := ValueSerializer([]*Value{{PK: NewVarCharPrimaryKey("0"), Value: genRowWithBM25(0)}}, schema)
+	require.NoError(t, err)
+	defer rec.Release()
+	for _, stage := range []string{"write_stats", "commit_manifest"} {
+		t.Run(stage, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			w, err := newPackedManifestRecordWriter(1, 2, 3, schema, nil, allocator.NewLocalAllocator(1, 1<<20),
+				1024, 0, 0, nil, cfg, nil, false, "parquet", nil)
+			require.NoError(t, err)
+			require.NoError(t, w.Write(rec))
+			requireLogicalSize(t, w.writer.GetFieldLogicalSizes().Fields[102], 8, 0)
+			if stage == "write_stats" {
+				defer mockey.Mock(packed.WriteFile).Return(merr.ErrServiceUnavailable).Build().UnPatch()
+			} else {
+				defer mockey.Mock(packed.CommitManifestUpdates).Return("", merr.ErrServiceUnavailable).Build().UnPatch()
+			}
+			require.ErrorIs(t, w.Close(), merr.ErrServiceUnavailable)
+			require.Nil(t, w.GetFieldLogicalSizes())
+		})
+	}
 }
 
 func TestPackedManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {

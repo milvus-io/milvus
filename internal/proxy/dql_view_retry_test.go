@@ -29,7 +29,6 @@ import (
 )
 
 func TestDQLViewRefresh(t *testing.T) {
-	require.NoError(t, Params.Save(Params.ProxyCfg.EnableAutoLoad.Key, "false"))
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
 	ready := mockey.Mock((*Proxy).ensureCollectionReady).Return(nil).Build()
 	defer ready.UnPatch()
@@ -80,4 +79,5 @@ func TestDQLViewRefresh(t *testing.T) {
 			})
 		}
 	}
+	require.Zero(t, ready.Times(), "View refreshes must not call EnsureCollectionReady")
 }

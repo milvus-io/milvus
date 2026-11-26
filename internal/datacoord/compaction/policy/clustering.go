@@ -228,7 +228,10 @@ func (policy *ClusteringCompactionPolicy) CollectionIsClusteringCompacting(colle
 	return false, 0
 }
 
-func CalculateClusteringCompactionConfig(coll *meta.CollectionInfo, cv view.CompactionView, expectedSegmentSize int64) (totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
+// CalculateClusteringCompactionConfig derives the row limits of the output
+// segments from expectedSegmentSize and the measured row size of the inputs.
+// maxRows is the row cap of the collection (0 for none) and bounds the result.
+func CalculateClusteringCompactionConfig(coll *meta.CollectionInfo, cv view.CompactionView, expectedSegmentSize int64, maxRows int64) (totalRows, maxSegmentRows, preferSegmentRows int64, err error) {
 	segments := cv.GetSegmentsView()
 	for _, s := range segments {
 		totalRows += s.NumOfRows
@@ -239,6 +242,9 @@ func CalculateClusteringCompactionConfig(coll *meta.CollectionInfo, cv view.Comp
 	segmentRows, err := estimateRowsBySegmentSize(segments, expectedSegmentSize)
 	if err != nil {
 		return 0, 0, 0, err
+	}
+	if maxRows > 0 {
+		segmentRows = min(segmentRows, maxRows)
 	}
 	maxSegmentRows = int64(float64(segmentRows) * clusteringMaxSegmentSizeRatio)
 	preferSegmentRows = int64(float64(segmentRows) * clusteringPreferSegmentSizeRatio)

@@ -543,6 +543,34 @@ func (s *MixCompactionTaskStorageV3Suite) TestPartialStructChildBackfill() {
 	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
 }
 
+// The partial writer has only the new vector child. Its read schema also
+// contains the PK-independent row anchor and an existing shape-provider
+// sibling. Neither is an output. The parent's four bits are shared, while the
+// four (NULL) vector elements belong to the new leaf.
+func (s *MixCompactionTaskStorageV3Suite) TestPartialStructMaterializationLogicalSizes() {
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
+	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
+	sourceSchema, targetSchema := w6bPartialStructSchemas()
+	cfg := s.task.compactionParams.StorageConfig
+	source := w6bWriteCompactionSource(s.T(), cfg, sourceSchema, 10, []int64{1, 2, 3, 4}, false)
+	plan := s.task.plan
+	plan.Type, plan.Schema, plan.TotalRows = datapb.CompactionType_BumpSchemaVersionCompaction, targetSchema, 4
+	plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{source}
+	task := NewBumpSchemaVersionCompactionTask(context.Background(), s.task.cm, plan, s.task.compactionParams)
+	result, err := task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), 1)
+	segment := result.GetSegments()[0]
+	s.Equal(source.GetSegmentID(), segment.GetSegmentID())
+	s.ElementsMatch([]int64{w6bCompactionVector, w6bCompactionStruct}, segment.GetFieldLogicalSizeUpdateIds())
+	sizes := segment.GetStats().GetFieldLogicalSizes()
+	s.EqualValues(4, sizes.GetRowCount())
+	s.Equal(map[int64]*datapb.FieldLogicalSize{
+		w6bCompactionVector: {ValidityBits: 4}, w6bCompactionStruct: {ValidityBits: 4},
+	}, sizes.GetFields())
+	w6bAssertBackfilledVector(s.T(), cfg, targetSchema, result.GetSegments())
+}
+
 func (s *MixCompactionTaskStorageV3Suite) TestLegacyV2StructChildBackfill() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.StorageFormat.Key, "parquet")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.StorageFormat.Key)
