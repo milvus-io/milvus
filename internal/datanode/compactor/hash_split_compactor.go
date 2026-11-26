@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -72,6 +73,7 @@ type hashSplitCompactionTask struct {
 	// ttlFieldID is the collection's row-level TTL field, or -1 when it has
 	// none. Resolved once, as a mix compaction does.
 	ttlFieldID int64
+	lobContext *compaction.LOBCompactionContext
 }
 
 var _ Compactor = (*hashSplitCompactionTask)(nil)
@@ -84,6 +86,12 @@ func NewSplitShardRewriteCompactionTask(
 	compactionParams compaction.Params,
 ) *hashSplitCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
+	// A split distributes one source across targets. Decode TEXT using that
+	// source's partition base, then write fresh LOBs and exact logical sizes
+	// for each target. This also handles legacy local source namespaces.
+	lobContext := compaction.NewLOBCompactionContext()
+	lobContext.ForceRewriteAll(compaction.GetTEXTFieldIDsFromSchema(plan.GetSchema()))
+	lobContext.DecodeTextFromSource = true
 	return &hashSplitCompactionTask{
 		ctx:              ctx,
 		cancel:           cancel,
@@ -93,6 +101,7 @@ func NewSplitShardRewriteCompactionTask(
 		tr:               timerecord.NewTimeRecorder("hash split compaction"),
 		currentTime:      compactionTTLTime(plan, time.Now()),
 		ttlFieldID:       getTTLFieldID(plan.GetSchema()),
+		lobContext:       lobContext,
 	}
 }
 
@@ -267,6 +276,9 @@ func (t *hashSplitCompactionTask) newTargetWriters(
 			idRange.GetBegin(), idRange.GetEnd(), n)
 	}
 
+	textConfigs := t.lobContext.GetTextColumnConfigs(
+		storage.SegmentPartitionBasePath(t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID),
+		t.compactionParams.TextInlineThreshold, t.compactionParams.TextMaxLobFileBytes, t.compactionParams.TextFlushThresholdBytes)
 	writers := make([]*MultiSegmentWriter, 0, partitioner.NumTargets())
 	for i := range partitioner.NumTargets() {
 		begin := idRange.GetBegin() + int64(i)*perTarget
@@ -291,7 +303,8 @@ func (t *hashSplitCompactionTask) newTargetWriters(
 			// output. The reader half already passes the same config.
 			storage.WithStorageConfig(t.compactionParams.StorageConfig),
 			storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
-			storage.WithWriterFormat(t.compactionParams.GetStorageFormat()))
+			storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
+			storage.WithTextColumnConfigs(textConfigs))
 		if err != nil {
 			for _, prev := range writers {
 				prev.Close()
@@ -335,7 +348,14 @@ func (t *hashSplitCompactionTask) rewriteSegment(
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime, seg.GetCommitTimestamp())
 
-	reader, existingFields, err := newCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig,
+	var textDecodeConfigs []packed.TextColumnConfig
+	if seg.GetManifest() != "" {
+		textDecodeConfigs, err = t.lobContext.GetSourceTextColumnConfigs(seg.GetManifest())
+		if err != nil {
+			return nil, err
+		}
+	}
+	reader, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, seg, t.plan.GetSchema(), t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithCollectionID(t.collectionID),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
