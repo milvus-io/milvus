@@ -54,7 +54,7 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := map[string]any{"type": "local", "path": tc.path}
-			params := map[string]any{"tokenizer": "standard", "char_filter": []any{map[string]any{"type": "mapping", "mappings": []string{"REQUEST_SECRET_MARKER => safe"}}}}
+			params := map[string]any{"tokenizer": "standard"}
 			switch tc.kind {
 			case "jieba":
 				params["tokenizer"] = map[string]any{"type": "jieba", "dict": []string{}, "extra_dict_file": file}
@@ -63,6 +63,8 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 			default:
 				params["filter"] = []any{map[string]any{"type": "stop", "stop_words_file": file}}
 			}
+			filters, _ := params["filter"].([]any)
+			params["filter"] = append(filters, map[string]any{"type": "stop", "stop_words": []string{"REQUEST_SECRET_MARKER"}})
 			data, err := json.Marshal(params)
 			require.NoError(t, err)
 			created, createErr := NewAnalyzer(string(data), "")
