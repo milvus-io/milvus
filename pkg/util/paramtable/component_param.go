@@ -177,14 +177,14 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
-	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
+	p.QueryNodeCfg.init(bt, &p.LocalStorageCfg)
 	p.DataCoordCfg.init(bt)
 	p.CommonCfg.UseLoonFFI = ParamItem{
-		Key:          "common.storage.useLoonFFI",
-		Version:      "2.6.7",
-		DefaultValue: "true",
-		Forbidden:    p.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool(),
-		Export:       true,
+		Key:           "common.storage.useLoonFFI",
+		Version:       "2.6.7",
+		DefaultValue:  "true",
+		forbiddenWhen: &p.DataCoordCfg.SegmentIndexSummariesEnabled,
+		Export:        true,
 	}
 	p.CommonCfg.UseLoonFFI.Init(bt.mgr)
 	p.DataNodeCfg.init(bt)
@@ -543,6 +543,19 @@ func (p *commonConfig) TalonNamespace() string {
 		caseMode = "all"
 	}
 	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
+}
+
+// Estimate lengths are read outside paramtable. Publish the effective value
+// even if the first etcd pull emitted no event, or a later override is deleted.
+func (pi *ParamItem) watchEstimateLength(set func(int)) {
+	var mu sync.Mutex
+	publish := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		set(getAsInt(pi.GetValue()))
+	}
+	pi.manager.Dispatcher.Register(pi.Key, config.NewHandler(pi.Key+".estimate", func(*config.Event) { publish() }))
+	pi.manager.OnStartupSnapshot(publish)
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1408,11 +1421,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.VarCharLengthAvg.Init(base.mgr)
-	typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
-	p.VarCharLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
-		return nil
-	})
+	p.VarCharLengthAvg.watchEstimateLength(typeutil.SetVarCharEstimateLength)
 
 	p.DynamicFieldLengthAvg = ParamItem{
 		Key:          "common.estimate.dynamicFieldLengthAvg",
@@ -1422,11 +1431,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.DynamicFieldLengthAvg.Init(base.mgr)
-	typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
-	p.DynamicFieldLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
-		return nil
-	})
+	p.DynamicFieldLengthAvg.watchEstimateLength(typeutil.SetDynamicFieldEstimateLength)
 
 	p.SparseFloatVectorSize = ParamItem{
 		Key:          "common.estimate.sparseFloatVectorSize",
@@ -1436,11 +1441,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.SparseFloatVectorSize.Init(base.mgr)
-	typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
-	p.SparseFloatVectorSize.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
-		return nil
-	})
+	p.SparseFloatVectorSize.watchEstimateLength(typeutil.SetSparseFloatVectorEstimateLength)
 
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
@@ -1934,7 +1935,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export: true,
 	}
 	p.PreferIPv6LocalIP.Init(base.mgr)
-	funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool())
+	base.mgr.OnStartupSnapshot(func() { funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool()) })
 
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
@@ -1973,7 +1974,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 				updateFastPBEnabled()
 			}
 		}))
-		updateFastPBEnabled()
+		base.mgr.OnStartupSnapshot(updateFastPBEnabled)
 	}
 
 	p.EnabledOptimizeExpr = ParamItem{
@@ -4985,7 +4986,7 @@ func (p *queryNodeConfig) ResolveLoadAdmissionLimits(asyncEnabled bool) (budgetB
 	return resolve(&p.LoadTransientBudgetBytes), resolve(&p.LoadAdmissionSlots)
 }
 
-func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
+func (p *queryNodeConfig) init(base *BaseTable, storage *LocalStorageConfig) {
 	p.MaterializeCodec = ParamItem{
 		Key:          "queryNode.materialize.codec",
 		Version:      "3.1.0",
@@ -5762,7 +5763,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				return path.Join(localStoragePath, "mmap")
+				return path.Join(storage.startupPath(), "mmap")
 			}
 			return v
 		},
@@ -6034,6 +6035,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
+				localStoragePath := storage.startupPath()
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						mlog.Fatal(context.TODO(), "failed to mkdir", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))
@@ -7649,13 +7651,12 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
 	}
 	p.SegmentIndexSummariesEnabled.Init(base.mgr)
-	summaryMode := p.SegmentIndexSummariesEnabled.GetAsBool()
 
 	p.WriteSegmentIndexToManifest = ParamItem{
-		Key:          "dataCoord.index.writeSegmentIndexToManifest",
-		Version:      "3.0.0",
-		DefaultValue: "true",
-		Forbidden:    summaryMode,
+		Key:           "dataCoord.index.writeSegmentIndexToManifest",
+		Version:       "3.0.0",
+		DefaultValue:  "true",
+		forbiddenWhen: &p.SegmentIndexSummariesEnabled,
 		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
 New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
 The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
@@ -7678,10 +7679,10 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
 
 	p.ManifestIndexBackfillEnabled = ParamItem{
-		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
-		Version:      "3.0.1",
-		DefaultValue: "false",
-		Forbidden:    summaryMode,
+		Key:           "dataCoord.index.manifestIndexBackfill.enabled",
+		Version:       "3.0.1",
+		DefaultValue:  "false",
+		forbiddenWhen: &p.SegmentIndexSummariesEnabled,
 		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
 Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
 Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
@@ -7739,7 +7740,7 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 
 	p.ManifestIndexRollbackEnabled = ParamItem{
 		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
-		Forbidden: summaryMode,
+		forbiddenWhen: &p.SegmentIndexSummariesEnabled,
 		Doc: `Copy StorageV3 path-version-2 index files to index_v1 with object-storage server-side Copy, then atomically restore etcd records with path version 1 and remove their manifest entries. Source files remain retained for readers and snapshots. Local-storage layout migration is unsupported. This restart-scoped switch overrides forward backfill and creation of new manifest index tasks; already-created version-2 tasks still finish in manifests and are then eligible for rollback.
 Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
 		Export: true,

@@ -31,7 +31,28 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestStartupErrorCategory(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{context.DeadlineExceeded, "DeadlineExceeded"},
+		{context.Canceled, "Canceled"},
+		{status.Error(codes.DeadlineExceeded, "private endpoint"), "DeadlineExceeded"},
+		{rpctypes.ErrAuthFailed, "AuthenticationFailed"},
+		{rpctypes.ErrPermissionDenied, "PermissionDenied"},
+		{&os.PathError{Op: "open", Path: "private certificate path", Err: os.ErrNotExist}, "FileNotFound"},
+		{os.ErrPermission, "FilePermissionDenied"},
+		{merr.WrapErrParameterInvalidMsg("private transport setting"), "InvalidConfiguration"},
+		{errors.New("private details"), "Unknown"},
+	} {
+		require.Equal(t, tc.want, StartupErrorCategory(errors.Wrap(tc.err, "private context")))
+	}
+}
 
 func TestRetryAtStartup(t *testing.T) {
 	for _, tt := range []struct {

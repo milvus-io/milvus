@@ -81,7 +81,8 @@ type BaseTable struct {
 	// enabled. It is injected into the config etcd source and shared with other
 	// etcd users (e.g. the version gate confirmator); it lives for the process
 	// lifetime and is never closed by the source.
-	etcdClient *clientv3.Client
+	etcdClient    *clientv3.Client
+	bootstrapEtcd *EtcdConfig
 }
 
 type baseTableConfig struct {
@@ -153,6 +154,7 @@ func (bt *BaseTable) init() {
 	}
 
 	var err error
+	bt.bootstrapEtcd = nil
 	bt.mgr, err = config.Init()
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to initialize config manager", mlog.Err(err))
@@ -205,10 +207,13 @@ func (bt *BaseTable) initConfigsFromLocal() {
 
 func (bt *BaseTable) initConfigsFromRemote(ctx context.Context) error {
 	refreshInterval := bt.config.refreshInterval
-	etcdConfig := EtcdConfig{}
-	etcdConfig.Init(bt)
-	etcdConfig.Endpoints.PanicIfEmpty = false
-	etcdConfig.RootPath.PanicIfEmpty = false
+	if bt.bootstrapEtcd == nil {
+		bt.bootstrapEtcd = &EtcdConfig{}
+		bt.bootstrapEtcd.Init(bt)
+		bt.bootstrapEtcd.Endpoints.PanicIfEmpty = false
+		bt.bootstrapEtcd.RootPath.PanicIfEmpty = false
+	}
+	etcdConfig := bt.bootstrapEtcd
 	if etcdConfig.Endpoints.GetValue() == "" {
 		return nil
 	}
@@ -219,7 +224,7 @@ func (bt *BaseTable) initConfigsFromRemote(ctx context.Context) error {
 	if err != nil {
 		// TLS and dial errors can contain protected paths, endpoints, or
 		// transport settings. Keep those details in the in-process error only.
-		mlog.Warn(ctx, "init with etcd client failed", mlog.String("error", config.RedactedValue))
+		mlog.Warn(ctx, "init with etcd client failed", mlog.String("errorCategory", etcd.StartupErrorCategory(err)))
 		return err
 	}
 	bt.etcdClient = etcdCli

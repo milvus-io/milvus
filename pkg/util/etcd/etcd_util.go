@@ -128,6 +128,30 @@ func IsRetriableStartupErr(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded || IsRetriableEtcdErr(err)
 }
 
+// StartupErrorCategory returns a diagnostic safe to log even when the wrapped
+// error contains credentials, certificate paths or transport details.
+func StartupErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return codes.DeadlineExceeded.String()
+	case errors.Is(err, context.Canceled):
+		return codes.Canceled.String()
+	case errors.IsAny(err, rpctypes.ErrAuthFailed, rpctypes.ErrGRPCAuthFailed):
+		return "AuthenticationFailed"
+	case errors.Is(err, os.ErrNotExist):
+		return "FileNotFound"
+	case errors.Is(err, os.ErrPermission):
+		return "FilePermissionDenied"
+	case errors.Is(err, merr.ErrParameterInvalid):
+		return "InvalidConfiguration"
+	}
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		return etcdErr.Code().String()
+	}
+	return status.Code(err).String()
+}
+
 // RetryAtStartup waits for a temporarily unavailable etcd until startup is canceled.
 // Each individual operation must have its own deadline. Keep connection details
 // out of bootstrap logs (errors may include endpoints or certificate paths).
@@ -145,8 +169,8 @@ func RetryAtStartup(ctx context.Context, operation func() error) error {
 			return backoff.Permanent(err)
 		}
 		return err
-	}, backoff.WithContext(policy, ctx), func(_ error, delay time.Duration) {
-		mlog.RatedWarn(ctx, 0.2, "waiting for etcd during startup", mlog.Duration("retryAfter", delay))
+	}, backoff.WithContext(policy, ctx), func(err error, delay time.Duration) {
+		mlog.RatedWarn(ctx, 0.2, "waiting for etcd during startup", mlog.String("errorCategory", StartupErrorCategory(err)), mlog.Duration("retryAfter", delay))
 	})
 }
 
