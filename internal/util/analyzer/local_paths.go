@@ -27,91 +27,75 @@ import (
 // ResolveLocalPaths pins relative dictionary and TLS paths before schema admission.
 // Persist the result so changing operator base directories cannot retarget old schemas.
 func ResolveLocalPaths(params, dictionaryRoot, tlsRoot string) (string, error) {
-	var visit func(json.RawMessage) (json.RawMessage, bool, error)
-	resolve := func(object map[string]json.RawMessage, key, root string) (bool, error) {
-		var name string
-		value, ok := object[key]
-		if !ok || json.Unmarshal(value, &name) != nil || name == "" || filepath.IsAbs(name) {
-			return false, nil
-		}
-		for _, part := range strings.Split(name, "/") {
-			if part == "" || part == "." || part == ".." {
-				return false, merr.WrapErrParameterInvalidMsg("invalid relative analyzer file path")
-			}
-		}
-		if !filepath.IsAbs(root) {
-			return false, merr.WrapErrServiceInternalMsg("analyzer file base directory must be absolute")
-		}
-		object[key], _ = json.Marshal(filepath.Join(root, name))
-		return true, nil
-	}
-	visit = func(raw json.RawMessage) (json.RawMessage, bool, error) {
-		trimmed := strings.TrimSpace(string(raw))
-		changed := false
-		switch {
-		case strings.HasPrefix(trimmed, "{"):
-			var object map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &object); err != nil {
-				return nil, false, merr.WrapErrParameterInvalidMsg("invalid analyzer parameters")
-			}
-			for key, value := range object {
-				next, updated, err := visit(value)
-				if err != nil {
-					return nil, false, err
-				}
-				object[key] = next
-				changed = changed || updated
-			}
-			var kind string
-			_ = json.Unmarshal(object["type"], &kind)
-			if kind == "local" {
-				updated, err := resolve(object, "path", dictionaryRoot)
-				if err != nil {
-					return nil, false, err
-				}
-				changed = changed || updated
-			}
-			if kind == "grpc" {
-				var tls map[string]json.RawMessage
-				if json.Unmarshal(object["tls"], &tls) == nil && tls != nil {
-					for _, key := range []string{"ca_cert", "client_cert", "client_key"} {
-						updated, err := resolve(tls, key, tlsRoot)
-						if err != nil {
-							return nil, false, err
-						}
-						changed = changed || updated
-					}
-					object["tls"], _ = json.Marshal(tls)
-				}
-			}
-			if changed {
-				raw, _ = json.Marshal(object)
-			}
-		case strings.HasPrefix(trimmed, "["):
-			var array []json.RawMessage
-			if err := json.Unmarshal(raw, &array); err != nil {
-				return nil, false, merr.WrapErrParameterInvalidMsg("invalid analyzer parameters")
-			}
-			for i, value := range array {
-				next, updated, err := visit(value)
-				if err != nil {
-					return nil, false, err
-				}
-				array[i] = next
-				changed = changed || updated
-			}
-			if changed {
-				raw, _ = json.Marshal(array)
-			}
-		}
-		return raw, changed, nil
-	}
 	if params == "" {
 		return params, nil
 	}
 	if !json.Valid([]byte(params)) {
 		return "", merr.WrapErrParameterInvalidMsg("invalid analyzer parameters")
 	}
-	resolved, _, err := visit(json.RawMessage(params))
-	return string(resolved), err
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(params))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", merr.WrapErrParameterInvalidMsg("invalid analyzer parameters")
+	}
+	changed := false
+	resolve := func(object map[string]any, key, root string) error {
+		name, ok := object[key].(string)
+		if !ok || name == "" || filepath.IsAbs(name) {
+			return nil
+		}
+		for _, part := range strings.Split(name, "/") {
+			if part == "" || part == "." || part == ".." {
+				return merr.WrapErrParameterInvalidMsg("invalid relative analyzer file path")
+			}
+		}
+		if !filepath.IsAbs(root) {
+			return merr.WrapErrServiceInternalMsg("analyzer file base directory must be absolute")
+		}
+		object[key] = filepath.Join(root, name)
+		changed = true
+		return nil
+	}
+	var visit func(any) error
+	visit = func(value any) error {
+		switch object := value.(type) {
+		case map[string]any:
+			for _, child := range object {
+				if err := visit(child); err != nil {
+					return err
+				}
+			}
+			if object["type"] == "local" {
+				return resolve(object, "path", dictionaryRoot)
+			}
+			if object["type"] == "grpc" {
+				if tls, ok := object["tls"].(map[string]any); ok {
+					for _, key := range []string{"ca_cert", "client_cert", "client_key"} {
+						if err := resolve(tls, key, tlsRoot); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		case []any:
+			for _, child := range object {
+				if err := visit(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit(value); err != nil {
+		return "", err
+	}
+	if !changed {
+		return params, nil
+	}
+	resolved, err := json.Marshal(value)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalMsg("cannot serialize analyzer parameters")
+	}
+	return string(resolved), nil
 }
