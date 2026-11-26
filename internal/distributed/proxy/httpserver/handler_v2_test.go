@@ -8343,3 +8343,70 @@ func TestTopLevelResultShapeErrorResponse(t *testing.T) {
 	assert.Equal(t, wantMessage, resp[HTTPReturnMessage])
 	assert.NotContains(t, resp, HTTPReturnData)
 }
+
+func TestInsertRejectsWriteCondition(t *testing.T) {
+	mp := &mockProxyComponent{}
+	testEngine := initHTTPServerV2(mp, false)
+
+	w := httptest.NewRecorder()
+	body := `{"collectionName": "book", "data": [{"id": 1, "version": 2}], "writeCondition": {"field": "version", "op": "gt"}}`
+	testEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, InsertAction), strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp ReturnErrMsg
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), resp.Code)
+	assert.Contains(t, resp.Message, "writeCondition is only supported for upsert")
+}
+
+func TestConditionalUpsertAllSkippedResponse(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	mp := &mockProxyComponent{}
+	describePatch := mockey.Mock((*mockProxyComponent).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Build()
+	defer describePatch.UnPatch()
+	upsertPatch := mockey.Mock((*mockProxyComponent).Upsert).To(func(_ *mockProxyComponent, _ context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		require.True(t, req.GetPartialUpdate())
+		require.NotNil(t, req.GetWriteCondition())
+		assert.Equal(t, "version", req.GetWriteCondition().GetField())
+		assert.Equal(t, milvuspb.WriteCondition_GT, req.GetWriteCondition().GetOp())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 0,
+			IDs: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}},
+			},
+		}, nil
+	}).Build()
+	defer upsertPatch.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
+
+	w := httptest.NewRecorder()
+	body := `{"collectionName": "book", "data": [{"id": 1, "version": 2}], "writeCondition": {"field": "version", "op": "gt"}}`
+	testEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, UpsertAction), strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, merr.Code(nil), resp[HTTPReturnCode])
+	data, ok := resp[HTTPReturnData].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 0, data["upsertCount"])
+	assert.Equal(t, []interface{}{}, data["upsertIds"])
+	assert.Equal(t, []interface{}{}, data["succIndex"])
+}
