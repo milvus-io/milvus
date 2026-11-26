@@ -142,12 +142,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // batch. Every structure this function writes -- column data, validity,
     // pk2offset_, the growing indexes, array offsets -- addresses the batch by
     // it rather than by "wherever I currently am" (#52637).
-    load_field_data_common(FieldId field_id,
-                           size_t reserved_offset,
-                           const std::vector<FieldDataPtr>& field_data,
-                           FieldId primary_field_id,
-                           size_t num_rows,
-                           bool text_is_remote_lob_ref = false);
+    load_field_data_common(
+        FieldId field_id,
+        size_t reserved_offset,
+        const std::vector<FieldDataPtr>& field_data,
+        FieldId primary_field_id,
+        size_t num_rows,
+        bool text_is_remote_lob_ref = false,
+        std::optional<uint64_t> persisted_payload_bytes = std::nullopt);
 
     // Test-only: inject TEXT LOB base path.
     void

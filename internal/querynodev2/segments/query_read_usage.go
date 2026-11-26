@@ -18,7 +18,6 @@ package segments
 
 import (
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -85,13 +84,7 @@ func sealedQueryFieldSizes(info *querypb.SegmentLoadInfo) *datapb.FieldLogicalSi
 		return nil
 	}
 	sizes := info.GetStats().GetFieldLogicalSizes()
-	if !storage.FieldLogicalSizesCover(sizes, info.GetNumOfRows()) {
-		return nil
-	}
-	path := info.GetManifestPath()
-	base, version, err := packed.UnmarshalManifestPath(path)
-	if err != nil || base == "" || version <= packed.ManifestEarliest ||
-		!packed.SameManifestPath(info.GetFieldLogicalSizesManifest(), path) {
+	if !storage.FieldLogicalSizesCoverManifest(sizes, info.GetNumOfRows(), info.GetFieldLogicalSizesManifest(), info.GetManifestPath()) {
 		return nil
 	}
 	return sizes

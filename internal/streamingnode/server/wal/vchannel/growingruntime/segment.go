@@ -446,10 +446,13 @@ func loadInfoFromVisibleSegment(segment walview.VisibleSegment) *querypb.Segment
 		Statslogs:      make([]*datapb.FieldBinlog, 0),
 		Bm25Logs:       make([]*datapb.FieldBinlog, 0),
 		ManifestPath:   persisted.GetManifestPath(),
+		Stats:          persisted.GetStatistics(),
 		StorageVersion: storage.StorageV2,
 	}
 	if persisted.GetManifestPath() != "" {
 		loadInfo.StorageVersion = storage.StorageV3
+		// The WAL checkpoint publishes the manifest and cumulative statistics together.
+		loadInfo.FieldLogicalSizesManifest = persisted.GetManifestPath()
 	}
 	if segment.Assignment != nil {
 		loadInfo.CollectionID = segment.Assignment.GetCollectionId()

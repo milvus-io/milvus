@@ -80,6 +80,9 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
 		segLoadInfo.FieldHints = req.FieldHints
+		if req.SegmentType == SegmentTypeGrowing {
+			segLoadInfo.FieldLogicalPayloadBytes = growingFieldLogicalPayloadBytes(req.LoadInfo)
+		}
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
 			return nil, err
@@ -112,6 +115,25 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		}
 	}
 	return seg, nil
+}
+
+// growingFieldLogicalPayloadBytes returns the persisted prefix of growing usage.
+// Growing usage counts value payloads and does not include validity bits.
+func growingFieldLogicalPayloadBytes(info *querypb.SegmentLoadInfo) map[int64]uint64 {
+	if info.GetStorageVersion() != storage.StorageV3 {
+		return nil
+	}
+	sizes := info.GetStats().GetFieldLogicalSizes()
+	if !storage.FieldLogicalSizesCoverManifest(sizes, info.GetNumOfRows(), info.GetFieldLogicalSizesManifest(), info.GetManifestPath()) {
+		return nil
+	}
+	bytes := make(map[int64]uint64, len(sizes.GetFields()))
+	for fieldID, size := range sizes.GetFields() {
+		if size != nil {
+			bytes[fieldID] = size.GetPayloadBytes()
+		}
+	}
+	return bytes
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.

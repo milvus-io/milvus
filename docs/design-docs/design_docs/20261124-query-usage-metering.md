@@ -12,7 +12,7 @@ AgentBase uses a distribution-installed reporter to record one `bytes` value at 
 
 Filtering, MVCC and the number of groups do not reduce the planned column sizes.
 
-Sealed workers read the field totals bound to the selected manifest revision and verify their row coverage. Sealed logical sizes include the stored validity bits. Growing workers track field payloads as they insert or recover batches. Missing required data fails the request. A known zero remains valid. For example, a recovered TEXT reference that carries no original length cannot supply a planned column size.
+Sealed workers read the field totals bound to the selected manifest revision and verify their row coverage. Sealed logical sizes include the stored validity bits. Growing workers track field payloads as they insert or recover batches. Growing recovery uses the persisted payload totals when the accounting version, manifest revision, and row count match the loaded data. The worker adds the subsequent WAL inserts to those totals. Fields without a verified total are measured from the loaded values. A recovered remote TEXT reference needs a verified payload total because the reference lacks the original length. Missing required data fails the request. A known zero remains valid.
 
 Proxy adds successful shard contributions and the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty shard results retain their usage.
 

@@ -146,4 +146,6 @@ message SegmentLoadInfo {
   // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
   uint64 commit_timestamp = 24;
   repeated int64 field_hints = 25; // Preload preferences within the explicit query scope; empty means all scope fields.
+  // Verified payload bytes for the loaded growing manifest's num_of_rows.
+  map<int64, uint64> field_logical_payload_bytes = 26;
 }

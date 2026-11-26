@@ -2068,7 +2068,8 @@ SegmentGrowingImpl::load_field_data_common(
     const std::vector<FieldDataPtr>& field_data,
     FieldId primary_field_id,
     size_t num_rows,
-    bool text_is_remote_lob_ref) {
+    bool text_is_remote_lob_ref,
+    std::optional<uint64_t> persisted_payload_bytes) {
     if (field_id == TimestampFieldID) {
         // step 2: sort timestamp
         // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
@@ -2207,31 +2208,33 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
-    uint64_t payload_bytes = 0;
+    uint64_t payload_bytes = persisted_payload_bytes.value_or(0);
     bool payload_known = true;
-    for (const auto& data : field_data) {
-        if (field_meta.get_data_type() != DataType::TEXT ||
-            !text_is_remote_lob_ref) {
-            payload_bytes += data->DataSize();
-            continue;
-        }
-        const auto* values = static_cast<const std::string*>(data->Data());
-        for (int64_t row = 0; row < data->get_num_rows(); ++row) {
-            if (field_meta.is_nullable() && !data->is_valid(row)) {
+    if (!persisted_payload_bytes.has_value()) {
+        for (const auto& data : field_data) {
+            if (field_meta.get_data_type() != DataType::TEXT ||
+                !text_is_remote_lob_ref) {
+                payload_bytes += data->DataSize();
                 continue;
             }
-            const auto& value = values[row];
-            if (value.empty() ||
-                !milvus_storage::lob_column::IsInlineData(
-                    reinterpret_cast<const uint8_t*>(value.data()))) {
-                // A remote reference does not contain the original length.
-                payload_known = false;
+            const auto* values = static_cast<const std::string*>(data->Data());
+            for (int64_t row = 0; row < data->get_num_rows(); ++row) {
+                if (field_meta.is_nullable() && !data->is_valid(row)) {
+                    continue;
+                }
+                const auto& value = values[row];
+                if (value.empty() ||
+                    !milvus_storage::lob_column::IsInlineData(
+                        reinterpret_cast<const uint8_t*>(value.data()))) {
+                    // A remote reference does not contain the original length.
+                    payload_known = false;
+                    break;
+                }
+                payload_bytes += value.size() - 1;
+            }
+            if (!payload_known) {
                 break;
             }
-            payload_bytes += value.size() - 1;
-        }
-        if (!payload_known) {
-            break;
         }
     }
     if (payload_known) {
@@ -4446,14 +4449,23 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         stats_.mem_size += num_rows * sizeof(int64_t);
     }
 
+    const auto& field_payloads = load_info_.field_logical_payload_bytes();
     for (auto& column_group_result : column_group_results) {
         for (auto& [field_id, field_data] : column_group_result) {
+            std::optional<uint64_t> persisted_payload_bytes;
+            if (reserved_offset == 0) {
+                if (auto it = field_payloads.find(field_id.get());
+                    it != field_payloads.end()) {
+                    persisted_payload_bytes = it->second;
+                }
+            }
             load_field_data_common(field_id,
                                    reserved_offset,
                                    field_data,
                                    primary_field_id,
                                    num_rows,
-                                   /*text_is_remote_lob_ref=*/true);
+                                   /*text_is_remote_lob_ref=*/true,
+                                   persisted_payload_bytes);
             // Build geometry cache for GEOMETRY fields
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
