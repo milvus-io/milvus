@@ -6,7 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
-var benchmarkFailureSnapshot map[int64]map[ResourceKey]qviews.QueryViewVersion
+var benchmarkFailureSnapshot map[int64]map[FailedResourceKey]ResourceFailure
 
 func BenchmarkEmptyFailureSnapshot(b *testing.B) {
 	b.ReportAllocs()

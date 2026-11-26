@@ -15,12 +15,23 @@ import (
 // delegates them to a QueryViewHandler, and sends back sync reports.
 type ViewSyncServer struct {
 	viewpb.UnimplementedViewSyncServiceServer
-	handler QueryViewHandler
+	handler            QueryViewHandler
+	resourceWatermarks func() *viewpb.NodeResourceWatermarks
+}
+
+type SyncServerOption func(*ViewSyncServer)
+
+func WithResourceWatermarks(sample func() *viewpb.NodeResourceWatermarks) SyncServerOption {
+	return func(s *ViewSyncServer) { s.resourceWatermarks = sample }
 }
 
 // NewViewSyncServer creates a new ViewSyncServer with the given handler.
-func NewViewSyncServer(handler QueryViewHandler) *ViewSyncServer {
-	return &ViewSyncServer{handler: handler}
+func NewViewSyncServer(handler QueryViewHandler, options ...SyncServerOption) *ViewSyncServer {
+	s := &ViewSyncServer{handler: handler}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }
 
 // SyncQueryView implements viewpb.ViewSyncServiceServer.
@@ -79,7 +90,7 @@ func (s *ViewSyncServer) sendLoop(
 	sizeReady := s.handler.ViewFeedbackReady()
 	feedbackReady := sizeReady
 	lastFeedbackTake := time.Now()
-	if s.sendViewFeedback(stream, pending) {
+	if s.sendResourceWatermarks(stream) || s.sendViewFeedback(stream, pending) {
 		return
 	}
 	for {
@@ -89,7 +100,7 @@ func (s *ViewSyncServer) sendLoop(
 		case <-timer.C:
 			lastFeedbackTake = time.Now()
 			timer.Reset(qviews.ViewFeedbackInterval)
-			if s.sendViewFeedback(stream, pending) {
+			if s.sendResourceWatermarks(stream) || s.sendViewFeedback(stream, pending) {
 				return
 			}
 			feedbackReady = sizeReady
@@ -107,6 +118,19 @@ func (s *ViewSyncServer) sendLoop(
 			}
 		}
 	}
+}
+
+// sendResourceWatermarks shares the sole stream writer with view reports.
+// Failed measurements are omitted; the coordinator expires the previous sample.
+func (s *ViewSyncServer) sendResourceWatermarks(stream viewpb.ViewSyncService_SyncQueryViewServer) bool {
+	if s.resourceWatermarks == nil {
+		return false
+	}
+	report := s.resourceWatermarks()
+	if report == nil {
+		return false
+	}
+	return stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_ResourceWatermarks{ResourceWatermarks: report}}) != nil
 }
 
 // sendViewFeedback runs only in sendLoop. Return true when sending must stop.

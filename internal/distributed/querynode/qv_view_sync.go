@@ -21,9 +21,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-func registerQueryViewSyncHandler(grpcServer *grpc.Server, queryViewHandler *qnview.QNQueryViewHandler) {
+func registerQueryViewSyncHandler(grpcServer *grpc.Server, queryViewHandler *qnview.QNQueryViewHandler, options ...handler.SyncServerOption) {
 	viewpb.RegisterViewSyncServiceServer(grpcServer, &queryNodeViewSyncServer{
-		ViewSyncServer: handler.NewViewSyncServer(queryViewHandler),
+		ViewSyncServer: handler.NewViewSyncServer(queryViewHandler, options...),
 		closing:        queryViewHandler.Closing(),
 	})
 }

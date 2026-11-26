@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -79,6 +80,7 @@ const (
 var errRetryTimerNotified = errors.New("retry timer notified")
 
 type Loader interface {
+	GetResourceWatermarks() *viewpb.NodeResourceWatermarks
 	// Load loads binlogs, and spawn segments,
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
@@ -1873,7 +1875,7 @@ func (loader *segmentLoader) checkLoadingResource(
 				mlog.Float64("totalMemMB", logutil.ToMB(float64(totalMem))),
 				mlog.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
 			)
-			return merr.WrapErrSegmentRequestResourceFailed("Memory")
+			return &resourceAdmissionError{error: merr.WrapErrSegmentRequestResourceFailed("Memory"), reason: viewpb.SegmentPerparingFailure_MemoryLimitExceeded}
 		}
 
 		if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
@@ -1884,7 +1886,7 @@ func (loader *segmentLoader) checkLoadingResource(
 				mlog.Float64("totalDiskMB", logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())))),
 				mlog.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()),
 			)
-			return merr.WrapErrSegmentRequestResourceFailed("Disk")
+			return &resourceAdmissionError{error: merr.WrapErrSegmentRequestResourceFailed("Disk"), reason: viewpb.SegmentPerparingFailure_DiskLimitExceeded}
 		}
 	}
 

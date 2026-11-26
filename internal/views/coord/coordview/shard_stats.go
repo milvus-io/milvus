@@ -33,7 +33,7 @@ type ShardStats struct {
 	// FailedResources records explicit capacity failures reported by QNs in
 	// Unrecoverable. Keep it separate from merged segment states: an older Up
 	// placement must not hide failure to prepare a new loading requirement.
-	FailedResources map[int64]map[ResourceKey]qviews.QueryViewVersion
+	FailedResources map[int64]map[FailedResourceKey]ResourceFailure
 	// UpVersion is the version of the current Up view, if any.
 	// Nil when no view is currently Up.
 	UpVersion *qviews.QueryViewVersion

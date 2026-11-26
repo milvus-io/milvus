@@ -257,13 +257,15 @@ preparation failure for a replacement View.
 
 Segment admission distinguishes outstanding loader reservations from sustained
 capacity rejection. The loader returns the competing memory/disk reservation
-snapshot from the same admission check. While competing reservations exist,
-capacity rejection retries locally. Without competing reservations, memory,
-disk and caching-layer reservation failures start a five-second grace window.
-A rejection observed after that window fails only the affected View through
-`OnUnrecoverable`; successful admission, a competing reservation, or a different
-admission error resets the window. This does not classify capacity errors as
-Input errors or impose a timeout on metadata, I/O, or native loading.
+snapshot from the same admission check. Only reservations in the rejected
+resource dimension extend the five-second quiet grace window. Continuous
+capacity rejection is bounded by a thirty-second admission window even with
+competing loads; a rejection observed after either applicable window fails the
+affected View through `OnUnrecoverable`. Successful admission or a different
+admission error resets both windows. This does not classify capacity errors as
+Input errors or impose a timeout on metadata, I/O, or native loading. Fallback
+loader admission retains its existing merr code and carries the specific memory
+or disk reason as an in-process typed error.
 
 The failure callback carries the exact rejected Segment ID and an enum reason.
 The QN includes these facts in `QueryViewOfQueryNode.failed_segments` as
@@ -277,11 +279,20 @@ Empty lists add no protobuf wire bytes; old reports or unknown reasons do not
 provide a capacity failure fact.
 
 Coordinator retains explicitly rejected QN requirements separately from successful
-resource facts, keyed by node, partition, segment, DataVersion and LoadInfoVersion.
-Replacement prefers an unfailed eligible node in the same Replica/RG. Failed
-requirements survive failed-View retirement until the loading identity changes
-or a newer View becomes Up. If every eligible node has rejected a requirement,
-retry the least recently failed placement with the existing preparation backoff.
+resource facts, keyed by node, partition, segment, manifest, schema and
+LoadInfoVersion. Only legacy requirements without a manifest use DataVersion as
+a conservative fallback identity. Other shards' flushes cannot invalidate a
+versioned segment's rejection. New Up clears the successful node's matching
+failures; it does not assert that another node recovered capacity. Replacement
+prunes retired identities and evidence older than ten minutes.
+
+QN separately reports its loader admission memory/disk watermarks through the
+shared SyncView stream. These include physical usage and committed reservations,
+normalized to the applicable loader limit and clamped to [0,100]. They do not
+represent the native caching-layer ledger. QueryView itself carries only the
+segment failure reason. Watermark updates do not trigger balance. The
+[capacity-aware candidate policy](../balancer_scoring.md#52-capacity-failure-feedback)
+uses them during existing reconciliation, with hysteresis and bounded probing.
 Replacement still acquires resources before old references are released, and
 serving Up coverage is retired only after replacement reaches Up.
 

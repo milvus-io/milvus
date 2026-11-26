@@ -323,7 +323,58 @@ estimate must still fall back to correct loading. Lost nodes, incompatible
 materializations, and resources already being released receive no guaranteed
 reuse credit. Whole-view failure must not poison every successful segment.
 
-### 5.2 Published Evidence and Integration Boundary
+### 5.2 Capacity Failure Feedback
+
+Explicit segment preparation failures restrict new loading candidates on both
+mandatory and optional paths. They never infer another node's or a sibling
+segment's failure from missing readiness. Failure identity is independent of
+collection DataVersion for versioned manifests; details are in
+[QN preparation](qnview/querynode_queryview_resource_preparation.md#54-retry-and-failure).
+
+Node-wide memory/disk watermarks arrive on SyncView and include the physical
+usage and committed reservations used by loader admission. Watermarks are in
+[0,100], relative to the applicable admission limit. The store never triggers
+balance; existing failure events, reconciliation and retries consume it.
+
+For a failed segment, memory rejection selects memory pressure, disk rejection
+selects disk pressure, and unspecified resource rejection selects the maximum.
+If different nodes report different dimensions, use their union for candidate
+ranking. The bounded pressure penalty is:
+
+```text
+w = ceil(relevantWatermark / 5) * 5
+pressureCost(w) = w / max(5, 100 - w)
+```
+
+Existing legal placements and compatible ready copies remain retained. For
+missing required placements, prefer unblocked candidates, then lower pressure,
+then the existing logical-load marginal gain. A rejected node becomes unblocked
+when its own rejected dimension drops at least five percentage points from the
+sample observed with the failure, or a one-minute probe interval expires. A
+fresh saturated watermark remains blocked for optional new loading. Unknown
+watermarks have the highest risk cost but may be probed; they are not free
+capacity and never create a permanent exclusion.
+
+If all required candidates remain blocked, retry the least recently failed
+placement under the existing preparation backoff. Keep serving Up coverage.
+Optional candidate search rejects blocked destinations and subtracts
+`LoadCostPerUnit * AdditionalLogicalSize * pressureCost` from candidate gain,
+while retaining the RG guard and final positive-gain requirement. A successful
+replacement clears only its successful node's failure, so another failed
+optional destination cannot be retried immediately after an unrelated success.
+
+This is an admission heuristic, not a guarantee that the next segment fits:
+absolute node capacities can differ, native caching has its own ledger, and
+concurrent reservations can change after a sample. Actual admission and the
+bounded probe path remain necessary. Five-point recovery hysteresis, retained
+placements, migration costs and absence of feedback-driven balance jointly
+limit oscillation.
+
+Healthy shards allocate no failure-scoring maps and perform no resource reads.
+The planning pass lazily pins node samples once; reports update O(nodes) state
+without scanning collections.
+
+### 5.3 Published Evidence and Integration Boundary
 
 The existing QN state machine preserves ready segment IDs when reporting
 Unrecoverable and does not immediately request Release. Coord defers Dropping
@@ -347,11 +398,10 @@ Topology/config/DataView publication refreshes affected targets. Node changes
 currently revisit resident shards of affected RG collections on the writer path.
 This is not a constant-time topology update.
 
-The branch defines the injected QV SegmentManager interface but has no concrete
-implementation. Its Acquire contract now explicitly requires reference
-registration before returning and retention of successful resources until Release.
-Actual physical sharing and handover still require resource-manager integration
-verification; the scorer's reuse estimate is not that guarantee.
+The concrete QV SegmentManager registers references before Acquire returns and
+retains successful resources until Release. Physical sharing and handover must
+still be verified through the resource manager and live QueryView transitions;
+the scorer's reuse estimate alone is not that guarantee.
 
 ## 6. Partial Scopes, Budgets, and Scenarios
 

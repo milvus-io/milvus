@@ -215,7 +215,16 @@ message SyncResponse {
         SyncQueryViewsResponse views = 1;
         SyncCloseResponse close = 2;
         ViewFeedbackReport view_feedback = 3;
+        NodeResourceWatermarks resource_watermarks = 4;
     }
+}
+
+// Node-wide admission pressure, independent of QueryView state or identity.
+// 100 means the loader admission limit is reached, not necessarily host capacity.
+// Missing reports mean unknown; an explicitly reported zero means no pressure.
+message NodeResourceWatermarks {
+    double memory = 1;
+    double disk = 2;
 }
 
 // SyncQueryViewsResponse reports the follower's latest local states.

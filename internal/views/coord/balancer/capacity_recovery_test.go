@@ -35,8 +35,8 @@ func TestCapacityAllocationDoesNotResolveCollectionPerSegment(t *testing.T) {
 						stats = upStats(qviews.DataVersion{StreamingVersion: 1}, placements...)
 					}
 					if mode == "failed" {
-						key := coordview.ResourceKey{PartitionID: 1, SegmentID: 1000, DataVersion: qviews.DataVersion{StreamingVersion: 1}, LoadInfoVersion: 1}
-						stats.FailedResources = map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion{1: {key: {DataVersion: key.DataVersion, QueryVersion: 1}}}
+						key := coordview.FailedResourceKey{PartitionID: 1, SegmentID: 1000, DataVersion: qviews.DataVersion{StreamingVersion: 1}, LoadInfoVersion: 1}
+						stats.FailedResources = map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure{1: {key: {Version: qviews.QueryViewVersion{DataVersion: key.DataVersion, QueryVersion: 1}}}}
 					}
 					c.PublishShard(id, stats)
 					p := newPlanningContext(c)
@@ -81,8 +81,8 @@ func TestCapacityFailurePlacement(t *testing.T) {
 				if oldUp {
 					stats = upStats(qviews.DataVersion{StreamingVersion: 1}, placement(101, 1, 10, coordview.SegmentStateUp))
 				}
-				key := coordview.ResourceKey{PartitionID: 1, SegmentID: 101, DataVersion: dv, LoadInfoVersion: c.GetCollection(1).ConfigVersion()}
-				stats.FailedResources = map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion{1: {key: {DataVersion: dv, QueryVersion: 1}}}
+				key := coordview.FailedResourceKey{PartitionID: 1, SegmentID: 101, DataVersion: dv, LoadInfoVersion: c.GetCollection(1).ConfigVersion()}
+				stats.FailedResources = map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure{1: {key: {Version: qviews.QueryViewVersion{DataVersion: dv, QueryVersion: 1}}}}
 				c.PublishShard(id, stats)
 				plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{id})
 				require.Contains(t, plan.Prepares, id)
@@ -94,7 +94,7 @@ func TestCapacityFailurePlacement(t *testing.T) {
 				require.Equal(t, want, assignmentsFromBuilder(plan.Prepares[id])[101])
 				// A failed different load identity must not poison the next one.
 				key.LoadInfoVersion++
-				stats.FailedResources = map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion{1: {key: {DataVersion: dv, QueryVersion: 1}}}
+				stats.FailedResources = map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure{1: {key: {Version: qviews.QueryViewVersion{DataVersion: dv, QueryVersion: 1}}}}
 				c.PublishShard(id, stats)
 				plan = NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{id})
 				require.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[id])[101])
@@ -121,8 +121,8 @@ func TestCapacityFailuresTryEveryEligibleNode(t *testing.T) {
 	publishTestData(c, 1, dv, map[int64]*SegmentDataView{101: {SegmentID: 101, PartitionID: 1, LogicalSize: 10}}, shardDataView(id.VChannel, 1, 101))
 	publishTestNodes(c, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"},
 		&NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"}, &NodeInfo{NodeID: 3, Alive: true, ResourceGroup: "rg1"})
-	key := coordview.ResourceKey{PartitionID: 1, SegmentID: 101, DataVersion: dv, LoadInfoVersion: c.GetCollection(1).ConfigVersion()}
-	stats := &coordview.ShardStats{FailedResources: make(map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion)}
+	key := coordview.FailedResourceKey{PartitionID: 1, SegmentID: 101, DataVersion: dv, LoadInfoVersion: c.GetCollection(1).ConfigVersion()}
+	stats := &coordview.ShardStats{FailedResources: make(map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure)}
 	policy := NewDefaultBalancePolicy()
 	for attempt, expected := range []int64{1, 2, 3, 1, 2, 3} {
 		c.PublishShard(id, stats)
@@ -130,11 +130,11 @@ func TestCapacityFailuresTryEveryEligibleNode(t *testing.T) {
 		require.Contains(t, plan.Prepares, id)
 		require.Equal(t, expected, assignmentsFromBuilder(plan.Prepares[id])[101])
 		// Publish a fresh snapshot, just as the manager does after a rejection.
-		copy := &coordview.ShardStats{FailedResources: make(map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion)}
+		copy := &coordview.ShardStats{FailedResources: make(map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure)}
 		for node, failed := range stats.FailedResources {
 			copy.FailedResources[node] = failed
 		}
-		copy.FailedResources[expected] = map[coordview.ResourceKey]qviews.QueryViewVersion{key: {DataVersion: dv, QueryVersion: int64(attempt + 1)}}
+		copy.FailedResources[expected] = map[coordview.FailedResourceKey]coordview.ResourceFailure{key: {Version: qviews.QueryViewVersion{DataVersion: dv, QueryVersion: int64(attempt + 1)}}}
 		stats = copy
 	}
 }

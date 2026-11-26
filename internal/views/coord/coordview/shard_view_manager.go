@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
+	"github.com/milvus-io/milvus/internal/views/coord/resourcewatermark"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -44,7 +45,8 @@ type ShardViewManager struct {
 	observe             func(qviews.ShardID, *ShardViewManager, *ShardStats)
 	onReleasedEmpty     func(qviews.ShardID, *ShardViewManager)
 	prepareBackoff      preparationBackoff
-	preparationFailures map[int64]map[ResourceKey]qviews.QueryViewVersion
+	resourceWatermarks  resourcewatermark.Reader
+	preparationFailures map[int64]map[FailedResourceKey]ResourceFailure
 	releaseRequested    bool
 	closed              bool // Failed recovery: ignore late sync callbacks.
 
@@ -276,7 +278,7 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 		}
 
 		fillSegments(stats.Segments, sm.View().GetQueryNode(), baseState, sm.QNReadySegments())
-		stats.FailedResources = fillFailedResources(stats.FailedResources, sm)
+		stats.FailedResources = fillFailedResources(stats.FailedResources, sm, m.resourceWatermarks)
 		// A failed view still protects successfully loaded segments until
 		// replacement acquires them. Never infer readiness for unfinished loads.
 		if sm.State() != qviews.QueryViewStateDown && sm.View().GetMeta().GetLoadInfoVersion() != 0 {
@@ -652,9 +654,7 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 		}
 		sm.completePreparation(nil)
 		m.prepareBackoff.onUp(sm.Version())
-		if !m.prepareBackoff.failed {
-			m.preparationFailures = nil
-		}
+		clearSuccessfulFailures(m.preparationFailures, sm)
 		m.downOlderUpView(sm)
 		m.refreshNewestUpLocked()
 		m.advanceUnrecoverableToDropping()
@@ -845,7 +845,7 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 			m.prepareBackoff.onFailure(version, time.Now())
 		}
 		if sm.State() == qviews.QueryViewStateUnrecoverable {
-			m.preparationFailures = fillFailedResources(m.preparationFailures, sm)
+			m.preparationFailures = fillFailedResources(m.preparationFailures, sm, m.resourceWatermarks)
 		}
 		qvobserve.Observe(m.ctx, qvobserve.CoordViewReportAppliedEvent{
 			ViewStateTransition: qvobserve.ViewStateTransition{

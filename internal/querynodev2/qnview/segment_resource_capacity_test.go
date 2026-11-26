@@ -23,8 +23,11 @@ func TestReservationCapacityWindow(t *testing.T) {
 			require.False(t, b.reservationNeedsReplanLocked(now, false, err))
 			require.False(t, b.reservationNeedsReplanLocked(now.Add(resourceCapacityRetryWindow-time.Nanosecond), false, err))
 			require.True(t, b.reservationNeedsReplanLocked(now.Add(resourceCapacityRetryWindow), false, err))
-			// Outstanding competing reservations always keep recovery local.
-			require.False(t, b.reservationNeedsReplanLocked(now.Add(time.Hour), true, err))
+			// Competing reservations extend, but cannot permanently reset, retries.
+			b.resetRetryLocked()
+			require.False(t, b.reservationNeedsReplanLocked(now, true, err))
+			require.True(t, b.reservationNeedsReplanLocked(now.Add(resourceContentionRetryWindow), true, err))
+			b.resetRetryLocked()
 			require.True(t, b.capacityRejectedSince.IsZero())
 			require.False(t, b.reservationNeedsReplanLocked(now.Add(2*time.Hour), false, err))
 			// Success and unrelated failures start a fresh admission window.
@@ -113,4 +116,17 @@ func TestSegmentResourcePersistentCapacityPreservesServingView(t *testing.T) {
 			})
 		})
 	}
+}
+
+type dimensionedCapacityError struct{ error }
+
+func (dimensionedCapacityError) ResourceFailureReason() viewpb.SegmentPerparingFailure_Reason {
+	return viewpb.SegmentPerparingFailure_DiskLimitExceeded
+}
+func (e dimensionedCapacityError) Unwrap() error { return e.error }
+
+func TestReservationCapacityDimensionSurvivesWrapping(t *testing.T) {
+	err := merr.Wrap(dimensionedCapacityError{merr.ErrSegmentRequestResourceFailed}, "loader admission")
+	require.Equal(t, viewpb.SegmentPerparingFailure_DiskLimitExceeded, reservationFailureReason(err))
+	require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
 }

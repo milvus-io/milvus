@@ -14,7 +14,7 @@ func TestAbsentCapacityFailuresAllocateNothing(t *testing.T) {
 		view := buildTestView(1)
 		sm := NewCoordQueryViewStateMachineWithRef(view, nil)
 		sm.OnNodeStateReported(qnReport(view, 1, state, 1000))
-		var snapshot map[int64]map[ResourceKey]qviews.QueryViewVersion
+		var snapshot map[int64]map[FailedResourceKey]ResourceFailure
 		allocs := testing.AllocsPerRun(100, func() {
 			snapshot = fillFailedResources(cloneFailedResources(nil), sm)
 		})
@@ -29,7 +29,7 @@ func TestFailedResourcesKeepPartialSuccessAndServingCoverage(t *testing.T) {
 	view.QueryNode[0].Partitions[0].SegmentIds = []int64{1001, 1003, 1004}
 	view.QueryNode[1].Partitions[0].SegmentIds = []int64{2001}
 	sm := NewCoordQueryViewStateMachineWithRef(view, nil)
-	var failed map[int64]map[ResourceKey]qviews.QueryViewVersion
+	var failed map[int64]map[FailedResourceKey]ResourceFailure
 	failed = fillFailedResources(failed, sm)
 	require.Empty(t, failed)
 	sm.OnNodeStateReported(qnReport(view, 2, qviews.QueryViewStateReady, 2001))
@@ -37,10 +37,12 @@ func TestFailedResourcesKeepPartialSuccessAndServingCoverage(t *testing.T) {
 	report.ViewOfQueryNode().FailedSegments = []*viewpb.SegmentPerparingFailure{{SegmentId: 1003, Reason: viewpb.SegmentPerparingFailure_MemoryLimitExceeded}}
 	sm.OnNodeStateReported(report)
 	failed = fillFailedResources(failed, sm)
-	require.Equal(t, map[int64]map[ResourceKey]qviews.QueryViewVersion{1: {{
-		PartitionID: 10, SegmentID: 1003,
-		DataVersion: sm.Version().DataVersion, LoadInfoVersion: 7,
-	}: sm.Version()}}, failed)
+	key := FailedResourceKey{PartitionID: 10, SegmentID: 1003, DataVersion: sm.Version().DataVersion, LoadInfoVersion: 7}
+	require.Len(t, failed, 1)
+	require.Len(t, failed[1], 1)
+	require.Equal(t, sm.Version(), failed[1][key].Version)
+	require.Equal(t, viewpb.SegmentPerparingFailure_MemoryLimitExceeded, failed[1][key].Reason)
+
 	// An older Up on the same node must not erase new-load failure evidence.
 	old := buildTestView(1)
 	old.Meta.LoadInfoVersion = 6
@@ -49,7 +51,7 @@ func TestFailedResourcesKeepPartialSuccessAndServingCoverage(t *testing.T) {
 	oldSM.OnNodeStateReported(qnReport(old, 1, qviews.QueryViewStateReady))
 	oldSM.OnNodeStateReported(snReport(old, qviews.QueryViewStateReady))
 	oldSM.OnNodeStateReported(snReport(old, qviews.QueryViewStateUp))
-	manager := &ShardViewManager{views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
+	manager := &ShardViewManager{preparationFailures: failed, views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
 		{QueryVersion: 1}: oldSM, {QueryVersion: 2}: sm,
 	}}
 	stats := manager.Stats()
@@ -105,13 +107,13 @@ func TestFailedResourcesRequireExplicitCapacityReason(t *testing.T) {
 			}}
 			sm.OnNodeStateReported(report)
 			failure.SegmentId = 9999 // Accepted snapshots must not alias the report.
-			var failed map[int64]map[ResourceKey]qviews.QueryViewVersion
+			var failed map[int64]map[FailedResourceKey]ResourceFailure
 			failed = fillFailedResources(failed, sm)
 			if reason == viewpb.SegmentPerparingFailure_Unknown || reason == 99 {
 				require.Empty(t, failed)
 			} else {
 				require.Len(t, failed[1], 1)
-				require.Contains(t, failed[1], ResourceKey{PartitionID: 10, SegmentID: 1000, DataVersion: sm.Version().DataVersion, LoadInfoVersion: 7})
+				require.Contains(t, failed[1], FailedResourceKey{PartitionID: 10, SegmentID: 1000, DataVersion: sm.Version().DataVersion, LoadInfoVersion: 7})
 			}
 			// A generic/legacy Unrecoverable report does not imply that any
 			// specific unready requirement failed on this node.
@@ -137,10 +139,10 @@ func TestFailureHistorySurvivesReplacement(t *testing.T) {
 	require.Equal(t, snapshot.FailedResources, mgr.Stats().FailedResources, "Dropping the previous view cannot forget rejection")
 	simulateCapacityFailure(t, syncer, testQN1, *second)
 	for _, version := range mgr.Stats().FailedResources[1] {
-		require.Equal(t, *second, version)
+		require.Equal(t, *second, version.Version)
 	}
 	for _, version := range snapshot.FailedResources[1] {
-		require.Equal(t, *first, version, "published failure snapshots are immutable")
+		require.Equal(t, *first, version.Version, "published failure snapshots are immutable")
 	}
 	require.NoError(t, mgr.AddPreparing(t.Context(), testBuilder(1, 1, 1).SetLoadInfoVersion(8)))
 	require.Empty(t, mgr.Stats().FailedResources, "new loading identity starts fresh")

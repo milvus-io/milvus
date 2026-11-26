@@ -74,6 +74,7 @@ type segmentBinding struct {
 	retryAfter            time.Time
 	retryBackoff          *backoff.ExponentialBackOff
 	capacityRejectedSince time.Time
+	capacityFirstRejected time.Time
 }
 
 type preparedSegmentRead struct {

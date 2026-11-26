@@ -22,10 +22,12 @@ import (
 // Close stops the loop but does NOT drain pending views.
 // Use DrainPendingIfNodeLost after Close for node loss scenarios.
 type resumableSyncer struct {
-	feedbackHandler ViewFeedbackHandler
-	node            qviews.WorkNode
-	client          ViewSyncClient
-	pending         *pendingSyncQueryViews
+	feedbackHandler    ViewFeedbackHandler
+	resourceWatermarks ResourceWatermarksHandler
+	receiveWatermarks  func(*viewpb.NodeResourceWatermarks)
+	node               qviews.WorkNode
+	client             ViewSyncClient
+	pending            *pendingSyncQueryViews
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -37,6 +39,7 @@ func newResumableSyncer(
 	node qviews.WorkNode,
 	client ViewSyncClient,
 	feedbackHandler ViewFeedbackHandler,
+	watermarks ...ResourceWatermarksHandler,
 ) *resumableSyncer {
 	ctx, cancel := context.WithCancel(ctx)
 	rs := &resumableSyncer{
@@ -46,6 +49,9 @@ func newResumableSyncer(
 		pending:         newPendingSyncQueryViews(),
 		ctx:             ctx,
 		cancel:          cancel,
+	}
+	if len(watermarks) > 0 {
+		rs.resourceWatermarks = watermarks[0]
 	}
 	rs.wg.Add(1)
 	go rs.loop()
@@ -117,6 +123,9 @@ func (rs *resumableSyncer) loop() {
 			continue
 		}
 
+		if node, ok := rs.node.(qviews.QueryNode); ok && rs.resourceWatermarks != nil {
+			rs.receiveWatermarks = rs.resourceWatermarks.Start(node.ID)
+		}
 		openedAt := time.Now()
 		var loops sync.WaitGroup
 		var receivedResponse atomic.Bool
@@ -148,6 +157,9 @@ func (rs *resumableSyncer) loop() {
 		}
 		attemptCancel()
 		loops.Wait()
+		if rs.receiveWatermarks != nil {
+			rs.receiveWatermarks(nil)
+		}
 		_ = stream.CloseSend()
 		if rs.ctx.Err() != nil {
 			return
@@ -204,6 +216,13 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			return receivedResponse
 		}
 
+		if report := resp.GetResourceWatermarks(); report != nil {
+			if rs.receiveWatermarks != nil {
+				rs.receiveWatermarks(report)
+			}
+			receivedResponse = true
+			continue
+		}
 		if feedback := resp.GetViewFeedback(); feedback != nil {
 			rs.receiveViewFeedback(feedback)
 			receivedResponse = true

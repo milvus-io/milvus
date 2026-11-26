@@ -12,16 +12,31 @@ import (
 
 const resourceRetryMaxDelay = 5 * time.Second
 
-// A quiet admission window tolerates brief pressure outside the loader as well
-// as concurrent loads. It is not a deadline on metadata, I/O or physical loading.
-const resourceCapacityRetryWindow = 5 * time.Second
+// A quiet admission window tolerates brief pressure. Competing loads extend it
+// only up to a bounded admission retry window, never indefinitely. Neither
+// window is a deadline on metadata, I/O or physical loading.
+const (
+	resourceCapacityRetryWindow   = 5 * time.Second
+	resourceContentionRetryWindow = 30 * time.Second
+)
 
 func (b *segmentBinding) reservationNeedsReplanLocked(now time.Time, competing bool, err error) bool {
 	capacity := reservationFailureReason(err) != viewpb.SegmentPerparingFailure_Unknown
-	if !capacity || competing {
+	if !capacity {
+		b.capacityRejectedSince, b.capacityFirstRejected = time.Time{}, time.Time{}
+		return false
+	}
+	if b.capacityFirstRejected.IsZero() {
+		b.capacityFirstRejected = now
+	}
+	if now.Sub(b.capacityFirstRejected) >= resourceContentionRetryWindow {
+		return true
+	}
+	if competing {
 		b.capacityRejectedSince = time.Time{}
 		return false
 	}
+
 	if b.capacityRejectedSince.IsZero() {
 		b.capacityRejectedSince = now
 		return false
@@ -30,6 +45,12 @@ func (b *segmentBinding) reservationNeedsReplanLocked(now time.Time, competing b
 }
 
 func reservationFailureReason(err error) viewpb.SegmentPerparingFailure_Reason {
+	var admission interface {
+		ResourceFailureReason() viewpb.SegmentPerparingFailure_Reason
+	}
+	if errors.As(err, &admission) {
+		return admission.ResourceFailureReason()
+	}
 	switch {
 	case errors.Is(err, merr.ErrServiceMemoryLimitExceeded):
 		return viewpb.SegmentPerparingFailure_MemoryLimitExceeded
@@ -70,4 +91,5 @@ func (b *segmentBinding) resetRetryLocked() {
 	b.retryBackoff = nil
 	b.retryAfter = time.Time{}
 	b.capacityRejectedSince = time.Time{}
+	b.capacityFirstRejected = time.Time{}
 }

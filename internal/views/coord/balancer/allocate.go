@@ -5,7 +5,6 @@ import (
 	"math"
 	"sort"
 
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -61,22 +60,13 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	if len(entries) > 0 && len(ctx.nodes) == 0 {
 		return nil
 	}
-	// Pin failure facts once per mandatory shard, not per segment/candidate.
-	// Normal placement and optional optimization need no failure allocations.
+	// Pin failure facts once for both mandatory and optional placement.
 	var original map[int64]int64
-	var failures map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion
-	var failureKey coordview.ResourceKey
 	if entry := collection.GetShard(shardID); entry != nil {
 		if target := entry.Target(); target != nil {
 			original = target.Assignments
 		}
-		if !optional {
-			failures = entry.Stats().FailedResources
-		}
-	}
-	if len(failures) > 0 {
-		failureKey.DataVersion, _ = p.DataVersionForCollection(desired.CollectionID)
-		failureKey.LoadInfoVersion = p.ConfigVersion(desired.CollectionID)
+		ctx.capacity = newCapacityPlacement(p, shardID, ctx.segments, entry.Stats().FailedResources)
 	}
 	eligible := make(map[int64]bool, len(ctx.nodes))
 	for _, node := range ctx.nodes {
@@ -84,9 +74,8 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	}
 	for _, segment := range entries {
 		if node, exists := original[segment.SegmentID]; exists && eligible[node] {
-			if len(failures) > 0 {
-				failureKey.PartitionID, failureKey.SegmentID = segment.PartitionID, segment.SegmentID
-				if _, failed := failures[node][failureKey]; failed {
+			if !optional && ctx.capacity != nil && !ctx.reusable[segment.SegmentID][node] {
+				if blocked, _, _ := ctx.capacity.state(segment.SegmentID, node); blocked {
 					continue
 				}
 			}
@@ -102,25 +91,32 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		}
 		best, bestGain := ctx.nodes[0], -math.MaxFloat64
 		var bestFailure qviews.QueryViewVersion
-		var bestFailed bool
-		selected := false
-		failureKey.PartitionID, failureKey.SegmentID = segment.PartitionID, segment.SegmentID
+		bestBlocked, selected := false, false
+		bestRisk := 0.0
 		for _, node := range ctx.nodes {
 			gain, _ := ctx.evaluate([]*SegmentDataView{segment}, node)
-			if len(failures) == 0 {
+			if ctx.capacity == nil {
 				if gain > bestGain+scoreEpsilon {
 					best, bestGain = node, gain
 				}
 				continue
 			}
-			failure, failed := failures[node][failureKey]
-			// Try unfailed nodes first. If every node rejected the requirement,
-			// retry the least recently failed placement instead of starving peers.
-			betterFailure := bestFailed && (!failed || bestFailure.GT(failure))
-			sameFailure := failed == bestFailed && (!failed || failure == bestFailure)
-			if !selected || betterFailure || (sameFailure && gain > bestGain+scoreEpsilon) {
-				best, bestGain = node, gain
-				bestFailure, bestFailed, selected = failure, failed, true
+			blocked, risk, failure := ctx.capacity.state(segment.SegmentID, node)
+			if ctx.reusable[segment.SegmentID][node] {
+				blocked, risk = false, 0
+			}
+			better := !selected || (bestBlocked && !blocked)
+			if selected && blocked == bestBlocked {
+				if blocked && failure != bestFailure {
+					// No feasible alternative: keep probing fairly under the existing
+					// preparation backoff, without dropping the old serving view.
+					better = bestFailure.GT(failure)
+				} else {
+					better = risk < bestRisk-scoreEpsilon || (math.Abs(risk-bestRisk) <= scoreEpsilon && gain > bestGain+scoreEpsilon)
+				}
+			}
+			if better {
+				best, bestGain, bestRisk, bestFailure, bestBlocked, selected = node, gain, risk, failure, blocked, true
 			}
 		}
 		ctx.assign([]*SegmentDataView{segment}, best)

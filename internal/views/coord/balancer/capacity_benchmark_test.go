@@ -33,11 +33,11 @@ func BenchmarkCapacityAllocation(b *testing.B) {
 				stats = testShardStats(ver(1, 0, 1), 1, placements...)
 			}
 			if mode == "failed" {
-				failed := make(map[coordview.ResourceKey]qviews.QueryViewVersion, len(rows))
+				failed := make(map[coordview.FailedResourceKey]coordview.ResourceFailure, len(rows))
 				for i := range rows {
-					failed[coordview.ResourceKey{PartitionID: 1, SegmentID: 1000 + int64(i), DataVersion: ver(1, 0, 1).DataVersion, LoadInfoVersion: 1}] = *ver(1, 0, 1)
+					failed[coordview.FailedResourceKey{PartitionID: 1, SegmentID: 1000 + int64(i), DataVersion: ver(1, 0, 1).DataVersion, LoadInfoVersion: 1}] = coordview.ResourceFailure{Version: *ver(1, 0, 1)}
 				}
-				stats.FailedResources = map[int64]map[coordview.ResourceKey]qviews.QueryViewVersion{1: failed}
+				stats.FailedResources = map[int64]map[coordview.FailedResourceKey]coordview.ResourceFailure{1: failed}
 			}
 			c.PublishShard(id, stats)
 			p := newPlanningContext(c)
