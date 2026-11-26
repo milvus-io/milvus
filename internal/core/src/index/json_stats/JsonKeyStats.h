@@ -40,6 +40,7 @@
 #include "bitset/bitset.h"
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/OpContext.h"
@@ -368,6 +369,60 @@ class JsonKeyStats : public ScalarIndex<std::string> {
                 }
             }
 
+            processed_size += chunk_size;
+        }
+        AssertInfo(processed_size == num_rows,
+                   "Processed size {} is not equal to num_rows {}",
+                   processed_size,
+                   num_rows);
+        return processed_size;
+    }
+
+    // EXISTS has already resolved the rows set in resolved. Skip complete
+    // physical chunks before reading either their payload or their validity.
+    // Mixed chunks still pass resolved to the evaluator to skip BSON parsing.
+    template <typename T, typename FUNC>
+    int64_t
+    ExecutorForUnresolvedShreddingData(milvus::OpContext* op_ctx,
+                                       const std::string& path,
+                                       FUNC func,
+                                       TargetBitmapView res,
+                                       TargetBitmapView valid_res,
+                                       TargetBitmapView resolved) {
+        static_assert(std::is_same_v<T, std::string_view>);
+        const auto it = shredding_columns_.find(path);
+        if (it == shredding_columns_.end()) {
+            return 0;
+        }
+        const auto& column = it->second;
+        column->Prepare(op_ctx);
+        const auto num_rows = column->NumRows();
+        AssertInfo(res.size() >= num_rows && valid_res.size() >= num_rows &&
+                       resolved.size() >= num_rows,
+                   "EXISTS scan bitmap is shorter than column {} rows {}",
+                   path,
+                   num_rows);
+        int64_t processed_size = 0;
+        for (int64_t chunk_id = 0; chunk_id < column->num_chunks();
+             ++chunk_id) {
+            const auto chunk_size = column->chunk_row_nums(chunk_id);
+            if (!resolved.view(processed_size, chunk_size).all()) {
+                // Bound the temporary string-view array even for large chunks.
+                for (int64_t offset = 0; offset < chunk_size;) {
+                    const auto size = std::min<int64_t>(
+                        chunk_size - offset, DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
+                    auto pinned = column->StringViews(
+                        op_ctx, chunk_id, std::make_pair(offset, size));
+                    const auto& [data, validity] = pinned.get();
+                    func(data.data(),
+                         validity,
+                         size,
+                         res + processed_size + offset,
+                         valid_res + processed_size + offset,
+                         resolved);
+                    offset += size;
+                }
+            }
             processed_size += chunk_size;
         }
         AssertInfo(processed_size == num_rows,
