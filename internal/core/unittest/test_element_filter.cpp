@@ -4622,22 +4622,34 @@ ExpectTopOneIsTarget(const milvus::SearchResult& sr) {
     ASSERT_NEAR(sr.distances_[0], 0.0f, 1e-5f);
 }
 
-// Approximate path (HNSW): the target must appear in the top-K, but may not
-// be strictly first.
+// HNSW can miss the target. Each hit must still identify the element
+// whose squared L2 distance was returned.
 inline void
-ExpectTargetInTopK(const milvus::SearchResult& sr) {
-    bool found = false;
+ExpectIndexedElementHits(const milvus::SearchResult& sr,
+                         const ElementSearchFixture& f) {
+    ASSERT_NO_FATAL_FAILURE(ExpectElementLevelShape(sr));
+    ASSERT_EQ(sr.distances_.size(), sr.seg_offsets_.size());
+    bool has_hit = false;
     for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
-        if (sr.seg_offsets_[i] == kElemTargetDoc &&
-            sr.element_indices_[i] == kElemTargetElem) {
-            found = true;
-            EXPECT_NEAR(sr.distances_[i], 0.0f, 1e-3f);
-            break;
+        const auto doc = sr.seg_offsets_[i];
+        if (doc == INVALID_SEG_OFFSET) {
+            continue;
         }
+        ASSERT_GE(doc, 0);
+        ASSERT_LT(doc, static_cast<int64_t>(kElemN));
+        has_hit = true;
+        const auto elem = sr.element_indices_[i];
+        const auto offset = (doc * kElemArrayLen + elem) * kElemDim;
+        float distance = 0.0f;
+        for (int d = 0; d < kElemDim; ++d) {
+            const float diff = f.query_data[d] - f.flat_data[offset + d];
+            distance += diff * diff;
+        }
+        // Both search plans round distances to three decimal places.
+        EXPECT_NEAR(sr.distances_[i], distance, 1e-3f)
+            << "doc=" << doc << ", elem=" << elem;
     }
-    ASSERT_TRUE(found) << "Target (doc=" << kElemTargetDoc
-                       << ", elem=" << kElemTargetElem
-                       << ") not found in approximate search result";
+    EXPECT_TRUE(has_hit);
 }
 
 inline std::unique_ptr<SearchResult>
@@ -4892,9 +4904,8 @@ TEST(ElementVectorSearch, SealedIndex_RangeSearch) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
     ASSERT_NE(sr, nullptr);
-    ExpectElementLevelShape(*sr);
+    ASSERT_NO_FATAL_FAILURE(ExpectIndexedElementHits(*sr, f));
     ExpectWithinRadius(*sr, radius);
-    ExpectTargetInTopK(*sr);
 }
 
 TEST(ElementVectorSearch, SealedIndex_IteratorV2) {
@@ -4921,9 +4932,8 @@ TEST(ElementVectorSearch, SealedIndex_IteratorV2) {
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     auto sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
     ASSERT_NE(sr, nullptr);
-    ExpectElementLevelShape(*sr);
+    ASSERT_NO_FATAL_FAILURE(ExpectIndexedElementHits(*sr, f));
     ExpectSortedAscending(*sr);
-    ExpectTargetInTopK(*sr);
 }
 
 // ---- Multi-chunk growing -------------------------------------------------

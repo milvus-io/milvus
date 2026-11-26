@@ -807,6 +807,23 @@ class TestCreateCollection(TestBase):
 
 @pytest.mark.tags(CaseLabel.L1)
 class TestCreateCollectionNegative(TestBase):
+    def test_create_collections_quick_setup_invalid_dynamic_field(self):
+        """Quick-create reports an invalid boolean as parameter error 1100."""
+        self.name = gen_collection_name()
+        response = self.collection_client.post(
+            f"{self.endpoint}/v2/vectordb/collections/create",
+            data={
+                "collectionName": self.name,
+                "dimension": 4,
+                "params": {"enableDynamicField": "invalid_bool"},
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["code"] == 1100, body
+        for text in ("enableDynamicField", "invalid_bool", "invalid syntax"):
+            assert text in body["message"], body
+
     def test_create_collections_custom_with_invalid_datatype(self):
         """
         VARCHAR is not a valid data type, it should be VarChar

@@ -808,12 +808,38 @@ func TestRecordBuilderAppendClearsBorrowedColumns(t *testing.T) {
 }
 
 func TestRecordBuilderAppendEmptyRangeDoesNotReadColumns(t *testing.T) {
-	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64},
-	}})
-	defer rb.Release()
-	require.NoError(t, rb.Append(nil, 0, 0))
-	require.Zero(t, rb.GetRowNum())
+	for _, tc := range []struct {
+		name         string
+		dataType     schemapb.DataType
+		defaultValue *schemapb.ValueField
+	}{
+		{name: "int64", dataType: schemapb.DataType_Int64},
+		{name: "text", dataType: schemapb.DataType_Text},
+		{
+			name: "invalid default", dataType: schemapb.DataType_Geometry,
+			defaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "invalid WKT"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, start := range []int{0, 1} {
+				t.Run(fmt.Sprintf("start=%d/end=0", start), func(t *testing.T) {
+					rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "value", DataType: tc.dataType, DefaultValue: tc.defaultValue},
+					}})
+					defer rb.Release()
+					err := rb.Append(nil, start, 0)
+					if tc.defaultValue != nil {
+						require.ErrorIs(t, err, merr.ErrServiceInternal)
+						require.ErrorContains(t, err, "invalid default value for geometry field value")
+					} else {
+						require.NoError(t, err)
+					}
+					require.Zero(t, rb.GetRowNum())
+					require.Zero(t, rb.GetSize())
+				})
+			}
+		})
+	}
 }
 
 // Alternating kept/deleted rows make compaction append one-row ranges.
