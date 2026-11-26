@@ -175,7 +175,7 @@ func TestFileResourceRemoteDefaultPrefix(t *testing.T) {
 func TestRegisteredResourceSurvivesPolicyChange(t *testing.T) {
 	root := t.TempDir()
 	sourceFile := filepath.Join(root, "dict")
-	require.NoError(t, os.WriteFile(sourceFile, []byte("the\n"), 0600))
+	require.NoError(t, os.WriteFile(sourceFile, []byte("the\n"), 0o600))
 	setSourceRoot(t, t.TempDir())
 	setting := &paramtable.Get().CommonCfg.FileResourceMaxFileSize
 	old := setting.SwapTempValue("1")
