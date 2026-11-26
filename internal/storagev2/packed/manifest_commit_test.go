@@ -854,7 +854,6 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumn(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, fields, int64(100))
 	require.Contains(t, fields, int64(102))
-
 }
 
 // TestReadManifestColumnGroups round-trips column-group descriptors through the

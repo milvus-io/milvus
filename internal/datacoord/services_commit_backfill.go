@@ -259,7 +259,6 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			continue
 		}
 		appendUnitStatuses(&statuses, batch, true, "")
-
 	}
 
 	committed, failed := countStatuses(statuses)
