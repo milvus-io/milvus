@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -86,23 +85,22 @@ func loadGrowingSegments(ctx context.Context, delegator delegator.ShardDelegator
 			}
 			if len(segmentInfo.GetBinlogs()) > 0 || segmentInfo.GetManifestPath() != "" {
 				growingSegments = append(growingSegments, &querypb.SegmentLoadInfo{
-					SegmentID:                 segmentInfo.ID,
-					Level:                     segmentInfo.GetLevel(),
-					PartitionID:               segmentInfo.PartitionID,
-					CollectionID:              segmentInfo.CollectionID,
-					BinlogPaths:               segmentInfo.Binlogs,
-					NumOfRows:                 segmentInfo.NumOfRows,
-					Statslogs:                 segmentInfo.Statslogs,
-					Deltalogs:                 segmentInfo.Deltalogs,
-					Bm25Logs:                  segmentInfo.Bm25Statslogs,
-					TextStatsLogs:             segmentInfo.GetTextStatsLogs(),
-					JsonKeyStatsLogs:          segmentInfo.GetJsonKeyStats(),
-					InsertChannel:             segmentInfo.InsertChannel,
-					StartPosition:             segmentInfo.GetStartPosition(),
-					StorageVersion:            segmentInfo.GetStorageVersion(),
-					ManifestPath:              segmentInfo.GetManifestPath(),
-					Stats:                     segmentInfo.GetStats(),
-					FieldLogicalSizesManifest: segmentInfo.GetFieldLogicalSizesManifest(),
+					SegmentID:        segmentInfo.ID,
+					Level:            segmentInfo.GetLevel(),
+					PartitionID:      segmentInfo.PartitionID,
+					CollectionID:     segmentInfo.CollectionID,
+					BinlogPaths:      segmentInfo.Binlogs,
+					NumOfRows:        segmentInfo.NumOfRows,
+					Statslogs:        segmentInfo.Statslogs,
+					Deltalogs:        segmentInfo.Deltalogs,
+					Bm25Logs:         segmentInfo.Bm25Statslogs,
+					TextStatsLogs:    segmentInfo.GetTextStatsLogs(),
+					JsonKeyStatsLogs: segmentInfo.GetJsonKeyStats(),
+					InsertChannel:    segmentInfo.InsertChannel,
+					StartPosition:    segmentInfo.GetStartPosition(),
+					StorageVersion:   segmentInfo.GetStorageVersion(),
+					ManifestPath:     segmentInfo.GetManifestPath(),
+					Stats:            segmentInfo.GetStats(),
 				})
 			} else {
 				mlog.Info(ctx, "skip segment which has no binlog and no manifest path",
@@ -268,14 +266,12 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// The delegator fixed this snapshot before querying any segments. Reading
 	// tSafe again here could report a newer snapshot than the returned data.
 	resp.MvccTimestamp = req.GetReq().GetMvccTimestamp()
-	readUsage := resp.GetCostAggregation().GetQueryReadUsage()
 	resp.CostAggregation = segmentutil.AggregateWorkerCosts(results,
 		func(result *internalpb.RetrieveResults) (int64, *internalpb.CostAggregation) {
 			return result.GetBase().GetSourceID(), result.GetCostAggregation()
 		},
 		paramtable.GetNodeID(),
 		paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool())
-	resp.CostAggregation.QueryReadUsage = readUsage
 	tr.CtxElapse(ctx, fmt.Sprintf("do query with channel done , vChannel = %s, segmentIDs = %v",
 		channel,
 		req.GetSegmentIDs(),
@@ -442,13 +438,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 
 	if err != nil {
 		return nil, err
-	}
-
-	if req.GetReq().GetCollectSearchReadUsage() {
-		resp.SearchReadUsage, err = querymeter.CollectSearchUsage(results)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	tr.CtxElapse(ctx, "search with channel done, ch="+channel)

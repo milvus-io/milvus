@@ -18,7 +18,6 @@ package tasks
 
 import (
 	"context"
-	"io"
 	"strings"
 	"testing"
 
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -82,16 +80,11 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 	}
 	segmentIDs := []int64{100, 101}
 	queryLimit := int64(1)
-	var additionalReadFields []int64
 	chainName := "scan"
 	outputName := "matches"
 	exportColumns := []string{outputName}
-	var predicate *planpb.Expr
-	var orderBy []*planpb.OrderByField
-	var groupBy []int64
-	var aggregates []*planpb.Aggregate
 	run := func(arguments string, withChain bool) (*internalpb.RetrieveResults, error) {
-		query := &planpb.QueryPlanNode{Limit: queryLimit, Predicates: predicate, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}
+		query := &planpb.QueryPlanNode{Limit: queryLimit}
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: query}, OutputFieldIds: []int64{100, textFieldID, 1}}
 		if withChain {
 			p.QuerynodeFunctionChains = []*schemapb.FunctionChain{{Name: chainName, Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan, OutputColumns: exportColumns, Ops: []*schemapb.FunctionChainOp{{Op: "grep", Inputs: []string{"text"}, Outputs: []string{outputName}, Params: map[string]*schemapb.FunctionParamValue{
@@ -100,7 +93,7 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		}
 		data, err := proto.Marshal(p)
 		require.NoError(t, err)
-		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}, CollectQueryReadUsage: withChain || predicate != nil, QueryReadFieldIds: additionalReadFields, OrderByFields: orderBy, GroupByFieldIds: groupBy, Aggregates: aggregates}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
+		req := &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10}, SerializedExprPlan: data, MvccTimestamp: typeutil.MaxTimestamp, Limit: queryLimit, OutputFieldsId: []int64{100, textFieldID, 1}}, SegmentIDs: segmentIDs, Scope: querypb.DataScope_Streaming}
 		task := NewQueryTask(ctx, collection, manager, req)
 		if err = task.PreExecute(); err != nil {
 			task.scheduleSpan.End()
@@ -133,54 +126,6 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		t.Fatal("text output field is missing")
 	}
 	if !enableScan {
-		t.Run("meters_comparison_source_alongside_lookup_predicate", func(t *testing.T) {
-			predicate = &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				Op:         planpb.OpType_GreaterThan,
-				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 500}},
-			}}}
-			additionalReadFields = []int64{textFieldID}
-			defer func() {
-				predicate = nil
-				additionalReadFields = nil
-			}()
-			result, err := run("", false)
-			require.NoError(t, err)
-			require.Empty(t, result.GetIds().GetIntId().GetData())
-			want := 48 + len("skiptimeout fortytimeout thirtyskiptimeout fiftytimeout twenty")
-			require.EqualValues(t, want, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-		})
-		t.Run("metered_legacy_stream_with_no_matching_rows", func(t *testing.T) {
-			predicate := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				Op:         planpb.OpType_GreaterThan,
-				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 500}},
-			}}}
-			plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{
-				Predicates: predicate, Limit: typeutil.Unlimited,
-			}}, OutputFieldIds: []int64{100, 1}}
-			encoded, err := proto.Marshal(plan)
-			require.NoError(t, err)
-			req := &querypb.QueryRequest{
-				Req: &internalpb.RetrieveRequest{
-					Base: &commonpb.MsgBase{}, CollectionID: 100, PartitionIDs: []int64{10},
-					SerializedExprPlan: encoded, MvccTimestamp: typeutil.MaxTimestamp, Limit: typeutil.Unlimited,
-					OutputFieldsId: plan.GetOutputFieldIds(), CollectQueryReadUsage: true,
-				},
-				SegmentIDs: []int64{100, 101}, Scope: querypb.DataScope_Streaming,
-			}
-			client := streamrpc.NewLocalQueryClient(t.Context())
-			server := client.CreateServer()
-			task := NewQueryStreamTask(t.Context(), collection, manager, req, server, 1024, 4096)
-			require.NoError(t, task.Execute())
-			require.NoError(t, server.FinishSend(nil))
-			result, err := client.Recv()
-			require.NoError(t, err)
-			require.Nil(t, result.GetIds())
-			require.EqualValues(t, 48, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-			_, err = client.Recv()
-			require.ErrorIs(t, err, io.EOF)
-		})
 		for _, arrowPath := range []string{"false", "true"} {
 			t.Run("transport_arrow="+arrowPath, func(t *testing.T) {
 				item := &paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled
@@ -205,51 +150,6 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 				}
 			})
 		}
-		pkGreaterThan := func(value int64) *planpb.Expr {
-			return &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: &planpb.ColumnInfo{FieldId: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				Op:         planpb.OpType_GreaterThan,
-				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: value}},
-			}}}
-		}
-		t.Run("metering counts both sides of a short-circuited predicate", func(t *testing.T) {
-			segmentIDs = []int64{100, 101}
-			textMatches := &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
-				ColumnInfo: &planpb.ColumnInfo{FieldId: textFieldID, DataType: schemapb.DataType_VarChar},
-				Op:         planpb.OpType_Equal,
-				Value:      &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: "skip"}},
-			}}}
-			predicate = &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
-				Op: planpb.BinaryExpr_LogicalAnd, Left: pkGreaterThan(100), Right: textMatches,
-			}}}
-			result, err := run("", false)
-			require.NoError(t, err)
-			require.Empty(t, result.GetIds().GetIntId().GetData())
-			require.EqualValues(t, 2*3*8+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-		})
-		t.Run("sort charges whole key columns", func(t *testing.T) {
-			segmentIDs = []int64{100, 101}
-			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
-			for _, threshold := range []int64{20, 100} {
-				predicate = pkGreaterThan(threshold)
-				result, err := run("", false)
-				require.NoError(t, err)
-				require.EqualValues(t, 2*3*8+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-			}
-		})
-		t.Run("grouping aggregation and sort charge whole columns", func(t *testing.T) {
-			segmentIDs = []int64{100, 101}
-			groupBy = []int64{textFieldID}
-			aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 100}}
-			orderBy = []*planpb.OrderByField{{FieldId: textFieldID, Ascending: true}}
-			for _, threshold := range []int64{20, 100} {
-				predicate = pkGreaterThan(threshold)
-				result, err := run("", false)
-				require.NoError(t, err)
-				// PK predicate, shared group and aggregate projection, and text sort key.
-				require.EqualValues(t, 2*3*8+(62+2*3*8)+62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-			}
-		})
 		return
 	}
 
@@ -289,8 +189,6 @@ func testRealQueryTask(t *testing.T, enableScan bool) {
 		for _, arguments := range []string{"-e timeout", "-e no_matches"} {
 			result, err := run(arguments, true)
 			require.NoError(t, err)
-			// Matching rows and a zero-row result both use the two full columns.
-			require.EqualValues(t, 62, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
 			chunks, err := queryreducestream.SplitRetrieveResult(result, 1)
 			require.NoError(t, err)
 			var rows []queryutil.RowRef

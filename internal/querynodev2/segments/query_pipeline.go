@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -348,15 +347,6 @@ func RunDelegatorQueryPipeline(
 	output.ScannedRemoteBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() })
 	output.ScannedTotalBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedTotalBytes() })
 	output.FeatureBits = orFeatureBits(results)
-	if req.GetReq().GetCollectQueryReadUsage() {
-		usage := &internalpb.QueryReadUsage{}
-		for _, result := range results {
-			if err := querymeter.AddReadUsage(usage, result.GetCostAggregation().GetQueryReadUsage()); err != nil {
-				return nil, err
-			}
-		}
-		output.CostAggregation = &internalpb.CostAggregation{QueryReadUsage: usage}
-	}
 
 	// Only fill empty fields when result has no data at all (same guard as QN level).
 	if len(output.GetFieldsData()) == 0 {

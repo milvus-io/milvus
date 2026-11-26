@@ -522,46 +522,6 @@ func (s *DelegatorSuite) initSegments() {
 	}, []int64{500, 501})
 }
 
-func (s *DelegatorSuite) TestHybridSearchUsage() {
-	s.delegator.Start()
-	paramtable.SetNodeID(1)
-	s.initSegments()
-
-	worker := &cluster.MockWorker{}
-	worker.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-		RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-			search := req.GetReq()
-			s.True(search.GetCollectSearchReadUsage())
-			s.Equal([]int64{105, 105}, search.GetSearchReadFieldIds())
-			return &internalpb.SearchResults{
-				Status: merr.Success(),
-				SearchReadUsage: &internalpb.QueryReadUsage{
-					DataBytes: 10 * uint64(search.GetNq()) * uint64(len(req.GetSegmentIDs())),
-				},
-			}, nil
-		})
-	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker, nil)
-
-	results, err := s.delegator.Search(s.T().Context(), &querypb.SearchRequest{
-		Req: &internalpb.SearchRequest{
-			Base:                   commonpbutil.NewMsgBase(),
-			IsAdvanced:             true,
-			Nq:                     99,
-			CollectSearchReadUsage: true,
-			SearchReadFieldIds:     []int64{105, 105},
-			SubReqs: []*internalpb.SubSearchRequest{
-				{FieldId: 101, Nq: 2, Topk: 1, MetricType: metric.L2},
-				{FieldId: 101, Nq: 3, Topk: 1, MetricType: metric.L2},
-			},
-		},
-		DmlChannels: []string{s.vchannelName},
-	})
-	s.Require().NoError(err)
-	s.Require().Len(results, 2)
-	s.EqualValues(5*10*2, results[0].GetSearchReadUsage().GetDataBytes())
-	s.EqualValues(5*10*3, results[1].GetSearchReadUsage().GetDataBytes())
-}
-
 func (s *DelegatorSuite) TestSearch() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
@@ -1128,42 +1088,6 @@ func (s *DelegatorSuite) TestQueryStream() {
 	s.delegator.Start()
 	paramtable.SetNodeID(1)
 	s.initSegments()
-
-	s.Run("metered", func() {
-		defer func() { s.workerManager.ExpectedCalls = nil }()
-		var omitUsage bool
-		worker := &cluster.MockWorker{}
-		worker.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
-			RunAndReturn(func(_ context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
-				s.True(req.GetReq().GetCollectQueryReadUsage())
-				if omitUsage && req.GetReq().GetBase().GetTargetID() == 2 {
-					return nil
-				}
-				return srv.Send(&internalpb.RetrieveResults{
-					CostAggregation: &internalpb.CostAggregation{
-						QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: uint64(10 * len(req.GetSegmentIDs()))},
-					},
-				})
-			})
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Return(worker, nil)
-		req := &querypb.QueryRequest{
-			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase(), CollectQueryReadUsage: true},
-			DmlChannels: []string{s.vchannelName},
-		}
-		client := streamrpc.NewLocalQueryClient(s.T().Context())
-		server := client.CreateServer()
-		s.Require().NoError(s.delegator.QueryStream(s.T().Context(), req, server))
-		s.Require().NoError(server.FinishSend(nil))
-		result, err := client.Recv()
-		s.Require().NoError(err)
-		s.EqualValues(50, result.GetCostAggregation().GetQueryReadUsage().GetDataBytes())
-		_, err = client.Recv()
-		s.ErrorIs(err, io.EOF)
-
-		omitUsage = true
-		client = streamrpc.NewLocalQueryClient(s.T().Context())
-		s.Require().ErrorContains(s.delegator.QueryStream(s.T().Context(), req, client.CreateServer()), "did not report read usage")
-	})
 
 	s.Run("normal", func() {
 		defer func() {

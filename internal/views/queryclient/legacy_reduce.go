@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -26,9 +25,6 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 		inputs := c.results[plan.ShardID.String()]
 		if len(inputs) == 0 {
 			empty := &internalpb.RetrieveResults{Status: merr.Success()}
-			if req.Req.GetCollectQueryReadUsage() {
-				empty.CostAggregation = &internalpb.CostAggregation{QueryReadUsage: &internalpb.QueryReadUsage{}}
-			}
 			inputs = []*internalpb.RetrieveResults{empty}
 		}
 		hasAggregation := len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0
@@ -45,9 +41,17 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 			for _, input := range inputs {
 				costs = append(costs, input.GetCostAggregation())
 			}
-			readUsage := result.GetCostAggregation().GetQueryReadUsage()
 			result.CostAggregation = mergeLegacyCosts(costs)
-			result.CostAggregation.QueryReadUsage = readUsage
+		}
+		if req.Req.GetCollectQueryReadUsage() {
+			usage, err := queryPlanReadUsage(plan, req.Req.GetPartitionIDs(), req.Plans != nil)
+			if err != nil {
+				return nil, err
+			}
+			if result.CostAggregation == nil {
+				result.CostAggregation = &internalpb.CostAggregation{}
+			}
+			result.CostAggregation.QueryReadUsage = usage
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
@@ -70,6 +74,12 @@ func (c *legacySearchCollector) Reduce(ctx context.Context, req *internalpb.Sear
 		result, err := reduceLegacyShardSearch(ctx, req, inputs)
 		if err != nil {
 			return nil, err
+		}
+		if req.GetCollectSearchReadUsage() {
+			result.SearchReadUsage, err = searchPlanReadUsage(plan)
+			if err != nil {
+				return nil, err
+			}
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())}
@@ -128,12 +138,6 @@ func reduceLegacyShardSearch(ctx context.Context, req *internalpb.SearchRequest,
 	result.ScannedRemoteBytes, result.ScannedTotalBytes = scannedRemote, scannedTotal
 	result.IsTopkReduce, result.IsRecallEvaluation = topkReduce, recallEvaluation
 	result.CostAggregation = cost
-	if req.GetCollectSearchReadUsage() {
-		result.SearchReadUsage, err = querymeter.CollectSearchUsage(inputs)
-		if err != nil {
-			return nil, err
-		}
-	}
 	result.Status = merr.Success()
 	return result, nil
 }

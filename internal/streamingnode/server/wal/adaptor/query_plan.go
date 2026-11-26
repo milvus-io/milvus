@@ -267,6 +267,10 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			}
 		}
 	}
+	response.Usage, err = planQueryUsage(ctx, response, lease.View, readRuntime)
+	if err != nil {
+		return nil, err
+	}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
 		mlog.FieldVChannel(shardID.VChannel),

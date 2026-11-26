@@ -7,7 +7,7 @@ import (
 )
 
 // SearchSelectedSegments runs on handles already pinned by a query-view lease.
-func SearchSelectedSegments(ctx context.Context, req *SearchRequest, selected []Segment, metering ...*SearchReadUsage) ([]*SearchResult, error) {
+func SearchSelectedSegments(ctx context.Context, req *SearchRequest, selected []Segment) ([]*SearchResult, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -15,7 +15,7 @@ func SearchSelectedSegments(ctx context.Context, req *SearchRequest, selected []
 	if len(selected) > 0 {
 		kind = selected[0].Type()
 	}
-	return searchSegments(ctx, nil, selected, kind, req, metering...)
+	return searchSegments(ctx, nil, selected, kind, req)
 }
 
 func RetrieveSelectedSegments(ctx context.Context, plan *RetrievePlan, req *querypb.QueryRequest, selected []Segment, opts ...RetrieveOption) ([]RetrieveSegmentResult, error) {

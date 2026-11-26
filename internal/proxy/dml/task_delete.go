@@ -308,6 +308,7 @@ type DeleteRunner struct {
 	count           atomic.Int64
 	viewQueryClient queryclient.Client
 	queryUsage      *querymeter.ReadUsageAccumulator
+	meterWrite      bool
 
 	// task queue
 	queue *scheduler.DmTaskQueue
@@ -341,9 +342,13 @@ func (dr *DeleteRunner) SetViewQueryClient(client queryclient.Client) {
 	dr.viewQueryClient = client
 }
 
-// EnableQueryReadUsage opts this request into planned reads and delete bytes.
+// EnableQueryReadUsage opts in to planned QueryView reads.
 func (dr *DeleteRunner) EnableQueryReadUsage() {
 	dr.queryUsage = &querymeter.ReadUsageAccumulator{}
+}
+
+func (dr *DeleteRunner) EnableWriteUsage() {
+	dr.meterWrite = true
 }
 
 func (dr *DeleteRunner) QueryReadBytes() (int64, bool) {
@@ -606,17 +611,16 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					commonpbutil.WithTargetID(nodeID),
 				),
-				MvccTimestamp:         dr.ts,
-				ReqID:                 paramtable.GetNodeID(),
-				DbID:                  0, // TODO
-				CollectionID:          dr.collectionID,
-				SchemaVersion:         dr.schema.GetVersion(),
-				PartitionIDs:          dr.partitionIDs,
-				SerializedExprPlan:    serializedPlan,
-				OutputFieldsId:        outputFieldIDs,
-				GuaranteeTimestamp:    dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
-				QueryLabel:            metrics.DeleteQueryLabel,
-				CollectQueryReadUsage: dr.queryUsage != nil,
+				MvccTimestamp:      dr.ts,
+				ReqID:              paramtable.GetNodeID(),
+				DbID:               0, // TODO
+				CollectionID:       dr.collectionID,
+				SchemaVersion:      dr.schema.GetVersion(),
+				PartitionIDs:       dr.partitionIDs,
+				SerializedExprPlan: serializedPlan,
+				OutputFieldsId:     outputFieldIDs,
+				GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
 			Scope:       querypb.DataScope_All,
@@ -653,7 +657,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				return err
 			}
 			dr.count.Add(task.count)
-			if dr.queryUsage != nil {
+			if dr.meterWrite {
 				writeBytes += primaryKeyBytes(task.primaryKeys)
 			}
 			allQueryCnt += task.allQueryCnt
@@ -688,15 +692,11 @@ func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		msgPartitionID = dr.partitionIDs[0]
 	}
 
-	var usage *internalpb.QueryReadUsage
 	for {
 		result, err := client.Recv()
 		if err != nil {
 			if err == io.EOF {
 				mlog.Debug(ctx, "query stream for delete finished", mlog.Int64("msgID", dr.msgID))
-				if dr.queryUsage != nil {
-					return dr.queryUsage.Add(usage)
-				}
 				return nil
 			}
 			return err
@@ -706,14 +706,6 @@ func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		if err != nil {
 			mlog.Warn(ctx, "query stream for delete get error status", mlog.Int64("msgID", dr.msgID), mlog.Err(err))
 			return err
-		}
-
-		if readUsage := result.GetCostAggregation().GetQueryReadUsage(); dr.queryUsage != nil && readUsage != nil {
-			if usage != nil {
-				return merr.WrapErrServiceInternalMsg("query shard reported stream read usage more than once")
-			}
-			usage = readUsage
-			continue
 		}
 
 		if dr.limiter != nil {
@@ -936,7 +928,7 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 	if err == nil {
 		dr.result.DeleteCnt = task.count
 		dr.result.Timestamp = task.sessionTS
-		if dr.queryUsage != nil {
+		if dr.meterWrite {
 			dr.writeBytes.Add(primaryKeyBytes(pk))
 		}
 	}

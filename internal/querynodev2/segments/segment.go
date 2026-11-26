@@ -466,9 +466,6 @@ type LocalSegment struct {
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
 	fieldJSONStats     map[int64]*querypb.JsonStatsInfo
 	fieldJSONStatsMu   sync.RWMutex
-	// Serializes legacy metered reads with replacement of the sealed native state.
-	queryMeterMu         sync.RWMutex
-	queryMeterFieldSizes *datapb.FieldLogicalSizes
 }
 
 func NewSegment(ctx context.Context,
@@ -526,17 +523,16 @@ func NewSegment(ctx context.Context,
 	logger.Debug(ctx, "create segment done")
 
 	segment := &LocalSegment{
-		baseSegment:          base,
-		bm25StatsHolder:      newBM25StatsHolder(),
-		manager:              manager,
-		ptrLock:              locker,
-		ptr:                  C.CSegmentInterface(csegment.RawPointer()),
-		csegment:             csegment,
-		lastDeltaTimestamp:   atomic.NewUint64(0),
-		fields:               typeutil.NewConcurrentMap[int64, *FieldInfo](),
-		fieldIndexes:         typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
-		fieldJSONStats:       make(map[int64]*querypb.JsonStatsInfo),
-		queryMeterFieldSizes: sealedQueryFieldSizes(loadInfo),
+		baseSegment:        base,
+		bm25StatsHolder:    newBM25StatsHolder(),
+		manager:            manager,
+		ptrLock:            locker,
+		ptr:                C.CSegmentInterface(csegment.RawPointer()),
+		csegment:           csegment,
+		lastDeltaTimestamp: atomic.NewUint64(0),
+		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
+		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
 		memSize:         atomic.NewInt64(-1),
 		binlogSize:      atomic.NewInt64(0),
@@ -1332,10 +1328,6 @@ func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 		return err
 	}
 
-	s.queryMeterMu.Lock()
-	defer s.queryMeterMu.Unlock()
-	// A failed delete replay can leave a new native state without matching load metadata.
-	s.queryMeterFieldSizes = nil
 	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
 	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
 		LoadInfo:      newLoadInfo,
@@ -1357,7 +1349,6 @@ func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	s.loadInfo.Store(newLoadInfo)
 	s.syncFieldJSONStatsFromLoadInfo(ctx, newLoadInfo)
 	s.compactLoadInfoForRuntime()
-	s.queryMeterFieldSizes = sealedQueryFieldSizes(newLoadInfo)
 	return nil
 }
 

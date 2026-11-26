@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -136,6 +135,7 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			}
 			runner.SetViewQueryClient(client)
 			runner.EnableQueryReadUsage()
+			runner.EnableWriteUsage()
 			err = runner.Run(ctx)
 			switch scenario {
 			case "query_error", "enqueue_error", "write_error":
@@ -309,24 +309,4 @@ func TestComplexDeleteRetryRejectsReplacementCollection(t *testing.T) {
 
 	require.ErrorIs(t, runner.complexDeleteByQueryView(t.Context()), merr.ErrCollectionNotFound)
 	require.EqualValues(t, 10, runner.collectionID)
-}
-
-func TestComplexDeleteStreamUsageFrame(t *testing.T) {
-	runner := &DeleteRunner{}
-	runner.EnableQueryReadUsage()
-	client := streamrpc.NewLocalQueryClient(t.Context())
-	server := client.CreateServer()
-	require.NoError(t, server.Send(&internalpb.RetrieveResults{
-		CostAggregation: &internalpb.CostAggregation{QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: 42}},
-	}))
-	require.NoError(t, server.FinishSend(nil))
-	// A usage frame contains no IDs and must never create a delete task.
-	require.NoError(t, runner.receiveQueryResult(t.Context(), client, nil))
-	bytes, present := runner.QueryReadBytes()
-	require.True(t, present)
-	require.EqualValues(t, 42, bytes)
-
-	client = streamrpc.NewLocalQueryClient(t.Context())
-	require.NoError(t, client.CreateServer().FinishSend(nil))
-	require.ErrorContains(t, runner.receiveQueryResult(t.Context(), client, nil), "did not report read usage")
 }

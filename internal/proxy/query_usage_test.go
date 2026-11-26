@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/querymeter"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -57,7 +58,7 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 	t.Cleanup(func() { rateCol = previousRateCollector })
 
 	mockey.PatchConvey("only a successful Query emits usage", t, func() {
-		node := &Proxy{}
+		node := &Proxy{viewQueryClient: struct{ queryclient.Client }{}}
 		request := &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection"}
 		reporter := &queryUsageReporter{}
 		oldReporter := extension.RequestUsageReporter()
@@ -115,7 +116,7 @@ func TestQueryReportsOneUsageValue(t *testing.T) {
 func TestSearchReportsOneUsageValue(t *testing.T) {
 	paramtable.Init()
 	mockey.PatchConvey("only a successful Search emits its accumulated usage", t, func() {
-		node := &Proxy{}
+		node := &Proxy{viewQueryClient: struct{ queryclient.Client }{}}
 		request := &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection"}
 		reporter := &queryUsageReporter{}
 		oldReporter := extension.RequestUsageReporter()
@@ -175,7 +176,7 @@ func TestSearchReportsOneUsageValue(t *testing.T) {
 func TestHybridSearchReportsOneUsageValue(t *testing.T) {
 	paramtable.Init()
 	mockey.PatchConvey("HybridSearch bills the final response and shared query stages once", t, func() {
-		node := &Proxy{}
+		node := &Proxy{viewQueryClient: struct{ queryclient.Client }{}}
 		request := &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"}
 		reporter := &queryUsageReporter{}
 		oldReporter := extension.RequestUsageReporter()

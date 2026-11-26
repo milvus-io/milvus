@@ -6,13 +6,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ scheduler.Task = &QueryStreamTask{}
@@ -81,29 +79,13 @@ func (t *QueryStreamTask) Execute() error {
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
 
-	var readFields []int64
-	var usage *internalpb.QueryReadUsage
-	if t.req.GetReq().GetCollectQueryReadUsage() {
-		readFields = querymeter.QueryFieldIDs(plan)
-		usage = &internalpb.QueryReadUsage{}
-	}
 	srv := streamrpc.NewResultCacheServer(t.srv, t.minMsgSize, t.maxMsgSize)
-	selected, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv, readFields, usage)
-	defer t.segmentManager.Segment.Unpin(selected)
-	flushErr := srv.Flush()
+	defer srv.Flush()
+
+	segments, err := segments.RetrieveStream(t.ctx, t.segmentManager, retrievePlan, t.req, srv)
+	defer t.segmentManager.Segment.Unpin(segments)
 	if err != nil {
 		return err
-	}
-	if flushErr != nil {
-		return flushErr
-	}
-	if usage != nil {
-		// Keep the usage-only frame out of the row cache and emit it even
-		// when no rows match or the worker has no selected segments.
-		return t.srv.Send(&internalpb.RetrieveResults{
-			Status:          merr.Success(),
-			CostAggregation: &internalpb.CostAggregation{QueryReadUsage: usage},
-		})
 	}
 	return nil
 }

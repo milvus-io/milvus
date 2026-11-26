@@ -780,6 +780,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					TransformStartAfterTimetick: meta.SegmentTransformStart(seg),
 					RowNum:                      rowNum,
 					Size:                        req.GetStats().GetInsertBinlogSize(),
+					FieldLogicalBytes:           meta.FlushDataViewFieldLogicalBytes(seg, req, rowNum, manifestPath),
 				}},
 			})
 			if err != nil {

@@ -7,7 +7,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -25,10 +24,9 @@ type ReadState interface {
 
 type sealedReadState struct {
 	Segment
-	parent     *LocalSegment
-	native     segcore.CSegment
-	fieldSizes *datapb.FieldLogicalSizes
-	refs       atomic.Int64
+	parent *LocalSegment
+	native segcore.CSegment
+	refs   atomic.Int64
 }
 
 func (s *sealedReadState) RetainReadState() func() {
@@ -89,7 +87,7 @@ func (s *LocalSegment) PrepareReadState(ctx context.Context, reuse ReadState, in
 		s.Unpin()
 		return nil, err
 	}
-	read := &sealedReadState{Segment: s, parent: s, native: native, fieldSizes: sealedQueryFieldSizes(info)}
+	read := &sealedReadState{Segment: s, parent: s, native: native}
 	read.refs.Store(1)
 	if err := prepareIndexLoadParams(info.GetIndexInfos()); err != nil {
 		read.ReleaseReadState()
@@ -130,11 +128,5 @@ func (s *LocalSegment) AdoptReadState(state ReadState) error {
 	if read.parent != s {
 		return merr.WrapErrServiceInternalMsg("read state belongs to another physical segment")
 	}
-	s.queryMeterMu.Lock()
-	defer s.queryMeterMu.Unlock()
-	if err := segcore.AdoptSealedReadState(s.csegment, read.native); err != nil {
-		return err
-	}
-	s.queryMeterFieldSizes = read.fieldSizes
-	return nil
+	return segcore.AdoptSealedReadState(s.csegment, read.native)
 }

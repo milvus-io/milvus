@@ -2453,7 +2453,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	dr.SetViewQueryClient(node.viewQueryClient)
 	usageReporter := extension.RequestUsageReporter()
 	if usageReporter != nil {
-		dr.EnableQueryReadUsage()
+		dr.EnableWriteUsage()
+		if node.viewQueryClient != nil {
+			dr.EnableQueryReadUsage()
+		}
 	}
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
@@ -2548,8 +2551,10 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
 	usageReporter := extension.RequestUsageReporter()
 	if usageReporter != nil {
-		it.EnableQueryReadUsage()
 		it.EnableWriteUsage()
+		if node.viewQueryClient != nil {
+			it.EnableQueryReadUsage()
+		}
 	}
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
@@ -2661,7 +2666,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	reporter := extension.RequestUsageReporter()
 	var usage *querymeter.SearchUsage
-	if reporter != nil {
+	if reporter != nil && node.viewQueryClient != nil {
 		ctx, usage = querymeter.WithSearchUsage(ctx)
 	}
 
@@ -2904,7 +2909,10 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.Result() != nil && usage == nil {
+	if qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+	}
+	if qt.Result() != nil && usage == nil && extension.RequestUsageReporter() == nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.Result())
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -2916,7 +2924,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -2927,7 +2934,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	if usage != nil && qt.Result() != nil {
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		if !isRecallEvaluation {
 			usage.SetResultSchema(qt.ResultSchema())
 		}
@@ -2942,7 +2948,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	reporter := extension.RequestUsageReporter()
 	var usage *querymeter.SearchUsage
-	if reporter != nil {
+	if reporter != nil && node.viewQueryClient != nil {
 		ctx, usage = querymeter.WithSearchUsage(ctx)
 	}
 
@@ -3139,7 +3145,10 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.Result() != nil && usage == nil {
+	if qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+	}
+	if qt.Result() != nil && usage == nil && extension.RequestUsageReporter() == nil {
 		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -3151,13 +3160,11 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
 	if usage != nil && qt.Result() != nil {
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		usage.SetResultSchema(qt.ResultSchema())
 	}
 	succeeded = true
@@ -3756,11 +3763,12 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	reporter := extension.RequestUsageReporter()
+	collectUsage := reporter != nil && node.viewQueryClient != nil
 	var result *milvuspb.QueryResults
 	var usageBytes int64
 	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
 		var err error
-		result, usageBytes, err = node.executeQuery(ctx, request, reporter != nil)
+		result, usageBytes, err = node.executeQuery(ctx, request, collectUsage)
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
@@ -3773,7 +3781,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
 		return &milvuspb.QueryResults{Status: status}, nil
 	}
-	if reporter != nil {
+	if collectUsage {
 		if err := ctx.Err(); err != nil {
 			return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
 		}
@@ -3838,8 +3846,8 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 
 	mlog.Debug(ctx, rpcDone(method))
 
-	if collectUsage {
-		SetStorageCost(res.Status, storageCost)
+	SetStorageCost(res.Status, storageCost)
+	if collectUsage || extension.RequestUsageReporter() != nil {
 		return res, qt.UsageBytes(), nil
 	}
 
@@ -3854,7 +3862,6 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
 	})
 	SetReportValue(res.Status, v)
-	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {

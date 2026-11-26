@@ -120,6 +120,7 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardID) *qviews.QueryViewAtCoordBuilder {
 	assignments := make(map[int64]map[int64][]int64)
 	manifests := make(map[int64]int64, len(r.entries))
+	fieldBytes := make(map[int64]*viewpb.FieldLogicalBytes)
 	for _, segment := range r.entries {
 		node := r.assignments[segment.SegmentID]
 		if assignments[node] == nil {
@@ -127,6 +128,9 @@ func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardI
 		}
 		assignments[node][segment.PartitionID] = append(assignments[node][segment.PartitionID], segment.SegmentID)
 		manifests[segment.SegmentID] = segment.ManifestVersion
+		if segment.FieldLogicalBytes != nil {
+			fieldBytes[segment.SegmentID] = segment.FieldLogicalBytes
+		}
 	}
 	stats := make(map[int64]int64, len(r.shard.Partitions))
 	for _, partition := range r.shard.Partitions {
@@ -138,6 +142,7 @@ func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardI
 		SchemaVersion:               p.SchemaVersion(r.collectionID),
 		TransformStartAfterTimetick: r.shard.TransformStartAfterTimetick(),
 		SegmentManifestVersions:     manifests, PartitionStatsVersions: stats,
+		SealedFieldBytes: fieldBytes,
 	}).SetAssignments(assignments).SetLoadInfoVersion(p.ConfigVersion(r.collectionID)).
 		SetPreparationPriority(p.preparationPriority(shardID))
 }
@@ -202,6 +207,12 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 			protoPartition.SegmentIds = append(protoPartition.SegmentIds, segment.SegmentID)
 			protoPartition.SegmentManifestVersions = append(protoPartition.SegmentManifestVersions, segment.ManifestVersion)
 			protoPartition.SegmentTransformStartAfterTimeticks = append(protoPartition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)
+			if segment.FieldLogicalBytes != nil {
+				if protoPartition.SegmentFieldBytes == nil {
+					protoPartition.SegmentFieldBytes = make(map[int64]*viewpb.FieldLogicalBytes)
+				}
+				protoPartition.SegmentFieldBytes[segment.SegmentID] = segment.FieldLogicalBytes
+			}
 		}
 		protoShard.Partitions = append(protoShard.Partitions, protoPartition)
 	}

@@ -3,7 +3,6 @@ package viewquery
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -72,8 +71,6 @@ func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.Sub
 		AnalyzerName:            sub.GetAnalyzerName(),
 		SearchType:              sub.GetSearchType(),
 		PkFilter:                common.PkFilterNoPkFilter,
-		CollectSearchReadUsage:  parent.GetCollectSearchReadUsage(),
-		SearchReadFieldIds:      parent.GetSearchReadFieldIds(),
 	}
 	req.ProtoReflect().SetUnknown(parent.ProtoReflect().GetUnknown())
 	return proto.Clone(req).(*internalpb.SearchRequest), nil
@@ -105,18 +102,6 @@ func UpdateSubSearchRequest(sub *internalpb.SubSearchRequest, optimized *interna
 	sub.SearchType = optimized.GetSearchType()
 	sub.Skip = skip
 	return nil
-}
-
-func finishAdvancedSearch(req *internalpb.SearchRequest, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
-	result := assembleAdvancedSearchResults(results)
-	if req.GetCollectSearchReadUsage() {
-		usage, err := querymeter.CollectSearchUsage(results)
-		if err != nil {
-			return nil, err
-		}
-		result.SearchReadUsage = usage
-	}
-	return result, nil
 }
 
 // assembleAdvancedSearchResults preserves sub-search order and converts regular

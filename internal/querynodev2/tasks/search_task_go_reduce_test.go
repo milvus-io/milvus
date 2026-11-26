@@ -1418,7 +1418,6 @@ func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *t
 				queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, nq, topK, testCollectionID)
 				require.NoError(t, err)
 				queryReq.Scope = scope
-				queryReq.Req.CollectSearchReadUsage = true
 				if withChain {
 					plan := &planpb.PlanNode{}
 					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
@@ -1438,8 +1437,6 @@ func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *t
 				require.NoError(t, task.Execute())
 				result := task.SearchResult()
 				require.NotNil(t, result)
-				require.NotNil(t, result.GetSearchReadUsage())
-				require.Zero(t, result.GetSearchReadUsage().GetDataBytes())
 				assert.Equal(t, nq, result.NumQueries)
 				assert.Equal(t, topK, result.TopK)
 				resultData := result.ResultData
@@ -1574,9 +1571,9 @@ func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
 				}).Origin(&setAllowed).Build()
 			t.Cleanup(func() { setter.UnPatch() })
 
-			var searchHistorical func(context.Context, *segments.Manager, *segments.SearchRequest, int64, []int64, []int64, ...*segments.SearchReadUsage) ([]*segments.SearchResult, []segments.Segment, error)
+			var searchHistorical func(context.Context, *segments.Manager, *segments.SearchRequest, int64, []int64, []int64) ([]*segments.SearchResult, []segments.Segment, error)
 			searcher := mockey.Mock(segments.SearchHistorical).To(
-				func(ctx context.Context, manager *segments.Manager, req *segments.SearchRequest, collectionID int64, partitionIDs, segmentIDs []int64, metering ...*segments.SearchReadUsage) ([]*segments.SearchResult, []segments.Segment, error) {
+				func(ctx context.Context, manager *segments.Manager, req *segments.SearchRequest, collectionID int64, partitionIDs, segmentIDs []int64) ([]*segments.SearchResult, []segments.Segment, error) {
 					require.Equal(t, []bool{tc.allowed}, decisions, "decide once before segment fan-out")
 					// A config refresh after the decision must not change later slices.
 					refreshedLimit := "0"
@@ -1584,7 +1581,7 @@ func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
 						refreshedLimit = "1"
 					}
 					require.NoError(t, params.Save(limitKey, refreshedLimit))
-					return searchHistorical(ctx, manager, req, collectionID, partitionIDs, segmentIDs, metering...)
+					return searchHistorical(ctx, manager, req, collectionID, partitionIDs, segmentIDs)
 				}).Origin(&searchHistorical).Build()
 			t.Cleanup(func() { searcher.UnPatch() })
 

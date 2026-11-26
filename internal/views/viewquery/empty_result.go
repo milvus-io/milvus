@@ -9,7 +9,7 @@ import (
 func emptySearchResults(req *internalpb.SearchRequest) *internalpb.SearchResults {
 	nq := req.GetNq()
 	topK := req.GetTopk()
-	result := &internalpb.SearchResults{
+	return &internalpb.SearchResults{
 		Status:             merr.Success(),
 		MetricType:         req.GetMetricType(),
 		NumQueries:         nq,
@@ -26,10 +26,6 @@ func emptySearchResults(req *internalpb.SearchRequest) *internalpb.SearchResults
 		},
 		CostAggregation: &internalpb.CostAggregation{},
 	}
-	if req.GetCollectSearchReadUsage() {
-		result.SearchReadUsage = &internalpb.QueryReadUsage{}
-	}
-	return result
 }
 
 func emptyQueryResults() *internalpb.RetrieveResults {
@@ -53,5 +49,5 @@ func EmptySearchResults(req *internalpb.SearchRequest) (*internalpb.SearchResult
 	for i, request := range requests {
 		results[i] = emptySearchResults(request)
 	}
-	return finishAdvancedSearch(req, results)
+	return assembleAdvancedSearchResults(results), nil
 }

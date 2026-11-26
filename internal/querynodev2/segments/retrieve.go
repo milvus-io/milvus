@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -38,9 +37,8 @@ import (
 )
 
 type RetrieveSegmentResult struct {
-	ReadUsage *internalpb.QueryReadUsage
-	Result    *segcorepb.RetrieveResults
-	Segment   Segment
+	Result  *segcorepb.RetrieveResults
+	Segment Segment
 
 	// Record carries candidate offsets in QueryScan mode, or user output
 	// columns when the ordinary Arrow transport was used;
@@ -67,8 +65,7 @@ func ReleaseRecords(results []RetrieveSegmentResult) {
 type RetrieveOption func(*retrieveOptions)
 
 type retrieveOptions struct {
-	forceArrow        bool
-	plannedReadFields []int64
+	forceArrow bool
 }
 
 // WithArrowTransport makes the retrieve take the Arrow path whatever
@@ -76,11 +73,6 @@ type retrieveOptions struct {
 // Arrow (shouldUseArrowTransport).
 func WithArrowTransport() RetrieveOption {
 	return func(o *retrieveOptions) { o.forceArrow = true }
-}
-
-// WithPlannedReadFields passes the planned column reads to each selected segment.
-func WithPlannedReadFields(fields []int64) RetrieveOption {
-	return func(o *retrieveOptions) { o.plannedReadFields = fields }
 }
 
 // retrieveOnSegments performs retrieve on listed segments
@@ -103,15 +95,11 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	}
 
 	retriever := func(ctx context.Context, s Segment) error {
-		usage, unlock, err := collectPlannedReadUsage(s, o.plannedReadFields)
-		defer unlock()
-		if err != nil {
-			return err
-		}
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		var (
 			result *segcorepb.RetrieveResults
 			record arrow.Record
+			err    error
 		)
 		if useArrow {
 			result, record, err = s.RetrieveArrow(ctx, plan)
@@ -147,10 +135,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}
 		}
 		resultCh <- RetrieveSegmentResult{
-			ReadUsage: usage,
-			Result:    result,
-			Segment:   s,
-			Record:    record,
+			Result:  result,
+			Segment: s,
+			Record:  record,
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 			contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
@@ -258,16 +245,12 @@ func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan, forc
 	return !hasAggregation && !hasOrderBy && !plan.IsIgnoreNonPk()
 }
 
-func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer, readFields []int64, usage *internalpb.QueryReadUsage) error {
+func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
 	var (
 		errs = make([]error, len(segments))
 		wg   sync.WaitGroup
 	)
 
-	var parts []*internalpb.QueryReadUsage
-	if len(readFields) > 0 {
-		parts = make([]*internalpb.QueryReadUsage, len(segments))
-	}
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel
@@ -280,14 +263,6 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
 			var result *segcorepb.RetrieveResults
 			err := doOnSegment(ctx, mgr, segment, func(ctx context.Context, segment Segment) error {
-				if len(readFields) > 0 {
-					part, unlock, err := collectPlannedReadUsage(segment, readFields)
-					defer unlock()
-					if err != nil {
-						return err
-					}
-					parts[i] = part
-				}
 				var err error
 				result, err = segment.Retrieve(ctx, plan)
 				return err
@@ -311,23 +286,16 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 					ScannedTotalBytes:         result.GetScannedTotalBytes(),
 				}); err != nil {
 					errs[i] = err
-					return
 				}
 			}
+
+			errs[i] = nil
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(paramtable.GetStringNodeID(),
 				contextutil.GetQueryLabel(ctx), label).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 		}(segment, i)
 	}
 	wg.Wait()
-	if err := merr.Combine(errs...); err != nil {
-		return err
-	}
-	for _, part := range parts {
-		if err := querymeter.AddReadUsage(usage, part); err != nil {
-			return err
-		}
-	}
-	return nil
+	return merr.Combine(errs...)
 }
 
 // retrieve will retrieve all the validate target segments
@@ -362,7 +330,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream
-func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer, readFields []int64, usage *internalpb.QueryReadUsage) ([]Segment, error) {
+func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) ([]Segment, error) {
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveSegments []Segment
@@ -383,6 +351,6 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 		return retrieveSegments, err
 	}
 
-	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, srv, readFields, usage)
+	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, srv)
 	return retrieveSegments, err
 }

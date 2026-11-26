@@ -12,21 +12,19 @@ AgentBase uses a distribution-installed reporter to record one `bytes` value at 
 
 Filtering, MVCC and the number of groups do not reduce the planned column sizes.
 
-Sealed workers read the field totals bound to the selected manifest revision and verify their row coverage. Sealed logical sizes include the stored validity bits. Growing workers track field payloads as they insert or recover batches. Growing recovery uses the persisted payload totals when the accounting version, manifest revision, and row count match the loaded data. The worker adds the subsequent WAL inserts to those totals. Fields without a verified total are measured from the loaded values. A recovered remote TEXT reference needs a verified payload total because the reference lacks the original length. Missing required data fails the request. A known zero remains valid.
+AgentBase read metering applies to QueryView. DataView publishes verified sealed column statistics with its segment and manifest revision. The StreamingNode uses the chosen QueryView, partitions, and segment selections to return totals for the requested columns in `GetQueryPlan`. Growing statistics use the loaded values. Recovery uses persisted payload totals when the accounting version, manifest revision, and row count match, then adds subsequent WAL inserts. Missing statistics for a planned column fail the request. A known zero remains valid.
 
-Proxy adds successful shard contributions and the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty shard results retain their usage.
-
-The first change uses the unary Query path for metered requests so it can receive complete usage from all selected workers. Each successful QueryIterator page is measured independently.
+Proxy uses the plan for each successful shard to count column references and adds the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty results retain their planned usage. Each successful QueryIterator page is measured independently. Metered requests use the unary QueryView client path.
 
 ## Search
 
-Search counts the original vector column and all planned predicate, grouping, aggregation, and sort columns in each selected segment. For each ANN or filter-only stage, workers multiply the planned column sizes by that stage's effective NQ. Filter-only stages include their predicates. Index sizes and hit counts do not enter the calculation.
+Search counts the original vector column and all planned predicate, grouping, aggregation, and sort columns in each selected segment. For each ANN or filter-only stage, Proxy multiplies the planned column sizes by that stage's effective NQ. Filter-only stages include their predicates. Index sizes and hit counts do not enter the calculation.
 
-Proxy adds successful read stages, including internal primary-key lookups and requery, to the same Search usage. A requery counts its own planned columns once per execution. Proxy adds the logical values in the final client response once and reports a single `bytes` value for the successful request. Metered Search receives worker usage through unary reduction.
+Proxy adds successful read stages, including internal primary-key lookups and requery, to the same Search usage. A requery counts its own planned columns once per execution. Proxy adds the logical values in the final client response once and reports a single `bytes` value for the successful request. Retained requery uses the primary-key column sizes for the original view and worker selections, scoped to the requery partitions.
 
 ## HybridSearch
 
-Each sub-search follows the Search column rules using its own effective NQ. Workers sum these contributions. A sub-search skipped during planning contributes zero. Proxy adds successful shared requery reads and the logical values in the final fused response, then reports one `bytes` value for the successful HybridSearch RPC. The legacy advanced Search entry uses the same accounting and retains its Search operation name.
+Each sub-search follows the Search column rules using its own effective NQ. Proxy sums these contributions. A sub-search skipped during planning contributes zero. Proxy adds successful shared requery reads and the logical values in the final fused response, then reports one `bytes` value for the successful HybridSearch RPC. The legacy advanced Search entry uses the same accounting and retains its Search operation name.
 
 ## Delete by filter
 

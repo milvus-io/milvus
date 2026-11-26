@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -478,12 +477,7 @@ func (sd *shardDelegator) executeSearchSubTasks(
 		return nil, err
 	}
 
-	evaluator := NewRowCountBasedEvaluator(sealedRowCount)
-	if req.GetReq().GetCollectSearchReadUsage() {
-		// Every selected worker must contribute its planned column usage.
-		evaluator = nil
-	}
-	results, err := executeSubTasks(ctx, tasks, evaluator,
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
 			ctx = workerReadContext(ctx)
 			resp, err := worker.SearchSegments(ctx, req)
@@ -558,18 +552,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		mlog.Int("effectiveSegmentNum", effectiveSegmentNum),
 	)
 
-	var filterUsage *internalpb.QueryReadUsage
 	if optimizers.ShouldUseTwoStageSearch(req, effectiveSegmentNum) {
-		results, fallback, bits, usage, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
+		results, fallback, bits, err := sd.twoStageSearch(ctx, req, sealed, growing, sealedRowCount)
 		if err != nil {
 			return nil, err
 		}
 		if !fallback {
 			// Only a two-stage search that ran both stages is one.
 			orFeatureBits(results, delegatorBits|execBit(featureusage.FeatureTwoStageSearch))
-			return attachFilterUsage(results, usage)
+			return results, nil
 		}
-		filterUsage = usage
 		// fallback: continue with normal single-stage search below; the filter
 		// stage still ran, so its execution features are kept.
 		delegatorBits |= bits
@@ -588,26 +580,6 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	orFeatureBits(results, delegatorBits)
-	return attachFilterUsage(results, filterUsage)
-}
-
-// Keep filter data out of the vector reducer. Attach its cost once even if
-// the second stage did not dispatch any work.
-func attachFilterUsage(results []*internalpb.SearchResults, filter *internalpb.QueryReadUsage) ([]*internalpb.SearchResults, error) {
-	if filter == nil {
-		return results, nil
-	}
-	if len(results) == 0 {
-		return []*internalpb.SearchResults{{Status: merr.Success(), SearchReadUsage: filter}}, nil
-	}
-	usage := &internalpb.QueryReadUsage{}
-	if err := querymeter.AddReadUsage(usage, results[0].GetSearchReadUsage()); err != nil {
-		return nil, err
-	}
-	if err := querymeter.AddReadUsage(usage, filter); err != nil {
-		return nil, err
-	}
-	results[0].SearchReadUsage = usage
 	return results, nil
 }
 
@@ -727,8 +699,6 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				AnalyzerName:            subReq.GetAnalyzerName(),
 				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
 				SearchType:              subReq.GetSearchType(),
-				CollectSearchReadUsage:  req.GetReq().GetCollectSearchReadUsage(),
-				SearchReadFieldIds:      req.GetReq().GetSearchReadFieldIds(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -746,22 +716,12 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				if err != nil {
 					return nil, err
 				}
-				result, err := segments.ReduceSearchOnQueryNode(ctx,
+				return segments.ReduceSearchOnQueryNode(ctx,
 					results,
 					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
 						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
 						WithGroupSize(searchReq.GetReq().GetGroupSize()).
 						WithGroupByFieldIdsFromProto(searchReq.GetReq().GetGroupByFieldId(), searchReq.GetReq().GetGroupByFieldIds()))
-				if err != nil {
-					return nil, err
-				}
-				if newRequest.GetCollectSearchReadUsage() {
-					result.SearchReadUsage, err = querymeter.CollectSearchUsage(results)
-					if err != nil {
-						return nil, err
-					}
-				}
-				return result, nil
 			})
 			futures[index] = future
 		}
@@ -864,67 +824,23 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return err
 	}
 
-	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		// ClientBase only retries stream creation; it never replays received data.
 		ctx = workerReadContext(ctx)
-		workerStream := srv
-		var metered *queryReadUsageStream
-		if req.GetReq().GetCollectQueryReadUsage() {
-			metered = &queryReadUsageStream{QueryStreamServer: srv}
-			workerStream = metered
-		}
-		err := worker.QueryStreamSegments(ctx, req, workerStream)
+		err := worker.QueryStreamSegments(ctx, req, srv)
 		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
-		if err != nil || metered == nil {
-			return nil, err
-		}
-		return &internalpb.RetrieveResults{
-			CostAggregation: &internalpb.CostAggregation{QueryReadUsage: metered.usage},
-		}, nil
+		return nil, err
 	}, "QueryStream", log)
 	if err != nil {
 		mlog.Warn(ctx, "Delegator query stream failed", mlog.Err(err))
 		return err
 	}
 
-	if req.GetReq().GetCollectQueryReadUsage() {
-		usage := &internalpb.QueryReadUsage{}
-		for _, result := range results {
-			if err := querymeter.AddReadUsage(usage, result.GetCostAggregation().GetQueryReadUsage()); err != nil {
-				return err
-			}
-		}
-		if err := srv.Send(&internalpb.RetrieveResults{
-			Status:          merr.Success(),
-			CostAggregation: &internalpb.CostAggregation{QueryReadUsage: usage},
-		}); err != nil {
-			return err
-		}
-	}
-
 	mlog.Info(ctx, "Delegator QueryStream done")
 
 	return nil
-}
-
-// queryReadUsageStream forwards row batches and retains one worker's terminal
-// usage so the delegator can validate that all selected workers contributed.
-type queryReadUsageStream struct {
-	streamrpc.QueryStreamServer
-	usage *internalpb.QueryReadUsage
-}
-
-func (s *queryReadUsageStream) Send(result *internalpb.RetrieveResults) error {
-	if usage := result.GetCostAggregation().GetQueryReadUsage(); usage != nil {
-		if s.usage != nil {
-			return merr.WrapErrServiceInternalMsg("query worker reported stream read usage more than once")
-		}
-		s.usage = usage
-		return nil
-	}
-	return s.QueryStreamServer.Send(result)
 }
 
 // withQuerySubTasks runs Query's steps up to the sub-task split, then run on

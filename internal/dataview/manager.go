@@ -130,7 +130,8 @@ type LoadableSegment struct {
 	RowNum int64
 	// Size is the insert_binlog_size statistic in bytes. A nonempty
 	// segment with no positive size uses the row-based estimate instead.
-	Size int64
+	Size              int64
+	FieldLogicalBytes *viewpb.FieldLogicalBytes
 }
 
 type CreateCollectionDataViewEvent struct {
@@ -798,8 +799,9 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 			segments := make([]*api.SegmentDataView, 0, len(partition.GetSegmentIds()))
 			for index, segmentID := range partition.GetSegmentIds() {
 				segment := &api.SegmentDataView{
-					SegmentID:   segmentID,
-					PartitionID: partition.GetPartitionId(),
+					SegmentID:         segmentID,
+					PartitionID:       partition.GetPartitionId(),
+					FieldLogicalBytes: partition.GetSegmentFieldBytes()[segmentID],
 				}
 				if index < len(partition.GetSegmentManifestVersions()) {
 					segment.ManifestVersion = partition.GetSegmentManifestVersions()[index]
@@ -1166,12 +1168,15 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			}
 			if segment.ManifestVersion > currentVersion {
 				known.partition.SegmentManifestVersions[known.index] = segment.ManifestVersion
+				delete(known.partition.SegmentFieldBytes, segment.SegmentID)
 			}
+			setSegmentFieldBytes(partition, segment)
 			continue
 		}
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
 		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.ManifestVersion)
 		partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)
+		setSegmentFieldBytes(partition, segment)
 		slots[segment.SegmentID] = segmentSlot{
 			location:  location,
 			partition: partition,
@@ -1179,6 +1184,16 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 		}
 	}
 	return nil
+}
+
+func setSegmentFieldBytes(partition *viewpb.DataViewOfPartition, segment LoadableSegment) {
+	if segment.FieldLogicalBytes == nil || segment.ManifestVersion == 0 {
+		return
+	}
+	if partition.SegmentFieldBytes == nil {
+		partition.SegmentFieldBytes = make(map[int64]*viewpb.FieldLogicalBytes)
+	}
+	partition.SegmentFieldBytes[segment.SegmentID] = segment.FieldLogicalBytes
 }
 
 // rebuildSegments replaces every Segment of the snapshot with the supplied
@@ -1195,11 +1210,13 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
 	known := make(map[int64]int64)
 	knownStarts := make(map[int64]uint64)
+	knownFieldBytes := make(map[int64]*viewpb.FieldLogicalBytes)
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
 			for idx, segmentID := range partition.GetSegmentIds() {
 				known[segmentID] = partition.GetSegmentManifestVersions()[idx]
 				knownStarts[segmentID] = partition.GetSegmentTransformStartAfterTimeticks()[idx]
+				knownFieldBytes[segmentID] = partition.GetSegmentFieldBytes()[segmentID]
 			}
 		}
 	}
@@ -1225,6 +1242,7 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 		if segments[i].ManifestVersion == 0 {
 			if exists {
 				segments[i].ManifestVersion = stored
+				segments[i].FieldLogicalBytes = knownFieldBytes[segments[i].SegmentID]
 			}
 			continue
 		}

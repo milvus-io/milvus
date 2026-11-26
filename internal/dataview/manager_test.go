@@ -1543,3 +1543,25 @@ func TestManagerFlushStatsCarryBaseSegments(t *testing.T) {
 	ids := ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds()
 	require.ElementsMatch(t, []int64{10, 20}, ids)
 }
+
+func TestDataViewFieldBytesFollowManifest(t *testing.T) {
+	view := buildEmptyDataView(1, []string{"ch"})
+	segment := segmentWithManifestVersion(10, "ch", 100, 3)
+	segment.FieldLogicalBytes = &viewpb.FieldLogicalBytes{PayloadBytes: map[int64]uint64{101: 0, 102: 48}}
+	require.NoError(t, addSegments(view, []LoadableSegment{segment}))
+	older := canonicalDataViewClone(view)
+
+	segment.ManifestVersion = 4
+	segment.FieldLogicalBytes = nil
+	require.NoError(t, addSegments(view, []LoadableSegment{segment}))
+	partition := view.GetShards()[0].GetPartitions()[0]
+	require.Equal(t, []int64{4}, partition.GetSegmentManifestVersions())
+	require.Empty(t, partition.GetSegmentFieldBytes())
+	require.Equal(t, map[int64]uint64{101: 0, 102: 48}, older.GetShards()[0].GetPartitions()[0].GetSegmentFieldBytes()[10].GetPayloadBytes())
+
+	segment.FieldLogicalBytes = &viewpb.FieldLogicalBytes{PayloadBytes: map[int64]uint64{101: 8}}
+	require.NoError(t, addSegments(view, []LoadableSegment{segment}))
+	require.EqualValues(t, 8, partition.GetSegmentFieldBytes()[10].GetPayloadBytes()[101])
+	require.NoError(t, removeSegments(view, []int64{10}))
+	require.Empty(t, partition.GetSegmentFieldBytes())
+}

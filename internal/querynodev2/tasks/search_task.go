@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -209,34 +207,13 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 		}
 	}
 
-	var meter *segments.SearchReadUsage
-	if req.GetReq().GetCollectSearchReadUsage() {
-		plan, err := extractPlanWithScorers(req.GetReq().GetSerializedExprPlan())
-		if err != nil {
-			return merr.Wrap(err, "parse search plan for metering")
-		}
-		fields := querymeter.SearchFieldIDs(plan, searchReq.FilterOnly())
-		if !searchReq.FilterOnly() {
-			fields = append(fields, req.GetReq().GetSearchReadFieldIds()...)
-		}
-		if preparedChains != nil {
-			if preparedChains.l0 != nil {
-				fields = append(fields, preparedChains.l0.inputPlan.PhysicalFieldIDs()...)
-			}
-			if preparedChains.l1 != nil {
-				fields = append(fields, preparedChains.l1.inputPlan.PhysicalFieldIDs()...)
-			}
-		}
-		meter = segments.NewSearchReadUsage(fields)
-	}
-
 	var (
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
 	)
 	if selected != nil {
 		searchedSegments = selected
-		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected, meter)
+		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected)
 	} else if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
@@ -245,7 +222,6 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			meter,
 		)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, searchedSegments, err = segments.SearchStreaming(
@@ -255,7 +231,6 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 			req.GetReq().GetCollectionID(),
 			req.GetReq().GetPartitionIDs(),
 			req.GetSegmentIDs(),
-			meter,
 		)
 	}
 	if selected == nil {
@@ -303,7 +278,7 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 			}
 		}
 		mlog.Debug(t.ctx, "filter-only search completed", mlog.Int("segments", len(segmentIDs)))
-		return t.attachReadUsage(meter)
+		return nil
 	}
 
 	// plan.MetricType is accurate, though req.MetricType may be empty
@@ -333,7 +308,7 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 			}
 			task.result = searchResults
 		}
-		return t.attachReadUsage(meter)
+		return nil
 	}
 
 	relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
@@ -466,20 +441,6 @@ func (t *SearchTask) execute(selected []segments.Segment) error {
 		metrics.ReduceSegments,
 		metrics.BatchReduce).
 		Observe(float64(reduceTR.RecordSpan().Microseconds()) / 1000.0)
-	return t.attachReadUsage(meter)
-}
-
-func (t *SearchTask) attachReadUsage(meter *segments.SearchReadUsage) error {
-	if meter == nil {
-		return nil
-	}
-	for i, nq := range t.originNqs {
-		usage, err := querymeter.ScaleSearchUsage(meter.Usage, nq)
-		if err != nil {
-			return err
-		}
-		t.subTaskAt(i).result.SearchReadUsage = usage
-	}
 	return nil
 }
 
@@ -535,9 +496,7 @@ func (t *SearchTask) canMerge(other *SearchTask) bool {
 	ratio := float64(after) / float64(pre)
 
 	// Check mergeable
-	if t.req.GetReq().GetCollectSearchReadUsage() != other.req.GetReq().GetCollectSearchReadUsage() ||
-		!slices.Equal(t.req.GetReq().GetSearchReadFieldIds(), other.req.GetReq().GetSearchReadFieldIds()) ||
-		t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
+	if t.req.GetFilterOnly() != other.req.GetFilterOnly() ||
 		t.req.GetEnableExprCache() != other.req.GetEnableExprCache() ||
 		t.req.GetReq().GetDbID() != other.req.GetReq().GetDbID() ||
 		t.req.GetReq().GetCollectionID() != other.req.GetReq().GetCollectionID() ||

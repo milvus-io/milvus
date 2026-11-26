@@ -97,7 +97,7 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 	if err := group.Wait(); err != nil {
 		return nil, err
 	}
-	return finishAdvancedSearch(legacyReq, results)
+	return assembleAdvancedSearchResults(results), nil
 }
 
 func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest, selection *viewpb.SegmentSelection) (*internalpb.SearchResults, error) {
@@ -189,11 +189,7 @@ func (s *Server) queryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 	}
 	defer tasks.Release()
 	if len(tasks.Tasks()) == 0 {
-		empty := emptyQueryResults()
-		if req.GetLegacyReq().GetCollectQueryReadUsage() {
-			empty.CostAggregation.QueryReadUsage = &internalpb.QueryReadUsage{}
-		}
-		return &viewpb.QueryOnViewResponse{LegacyResults: empty}, nil
+		return &viewpb.QueryOnViewResponse{LegacyResults: emptyQueryResults()}, nil
 	}
 
 	result, err := s.scheduler.Query(ctx, tasks)

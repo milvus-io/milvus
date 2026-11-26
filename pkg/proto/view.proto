@@ -104,6 +104,8 @@ message DataViewOfPartition {
     repeated uint64 segment_transform_start_after_timeticks = 4 [packed = true];
     // Immutable object version; zero means no clustering statistics.
     int64 partition_stats_version = 5;
+    // Logical sizes keyed by segment ID, bound to the parallel manifest version.
+    map<int64, FieldLogicalBytes> segment_field_bytes = 6;
 }
 
 // QueryViewState represents the distributed lifecycle of a QueryView.
@@ -144,6 +146,7 @@ message QueryViewMeta {
 // The node is identified implicitly by the shard's vchannel binding.
 message QueryViewOfStreamingNode {
     repeated ClusteredPartitionStats partition_stats = 1;
+    map<int64, FieldLogicalBytes> sealed_field_bytes = 2;
 }
 
 // Immutable statistics-object reference scoped by the enclosing QueryViewMeta's
@@ -358,6 +361,7 @@ message GetQueryPlanResponse {
     ExecutionSummary execution_summary = 3;
     // Consumed by QueryViewClient; not part of the reusable worker plan.
     QueryPlanClientOptimizeInfo client_optimize_info = 4;
+    PlannedQueryUsage usage = 5;
 }
 
 // Diagnostic facts for the successful execution attempt, never execution controls.
@@ -581,4 +585,24 @@ message QueryOnViewStreamResponse {
         internal.RetrieveResults chunk = 1;
         internal.RetrieveResults metadata = 2;
     }
+}
+
+message FieldLogicalBytes {
+    // A present zero is a known size. Missing columns have no entry.
+    map<int64, uint64> payload_bytes = 1;
+    map<int64, uint64> validity_bits = 2;
+}
+
+message PlannedColumnRead {
+    FieldLogicalBytes columns = 1;
+    // Repeated references are significant. Columns contains one size per field.
+    repeated int64 field_ids = 2;
+    int64 nq = 3;
+}
+
+message PlannedQueryUsage {
+    repeated PlannedColumnRead reads = 1;
+    PlannedColumnRead filter_only = 2;
+    // Requery inherits the original worker selection and supplies its own partitions.
+    map<int64, PlannedColumnRead> requery_partitions = 3;
 }

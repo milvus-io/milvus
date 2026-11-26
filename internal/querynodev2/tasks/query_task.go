@@ -15,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/materialize"
-	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -184,17 +183,6 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	if t.materialize {
 		opts = append(opts, segments.WithArrowTransport())
 	}
-	var readUsage *internalpb.QueryReadUsage
-	if t.req.GetReq().GetCollectQueryReadUsage() {
-		readUsage = &internalpb.QueryReadUsage{}
-		fields := append(querymeter.QueryFieldIDs(t.plan), t.req.GetReq().GetQueryReadFieldIds()...)
-		if t.queryChain != nil {
-			// QueryScan currently accepts one Grep operator. Its text read is
-			// independent of the predicates that select its candidate rows.
-			fields = append(fields, t.queryChain.InputPlan.Inputs[0].SourceFieldID)
-		}
-		opts = append(opts, segments.WithPlannedReadFields(fields))
-	}
 	if selected != nil {
 		results, err = segments.RetrieveSelectedSegments(t.ctx, retrievePlan, t.req, selected, opts...)
 	} else {
@@ -221,11 +209,6 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	arrowRecords := make([]arrow.Record, 0, len(results))
 	hasArrow := false
 	for _, result := range results {
-		if readUsage != nil && result.ReadUsage != nil {
-			if err := querymeter.AddReadUsage(readUsage, result.ReadUsage); err != nil {
-				return err
-			}
-		}
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
 		arrowRecords = append(arrowRecords, result.Record)
@@ -262,7 +245,7 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
 		return acc + segments.GetSegmentRelatedDataSize(seg)
 	}, 0)
-	cost := &internalpb.CostAggregation{TotalRelatedDataSize: relatedDataSize, QueryReadUsage: readUsage}
+	cost := &internalpb.CostAggregation{TotalRelatedDataSize: relatedDataSize}
 
 	if t.materialize {
 		// ServiceTime covers building the batch, mirroring the Query path

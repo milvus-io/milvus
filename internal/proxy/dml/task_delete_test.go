@@ -768,7 +768,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		dr.EnableQueryReadUsage()
+		dr.EnableWriteUsage()
 		streaming.ExpectErrorOnce(errors.New("mock error"))
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
@@ -1070,7 +1070,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
-		dr.EnableQueryReadUsage()
+		dr.EnableWriteUsage()
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
 			require.Error(t, workload.Exec(ctx, 1, qn, ""))
 			return workload.Exec(ctx, 1, qn, "")
@@ -1097,17 +1097,14 @@ func TestDeleteRunner_Run(t *testing.T) {
 					server.FinishSend(merr.ErrServiceUnavailable)
 					return client
 				}
-				server.Send(&internalpb.RetrieveResults{
-					CostAggregation: &internalpb.CostAggregation{QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: 21}},
-				})
 				server.FinishSend(nil)
 				return client
 			}, nil).Twice()
 		require.NoError(t, dr.Run(ctx))
 		require.EqualValues(t, 24, dr.WriteBytes())
 		readBytes, present := dr.QueryReadBytes()
-		require.True(t, present)
-		require.EqualValues(t, 21, readBytes)
+		require.False(t, present)
+		require.Zero(t, readBytes)
 	})
 
 	schema.Fields[1].IsPartitionKey = true

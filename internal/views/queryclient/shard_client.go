@@ -188,7 +188,7 @@ type ShardQueryRequest struct {
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
 	var stage twoStageSearch
-	return s.executeShard(ctx, req.VChannel, &shardExecParams{
+	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
@@ -220,16 +220,15 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			if err != nil {
 				return err
 			}
-			if req.Req.GetCollectSearchReadUsage() && merr.Ok(resp.GetLegacyResults().GetStatus()) {
-				if err := stage.mergeReadUsage(node, resp.GetLegacyResults()); err != nil {
-					return err
-				}
-			}
 			stage.mergeFeatures(node, resp)
 			return req.Reducer.Add(shardID, resp)
 		},
 		resetShard: req.Reducer.ResetShard,
 	})
+	if plan != nil {
+		plan.FilterOnlyRan = len(stage.filters) != 0
+	}
+	return plan, err
 }
 
 // SearchStreams returns one per-vchannel ReduceStream per sub-search, or one
@@ -468,7 +467,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 			if err != nil {
 				return err
 			}
-			if !req.Req.GetCollectQueryReadUsage() && isEmptySuccessfulQueryResponse(resp) {
+			if isEmptySuccessfulQueryResponse(resp) {
 				return nil
 			}
 			return req.Reducer.Add(shardID, resp)
@@ -802,6 +801,7 @@ func (s *shardViewQueryClient) executeShard(
 			WorkNodes:        workNodes,
 			Selections:       plan.GetWorkNodes(),
 			ExecutionSummary: response.GetExecutionSummary(),
+			Usage:            response.GetUsage(),
 		}, nil
 	}
 }
@@ -869,12 +869,16 @@ func (s *shardViewQueryClient) fanOutToWorkNodes(
 
 func legacySearchRequestForNode(plan *viewpb.QueryPlan, node qviews.WorkNode) *internalpb.SearchRequest {
 	req := proto.Clone(plan.GetLegacySearchRequest()).(*internalpb.SearchRequest)
+	req.CollectSearchReadUsage = false
+	req.SearchReadFieldIds = nil
 	req.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
 	return req
 }
 
 func legacyRetrieveRequestForNode(plan *viewpb.QueryPlan, node qviews.WorkNode) *internalpb.RetrieveRequest {
 	req := proto.Clone(plan.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)
+	req.CollectQueryReadUsage = false
+	req.QueryReadFieldIds = nil
 	req.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
 	return req
 }
