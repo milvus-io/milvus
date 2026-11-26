@@ -19,26 +19,30 @@ package sessionutil
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type recoveringSessionEtcd struct {
 	clientv3.KV
 	clientv3.Watcher
-	getCalls int
-	revision int64
-	events   chan clientv3.WatchResponse
+	getErrors []error
+	getCalls  int
+	revision  int64
+	events    chan clientv3.WatchResponse
 }
 
 func (c *recoveringSessionEtcd) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	c.getCalls++
-	if c.getCalls == 1 {
-		return nil, rpctypes.ErrLeaderChanged
+	if c.getCalls <= len(c.getErrors) {
+		return nil, c.getErrors[c.getCalls-1]
 	}
 	return &clientv3.GetResponse{
 		Header: &etcdserverpb.ResponseHeader{Revision: 20},
@@ -56,7 +60,10 @@ func (c *recoveringSessionEtcd) Close() error { return nil }
 func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stub := &recoveringSessionEtcd{events: make(chan clientv3.WatchResponse)}
+	stub := &recoveringSessionEtcd{
+		getErrors: []error{rpctypes.ErrLeaderChanged, status.Error(codes.DeadlineExceeded, "snapshot timed out")},
+		events:    make(chan clientv3.WatchResponse),
+	}
 	cli := clientv3.NewCtxClient(ctx)
 	cli.KV, cli.Watcher = stub, stub
 	defer cli.Close()
@@ -74,7 +81,7 @@ func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 		},
 	}
 	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
-	require.Equal(t, 2, stub.getCalls)
+	require.Equal(t, 3, stub.getCalls)
 	require.True(t, rewatched)
 	require.EqualValues(t, 20, stub.revision)
 	require.Equal(t, clientv3.WatchChan(stub.events), w.rch)
@@ -85,7 +92,28 @@ func TestSessionWatcher_LeaderChangedRecovery(t *testing.T) {
 	}
 
 	require.ErrorIs(t, w.handleWatchErr(rpctypes.ErrPermissionDenied), rpctypes.ErrPermissionDenied)
-	require.Equal(t, 2, stub.getCalls, "permission denied must not retry")
+	require.Equal(t, 3, stub.getCalls, "permission denied must not retry")
 	_, open := <-w.eventCh
 	require.False(t, open)
+}
+
+func TestSessionWatcher_DoesNotRetryRewatchCallbackDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	stub := &recoveringSessionEtcd{}
+	cli := clientv3.NewCtxClient(ctx)
+	cli.KV = stub
+	defer cli.Close()
+	calls := 0
+	w := &sessionWatcher{
+		s: &Session{ctx: ctx, etcdCli: cli}, ctx: ctx,
+		eventCh: make(chan *SessionEvent),
+		rewatch: func(map[string]*Session) error {
+			calls++
+			return context.DeadlineExceeded
+		},
+	}
+	require.ErrorIs(t, w.handleWatchErr(rpctypes.ErrCompacted), context.DeadlineExceeded)
+	require.NoError(t, ctx.Err())
+	require.Equal(t, 1, calls)
 }

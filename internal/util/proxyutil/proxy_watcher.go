@@ -117,11 +117,15 @@ func (p *ProxyWatcher) WatchProxy(ctx context.Context) error {
 
 func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, error) {
 	interval := 200 * time.Millisecond
+	timeout := paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		requestCtx, cancel := context.WithTimeout(ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+		requestCtx, cancel := context.WithTimeout(ctx, timeout)
 		sessions, rev, err := p.getSessionsOnEtcd(requestCtx)
 		cancel()
 		if err == nil {
@@ -142,8 +146,7 @@ func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// Only transient etcd errors are retried; a request timeout aborts.
-		if !etcd.IsRetriableWatchErr(err) {
+		if !etcd.IsRequestTimeout(err) && !etcd.IsRetriableWatchErr(err) {
 			return nil, err
 		}
 		mlog.Warn(ctx, "failed to list proxy sessions, retry", mlog.Err(err))
