@@ -65,7 +65,6 @@ set(CONAN_TARGETS
     ICU::uc
     xxHash::xxhash
     TBB::tbb
-    libsodium::libsodium
     double-conversion::double-conversion
     xsimd
     unordered_dense::unordered_dense

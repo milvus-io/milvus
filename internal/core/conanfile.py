@@ -27,13 +27,12 @@ class MilvusConan(ConanFile):
         "glog/0.7.1#a306e61d7b8311db8cb148ad62c48030",
         "gflags/2.2.2#7671803f1dc19354cc90bd32874dcfda",
         "double-conversion/3.3.0#640e35791a4bac95b0545e2f54b7aceb",
-        "libsodium/1.0.19",
         "xsimd/9.0.1#51df19a2d512f70597105ee2a2d21916",
         "xz_utils/5.4.5#fc4e36861e0a47ecd4a40a00e6d29ac8",
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
+        "librdkafka/2.6.1@milvus/dev#124f531c8be5e7c414e4c7273011c3e1",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -120,6 +119,14 @@ class MilvusConan(ConanFile):
             # Use OpenSSL for libcurl on macOS
             self.options["libcurl"].with_ssl = "openssl"
         self.options["arrow"].with_azure = True
+        # Set by scripts/3rdparty_build.sh for MILVUS_FIPS_STRICT=ON builds.
+        # Build librdkafka with SASL but without Cyrus SASL, so libsasl2 is not
+        # linked. SASL/PLAIN, SCRAM and OAUTHBEARER stay available; only
+        # GSSAPI/Kerberos is not.
+        if self.conf.get("user.milvus:fips_strict", default=False, check_type=bool):
+            self.options["librdkafka"].sasl_cyrus = False
+            # folly uses libsodium only for folly/crypto, which Milvus doesn't use.
+            self.options["folly"].with_libsodium = False
 
     def requirements(self):
         # Public necessary-literal API; Arrow and gRPC must use the same RE2.
@@ -145,9 +152,10 @@ class MilvusConan(ConanFile):
         )
         self.requires("abseil/20250127.0#481edcc75deb0efb16500f511f0f0a1c", force=True)
         self.requires("fmt/11.2.0#eb98daa559c7c59d591f4720dde4cd5c", force=True)
-        # Override milvus-common's older recipe pin to disable automatic exception stack tracing.
+        # Override milvus-common's older recipe pin to disable automatic exception stack tracing
+        # and to get the with_libsodium option.
         self.requires(
-            "folly/2026.04.20.00@milvus/dev#fe44332ddb5bb53bb297699d45d29f88",
+            "folly/2026.04.20.00@milvus/dev#828aa1f410eeeeb8a28dd51d67e748fc",
             force=True,
         )
         # libbson only (BSON C library) for JSON stats — NOT the full mongo-c-driver.
