@@ -25,8 +25,8 @@ import numpy as np
 import pytest
 from check.param_check import ip_check, number_check
 from common.common_func import param_info
-from common.minio_comm import file_resource_path
 from common.milvus_sys import MilvusSys
+from common.minio_comm import file_resource_path
 from config.log_config import log_config
 from pymilvus import connections
 from pymilvus.orm.types import CONSISTENCY_STRONG
