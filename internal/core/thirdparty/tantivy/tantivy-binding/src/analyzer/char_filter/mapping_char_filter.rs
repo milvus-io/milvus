@@ -20,16 +20,27 @@ pub(crate) struct MappingCharFilter {
 #[derive(Default)]
 struct MappingTrie {
     // Node 0 is the root. Each edge creates one node.
-    edges: HashMap<(usize, u8), usize>,
+    edges: HashMap<(usize, u8), MappingEdge>,
     targets: HashMap<usize, String>,
 }
 
+struct MappingEdge {
+    child: usize,
+    // Shortest complete source that passes through this edge, in bytes.
+    min_source_len: usize,
+}
+
 impl MappingTrie {
+    fn next_node(&self, node: usize, byte: u8, input_len: usize) -> Option<usize> {
+        let edge = self.edges.get(&(node, byte))?;
+        (edge.min_source_len <= input_len).then_some(edge.child)
+    }
+
     fn longest_match(&self, text: &str) -> Option<(usize, &str)> {
         let mut node = 0;
         let mut longest = None;
         for (offset, byte) in text.bytes().enumerate() {
-            let Some(&child) = self.edges.get(&(node, byte)) else {
+            let Some(child) = self.next_node(node, byte, text.len()) else {
                 break;
             };
             node = child;
@@ -68,7 +79,12 @@ impl MappingCharFilter {
             let mut node = 0;
             for byte in source.bytes() {
                 let next = trie.edges.len() + 1;
-                node = *trie.edges.entry((node, byte)).or_insert(next);
+                let edge = trie.edges.entry((node, byte)).or_insert(MappingEdge {
+                    child: next,
+                    min_source_len: source.len(),
+                });
+                edge.min_source_len = edge.min_source_len.min(source.len());
+                node = edge.child;
             }
             if trie.targets.insert(node, target).is_some() {
                 return Err(TantivyBindingError::InvalidArgument(format!(
@@ -244,6 +260,18 @@ mod tests {
 
         assert_eq!(output.text, "xzyad丰");
         assert_eq!(output.correct_offsets(2, 3), (10, 13));
+    }
+
+    #[test]
+    fn test_short_input_skips_unreachable_mapping_prefixes() {
+        let params = json::json!({"mappings": ["aaaaaa=>long", "a=>short", "bbbb=>other"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let trie = &filter.trie;
+        assert_eq!(trie.next_node(0, b'b', 3), None);
+        let a = trie.next_node(0, b'a', 3).unwrap();
+        assert_eq!(trie.next_node(a, b'a', 3), None);
+        assert_eq!(trie.longest_match("aaa"), Some((1, "short")));
+        assert_eq!(trie.longest_match("aaaaaa"), Some((6, "long")));
     }
 
     #[test]
