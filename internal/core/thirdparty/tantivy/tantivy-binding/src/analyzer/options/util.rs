@@ -1,15 +1,29 @@
 use serde_json as json;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use super::resource_info::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
-use crate::file_reader::read_file_in_root;
+use crate::file_reader::with_file_in_root;
 
 pub fn read_resource_file(
     helper: &mut FileResourcePathHelper,
     params: &json::Value,
     key: &str,
 ) -> Result<Vec<u8>> {
+    with_resource_file(helper, params, key, |reader| {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })
+}
+
+pub(crate) fn with_resource_file<T>(
+    helper: &mut FileResourcePathHelper,
+    params: &json::Value,
+    key: &str,
+    parse: impl FnOnce(&mut dyn BufRead) -> Result<T>,
+) -> Result<T> {
     let path = get_resource_path(helper, params, key)?;
     let root_key = if params.get("type").and_then(json::Value::as_str) == Some("local") {
         super::DEFAULT_DICT_PATH_KEY
@@ -29,7 +43,7 @@ pub fn read_resource_file(
     let limit = super::get_options("max_dict_size")
         .and_then(|v| v.as_u64())
         .unwrap_or(64 * 1024 * 1024);
-    read_file_in_root(&root, &path, limit)
+    with_file_in_root(&root, &path, limit, parse)
 }
 
 pub fn get_resource_path(
@@ -125,6 +139,7 @@ pub fn get_resource_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_reader::read_file_in_root;
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::symlink;

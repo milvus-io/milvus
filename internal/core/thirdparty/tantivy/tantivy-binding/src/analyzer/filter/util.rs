@@ -1,4 +1,4 @@
-use crate::analyzer::options::read_resource_file;
+use crate::analyzer::options::with_resource_file;
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -32,25 +32,28 @@ pub(crate) fn read_line_file(
     params: &json::Value,
     key: &str,
 ) -> Result<()> {
-    let bytes = read_resource_file(helper, params, key)?;
-    let reader = std::io::Cursor::new(bytes);
-    for (line_index, line) in reader.lines().enumerate() {
-        let mut row_data = line.map_err(|err| {
-            TantivyBindingError::InternalError(format!(
-                "read {} file failed, error: {}",
-                key,
-                err.to_string()
-            ))
-        })?;
-        if line_index == 0 {
-            row_data = row_data
-                .strip_prefix('\u{feff}')
-                .unwrap_or(&row_data)
-                .to_string();
+    with_resource_file(helper, params, key, |reader| {
+        for (line_index, line) in reader.lines().enumerate() {
+            let mut row_data = line.map_err(|err| {
+                if err.kind() == std::io::ErrorKind::InvalidData {
+                    TantivyBindingError::InternalError(format!(
+                        "read {} file failed, error: {}",
+                        key, err
+                    ))
+                } else {
+                    err.into()
+                }
+            })?;
+            if line_index == 0 {
+                row_data = row_data
+                    .strip_prefix('\u{feff}')
+                    .unwrap_or(&row_data)
+                    .to_string();
+            }
+            dict.push(row_data);
         }
-        dict.push(row_data);
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 #[cfg(test)]
