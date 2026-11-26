@@ -19,15 +19,19 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -122,4 +126,55 @@ func TestSplitStagedCapacityAcceptsLargeSourceBeforeMessage(t *testing.T) {
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, CollectionID: 100, InsertChannel: splitTestSource, State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, Stats: &datapb.Statistics{InsertBinlogSize: 1 << 40}})))
 	server := &Server{meta: mt}
 	require.NoError(t, server.checkSplitRewriteCapacity(ctx, 100, splitTestSource))
+}
+
+func TestShardSplitRewriteCollectionTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		wantTTL    int64
+		wantError  bool
+	}{
+		{name: "configured", properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "60"}}, wantTTL: int64(time.Minute)},
+		{name: "unset", wantTTL: -1},
+		{name: "invalid", properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "invalid"}}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			mt, err := meta.NewMemoryMeta(t)
+			require.NoError(t, err)
+			mt.AddCollection(&meta.CollectionInfo{ID: 100, Properties: tc.properties})
+			require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: splitTestSource, Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Flushed, NumOfRows: 1})))
+			task := &datapb.SplitShardTask{
+				TaskId: 7, CollectionId: 100, SourceVchannel: splitTestSource,
+				State:          datapb.SplitShardTaskState_SplitShardTaskResidualFlushed,
+				SwitchTimeTick: 100, RoutingModulus: 2,
+				Targets: []*datapb.SplitShardTaskTarget{{Vchannel: splitTestTarget1, Residues: []uint64{0}}, {Vchannel: splitTestTarget2, Residues: []uint64{1}}},
+			}
+			alloc := allocator.NewMockAllocator(t)
+			allocID := mockey.Mock(mockey.GetMethod(alloc, "AllocID")).Return(int64(1000), nil).Build()
+			defer allocID.UnPatch()
+			allocN := mockey.Mock(mockey.GetMethod(alloc, "AllocN")).Return(int64(2000), int64(3000), nil).Build()
+			defer allocN.UnPatch()
+			inspector := compaction.NewMockCompactionInspector(t)
+			var queued *datapb.CompactionTask
+			enqueue := mockey.Mock(mockey.GetMethod(inspector, "EnqueueCompaction")).To(func(_ *compaction.MockCompactionInspector, plan *datapb.CompactionTask) error {
+				queued = plan
+				return nil
+			}).Build()
+			defer enqueue.UnPatch()
+			server := &Server{meta: mt, allocator: alloc, compactionInspector: inspector}
+			err = server.rewriteShardSplit(ctx, task)
+			if tc.wantError {
+				require.Error(t, err)
+				require.Nil(t, queued, "invalid TTL must not dispatch a rewrite")
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, queued)
+			require.Equal(t, tc.wantTTL, queued.GetCollectionTtl())
+			require.Equal(t, []int64{10}, queued.GetInputSegments())
+			require.EqualValues(t, 100, queued.GetSplitRewrite().GetTtlCutoffTimetick())
+		})
+	}
 }

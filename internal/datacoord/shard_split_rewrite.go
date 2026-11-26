@@ -95,7 +95,7 @@ func (s *Server) rewriteShardSplit(ctx context.Context, task *datapb.SplitShardT
 	if collection == nil {
 		return merr.WrapErrServiceNotReadyMsg("split collection metadata is unavailable")
 	}
-	ttl, err := common.GetCollectionTTLFromMap(collection.Properties)
+	ttl, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
 		return err
 	}
