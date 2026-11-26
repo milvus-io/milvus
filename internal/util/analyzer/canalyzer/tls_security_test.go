@@ -96,11 +96,12 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 			if tc.want == "" {
 				require.NoError(t, err)
 				analyzer.Destroy()
-				require.NoError(t, ValidateAnalyzer(string(params), ""))
+				_, err = ValidateAnalyzer(string(params), "")
+				require.NoError(t, err)
 			} else {
 				require.ErrorContains(t, err, tc.want)
 				require.NotContains(t, err.Error(), "TLS_FILE_SECRET_MARKER")
-				err = ValidateAnalyzer(string(params), "")
+				_, err = ValidateAnalyzer(string(params), "")
 				require.ErrorContains(t, err, tc.want)
 				require.NotContains(t, err.Error(), "TLS_FILE_SECRET_MARKER")
 			}

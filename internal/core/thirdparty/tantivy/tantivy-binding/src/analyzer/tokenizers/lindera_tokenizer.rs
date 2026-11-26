@@ -14,9 +14,7 @@ use lindera::token_filter::korean_keep_tags::KoreanKeepTagsTokenFilter;
 use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
-use lindera::dictionary::{
-    load_user_dictionary_from_bin, load_user_dictionary_from_csv, Dictionary, UserDictionary,
-};
+use lindera::dictionary::{load_user_dictionary_from_csv, Dictionary, UserDictionary};
 use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
@@ -375,13 +373,14 @@ fn fetch_lindera_user_dict(
         ));
     }
     let bytes = read_resource_file(helper, v, "lindera user dict file")?;
-    // Lindera accepts a path, so parse a bounded private snapshot, never reopen
-    // the caller's path after checking its size and directory confinement.
-    let mut snapshot = tempfile::NamedTempFile::new()?;
-    std::io::Write::write_all(&mut snapshot, &bytes)?;
     let user_dict = match ext {
-        Some("csv") => load_user_dictionary_from_csv(kind.clone(), snapshot.path()),
-        _ => load_user_dictionary_from_bin(snapshot.path()),
+        Some("csv") => {
+            // The CSV parser needs a path; never reopen the caller's file.
+            let mut snapshot = tempfile::NamedTempFile::new()?;
+            std::io::Write::write_all(&mut snapshot, &bytes)?;
+            load_user_dictionary_from_csv(kind.clone(), snapshot.path())
+        }
+        _ => UserDictionary::load(&bytes),
     }
     .map_err(|_| {
         TantivyBindingError::InvalidArgument("lindera user dictionary is invalid".into())
@@ -940,12 +939,40 @@ mod tests {
         let mut helper = default_helper();
         helper.test_root = Some(dir.path().to_path_buf());
         std::fs::write(&path, "Milvus,custom,Milvus").unwrap();
-        assert!(fetch_lindera_user_dict(
+        let dictionary = fetch_lindera_user_dict(
             &DictionaryKind::IPADIC,
             params.as_object().unwrap(),
-            &mut helper
+            &mut helper,
         )
-        .is_ok());
+        .unwrap()
+        .unwrap();
+        let binary_path = dir.path().join("user.bin");
+        let details: Vec<String> = dictionary
+            .word_details(0)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        lindera_dictionary::dictionary_builder::build_user_dictionary(dictionary, &binary_path)
+            .unwrap();
+        let binary_params = json::json!({"user_dict":{"type":"local","path":binary_path}});
+        let binary = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            binary_params.as_object().unwrap(),
+            &mut helper,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(binary.word_details(0), details);
+        std::fs::write(&binary_path, b"\0").unwrap();
+        let error = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            binary_params.as_object().unwrap(),
+            &mut helper,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("lindera user dictionary is invalid"));
         std::fs::write(&path, "FILE_SECRET_MARKER,0,0,invalid_cost").unwrap();
         let error = match fetch_lindera_user_dict(
             &DictionaryKind::IPADIC,
