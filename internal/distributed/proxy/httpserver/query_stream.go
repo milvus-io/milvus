@@ -36,8 +36,7 @@ type dqlStreamState struct {
 }
 
 // DQLStreamingHTTPHandler must wrap Gin, outside its Recovery middleware.
-// After response commitment, a failed DQL response must end as a transport failure,
-// not as a successful HTTP response containing truncated JSON.
+// It ends an aborted response at the transport after Gin has finished logging the request.
 func DQLStreamingHTTPHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		state := &dqlStreamState{}
@@ -46,6 +45,13 @@ func DQLStreamingHTTPHandler(next http.Handler) http.Handler {
 			panic(http.ErrAbortHandler)
 		}
 	})
+}
+
+// AbortHTTPResponse skips the remaining Gin handlers and asks DQLStreamingHTTPHandler
+// to abort the transport after the outer Gin middleware records the request outcome.
+func AbortHTTPResponse(c *gin.Context) {
+	c.Abort()
+	c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState).aborted = true
 }
 
 // The worker owns this writer and has no reference to the real response writer.
@@ -84,8 +90,6 @@ func (w *dqlResponseWriter) renderDQLResult(data any) error {
 func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	bufPool := &BufferPool{}
 	return func(c *gin.Context) {
-		// DQLStreamingHTTPHandler is required to abort partial responses past Gin Recovery.
-		state := c.Request.Context().Value(dqlStreamKey{}).(*dqlStreamState)
 		timeout, ok := requestTimeout(c)
 		if !ok {
 			return
@@ -112,7 +116,6 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			handler(child)
 		}()
 
-		abort := func() { c.Abort(); state.aborted = true }
 		fail := func(status int) {
 			c.Abort()
 			c.Set(HTTPReturnCode, status)
@@ -121,7 +124,7 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 				c.Set(HTTPReturnMessage, "request timeout")
 			}
 			if c.Writer.Written() {
-				abort()
+				AbortHTTPResponse(c)
 				return
 			}
 			body := gin.H{HTTPReturnCode: status}
@@ -140,7 +143,7 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 			if err == context.Canceled {
 				c.Set(HTTPReturnCode, merr.CanceledCode)
 				c.Set(HTTPReturnMessage, err.Error())
-				abort() // Cancellation is not a timeout; do not send a 408 envelope.
+				AbortHTTPResponse(c) // Cancellation is not a timeout; do not send a 408 envelope.
 				return
 			}
 			fail(http.StatusRequestTimeout)
@@ -175,7 +178,7 @@ func dqlTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(parentCtx)
 		if writer.result == nil {
 			if err := writer.CommitTo(c.Writer); err != nil {
-				abort()
+				AbortHTTPResponse(c)
 			}
 			return
 		}

@@ -17,6 +17,7 @@
 package grpcproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -36,6 +37,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -45,6 +47,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
@@ -1356,6 +1359,112 @@ func Test_NewHTTPServer_PortShare_H2C(t *testing.T) {
 	resp, err := grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, resp.GetStatus())
+}
+
+// The proxy's own wiring: on a shared port the RESTful chain negotiates
+// compression in both directions, and gRPC on the same port is dispatched
+// before the compression layer.
+func Test_NewHTTPServer_PortShare_Compression(t *testing.T) {
+	enableCustomInterceptor = false
+	t.Cleanup(func() { enableCustomInterceptor = true })
+	params := paramtable.Get()
+	params.Save(params.HTTPCfg.CompressionMinResponseSize.Key, "0")
+	t.Cleanup(func() { params.Reset(params.HTTPCfg.CompressionMinResponseSize.Key) })
+	_, grpcPort, _ := startHTTP2ProxyServer(t, 0, true)
+	url := fmt.Sprintf("http://localhost:%d/not-found", grpcPort)
+	client := newH2CClient(t)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "zstd")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, "zstd", resp.Header.Get("Content-Encoding"))
+	assert.Equal(t, "zstd, gzip", resp.Header.Get("Accept-Encoding"))
+	dec, err := zstd.NewReader(bytes.NewReader(body))
+	require.NoError(t, err)
+	plain, err := io.ReadAll(dec)
+	dec.Close()
+	require.NoError(t, err)
+	assert.Equal(t, "404 page not found", string(plain))
+
+	// Request decoding runs on every matched route, v1 and v2 alike. Authorization
+	// is off here; Test_NewHTTPServer_DecodesOnlyAfterAuthentication covers it on.
+	for _, tc := range []struct {
+		path, coding string
+		body         string
+		status       int
+	}{
+		{"/v2/vectordb/collections/list", "br", "{}", http.StatusUnsupportedMediaType},
+		{"/v1/vector/query", "gzip", "not gzip", http.StatusBadRequest},
+	} {
+		req, err = http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%d%s", grpcPort, tc.path), strings.NewReader(tc.body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Encoding", tc.coding)
+		resp, err = client.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		assert.Equal(t, tc.status, resp.StatusCode, tc.path)
+	}
+
+	// gRPC on the same port is dispatched before the compression layer, so its
+	// responses carry none of that layer's headers.
+	ctx, cancel := context.WithTimeout(context.Background(), waitDuration)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, fmt.Sprintf("localhost:%d", grpcPort), grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	var header metadata.MD
+	health, err := grpc_health_v1.NewHealthClient(conn).Check(ctx, &grpc_health_v1.HealthCheckRequest{}, grpc.Header(&header))
+	require.NoError(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, health.GetStatus())
+	assert.Empty(t, header.Get("accept-encoding"))
+	assert.Empty(t, header.Get("vary"))
+}
+
+// With authorization on, the proxy's own chain authenticates a request before
+// it decodes the body: without credentials even a body it could never decode
+// is answered 401, and only an authenticated one reaches the decoder.
+func Test_NewHTTPServer_DecodesOnlyAfterAuthentication(t *testing.T) {
+	enableCustomInterceptor = false
+	t.Cleanup(func() { enableCustomInterceptor = true })
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	t.Cleanup(func() { params.Reset(params.CommonCfg.AuthorizationEnabled.Key) })
+	passwordMock := mockey.Mock(proxy.PasswordVerify).To(func(_ context.Context, username, password string) bool {
+		return username == "alice" && password == "right"
+	}).Build()
+	defer passwordMock.UnPatch()
+	_, grpcPort, _ := startHTTP2ProxyServer(t, 0, true)
+	client := newH2CClient(t)
+
+	for _, tc := range []struct {
+		name, coding, body string
+		authenticated      bool
+		status             int
+	}{
+		{"unsupported coding, no credentials", "br", "{}", false, http.StatusUnauthorized},
+		{"corrupt body, no credentials", "gzip", "not gzip", false, http.StatusUnauthorized},
+		{"unsupported coding, authenticated", "br", "{}", true, http.StatusUnsupportedMediaType},
+		{"corrupt body, authenticated", "gzip", "not gzip", true, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			url := fmt.Sprintf("http://localhost:%d/v2/vectordb/entities/insert", grpcPort)
+			req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(tc.body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Encoding", tc.coding)
+			if tc.authenticated {
+				req.SetBasicAuth("alice", "right")
+			}
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			assert.Equal(t, tc.status, resp.StatusCode)
+		})
+	}
 }
 
 func Test_NewHTTPServer_TLS_FileNotExisted(t *testing.T) {

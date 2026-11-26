@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/bytedance/mockey"
@@ -7654,6 +7655,24 @@ func TestBindCollectionDataMetadataRequiredData(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A middleware that already read the body leaves it under gin.BodyBytesKey:
+// httpcompress.RequestBodyMiddleware does so for a decompressed one. Reading
+// the request body again would hold a second copy of an insert that can be as
+// large as proxy.grpc.serverMaxRecvSize.
+func TestBindCollectionDataMetadataReusesCachedBody(t *testing.T) {
+	body := []byte(`{"collectionName":"book","data":[{"id":1}]}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/insert",
+		iotest.ErrReader(errors.New("the request body was read a second time")))
+	c.Set(gin.BodyBytesKey, body)
+
+	req := &CollectionDataReq{}
+	require.NoError(t, bindCollectionDataMetadata(c, req))
+	require.Equal(t, "book", req.CollectionName)
+	cached, _ := c.Get(gin.BodyBytesKey)
+	require.Same(t, &body[0], &cached.([]byte)[0], "the cached bytes are used as they are, not copied")
 }
 
 func BenchmarkCollectionDataBinding(b *testing.B) {
