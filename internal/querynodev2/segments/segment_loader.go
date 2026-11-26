@@ -660,33 +660,48 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	if collection == nil {
 		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	return loader.LoadBloomFilterSetWithSchema(ctx, collection.Schema(), infos...)
+	// Legacy delete forwarding inspects candidates while holding the channel lock.
+	return loader.loadBloomFilterSet(ctx, collection.Schema(), false, infos...)
 }
 
+// LoadBloomFilterSetWithSchema prepares QueryView PK candidates.
 func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
+	return loader.loadBloomFilterSet(ctx, schema, true, infos...)
+}
+
+func (loader *segmentLoader) loadBloomFilterSet(ctx context.Context, schema *schemapb.CollectionSchema, allowLazy bool, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	segmentNum := len(infos)
 	if segmentNum == 0 {
 		mlog.Info(context.TODO(), "no segment to load")
 		return nil, nil
 	}
 
-	// Phase 1: always create metadata-only stubs (segmentID / partitionID / type).
-	// This gives callers valid candidates even when BF data is not loaded,
-	// so partition filtering and type-based delete-scope logic never need nil guards.
+	isExternalCollection := typeutil.IsExternalCollection(schema)
+	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
+		HasExternalPrimaryKey(schema)
+	bloomFilterEnabled := paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()
+
 	bfSets := make([]*pkoracle.BloomFilterSet, segmentNum)
+	if allowLazy && bloomFilterEnabled && !isExternalCollection && !isMilvusTableRealPK &&
+		paramtable.Get().QueryNodeCfg.TieredLazyBloomFilterEnabled.GetAsBool() {
+		pkFieldID := GetPkField(schema).GetFieldID()
+		for i, info := range infos {
+			bfSets[i] = loader.newLazyBloomFilterSet(ctx, info, pkFieldID)
+		}
+		return bfSets, nil
+	}
+
+	// Even without Bloom filters, callers need candidates for partition filtering
+	// and type-based delete scope.
 	for i, info := range infos {
 		bfSets[i] = pkoracle.NewBloomFilterSet(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed)
 	}
 
-	isExternalCollection := typeutil.IsExternalCollection(schema)
-	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-		HasExternalPrimaryKey(schema)
-
-	// Phase 2: load BF stats into the stubs. Milvus-table real-PK correctness
+	// Milvus-table real-PK correctness
 	// depends on source bloom filters, so that path ignores the global BF
 	// disable switch; other collections keep the historical metadata-only
 	// behavior when BloomFilterEnabled=false.
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
+	if !bloomFilterEnabled && !isMilvusTableRealPK {
 		mlog.Info(context.TODO(), "bloom filter disabled: returning metadata-only stubs")
 		return bfSets, nil
 	}
@@ -707,29 +722,11 @@ func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, s
 		totalMemorySize += memSize
 	}
 
-	// Reserve memory resource if tiered eviction is enabled
-	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-		if ok := C.TryReserveLoadingResourceWithTimeout(C.CResourceUsage{
-			// double loading memory size for bloom filters to avoid OOM during loading
-			memory_bytes: C.int64_t(totalMemorySize * 2),
-			disk_bytes:   C.int64_t(0),
-		}, 1000); !ok {
-			return nil, merr.WrapErrSegmentRequestResourceFailed("memory",
-				fmt.Sprintf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
-					logutil.ToMB(float64(totalMemorySize))))
-		}
-		mlog.Debug(ctx, "reserved loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
+	release, err := reserveBloomFilterMemory(ctx, totalMemorySize)
+	if err != nil {
+		return nil, err
 	}
-
-	defer func() {
-		if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && totalMemorySize > 0 {
-			C.ReleaseLoadingResource(C.CResourceUsage{
-				memory_bytes: C.int64_t(totalMemorySize * 2),
-				disk_bytes:   C.int64_t(0),
-			})
-			mlog.Debug(ctx, "released loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(totalMemorySize))))
-		}
-	}()
+	defer release()
 
 	mlog.Debug(ctx, "start loading remote...", mlog.Int("segmentNum", segmentNum))
 
@@ -742,7 +739,7 @@ func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, s
 		if err != nil {
 			return err
 		}
-		err = loader.loadBloomFilter(ctx, bfs.ID(), bfs, pkStatsBinlogs, loader.bloomFilterDownloaderWithSchema(loadInfo.GetCollectionID(), schema, isMilvusTableRealPK))
+		err = loader.loadBloomFilter(ctx, bfs, pkStatsBinlogs, loader.bloomFilterDownloaderWithSchema(loadInfo.GetCollectionID(), schema, isMilvusTableRealPK))
 		if err != nil {
 			mlog.Warn(context.TODO(), "load remote segment bloom filter failed",
 				mlog.Int64("partitionID", bfs.Partition()),
@@ -757,7 +754,7 @@ func (loader *segmentLoader) LoadBloomFilterSetWithSchema(ctx context.Context, s
 		return nil
 	}
 
-	err := funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteFunc, "loadRemoteFunc")
+	err = funcutil.ProcessFuncParallel(segmentNum, segmentNum, loadRemoteFunc, "loadRemoteFunc")
 	if err != nil {
 		// no partial success here
 		mlog.Warn(context.TODO(), "failed to load remote segment", mlog.Err(err))
@@ -1110,7 +1107,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			if err := loader.loadBloomFilter(ctx, segment.ID(), bf, bfPaths, loader.cm.MultiRead); err != nil {
+			if err := loader.loadBloomFilter(ctx, bf, bfPaths, loader.cm.MultiRead); err != nil {
 				return err
 			}
 
@@ -1193,14 +1190,78 @@ func (loader *segmentLoader) loadBm25Stats(ctx context.Context, segmentID int64,
 	return nil
 }
 
+func (loader *segmentLoader) newLazyBloomFilterSet(ctx context.Context, info *querypb.SegmentLoadInfo, pkFieldID int64) *pkoracle.BloomFilterSet {
+	// Keep only the PK stats metadata needed after preparation returns.
+	statsInfo := &querypb.SegmentLoadInfo{
+		ManifestPath: info.GetManifestPath(),
+		Statslogs:    info.GetStatslogs(),
+	}
+	return pkoracle.NewLazyBloomFilterSet(ctx, info.GetSegmentID(), info.GetPartitionID(), func(ctx context.Context, publish func([]*storage.PkStatistics)) error {
+		// Use a fresh resolver on each attempt so a failed manifest read can retry.
+		resolver := packed.NewStatsResolverFromLoadInfo(statsInfo)
+		paths, err := resolver.BloomFilterPaths(pkFieldID)
+		if err != nil || len(paths) == 0 {
+			return err
+		}
+		memSize, err := resolver.BloomFilterMemorySize(pkFieldID)
+		if err != nil {
+			return err
+		}
+		release, err := reserveBloomFilterMemory(ctx, memSize)
+		if err != nil {
+			return err
+		}
+		defer release()
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		stats, err := readBloomFilter(ctx, paths, loader.cm.MultiRead)
+		if err != nil {
+			return err
+		}
+		// The resolver returns either one compound path or the individual paths.
+		// An empty individual file must not leave a partial filter in use.
+		if len(stats) == 0 || (len(paths) > 1 && len(stats) != len(paths)) {
+			return merr.WrapErrServiceInternalMsg("incomplete bloom filter stats")
+		}
+		publish(stats)
+		return nil
+	})
+}
+
+func reserveBloomFilterMemory(ctx context.Context, size int64) (func(), error) {
+	if !paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() || size <= 0 {
+		return func() {}, nil
+	}
+	// Reserve double the estimated size for temporary allocations during decoding.
+	resource := C.CResourceUsage{memory_bytes: C.int64_t(size * 2)}
+	if !C.TryReserveLoadingResourceWithTimeout(resource, 1000) {
+		return nil, merr.WrapErrSegmentRequestResourceFailed("memory",
+			fmt.Sprintf("failed to reserve loading resource for bloom filters, totalMemorySize = %v MB",
+				logutil.ToMB(float64(size))))
+	}
+	mlog.Debug(ctx, "reserved loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(size))))
+	return func() {
+		C.ReleaseLoadingResource(resource)
+		mlog.Debug(ctx, "released loading resource for bloom filters", mlog.Float64("totalMemorySizeMB", logutil.ToMB(float64(size))))
+	}, nil
+}
+
 func (loader *segmentLoader) loadBloomFilter(
 	ctx context.Context,
-	segmentID int64,
 	bfs *pkoracle.BloomFilterSet,
 	binlogPaths []string,
 	downloader func(context.Context, []string) ([][]byte, error),
 ) error {
-	return loader.loadBloomFilterWithDownloader(ctx, segmentID, bfs, binlogPaths, downloader)
+	stats, err := readBloomFilter(ctx, binlogPaths, downloader)
+	if err != nil {
+		return err
+	}
+	for _, stat := range stats {
+		bfs.AddHistoricalStats(stat)
+	}
+	return nil
 }
 
 // bloomFilterDownloaderWithSchema returns the byte downloader used for PK bloom-filter
@@ -1220,24 +1281,20 @@ func (loader *segmentLoader) bloomFilterDownloaderWithSchema(collectionID int64,
 	}
 }
 
-// loadBloomFilterWithDownloader merges one or more serialized PK bloom-filter
-// stats into the segment BloomFilterSet.
-func (loader *segmentLoader) loadBloomFilterWithDownloader(
+func readBloomFilter(
 	ctx context.Context,
-	segmentID int64,
-	bfs *pkoracle.BloomFilterSet,
 	binlogPaths []string,
 	downloader func(context.Context, []string) ([][]byte, error),
-) error {
+) ([]*storage.PkStatistics, error) {
 	if len(binlogPaths) == 0 {
-		mlog.Info(context.TODO(), "there are no stats logs saved with segment")
-		return nil
+		mlog.Info(ctx, "there are no stats logs saved with segment")
+		return nil, nil
 	}
 
 	startTs := time.Now()
 	values, err := downloader(ctx, binlogPaths)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	blobs := make([]*storage.Blob, len(values))
 	for i := range values {
@@ -1246,22 +1303,25 @@ func (loader *segmentLoader) loadBloomFilterWithDownloader(
 
 	stats, err := storage.DeserializeBloomFilterStats(binlogPaths, blobs)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to deserialize bloom filter stats", mlog.Err(err))
-		return err
+		mlog.Warn(ctx, "failed to deserialize bloom filter stats", mlog.Err(err))
+		return nil, err
 	}
 
 	var size uint
+	pkStats := make([]*storage.PkStatistics, 0, len(stats))
 	for _, stat := range stats {
-		pkStat := &storage.PkStatistics{
+		if stat == nil || stat.BF == nil {
+			return nil, merr.WrapErrServiceInternalMsg("missing bloom filter in PK stats")
+		}
+		pkStats = append(pkStats, &storage.PkStatistics{
 			PkFilter: stat.BF,
 			MinPK:    stat.MinPk,
 			MaxPK:    stat.MaxPk,
-		}
+		})
 		size += stat.BF.Cap()
-		bfs.AddHistoricalStats(pkStat)
 	}
 	mlog.Debug(ctx, "Successfully load pk stats", mlog.Duration("time", time.Since(startTs)), mlog.Uint("size", size))
-	return nil
+	return pkStats, nil
 }
 
 // loadDeltalogs performs the internal actions of `LoadDeltaLogs`

@@ -148,7 +148,7 @@ func (s *queryViewTransformSegment) Release(ctx context.Context) error {
 
 func filterMaybeHitPrimaryKeys(segment qvLoadedSegment, pks storage.PrimaryKeys, timestamps []typeutil.Timestamp) (storage.PrimaryKeys, []typeutil.Timestamp) {
 	candidate, ok := segment.(qvPKCandidateSegment)
-	if !ok || !candidate.PkCandidateExist() || pks == nil || pks.Len() == 0 || len(timestamps) != pks.Len() {
+	if !ok || pks == nil || pks.Len() == 0 || len(timestamps) != pks.Len() || !candidate.PkCandidateExist() {
 		return pks, timestamps
 	}
 

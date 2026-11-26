@@ -17,13 +17,20 @@
 package pkoracle
 
 import (
+	"context"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -187,4 +194,107 @@ func TestMemSize(t *testing.T) {
 		size := bfs.MemSize()
 		assert.Greater(t, size, int64(0))
 	})
+}
+
+func TestLazyBloomFilterSetLoadsOnce(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	pk := storage.NewInt64PrimaryKey(42)
+	stats := NewBloomFilterSet(1, 2, commonpb.SegmentState_Sealed)
+	stats.UpdatePkCandidate([]storage.PrimaryKey{pk})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var loads atomic.Int32
+	bfs := NewLazyBloomFilterSet(ctx, 1, 2, func(ctx context.Context, publish func([]*storage.PkStatistics)) error {
+		assert.NoError(t, ctx.Err())
+		loads.Add(1)
+		publish([]*storage.PkStatistics{stats.Stats()})
+		return nil
+	})
+	defer bfs.Refund()
+	cancel()
+
+	bfs.Charge()
+	require.False(t, bfs.IsResourceCharged())
+	require.Zero(t, bfs.MemSize())
+	require.Zero(t, loads.Load())
+
+	var readers sync.WaitGroup
+	for range 16 {
+		readers.Go(func() {
+			assert.True(t, bfs.PkCandidateExist())
+			assert.True(t, bfs.MayPkExist(storage.NewLocationsCache(pk)))
+		})
+	}
+	readers.Wait()
+
+	require.EqualValues(t, 1, loads.Load())
+	require.Equal(t, []bool{true, false}, bfs.BatchPkExist(storage.NewBatchLocationsCache(
+		[]storage.PrimaryKey{pk, storage.NewInt64PrimaryKey(43)})))
+	require.Equal(t, stats.MemSize(), bfs.MemSize())
+	require.True(t, bfs.IsResourceCharged())
+
+	bfs.Refund()
+	bfs.Charge()
+	require.False(t, bfs.IsResourceCharged())
+}
+
+func TestLazyBloomFilterSetRetriesWithoutDroppingPKs(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	pk := storage.NewInt64PrimaryKey(42)
+	other := storage.NewInt64PrimaryKey(43)
+	stats := NewBloomFilterSet(1, 2, commonpb.SegmentState_Sealed)
+	stats.UpdatePkCandidate([]storage.PrimaryKey{pk})
+	loads := 0
+	bfs := NewLazyBloomFilterSet(context.Background(), 1, 2, func(_ context.Context, publish func([]*storage.PkStatistics)) error {
+		loads++
+		if loads <= 2 {
+			return merr.WrapErrServiceInternalMsg("injected stats read failure")
+		}
+		publish([]*storage.PkStatistics{stats.Stats()})
+		return nil
+	})
+	defer bfs.Refund()
+
+	pks := []storage.PrimaryKey{pk, other}
+	require.False(t, bfs.PkCandidateExist())
+	require.True(t, bfs.MayPkExist(storage.NewLocationsCache(other)))
+	require.Equal(t, []bool{true, true}, bfs.BatchPkExist(storage.NewBatchLocationsCache(pks)))
+	require.Nil(t, bfs.GetMinPk())
+	require.Zero(t, bfs.MemSize())
+	require.False(t, bfs.IsResourceCharged())
+	require.Equal(t, 1, loads)
+	require.Equal(t, initialBloomFilterRetryDelay, bfs.lazy.retryDelay)
+
+	bfs.lazy.retryAt = time.Time{}
+	require.False(t, bfs.PkCandidateExist())
+	require.Equal(t, 2, loads)
+	require.Equal(t, 2*initialBloomFilterRetryDelay, bfs.lazy.retryDelay)
+
+	bfs.lazy.retryAt = time.Time{}
+	require.Equal(t, []bool{true, false}, bfs.BatchPkExist(storage.NewBatchLocationsCache(pks)))
+	require.Equal(t, 3, loads)
+	require.True(t, bfs.IsResourceCharged())
+}
+
+func TestLazyBloomFilterSetRefundDuringLoad(t *testing.T) {
+	started, finished := make(chan struct{}), make(chan struct{})
+	bfs := NewLazyBloomFilterSet(context.Background(), 1, 2, func(ctx context.Context, publish func([]*storage.PkStatistics)) error {
+		close(started)
+		<-ctx.Done()
+		// A read that finishes concurrently with release cannot install stats.
+		publish([]*storage.PkStatistics{{}})
+		return nil
+	})
+	go func() {
+		defer close(finished)
+		assert.False(t, bfs.PkCandidateExist())
+	}()
+	<-started
+	bfs.Refund()
+	<-finished
+	require.False(t, bfs.PkCandidateExist())
+	require.False(t, bfs.IsResourceCharged())
 }

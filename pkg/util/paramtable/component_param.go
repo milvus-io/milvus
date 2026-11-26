@@ -4806,6 +4806,7 @@ type queryNodeConfig struct {
 	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
 	TieredLazyIndexSlotEnabled      ParamItem `refreshable:"true"`
 	TieredLazyColumnGroupEnabled    ParamItem `refreshable:"true"`
+	TieredLazyBloomFilterEnabled    ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -5177,6 +5178,15 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredLazyColumnGroupEnabled.Init(base.mgr)
+
+	p.TieredLazyBloomFilterEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.lazyBloomFilterEnabled",
+		Version:      "3.0.7",
+		DefaultValue: "false",
+		Doc:          "Defer ordinary sealed segment Bloom filter loading in QueryView until the first primary-key check.",
+		Export:       true,
+	}
+	p.TieredLazyBloomFilterEnabled.Init(base.mgr)
 
 	p.TieredEvictionEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",

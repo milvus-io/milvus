@@ -39,9 +39,8 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 			_ = loaded.Release(context.Background())
 		}
 	}()
-	// The PK candidate only reads the stats files named by the load info, so
-	// load it while segcore loads column data instead of after it. The first
-	// failure cancels the other branch.
+	// Candidate preparation depends only on load info. Run it alongside column
+	// data loading so eager stats reads can overlap with segcore loading.
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return l.loader.LoadPKCandidate(gctx, loaded, info)

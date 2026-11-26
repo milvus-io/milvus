@@ -28,6 +28,8 @@ import (
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -40,6 +42,22 @@ import (
 
 var _ Candidate = (*BloomFilterSet)(nil)
 
+const (
+	initialBloomFilterRetryDelay = time.Second
+	maxBloomFilterRetryDelay     = 30 * time.Second
+)
+
+type lazyBloomFilter struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   atomic.Bool
+
+	mu         sync.Mutex
+	load       func(context.Context, func([]*storage.PkStatistics)) error
+	retryAt    time.Time
+	retryDelay time.Duration
+}
+
 // BloomFilterSet is one implementation of Candidate with bloom filter in statslog.
 type BloomFilterSet struct {
 	statsMutex   sync.RWMutex
@@ -48,6 +66,7 @@ type BloomFilterSet struct {
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
+	lazy         *lazyBloomFilter
 
 	// Resource tracking
 	trackedSize     int64 // memory size that was charged
@@ -56,8 +75,12 @@ type BloomFilterSet struct {
 
 // MayPkExist returns whether any bloom filters returns positive.
 func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
+	s.loadOnDemand()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
+	if s.lazy != nil && len(s.historyStats) == 0 {
+		return true
+	}
 	if s.currentStat != nil && s.currentStat.TestLocationCache(lc) {
 		return true
 	}
@@ -72,10 +95,17 @@ func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
 }
 
 func (s *BloomFilterSet) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	s.loadOnDemand()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
 	hits := make([]bool, lc.Size())
+	if s.lazy != nil && len(s.historyStats) == 0 {
+		for i := range hits {
+			hits[i] = true
+		}
+		return hits
+	}
 	if s.currentStat != nil {
 		s.currentStat.BatchPkExist(lc, hits)
 	}
@@ -103,12 +133,17 @@ func (s *BloomFilterSet) Type() commonpb.SegmentState {
 
 // Stats returns the current bloom filter statistics.
 func (s *BloomFilterSet) Stats() *storage.PkStatistics {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
 	return s.currentStat
 }
 
 // PkCandidateExist reports whether bloom filter data has been loaded (current or historical).
 func (s *BloomFilterSet) PkCandidateExist() bool {
-	return s.currentStat != nil || s.historyStats != nil
+	s.loadOnDemand()
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+	return s.currentStat != nil || len(s.historyStats) > 0
 }
 
 // UpdatePkCandidate updates currentStats with provided pks.
@@ -147,6 +182,7 @@ func (s *BloomFilterSet) UpdatePkCandidate(pks []storage.PrimaryKey) {
 // GetMinPk returns the global minimum PK across all statistics (current + historical).
 // Returns nil if no statistics with a valid MinPK are available.
 func (s *BloomFilterSet) GetMinPk() *storage.PrimaryKey {
+	s.loadOnDemand()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -171,6 +207,7 @@ func (s *BloomFilterSet) GetMinPk() *storage.PrimaryKey {
 // GetMaxPk returns the global maximum PK across all statistics (current + historical).
 // Returns nil if no statistics with a valid MaxPK are available.
 func (s *BloomFilterSet) GetMaxPk() *storage.PrimaryKey {
+	s.loadOnDemand()
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
@@ -206,16 +243,7 @@ func (s *BloomFilterSet) MemSize() int64 {
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
-	var size int64
-	if s.currentStat != nil && s.currentStat.PkFilter != nil {
-		size += int64(s.currentStat.PkFilter.Cap() / 8) // Cap returns bits, convert to bytes
-	}
-	for _, stats := range s.historyStats {
-		if stats != nil && stats.PkFilter != nil {
-			size += int64(stats.PkFilter.Cap() / 8)
-		}
-	}
-	return size
+	return s.memSizeLocked()
 }
 
 // Charge charges memory resource for this bloom filter set via caching layer.
@@ -224,8 +252,12 @@ func (s *BloomFilterSet) Charge() {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
-	if s.resourceCharged {
-		return // Already charged
+	s.chargeLocked(context.TODO())
+}
+
+func (s *BloomFilterSet) chargeLocked(ctx context.Context) {
+	if s.resourceCharged || (s.lazy != nil && s.lazy.ctx.Err() != nil) {
+		return
 	}
 
 	size := s.memSizeLocked()
@@ -236,7 +268,7 @@ func (s *BloomFilterSet) Charge() {
 		})
 		s.trackedSize = size
 		s.resourceCharged = true
-		mlog.Debug(context.TODO(), "charged bloom filter resource",
+		mlog.Debug(ctx, "charged bloom filter resource",
 			mlog.FieldSegmentID(s.segmentID),
 			mlog.Int64("size", size))
 	}
@@ -247,6 +279,9 @@ func (s *BloomFilterSet) Refund() {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
+	if s.lazy != nil {
+		s.lazy.cancel()
+	}
 	if !s.resourceCharged || s.trackedSize <= 0 {
 		return
 	}
@@ -304,4 +339,49 @@ func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.Segm
 		partitionID: partitionID,
 		segType:     segType,
 	}
+}
+
+// NewLazyBloomFilterSet defers sealed PK stats loading until the first PK check.
+// load publishes complete stats synchronously while its loading reservation is held.
+func NewLazyBloomFilterSet(ctx context.Context, segmentID, partitionID int64, load func(context.Context, func([]*storage.PkStatistics)) error) *BloomFilterSet {
+	bfs := NewBloomFilterSet(segmentID, partitionID, commonpb.SegmentState_Sealed)
+	// Segment preparation can finish before the candidate is first used.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	bfs.lazy = &lazyBloomFilter{ctx: ctx, cancel: cancel, load: load}
+	return bfs
+}
+
+func (s *BloomFilterSet) loadOnDemand() {
+	lazy := s.lazy
+	if lazy == nil || lazy.done.Load() {
+		return
+	}
+	lazy.mu.Lock()
+	defer lazy.mu.Unlock()
+	if lazy.done.Load() || lazy.ctx.Err() != nil || time.Now().Before(lazy.retryAt) {
+		return
+	}
+
+	err := lazy.load(lazy.ctx, func(stats []*storage.PkStatistics) {
+		s.statsMutex.Lock()
+		defer s.statsMutex.Unlock()
+		if lazy.ctx.Err() == nil {
+			s.historyStats = stats
+			s.chargeLocked(lazy.ctx)
+		}
+	})
+	if err == nil {
+		lazy.load = nil
+		lazy.done.Store(true)
+		return
+	}
+	if lazy.ctx.Err() != nil {
+		return
+	}
+	lazy.retryDelay = min(max(initialBloomFilterRetryDelay, 2*lazy.retryDelay), maxBloomFilterRetryDelay)
+	lazy.retryAt = time.Now().Add(lazy.retryDelay)
+	mlog.Warn(lazy.ctx, "failed to load sealed segment bloom filter",
+		mlog.FieldSegmentID(s.segmentID),
+		mlog.Duration("retryDelay", lazy.retryDelay),
+		mlog.Err(err))
 }

@@ -68,7 +68,11 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	err = json.Unmarshal(*messageMap["fieldID"], &stats.FieldID)
+	fieldID := messageMap["fieldID"]
+	if fieldID == nil {
+		return merr.WrapErrServiceInternalMsg("missing field ID in PK stats")
+	}
+	err = json.Unmarshal(*fieldID, &stats.FieldID)
 	if err != nil {
 		return err
 	}
@@ -91,8 +95,12 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		stats.MaxPk = &Int64PrimaryKey{}
 		stats.MinPk = &Int64PrimaryKey{}
 
-		// Compatible with versions that only support int64 type primary keys
-		err = json.Unmarshal(*messageMap["max"], &stats.Max)
+		// Compatible with versions that only support int64 type primary keys.
+		minPK, maxPK := messageMap["min"], messageMap["max"]
+		if minPK == nil || maxPK == nil {
+			return merr.WrapErrServiceInternalMsg("missing int64 PK bounds in PK stats")
+		}
+		err = json.Unmarshal(*maxPK, &stats.Max)
 		if err != nil {
 			return err
 		}
@@ -101,7 +109,7 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 			return err
 		}
 
-		err = json.Unmarshal(*messageMap["min"], &stats.Min)
+		err = json.Unmarshal(*minPK, &stats.Min)
 		if err != nil {
 			return err
 		}
