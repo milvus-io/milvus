@@ -320,3 +320,36 @@ func TestFileResourceAdmissionChecksActualBytes(t *testing.T) {
 	require.NotContains(t, err.Error(), "SECRET_MARKER")
 	api.AssertNotCalled(t, "Broadcast", mock.Anything, mock.Anything)
 }
+
+func TestFileResourceExistingRegistrationSurvivesPolicyChange(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("new-root")
+	oldLimit := Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("1")
+	t.Cleanup(func() {
+		Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot)
+		Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(oldLimit)
+	})
+	meta, _ := fileResourceTestMeta(t)
+	resource := &internalpb.FileResourceInfo{Id: 123, Name: "dictionary", Path: "old-root/custom.txt"}
+	meta.fileResourceName2Meta[resource.Name] = resource
+	meta.fileResourceID2Meta[resource.Id] = resource
+	storage := mock_storage.NewMockChunkManager(t)
+	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage))
+	api := mockFileResourceBroadcast(t, core)
+	api.ExpectedCalls = nil
+	api.EXPECT().Close().Return().Times(3)
+	api.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			require.True(t, proto.Equal(resource, message.MustAsBroadcastAddFileResourceMessageV2(msg).MustBody().GetResource()))
+			return &types.BroadcastAppendResult{}, nil
+		}).Once()
+	require.NoError(t, core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+		Name: resource.Name, Path: resource.Path,
+	}))
+	for _, req := range []*milvuspb.AddFileResourceRequest{
+		{Name: "new-dictionary", Path: resource.Path},
+		{Name: resource.Name, Path: "old-root/other.txt"},
+	} {
+		require.ErrorContains(t, core.broadcastAddFileResource(context.Background(), req), "outside the configured directory")
+	}
+	require.Empty(t, storage.Calls, "existing registrations and rejected paths must not probe storage")
+}

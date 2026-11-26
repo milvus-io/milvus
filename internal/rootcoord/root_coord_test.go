@@ -2069,6 +2069,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 	t.Run("outside allowed directory does not probe storage", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource", Path: "/outside/secret",
 		})
@@ -2181,7 +2182,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.False(t, resp.GetRetriable())
 	})
 
-	t.Run("identical add skips size check", func(t *testing.T) {
+	t.Run("identical add skips storage checks", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
@@ -2190,7 +2191,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 			Path: "/path/to/file",
 		}
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
@@ -2208,7 +2208,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("same name with different path skips size check and fails", func(t *testing.T) {
+	t.Run("same name with different path skips storage checks and fails", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
@@ -2217,7 +2217,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 			Path: "/path/to/new-file",
 		}
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{

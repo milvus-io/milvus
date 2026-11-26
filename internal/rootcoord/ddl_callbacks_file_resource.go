@@ -37,17 +37,6 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	if req.GetPath() == "" {
 		return merr.WrapErrParameterMissing("file resource path")
 	}
-	source := fileresource.RestrictSource(c.storage)
-	resolvedPath, err := source.ResolvePath(req.GetPath())
-	if err != nil {
-		return err
-	}
-	req.Path = resolvedPath
-	if exist, err := source.Exist(ctx, req.GetPath()); err != nil {
-		return err
-	} else if !exist {
-		return merr.WrapErrParameterInvalidMsg("file resource path not exist")
-	}
 
 	// Resource changes conflict with schema DDL, which reserves resource refs.
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
@@ -64,15 +53,30 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	sizeChecked := false
 	for {
 		resource := c.meta.FindFileResource(ctx, req.GetName())
+		// An unchanged registration was already admitted under its original policy.
+		if resource == nil || resource.GetPath() != req.GetPath() {
+			resolvedPath, resolveErr := fileresource.RestrictSource(c.storage).ResolvePath(req.GetPath())
+			if resolveErr != nil {
+				return resolveErr
+			}
+			req.Path = resolvedPath
+		}
 		if resource != nil && resource.GetPath() != req.GetPath() {
 			return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
 		}
 		if resource == nil {
-			if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-				if !sizeChecked {
-					// Storage admission must not block unrelated DDL.
-					broadcaster.Close()
-					broadcaster = nil
+			maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize()
+			if !sizeChecked {
+				// Storage admission must not block unrelated DDL.
+				broadcaster.Close()
+				broadcaster = nil
+				source := fileresource.RestrictSource(c.storage)
+				if exist, err := source.Exist(ctx, req.GetPath()); err != nil {
+					return err
+				} else if !exist {
+					return merr.WrapErrParameterInvalidMsg("file resource path not exist")
+				}
+				if maxFileSize > 0 {
 					size, err = source.Size(ctx, req.GetPath())
 					if err != nil {
 						return err
@@ -95,13 +99,15 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 						}
 						size = readSize
 					}
-					broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
-					if err != nil {
-						return err
-					}
-					sizeChecked = true
-					continue
 				}
+				broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+				if err != nil {
+					return err
+				}
+				sizeChecked = true
+				continue
+			}
+			if maxFileSize > 0 {
 				if size < 0 {
 					return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)
 				}
