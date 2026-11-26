@@ -119,10 +119,16 @@ func requireGoFIPS(info *debug.BuildInfo, enabled bool) error {
 	return nil
 }
 
+// RequireGoModule checks the Go Cryptographic Module snapshot and mode. It
+// needs no configuration, so it can run before the first remote connection.
+func RequireGoModule() error {
+	info, _ := debug.ReadBuildInfo()
+	return requireGoFIPS(info, fips140.Enabled())
+}
+
 // Require checks the Go module and mode before enabling the OpenSSL provider.
 func Require() error {
-	info, _ := debug.ReadBuildInfo()
-	if err := requireGoFIPS(info, fips140.Enabled()); err != nil {
+	if err := RequireGoModule(); err != nil {
 		return err
 	}
 	if !MaybeEnableOpenSSLFIPS() {

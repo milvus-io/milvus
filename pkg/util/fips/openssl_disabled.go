@@ -23,6 +23,11 @@ func MaybeEnableOpenSSLFIPS() bool {
 	return false
 }
 
+// RequireGoModule has nothing to check outside a MILVUS_FIPS_ENABLED=ON build.
+func RequireGoModule() error {
+	return nil
+}
+
 // Require has nothing to check outside a MILVUS_FIPS_ENABLED=ON build.
 func Require() error {
 	return nil
