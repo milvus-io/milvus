@@ -854,6 +854,10 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 	planReq *viewpb.GetQueryPlanRequest,
 	params *shardExecParams,
 ) (*viewpb.GetQueryPlanResponse, error) {
+	if shard, ok := ctx.Value(servingShardContextKey{}).(resolver.Shard); ok {
+		planReq.LoadInfoVersion = shard.LoadInfoVersion
+		planReq.ReadSchemaVersion = shard.ReadSchemaVersion
+	}
 	if params.mvcc != nil && params.barrierMVCC != 0 {
 		return nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
 	}

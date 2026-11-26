@@ -337,7 +337,7 @@ func TestSharedLoadProbeChecksEachPlannedShard(t *testing.T) {
 		name    string
 		epoch   uint64
 		invalid bool
-	}{{lineageT1, 2, false}, {lineageS, 2, true}, {lineageS, 1, true}, {lineageT2, 3, false}} {
+	}{{lineageT1, 2, false}, {lineageT1, 2, false}, {lineageS, 2, true}, {lineageS, 1, true}, {lineageT2, 3, false}} {
 		ctx := context.WithValue(t.Context(), servingShardContextKey{}, resolver.Shard{VChannel: test.name, ShardSetEpoch: test.epoch})
 		_, err := check.check(ctx)
 		if test.invalid {
@@ -347,5 +347,7 @@ func TestSharedLoadProbeChecksEachPlannedShard(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	require.Equal(t, 1, calls)
+	// Valid callers share the probe. Each invalidated plan clears it so a
+	// subsequent whole-request retry can observe a newer publication.
+	require.Equal(t, 3, calls)
 }

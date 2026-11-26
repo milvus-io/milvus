@@ -43,11 +43,29 @@ type loadStateCall struct {
 	done          chan struct{}
 	err           error
 	ownerCanceled bool
+	invalidated   bool
 	nextCheck     time.Time
 }
 
 func newCollectionLoadChecks(client LoadInfoClient) *collectionLoadChecks {
 	return &collectionLoadChecks{client: client, collections: make(map[int64]*collectionLoadCheck)}
+}
+
+func (s *collectionLoadChecks) invalidate(collectionID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, state := range s.collections {
+		if collectionID != 0 && id != collectionID {
+			continue
+		}
+		state.mu.Lock()
+		state.last = nil
+		if state.inflight != nil {
+			state.inflight.invalidated = true
+			state.inflight = nil
+		}
+		state.mu.Unlock()
+	}
 }
 
 func (s *collectionLoadChecks) acquire(collectionID int64) *collectionLoadCheck {
@@ -87,16 +105,16 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			case <-call.done:
 				// The caller owning the RPC can be canceled independently of
 				// other queries sharing this probe. Let those queries try again.
-				if call.ownerCanceled {
+				if call.ownerCanceled || call.invalidated {
 					continue
 				}
-				return call.result(ctx)
+				return s.result(ctx, call)
 			}
 		}
 		if s.last != nil && time.Now().Before(s.last.nextCheck) {
 			call := s.last
 			s.mu.Unlock()
-			return call.result(ctx)
+			return s.result(ctx, call)
 		}
 		call := &loadStateCall{done: make(chan struct{})}
 		s.inflight = call
@@ -116,15 +134,34 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			call.err = err
 		}
 		s.mu.Lock()
-		if call.err == nil {
+		if call.err == nil && !call.invalidated {
 			call.nextCheck = time.Now().Add(loadStateCheckInterval)
 			s.last = call
 		}
-		s.inflight = nil
+		if s.inflight == call {
+			s.inflight = nil
+		}
 		close(call.done)
 		s.mu.Unlock()
-		return call.result(ctx)
+		if call.invalidated {
+			continue
+		}
+		return s.result(ctx, call)
 	}
+}
+
+func (s *collectionLoadCheck) result(ctx context.Context, call *loadStateCall) (time.Time, error) {
+	next, err := call.result(ctx)
+	if err != nil && viewerror.AsViewError(err).IsViewInvalidated() {
+		// A shared probe can predate this caller's publication. Do not let
+		// its cached identity reject every subsequent whole-request retry.
+		s.mu.Lock()
+		if s.last == call {
+			s.last = nil
+		}
+		s.mu.Unlock()
+	}
+	return next, err
 }
 
 // Interpret the shared publication separately for each waiting shard.
@@ -133,8 +170,11 @@ func (call *loadStateCall) result(ctx context.Context) (time.Time, error) {
 	if call.err != nil || !planned || len(call.info.GetServingShards()) == 0 {
 		return call.nextCheck, call.err
 	}
+	if shard.LoadInfoVersion != 0 && (call.info.GetVersion() != shard.LoadInfoVersion || call.info.GetReadSchemaVersion() != shard.ReadSchemaVersion) {
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s serving load/schema identity changed", shard.VChannel)
+	}
 	published := call.info.GetShardSetEpoch()
-	if published > max(1, shard.ShardSetEpoch) {
+	if published > shard.ShardSetEpoch {
 		return time.Time{}, viewerror.NewViewInvalidated("shard %s was planned at epoch %d, published epoch is %d", shard.VChannel, shard.ShardSetEpoch, published)
 	}
 	// A shared probe may predate another caller's newer plan.

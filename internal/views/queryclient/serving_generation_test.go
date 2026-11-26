@@ -3,12 +3,15 @@ package queryclient
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -120,8 +123,33 @@ func TestStaleUnsplitCacheRefreshesIntoServingGeneration(t *testing.T) {
 func TestSplitMetadataNeverFallsBackToWriteRoutingWithoutPublication(t *testing.T) {
 	client := &servingTestClient{empty: true}
 	fallback := &servingMarkerFallback{split: true}
-	shards, err := resolver.ResolveShards(t.Context(), withServingResolver(fallback, client), 100)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	shards, err := resolver.ResolveShards(ctx, withServingResolver(fallback, client), 100)
 	require.Nil(t, shards)
-	require.ErrorIs(t, err, merr.ErrServiceNotReady)
-	require.Equal(t, 1, client.calls)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.GreaterOrEqual(t, client.calls, 2)
+}
+
+func TestServingIdentityDoesNotReplaceParsedSchema(t *testing.T) {
+	search := &internalpb.SearchRequest{SchemaVersion: 3}
+	retrieve := &internalpb.RetrieveRequest{SchemaVersion: 4}
+	requests := []*viewpb.GetQueryPlanRequest{
+		{Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: search}},
+		{Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieve}},
+		{Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{}}},
+	}
+	sn := &legacyPlanClient{getQueryPlan: func(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+		require.EqualValues(t, 11, req.LoadInfoVersion)
+		require.EqualValues(t, 7, req.ReadSchemaVersion)
+		return nil, viewerror.NewViewInvalidated("parsed schema no longer matches publication")
+	}}
+	s := newShardViewQueryClient(1, sn, nil)
+	ctx := context.WithValue(t.Context(), servingShardContextKey{}, resolver.Shard{VChannel: "s", LoadInfoVersion: 11, ReadSchemaVersion: 7})
+	for _, req := range requests {
+		_, err := s.executeGetQueryPlan(ctx, qviews.ShardID{VChannel: "s"}, req, &shardExecParams{})
+		require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+	}
+	require.EqualValues(t, 3, search.SchemaVersion)
+	require.EqualValues(t, 4, retrieve.SchemaVersion)
 }
