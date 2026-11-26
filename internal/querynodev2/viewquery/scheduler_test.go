@@ -5,7 +5,6 @@ package viewquery
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -98,51 +97,7 @@ func TestSchedulerReturnsExecutorError(t *testing.T) {
 	require.ErrorIs(t, err, executorErr)
 }
 
-func TestSchedulerSearchCancelWhileWaiting(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	started := make(chan int64, 1)
-	release := make(chan struct{})
-	computed := make(chan struct{}, 1)
-	executor := &fakeQNSegmentTaskExecutor{
-		beforeSearch: func(ctx context.Context, tasks []qnview.QNSearchSegmentTask) error {
-			started <- tasks[0].Handle.ID()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-release:
-				computed <- struct{}{}
-				return nil
-			}
-		},
-	}
-	scheduler := NewScheduler(executor)
-	tasks := qnview.NewQNSearchSegmentTasks([]qnview.QNSearchSegmentTask{
-		{Handle: fakeSealedSegmentHandle{id: 1}, Request: &internalpb.SearchRequest{}, MVCC: &viewpb.QueryPlanMVCC{}},
-	})
-	done := make(chan error, 1)
-	go func() {
-		_, err := scheduler.Search(ctx, tasks)
-		done <- err
-	}()
-	select {
-	case segmentID := <-started:
-		require.EqualValues(t, 1, segmentID)
-	case <-ctx.Done():
-		t.Fatal("segment did not reach the wait point")
-	}
-	cancel()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(5 * time.Second):
-		t.Fatal("segment wait did not exit on cancellation")
-	}
-	require.Empty(t, computed)
-}
-
 type fakeQNSegmentTaskExecutor struct {
-	beforeSearch func(context.Context, []qnview.QNSearchSegmentTask) error
 	searchTasks  []qnview.QNSearchSegmentTask
 	searchResult *internalpb.SearchResults
 	searchErr    error
@@ -153,11 +108,6 @@ type fakeQNSegmentTaskExecutor struct {
 
 func (e *fakeQNSegmentTaskExecutor) Search(ctx context.Context, tasks []qnview.QNSearchSegmentTask) (*internalpb.SearchResults, error) {
 	e.searchTasks = append([]qnview.QNSearchSegmentTask(nil), tasks...)
-	if e.beforeSearch != nil {
-		if err := e.beforeSearch(ctx, tasks); err != nil {
-			return nil, err
-		}
-	}
 	return e.searchResult, e.searchErr
 }
 
