@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -1651,4 +1652,70 @@ func (suite *ResourceManagerSuite) TestSetupInMemResourceGroup_NodeIDMapCleanup(
 	suite.Equal("rg1", suite.manager.nodeIDMap[1])
 	_, exists := suite.manager.nodeIDMap[2]
 	suite.False(exists, "nodeIDMap should not contain node 2 after it was removed from rg1")
+}
+
+func TestReconcileNodeRemovalAfterResourceGroupSwap(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	const (
+		source         = "source"
+		target         = "destination" // Published before source when swap groups are sorted by name.
+		departed int64 = 10
+		spare    int64 = 11
+	)
+	nodes := session.NewNodeManager()
+	catalog := metastoremocks.NewQueryCoordCatalog(t)
+	persisted := make(map[string][]int64)
+	var saveErr error
+	save := func(_ context.Context, groups ...*querypb.ResourceGroup) error {
+		if saveErr == nil {
+			for _, group := range groups {
+				persisted[group.GetName()] = group.GetNodes()
+			}
+		}
+		return saveErr
+	}
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).RunAndReturn(save)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(save)
+	catalog.EXPECT().RemoveResourceGroup(mock.Anything, source).Return(nil).Once()
+	manager := NewResourceManager(catalog, nodes)
+	require.NoError(t, manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		source: newResourceGroupConfig(1, 1),
+		target: newResourceGroupConfig(0, 0),
+	}))
+	for _, id := range []int64{departed, spare} {
+		nodes.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: id}))
+		manager.HandleNodeUp(ctx, id)
+	}
+	require.Equal(t, source, manager.GetResourceGroupByNodeID(departed))
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(spare))
+
+	nodes.Remove(departed)
+	saveErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+	require.Error(t, manager.HandleNodeDown(ctx, departed))
+	swap := map[string]*rgpb.ResourceGroupConfig{
+		source: newResourceGroupConfig(0, 0),
+		target: newResourceGroupConfig(1, 1),
+	}
+	require.Error(t, manager.AlterResourceGroups(ctx, swap))
+	require.Equal(t, source, manager.GetResourceGroupByNodeID(departed))
+
+	saveErr = nil
+	require.NoError(t, manager.AlterResourceGroups(ctx, swap))
+	require.Equal(t, []int64{departed}, persisted[target])
+	require.NoError(t, manager.RemoveResourceGroup(ctx, source))
+
+	saveErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+	require.Error(t, manager.ReconcileNodeRemovals(ctx, target))
+	require.Equal(t, target, manager.GetResourceGroupByNodeID(departed))
+	require.Equal(t, []int64{departed}, persisted[target])
+
+	saveErr = nil
+	require.NoError(t, manager.ReconcileNodeRemovals(ctx, target))
+	require.Empty(t, persisted[target])
+	require.Empty(t, manager.GetResourceGroupByNodeID(departed))
+	require.NoError(t, manager.AutoRecoverResourceGroup(ctx, target))
+	require.NoError(t, manager.MeetRequirement(ctx, target))
+	require.Equal(t, []int64{spare}, persisted[target])
+	require.Equal(t, []int64{spare}, manager.GetResourceGroup(ctx, target).GetAllNodes())
 }
