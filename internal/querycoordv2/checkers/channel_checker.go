@@ -99,6 +99,12 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 	collectionIDs := c.meta.GetAll(ctx)
 	tasks := make([]task.Task, 0)
+	// projectedLoad carries the channels planned earlier in this round across
+	// collections and replicas, so a later collection's assignment observes the
+	// load of channels planned by earlier ones (the scheduler only sees the tasks
+	// after the whole round). Without it, every single-channel collection ties on
+	// the same load and keeps hitting the smallest node ID (initial-allocation skew).
+	projectedLoad := make(map[int64]int)
 	for _, cid := range collectionIDs {
 		if c.readyToCheck(ctx, cid) {
 			// Fast path: skip if target and dist versions unchanged
@@ -111,7 +117,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
 			for _, r := range replicas {
-				replicaTasks := c.checkReplica(ctx, r)
+				replicaTasks := c.checkReplica(ctx, r, projectedLoad)
 				if len(replicaTasks) > 0 {
 					hasTask = true
 					tasks = append(tasks, replicaTasks...)
@@ -187,11 +193,11 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 	}
 }
 
-func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica, projectedLoad map[int64]int) []task.Task {
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(ctx, replica.GetCollectionID(), replica.GetID())
-	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica, projectedLoad)
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
 
@@ -274,7 +280,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	return dupChannels
 }
 
-func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
+func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica, projectedLoad map[int64]int) []task.Task {
 	// Group channels by their candidate node set and hand each group to the
 	// assign policy in one call. Assigning channel by channel lets every call
 	// observe the same node scores (the tasks of this round are not in the
@@ -307,7 +313,11 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
 	for _, key := range groupKeys {
 		group := groups[key]
-		plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
+		if p, ok := c.assignPolicy.(*assign.RoundRobinAssignPolicy); ok {
+			plans = append(plans, p.AssignChannelWithProjectedLoad(ctx, replica.GetCollectionID(), group.channels, group.nodes, true, projectedLoad)...)
+		} else {
+			plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
+		}
 	}
 
 	for i := range plans {
