@@ -1884,7 +1884,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Key:          "common.fileResource.allowedPath",
 		Version:      "3.0",
 		DefaultValue: "",
-		Doc:          "Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.",
+		Doc:          "New file resources must use this complete object-key prefix (remote storage) or absolute directory (local storage). Existing registrations are not rechecked. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.",
 		Export:       true,
 		Forbidden:    true,
 	}
@@ -1894,7 +1894,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Key:          "common.fileResource.maxFileSize",
 		Version:      "3.0",
 		DefaultValue: "64m",
-		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Also limits downloaded bytes; must be positive.",
+		Doc:          "Maximum bytes accepted by a new AddFileResource registration, including actual reads. Existing registrations are not rechecked; must be positive.",
 		Export:       true,
 		Formatter: func(v string) string {
 			value := strings.ToLower(v)

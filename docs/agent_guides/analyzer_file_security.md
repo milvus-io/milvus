@@ -1,59 +1,50 @@
 # Analyzer file security
 
-Request-selected TLS files use the generic startup-only `tls.allowedPath`
-base directory, defaulting to `<localStorage.path>/tls` (normally
-`/var/lib/milvus/data/tls`). The gRPC tokenizer uses it for `ca_cert`,
-`client_cert` and `client_key`. Relative paths resolve beneath the base;
-absolute paths must be descendants. Reads reject traversal, symlinks and
-non-regular files and enforce a fixed 1 MiB limit per file before TLS parsing.
-Read/configuration failures abort before connecting, without echoing file contents.
-Client certificates and private keys must be supplied together.
+Directory and byte-limit policies apply at admission: new collection analyzers,
+changed analyzer definitions, inline RunAnalyzer/ComputePhraseMatchSlop, and new
+file-resource registrations. They do not retroactively revoke persisted schemas
+or registered resources when operators change configuration, including on restart,
+index rebuild, WAL recovery, or cache eviction. Unchanged named analyzers retain
+their resource IDs when other schema fields or analyzers change.
 
-Operators must provision this directory separately from every dictionary or
-file-resource source directory; never place private keys in those readable
-resource trees. Only provision credentials intended for this consumer: directory
-confinement does not authorize endpoints or restrict which caller can select a
-credential. Existing server/internal TLS path settings are unchanged. This fix
-preserves custom CA and mTLS support using confined files; it does not introduce
-public CA roots. TLS-disabled builds continue to reject HTTPS endpoints.
+Request-selected TLS files use the generic startup-only `tls.allowedPath`,
+defaulting to `<localStorage.path>/tls`. New gRPC tokenizer `ca_cert`, `client_cert`
+and `client_key` reads use this directory and a fixed 1 MiB limit per file.
+The client certificate and key must be supplied together. Custom CA and mTLS
+remain supported; no new HTTPS trust roots are installed.
 
-Local dictionary paths are relative to, or absolute descendants of,
-`function.analyzer.local_resource_path`. This startup-only directory must be
-absolute and cannot be `/`. When unset or empty, it uses
-`<localStorage.path>/analyzer` (default `/var/lib/milvus/data/analyzer`).
-An explicit absolute path overrides this default. Deployments using the former
-`/var/lib/milvus/analyzer` default must set that path explicitly or move their
-dictionaries, including any cached Lindera dictionaries, before upgrading.
-Reads reject traversal, symlinks and non-regular
-files, then take a bounded snapshot before parsing. `function.analyzer.max_dict_size`
-limits each local or downloaded dictionary to 64 MiB by default. Parser errors
-must not echo dictionary contents, and native errors must not append analyzer
-parameters. Lindera's CSV parser receives a private temporary snapshot; binary
-dictionaries are parsed directly from the bounded bytes.
+Local dictionaries use the startup-only `function.analyzer.local_resource_path`,
+defaulting to `<localStorage.path>/analyzer`. New dictionary reads are limited by
+`function.analyzer.max_dict_size` (64 MiB by default). Admission resolves relative
+paths against the appropriate base and requires absolute paths to be descendants.
+Descriptor-relative reads reject traversal, symlinks and non-regular files before
+reading. Text dictionaries stream through a bounded reader; TLS and binary
+Lindera dictionaries use byte snapshots, and Lindera CSV uses a temporary file.
 
-`common.fileResource.allowedPath` is a startup-only source boundary. For S3 and
-other remote storage, empty uses `<storage-root>/file_resource`, normally
-`<minio.rootPath>/file_resource` (default `files/file_resource`). This is a
-bucket-relative object-key prefix, unrelated to `localStorage.path`. For example,
-`AddFileResource(path="files/file_resource/dict.txt")` reads that object in the
-configured bucket. An explicit prefix overrides the default. Remote request
-paths must be complete keys under the prefix; they are never rebased or
-path-cleaned.
+Create/Alter resolves new relative dictionary and TLS paths to absolute paths in
+the schema before validation and WAL publication. Old definitions remain unchanged,
+including legacy relative paths that use the process working directory. Recovery
+uses the persisted definition, without the current admission directory or limit.
+Only internal schema consumers select this restoration path; client-supplied
+analyzer JSON cannot select it. Native validation always enforces admission even
+if its server extra info contains a restoration flag. Parser errors remain redacted
+on both paths and must not append dictionary contents or analyzer parameters.
 
-With a local storage backend, empty uses `<localStorage.path>/file_resource`
-(default `/var/lib/milvus/data/file_resource`). Relative request paths resolve
-beneath this base; absolute paths must already be descendants of it. Source
-files are operator-provisioned, separate from downloaded resource caches under
-`<localStorage.path>/cache/<nodeID>/file_resource/`.
+`common.fileResource.allowedPath` bounds new source registrations. Remote sources
+use complete bucket-relative keys, defaulting to `<storage-root>/file_resource`
+(normally `files/file_resource`); they are not rebased or cleaned. Local sources
+use `<localStorage.path>/file_resource` by default, and relative request paths are
+resolved before persisting registration. Registration checks both reported size
+and actual streamed bytes against `common.fileResource.maxFileSize` (64 MiB by
+default). Already registered sources download from their recorded path without
+reapplying the operator directory/size policy. Downloads still bound reads to the
+reported object size and reject size changes without publishing a partial cache.
+The per-node cache remains separate from source directories.
 
-Configure an appropriate source boundary before upgrading; move existing
-resources into it and update registrations as necessary. Admission and downloads reject
-out-of-range paths before calling the storage backend. Resource filenames in
-analyzer parameters must be single basenames, so they cannot select another
-resource's cached files. `common.fileResource.maxFileSize` limits both admission
-and actual downloads; the default is 64 MiB and zero no longer disables it.
-
-These are deployment-local access policies, not replicated metadata. CDC still
-replicates resource registration through the existing WAL message. Every
-cluster must provision compatible allowed resource prefixes and local dictionary
-files; replay does not grant permission to read outside its local policy.
+Admission is not a content snapshot or a guarantee that files cannot be replaced.
+Operators must preserve admitted paths and control their contents and permissions;
+TLS credentials should remain outside dictionary/resource trees. Lowering a limit
+or changing a base does not revoke old definitions. Missing or invalid files can
+still fail recovery. CDC carries resolved schema paths and registrations through
+the existing WAL messages; each cluster must provision those paths and contents.
+No new metadata write outside WAL or public protocol field is introduced.

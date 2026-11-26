@@ -148,22 +148,29 @@ test. Report which versions, layouts, and failure cases were actually exercised.
 
 ## Analyzer and file resource sources
 
-File resource admission and download use `common.fileResource.allowedPath` as
-a source boundary. Remote object keys remain complete keys; empty uses
-`<storage-root>/file_resource`, normally `<minio.rootPath>/file_resource`
-(default `files/file_resource`), independent of the local cache directory.
-For local sources, empty uses `<localStorage.path>/file_resource`.
-The file-resource adapter accepts relative local paths beneath this directory,
-or absolute descendants of it; this does not change the general ChunkManager
-complete-key contract. Paths outside the boundary are rejected before any
-backend probe. Local source reads pin directory descriptors and reject symlinks
-and non-regular files. Analyzer local dictionaries use the separate
-`function.analyzer.local_resource_path` boundary, defaulting to
-`<localStorage.path>/analyzer`. Both source reads have finite byte limits; a
-prior size check alone is not sufficient. Source directories are provisioned by
-operators and are separate from the disposable per-node resource cache.
+New file-resource registrations use `common.fileResource.allowedPath` as their
+source boundary. Remote keys remain complete keys, defaulting to
+`<storage-root>/file_resource`; local sources default to
+`<localStorage.path>/file_resource`. Local relative paths resolve to absolute
+paths before registration is persisted. Admission rejects out-of-range paths
+before backend probes and bounds actual reads as well as size metadata.
+Registered resource downloads retain their recorded path across operator policy
+changes and remain bounded by the object's reported size, with atomic cache
+publication only after a complete download.
 
-Request-selected TLS files have a separate `tls.allowedPath` base, defaulting to
-`<localStorage.path>/tls`. The gRPC tokenizer uses the same descriptor-relative
-file reader with a fixed 1 MiB limit. Operators must keep TLS credentials outside
-all dictionary and file-resource source trees.
+New analyzer local dictionaries use `function.analyzer.local_resource_path`
+(default `<localStorage.path>/analyzer`) and `function.analyzer.max_dict_size`.
+Request-selected TLS files use the separate generic `tls.allowedPath`
+(default `<localStorage.path>/tls`) and a fixed 1 MiB admission limit per file.
+New relative dictionary/TLS paths are resolved in the schema before validation
+and WAL publication. Existing schema restoration uses the recorded definition
+without applying the current directory/size policy. Legacy relative paths retain
+their process-working-directory meaning. Inline requests and changed definitions
+always pass current admission. Error redaction applies to both paths.
+
+These are admission rules, not immutable content snapshots. Operators must retain
+admitted files and protect them from replacement; changing policy does not revoke
+existing definitions. Source directories and TLS credentials must remain separate
+from disposable caches and from each other. CDC replays recorded schema and
+resource paths through existing WAL messages, so corresponding files must be
+provisioned on every cluster.

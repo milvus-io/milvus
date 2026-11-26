@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package canalyzer
 
 import (
@@ -104,6 +120,17 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 				analyzer.Destroy()
 				_, err = ValidateAnalyzer(string(params), "")
 				require.NoError(t, err)
+				if tc.name == "absolute" {
+					setting.SwapTempValue(t.TempDir())
+					require.NoError(t, updateParams())
+					restored, err := RestoreAnalyzer(string(params), "")
+					require.NoError(t, err)
+					restored.Destroy()
+					_, err = NewAnalyzer(string(params), "")
+					require.ErrorContains(t, err, "outside the configured directory")
+					setting.SwapTempValue(root)
+					require.NoError(t, updateParams())
+				}
 			} else {
 				require.ErrorContains(t, err, tc.want)
 				require.NotContains(t, err.Error(), "TLS_FILE_SECRET_MARKER")

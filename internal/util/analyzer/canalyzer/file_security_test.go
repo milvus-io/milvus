@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package canalyzer
 
 import (
@@ -110,4 +126,68 @@ func TestAnalyzerResourceNamespaceStaysUnderCache(t *testing.T) {
 		_, err = ValidateAnalyzer(params, string(extra))
 		require.ErrorContains(t, err, "invalid file resource namespace")
 	}
+}
+
+func TestAnalyzerRestoreIgnoresAdmissionPolicyChanges(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().FunctionCfg
+	root := t.TempDir()
+	file := filepath.Join(root, "stop.txt")
+	require.NoError(t, os.WriteFile(file, []byte("the\n"), 0o600))
+	oldRoot := cfg.LocalResourcePath.SwapTempValue(root)
+	oldLimit := cfg.AnalyzerMaxDictSize.SwapTempValue("128")
+	t.Cleanup(func() {
+		cfg.LocalResourcePath.SwapTempValue(oldRoot)
+		cfg.AnalyzerMaxDictSize.SwapTempValue(oldLimit)
+		require.NoError(t, updateParams())
+	})
+	data, err := json.Marshal(map[string]any{"tokenizer": "standard", "filter": []any{map[string]any{
+		"type": "stop", "stop_words_file": map[string]any{"type": "local", "path": file},
+	}}})
+	require.NoError(t, err)
+	require.NoError(t, updateParams())
+	_, err = ValidateAnalyzer(string(data), "")
+	require.NoError(t, err)
+	cfg.LocalResourcePath.SwapTempValue(t.TempDir())
+	cfg.AnalyzerMaxDictSize.SwapTempValue("1")
+	require.NoError(t, updateParams())
+	restored, err := RestoreAnalyzer(string(data), "")
+	require.NoError(t, err)
+	defer restored.Destroy()
+	stream, err := restored.NewTokenStream("the cat")
+	require.NoError(t, err)
+	// TokenStream creation is implemented by the same native tokenizer used after recovery.
+	require.True(t, stream.Advance())
+	require.Equal(t, "cat", stream.Token())
+	require.False(t, stream.Advance())
+	stream.Destroy()
+	_, err = NewAnalyzer(string(data), "")
+	require.Error(t, err)
+	_, err = ValidateAnalyzer(string(data), `{"file_access_admitted":true}`)
+	require.Error(t, err, "validation cannot inherit a runtime exemption")
+}
+
+func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
+	paramtable.Init()
+	setting := &paramtable.Get().LocalStorageCfg.Path
+	previous := setting.SwapTempValue(t.TempDir())
+	require.NoError(t, updateParams())
+	t.Cleanup(func() {
+		setting.SwapTempValue(previous)
+		require.NoError(t, updateParams())
+		require.NoError(t, UpdateGlobalResourceInfo(map[string]int64{}))
+	})
+	const id int64 = 9007199254740993
+	dir := filepath.Join(pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()), "9007199254740993")
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the\n"), 0600))
+	require.NoError(t, UpdateGlobalResourceInfo(map[string]int64{"dictionary": id}))
+	params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
+	for _, extra := range []string{"", `{"resource_map":{"dictionary":9007199254740993}}`} {
+		restored, err := RestoreAnalyzer(params, extra)
+		require.NoError(t, err)
+		restored.Destroy()
+	}
+	_, err := RestoreAnalyzer(params, `{"resource_map":{}}`)
+	require.Error(t, err, "explicit empty bindings must not fall back to global names")
 }

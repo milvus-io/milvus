@@ -69,7 +69,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 		DefaultValue: "",
 		Forbidden:    true,
 		Export:       true,
-		Doc:          "Base directory for request-selected TLS files, currently used by the gRPC tokenizer. Empty uses localStorage.path/tls. Must be separate from dictionary and file-resource source directories. Restart required.",
+		Doc:          "Admission base for request-selected TLS files, used by the gRPC tokenizer. Empty uses localStorage.path/tls. Existing schemas retain their paths. Keep separate from dictionary and file-resource directories. Restart required.",
 		Formatter: func(value string) string {
 			if value == "" {
 				value = filepath.Join(localStoragePath, "tls")

@@ -172,12 +172,23 @@ pub fn create_analyzer_by_json(
 
 pub fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
     if extra_info.is_empty() {
-        Ok(get_global_file_resource_helper())
+        return Ok(get_global_file_resource_helper());
+    }
+    let value =
+        json::from_str::<json::Value>(extra_info).map_err(TantivyBindingError::JsonError)?;
+    if value
+        .get("use_global_resources")
+        .and_then(json::Value::as_bool)
+        == Some(true)
+    {
+        let mut helper = get_global_file_resource_helper();
+        helper.enforce_file_access = value
+            .get("file_access_admitted")
+            .and_then(json::Value::as_bool)
+            != Some(true);
+        Ok(helper)
     } else {
-        Ok(FileResourcePathHelper::from_json(
-            &json::from_str::<json::Value>(&extra_info)
-                .map_err(|e| TantivyBindingError::JsonError(e))?,
-        )?)
+        FileResourcePathHelper::from_json(&value)
     }
 }
 
@@ -193,6 +204,18 @@ pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
     create_analyzer_by_json(json_params, &mut helper)
 }
 
+// Index readers/writers receive analyzer definitions from persisted schemas.
+pub fn restore_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
+    if params.is_empty() {
+        return Ok(standard_analyzer(vec![]));
+    }
+    let json_params = json::from_str::<json::Map<String, json::Value>>(params)
+        .map_err(TantivyBindingError::JsonError)?;
+    let mut helper = create_helper(extra_info)?;
+    helper.enforce_file_access = false;
+    create_analyzer_by_json(&json_params, &mut helper)
+}
+
 pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
     if params.len() == 0 {
         return Ok(vec![]);
@@ -202,6 +225,7 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
         .map_err(|e| TantivyBindingError::JsonError(e))?;
 
     let mut helper = create_helper(extra_info)?;
+    helper.enforce_file_access = true;
     create_analyzer_by_json(json_params, &mut helper)?;
     Ok(helper.get_resource_ids())
 }

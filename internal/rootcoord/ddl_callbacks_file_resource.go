@@ -19,6 +19,8 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"io"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -36,6 +38,11 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 		return merr.WrapErrParameterMissing("file resource path")
 	}
 	source := fileresource.RestrictSource(c.storage)
+	resolvedPath, err := source.ResolvePath(req.GetPath())
+	if err != nil {
+		return err
+	}
+	req.Path = resolvedPath
 	if exist, err := source.Exist(ctx, req.GetPath()); err != nil {
 		return err
 	} else if !exist {
@@ -69,6 +76,24 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 					size, err = source.Size(ctx, req.GetPath())
 					if err != nil {
 						return err
+					}
+					if size >= 0 && size <= maxFileSize {
+						if maxFileSize == math.MaxInt64 {
+							return merr.WrapErrServiceInternalMsg("file resource read limit is too large")
+						}
+						reader, readErr := source.Reader(ctx, req.GetPath())
+						if readErr != nil {
+							return readErr
+						}
+						readSize, readErr := io.Copy(io.Discard, io.LimitReader(reader, maxFileSize+1))
+						closeErr := reader.Close()
+						if readErr != nil {
+							return merr.Wrap(readErr, "validate file resource")
+						}
+						if closeErr != nil {
+							return merr.Wrap(closeErr, "close file resource")
+						}
+						size = readSize
 					}
 					broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 					if err != nil {
