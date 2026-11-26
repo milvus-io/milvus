@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json as json;
@@ -14,7 +14,31 @@ use crate::error::{Result, TantivyBindingError};
 /// existing offset corrections.
 #[derive(Clone)]
 pub(crate) struct MappingCharFilter {
-    mappings: Arc<HashMap<char, Vec<(String, String)>>>,
+    trie: Arc<MappingTrie>,
+}
+
+#[derive(Default)]
+struct MappingTrie {
+    // Node 0 is the root. Each edge creates one node.
+    edges: HashMap<(usize, u8), usize>,
+    targets: HashMap<usize, String>,
+}
+
+impl MappingTrie {
+    fn longest_match(&self, text: &str) -> Option<(usize, &str)> {
+        let mut node = 0;
+        let mut longest = None;
+        for (offset, byte) in text.bytes().enumerate() {
+            let Some(&child) = self.edges.get(&(node, byte)) else {
+                break;
+            };
+            node = child;
+            if let Some(target) = self.targets.get(&node) {
+                longest = Some((offset + 1, target.as_str()));
+            }
+        }
+        longest
+    }
 }
 
 impl MappingCharFilter {
@@ -33,7 +57,7 @@ impl MappingCharFilter {
                 )
             })?;
 
-        let mut parsed = HashMap::with_capacity(mappings.len());
+        let mut trie = MappingTrie::default();
         for mapping in mappings {
             let mapping = mapping.as_str().ok_or_else(|| {
                 TantivyBindingError::InvalidArgument(
@@ -41,48 +65,28 @@ impl MappingCharFilter {
                 )
             })?;
             let (source, target) = parse_mapping(mapping)?;
-            match parsed.entry(source) {
-                Entry::Vacant(entry) => {
-                    entry.insert(target);
-                }
-                Entry::Occupied(entry) => {
-                    return Err(TantivyBindingError::InvalidArgument(format!(
-                        "mapping char_filter source must be unique: {:?}",
-                        entry.key()
-                    )));
-                }
+            let mut node = 0;
+            for byte in source.bytes() {
+                let next = trie.edges.len() + 1;
+                node = *trie.edges.entry((node, byte)).or_insert(next);
+            }
+            if trie.targets.insert(node, target).is_some() {
+                return Err(TantivyBindingError::InvalidArgument(format!(
+                    "mapping char_filter source must be unique: {:?}",
+                    source
+                )));
             }
         }
 
-        let mut mappings: HashMap<char, Vec<(String, String)>> = HashMap::new();
-        for (source, target) in parsed {
-            let first_char = source.chars().next().unwrap();
-            mappings
-                .entry(first_char)
-                .or_default()
-                .push((source, target));
-        }
-        for rules in mappings.values_mut() {
-            rules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
-        }
-
         Ok(MappingCharFilter {
-            mappings: Arc::new(mappings),
+            trie: Arc::new(trie),
         })
     }
 }
 
 impl CharFilter for MappingCharFilter {
     fn apply(&self, input: FilteredText) -> FilteredText {
-        input.replace_matches(|text| {
-            let next = text.chars().next().unwrap();
-            self.mappings
-                .get(&next)
-                .into_iter()
-                .flatten()
-                .find(|(source, _)| text.starts_with(source))
-                .map(|(source, target)| (source.len(), target.as_str()))
-        })
+        input.replace_matches(|text| self.trie.longest_match(text))
     }
 
     fn box_clone(&self) -> BoxCharFilter {
@@ -230,6 +234,16 @@ mod tests {
 
         assert_eq!(output.text, "y");
         assert_eq!(output.correct_offsets(0, 1), (0, 2));
+    }
+
+    #[test]
+    fn test_mapping_char_filter_falls_back_to_longest_complete_prefix() {
+        let params = json::json!({"mappings": ["中ab=>x", "中文=>", "中=>y", "中ac=>z"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let output = filter.apply(FilteredText::new("中ab中ac中ad中文丰"));
+
+        assert_eq!(output.text, "xzyad丰");
+        assert_eq!(output.correct_offsets(2, 3), (10, 13));
     }
 
     #[test]

@@ -202,6 +202,7 @@ impl FilteredText {
 
     /// Replacements must be sorted, non-overlapping, and aligned to UTF-8 byte
     /// boundaries in the current filtered text.
+    #[cfg(test)]
     pub(crate) fn replace_ranges<S: AsRef<str>>(
         self,
         replacements: Vec<(usize, usize, S)>,
@@ -286,6 +287,7 @@ impl FilteredText {
         }
     }
 
+    #[cfg(test)]
     fn valid_replacements<S>(text: &str, replacements: &[(usize, usize, S)]) -> bool {
         let mut cursor = 0;
         for (start, end, _) in replacements {
@@ -408,12 +410,15 @@ impl FilteredText {
                 let (original_start, original_end) = self.correct_offsets(start, end);
                 output.text.push_str(replacement);
                 let source = &self.text[start..end];
+                let delta = output_corrections
+                    .last()
+                    .map_or(0, |last| last.post_delta());
                 let preserves_single_char_offsets = !source.is_empty()
                     && source.chars().nth(1).is_none()
                     && !replacement.is_empty()
                     && replacement.chars().nth(1).is_none()
-                    && original_start == output_start
-                    && original_end == output.text.len();
+                    && original_start == add_delta(output_start, delta)
+                    && original_end == add_delta(output.text.len(), delta);
                 if !preserves_single_char_offsets {
                     Self::push_span_correction(
                         output_corrections,
@@ -604,6 +609,21 @@ mod tests {
         assert_eq!(filtered.correct_offsets(0, 1), (0, 2));
         assert_eq!(filtered.correct_offsets(1, 2), (0, 2));
         assert_eq!(filtered.correction_count(), 1);
+    }
+
+    #[test]
+    fn test_single_char_replacements_reuse_previous_offset_delta() {
+        for replacement in ["and", ""] {
+            let filtered = FilteredText::new("&A中").replace_ranges(vec![
+                (0, 1, replacement),
+                (1, 2, "a"),
+                (2, 5, "文"),
+            ]);
+            let start = replacement.len();
+            assert_eq!(filtered.correction_count(), 1);
+            assert_eq!(filtered.correct_offsets(start, start + 1), (1, 2));
+            assert_eq!(filtered.correct_offsets(start + 1, start + 4), (2, 5));
+        }
     }
 
     #[test]
