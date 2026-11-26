@@ -10,6 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/idf"
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ReplicaQueries owns live read resources for the lifetime of the physical
@@ -34,7 +36,10 @@ type ReplicaQueries struct {
 	buffer   *replica.Buffer
 	dispatch *queryresource.Dispatcher
 	mu       sync.Mutex
-	active   map[string]*queryChannel
+	// Cleanup only needs the resource manager. Its lookup must not take mu
+	// while holding the recovery module lock used to serialize admission.
+	active   *typeutil.ConcurrentMap[string, *queryChannel]
+	recovery *PChannelRecoveryManager // bound while this replica has writer recovery
 	through  uint64
 	changed  chan struct{}
 }
@@ -46,28 +51,49 @@ type queryChannel struct {
 }
 
 func NewReplicaQueries(ctx context.Context, channel string, b *replica.Buffer, through uint64) *ReplicaQueries {
-	return &ReplicaQueries{ctx: ctx, channel: channel, buffer: b, through: through, dispatch: queryresource.NewConfiguredDispatcher(), active: make(map[string]*queryChannel), changed: make(chan struct{})}
+	return &ReplicaQueries{ctx: ctx, channel: channel, buffer: b, through: through, dispatch: queryresource.NewConfiguredDispatcher(), active: typeutil.NewConcurrentMap[string, *queryChannel](), changed: make(chan struct{})}
 }
 
 // RetryFailedPreparation reports whether local failures should be retried for
 // the writer that supplied the current target.
 func (q *ReplicaQueries) RetryFailedPreparation() bool { return !q.writer.Load() }
 
+// BindWriter attaches the admission check before writer cleanup starts. A
+// demotion or failed open detaches recovery without releasing any query views.
+func (q *ReplicaQueries) BindWriter(m *PChannelRecoveryManager) func() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.recovery = m
+	return func() {
+		q.mu.Lock()
+		q.recovery = nil
+		q.mu.Unlock()
+	}
+}
+
+func (q *ReplicaQueries) OldestDataVersion(vchannel string) (qviews.DataVersion, bool) {
+	if ch, ok := q.active.Get(vchannel); ok {
+		return ch.resources.OldestDataVersion()
+	}
+	return qviews.DataVersion{}, false
+}
+
 // SetWriter changes failure ownership without interrupting a running build.
 func (q *ReplicaQueries) SetWriter(writer bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.writer.Store(writer)
-	for _, ch := range q.active {
+	q.active.Range(func(_ string, ch *queryChannel) bool {
 		q.retryAdmissionLocked(ch)
-	}
+		return true
+	})
 }
 
 func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	vc := req.Key.ShardID.VChannel
-	ch := q.active[vc]
+	ch, _ := q.active.Get(vc)
 	if ch == nil {
 		r := resource.Resource()
 		cfg := queryresource.Config{
@@ -85,13 +111,13 @@ func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
 			refs:           make(map[qviews.QueryViewKey]*snview.AcquireResource),
 			awaitingSealed: make(map[int64]struct{}),
 		}
-		q.active[vc] = ch
+		q.active.Insert(vc, ch)
 	}
 	q.admitLocked(ch, &req)
 }
 
 func (q *ReplicaQueries) admitLocked(ch *queryChannel, req *snview.AcquireResource) {
-	if !ch.resources.TryAcquireLocked(*req, nil) {
+	if !q.tryAcquireLocked(ch, req) {
 		if !q.writer.Load() {
 			ch.refs[req.Key] = req
 			return
@@ -99,6 +125,23 @@ func (q *ReplicaQueries) admitLocked(ch *queryChannel, req *snview.AcquireResour
 		ch.resources.Reject(*req)
 	}
 	ch.refs[req.Key] = nil
+}
+
+// Both a new reference and a cleanup decision are made under module.mu. The
+// writer checks the in-memory floor, including a pending catalog write.
+func (q *ReplicaQueries) tryAcquireLocked(ch *queryChannel, req *snview.AcquireResource) bool {
+	if q.recovery != nil {
+		module := q.recovery.Module(req.Key.ShardID.VChannel)
+		if module == nil {
+			return false
+		}
+		module.mu.Lock()
+		defer module.mu.Unlock()
+		if !module.acceptsQueryVersionLocked(req.Key.QueryViewVersion.DataVersion) {
+			return false
+		}
+	}
+	return ch.resources.TryAcquireLocked(*req, nil)
 }
 
 func (q *ReplicaQueries) retryAdmissionLocked(ch *queryChannel) {
@@ -120,7 +163,7 @@ func (q *ReplicaQueries) retryAdmissionLocked(ch *queryChannel) {
 
 func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
 	q.mu.Lock()
-	ch := q.active[req.Key.ShardID.VChannel]
+	ch, _ := q.active.Get(req.Key.ShardID.VChannel)
 	if ch == nil {
 		q.mu.Unlock()
 		if req.OnDropped != nil {
@@ -132,8 +175,8 @@ func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
 	onDropped := req.OnDropped
 	req.OnDropped = func() {
 		q.mu.Lock()
-		if q.active[req.Key.ShardID.VChannel] == ch && len(ch.refs) == 0 {
-			delete(q.active, req.Key.ShardID.VChannel)
+		if current, _ := q.active.Get(req.Key.ShardID.VChannel); current == ch && len(ch.refs) == 0 {
+			q.active.Remove(req.Key.ShardID.VChannel)
 		}
 		q.mu.Unlock()
 		if onDropped != nil {
@@ -143,14 +186,23 @@ func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
 	// Serialize unregister/register of the same key. Release schedules cleanup
 	// and the callback outside the manager lock.
 	ch.resources.Release(req)
+	if q.recovery != nil {
+		if module := q.recovery.Module(req.Key.ShardID.VChannel); module != nil {
+			module.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
+		}
+	}
 	q.retryAdmissionLocked(ch)
 	q.mu.Unlock()
 }
 
 func (q *ReplicaQueries) Close() {
 	q.mu.Lock()
-	active := q.active
-	q.active = make(map[string]*queryChannel)
+	var active []*queryChannel
+	q.active.Range(func(name string, ch *queryChannel) bool {
+		active = append(active, ch)
+		q.active.Remove(name)
+		return true
+	})
 	close(q.changed)
 	q.changed = make(chan struct{})
 	q.mu.Unlock()
@@ -161,9 +213,7 @@ func (q *ReplicaQueries) Close() {
 }
 
 func (q *ReplicaQueries) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
-	q.mu.Lock()
-	ch := q.active[key.ShardID.VChannel]
-	q.mu.Unlock()
+	ch, _ := q.active.Get(key.ShardID.VChannel)
 	if ch == nil {
 		return nil, false
 	}
@@ -182,9 +232,7 @@ func (q *ReplicaQueries) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRunt
 // before a prepared view may start serving. The runtime barrier also drains
 // WAL effects and sealed events delivered during the catalog read.
 func (q *ReplicaQueries) PrepareUp(ctx context.Context, key qviews.QueryViewKey) error {
-	q.mu.Lock()
-	ch := q.active[key.ShardID.VChannel]
-	q.mu.Unlock()
+	ch, _ := q.active.Get(key.ShardID.VChannel)
 	if ch != nil {
 		if runtime, ok := ch.resources.QueryRuntime(key); ok {
 			return runtime.PrepareQueryView(ctx)
@@ -203,7 +251,7 @@ func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint6
 		if msg.TimeTick() <= q.through {
 			continue
 		}
-		if ch := q.active[msg.VChannel()]; ch != nil {
+		if ch, ok := q.active.Get(msg.VChannel()); ok {
 			if msg.MessageType() == message.MessageTypeCreateSegment {
 				ch.awaitingSealed[message.MustAsImmutableCreateSegmentMessageV2(msg).Header().GetSegmentId()] = struct{}{}
 			}
@@ -211,9 +259,10 @@ func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint6
 		}
 	}
 	// A physical confirmation covers every vchannel on this PChannel.
-	for _, ch := range q.active {
+	q.active.Range(func(_ string, ch *queryChannel) bool {
 		ch.resources.ObserveEvent(q.ctx, walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: through}})
-	}
+		return true
+	})
 	q.through = through
 	close(q.changed)
 	q.changed = make(chan struct{})
@@ -292,7 +341,7 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 	view.CaptureQueryView = func(m *viewpb.QueryViewMeta, cb func(walview.VChannelWALView)) bool {
 		return q.capture(q.ctx, m, cb) == nil
 	}
-	if ch := q.active[meta.Vchannel]; ch != nil {
+	if ch, ok := q.active.Get(meta.Vchannel); ok {
 		for _, segment := range view.SegmentSnapshot.Segments {
 			if segment.SealedAtDataVersion == nil {
 				ch.awaitingSealed[segment.SegmentID] = struct{}{}
@@ -317,7 +366,7 @@ func (q *ReplicaQueries) refreshSealedVersions(ctx context.Context, vchannel str
 		}
 	}
 	q.mu.Lock()
-	ch := q.active[vchannel]
+	ch, _ := q.active.Get(vchannel)
 	if ch != nil {
 		for id := range ch.awaitingSealed {
 			if _, ok := segments[id]; !ok {
@@ -334,7 +383,7 @@ func (q *ReplicaQueries) refreshSealedVersions(ctx context.Context, vchannel str
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.active[vchannel] == ch {
+	if current, _ := q.active.Get(vchannel); current == ch {
 		for id, s := range segments {
 			if version := s.SealedAtDataVersion; version != nil {
 				delete(ch.awaitingSealed, id)

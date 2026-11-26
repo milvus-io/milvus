@@ -2,14 +2,20 @@ package vchannel
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	sncatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -56,57 +62,224 @@ func TestReplicaQueryPrefixIsMonotonic(t *testing.T) {
 	require.EqualValues(t, 15, q.through)
 }
 
-func TestReplicaQueryAdmissionDuringForwardRecovery(t *testing.T) {
-	scheduler := nodescheduler.New(1)
-	defer scheduler.Close()
+func newTestReplicaQueries(t *testing.T, canCapture <-chan struct{}) (*ReplicaQueries, *queryresource.Manager) {
+	t.Helper()
 	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
-	defer q.Close()
+	t.Cleanup(q.Close)
+	return q, addTestQueryChannel(q, canCapture)
+}
+
+func addTestQueryChannel(q *ReplicaQueries, canCapture <-chan struct{}) *queryresource.Manager {
 	ch := &queryChannel{
 		refs: make(map[qviews.QueryViewKey]*snview.AcquireResource),
 		resources: queryresource.NewManager(queryresource.Config{
-			Scheduler: scheduler, Dispatcher: q.dispatch,
+			Scheduler: nodescheduler.Get(), Dispatcher: q.dispatch,
 			Builders: []queryresource.QueryRuntimeModuleBuilder{nil},
-			CaptureView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) error {
+			CaptureView: func(ctx context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) error {
+				if canCapture != nil {
+					select {
+					case <-canCapture:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
 				install(walview.VChannelWALView{})
 				return nil
 			},
 		}),
 	}
-	q.active["v1"] = ch
-	acquire := func(version int64) (qviews.QueryViewKey, <-chan bool) {
-		meta := &viewpb.QueryViewMeta{
-			Vchannel: "v1", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: version}},
-		}
-		key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.Version)}
-		outcome := make(chan bool, 1)
-		q.Acquire(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { outcome <- true }, OnUnrecoverable: func() { outcome <- false }})
-		return key, outcome
-	}
-	expect := func(result <-chan bool, ready bool) {
-		t.Helper()
-		select {
-		case got := <-result:
-			require.Equal(t, ready, got)
-		case <-time.After(5 * time.Second):
-			t.Fatal("query resource preparation did not report")
-		}
-	}
+	q.active.Insert("v1", ch)
+	return ch.resources
+}
 
-	high, first := acquire(8)
-	expect(first, true)
-	expired, obsolete := acquire(2)
-	_, third := acquire(3)
-	_, fourth := acquire(4)
+func acquireReplicaView(q *ReplicaQueries, version int64) (qviews.QueryViewKey, <-chan bool) {
+	meta := &viewpb.QueryViewMeta{
+		Vchannel: "v1", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: version}},
+	}
+	key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.Version)}
+	outcome := make(chan bool, 1)
+	q.Acquire(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { outcome <- true }, OnUnrecoverable: func() { outcome <- false }})
+	return key, outcome
+}
+
+func expectReplicaAdmission(t *testing.T, result <-chan bool, ready bool) {
+	t.Helper()
+	select {
+	case got := <-result:
+		require.Equal(t, ready, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("query resource preparation did not report")
+	}
+}
+
+func TestReplicaQueryAdmissionDuringForwardRecovery(t *testing.T) {
+	q, _ := newTestReplicaQueries(t, nil)
+	high, first := acquireReplicaView(q, 8)
+	expectReplicaAdmission(t, first, true)
+	expired, obsolete := acquireReplicaView(q, 2)
+	_, third := acquireReplicaView(q, 3)
+	_, fourth := acquireReplicaView(q, 4)
 	q.Release(snview.ReleaseResource{Key: expired})
 	q.Release(snview.ReleaseResource{Key: high})
-	expect(third, true)
-	expect(fourth, true)
+	expectReplicaAdmission(t, third, true)
+	expectReplicaAdmission(t, fourth, true)
 	select {
 	case <-obsolete:
 		t.Fatal("a dropped pending acquisition was revived")
 	default:
 	}
-	_, waiting := acquire(1)
+	_, waiting := acquireReplicaView(q, 1)
 	q.SetWriter(true)
-	expect(waiting, false)
+	expectReplicaAdmission(t, waiting, false)
+}
+
+func TestReplicaQueryRetentionAcrossWriterLifetimes(t *testing.T) {
+	canCapture := make(chan struct{})
+	q, resources := newTestReplicaQueries(t, canCapture)
+	key, ready := acquireReplicaView(q, 10)
+
+	seg := &streamingpb.SegmentAssignmentMeta{
+		CollectionId: 1, PartitionId: 10, SegmentId: 100, Vchannel: "v1",
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+		CheckpointTimeTick: 10, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 11},
+	}
+	openWriter := func() (*PChannelRecoveryManager, func()) {
+		writer, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+			PChannel: "p", QueryRetention: q,
+			VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": restoreSchemaTestMeta()},
+			Segments:      map[int64]*streamingpb.SegmentAssignmentMeta{100: seg},
+		})
+		require.NoError(t, err)
+		t.Cleanup(writer.Close)
+		require.Nil(t, writer.Module("v1").localQueries)
+		require.Nil(t, writer.queryDispatcher)
+		_, owned := writer.GetQueryRuntime(key)
+		require.False(t, owned)
+		_, owned = writer.GetQueryReadRuntime(key)
+		require.False(t, owned)
+		detach := q.BindWriter(writer)
+		q.SetWriter(true)
+		return writer, detach
+	}
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 40}
+	writer, detach := openWriter()
+	require.Empty(t, writer.ConsumeCleanupSnapshots(cleanup), "the Preparing view already pins its version")
+	close(canCapture)
+	expectReplicaAdmission(t, ready, true)
+	runtime, ok := resources.QueryRuntime(key)
+	require.True(t, ok)
+	require.False(t, writer.Module("v1").vchannelView.SegmentDataVersionSummary().GT(key.QueryViewVersion.DataVersion))
+	detach()
+	writer.Close()
+	q.SetWriter(false)
+	current, ok := resources.QueryRuntime(key)
+	require.True(t, ok)
+	require.Same(t, runtime, current)
+
+	writer, detach = openWriter()
+	defer detach()
+	dropped := make(chan struct{})
+	q.Release(snview.ReleaseResource{Key: key, OnDropped: func() { close(dropped) }})
+	select {
+	case <-dropped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old view did not retire")
+	}
+	require.False(t, q.active.Contain("v1"))
+	addTestQueryChannel(q, nil) // A fresh manager has no runtime watermark of its own.
+	require.Empty(t, writer.ConsumeCleanupSnapshots(cleanup))
+	module := writer.Module("v1")
+	require.EqualValues(t, 11, module.vchannelView.SegmentDataVersionSummary().StreamingVersion)
+	_, late := acquireReplicaView(q, 10)
+	expectReplicaAdmission(t, late, false)
+	_, ok = q.OldestDataVersion("v1")
+	require.False(t, ok)
+	for _, snapshot := range writer.ConsumeDirtySnapshots() {
+		snapshot.MarkPersisted()
+	}
+	deletes := writer.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, deletes, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, deletes[0].Op())
+	deletes[0].MarkPersisted()
+	require.Empty(t, module.segments)
+}
+
+func TestReplicaQueryPinsDroppedChannel(t *testing.T) {
+	q, _ := newTestReplicaQueries(t, nil)
+	key, ready := acquireReplicaView(q, 10)
+	expectReplicaAdmission(t, ready, true)
+	meta := restoreSchemaTestMeta()
+	meta.CollectionInfo.Schemas = meta.CollectionInfo.Schemas[1:]
+	meta.State = streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED
+	meta.TransformMaterializedTimeTick = meta.CheckpointTimeTick
+	writer, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel: "p", QueryRetention: q, VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": meta},
+	})
+	require.NoError(t, err)
+	t.Cleanup(writer.Close)
+	detach := q.BindWriter(writer)
+	defer detach()
+	q.SetWriter(true)
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 40, SummaryRetired: func(string, uint64) bool { return true }}
+	require.Empty(t, writer.ConsumeCleanupSnapshots(cleanup))
+	lateKey, late := acquireReplicaView(q, 11)
+	expectReplicaAdmission(t, late, false)
+	q.Release(snview.ReleaseResource{Key: key})
+	deletes := writer.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, deletes, 1)
+	deletes[0].MarkPersisted()
+	require.Nil(t, writer.Module("v1"))
+	_, removed := acquireReplicaView(q, 12)
+	expectReplicaAdmission(t, removed, false)
+	q.Release(snview.ReleaseResource{Key: lateKey})
+}
+
+func TestReplicaQueryCaptureReleasesPinOnShutdown(t *testing.T) {
+	catalog := sncatalog.NewCataLog(nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+	defer mockey.Mock(mockey.GetMethod(catalog, "ListVChannel")).Return([]*streamingpb.VChannelMeta{restoreSchemaTestMeta()}, nil).Build().UnPatch()
+	defer mockey.Mock(mockey.GetMethod(catalog, "ListSegmentAssignment")).Return([]*streamingpb.SegmentAssignmentMeta{{Vchannel: "other"}}, nil).Build().UnPatch()
+	readBaseline := make(chan struct{}, 1)
+	defer mockey.Mock(walsummary.ReadSnapshot).To(func(context.Context, *walsummary.Store, int64) (*walsummary.Snapshot, error) {
+		readBaseline <- struct{}{}
+		return &walsummary.Snapshot{}, nil
+	}).Build().UnPatch()
+	for _, tc := range []string{"view retired", "replica closed"} {
+		t.Run(tc, func(t *testing.T) {
+			ctx, cancelReplica := context.WithCancel(t.Context())
+			defer cancelReplica()
+			captureCtx, cancelView := context.WithCancel(t.Context())
+			defer cancelView()
+			buffer := replica.NewBuffer(10)
+			q := NewReplicaQueries(ctx, "p", buffer, 10)
+			defer q.Close()
+			key := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "v1"}}
+			_, ok := q.GetQueryReadRuntime(key)
+			require.False(t, ok)
+			require.Error(t, q.PrepareUp(ctx, key))
+			done := make(chan error, 1)
+			meta := &viewpb.QueryViewMeta{Vchannel: "v1", CollectionId: 1, SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}}}
+			go func() {
+				done <- q.capture(captureCtx, meta, func(walview.VChannelWALView) { t.Error("installed a view beyond the observed prefix") })
+			}()
+			<-readBaseline
+			buffer.Observe(nil, 30)
+			buffer.Truncate(30)
+			if tc == "view retired" {
+				cancelView()
+			} else {
+				cancelReplica()
+			}
+			require.ErrorIs(t, <-done, context.Canceled)
+			cursor, floor, err := buffer.Pin(false)
+			require.NoError(t, err)
+			require.EqualValues(t, 30, floor)
+			cursor.Close()
+			released := make(chan bool, 1)
+			q.Release(snview.ReleaseResource{Key: key, OnDropped: func() { released <- true }})
+			expectReplicaAdmission(t, released, true)
+			buffer.Close()
+			require.ErrorIs(t, q.capture(captureCtx, meta, nil), io.EOF)
+		})
+	}
 }

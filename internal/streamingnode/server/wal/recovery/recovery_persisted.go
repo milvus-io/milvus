@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -119,11 +120,11 @@ func ReadFrozenSnapshot(ctx context.Context, target types.PChannelInfo) (*Frozen
 // while the source still accepts appends. The scheduler cannot run any writer
 // side effects before activation. An older metadata format needs the existing
 // exclusive migration path and is restored after ownership changes.
-func (s *FrozenSnapshot) Prepare(ctx context.Context, target types.PChannelInfo, cursor *replica.RecoveryCursor) error {
+func (s *FrozenSnapshot) Prepare(ctx context.Context, target types.PChannelInfo, cursor *replica.RecoveryCursor, retention vchannel.QueryRetention) error {
 	if s.Checkpoint == nil || s.Checkpoint.Magic != utility.RecoveryMagicSchemaMetadataAligned {
 		return nil
 	}
-	r := newRecoveryStorage(target, s.Checkpoint)
+	r := newRecoveryStorage(target, s.Checkpoint, WithQueryRetention(retention))
 	s.staged = r
 	r.SetLogger(resource.Resource().Logger().With(mlog.String("channel", target.String())))
 	r.taskScheduler.staging.Store(true)

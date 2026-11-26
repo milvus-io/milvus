@@ -301,12 +301,17 @@ func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls,
 	if cursor != nil {
 		streamBuilder = &replicaRecoveryBuilder{WALImpls: l, cursor: cursor, ready: liveReady, onFatal: roWAL.markUnavailable}
 	}
+	var retention vchannel.QueryRetention
+	if readSide != nil {
+		retention = readSide.readQueries
+	}
 	rs, snapshot, err := frozen.Recover(
 		ctx,
 		streamBuilder,
 		cp,
 		firstBarrier,
 		recovery.WithWriterPersistence(roWAL.writerPersistence),
+		recovery.WithQueryRetention(retention),
 		recovery.WithObservedWriterBarrier(cursor != nil),
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
 		recovery.WithConsumedThrough(func(tt uint64) {
@@ -329,11 +334,12 @@ func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls,
 			}
 		}),
 		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
-		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) {
+		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) func() {
 			if readSide != nil {
-				return
+				return readSide.readQueries.BindWriter(manager)
 			}
 			resources.queryViewHandler = snview.RecoverPChannelSNQueryViewHandler(roWAL.availableCtx, opt.Channel.Name, queryViewCatalog, manager, persistedViews)
+			return nil
 		}),
 	)
 	if err != nil {
@@ -519,7 +525,7 @@ func (r *roWALAdaptorImpl) Promote(ctx context.Context, target types.PChannelInf
 			return nil, merr.WrapErrServiceUnavailable("replica buffer no longer covers writer recovery checkpoint")
 		}
 		defer snapshot.Close()
-		if err := snapshot.Prepare(ctx, target, cursor); err != nil {
+		if err := snapshot.Prepare(ctx, target, cursor, r.readQueries); err != nil {
 			return nil, err
 		}
 	}

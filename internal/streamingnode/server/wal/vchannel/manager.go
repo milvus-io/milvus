@@ -27,7 +27,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// QueryRetention reads admitted local QueryView references. Writer admission and
+// cleanup both hold the VChannelRecoveryModule lock while using these references.
+type QueryRetention interface {
+	OldestDataVersion(vchannel string) (qviews.DataVersion, bool)
+}
+
 type PChannelManagerConfig struct {
+	QueryRetention             QueryRetention
 	QueryScheduler             nodescheduler.Scheduler
 	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
@@ -75,14 +82,16 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 	}
 	segmentsByVChannel := groupSegmentsByVChannel(config.Segments)
 	manager := &PChannelRecoveryManager{
-		pchannel:                config.PChannel,
-		queryDispatcher:         queryresource.NewConfiguredDispatcher(),
-		queryTransformLogStream: walsummary.NewStream(config.SummaryManager),
-		modules:                 typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
-		segmentsByVChannel:      segmentsByVChannel,
-		dirtyModules:            make(map[string]*VChannelRecoveryModule),
-		config:                  config,
-		closeCh:                 make(chan struct{}),
+		pchannel:           config.PChannel,
+		modules:            typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
+		segmentsByVChannel: segmentsByVChannel,
+		dirtyModules:       make(map[string]*VChannelRecoveryModule),
+		config:             config,
+		closeCh:            make(chan struct{}),
+	}
+	if config.QueryRetention == nil {
+		manager.queryDispatcher = queryresource.NewConfiguredDispatcher()
+		manager.queryTransformLogStream = walsummary.NewStream(config.SummaryManager)
 	}
 	for _, vchannel := range manager.initialVChannels(config) {
 		module, err := manager.newModule(vchannel)
@@ -271,9 +280,11 @@ func (m *PChannelRecoveryManager) Start() {
 
 func (m *PChannelRecoveryManager) Close() {
 	m.closeOnce.Do(func() {
-		m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool { module.CloseQueryResources(); return true })
-		_ = m.queryTransformLogStream.Close()
-		m.queryDispatcher.Close()
+		if m.queryDispatcher != nil {
+			m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool { module.CloseQueryResources(); return true })
+			_ = m.queryTransformLogStream.Close()
+			m.queryDispatcher.Close()
+		}
 		close(m.closeCh)
 	})
 	m.wg.Wait()
@@ -328,6 +339,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		},
 	}
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
+		QueryRetention:             m.config.QueryRetention,
 		QueryScheduler:             m.config.QueryScheduler,
 		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
 		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,

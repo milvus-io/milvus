@@ -27,6 +27,8 @@
 
 所有查询均向当前 RW 取 MVCC，RO 持续追赶 WAL 和准备 QueryView。RO 查询路由留待后续接入。查询的 WAL 部分在提供 MVCC 的同一实例执行，按主键回查也沿用此实例。Append 和 Strong 另行检查写准入和 writer term；从 A Seal 到 B 完成本任屏障且被客户端发现，两者会有等待窗口。角色切换本身不触发已 Up View 的重建。[查询发现](../qviews/query/replica_discovery.md)
 
+副本读侧的 `ReplicaQueries` 按 VChannel 管理 QueryView 引用。Preparing 登记引用时就开始保护该版本，Dropped 释放引用。冷启动 RW 和 RO 升主都在启动后台清理前把 writer 接到同一组引用。RecoveryStorage 清理 segment 时读取本机最老的在用 DataVersion，清理已删除的 VChannel 时确认本机引用已释放。新引用的准入与版本下界推进在同一个 VChannel 锁内完成，下界持久化后才能删除 segment 元数据。降主解除 writer 的关联，既有引用和 QueryRuntime 继续随读侧运行。
+
 ## QueryView 多副本确认
 
 QueryView 的逻辑身份为 ShardID + QueryViewVersion。RW 从当前 Watch 取得报告者的 WALReplicaID，以 ShardID + QueryViewVersion 匹配本地状态；重复回报幂等。RW 协调当前参与集合的 Ready 和 Down；RO 使用同一查询状态机准备和排空本地资源，回报本地状态。RW 在收到 Coord 的 Up 目标且参与者均已 Ready 后，先持久发布 Up，再同步该版本的 Up 状态并上报 Coord。Down 时先分发排空意图，各参与者遵守已有租约及操作引用；收齐 Down 或安全退出证明后，RW 才删除持久 Up 并上报。Dropped 继续走原释放流程。重连或换主后从新流收集本地状态；成员变化时按新集合判断，新增成员单独确认。[QueryView 状态机](../qviews/query_view_state_machine.md) · [成员确认规则](wal-replica-protocol.md)

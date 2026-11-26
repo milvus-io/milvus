@@ -26,11 +26,10 @@ func TestQueryReadinessPublishesCompletedCommitBeforeOwnerNotification(t *testin
 		State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 	}, nil, segment.ViewConfig{})
 	module := &VChannelRecoveryModule{
-		segments:       map[int64]*segment.SegmentView{7: sealed, 8: open},
-		querySealed:    make(map[int64]bool),
-		queryResources: queryresource.NewManager(queryresource.Config{}),
+		segments:     map[int64]*segment.SegmentView{7: sealed, 8: open},
+		localQueries: &localQueryResources{Manager: queryresource.NewManager(queryresource.Config{}), sealed: make(map[int64]bool)},
 	}
-	defer module.queryResources.Close()
+	defer module.localQueries.Close()
 	var events []walview.SegmentSealedEvent
 	observed := mockey.Mock((*queryresource.Manager).ObserveEvent).To(func(_ *queryresource.Manager, _ context.Context, event walview.VChannelResourceEvent) {
 		// Copy before return: the notification can be allocated on the caller's stack.

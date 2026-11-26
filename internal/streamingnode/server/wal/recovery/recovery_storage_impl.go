@@ -82,7 +82,7 @@ func (rs *recoveryStorageImpl) activate(ctx context.Context, recoveryStreamBuild
 	// Register recovered QueryView references before background cleanup can
 	// advance the segment-version floor or reclaim their bootstrap resources.
 	if rs.recoverQueryViews != nil {
-		rs.recoverQueryViews(rs.vchannelManager)
+		rs.detachWriterQueries = rs.recoverQueryViews(rs.vchannelManager)
 	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
@@ -101,6 +101,12 @@ func (rs *recoveryStorageImpl) activate(ctx context.Context, recoveryStreamBuild
 
 type RecoveryStorageOption func(*recoveryStorageImpl)
 
+// WithQueryRetention lets a replica writer reclaim metadata against the query
+// references owned by its read side. The writer never closes those resources.
+func WithQueryRetention(retention vchannel.QueryRetention) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.queryRetention = retention }
+}
+
 // WithObservedWriterBarrier selects a logical source that already proved the
 // writer barrier on its linked stream. Physical replay still traverses each leg.
 func WithObservedWriterBarrier(observed bool) RecoveryStorageOption {
@@ -115,7 +121,7 @@ func WithRecoveryComplete(complete func(*RecoverySnapshot)) RecoveryStorageOptio
 
 // WithQueryViewRecovery installs query references at the startup barrier, before
 // background persistence and cleanup begin. The callback must not block on I/O.
-func WithQueryViewRecovery(recoverViews func(*vchannel.PChannelRecoveryManager)) RecoveryStorageOption {
+func WithQueryViewRecovery(recoverViews func(*vchannel.PChannelRecoveryManager) func()) RecoveryStorageOption {
 	return func(r *recoveryStorageImpl) { r.recoverQueryViews = recoverViews }
 }
 
@@ -195,10 +201,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 		rs.nodeScheduler = nodescheduler.Get()
 	}
 	rs.taskScheduler = newScopedTaskScheduler(rs.nodeScheduler)
-	if rs.persistence != nil {
-		rs.taskScheduler.admission = rs.persistence
-		rs.queryScheduler = newScopedTaskScheduler(rs.nodeScheduler)
-	}
+	rs.taskScheduler.admission = rs.persistence
 	rs.broadcastAck = newBroadcastAckModule(moduleapi.Runtime{
 		Scheduler: rs.taskScheduler,
 		Notifier:  rs,
@@ -212,7 +215,8 @@ type recoveryStorageImpl struct {
 	writerBarrierObserved bool
 	frozen                *FrozenSnapshot
 	persistence           *replica.Admission
-	queryScheduler        *scopedTaskScheduler
+	queryRetention        vchannel.QueryRetention
+	detachWriterQueries   func()
 	publishedCheckpoint   func(*utility.WALCheckpoint)
 	consumedThrough       func(uint64)
 	mlog.Binder
@@ -229,7 +233,7 @@ type recoveryStorageImpl struct {
 	tailController          *recoveryTailController
 	recoveryTailRateLimiter RecoveryTailRateLimiter
 	broadcastAck            *broadcastAckModule
-	recoverQueryViews       func(*vchannel.PChannelRecoveryManager)
+	recoverQueryViews       func(*vchannel.PChannelRecoveryManager) func()
 	vchannelManager         *vchannel.PChannelRecoveryManager
 	summaryManager          *walsummary.Manager
 	nodeScheduler           nodescheduler.Scheduler
@@ -308,25 +312,14 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID(), retry.Attempts(1)),
 	)
 	// The temporary L0 consumer rebuilds retained Delete handles from WAL replay.
-	var queryScheduler nodescheduler.Scheduler = r.taskScheduler
-	if r.queryScheduler != nil {
-		queryScheduler = r.queryScheduler
-	}
-	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
-		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
-			queryresource.NewGrowingRuntimeModuleBuilder(nil),
-			queryresource.NewReadSchemaModuleBuilder(),
-			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager())),
-		},
-		QueryScheduler:            queryScheduler,
-		QueryStatsChunkManager:    resource.Resource().ChunkManager(),
-		QueryViewLoadInfoProvider: queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient()),
-		PChannel:                  r.channel.Name,
-		VChannelMetas:             vchannels,
-		Segments:                  segments,
-		Runtime:                   moduleRuntime,
-		Logger:                    r.Logger(),
-		SegmentLifecycle:          segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
+	config := vchannel.PChannelManagerConfig{
+		QueryRetention:   r.queryRetention,
+		PChannel:         r.channel.Name,
+		VChannelMetas:    vchannels,
+		Segments:         segments,
+		Runtime:          moduleRuntime,
+		Logger:           r.Logger(),
+		SegmentLifecycle: segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
 		SegmentPackWriter: segment.NewBulkPackWriter(
 			resource.Resource().ChunkManager(),
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
@@ -336,7 +329,18 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		L0Materializer:     l0Writer,
 		L0MaterializeRows:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
 		L0MaterializeBytes: uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
-	})
+	}
+	if r.queryRetention == nil {
+		config.QueryRuntimeModuleBuilders = []queryresource.QueryRuntimeModuleBuilder{
+			queryresource.NewGrowingRuntimeModuleBuilder(nil),
+			queryresource.NewReadSchemaModuleBuilder(),
+			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager())),
+		}
+		config.QueryScheduler = r.taskScheduler
+		config.QueryStatsChunkManager = resource.Resource().ChunkManager()
+		config.QueryViewLoadInfoProvider = queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient())
+	}
+	manager, err := vchannel.NewPChannelRecoveryManager(config)
 	if err != nil {
 		return err
 	}
@@ -427,11 +431,11 @@ func (r *recoveryStorageImpl) closeRecoveryResources() {
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
 	}
+	if r.detachWriterQueries != nil {
+		r.detachWriterQueries()
+	}
 	if r.vchannelManager != nil {
 		r.vchannelManager.Close()
-	}
-	if r.queryScheduler != nil {
-		r.queryScheduler.Close()
 	}
 	if r.taskScheduler != nil {
 		r.taskScheduler.Close()

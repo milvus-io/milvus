@@ -10,13 +10,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -142,4 +145,43 @@ func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.
 	snapshots := module.ConsumeCleanupSnapshots(cleanup)
 	require.Len(t, snapshots, 1)
 	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+}
+
+// The non-replica WAL still captures a query view from its recovery module,
+// including the live observer and its own transform subscription.
+func TestRecoveryModuleOwnsNonReplicaQueries(t *testing.T) {
+	vc := restoreSchemaTestMeta()
+	schema := mock_segcore.GenTestCollectionSchema("query-retention", schemapb.DataType_Int64, false)
+	schema.Version = 1
+	vc.CollectionInfo.Schemas[1].Schema = schema
+	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": vc},
+		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{queryresource.NewReadSchemaModuleBuilder()},
+	})
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	module := manager.Module("v1")
+	require.True(t, module.ObserveQueryBarrier(t.Context(), 42))
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v1", SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 2}}}
+	view, ok := module.queryWALViewLocked(meta)
+	require.True(t, ok)
+	require.EqualValues(t, 42, view.DeleteReplayStartAfterTimeTick)
+	require.Same(t, manager.queryTransformLogStream, view.TransformLogStream)
+	require.True(t, view.CaptureQueryView(meta, func(captured walview.VChannelWALView) {
+		require.EqualValues(t, 1, captured.Schema.GetVersion())
+	}))
+	unknown := proto.CloneOf(meta)
+	unknown.SchemaVersion = 10
+	require.False(t, view.CaptureQueryView(unknown, func(walview.VChannelWALView) { t.Fatal("captured an unknown schema") }))
+	key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.Version)}
+	ready := make(chan bool, 1)
+	manager.Acquire(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { ready <- true }, OnUnrecoverable: func() { ready <- false }})
+	expectReplicaAdmission(t, ready, true)
+	_, ok = manager.GetQueryRuntime(key)
+	require.True(t, ok)
+	_, ok = manager.GetQueryReadRuntime(key)
+	require.True(t, ok)
+	manager.Release(snview.ReleaseResource{Key: key})
+	_, ok = manager.GetQueryReadRuntime(key)
+	require.False(t, ok)
 }

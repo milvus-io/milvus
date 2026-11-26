@@ -3,6 +3,7 @@ package vchannel
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -12,58 +13,80 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+// localQueryResources adapts the non-replica WAL's in-memory recovery view.
+// A replica receives its live events from its own scanner and never creates this adapter.
+type localQueryResources struct {
+	*queryresource.Manager
+	stream wal.TransformLogStream
+	sealed map[int64]bool
+}
+
+func (m *VChannelRecoveryModule) acceptsQueryVersionLocked(version qviews.DataVersion) bool {
+	return !m.removed && m.vchannelView != nil && m.vchannelView.IsActive() && version.GTE(m.vchannelView.SegmentDataVersionSummary())
+}
+
+func (m *VChannelRecoveryModule) oldestQueryVersionLocked() (qviews.DataVersion, bool) {
+	if m.queryRetention != nil {
+		return m.queryRetention.OldestDataVersion(m.vchannel)
+	}
+	return m.localQueries.OldestDataVersion()
+}
+
 func (m *VChannelRecoveryModule) AcquireQueryResource(req snview.AcquireResource) {
 	if req.Meta == nil || req.Meta.GetVchannel() != m.vchannel {
 		panic("query view vchannel does not match recovery module")
 	}
 	m.mu.Lock()
 	requested := qviews.FromProtoDataVersion(req.Meta.GetVersion().GetDataVersion())
-	if m.removed || m.vchannelView == nil || !m.vchannelView.IsActive() || !requested.GTE(m.vchannelView.SegmentDataVersionSummary()) {
-		m.queryResources.Reject(req)
+	if !m.acceptsQueryVersionLocked(requested) {
+		m.localQueries.Reject(req)
 		m.mu.Unlock()
 		return
 	}
-	m.queryResources.AcquireLocked(req, m.queryWALViewLocked)
+	m.localQueries.AcquireLocked(req, m.queryWALViewLocked)
 	m.mu.Unlock()
 }
 
 func (m *VChannelRecoveryModule) ReleaseQueryResource(req snview.ReleaseResource) {
-	if m == nil || m.queryResources == nil {
+	if m == nil || m.localQueries == nil {
 		return
 	}
-	m.queryResources.Release(req)
+	m.localQueries.Release(req)
 	if m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
 	}
 }
 
 func (m *VChannelRecoveryModule) QueryRuntime(key qviews.QueryViewKey) (*queryresource.QueryRuntime, bool) {
-	if m == nil || m.queryResources == nil {
+	if m == nil || m.localQueries == nil {
 		return nil, false
 	}
-	return m.queryResources.QueryRuntime(key)
+	return m.localQueries.QueryRuntime(key)
 }
 
 func (m *VChannelRecoveryModule) QueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
-	return m.queryResources.ReadRuntime(key)
+	if m.localQueries == nil {
+		return nil, false
+	}
+	return m.localQueries.ReadRuntime(key)
 }
 
 func (m *VChannelRecoveryModule) CloseQueryResources() {
-	if m == nil || m.queryResources == nil {
+	if m == nil || m.localQueries == nil {
 		return
 	}
-	m.queryResources.Close()
+	m.localQueries.Close()
 }
 
 func (m *VChannelRecoveryModule) observeQueryResourceEvent(ctx context.Context, event walview.VChannelResourceEvent) {
-	if m == nil || m.queryResources == nil {
+	if m == nil || m.localQueries == nil {
 		return
 	}
-	m.queryResources.ObserveEvent(ctx, event)
+	m.localQueries.ObserveEvent(ctx, event)
 }
 
 func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
-	if m.vchannelView == nil || m.queryTransformLogStream == nil {
+	if m.vchannelView == nil || m.localQueries == nil || m.localQueries.stream == nil {
 		return walview.VChannelWALView{}, false
 	}
 	state, ok := m.vchannelView.WritePathRecoveryState()
@@ -99,7 +122,7 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 		PrepareQueryView:      m.prepareQueryViewLocked,
 		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
 		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: schema.GetSchema(), WriteSchema: state.Schema,
-		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
+		SegmentSnapshot: snapshot, TransformLogStream: m.localQueries.stream,
 		DeleteReplayStartAfterTimeTick: start,
 	}, true
 }
@@ -206,10 +229,10 @@ func (m *VChannelRecoveryModule) publishSegmentSealedLocked(id int64) {
 	if meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED || meta.GetSealedAtDataVersion() == nil {
 		return
 	}
-	if m.querySealed[id] {
+	if m.localQueries.sealed[id] {
 		return
 	}
-	m.querySealed[id] = true
+	m.localQueries.sealed[id] = true
 	m.observeQueryResourceEvent(context.TODO(), walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: id, VChannel: m.vchannel, SealedAtDataVersion: qviews.FromProtoDataVersion(meta.GetSealedAtDataVersion())}})
 }
 
@@ -225,7 +248,9 @@ func (m *VChannelRecoveryModule) ObserveQueryBarrier(ctx context.Context, timeti
 		m.queryBarrierTimeTick = timetick
 		m.queryObservedTimeTick = max(m.queryObservedTimeTick, timetick)
 		m.observeQueryResourceEvent(ctx, walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: timetick}})
-		m.queryResources.TryBuildLocked(m.queryWALViewLocked)
+		if m.localQueries != nil {
+			m.localQueries.TryBuildLocked(m.queryWALViewLocked)
+		}
 	}
 	return true
 }
