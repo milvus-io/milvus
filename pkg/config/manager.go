@@ -86,6 +86,10 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
+	startupMu        sync.Mutex
+	startupComplete  bool
+	startupCallbacks []func()
+
 	// snapshotMutex keeps source/overlay values and the spelling policy used
 	// by external reads in the same generation. Acquire it before a source
 	// lock; never retain it while refreshing sources or dispatching callbacks.
@@ -464,6 +468,18 @@ func (m *Manager) pullSourceConfigs(source string) error {
 	return nil
 }
 
+// OnStartupSnapshot initializes state from the current sources. Packages can
+// initialize before Run, so repeat the initialization once with the first
+// authoritative startup snapshot, in dependency (registration) order.
+func (m *Manager) OnStartupSnapshot(init func()) {
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	init()
+	if !m.startupComplete {
+		m.startupCallbacks = append(m.startupCallbacks, init)
+	}
+}
+
 // LoadEtcdConfigsAtStartup completes the initial source load if etcd was
 // unreachable during package initialization. Index the full snapshot, even
 // for keys whose runtime update events are ignored.
@@ -478,6 +494,7 @@ func (m *Manager) LoadEtcdConfigsAtStartup(ctx context.Context, source *EtcdSour
 	}
 	// A background refresh may have published a newer snapshot since the read.
 	source.updateMu.Lock()
+	defer source.updateMu.Unlock()
 	m.snapshotMutex.Lock()
 	m.indexSourceConfigs(source, source.currentConfigs)
 	m.keySourceMap.Range(func(key, indexedSource string) bool {
@@ -487,8 +504,14 @@ func (m *Manager) LoadEtcdConfigsAtStartup(ctx context.Context, source *EtcdSour
 		return true
 	})
 	m.snapshotMutex.Unlock()
-	source.updateMu.Unlock()
 	m.EvictCachedValue(source.GetSourceName())
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	for _, init := range m.startupCallbacks {
+		init()
+	}
+	m.startupCallbacks = nil
+	m.startupComplete = true
 	return nil
 }
 
