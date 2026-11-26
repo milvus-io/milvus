@@ -651,4 +651,155 @@ EstimateSegmentResources(const proto::cgo::BatchLoadResourceRequest& request) {
     return response;
 }
 
+proto::cgo::CoreResourceUsage
+EstimateLoadDiffResources(const proto::cgo::BatchLoadResourceRequest& request,
+                          const SegmentLoadInfo& target,
+                          const LoadDiff& diff,
+                          const SealedFieldLayoutPtr& fields) {
+    AssertInfo(request.segments_size() == 1,
+               "load plan estimate requires exactly one segment");
+    auto loading = request;
+    loading.set_final_only(false);
+    // The diff already selected raw projections; do not re-derive skip rules
+    // from the subset of indexes that happens to be replaced in this load.
+    loading.set_prefer_field_data_when_index_has_raw_data(true);
+    auto* input = loading.mutable_segments(0);
+    input->clear_indexes();
+    input->clear_fields();
+    auto add_indexes = [&](const auto& indexes) {
+        for (const auto& [id, entries] : indexes) {
+            for (const auto& index : entries) {
+                auto* info = input->add_indexes();
+                *info->mutable_field() = index.schema;
+                info->set_enable_mmap(index.enable_mmap);
+                info->set_index_engine_version(index.index_engine_version);
+                info->set_index_file_size(index.index_size);
+                info->set_num_rows(index.num_rows);
+                for (const auto& [key, value] : index.index_params) {
+                    (*info->mutable_index_params())[key] = value;
+                }
+                for (const auto& file : index.index_files) {
+                    info->add_index_files(file);
+                }
+            }
+        }
+    };
+    add_indexes(diff.indexes_to_load);
+    add_indexes(diff.indexes_to_replace);
+    auto add_binlogs = [&](const auto& entries) {
+        for (const auto& [ids, binlog] : entries) {
+            auto* group = input->add_fields();
+            *group = binlog;
+            group->clear_child_fields();
+            for (const auto id : ids) {
+                group->add_child_fields(id.get());
+            }
+        }
+    };
+    add_binlogs(diff.binlogs_to_load);
+    add_binlogs(diff.binlogs_to_replace);
+
+    // Column-group sizes remain metadata estimates. Charge the entire group
+    // for each selected projection when per-field sizes are unavailable.
+    const auto& supplied = request.segments(0).fields();
+    auto add_groups = [&](const auto& entries) {
+        for (const auto& [group_id, ids] : entries) {
+            const proto::segcore::FieldBinlog* source = nullptr;
+            for (const auto& candidate : supplied) {
+                if (candidate.fieldid() == group_id) {
+                    source = &candidate;
+                    break;
+                }
+            }
+            proto::segcore::FieldBinlog fallback;
+            if (!source) {
+                // shortcut: no group size metadata; retain all supplied bytes
+                // until storage provides a size for this exact projection.
+                for (const auto& candidate : supplied) {
+                    for (const auto& log : candidate.binlogs()) {
+                        *fallback.add_binlogs() = log;
+                    }
+                }
+                if (fallback.binlogs().empty()) {
+                    uint64_t bytes = 0;
+                    for (const auto id : ids) {
+                        const auto& field = (*fields)[id];
+                        const auto width =
+                            IsSparseFloatVectorDataType(field.get_data_type())
+                                ? sizeof(std::string_view)
+                                : field.get_sizeof();
+                        bytes = SaturatingAdd(
+                            bytes,
+                            SaturatingMultiply(
+                                Nonnegative(target.GetNumOfRows()), width));
+                    }
+                    auto* log = fallback.add_binlogs();
+                    log->set_entries_num(target.GetNumOfRows());
+                    log->set_memory_size(std::min<uint64_t>(
+                        bytes, std::numeric_limits<int64_t>::max()));
+                }
+                source = &fallback;
+            }
+            auto* group = input->add_fields();
+            *group = *source;
+            group->set_fieldid(group_id);
+            group->clear_child_fields();
+            for (const auto id : ids) {
+                group->add_child_fields(id.get());
+            }
+        }
+    };
+    add_groups(diff.column_groups_to_load);
+    add_groups(diff.column_groups_to_replace);
+    // Lazy projections may still allocate metadata; existing ancillary
+    // accounting remains in Go. They do not eagerly materialize the column.
+    if (diff.load_external_manifest) {
+        *input->mutable_fields() = supplied;
+    }
+    for (const auto id : diff.fields_to_reload) {
+        for (const auto& group : supplied) {
+            const bool contains =
+                group.child_fields().empty()
+                    ? group.fieldid() == id.get()
+                    : std::find(group.child_fields().begin(),
+                                group.child_fields().end(),
+                                id.get()) != group.child_fields().end();
+            if (contains) {
+                *input->add_fields() = group;
+            }
+        }
+    }
+    for (const auto id : diff.fields_to_fill_default) {
+        const auto& field = (*fields)[id];
+        auto* group = input->add_fields();
+        group->set_fieldid(id.get());
+        auto* log = group->add_binlogs();
+        log->set_entries_num(target.GetNumOfRows());
+        // Sparse defaults are empty; include a descriptor per row.
+        const auto width = IsSparseFloatVectorDataType(field.get_data_type())
+                               ? sizeof(std::string_view)
+                               : field.get_sizeof();
+        const auto bytes =
+            SaturatingMultiply(Nonnegative(target.GetNumOfRows()), width);
+        log->set_memory_size(
+            std::min<uint64_t>(bytes, std::numeric_limits<int64_t>::max()));
+    }
+    auto result = EstimateSegmentResources(loading).segments(0);
+    auto final_request = request;
+    for (const auto id : diff.fields_to_fill_default) {
+        for (const auto& group : input->fields()) {
+            if (group.fieldid() == id.get() && group.child_fields().empty()) {
+                *final_request.mutable_segments(0)->add_fields() = group;
+            }
+        }
+    }
+    final_request.set_final_only(true);
+    const auto final = EstimateSegmentResources(final_request).segments(0);
+    result.set_final_memory_bytes(final.final_memory_bytes());
+    result.set_final_disk_bytes(final.final_disk_bytes());
+    // GPU admission stays in Go; native plans do not own per-device budgets.
+    result.clear_field_gpu_memory_bytes();
+    return result;
+}
+
 }  // namespace milvus::segcore

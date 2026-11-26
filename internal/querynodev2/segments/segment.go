@@ -1333,6 +1333,11 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 // Segcore has already switched views; rows pending deletion can remain visible
 // until a later replay succeeds (permanent source errors require repair).
 func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, replayDeletes func() error) error {
+	return s.reopenWithPlan(ctx, newLoadInfo, replayDeletes, nil)
+}
+
+// reopenWithPlan publishes Go metadata only after the existing delete replay.
+func (s *LocalSegment) reopenWithPlan(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, replayDeletes func() error, plan *segcore.SegmentLoadPlan) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1341,16 +1346,24 @@ func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	// Reopen forwards the SegmentLoadInfo straight to segcore, so it must inject
 	// the QueryNode-local index load params (e.g. DISKANN num_load_thread) that
 	// the full-load path injects; otherwise segcore asserts on load. See #51249.
-	if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
-		return err
+	// A prepared plan already captured these parameters before admission.
+	if plan == nil {
+		if err := prepareIndexLoadParams(newLoadInfo.GetIndexInfos()); err != nil {
+			return err
+		}
 	}
 
-	schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
-	err := s.csegment.Reopen(ctx, &segcore.ReopenRequest{
-		LoadInfo:      newLoadInfo,
-		Schema:        schema,
-		SchemaVersion: schemaVersion,
-	})
+	var err error
+	if plan != nil {
+		err = plan.Execute(ctx)
+	} else {
+		schema, schemaVersion := s.collection.SchemaAndSegcoreVersion()
+		err = s.csegment.Reopen(ctx, &segcore.ReopenRequest{
+			LoadInfo:      newLoadInfo,
+			Schema:        schema,
+			SchemaVersion: schemaVersion,
+		})
+	}
 	if err != nil {
 		return err
 	}

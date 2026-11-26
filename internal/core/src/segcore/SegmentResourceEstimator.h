@@ -17,6 +17,7 @@
 #pragma once
 
 #include "pb/cgo_msg.pb.h"
+#include "segcore/SegmentLoadInfo.h"
 
 namespace milvus::segcore {
 
@@ -24,5 +25,13 @@ namespace milvus::segcore {
 // all per-segment and batch arithmetic runs without holding a global lock.
 proto::cgo::BatchLoadResourceResponse
 EstimateSegmentResources(const proto::cgo::BatchLoadResourceRequest& request);
+
+// Estimates only actions in diff for loading; final occupancy uses the target.
+// Input must describe exactly one segment. No field/index payload is read.
+proto::cgo::CoreResourceUsage
+EstimateLoadDiffResources(const proto::cgo::BatchLoadResourceRequest& request,
+                          const SegmentLoadInfo& target,
+                          const LoadDiff& diff,
+                          const SealedFieldLayoutPtr& fields);
 
 }  // namespace milvus::segcore

@@ -89,6 +89,44 @@ NewSealedSegmentWithCollection(CCollection collection,
  */
 typedef void* CLoadCancellationSource;
 
+typedef void* CSegmentLoadPlan;
+
+typedef struct {
+    uint64_t loading_memory_bytes;
+    uint64_t loading_disk_bytes;
+    uint64_t loaded_memory_bytes;
+    uint64_t loaded_disk_bytes;
+    uint64_t timestamp_memory_bytes;
+    uint64_t interim_index_bytes;
+    uint64_t mmap_field_count;
+} CSegmentLoadEstimate;
+
+// The caller pins segment until all futures finish and releases the plan.
+// Null load_blob prepares initial Load; otherwise schema is the reopen target.
+CFuture*
+AsyncPrepareSegmentLoadPlan(CSegmentInterface segment,
+                            const uint8_t* load_blob,
+                            int64_t load_length,
+                            const void* schema_blob,
+                            int64_t schema_length,
+                            uint64_t schema_version);
+
+// Reads plan metadata only. request is the existing single-segment estimate
+// protobuf; the returned resource values own no borrowed buffers.
+CStatus
+EstimatePreparedSegmentLoad(CSegmentLoadPlan plan,
+                            const uint8_t* request,
+                            uint64_t length,
+                            CSegmentLoadEstimate* result);
+
+// Future returns a bool: false means stale, with no payload load started.
+CFuture*
+AsyncExecuteSegmentLoadPlan(CSegmentLoadPlan plan);
+void
+ReleaseSegmentLoadPlanResult(void* result);
+void
+ReleaseSegmentLoadPlan(CSegmentLoadPlan plan);
+
 /**
  * @brief Create a new cancellation source for load operations
  * @return Handle to the cancellation source

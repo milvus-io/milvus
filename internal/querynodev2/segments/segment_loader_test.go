@@ -214,6 +214,7 @@ func newReopenTestSegment(schema *schemapb.CollectionSchema, info *querypb.Segme
 }
 
 func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
+	mockPreparedReopenForTest(t)
 	paramtable.Init()
 	params := paramtable.Get()
 	statsKey := params.CommonCfg.EnabledJSONKeyStats.Key
@@ -256,7 +257,7 @@ func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
 			segment.lastDeltaTimestamp.Store(50)
 			manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
 			loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
-			resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+			resourcePatch := mockey.Mock((*segmentLoader).reserveEstimatedResource).Return(requestResourceResult{}, nil).Build()
 			defer resourcePatch.UnPatch()
 			freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
 			defer freePatch.UnPatch()
@@ -357,6 +358,7 @@ func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
 }
 
 func TestReopenSegmentsNonMilvusTableSkipsReplay(t *testing.T) {
+	mockPreparedReopenForTest(t)
 	paramtable.Init()
 	ctx := context.Background()
 	manager := NewManager()
@@ -366,7 +368,7 @@ func TestReopenSegmentsNonMilvusTableSkipsReplay(t *testing.T) {
 	schema.Fields[0].ExternalField = "id"
 	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
 	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
-	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	resourcePatch := mockey.Mock((*segmentLoader).reserveEstimatedResource).Return(requestResourceResult{}, nil).Build()
 	defer resourcePatch.UnPatch()
 	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
 	defer freePatch.UnPatch()
@@ -395,6 +397,7 @@ func TestReopenSegmentsNonMilvusTableSkipsReplay(t *testing.T) {
 }
 
 func TestReopenSegmentsSkipsReplayForUnchangedDeltaSource(t *testing.T) {
+	mockPreparedReopenForTest(t)
 	paramtable.Init()
 	ctx := context.Background()
 	manager := NewManager()
@@ -402,7 +405,7 @@ func TestReopenSegmentsSkipsReplayForUnchangedDeltaSource(t *testing.T) {
 	schema.ExternalSource = "s3://source-bucket/snapshot"
 	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
 	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
-	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	resourcePatch := mockey.Mock((*segmentLoader).reserveEstimatedResource).Return(requestResourceResult{}, nil).Build()
 	defer resourcePatch.UnPatch()
 	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
 	defer freePatch.UnPatch()
@@ -744,8 +747,8 @@ func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
 			loader := suite.loader.(*segmentLoader)
 			loadErr := errors.New("injected load failure")
 			var captured *LocalSegment
-			loadData := mockey.Mock((*segmentLoader).LoadSegment).To(
-				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo) error {
+			loadData := mockey.Mock((*segmentLoader).loadSegmentWithPlan).To(
+				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo, _ *segcore.SegmentLoadPlan) error {
 					captured = segment.(*LocalSegment)
 					suite.Nil(captured.pkCandidate)
 					if stage == "data" {
@@ -754,6 +757,8 @@ func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
 					return nil
 				}).Build()
 			defer loadData.UnPatch()
+			preparePlan := mockey.Mock(segcore.PrepareSegmentLoadPlan).Return(&segcore.SegmentLoadPlan{}, nil).Build()
+			defer preparePlan.UnPatch()
 			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(loadErr).Build()
 			defer loadDeltas.UnPatch()
 
@@ -1351,8 +1356,10 @@ func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() 
 
 	loader := suite.loader.(*segmentLoader)
 	// Isolate candidate loading from segcore and delta-file I/O.
-	loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+	loadData := mockey.Mock((*segmentLoader).loadSegmentWithPlan).Return(nil).Build()
 	defer loadData.UnPatch()
+	preparePlan := mockey.Mock(segcore.PrepareSegmentLoadPlan).Return(&segcore.SegmentLoadPlan{}, nil).Build()
+	defer preparePlan.UnPatch()
 	loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
 	defer loadDeltas.UnPatch()
 	readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
@@ -1444,8 +1451,10 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKCollisionWarnings() {
 				defer suite.manager.Segment.Remove(ctx, id, querypb.DataScope_All)
 			}
 			// Exercise Load with real segment creation while isolating data-file I/O.
-			loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+			loadData := mockey.Mock((*segmentLoader).loadSegmentWithPlan).Return(nil).Build()
 			defer loadData.UnPatch()
+			preparePlan := mockey.Mock(segcore.PrepareSegmentLoadPlan).Return(&segcore.SegmentLoadPlan{}, nil).Build()
+			defer preparePlan.UnPatch()
 			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
 			defer loadDeltas.UnPatch()
 			readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
@@ -3687,32 +3696,37 @@ func TestLocalSegmentReopenPreparationFailure(t *testing.T) {
 
 func TestReopenSegmentsResourceAndMissingSegment(t *testing.T) {
 	paramtable.Init()
+	mockPreparedReopenForTest(t)
 	for _, failResource := range []bool{true, false} {
 		name := "missing_segment"
 		if failResource {
 			name = "resource_failure"
 		}
 		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
 			loader := &segmentLoader{manager: NewManager(), loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
-			var resourceErr error
+			info := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000}
 			if failResource {
-				resourceErr = merr.Wrap(merr.ErrServiceNotReady, "resource reservation unavailable")
+				schema := milvusTableCollectionSchema(false)
+				segment := newReopenTestSegment(schema, info)
+				loader.manager.Collection.(*collectionManager).collections[1000] = segment.collection
+				loader.manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
 			}
-			request := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, resourceErr).Build()
+			resourceErr := merr.Wrap(merr.ErrServiceNotReady, "resource reservation unavailable")
+			request := mockey.Mock((*segmentLoader).reserveEstimatedResource).Return(requestResourceResult{}, resourceErr).Build()
 			defer request.UnPatch()
-			freed := 0
-			free := mockey.Mock((*segmentLoader).freeRequestResource).To(func(_ *segmentLoader, _ requestResourceResult) {
-				freed++
-			}).Build()
+			free := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
 			defer free.UnPatch()
-			err := loader.ReopenSegments(context.Background(), []*querypb.SegmentLoadInfo{{CollectionID: 1000, SegmentID: 3000}})
+			err := loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{info})
 			if failResource {
 				require.ErrorIs(t, err, resourceErr)
-				require.Zero(t, freed)
+				require.Equal(t, 1, request.Times())
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, 1, freed)
+				require.Zero(t, request.Times(), "missing segments do not need admission")
 			}
+			require.Zero(t, free.Times(), "no reservation was acquired")
+			require.False(t, loader.loadingSegments.Contain(info.GetSegmentID()))
 		})
 	}
 }
@@ -3933,4 +3947,26 @@ func TestLoadingResourceConcurrentCommit(t *testing.T) {
 		reservation.Release()
 	}
 	require.Zero(t, loader.committedResource)
+}
+
+// Preserve the existing delete-replay fault tests while exercising the new
+// plan boundary. The fake native core still controls execution failures.
+func mockPreparedReopenForTest(t *testing.T) {
+	type binding struct {
+		core    segcore.CSegment
+		request *segcore.ReopenRequest
+	}
+	bindings := make(map[*segcore.SegmentLoadPlan]binding)
+	prepare := mockey.Mock(segcore.PrepareSegmentLoadPlan).To(func(_ context.Context, core segcore.CSegment, schema *schemapb.CollectionSchema, version uint64, info *querypb.SegmentLoadInfo, initial bool) (*segcore.SegmentLoadPlan, error) {
+		require.False(t, initial)
+		plan := &segcore.SegmentLoadPlan{}
+		bindings[plan] = binding{core: core, request: &segcore.ReopenRequest{LoadInfo: info, Schema: schema, SchemaVersion: version}}
+		return plan, nil
+	}).Build()
+	execute := mockey.Mock((*segcore.SegmentLoadPlan).Execute).To(func(plan *segcore.SegmentLoadPlan, ctx context.Context) error {
+		b, ok := bindings[plan]
+		require.True(t, ok, "execute must use the prepared plan")
+		return b.core.Reopen(ctx, b.request)
+	}).Build()
+	t.Cleanup(func() { execute.UnPatch(); prepare.UnPatch() })
 }

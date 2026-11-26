@@ -82,6 +82,49 @@ class SegmentResourceEstimatorTest : public ::testing::Test {
     bool old_async_;
 };
 
+TEST_F(SegmentResourceEstimatorTest, EmptyDiffKeepsFinalButHasNoLoadingCost) {
+    proto::cgo::BatchLoadResourceRequest request;
+    auto* input = AddFieldSegment(request, proto::schema::Int64, 1000);
+    input->mutable_schema()->mutable_fields(0)->set_name("pk");
+    input->mutable_schema()->mutable_fields(0)->set_is_primary_key(true);
+    auto schema = Schema::ParseFrom(input->schema());
+    auto layout = std::make_shared<const SealedFieldLayout>(
+        schema, LoadScope::FromLegacySchema(*schema));
+    proto::segcore::SegmentLoadInfo proto;
+    SegmentLoadInfo target(proto, layout);
+    const auto estimate =
+        EstimateLoadDiffResources(request, target, {}, layout);
+    EXPECT_EQ(estimate.max_memory_bytes(), 0);
+    EXPECT_EQ(estimate.max_disk_bytes(), 0);
+    EXPECT_EQ(estimate.final_memory_bytes(), 1000);
+}
+
+TEST_F(SegmentResourceEstimatorTest, DiffLoadsOnlyChangedBinlogProjection) {
+    proto::cgo::BatchLoadResourceRequest request;
+    auto* input = AddFieldSegment(request, proto::schema::Int64, 1000, 10, 2);
+    input->mutable_schema()->mutable_fields(0)->set_name("pk");
+    input->mutable_schema()->mutable_fields(0)->set_is_primary_key(true);
+    auto* field = input->mutable_schema()->add_fields();
+    field->set_fieldid(101);
+    field->set_name("unchanged");
+    field->set_data_type(proto::schema::Int64);
+    auto* unchanged = input->add_fields();
+    unchanged->set_fieldid(101);
+    unchanged->add_binlogs()->set_memory_size(9000);
+    auto schema = Schema::ParseFrom(input->schema());
+    auto layout = std::make_shared<const SealedFieldLayout>(
+        schema, LoadScope::FromLegacySchema(*schema));
+    proto::segcore::SegmentLoadInfo proto;
+    SegmentLoadInfo target(proto, layout);
+    LoadDiff diff;
+    diff.binlogs_to_replace.emplace_back(std::vector<FieldId>{FieldId(100)},
+                                         input->fields(0));
+    const auto estimate =
+        EstimateLoadDiffResources(request, target, diff, layout);
+    EXPECT_EQ(estimate.max_memory_bytes(), 2000);
+    EXPECT_EQ(estimate.final_memory_bytes(), 10000);
+}
+
 TEST_F(SegmentResourceEstimatorTest, BatchSharesOversizedFieldTasks) {
     proto::cgo::BatchLoadResourceRequest request;
     const auto bytes = 2 * FieldDataLoadBatchTargetBytes();

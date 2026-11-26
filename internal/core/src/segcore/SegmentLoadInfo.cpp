@@ -53,7 +53,7 @@ SegmentLoadInfo::PrepareForLoad(const ProtoType& info,
 }
 
 std::shared_ptr<milvus_storage::api::ColumnGroups>
-SegmentLoadInfo::GetColumnGroups() const {
+SegmentLoadInfo::LoadPlanningMetadata() const {
     auto manifest_path = GetManifestPath();
     if (manifest_path.empty()) {
         return nullptr;
@@ -73,12 +73,19 @@ SegmentLoadInfo::GetColumnGroups() const {
     return column_groups_;
 }
 
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+SegmentLoadInfo::GetColumnGroups() const {
+    AssertInfo(!HasManifestPath() || column_groups_ != nullptr,
+               "manifest metadata must be prepared before accessing groups");
+    return column_groups_;
+}
+
 SealedFieldLayoutPtr
 SegmentLoadInfo::BindManifestFields(const SealedFieldLayoutPtr& fields) const {
     if (!fields->is_external_collection() || !HasManifestPath()) {
         return fields;
     }
-    auto groups = GetColumnGroups();
+    auto groups = LoadPlanningMetadata();
     auto mapping = IsMilvusTableExternalSpec(fields->get_external_spec())
                        ? ResolveMilvusTableFieldIdMapping(*groups)
                        : ReadMilvusTableFieldIdMapping(*groups);
@@ -499,8 +506,8 @@ SegmentLoadInfo::ComputeDiffColumnGroups(LoadDiff& diff,
     auto prefer_field_data =
         SegcoreConfig::default_config()
             .get_prefer_field_data_when_index_has_raw_data();
-    auto cur_column_group = GetColumnGroups();
-    auto new_column_group = new_info.GetColumnGroups();
+    auto cur_column_group = LoadPlanningMetadata();
+    auto new_column_group = new_info.LoadPlanningMetadata();
 
     AssertInfo(cur_column_group, "current column groups shall not be null");
     AssertInfo(new_column_group, "new column groups shall not be null");
@@ -726,7 +733,7 @@ SegmentLoadInfo::ComputeDiffReloadFields(LoadDiff& diff,
         } else {
             // Manifest mode: collect fields per column group, emplace each
             // group index only once
-            auto column_groups = new_info.GetColumnGroups();
+            auto column_groups = new_info.LoadPlanningMetadata();
             if (column_groups) {
                 std::map<int, std::vector<FieldId>> cg_fields;
                 for (size_t i = 0; i < column_groups->size(); i++) {
@@ -834,7 +841,7 @@ SegmentLoadInfo::CollectRowColumnFields() const {
     }
 
     if (HasManifestPath()) {
-        auto column_groups = GetColumnGroups();
+        auto column_groups = LoadPlanningMetadata();
         if (column_groups) {
             for (size_t i = 0; i < column_groups->size(); i++) {
                 auto cg = column_groups->at(i);

@@ -18,18 +18,18 @@ package loadresource
 
 import (
 	"context"
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"math"
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -475,4 +475,18 @@ func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
 		}
 	}
 	return true
+}
+
+// PreparedLoadingResource applies the existing Go policy and ancillary costs
+// to a native plan estimate. GPU checks are supplied separately by the loader.
+func PreparedLoadingResource(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo, memory, disk, timestamp, interim uint64, mmapCount int) SegmentResourceUsage {
+	options := DefaultSegmentLoadingEstimateOptions()
+	usage := estimateSegmentLoadingExtras(schema, info, options, timestamp, interim)
+	if !options.TieredEvictionEnabled {
+		usage.MemoryBytes += memory
+		usage.DiskBytes += disk
+	}
+	usage.MmapFieldCount = mmapCount
+	return usage
+
 }

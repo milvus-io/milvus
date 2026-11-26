@@ -43,11 +43,46 @@ import (
 // estimateCoreResources supplies metadata and resolved local index options to
 // segcore. All field/index size calculations stay on the loading implementation's side.
 func estimateCoreResources(ctx context.Context, schemas []*schemapb.CollectionSchema, loadInfos []*querypb.SegmentLoadInfo, mmapVector, mmapScalar, preferFieldData, finalOnly bool, runner Runner, loadingOptions ...SegmentLoadingEstimateOptions) (*cgopb.BatchLoadResourceResponse, error) {
+	if len(loadInfos) == 0 {
+		return &cgopb.BatchLoadResourceResponse{}, nil
+	}
+	serialized, err := MarshalResourceEstimateRequest(ctx, schemas, loadInfos, mmapVector, mmapScalar, preferFieldData, finalOnly, loadingOptions...)
+	if err != nil {
+		return nil, err
+	}
+	layout := C.CreateProtoLayout()
+	if layout == nil {
+		return nil, merr.WrapErrServiceInternalMsg("create segment resource result failed")
+	}
+	defer C.ReleaseProtoLayout(layout)
+	var status C.CStatus
+	if err := run(runner, func() error {
+		status = C.EstimateSegmentResourcesFromSerializedInfo((*C.uint8_t)(unsafe.Pointer(&serialized[0])), C.uint64_t(len(serialized)), layout)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := consumeCStatus(&status); err != nil {
+		return nil, merr.Wrap(err, "estimate segment resources failed")
+	}
+	result := &cgopb.BatchLoadResourceResponse{}
+	if err := proto.Unmarshal(unsafe.Slice((*byte)(layout.blob), int(layout.size)), result); err != nil {
+		return nil, err
+	}
+	if len(result.GetSegments()) != len(loadInfos) || result.GetTotal() == nil {
+		return nil, merr.WrapErrServiceInternalMsg("segcore returned an incomplete segment resource estimate")
+	}
+	return result, nil
+}
+
+// MarshalResourceEstimateRequest supplies existing metadata to a native plan;
+// it performs no field/index I/O and is also used by stateless estimation.
+func MarshalResourceEstimateRequest(ctx context.Context, schemas []*schemapb.CollectionSchema, loadInfos []*querypb.SegmentLoadInfo, mmapVector, mmapScalar, preferFieldData, finalOnly bool, loadingOptions ...SegmentLoadingEstimateOptions) ([]byte, error) {
 	if len(schemas) != len(loadInfos) {
 		return nil, merr.WrapErrServiceInternalMsg("schema and segment counts differ")
 	}
 	if len(loadInfos) == 0 {
-		return &cgopb.BatchLoadResourceResponse{}, nil
+		return nil, nil
 	}
 	options := DefaultSegmentLoadingEstimateOptions()
 	if len(loadingOptions) != 0 {
@@ -106,31 +141,5 @@ func estimateCoreResources(ctx context.Context, schemas []*schemapb.CollectionSc
 		}
 		request.Segments = append(request.Segments, segment)
 	}
-	serialized, err := proto.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
-	layout := C.CreateProtoLayout()
-	if layout == nil {
-		return nil, merr.WrapErrServiceInternalMsg("create segment resource result failed")
-	}
-	defer C.ReleaseProtoLayout(layout)
-	var status C.CStatus
-	if err := run(runner, func() error {
-		status = C.EstimateSegmentResourcesFromSerializedInfo((*C.uint8_t)(unsafe.Pointer(&serialized[0])), C.uint64_t(len(serialized)), layout)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := consumeCStatus(&status); err != nil {
-		return nil, merr.Wrap(err, "estimate segment resources failed")
-	}
-	result := &cgopb.BatchLoadResourceResponse{}
-	if err := proto.Unmarshal(unsafe.Slice((*byte)(layout.blob), int(layout.size)), result); err != nil {
-		return nil, err
-	}
-	if len(result.GetSegments()) != len(loadInfos) || result.GetTotal() == nil {
-		return nil, merr.WrapErrServiceInternalMsg("segcore returned an incomplete segment resource estimate")
-	}
-	return result, nil
+	return proto.Marshal(request)
 }

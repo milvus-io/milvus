@@ -401,6 +401,36 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId, bool> index_has_raw_data;
     };
 
+    /**
+     * @brief Single-use load plan owning metadata, never loaded resources.
+     * The segment must outlive the plan and all executing native tasks.
+     */
+    struct PreparedLoadPlan {
+        ChunkedSegmentSealedImpl* owner;
+        std::weak_ptr<const PublishedSegmentState> base;
+        SegmentLoadInfo load_info;
+        SealedFieldLayoutPtr fields;
+        LoadDiff diff;
+        bool consumed{false};  // Protected by the owner's reopen_mutex_.
+    };
+
+    /**
+     * @brief Prepare metadata and the exact diff without loading payload.
+     * @param target Null for initial Load; otherwise the Reopen target.
+     * @return Plan with no update lock or runtime snapshot retained.
+     */
+    std::unique_ptr<PreparedLoadPlan>
+    PrepareLoadPlan(milvus::OpContext* op_ctx,
+                    const proto::segcore::SegmentLoadInfo* target = nullptr,
+                    SealedFieldLayoutPtr fields = nullptr);
+
+    /**
+     * @brief Execute once under the segment update lock.
+     * @return False if the plan became stale; no load is started in that case.
+     */
+    bool
+    ExecuteLoadPlan(milvus::OpContext* op_ctx, PreparedLoadPlan& plan);
+
     struct StateDelta {
         std::optional<SealedFieldLayoutPtr> fields;
         std::optional<std::shared_ptr<const SegmentLoadInfo>> load_info;

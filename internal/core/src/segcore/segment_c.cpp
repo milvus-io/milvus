@@ -76,6 +76,7 @@
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentResourceEstimator.h"
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
@@ -261,6 +262,112 @@ ParseFlushSchema(const void* schema_blob, const int64_t schema_length) {
     auto suc = collection_schema.ParseFromArray(schema_blob, schema_length);
     AssertInfo(suc, "parse flush schema proto failed");
     return milvus::Schema::ParseFrom(collection_schema);
+}
+
+CFuture*
+AsyncPrepareSegmentLoadPlan(CSegmentInterface c_segment,
+                            const uint8_t* load_blob,
+                            int64_t load_length,
+                            const void* schema_blob,
+                            int64_t schema_length,
+                            uint64_t schema_version) {
+    using Plan = milvus::segcore::ChunkedSegmentSealedImpl::PreparedLoadPlan;
+    std::exception_ptr error;
+    std::optional<milvus::proto::segcore::SegmentLoadInfo> info;
+    milvus::segcore::SealedFieldLayoutPtr fields;
+    try {
+        if (load_blob != nullptr) {
+            info.emplace();
+            AssertInfo(info->ParseFromArray(load_blob, load_length),
+                       "unmarshal load plan info failed");
+            auto schema =
+                ParseReopenSchema(schema_blob, schema_length, schema_version);
+            fields = std::make_shared<const milvus::segcore::SealedFieldLayout>(
+                schema, milvus::segcore::LoadScope::FromLegacySchema(*schema));
+        }
+    } catch (...) {
+        error = std::current_exception();
+    }
+    auto future = milvus::futures::Future<Plan>::async(
+        milvus::futures::getLoadCPUExecutor(),
+        milvus::futures::ExecutePriority::NORMAL,
+        [c_segment, info = std::move(info), fields = std::move(fields), error](
+            folly::CancellationToken token) -> Plan* {
+            if (error) {
+                std::rethrow_exception(error);
+            }
+            auto* segment =
+                dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                    static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+            AssertInfo(segment != nullptr, "load plan requires sealed segment");
+            milvus::OpContext ctx(token);
+            return segment
+                ->PrepareLoadPlan(&ctx, info ? &*info : nullptr, fields)
+                .release();
+        },
+        milvus::futures::PoolType::kLoad);
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+CStatus
+EstimatePreparedSegmentLoad(CSegmentLoadPlan handle,
+                            const uint8_t* request,
+                            uint64_t length,
+                            CSegmentLoadEstimate* output) {
+    try {
+        AssertInfo(handle && output, "load plan or estimate output is null");
+        *output = {};
+        AssertInfo(
+            request != nullptr && length <= std::numeric_limits<int>::max(),
+            "invalid load plan estimate protobuf length");
+        milvus::proto::cgo::BatchLoadResourceRequest input;
+        AssertInfo(input.ParseFromArray(request, static_cast<int>(length)),
+                   "parse load plan estimate request failed");
+        const auto& plan = *static_cast<
+            milvus::segcore::ChunkedSegmentSealedImpl::PreparedLoadPlan*>(
+            handle);
+        const auto result = milvus::segcore::EstimateLoadDiffResources(
+            input, plan.load_info, plan.diff, plan.fields);
+        *output = {result.max_memory_bytes(),
+                   result.max_disk_bytes(),
+                   result.final_memory_bytes(),
+                   result.final_disk_bytes(),
+                   result.timestamp_memory_bytes(),
+                   result.interim_index_bytes(),
+                   result.mmap_field_count()};
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CFuture*
+AsyncExecuteSegmentLoadPlan(CSegmentLoadPlan handle) {
+    auto* plan = static_cast<
+        milvus::segcore::ChunkedSegmentSealedImpl::PreparedLoadPlan*>(handle);
+    auto future = milvus::futures::Future<bool>::async(
+        milvus::futures::getLoadCPUExecutor(),
+        milvus::futures::ExecutePriority::NORMAL,
+        [plan](folly::CancellationToken token) -> bool* {
+            milvus::OpContext ctx(token);
+            auto result = std::make_unique<bool>(false);
+            *result = plan->owner->ExecuteLoadPlan(&ctx, *plan);
+            return result.release();
+        },
+        milvus::futures::PoolType::kLoad);
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
+void
+ReleaseSegmentLoadPlanResult(void* result) {
+    delete static_cast<bool*>(result);
+}
+
+void
+ReleaseSegmentLoadPlan(CSegmentLoadPlan handle) {
+    delete static_cast<
+        milvus::segcore::ChunkedSegmentSealedImpl::PreparedLoadPlan*>(handle);
 }
 
 CFuture*

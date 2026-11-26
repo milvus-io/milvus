@@ -8812,7 +8812,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
     // reopen_mutex_.
     if (new_local.HasManifestPath() && sch->is_external_collection()) {
         CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
-        (void)new_local.GetColumnGroups();
+        (void)new_local.LoadPlanningMetadata();
     }
     LOG_INFO(
         "Schema-only reopen segment {} with diff {}", id_, diff.ToString());
@@ -8900,7 +8900,7 @@ ChunkedSegmentSealedImpl::Reopen(
     if (new_local.HasManifestPath() &&
         target_schema->is_external_collection()) {
         CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
-        (void)new_local.GetColumnGroups();
+        (void)new_local.LoadPlanningMetadata();
     }
     LOG_INFO("Reopen segment {} with diff {}", id_, diff.ToString());
 
@@ -8935,6 +8935,90 @@ ChunkedSegmentSealedImpl::Reopen(
     LOG_INFO("Reopen segment {} done", id_);
 }
 
+std::unique_ptr<ChunkedSegmentSealedImpl::PreparedLoadPlan>
+ChunkedSegmentSealedImpl::PrepareLoadPlan(
+    milvus::OpContext* op_ctx,
+    const proto::segcore::SegmentLoadInfo* target,
+    SealedFieldLayoutPtr fields) {
+    AssertInfo(target == nullptr || target->segmentid() == id_,
+               "load plan target belongs to another segment");
+    // Copy only metadata/readiness under the lock. Admission must not keep the
+    // published runtime alive, nor hold an update lock during metadata I/O.
+    std::weak_ptr<const PublishedSegmentState> base;
+    std::shared_ptr<const SegmentLoadInfo> current_info;
+    SealedFieldLayoutPtr current_fields;
+    BitsetType ready;
+    {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        const auto current = CapturePublishedState();
+        base = current;
+        current_info = current->load_info;
+        current_fields = current->fields;
+        ready = current->field_data_ready_bitset.clone();
+    }
+    CheckCancellation(op_ctx, id_, "PrepareLoadPlan");
+    if (!read_state_fork_ && fields &&
+        fields->get_schema_version() < current_fields->get_schema_version()) {
+        ThrowInfo(kCollectionSchemaVersionNotReady,
+                  "stale load plan schema for segment {}",
+                  id_);
+    }
+    auto [next, layout] = SegmentLoadInfo::PrepareForLoad(
+        target ? *target : current_info->GetProto(),
+        fields ? std::move(fields) : current_fields,
+        *current_info,
+        read_state_fork_);
+    SegmentLoadInfo previous(*current_info);
+    if (target) {
+        previous.ResolveLegacyBinlogChildFields(current_fields, nullptr);
+    }
+    next.ResolveLegacyBinlogChildFields(layout, target ? &previous : nullptr);
+    for (auto fid : current_info->GetCreatedTextIndexes()) {
+        if (field_exists_in_schema(layout, fid)) {
+            next.SetTextIndexCreated(fid);
+        }
+    }
+    if (!target) {
+        next.SetFieldsFilledWithDefault(
+            current_info->GetFieldsFilledWithDefault());
+    }
+    auto diff =
+        target ? previous.ComputeDiff(next, layout) : next.GetLoadDiff(layout);
+    if (target) {
+        std::erase_if(diff.fields_to_fill_default, [&](FieldId field_id) {
+            return current_fields->has_field(field_id) &&
+                   get_bit_if_present(ready, field_id);
+        });
+        next.SetFieldsFilledWithDefault(
+            previous.GetDefaultFilledFieldsForNewInfo(next));
+    }
+    // Make manifest I/O explicit during planning, including external layouts.
+    next.LoadPlanningMetadata();
+    CheckCancellation(op_ctx, id_, "PrepareLoadPlan");
+    return std::make_unique<PreparedLoadPlan>(
+        PreparedLoadPlan{this,
+                         std::move(base),
+                         std::move(next),
+                         std::move(layout),
+                         std::move(diff)});
+}
+
+bool
+ChunkedSegmentSealedImpl::ExecuteLoadPlan(milvus::OpContext* op_ctx,
+                                          PreparedLoadPlan& plan) {
+    std::lock_guard<std::mutex> guard(reopen_mutex_);
+    AssertInfo(plan.owner == this, "load plan belongs to another segment");
+    AssertInfo(!plan.consumed, "load plan has already been consumed");
+    plan.consumed = true;
+    CheckCancellation(op_ctx, id_, "ExecuteLoadPlan");
+    const auto current = CapturePublishedState();
+    if (plan.base.lock() != current) {
+        return false;
+    }
+    ApplyLoadDiff(op_ctx, plan.load_info, plan.diff, plan.fields);
+    return true;
+}
+
 void
 ChunkedSegmentSealedImpl::ApplyLoadDiff(
     milvus::OpContext* op_ctx,
@@ -8946,6 +9030,8 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(
         timing, milvus::monitor::SegmentLoadPhase::CloneState);
     auto current = CapturePublishedState();
     auto next_runtime = CloneMutableRuntimeResourceState();
+    InvalidateStaleStructElementOffsets(
+        current->fields, schema_snapshot, *next_runtime);
     auto staged = ClonePublishedState(current);
     staged->fields = schema_snapshot;
     staged->load_info =

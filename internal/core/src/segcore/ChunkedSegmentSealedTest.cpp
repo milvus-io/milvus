@@ -3416,3 +3416,33 @@ TEST(test_chunk_segment, VortexNestedArrayOutputMatchesBulkArrayValueAt) {
     EXPECT_FALSE(view0.array_at(0).is_valid(1));
     EXPECT_TRUE(view0.array_at(2).empty());
 }
+
+TEST(PreparedSegmentLoadPlanTest, StalePlanDoesNotReadPayload) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema, nullptr, 1);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(10);
+    info.set_storageversion(1);
+    auto* group = info.add_binlog_paths();
+    group->set_fieldid(pk.get());
+    auto* log = group->add_binlogs();
+    log->set_log_path("/must/not/read/prepared-plan");
+    log->set_entries_num(10);
+    log->set_memory_size(80);
+    sealed->SetLoadInfo(info);
+    auto plan = sealed->PrepareLoadPlan(nullptr);
+    ASSERT_FALSE(plan->diff.binlogs_to_load.empty());
+    // A metadata publication retires the base. The plan must not keep its
+    // runtime alive, and a stale Execute must not try the inaccessible file.
+    sealed->SetLoadInfo(info);
+    EXPECT_TRUE(plan->base.expired());
+    EXPECT_FALSE(sealed->ExecuteLoadPlan(nullptr, *plan));
+    EXPECT_THROW(sealed->ExecuteLoadPlan(nullptr, *plan), SegcoreError);
+}
