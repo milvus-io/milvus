@@ -373,6 +373,9 @@ fn fetch_lindera_user_dict(
         ));
     }
     let user_dict = match ext {
+        Some("csv") if !helper.enforce_file_access => {
+            load_user_dictionary_from_csv(kind.clone(), path.as_path())
+        }
         Some("csv") => {
             // The CSV parser needs a path; never reopen the caller's file.
             let mut snapshot = tempfile::NamedTempFile::new()?;
@@ -951,6 +954,16 @@ mod tests {
         )
         .unwrap()
         .unwrap();
+        helper.enforce_file_access = false;
+        let restored = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(restored.word_details(0), dictionary.word_details(0));
+        helper.enforce_file_access = true;
         let binary_path = dir.path().join("user.bin");
         let details: Vec<String> = dictionary
             .word_details(0)
@@ -987,6 +1000,17 @@ mod tests {
             Ok(_) => panic!("invalid dictionary was accepted"),
             Err(error) => error.to_string(),
         };
+        assert!(error.contains("lindera user dictionary is invalid"));
+        assert!(!error.contains("FILE_SECRET_MARKER"));
+        helper.enforce_file_access = false;
+        let error = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        )
+        .err()
+        .unwrap()
+        .to_string();
         assert!(error.contains("lindera user dictionary is invalid"));
         assert!(!error.contains("FILE_SECRET_MARKER"));
     }

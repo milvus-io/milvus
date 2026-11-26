@@ -51,9 +51,10 @@ func TestRestoreCollectionUsesOneBroadcast(t *testing.T) {
 		}
 		cleaned := false
 		mockey.Mock((*rootcoord.Core).CheckRestoreTargetAbsent).Return(merr.WrapErrCollectionNotFound("target")).Build()
-		mockey.Mock((*rootcoord.Core).PrepareRestoreCollection).To(func(_ *rootcoord.Core, _ context.Context, request *milvuspb.CreateCollectionRequest, partitions []string) (*messagespb.RestoreSnapshotMessageBody, func(), error) {
+		mockey.Mock((*rootcoord.Core).PrepareRestoreCollection).To(func(_ *rootcoord.Core, _ context.Context, request *milvuspb.CreateCollectionRequest, partitions []string, external bool) (*messagespb.RestoreSnapshotMessageBody, func(), error) {
 			require.Equal(t, "target", request.GetCollectionName())
 			require.ElementsMatch(t, []string{"_default", "p1"}, partitions)
+			require.False(t, external)
 			return body, func() { cleaned = true }, nil
 		}).Build()
 		mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(77), nil).Build()

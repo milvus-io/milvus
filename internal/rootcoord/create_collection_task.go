@@ -55,6 +55,8 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// Set only for a snapshot stored by this cluster, never from request properties.
+	restoreAnalyzerDefinitions bool
 	// allowStructSubFieldOriginMarker accepts the internal origin marker on
 	// struct sub-fields. Only restore from a snapshot sets it: that restore
 	// copies segments as they are, so the sub-fields added after their struct
@@ -252,7 +254,17 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	fileResourceIds, err := t.validateSchemaAnalyzerFileResources(ctx, schema)
+	var fileResourceIds []int64
+	var err error
+	if t.restoreAnalyzerDefinitions {
+		previous := &model.Collection{
+			Fields: schema.GetFields(), Functions: model.UnmarshalFunctionModels(schema.GetFunctions()),
+			FileResourceIds: schema.GetFileResourceIds(),
+		}
+		fileResourceIds, err = t.validateChangedAnalyzers(ctx, previous, schema)
+	} else {
+		fileResourceIds, err = t.validateSchemaAnalyzerFileResources(ctx, schema)
+	}
 	if err != nil {
 		return err
 	}

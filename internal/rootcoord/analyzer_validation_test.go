@@ -23,8 +23,10 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -179,4 +181,27 @@ func TestAnalyzerRetentionIgnoresUnconsumedResourceCandidates(t *testing.T) {
 	ids, err := core.validateChangedAnalyzers(context.Background(), coll, coll.ToCollectionSchemaPB())
 	require.NoError(t, err)
 	require.Empty(t, ids)
+}
+
+func TestAnalyzerAdmissionOnlyExemptsStoredSnapshots(t *testing.T) {
+	paramtable.Init()
+	const params = `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"legacy.txt"}}]}`
+	schema := &schemapb.CollectionSchema{Name: "restored", Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "100"}, {Key: "enable_analyzer", Value: "true"}, {Key: "analyzer_params", Value: params}},
+	}}}
+	calls := 0
+	mockAnalyzerValidation(t)(func(context.Context, []*querypb.AnalyzerInfo) ([]int64, error) {
+		calls++
+		return nil, merr.WrapErrParameterInvalidMsg("current policy rejects definition")
+	})
+	task := &createCollectionTask{Core: &Core{}, Req: &milvuspb.CreateCollectionRequest{CollectionName: "restored"}, preserveFieldID: true, restoreAnalyzerDefinitions: true}
+	restored := proto.Clone(schema).(*schemapb.CollectionSchema)
+	require.NoError(t, task.validateSchema(context.Background(), restored))
+	require.Equal(t, params, restored.Fields[0].TypeParams[2].Value)
+	require.Zero(t, calls)
+	// A client-provided preserve_field_ids request is still new admission.
+	task.restoreAnalyzerDefinitions = false
+	require.Error(t, task.validateSchema(context.Background(), proto.Clone(schema).(*schemapb.CollectionSchema)))
+	require.Equal(t, 1, calls)
 }

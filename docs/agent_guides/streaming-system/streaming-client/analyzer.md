@@ -344,3 +344,7 @@ or changing a base does not revoke old definitions. Missing or invalid files can
 still fail recovery. CDC carries resolved schema paths and registrations through
 the existing WAL messages; each cluster must provision those paths and contents.
 No new metadata write outside WAL or public protocol field is introduced.
+
+Local stored-snapshot restoration also preserves the admitted analyzer definitions
+and resource bindings. External snapshot imports and client requests carrying
+`preserve_field_ids` remain new admission; neither is proof of local admission.

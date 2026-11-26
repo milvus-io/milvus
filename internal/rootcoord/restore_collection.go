@@ -34,7 +34,7 @@ import (
 
 // PrepareRestoreCollection allocates the complete creation recipe while the
 // caller owns the target collection-name broadcast lock. It publishes nothing.
-func (c *Core) PrepareRestoreCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, partitions []string) (*messagespb.RestoreSnapshotMessageBody, func(), error) {
+func (c *Core) PrepareRestoreCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest, partitions []string, external bool) (*messagespb.RestoreSnapshotMessageBody, func(), error) {
 	schema := &schemapb.CollectionSchema{}
 	if err := proto.Unmarshal(req.GetSchema(), schema); err != nil {
 		return nil, nil, err
@@ -54,8 +54,9 @@ func (c *Core) PrepareRestoreCollection(ctx context.Context, req *milvuspb.Creat
 	// those sub-fields, and the sub-field drop rule depends on the marker.
 	task := &createCollectionTask{
 		Core: c, Req: req, preserveFieldID: true, allowStructSubFieldOriginMarker: true,
-		header: &message.CreateCollectionMessageHeader{},
-		body:   &message.CreateCollectionRequest{DbName: req.GetDbName(), CollectionName: req.GetCollectionName(), CollectionSchema: schema},
+		restoreAnalyzerDefinitions: !external,
+		header:                     &message.CreateCollectionMessageHeader{},
+		body:                       &message.CreateCollectionRequest{DbName: req.GetDbName(), CollectionName: req.GetCollectionName(), CollectionSchema: schema},
 	}
 	if err := task.Prepare(ctx); err != nil {
 		task.releaseFileResources()

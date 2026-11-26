@@ -233,9 +233,15 @@ func TestPrepareRestoreCollectionAllowsStructSubFieldOriginMarker(t *testing.T) 
 	core := &Core{}
 	_, _, err = core.PrepareRestoreCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		DbName: "default", CollectionName: "restored", Schema: schema,
-	}, nil)
+	}, nil, false)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
 	require.NotNil(t, captured)
 	require.True(t, captured.preserveFieldID)
 	require.True(t, captured.allowStructSubFieldOriginMarker)
+	require.True(t, captured.restoreAnalyzerDefinitions)
+	_, _, err = core.PrepareRestoreCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+		DbName: "default", CollectionName: "restored", Schema: schema,
+	}, nil, true)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.False(t, captured.restoreAnalyzerDefinitions)
 }
