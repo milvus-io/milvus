@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <folly/coro/Task.h>
+
 #include <folly/ExceptionWrapper.h>
 #include <stdint.h>
 #include <any>
@@ -1526,6 +1528,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         milvus::OpContext* op_ctx,
                         StagedStateCommitter& committer);
 
+    folly::coro::Task<void>
+    BuildInterimIndexesAsync(const std::vector<std::vector<FieldId>>& groups,
+                             const SealedFieldLayoutPtr& layout,
+                             milvus::OpContext* op_ctx,
+                             StagedStateCommitter& committer);
+
     bool
     generate_interim_index(
         const FieldMeta& field_meta,
@@ -1547,8 +1555,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SealedFieldLayoutPtr& schema_snapshot) const;
 
-    [[nodiscard]] std::vector<ManifestLoadTask>
-    PrepareManifestLoadTasks(
+    folly::coro::Task<std::vector<ManifestLoadTask>>
+    PrepareManifestLoadTasksAsync(
         const std::shared_ptr<milvus_storage::api::Reader>& reader,
         const SealedFieldLayoutPtr& schema_snapshot,
         const SegmentLoadInfo& segment_load_info,
@@ -1818,8 +1826,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             info_proto,
         const std::string& shard);
 
-    void
-    LoadBatchJsonKeyIndexes(
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchJsonKeyIndexesAsync(
         milvus::OpContext* op_ctx,
         const std::unordered_map<
             FieldId,
@@ -2075,16 +2084,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      bool is_replace,
                      StagedStateCommitter& committer);
 
-    void
-    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
-                       std::vector<std::pair<std::vector<FieldId>,
-                                             proto::segcore::FieldBinlog>>&
-                           field_binlog_to_load,
-                       const SegmentLoadInfo& segment_load_info,
-                       const SealedFieldLayoutPtr& schema_snapshot,
-                       milvus::OpContext* op_ctx,
-                       bool is_replace,
-                       StagedStateCommitter& committer);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchIndexesAsync(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
+            field_id_to_index_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer);
+
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchFieldDataAsync(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::vector<
+            std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>&
+            field_binlog_to_load,
+        const SegmentLoadInfo& segment_load_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer,
+        const std::unordered_set<FieldId>& index_raw_fields);
 
     void
     InitTextLobPaths(const std::string& manifest_path,
@@ -2121,13 +2144,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace,
         StagedStateCommitter& committer);
 
-    // Load external collection column groups from staged segment load info.
-    void
-    LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
-                     const SealedFieldLayoutPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx,
-                     bool is_replace,
-                     StagedStateCommitter& committer);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadColumnGroupsAsync(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        std::shared_ptr<const milvus_storage::api::Properties> properties,
+        std::vector<std::pair<int, std::vector<FieldId>>> eager_cg_field_ids,
+        std::vector<std::pair<int, std::vector<FieldId>>> lazy_cg_field_ids,
+        std::vector<VortexColumnGroupLocalFormat> local_formats,
+        const SegmentLoadInfo& segment_load_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer);
+
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadColumnGroupsAsync(const SegmentLoadInfo& segment_load_info,
+                          const SealedFieldLayoutPtr& schema_snapshot,
+                          milvus::OpContext* op_ctx,
+                          bool is_replace,
+                          StagedStateCommitter& committer,
+                          std::shared_ptr<const PublishedSegmentState> current);
 
     void
     LoadColumnGroup(
@@ -2147,7 +2185,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             preopened_chunk_reader,
         bool enable_async_load,
         bool lazy_materialization,
-        bool use_vortex);
+        bool use_vortex,
+        const std::shared_ptr<milvus_storage::api::Reader>& reader);
 
     void
     LoadVortexColumnGroup(
@@ -2170,12 +2209,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const SealedFieldLayoutPtr& schema_snapshot) const;
 
-    void
-    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
-                  milvus::OpContext* op_ctx = nullptr);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    ReloadColumnsAsync(const std::vector<FieldId>& field_ids_to_reload,
+                       milvus::OpContext* op_ctx,
+                       std::shared_ptr<const PublishedSegmentState> current);
 
     void
     LoadBatchTextIndexes(
+        milvus::OpContext* op_ctx,
+        std::unordered_map<FieldId,
+                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
+            text_indexes_to_load,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        const SegmentLoadInfo& segment_load_info,
+        StagedStateCommitter& committer);
+
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchTextIndexesAsync(
         milvus::OpContext* op_ctx,
         std::unordered_map<FieldId,
                            std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
@@ -2229,14 +2281,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
                            FieldId field_id);
 
-    void
-    PrepareLoadDiffForReopen(
-        milvus::OpContext* op_ctx,
-        SegmentLoadInfo& segment_load_info,
-        LoadDiff& load_diff,
-        const SealedFieldLayoutPtr& schema_snapshot,
-        StagedStateCommitter& committer,
-        milvus::monitor::SegmentLoadTiming* timing = nullptr);
+    // Owns the preparation fan-out, dependent completion and final retirement.
+    folly::coro::Task<void>
+    ExecuteLoadDiffAsync(milvus::OpContext* op_ctx,
+                         SegmentLoadInfo& segment_load_info,
+                         LoadDiff& load_diff,
+                         const SealedFieldLayoutPtr& schema_snapshot,
+                         StagedStateCommitter& committer,
+                         std::shared_ptr<const PublishedSegmentState> current,
+                         milvus::monitor::SegmentLoadTiming* timing = nullptr);
 
     void
     FinalizeLoadDiffForReopen(milvus::OpContext* op_ctx,
@@ -2573,7 +2626,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::vector<std::pair<int, std::vector<FieldId>>> lazy_cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const TestFieldLayout& schema_snapshot,
-        std::shared_ptr<milvus_storage::api::Reader> reader) {
+        std::shared_ptr<milvus_storage::api::Reader> reader,
+        milvus::OpContext* op_ctx = nullptr) {
         auto current = CapturePublishedState();
         std::unordered_set<FieldId> loaded_fields;
         for (const auto* groups : {&eager_cg_field_ids, &lazy_cg_field_ids}) {
@@ -2603,12 +2657,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                                               schema_snapshot),
                          segment_load_info,
                          schema_snapshot,
-                         nullptr,
+                         op_ctx,
                          false,
                          committer);
 
         BuildInterimIndexes(
-            interim_indexes, schema_snapshot, nullptr, committer);
+            interim_indexes, schema_snapshot, op_ctx, committer);
         std::vector<std::shared_ptr<ChunkedColumnInterface>> columns;
         for (const auto* cg_field_ids :
              {&eager_cg_field_ids, &lazy_cg_field_ids}) {

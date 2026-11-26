@@ -169,10 +169,10 @@ struct LoadDiff {
 
 Location: `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp`
 
-`ApplyLoadDiff()` prepares a cloned runtime state, finalizes resource removals,
-and publishes the new snapshot after the complete operation succeeds. It shares
-`PrepareLoadDiffForReopen()` and `FinalizeLoadDiffForReopen()` with Reopen.
-Existing readers retain their original snapshot while the new state is prepared.
+`ApplyLoadDiff()` prepares a cloned runtime state and uses the same
+`ExecuteLoadDiffAsync()` orchestration as Reopen. It publishes the new snapshot
+only after all preparation and resource finalization succeeds. Existing readers
+retain their original snapshot while the new state is prepared.
 
 ### 4. Unified Load and Reopen
 
@@ -376,25 +376,43 @@ additional concurrent builds. Lazy fields keep their separate groups.
 
 ### Execution boundary
 
-The current synchronous orchestration is retained:
+Load and both Reopen paths retain their caller-side lock, input snapshot, staged
+resources, and final publication. A single outer `blockingWait` runs
+`ExecuteLoadDiffAsync()` on ASYNC_LOAD:
 
-1. Load/replace formal indexes and prepare raw fields, LOB paths, and related
-   field metadata.
-2. Load pre-built Text/JSON indexes and create planned Text indexes that do not
-   need default filling. Index dependencies are satisfied by step 1.
-3. Fill default values, then create Text indexes that depend on those values.
-4. Finalize old-resource removal in staged state.
-5. Execute the planned interim builds, drain submitted work, and publish the
-   complete snapshot.
+1. Capture source columns and index raw-data capabilities from the input snapshot
+   and target metadata before starting any tasks. Initialize shared LOB metadata
+   before concurrent readers can access it.
+2. Start independent formal-index, raw-field, reload, pre-built Text, and JSON
+   preparation tasks together. Their task vector is joined before dependent
+   operations begin.
+3. Build struct offsets, create Text indexes using existing/loaded data, fill
+   defaults, and create Text indexes requiring defaults in an ordered MIDDLE task.
+4. Finalize resource removals in staged state, then execute the planned interim
+   groups. Each group's fields build serially; separate groups may overlap.
+5. Return to the caller and publish the complete snapshot.
 
-The existing eager/lazy replacement phases remain separate; this planning
-change does not combine their loading concurrency. Failures or cancellation keep
-the old published state visible. An exception while submitting interim work
-still waits for already submitted tasks before releasing the staged state.
+ASYNC_LOAD runs orchestration and asynchronous reader waits. MIDDLE runs the
+synchronous leaves, including materialization, cache-slot construction, and index
+Deserialize. A MIDDLE leaf does not submit more MIDDLE work and block waiting for
+it. Batch orchestration awaits futures without occupying a MIDDLE worker. Native
+Load phase timing counts the overlapping preparation tree once as
+`parallel_prepare`; existing batch and worker metrics retain their own timings.
+Default filling, Text creation, finalization and publication remain sequential
+phase intervals.
 
-This change does not remove MIDDLE, introduce asynchronous cache-slot APIs, or
-combine the entire LoadDiff into a coroutine task vector. It also preserves the
-existing restriction against dropping a vector index while retaining its field.
+Preparation failures are collected only after every started task finishes.
+Submission failures also drain work already submitted by that batch. Awaiting
+those borrowed-state operations suppresses early coroutine cancellation; the
+operations retain their existing `OpContext` cancellation checks. The caller's
+snapshot and staged state therefore outlive all workers, and failed preparation
+does not publish a partial result.
+
+Concurrent preparation can make more categories of work active at once; existing
+load budgets continue to govern admission. This change does not claim a lower
+peak memory footprint. It does not introduce asynchronous cache-slot APIs or
+remove MIDDLE, and preserves the restriction against dropping a vector index
+while retaining its field.
 
 ## Testing
 

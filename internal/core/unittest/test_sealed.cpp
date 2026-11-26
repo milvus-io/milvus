@@ -17,6 +17,7 @@
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/futures/Future.h>
 #include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -634,6 +635,73 @@ class RendezvousTestReader : public WarmupTestReader {
     mutable std::mutex mutex_;
     mutable std::condition_variable cv_;
     mutable int arrived_{0};
+};
+
+// Each async open stays pending until the test completes it. Completion ignores
+// cancellation, like an already issued blocking read that must be drained.
+class ControlledAsyncTestReader : public WarmupTestReader {
+ public:
+    using OpenResult =
+        arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>;
+    explicit ControlledAsyncTestReader(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> groups)
+        : WarmupTestReader(std::move(groups)) {
+    }
+
+    folly::SemiFuture<OpenResult>
+    get_chunk_reader_async(int64_t index,
+                           const std::shared_ptr<std::vector<std::string>>&,
+                           folly::CancellationToken) const override {
+        std::lock_guard lock(mutex_);
+        if (released_) {
+            return folly::makeSemiFuture<OpenResult>(
+                WarmupTestReader::get_chunk_reader(index, nullptr));
+        }
+        folly::Promise<OpenResult> promise;
+        auto future = promise.getSemiFuture();
+        pending_.emplace(index, std::move(promise));
+        cv_.notify_all();
+        return future;
+    }
+
+    bool
+    WaitForOpens(size_t count) {
+        std::unique_lock lock(mutex_);
+        return cv_.wait_for(lock, std::chrono::seconds(10), [&] {
+            return pending_.size() == count;
+        });
+    }
+
+    void
+    Fail(int64_t index) {
+        folly::Promise<OpenResult> promise;
+        {
+            std::lock_guard lock(mutex_);
+            promise = std::move(pending_.at(index));
+            pending_.erase(index);
+        }
+        promise.setValue(arrow::Status::Invalid("injected reader failure"));
+    }
+
+    void
+    Release() {
+        std::map<int64_t, folly::Promise<OpenResult>> pending;
+        {
+            std::lock_guard lock(mutex_);
+            released_ = true;
+            pending.swap(pending_);
+        }
+        for (auto& [index, promise] : pending) {
+            promise.setValue(
+                WarmupTestReader::get_chunk_reader(index, nullptr));
+        }
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    mutable std::condition_variable cv_;
+    mutable std::map<int64_t, folly::Promise<OpenResult>> pending_;
+    mutable bool released_{false};
 };
 
 class CancellationObservingIndex final : public index::IIndex {
@@ -5264,6 +5332,11 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPreservesCreatedTextIndexState) {
 }
 
 TEST(SealedSegmentReopen, TextBuildUsesPlannedDataPreparation) {
+    auto& middle = ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
+    const auto previous_threads = middle.numThreads();
+    middle.setNumThreads(1);
+    auto restore_threads =
+        folly::makeGuard([&] { middle.setNumThreads(previous_threads); });
     for (const auto preparation : {TextIndexDataPreparation::Existing,
                                    TextIndexDataPreparation::Load,
                                    TextIndexDataPreparation::FillDefault}) {
@@ -5363,6 +5436,83 @@ TEST(SealedSegmentReopen, TextBuildUsesPlannedDataPreparation) {
         EXPECT_EQ(matches.size(), rows);
         EXPECT_EQ(matches.count(), rows);
     }
+}
+
+TEST(SealedSegmentReopen, FailedFieldFanoutDoesNotPublishAndCanRetry) {
+    const FieldId pk(100);
+    const FieldId first(101);
+    const FieldId second(102);
+    proto::schema::CollectionSchema schema_proto;
+    for (const auto field_id : {pk, first, second}) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(field_id.get());
+        field->set_name("field_" + std::to_string(field_id.get()));
+        field->set_data_type(proto::schema::DataType::Int64);
+        field->set_is_primary_key(field_id == pk);
+    }
+    // The missing file must be read during Reopen, not deferred until a query.
+    AddWarmupProperty(schema_proto, "warmup.scalarField", "sync");
+    auto schema = Schema::ParseFrom(schema_proto);
+    constexpr int64_t rows = 4;
+    auto dataset = DataGen(schema, rows);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    const auto raw = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    auto initial = raw;
+    initial.field_infos.erase(first.get());
+    initial.field_infos.erase(second.get());
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->LoadFieldData(initial);
+    proto::segcore::SegmentLoadInfo previous;
+    previous.set_segmentid(kSegmentID);
+    previous.set_collectionid(kCollectionID);
+    previous.set_partitionid(kPartitionID);
+    previous.set_num_of_rows(rows);
+    previous.set_storageversion(1);
+    auto add_binlog = [](auto& proto, int64_t field, const auto& info) {
+        auto* binlog = proto.add_binlog_paths();
+        binlog->set_fieldid(field);
+        for (size_t i = 0; i < info.insert_files.size(); ++i) {
+            auto* file = binlog->add_binlogs();
+            file->set_log_path(info.insert_files[i]);
+            file->set_entries_num(info.entries_nums[i]);
+            file->set_log_size(info.memory_sizes[i]);
+        }
+    };
+    for (const auto& [field, info] : initial.field_infos) {
+        add_binlog(previous, field, info);
+    }
+    sealed->SetLoadInfo(previous);
+    ASSERT_EQ(sealed->TestResolveFieldDataWarmupPolicy(
+                  second, *sealed->TestGetLoadInfoSnapshot(), schema),
+              "sync");
+    const auto before = sealed->TestGetPublishedStateSnapshot();
+    auto good_target = previous;
+    add_binlog(good_target, first.get(), raw.field_infos.at(first.get()));
+    add_binlog(good_target, second.get(), raw.field_infos.at(second.get()));
+    auto bad_target = good_target;
+    // Both fields are independent jobs. The first can stage successfully while
+    // the second fails; neither staged result may become externally visible.
+    auto* invalid =
+        bad_target.mutable_binlog_paths(bad_target.binlog_paths_size() - 1);
+    invalid->mutable_binlogs(0)->set_log_path(
+        raw.field_infos.at(second.get()).insert_files.front() + "-missing");
+    OpContext context;
+    EXPECT_THROW(sealed->Reopen(&context, bad_target), std::exception);
+    EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+    EXPECT_EQ(before->runtime->fields.count(first), 0);
+    EXPECT_EQ(before->runtime->fields.count(second), 0);
+
+    ASSERT_NO_THROW(sealed->Reopen(&context, good_target));
+    const auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_NE(after, before);
+    EXPECT_EQ(after->runtime->fields.at(first)->NumRows(), rows);
+    EXPECT_EQ(after->runtime->fields.at(second)->NumRows(), rows);
+    EXPECT_EQ(before->runtime->fields.count(first), 0);
+    EXPECT_EQ(before->runtime->fields.count(second), 0);
 }
 
 // Reproducer for issue #49076.
@@ -6332,6 +6482,124 @@ TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
         schema,
         std::make_shared<RendezvousTestReader>(column_groups, /*parties=*/2));
 
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(columns[0]->DataByteSize(), 1);
+    EXPECT_EQ(columns[1]->DataByteSize(), 1);
+}
+
+TEST(SealedSegmentCowState,
+     AsyncManifestFailureAndCancellationDrainPendingOpen) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetLoadAsyncReadForTest(true);
+    for (const bool cancel : {false, true}) {
+        SCOPED_TRACE(cancel);
+        auto schema = std::make_shared<Schema>();
+        const auto first = schema->AddDebugField("first", DataType::INT64);
+        const auto second = schema->AddDebugField("second", DataType::INT64);
+        auto segment = CreateSealedSegment(schema);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        const auto before = sealed->TestGetPublishedStateSnapshot();
+        proto::segcore::SegmentLoadInfo proto;
+        proto.set_segmentid(1010);
+        proto.set_num_of_rows(1);
+        SegmentLoadInfo info(proto, schema);
+        auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+        for (const auto field : {first, second}) {
+            auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+            group->columns = {std::to_string(field.get())};
+            groups->push_back(std::move(group));
+        }
+        auto reader = std::make_shared<ControlledAsyncTestReader>(groups);
+        folly::CancellationSource cancellation;
+        OpContext context;
+        context.cancellation_token = cancellation.getToken();
+        auto load = std::async(std::launch::async, [&] {
+            return sealed->TestStageLoadColumnGroupsWithReader(
+                groups,
+                std::make_shared<milvus_storage::api::Properties>(),
+                {{0, {first}}, {1, {second}}},
+                {},
+                info,
+                schema,
+                reader,
+                &context);
+        });
+        auto release = folly::makeGuard([&] { reader->Release(); });
+        ASSERT_TRUE(reader->WaitForOpens(2));
+        if (cancel) {
+            cancellation.requestCancellation();
+        } else {
+            reader->Fail(0);
+        }
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+        reader->Release();
+        EXPECT_THROW(load.get(), SegcoreError);
+        EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+    }
+}
+
+TEST(SealedSegmentCowState,
+     AsyncManifestOpenProgressesWithOnlyMiddleWorkerBusy) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetLoadAsyncReadForTest(true);
+    auto& middle = ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
+    const auto previous_threads = middle.numThreads();
+    middle.setNumThreads(1);
+    auto restore_threads =
+        folly::makeGuard([&] { middle.setNumThreads(previous_threads); });
+    auto schema = std::make_shared<Schema>();
+    const auto first = schema->AddDebugField("first", DataType::INT64);
+    const auto second = schema->AddDebugField("second", DataType::INT64);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(1011);
+    proto.set_num_of_rows(1);
+    SegmentLoadInfo info(proto, schema);
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto field : {first, second}) {
+        auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+        group->columns = {std::to_string(field.get())};
+        groups->push_back(std::move(group));
+    }
+    auto reader = std::make_shared<ControlledAsyncTestReader>(groups);
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+    auto unblocked = unblock.get_future();
+    auto blocker = folly::via(&middle, [&] {
+        worker_started.set_value();
+        unblocked.wait();
+    });
+    worker_started.get_future().wait();
+    auto load = std::async(std::launch::async, [&] {
+        return sealed->TestStageLoadColumnGroupsWithReader(
+            groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {first}}, {1, {second}}},
+            {},
+            info,
+            schema,
+            reader);
+    });
+    bool released = false;
+    auto release = folly::makeGuard([&] {
+        reader->Release();
+        if (!released) {
+            unblock.set_value();
+        }
+    });
+    ASSERT_TRUE(reader->WaitForOpens(2));
+    reader->Release();
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    unblock.set_value();
+    released = true;
+    std::move(blocker).get();
+    const auto columns = load.get();
     ASSERT_EQ(columns.size(), 2);
     EXPECT_EQ(columns[0]->DataByteSize(), 1);
     EXPECT_EQ(columns[1]->DataByteSize(), 1);

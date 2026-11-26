@@ -32,6 +32,7 @@ constexpr std::array phase_names = {"lock_wait",
                                     "create_text_indexes",
                                     "finalize",
                                     "publish",
+                                    "parallel_prepare",
                                     "total"};
 static_assert(phase_names.size() ==
               static_cast<std::size_t>(SegmentLoadPhase::Count) + 1);

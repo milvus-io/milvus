@@ -13,6 +13,9 @@
 #include "monitor/SegmentLoadMetrics.h"
 
 #include <gtest/gtest.h>
+#include <folly/coro/BlockingWait.h>
+#include <folly/coro/Task.h>
+#include <folly/coro/CurrentExecutor.h>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
@@ -54,6 +57,44 @@ Snapshot(const std::string& family_name,
 
 constexpr auto duration_family = "internal_core_query_stage_duration_seconds";
 constexpr auto inflight_family = "internal_core_query_stage_inflight";
+
+folly::coro::Task<void>
+TimedAsyncLoadBatch(bool fail) {
+    QueryStageTimer batch(QueryStage::LoadIndexesBatch);
+    co_await folly::coro::co_reschedule_on_current_executor;
+    QueryStageTimer wait(QueryStage::LoadIndexesWait);
+    if (fail) {
+        throw std::runtime_error("async load failure");
+    }
+    co_return;
+}
+
+TEST(QueryMetrics, CoroutineLoadBatchRecordsOutcomeAndReleasesInflight) {
+    for (bool failed : {false, true}) {
+        const auto result = failed ? "error" : "success";
+        const auto batch_before =
+            Snapshot(duration_family, "load_indexes_batch", result);
+        const auto wait_before =
+            Snapshot(duration_family, "load_indexes_wait", result);
+        if (failed) {
+            EXPECT_THROW(folly::coro::blockingWait(TimedAsyncLoadBatch(true)),
+                         std::runtime_error);
+        } else {
+            EXPECT_NO_THROW(
+                folly::coro::blockingWait(TimedAsyncLoadBatch(false)));
+        }
+        EXPECT_EQ(Snapshot(duration_family, "load_indexes_batch", result)
+                      .histogram.sample_count,
+                  batch_before.histogram.sample_count + 1);
+        EXPECT_EQ(Snapshot(duration_family, "load_indexes_wait", result)
+                      .histogram.sample_count,
+                  wait_before.histogram.sample_count + 1);
+        EXPECT_DOUBLE_EQ(
+            Snapshot(inflight_family, "load_indexes_batch").gauge.value, 0);
+        EXPECT_DOUBLE_EQ(
+            Snapshot(inflight_family, "load_indexes_wait").gauge.value, 0);
+    }
+}
 
 TEST(QueryMetrics, ExportsFiniteBucketsAndSeconds) {
     const auto before =
@@ -156,7 +197,8 @@ TEST(QueryMetrics, LoadPhasesPartitionEachAttemptIncludingSkippedStages) {
                                              "default_fields",
                                              "create_text_indexes",
                                              "finalize",
-                                             "publish"};
+                                             "publish",
+                                             "parallel_prepare"};
     for (bool failed : {false, true}) {
         const auto result = failed ? "error" : "success";
         std::vector<prometheus::ClientMetric> before;
@@ -166,10 +208,24 @@ TEST(QueryMetrics, LoadPhasesPartitionEachAttemptIncludingSkippedStages) {
         const auto total_before = Snapshot(family, "total", result);
         try {
             SegmentLoadTiming timing;
-            SegmentLoadTiming::SwitchTo(&timing, SegmentLoadPhase::Indexes);
+            SegmentLoadTiming::SwitchTo(&timing,
+                                        SegmentLoadPhase::ParallelPrepare);
             if (failed) {
                 throw std::runtime_error("load failure");
             }
+            std::thread dependent([&] {
+                SegmentLoadTiming::SwitchTo(&timing,
+                                            SegmentLoadPhase::Finalize);
+                SegmentLoadTiming::SwitchTo(
+                    &timing, SegmentLoadPhase::CreateTextIndexes);
+                SegmentLoadTiming::SwitchTo(&timing,
+                                            SegmentLoadPhase::DefaultFields);
+                SegmentLoadTiming::SwitchTo(
+                    &timing, SegmentLoadPhase::CreateTextIndexes);
+                SegmentLoadTiming::SwitchTo(&timing,
+                                            SegmentLoadPhase::Finalize);
+            });
+            dependent.join();
             SegmentLoadTiming::SwitchTo(&timing, SegmentLoadPhase::Publish);
             timing.End();
             timing.End();

@@ -42,7 +42,7 @@ first use, with no label-map construction on the observation hot path.
 | `manifest_build_chunk` | Per loaded cell: Arrow normalization, chunk construction and optional mmap-file creation/population. Several cells may build in parallel. |
 | `fill_primary_keys` | Per segment result: the entire PK fill call, including the segment read lock and any cold reads. |
 | `load_indexes_batch`, `load_column_groups_batch` | Whole index/column-group batch wall time in Load or Reopen, including submission and worker waits. |
-| `load_indexes_wait`, `load_column_groups_wait` | WaitAllFutures inside the corresponding batch. Overlaps queue/run work. |
+| `load_indexes_wait`, `load_column_groups_wait` | Dispatch and asynchronous join inside the corresponding batch. Overlaps queue/run work. |
 | `load_index_queue/run`, `load_column_group_queue/run` | Per completed MIDDLE worker: submission to entry, then execution; both share the worker outcome. See [Cold Load](cold-load-stages.md) for the separate per-Load phase population. |
 
 On master, the coroutine-based async load pipeline also records
