@@ -130,6 +130,9 @@ func (b *DefaultBalancer) publishScope(s TriggerScope) {
 	if len(s.DirtyCollections) > 0 {
 		b.discovery.add(localChanges, TriggerScope{DirtyCollections: slices.Clone(s.DirtyCollections)})
 	}
+	for _, replica := range s.RetiringReplicas {
+		b.discovery.add(localChanges, TriggerScope{RetiringReplicas: []int64{replica}})
+	}
 	if len(s.DirtyNodes) > 0 {
 		b.discovery.add(topologyChanges, TriggerScope{DirtyNodes: slices.Clone(s.DirtyNodes)})
 	} else if s.NodeChanged {

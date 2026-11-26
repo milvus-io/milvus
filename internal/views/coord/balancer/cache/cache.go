@@ -74,12 +74,36 @@ func (c *CollectionEntry) CanRetireReplicas(reader Reader) bool {
 		n := reader.GetNode(node.ID())
 		for ref := range node.RangeReplicas {
 			if r := c.planning.Replica(ref.ReplicaID); r != nil && ref.Up > 0 &&
-				(n == nil || !n.info.Alive || n.info.Stopping || n.info.ResourceGroup != r.group) {
+				!n.eligibleFor(r.group) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// A placement-only handoff can unblock retirement while all versions stay current.
+func (c *CollectionEntry) clearedRetirementBlocker(reader Reader, old, next *ShardEntry) bool {
+	if old == nil || (next != nil && slices.Equal(old.upNodes, next.upNodes)) {
+		return false
+	}
+	replica := c.planning.Replica(old.id.ReplicaID)
+	if replica == nil {
+		return false
+	}
+	key := idKey(old.id.ReplicaID)
+	for _, node := range old.upNodes {
+		if placement := c.PlacementNode(node); placement != nil {
+			ref, _ := placement.replicas.get(key[:])
+			if ref.Up > 0 {
+				continue
+			}
+		}
+		if !reader.GetNode(node).eligibleFor(replica.group) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *CollectionEntry) MaybeUped(id qviews.ShardID) bool {
@@ -113,6 +137,10 @@ type NodeEntry struct {
 	info          api.BalanceNode
 	contributions immutableIndex[nodeContribution]
 	targets       immutableIndex[targetContribution]
+}
+
+func (n *NodeEntry) eligibleFor(group string) bool {
+	return n != nil && n.info.Alive && !n.info.Stopping && n.info.ResourceGroup == group
 }
 
 func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
@@ -592,15 +620,23 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		delete(c.replicas, id.ReplicaID)
 	}
 	c.mu.Unlock()
-	if !wasReady && next.allCurrentUp() {
+	// Once all desired shards are current, each desired replica has a resident
+	// shard. Extra replica IDs therefore identify collections awaiting retirement.
+	if next.allCurrentUp() && len(slot.replicaUses) > len(next.config.Replicas) &&
+		(!wasReady || next.clearedRetirementBlocker(c, old, replacement)) && next.CanRetireReplicas(c) {
 		for resident := range slot.replicaUses {
 			if next.planning.Replica(resident) == nil {
-				c.changed(api.TriggerScope{DirtyCollections: []int64{collectionID}})
-				break
+				c.changed(api.TriggerScope{RetiringReplicas: []int64{resident}})
 			}
 		}
 	}
 	if old != nil && stats != nil {
+		// A schema publication can unblock retirement even for an empty manager.
+		if next.config != nil && next.planning.Replica(id.ReplicaID) == nil &&
+			!sameVersion(old.stats.PublishedSchema, stats.PublishedSchema) {
+			c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
+			return
+		}
 		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
 			return
 		}
@@ -614,7 +650,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
 }
 
-func sameVersion(a, b *qviews.QueryViewVersion) bool {
+func sameVersion[T comparable](a, b *T) bool {
 	if a == nil || b == nil {
 		return a == b
 	}

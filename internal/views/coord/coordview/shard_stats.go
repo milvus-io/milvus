@@ -20,6 +20,8 @@ type ShardStats struct {
 	// MaybeUped records whether this manager has seen or recovered evidence of Up.
 	MaybeUped  bool
 	UpBySchema map[int32]SchemaUpView
+	// PublishedSchema is the immutable public read generation applied by this manager.
+	PublishedSchema *int32
 
 	// Per-view placements are independent of merged physical resource progress.
 	UpPlacement        *ViewPlacement

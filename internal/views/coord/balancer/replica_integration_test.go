@@ -215,10 +215,10 @@ func TestRetirementWaitsForWholeTarget(t *testing.T) {
 	c.PublishShard(last, stale)
 	check(false)
 
-	var rescanned []int64
-	c.SetScheduler(func(scope TriggerScope) { rescanned = append(rescanned, scope.DirtyCollections...) })
+	var retiring []int64
+	c.SetScheduler(func(scope TriggerScope) { retiring = append(retiring, scope.RetiringReplicas...) })
 	c.PublishShard(last, replacement(2))
-	require.Equal(t, []int64{1}, rescanned)
+	require.Equal(t, []int64{removed.ReplicaID}, retiring)
 	check(true)
 	for _, info := range []*NodeInfo{nil, {NodeID: 1, ResourceGroup: "rg1", Alive: true, Stopping: true}, {NodeID: 1, ResourceGroup: "other", Alive: true}} {
 		c.PublishNode(1, info)
@@ -228,6 +228,77 @@ func TestRetirementWaitsForWholeTarget(t *testing.T) {
 	check(true)
 	c.PublishShard(last, nil)
 	check(false)
+}
+
+func TestRetirementWakesOnPlacementHandoff(t *testing.T) {
+	c := replicaCache(1, 2)
+	t.Cleanup(c.Close)
+	target, old := cacheShard(1, 10), cacheShard(1, 11)
+	second := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_1_1v1"}
+	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1}, nil, shardDataView(target.VChannel, 1), shardDataView(second.VChannel, 1))
+	placed := func(node int64) *coordview.ShardStats {
+		return testShardStats(ver(1, 0, node), 1, placement(1000, 1, node, coordview.SegmentStateUp))
+	}
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, Stopping: true, ResourceGroup: "rg1"})
+	c.PublishShard(target, placed(1))
+	c.PublishShard(second, placed(1))
+	registry := emptyRegistry(t)
+	registry.PublishCollectionSchema(1, 0)
+	registry.Ensure(old)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	c.MarkReady()
+	b := NewDefaultBalancer(c, registry, nil, nil)
+	// Neither Start nor Trigger is called. Consume only publications after this point.
+	c.PublishShard(target, placed(2))
+	for b.dispatch(anySource) >= 0 {
+	}
+	require.NotContains(t, b.ready.items, old, "another desired shard still references the stopping node")
+	c.PublishShard(second, placed(2))
+	for b.dispatch(anySource) >= 0 {
+	}
+	require.Contains(t, b.ready.items, old)
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.Nil(t, registry.Get(old))
+}
+
+func TestRetirementWakesOnSchemaPublication(t *testing.T) {
+	c := replicaCache(1, 1)
+	t.Cleanup(c.Close)
+	target, old := cacheShard(1, 10), cacheShard(1, 11)
+	data := cacheData(1, target.VChannel, 100)
+	data.SchemaVersion = 1
+	c.PublishDataView(1, data)
+	stats := testShardStats(ver(1, 0, 1), 1, placement(1000, 1, 1, coordview.SegmentStateUp))
+	stats.UpSchemaVersion = 1
+	c.PublishShard(target, stats)
+	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
+		for _, views := range group.ViewsByNode {
+			for _, view := range views {
+				response := view.View.IntoProto()
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStatePreparing {
+					response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+				}
+				view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+			}
+		}
+		return nil
+	})
+	registry.PublishCollectionSchema(1, 0)
+	addShardWithPreparingView(t, registry, old, nil)
+	mgr := registry.Get(old)
+	require.Eventually(t, func() bool { return mgr.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	c.MarkReady()
+	b := NewDefaultBalancer(c, registry, nil, nil)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.NotNil(t, mgr.Stats().UpVersion, "the old public schema must remain serviceable")
+	registry.PublishCollectionSchema(1, 1)
+	require.Nil(t, mgr.Stats().UpVersion)
+	registry.PublishCollectionSchema(1, 1)
+	require.Eventually(t, func() bool {
+		return b.Reconcile(t.Context()) == nil && registry.Get(old) == nil
+	}, 5*time.Second, time.Millisecond)
+	require.Nil(t, registry.Get(target), "retirement must not prepare a desired shard")
 }
 
 func TestRetirementRechecksApplyInputs(t *testing.T) {

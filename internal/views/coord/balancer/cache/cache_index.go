@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"iter"
 
 	iradix "github.com/hashicorp/go-immutable-radix"
 
@@ -56,6 +57,18 @@ func (i immutableIndex[T]) remove(key []byte) immutableIndex[T] {
 func (i immutableIndex[T]) each(fn func(T) bool) {
 	if i.tree != nil {
 		i.tree.Root().Walk(func(_ []byte, value interface{}) bool { return !fn(value.(T)) })
+	}
+}
+
+// RangeReplicaShards walks the replica prefix of the immutable resident shard index.
+func (c *CollectionEntry) RangeReplicaShards(replica int64) iter.Seq[qviews.ShardID] {
+	return func(yield func(qviews.ShardID) bool) {
+		key := idKey(replica)
+		if c.shards.tree != nil {
+			c.shards.tree.Root().WalkPrefix(key[:], func(_ []byte, value interface{}) bool {
+				return !yield(value.(*ShardEntry).id)
+			})
+		}
 	}
 }
 

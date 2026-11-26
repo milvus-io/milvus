@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -44,6 +45,32 @@ func TestResolveCacheScope(t *testing.T) {
 	}
 	c.PublishLoadConfig(1, nil, 2)
 	require.Empty(t, discoveredIDs(c, TriggerScope{DirtyCollections: []int64{1}}), "explicit release bypasses shard discovery")
+}
+
+func TestRetiringReplicaScopeUsesResidentChannels(t *testing.T) {
+	c := replicaCache(1, 1)
+	t.Cleanup(c.Close)
+	desired, old := cacheShard(1, 10), cacheShard(1, 11)
+	c.PublishShard(desired, &coordview.ShardStats{})
+	for i := range discoveryShardLimit + 1 {
+		c.PublishShard(qviews.ShardID{ReplicaID: old.ReplicaID, VChannel: fmt.Sprintf("ch_1v%d", i)}, &coordview.ShardStats{})
+	}
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	scope := TriggerScope{RetiringReplicas: []int64{old.ReplicaID}}
+	b.publishScope(scope)
+	b.publishScope(scope)
+	require.Len(t, b.discovery.pending, 1)
+	var sizes []int
+	for batch := range b.discover(scope) {
+		sizes = append(sizes, len(batch.ids))
+		for _, id := range batch.ids {
+			require.Equal(t, old.ReplicaID, id.ReplicaID)
+		}
+	}
+	require.Equal(t, []int{discoveryShardLimit, 1}, sizes)
+	require.Empty(t, discoveredIDs(c, TriggerScope{RetiringReplicas: []int64{desired.ReplicaID, 999}}))
+	c.PublishLoadConfig(1, nil, 2)
+	require.Empty(t, discoveredIDs(c, scope), "collection release owns teardown")
 }
 
 func setOf[T comparable](values ...T) map[T]struct{} {

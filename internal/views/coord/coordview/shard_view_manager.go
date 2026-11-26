@@ -259,10 +259,11 @@ func (m *ShardViewManager) Stats() *ShardStats {
 
 func (m *ShardViewManager) statsLocked() *ShardStats {
 	stats := &ShardStats{
-		MaybeUped:  m.maybeUped,
-		Segments:   make(map[int64]*SegmentStats),
-		Resources:  make(map[int64]map[ResourceKey]struct{}),
-		UpBySchema: make(map[int32]SchemaUpView),
+		MaybeUped:       m.maybeUped,
+		PublishedSchema: m.publishedSchema,
+		Segments:        make(map[int64]*SegmentStats),
+		Resources:       make(map[int64]map[ResourceKey]struct{}),
+		UpBySchema:      make(map[int32]SchemaUpView),
 	}
 	resident := make(map[int64]struct{})
 

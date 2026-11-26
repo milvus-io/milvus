@@ -13,4 +13,5 @@ type TriggerScope struct {
 	DirtyResourceGroups []string
 	DirtyShards         []qviews.ShardID
 	DirtyCollections    []int64
+	RetiringReplicas    []int64 // Revisit only resident shards of these removed replica IDs.
 }

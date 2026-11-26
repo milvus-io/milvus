@@ -29,6 +29,8 @@ func discoveryKey(scope TriggerScope) (scopeKey, bool) {
 		return scopeKey{kind: "scan"}, true
 	case len(scope.DirtyCollections) == 1:
 		return scopeKey{kind: "collection", id: scope.DirtyCollections[0]}, true
+	case len(scope.RetiringReplicas) == 1:
+		return scopeKey{kind: "retiringReplica", id: scope.RetiringReplicas[0]}, true
 	case len(scope.DirtyShards) == 1:
 		id := scope.DirtyShards[0]
 		return scopeKey{kind: "shard", id: id.ReplicaID, channel: id.VChannel}, true
@@ -283,6 +285,18 @@ func (w *scopeWalk) visitScope(scope TriggerScope) bool {
 	for _, id := range scope.DirtyCollections {
 		if !w.visitCollection(id) {
 			return false
+		}
+	}
+	for _, replica := range scope.RetiringReplicas {
+		if collectionID, ok := w.balancer.cache.CollectionForReplica(replica); ok {
+			c := w.balancer.cache.GetCollection(collectionID)
+			if c != nil && c.LoadConfig() != nil && c.Planning().Replica(replica) == nil {
+				for id := range c.RangeReplicaShards(replica) {
+					if !w.emit(id) {
+						return false
+					}
+				}
+			}
 		}
 	}
 	for _, id := range scope.DirtyNodes {

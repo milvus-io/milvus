@@ -185,6 +185,7 @@ func (r *ShardViewRegistry) EnsureIf(shardID qviews.ShardID, current func() bool
 	_, collectionID, _, _ := funcutil.ParseVChannel(shardID.VChannel)
 	if version, ok := r.publishedSchemas[collectionID]; ok {
 		mgr.publishedSchema = &version
+		stats.PublishedSchema = mgr.publishedSchema
 	}
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
