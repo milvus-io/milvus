@@ -441,6 +441,55 @@ func TestRateLimitInterceptor(t *testing.T) {
 	})
 }
 
+func TestRateLimitInterceptor_RegexpPartitionQuota(t *testing.T) {
+	for _, param := range []*paramtable.ParamItem{
+		&Params.QuotaConfig.QuotaAndLimitsEnabled,
+		&Params.ProxyCfg.PartitionNameRegexp,
+	} {
+		originalValue := param.GetValue()
+		require.NoError(t, Params.Save(param.Key, "true"))
+		t.Cleanup(func() { assert.NoError(t, Params.Save(param.Key, originalValue)) })
+	}
+
+	const dbID, collectionID, firstPartitionID, secondPartitionID int64 = 100, 10, 20, 21
+	ctx := context.Background()
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(ctx, "db1").Return(&databaseInfo{DBID: dbID}, nil)
+	cache.EXPECT().GetCollectionID(ctx, "db1", "foo").Return(collectionID, nil)
+	cache.EXPECT().GetPartitions(ctx, "db1", "foo").Return(map[string]int64{
+		"p1": firstPartitionID,
+		"p2": secondPartitionID,
+		"p3": 22,
+	}, nil)
+
+	req := &milvuspb.SearchRequest{
+		DbName:         "db1",
+		CollectionName: "foo",
+		PartitionNames: []string{"p[12]", "p2"},
+		Nq:             1,
+	}
+	gotDBID, collections, rateType, tokens, err := GetRequestInfo(ctx, cache, req)
+	require.NoError(t, err)
+	assert.Equal(t, dbID, gotDBID)
+	assert.ElementsMatch(t, []int64{firstPartitionID, secondPartitionID}, collections[collectionID])
+	assert.Equal(t, internalpb.RateType_DQLSearch, rateType)
+	assert.Equal(t, 1, tokens)
+
+	limiter := NewSimpleLimiter(0, 0)
+	partition := limiter.rateLimiter.GetOrCreatePartitionLimiters(
+		dbID, collectionID, secondPartitionID, newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
+	partition.GetLimiters().Insert(rateType, ratelimitutil.NewLimiter(0, 0))
+	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return cache }, limiter)
+	response, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+		t.Fatal("search must be rejected by the matched partition's quota")
+		return nil, nil
+	})
+	require.NoError(t, err)
+	result, ok := response.(*milvuspb.SearchResults)
+	require.True(t, ok)
+	assert.ErrorIs(t, merr.Error(result.GetStatus()), merr.ErrServiceQuotaExceeded)
+}
+
 func TestRateLimitInterceptor_ZeroTokenRequestsBypassLimiter(t *testing.T) {
 	quotaConfig := &Params.QuotaConfig.QuotaAndLimitsEnabled
 	originalValue := quotaConfig.GetValue()
