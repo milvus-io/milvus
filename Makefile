@@ -52,7 +52,7 @@ ifeq ($(USE_ASAN), ON)
 	use_asan = ${USE_ASAN}
 	CGO_LDFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
 	CGO_CFLAGS += -fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address
-	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
+	asan_go_tag := ,use_asan
 endif
 
 USE_TSAN ?= OFF
@@ -116,11 +116,6 @@ ifdef WITH_CRT
 	with_crt = ${WITH_CRT}
 endif
 
-# FIPS: default OFF. Set MILVUS_FIPS_ENABLED=ON to enable BoringCrypto.
-GOEXPERIMENT_FLAG :=
-ifeq ($(MILVUS_FIPS_ENABLED),ON)
-	GOEXPERIMENT_FLAG := GOEXPERIMENT=boringcrypto
-endif
 # golangci-lint
 GOLANGCI_LINT_VERSION := 2.11.3
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -159,8 +154,27 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
         $(error USE_TSAN does not support GPU builds)
     endif
     ifneq ($(index_engine),cardinal)
-        MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
+        cuda_go_tag := ,cuda
     endif
+endif
+
+# All Go artifacts loaded into the same process must use the same snapshot.
+# Go 1.26.10 resolves v1.0.0 to the certified v1.0.0-c2097c7c (CMVP #5247).
+ifeq ($(MILVUS_FIPS_ENABLED),ON)
+ifneq ($(findstring ',$(MILVUS_GO_BUILD_TAGS))$(findstring ",$(MILVUS_GO_BUILD_TAGS)),)
+$(error FIPS build tags must not contain literal quote characters)
+endif
+	override GOFIPS140 := v1.0.0
+	export GOFIPS140
+	# Go accepts whitespace-separated or comma-separated tags. Normalize custom
+	# lists before adding a required tag so the Go tool sees it as its own tag.
+	empty :=
+	space := $(empty) $(empty)
+	comma := ,
+	fips_go_tags := $(subst $(comma), ,$(MILVUS_GO_BUILD_TAGS)$(asan_go_tag)$(cuda_go_tag))
+	override MILVUS_GO_BUILD_TAGS := $(subst $(space),$(comma),$(strip $(filter-out milvus_fips,$(fips_go_tags)) milvus_fips))
+else
+	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS)$(asan_go_tag)$(cuda_go_tag)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
@@ -183,11 +197,16 @@ endif
 
 milvus: build-cpp print-build-info build-go build-pyudf-runtime-wheel
 
+# Expose the server's Go module selection to external packaging builds.
+.PHONY: print-fips-go-module
+print-fips-go-module:
+	@printf '%s\n' "$$GOFIPS140"
+
 build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:

@@ -17,12 +17,11 @@
 package crypto
 
 import (
-	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
@@ -49,37 +48,12 @@ const (
 // pbkdf2Encoding omits padding, as the PHC string format this layout follows does.
 var pbkdf2Encoding = base64.RawStdEncoding.Strict()
 
-// pbkdf2SHA512 implements PBKDF2 (RFC 8018, section 5.2) with HMAC-SHA-512.
-//
-// This is deliberately not the standard library's crypto/pbkdf2: that package
-// always runs on Go's native FIPS module, while crypto/hmac and crypto/sha512
-// route to BoringCrypto under GOEXPERIMENT=boringcrypto, which is what
-// MILVUS_FIPS_ENABLED=ON builds with.
-func pbkdf2SHA512(password, salt []byte, iterations, keyBytes int) []byte {
-	prf := hmac.New(sha512.New, password)
-	hashBytes := prf.Size()
-	blocks := (keyBytes + hashBytes - 1) / hashBytes
-
-	derived := make([]byte, 0, blocks*hashBytes)
-	u := make([]byte, 0, hashBytes)
-	t := make([]byte, hashBytes)
-	var blockIndex [4]byte
-	for block := 1; block <= blocks; block++ {
-		binary.BigEndian.PutUint32(blockIndex[:], uint32(block))
-		prf.Reset()
-		prf.Write(salt)
-		prf.Write(blockIndex[:])
-		u = prf.Sum(u[:0])
-		copy(t, u)
-		for i := 2; i <= iterations; i++ {
-			prf.Reset()
-			prf.Write(u)
-			u = prf.Sum(u[:0])
-			subtle.XORBytes(t, t, u)
-		}
-		derived = append(derived, t...)
-	}
-	return derived[:keyBytes]
+// pbkdf2SHA512 derives keyBytes with PBKDF2-HMAC-SHA-512 (RFC 8018, section
+// 5.2). It uses crypto/pbkdf2 so that in a MILVUS_FIPS_ENABLED=ON build the
+// derivation runs inside the FIPS 140-3 Go Cryptographic Module, whose
+// validation covers PBKDF.
+func pbkdf2SHA512(password string, salt []byte, iterations, keyBytes int) ([]byte, error) {
+	return pbkdf2.Key(sha512.New, password, salt, iterations, keyBytes)
 }
 
 // encryptPBKDF2SHA512 returns $pbkdf2-sha512$i=<iterations>$<base64 salt>$<base64 key>.
@@ -94,7 +68,10 @@ func encryptPBKDF2SHA512(pwd string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", merr.WrapErrServiceInternalErr(err, "failed to generate password salt")
 	}
-	key := pbkdf2SHA512([]byte(pwd), salt, pbkdf2SHA512Iterations, pbkdf2SHA512KeyBytes)
+	key, err := pbkdf2SHA512(pwd, salt, pbkdf2SHA512Iterations, pbkdf2SHA512KeyBytes)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "failed to derive password hash")
+	}
 	return fmt.Sprintf("%si=%d$%s$%s", pbkdf2SHA512Prefix, pbkdf2SHA512Iterations,
 		pbkdf2Encoding.EncodeToString(salt), pbkdf2Encoding.EncodeToString(key)), nil
 }
@@ -107,7 +84,10 @@ func verifyPBKDF2SHA512(storedHash, password string) error {
 	if reason != "" {
 		return merr.WrapErrServiceInternalMsg("stored credential hash is invalid: %s", reason)
 	}
-	derived := pbkdf2SHA512([]byte(password), salt, iterations, len(key))
+	derived, err := pbkdf2SHA512(password, salt, iterations, len(key))
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "failed to derive password hash")
+	}
 	if subtle.ConstantTimeCompare(derived, key) != 1 {
 		return merr.WrapErrPrivilegeNotAuthenticated("invalid password")
 	}
