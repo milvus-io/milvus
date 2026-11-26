@@ -56,6 +56,9 @@ func installPreparationTestInterceptor(t *testing.T, w *walAdaptorImpl) function
 	}
 	require.NoError(t, manager.Alloc(1, "v1", schema))
 	mockey.Mock((*preparationTestInterceptor).DoAppend).To(func(_ *preparationTestInterceptor, ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+		// This reduced chain omits the TimeTick interceptor. Populate the
+		// message property as well as the mocked backend's AppendResult.
+		msg.WithTimeTick(1)
 		if msg.MessageType() == message.MessageTypeInsert {
 			_, err := manager.Materialize(function.WithDeferredPreparation(ctx), 1, "v1", function.LatestFunctionRunnerVersion, message.MustAsMutableInsertMessageV1(msg))
 			if err != nil {

@@ -156,7 +156,10 @@ type partialUpdateCASRejectProducer struct{ handlerproducer.Producer }
 // failure. The real server distinguishes a live, expired session from no record.
 func TestTransactionRetryUsesServerOutcome(t *testing.T) {
 	for _, phase := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeCommitTxn} {
-		for _, outcome := range []string{"expired", "cleaned", "aborted", "not found"} {
+		for _, outcome := range []string{"expired", "cleaned", "aborted", "not found", "rejected commit"} {
+			if outcome == "rejected commit" && phase != message.MessageTypeCommitTxn {
+				continue
+			}
 			for _, disconnect := range []bool{false, true} {
 				for _, cas := range []bool{false, true} {
 					name := phase.String() + "/" + outcome
@@ -183,6 +186,7 @@ func TestTransactionRetryUsesServerOutcome(t *testing.T) {
 						var sequence int64
 						begins, commits := 0, 0
 						invalidated := false
+						rejected := false
 						if outcome == "not found" {
 							cfg := paramtable.Get().StreamingCfg.TxnTombstoneMaxCount.Key
 							require.NoError(t, paramtable.Get().Save(cfg, "0"))
@@ -198,7 +202,7 @@ func TestTransactionRetryUsesServerOutcome(t *testing.T) {
 								if firstTxn == 0 {
 									firstTxn = id
 								}
-								if disconnect && len(attempts) == 1 {
+								if disconnect && len(attempts) == 1 && outcome != "rejected commit" {
 									return nil, io.ErrUnexpectedEOF
 								}
 								if id == firstTxn && !invalidated {
@@ -210,13 +214,17 @@ func TestTransactionRetryUsesServerOutcome(t *testing.T) {
 										if outcome == "cleaned" {
 											manager.CleanupTxnUntil(tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)))
 										}
-									} else {
+									} else if outcome != "rejected commit" {
 										manager.FailTxnAtVChannel(msg.VChannel(), 1)
 									}
 								}
 							}
 							extra := &utility.ExtraAppendResult{}
 							id, err := server.DoAppend(utility.WithExtraAppendResult(ctx, extra), msg, func(_ context.Context, m message.MutableMessage) (message.MessageID, error) {
+								if outcome == "rejected commit" && m.MessageType() == message.MessageTypeCommitTxn && !rejected {
+									rejected = true
+									return nil, txn.MarkCommitAdmissionRejected(status.NewTransactionExpired("commit rejected before WAL append"))
+								}
 								sequence++
 								if m.MessageType() == message.MessageTypeBeginTxn {
 									begins++
@@ -226,6 +234,12 @@ func TestTransactionRetryUsesServerOutcome(t *testing.T) {
 								}
 								return walimplstest.NewTestMessageID(sequence), nil
 							})
+							if outcome == "rejected commit" && disconnect && msg.MessageType() == phase && len(attempts) == 1 {
+								require.True(t, status.AsStreamingError(err).IsTxnExpired())
+								// Lose the actual rejection response. The same Commit must
+								// receive Expired while its Rollbacked session is still live.
+								return nil, io.ErrUnexpectedEOF
+							}
 							if err != nil {
 								return nil, err
 							}

@@ -186,13 +186,19 @@ exactly-once window. CDC keeps its source-checkpoint deduplication.
 
 ### Definite pre-commit outcome retention
 
-When an InFlight transaction expires or an exclusive operation aborts it,
-TxnManager releases its callbacks and active/recovered registry entries immediately,
-but retains a lightweight terminal record. A later body, Commit or Rollback lookup
+Expiration immediately rejects new requests, but already admitted bodies retain
+their session, cleanup references and LCMID pin until they finish. Their delayed
+keepalive cannot revive an expired transaction. Once no body is in flight,
+TxnManager releases callbacks and active/recovered registry entries and retains
+a lightweight terminal record. Exclusive operations already hold the WAL scope
+lock, so their abort can release references immediately.
+A later body, Commit or Rollback lookup
 returns TransactionExpired while that record is retained. Cleanup captures the
 outcome and marks expiration under the session mutex, so a request holding an old
 session pointer cannot subsequently admit a Commit. Completed rollbacks and explicit
-Commit rejections retain the same definite failure result. Admitted but unresolved
+Commit rejections return TransactionExpired even before manager cleanup; the
+result does not depend on whether the retry precedes the next TimeTick.
+An empty Commit still returns InvalidArgument. Admitted but unresolved
 Commits and successful Commits never become retryable solely because of cleanup.
 
 This separate cache uses the same tombstoneMaxCount and tombstoneMaxLifetime limits:

@@ -10,11 +10,55 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
+
+func TestRecoveredPinWaitsForAcceptedBodyAfterExpiration(t *testing.T) {
+	resource.InitForTest(t)
+	floor := walimplstest.NewTestMessageID(0)
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(message.TxnContext{TxnID: 1, Keepalive: time.Second}).
+		WithTimeTick(10).WithLastConfirmed(floor).IntoImmutableMessage(walimplstest.NewTestMessageID(10))
+	manager := txn.NewTxnManager(types.PChannelInfo{Name: t.Name()}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{
+		1: message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)),
+	})
+	session, err := manager.GetSessionOfTxn(1)
+	require.NoError(t, err)
+	last := newLastConfirmedManager(floor)
+	later := message.CreateTestEmptyInsertMesage(1, nil).WithTimeTick(15).WithLastConfirmed(floor).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(30))
+	require.NoError(t, session.AddNewMessage(t.Context(), 20))
+	expiration := tsoutil.AddPhysicalDurationOnTs(10, time.Second)
+	require.True(t, status.AsStreamingError(session.AddNewMessage(t.Context(), expiration)).IsTxnExpired())
+	last.AddConfirmedDetails(sortedDetails{
+		&AckDetail{Message: begin, TxnSession: session, EndTimestamp: 11},
+		&AckDetail{Message: later, EndTimestamp: 15},
+	}, 19)
+	require.True(t, floor.EQ(last.GetLastConfirmedMessageID()), "recovered Begin must remain pinned while the accepted body is in flight")
+	manager.CleanupTxnUntil(19)
+	select {
+	case <-manager.RecoverDone():
+		t.Fatal("recovery wait must not finish before the accepted body")
+	default:
+	}
+	body := message.CreateTestEmptyInsertMesage(1, nil).WithTimeTick(20).WithLastConfirmed(floor).
+		WithTxnContext(session.TxnContext()).IntoImmutableMessage(walimplstest.NewTestMessageID(40))
+	session.AddNewMessageDoneAndKeepalive(20, message.MessageTypeInsert)
+	last.AddConfirmedDetails(sortedDetails{&AckDetail{Message: body, TxnSession: session, EndTimestamp: 21}}, 22)
+	require.True(t, body.MessageID().EQ(last.GetLastConfirmedMessageID()), "completion must not renew a terminal transaction's pin")
+	manager.CleanupTxnUntil(22)
+	select {
+	case <-manager.RecoverDone():
+	default:
+		t.Fatal("completed expired body must release recovery wait")
+	}
+	require.NoError(t, manager.GracefulClose(t.Context()))
+}
 
 func TestRecoveredAckEntriesFollowActualSessionLifecycle(t *testing.T) {
 	for _, finish := range []string{"commit", "rollback", "expire", "scoped abort", "global abort"} {
