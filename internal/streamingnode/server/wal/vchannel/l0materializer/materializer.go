@@ -102,15 +102,9 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 	if collectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for L0 materialization", req.VChannel)
 	}
-	var groups []materializeGroup
-	if slices.ContainsFunc(req.Entries, func(e *streamingpb.TransformLogEntry) bool { return e.GetMutations() != nil }) {
-		var err error
-		groups, err = typedMaterializeGroups(req, collectionID)
-		if err != nil {
-			return err
-		}
-	} else {
-		groups = splitMaterializeGroups(req)
+	groups, err := splitMaterializeGroups(req, collectionID)
+	if err != nil {
+		return err
 	}
 	for _, group := range groups {
 		if err := m.materializeGroup(ctx, req, collectionID, group); err != nil {
@@ -139,15 +133,13 @@ func (m *SyncMaterializer) materializeGroup(
 	if pos := req.DeletePositions[group.toTimeTick]; pos != nil {
 		checkpoint = proto.Clone(pos).(*msgpb.MsgPosition)
 	}
-	schema := materializeSchema(group.pkType)
-	if group.delta != nil {
-		schema.Properties = req.Schemas[group.fromTimeTick].GetProperties()
-	}
+	schema := materializeSchema(group.delta.Layout.PKType)
+	schema.Properties = req.Schemas[group.fromTimeTick].GetProperties()
 	metaCache := newMaterializeMetaCache(collectionID, vchannel, schema)
 	metaCache.AddSegment(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
-		PartitionID:    group.partitionID,
+		PartitionID:    group.delta.Layout.PartitionID,
 		InsertChannel:  vchannel,
 		StartPosition:  startPosition,
 		State:          commonpb.SegmentState_Growing,
@@ -159,7 +151,7 @@ func (m *SyncMaterializer) materializeGroup(
 
 	pack := (&syncmgr.SyncPack{}).
 		WithCollectionID(collectionID).
-		WithPartitionID(group.partitionID).
+		WithPartitionID(group.delta.Layout.PartitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
 		WithStartPosition(startPosition).
@@ -168,15 +160,9 @@ func (m *SyncMaterializer) materializeGroup(
 		WithLevel(datapb.SegmentLevel_L0).
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithBatchRows(0).
+		WithMutationDelta(&group.delta, group.bytes).
 		WithFlush()
 
-	rows, kind := uint64(len(group.pks)), "delete"
-	if group.delta != nil {
-		rows, kind = group.logicalRows, "typed mutations"
-		pack.WithMutationDelta(group.delta, group.bytes)
-	} else {
-		pack.WithDeleteData(storage.NewDeleteData(group.pks, group.timestamps))
-	}
 	task := syncmgr.NewSyncTask().
 		WithAllocator(m.allocator).
 		WithChunkManager(m.chunkManager).
@@ -186,13 +172,13 @@ func (m *SyncMaterializer) materializeGroup(
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig())
 
-	mlog.Info(ctx, "materialize mutations into l0 segment", mlog.String("kind", kind),
+	mlog.Info(ctx, "materialize mutations into l0 segment",
 		mlog.FieldCollectionID(collectionID),
-		mlog.FieldPartitionID(group.partitionID),
+		mlog.FieldPartitionID(group.delta.Layout.PartitionID),
 		mlog.FieldSegmentID(segmentID),
 		mlog.String("vchannel", vchannel),
 		mlog.Uint64("targetTimeTick", req.TargetTimeTick),
-		mlog.Uint64("rows", rows),
+		mlog.Uint64("rows", group.logicalRows),
 		mlog.Uint64("bytes", group.bytes),
 	)
 	// Bound coordinator client retries; the WAL task scheduler owns later attempts.
@@ -200,109 +186,11 @@ func (m *SyncMaterializer) materializeGroup(
 }
 
 type materializeGroup struct {
-	delta        *storage.MutationDelta
+	delta        storage.MutationDelta
 	logicalRows  uint64
-	partitionID  int64
-	pkType       schemapb.DataType
-	pks          []storage.PrimaryKey
-	timestamps   []uint64
 	fromTimeTick uint64
 	toTimeTick   uint64
 	bytes        uint64
-}
-
-func splitMaterializeGroups(req MaterializeRequest) []materializeGroup {
-	maxRows := req.MaxRows
-	if maxRows == 0 {
-		maxRows = defaultMaterializeMaxRows
-	}
-	maxBytes := req.MaxBytes
-	if maxBytes == 0 {
-		maxBytes = defaultMaterializeMaxBytes
-	}
-	groups := make([]materializeGroup, 0)
-	currentByPartition := make(map[int64]*materializeGroup)
-	// Reuse this map across TimeTicks. A transaction can have many blocks for
-	// the same partition; account for all of them before choosing an L0.
-	tickSizes := make(map[int64]struct{ rows, bytes uint64 })
-	flushCurrent := func(partitionID int64) {
-		group := currentByPartition[partitionID]
-		if group == nil || len(group.pks) == 0 {
-			return
-		}
-		groups = append(groups, *group)
-		delete(currentByPartition, partitionID)
-	}
-	for begin := 0; begin < len(req.Entries); {
-		timeTick := req.Entries[begin].GetTimeTick()
-		end := begin + 1
-		for end < len(req.Entries) && req.Entries[end].GetTimeTick() == timeTick {
-			end++
-		}
-		clear(tickSizes)
-		for _, entry := range req.Entries[begin:end] {
-			for _, block := range entry.GetDelete().GetBlocks() {
-				rows := uint64(typeutil.GetSizeOfIDs(block.GetPrimaryKeys()))
-				if rows == 0 {
-					continue
-				}
-				size := tickSizes[block.GetPartitionId()]
-				size.rows += rows
-				size.bytes += uint64(proto.Size(block))
-				tickSizes[block.GetPartitionId()] = size
-			}
-		}
-		for _, entry := range req.Entries[begin:end] {
-			for _, block := range entry.GetDelete().GetBlocks() {
-				pks := storage.ParseIDs2PrimaryKeys(block.GetPrimaryKeys())
-				if len(pks) == 0 {
-					continue
-				}
-				partitionID := block.GetPartitionId()
-				group := currentByPartition[partitionID]
-				size := tickSizes[partitionID]
-				startsTimeTick := group == nil || group.toTimeTick != timeTick
-				// Size limits are soft for one (partition, TimeTick). Never
-				// publish only part of a transaction at its commit TimeTick.
-				if group != nil && startsTimeTick &&
-					(group.pkType != pks[0].Type() || exceedsMaterializeLimit(group, size.rows, size.bytes, maxRows, maxBytes)) {
-					flushCurrent(partitionID)
-					group = nil
-				}
-				if group == nil {
-					group = &materializeGroup{
-						partitionID:  partitionID,
-						pkType:       pks[0].Type(),
-						fromTimeTick: timeTick,
-					}
-					currentByPartition[partitionID] = group
-				}
-				if startsTimeTick {
-					group.bytes += size.bytes
-				}
-				group.pks = append(group.pks, pks...)
-				for range pks {
-					group.timestamps = append(group.timestamps, timeTick)
-				}
-				group.toTimeTick = timeTick
-			}
-		}
-		begin = end
-	}
-	for partitionID := range currentByPartition {
-		flushCurrent(partitionID)
-	}
-	return groups
-}
-
-func exceedsMaterializeLimit(group *materializeGroup, rows uint64, bytes uint64, maxRows uint64, maxBytes uint64) bool {
-	if len(group.pks) == 0 {
-		return false
-	}
-	if maxRows > 0 && uint64(len(group.pks))+rows > maxRows {
-		return true
-	}
-	return maxBytes > 0 && group.bytes+bytes > maxBytes
 }
 
 func materializeSchema(pkType schemapb.DataType) *schemapb.CollectionSchema {
@@ -330,9 +218,9 @@ func newMaterializeMetaCache(collectionID int64, vchannel string, schema *schema
 	}, metacache.NoneBm25StatsFactory)
 }
 
-// typedMaterializeGroups validates every mutation before writing any output.
+// splitMaterializeGroups validates every mutation before writing any output.
 // A TimeTick may exceed the limits but never straddles files in the same scope.
-func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]materializeGroup, error) {
+func splitMaterializeGroups(req MaterializeRequest, collectionID int64) ([]materializeGroup, error) {
 	maxRows, maxBytes := req.MaxRows, req.MaxBytes
 	if maxRows == 0 {
 		maxRows = defaultMaterializeMaxRows
@@ -356,12 +244,13 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 	for begin := 0; begin < len(req.Entries); {
 		tt := req.Entries[begin].GetTimeTick()
 		schema := req.Schemas[tt]
-		if schema == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("missing delta schema at %d", tt)
-		}
-		pk, err := typeutil.GetPrimaryFieldSchema(schema)
-		if err != nil {
-			return nil, merr.Wrap(err, "delta PK schema")
+		var pkType schemapb.DataType
+		if schema != nil {
+			pk, err := typeutil.GetPrimaryFieldSchema(schema)
+			if err != nil {
+				return nil, merr.Wrap(err, "delta PK schema")
+			}
+			pkType = pk.GetDataType()
 		}
 		fields := map[int64]*schemapb.FieldSchema{}
 		for _, f := range schema.GetFields() {
@@ -371,7 +260,18 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 		var ordered []int64
 		add := func(scope int64, r deltacodec.Row, bytes int) error {
 			count := messageutil.PrimaryKeyCount(r.PrimaryKeys)
-			if count == 0 || (pk.GetDataType() == schemapb.DataType_Int64) != (r.PrimaryKeys.GetIntId() != nil) {
+			if count == 0 && r.Operation == deltacodec.Delete {
+				return nil
+			}
+			rowPKType := schemapb.DataType_Int64
+			if r.PrimaryKeys.GetStrId() != nil {
+				rowPKType = schemapb.DataType_VarChar
+			}
+			// A historical delete may carry only its typed PKs and TimeTick.
+			if pkType == schemapb.DataType_None {
+				pkType = rowPKType
+			}
+			if count == 0 || rowPKType != pkType {
 				return merr.WrapErrDataIntegrityMsg("delta primary keys mismatch schema at %d", tt)
 			}
 			g := scopes[scope]
@@ -402,11 +302,6 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 		for begin < len(req.Entries) && req.Entries[begin].GetTimeTick() == tt {
 			e := req.Entries[begin]
 			begin++
-			for _, b := range e.GetDelete().GetBlocks() {
-				if err := addDelete(b, b.GetSourceOrdinal()); err != nil {
-					return nil, err
-				}
-			}
 			for _, b := range e.GetMutations().GetBlocks() {
 				if b.GetDelete() != nil {
 					if err := addDelete(b.GetDelete(), b.GetSourceOrdinal()); err != nil {
@@ -415,6 +310,9 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 					continue
 				}
 				u := b.GetUpdate()
+				if schema == nil {
+					return nil, merr.WrapErrDataIntegrityMsg("missing delta schema at %d", tt)
+				}
 				if u == nil || len(u.GetAssignments()) == 0 || b.SchemaVersion == nil || b.GetSchemaVersion() != schema.GetVersion() {
 					return nil, merr.WrapErrDataIntegrityMsg("invalid delta payload or schema version at %d", tt)
 				}
@@ -423,22 +321,19 @@ func typedMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 				}
 			}
 		}
-		if len(scopes) == 0 {
-			return nil, merr.WrapErrDataIntegrityMsg("empty delta payload at %d", tt)
-		}
 		for _, scope := range ordered {
 			batch := scopes[scope]
 			g := current[scope]
-			if g != nil && (g.delta.Layout.SchemaVersion != schema.GetVersion() || g.bytes+batch.bytes > maxBytes || g.logicalRows+batch.keys > maxRows) {
+			if g != nil && (g.delta.Layout.PKType != pkType || g.delta.Layout.SchemaVersion != schema.GetVersion() || g.bytes+batch.bytes > maxBytes || g.logicalRows+batch.keys > maxRows) {
 				finish(scope)
 				g = nil
 			}
 			if g == nil {
-				layout := deltacodec.Layout{CollectionID: collectionID, VChannel: req.VChannel, PartitionID: scope, SchemaVersion: schema.GetVersion(), PKType: pk.GetDataType()}
+				layout := deltacodec.Layout{CollectionID: collectionID, VChannel: req.VChannel, PartitionID: scope, SchemaVersion: schema.GetVersion(), PKType: pkType}
 				if err := layout.ValidateIdentity(); err != nil {
 					return nil, err
 				}
-				g = &materializeGroup{partitionID: scope, pkType: pk.GetDataType(), fromTimeTick: tt, delta: &storage.MutationDelta{Layout: layout}}
+				g = &materializeGroup{fromTimeTick: tt, delta: storage.MutationDelta{Layout: layout}}
 				current[scope] = g
 			}
 			g.toTimeTick = tt

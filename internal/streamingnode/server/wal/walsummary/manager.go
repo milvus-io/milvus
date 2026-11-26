@@ -375,7 +375,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		for _, record := range staged {
 			if record.entry != nil {
 				cs.Transform = append(cs.Transform, &streamingpb.VChannelSummaryTransformRecord{
-					TimeTick: record.timeTick, Delete: record.entry.GetDelete(), Mutations: record.entry.GetMutations(),
+					TimeTick: record.timeTick, Mutations: record.entry.GetMutations(),
 				})
 			}
 			if record.insert != nil {

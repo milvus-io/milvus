@@ -39,21 +39,18 @@ func transformEntryFromRecord(record *streamingpb.VChannelSummaryTransformRecord
 	entry := &streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick()}
 	if record.GetMutations() != nil {
 		entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: record.GetMutations()}
-	} else {
-		entry.Entry = &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}
+	} else if deleted := record.GetDelete(); deleted != nil {
+		entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: messageutil.MutationsFromLegacyDeletes(deleted)}
 	}
 	return entry
 }
 
-func transformEntrySize(entry *streamingpb.TransformLogEntry) (uint64, uint64) {
+func transformEntryKeyCount(entry *streamingpb.TransformLogEntry) uint64 {
 	var rows uint64
-	for _, block := range entry.GetDelete().GetBlocks() {
-		rows += uint64(len(block.GetPrimaryKeys().GetIntId().GetData()) + len(block.GetPrimaryKeys().GetStrId().GetData()))
-	}
 	for _, block := range entry.GetMutations().GetBlocks() {
 		rows += uint64(messageutil.PrimaryKeyCount(block.GetUpdate().GetPrimaryKeys()) + messageutil.PrimaryKeyCount(block.GetDelete().GetPrimaryKeys()))
 	}
-	return rows, uint64(proto.Size(entry))
+	return rows
 }
 
 func addTransformSize(indexes map[string]*streamingpb.VChannelSummaryTransformIndex, vc string, entry *streamingpb.TransformLogEntry) {
@@ -63,8 +60,7 @@ func addTransformSize(indexes map[string]*streamingpb.VChannelSummaryTransformIn
 		indexes[vc] = index
 	}
 	index.EndTimeTick = entry.GetTimeTick()
-	_, size := transformEntrySize(entry)
-	index.TotalSize += size
+	index.TotalSize += uint64(proto.Size(entry))
 }
 
 func (stats *TransformStats) add(index *streamingpb.VChannelSummaryTransformIndex, after, through uint64) {

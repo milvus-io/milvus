@@ -24,8 +24,6 @@ import (
 	"sort"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -294,9 +292,5 @@ func (m *L0Materializer) checkCapacity(ctx context.Context, after, target uint64
 	if batch.FastForwardTimeTick > after {
 		return false, merr.WrapErrDataIntegrityMsg("L0 materialized position %d precedes summary fast-forward %d", after, batch.FastForwardTimeTick)
 	}
-	var size uint64
-	for _, entry := range batch.Entries {
-		size += uint64(proto.Size(entry))
-	}
-	return size >= m.materializeMaxBytes || batch.CoveredThrough < min(target, batch.ReadableThrough), nil
+	return batch.Bytes >= m.materializeMaxBytes || batch.CoveredThrough < min(target, batch.ReadableThrough), nil
 }

@@ -32,7 +32,9 @@ type ReadLimits struct{ MaxRows, MaxBytes uint64 }
 // belong to the caller and include whole transactions only. Changed is captured
 // atomically with coverage: a reader waiting at the tail cannot lose a wakeup.
 type TransformBatch struct {
-	Entries         []*streamingpb.TransformLogEntry
+	Entries []*streamingpb.TransformLogEntry
+	// Bytes uses the original encoding, matching the persisted chunk index.
+	Bytes           uint64
 	CoveredThrough  uint64
 	ReadableThrough uint64
 	// FastForwardTimeTick explicitly identifies retired history skipped by this read.
@@ -122,13 +124,14 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	after = min(target, max(after, fastForward))
 	batch.CoveredThrough = after
 
-	var rows, bytes uint64
-	appendEntry := func(entry *streamingpb.TransformLogEntry, shared bool) bool {
+	var rows uint64
+	appendEntry := func(entry *streamingpb.TransformLogEntry, shared bool, encoded proto.Message) bool {
 		if entry == nil || entry.GetTimeTick() <= after || entry.GetTimeTick() > target {
 			return true
 		}
-		n, size := transformEntrySize(entry)
-		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows+n > limits.MaxRows) || (limits.MaxBytes > 0 && bytes+size > limits.MaxBytes)) {
+		size := uint64(proto.Size(encoded))
+		n := transformEntryKeyCount(entry)
+		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows+n > limits.MaxRows) || (limits.MaxBytes > 0 && batch.Bytes+size > limits.MaxBytes)) {
 			return false
 		}
 		if shared {
@@ -137,7 +140,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		batch.Entries = append(batch.Entries, entry)
 		batch.CoveredThrough = entry.GetTimeTick()
 		rows += n
-		bytes += size
+		batch.Bytes += size
 		return true
 	}
 	for _, chunk := range chunks {
@@ -156,7 +159,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		}
 		// Once a batch is full, do not fetch the next object just to reject
 		// its first entry. Coverage remains at the last complete entry.
-		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows >= limits.MaxRows) || (limits.MaxBytes > 0 && bytes >= limits.MaxBytes)) {
+		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows >= limits.MaxRows) || (limits.MaxBytes > 0 && batch.Bytes >= limits.MaxBytes)) {
 			return batch, nil
 		}
 		payload, err := m.chunkIndex.cache.read(ctx, m.cfg.Store, chunk)
@@ -168,7 +171,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			return TransformBatch{}, err
 		}
 		for _, record := range records {
-			if !appendEntry(transformEntryFromRecord(record), false) {
+			if !appendEntry(transformEntryFromRecord(record), false, record) {
 				return batch, nil
 			}
 		}
@@ -178,7 +181,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			if err := ctx.Err(); err != nil {
 				return TransformBatch{}, err
 			}
-			if !appendEntry(record.entry, true) {
+			if !appendEntry(record.entry, true, record.entry) {
 				return batch, nil
 			}
 		}
@@ -187,7 +190,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if err := ctx.Err(); err != nil {
 			return TransformBatch{}, err
 		}
-		if record.vchannel == vchannel && !appendEntry(record.entry, true) {
+		if record.vchannel == vchannel && !appendEntry(record.entry, true, record.entry) {
 			return batch, nil
 		}
 	}

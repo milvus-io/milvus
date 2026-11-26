@@ -63,17 +63,14 @@ func (s *queryViewTransformSegment) TransformStartAfterTimeTick() uint64 {
 }
 
 func (s *queryViewTransformSegment) ApplyTransform(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
-	if entry == nil {
-		return nil
-	}
-	deleteEntry := entry.GetDelete()
-	if deleteEntry == nil {
-		return nil
-	}
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	for _, block := range deleteEntry.GetBlocks() {
+	for _, mutation := range entry.GetMutations().GetBlocks() {
+		block := mutation.GetDelete()
+		if block == nil {
+			continue
+		}
 		blockPartitionID := block.GetPartitionId()
 		if blockPartitionID != common.AllPartitionsID && blockPartitionID != s.PartitionID() {
 			mlog.Debug(ctx, "querynode transform segment skipped delete block by partition",

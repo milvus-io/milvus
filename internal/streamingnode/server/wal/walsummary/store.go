@@ -637,8 +637,7 @@ func marshalChunk(
 			}
 			var totalSize uint64
 			for _, record := range records {
-				_, size := transformEntrySize(transformEntryFromRecord(record))
-				totalSize += size
+				totalSize += uint64(proto.Size(record))
 			}
 			transformStart, transformEnd := transformRecordTimetickRange(records)
 			index.Transform = &streamingpb.VChannelSummaryTransformIndex{

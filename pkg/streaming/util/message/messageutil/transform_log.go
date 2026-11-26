@@ -30,13 +30,12 @@ type TransformLogKind int
 
 const (
 	TransformLogKindNone TransformLogKind = iota
-	TransformLogKindDelete
 	TransformLogKindBarrier
 	TransformLogKindMutation
 )
 
 func (k TransformLogKind) HasPayload() bool {
-	return k == TransformLogKindDelete || k == TransformLogKindMutation
+	return k == TransformLogKindMutation
 }
 
 // ClassifyTransformLogMessage classifies a WAL message for TransformLog processing.
@@ -45,9 +44,7 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 		return TransformLogKindNone
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeDelete:
-		return TransformLogKindDelete
-	case message.MessageTypeUpdate:
+	case message.MessageTypeDelete, message.MessageTypeUpdate:
 		return TransformLogKindMutation
 	case message.MessageTypeInsert:
 		return TransformLogKindNone
@@ -58,7 +55,6 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 	}
 }
 
-// An update selects the ordered mutation envelope, including its sibling deletes.
 func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	if txn == nil || txn.Size() == 0 {
 		return TransformLogKindNone
@@ -66,11 +62,7 @@ func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	kind := TransformLogKindNone
 	_ = txn.RangeOver(func(inner message.ImmutableMessage) error {
 		switch inner.MessageType() {
-		case message.MessageTypeDelete:
-			if kind != TransformLogKindMutation {
-				kind = TransformLogKindDelete
-			}
-		case message.MessageTypeUpdate:
+		case message.MessageTypeDelete, message.MessageTypeUpdate:
 			kind = TransformLogKindMutation
 		case message.MessageTypeInsert:
 		default:
@@ -98,8 +90,7 @@ func (o TransformEntryOption) acceptDelete(partitionID int64, timeTick uint64) b
 	return o.DeleteFilter(partitionID, timeTick)
 }
 
-// BuildTransformLogEntry copies committed mutations in source order. Delete-only
-// transactions retain the original wire arm for older readers.
+// BuildTransformLogEntry copies committed deletes and updates in source order.
 func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOption) *streamingpb.TransformLogEntry {
 	kind := ClassifyTransformLogMessage(msg)
 	if kind == TransformLogKindNone {
@@ -109,7 +100,6 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 	if !kind.HasPayload() {
 		return entry
 	}
-	var deletes streamingpb.TransformDeleteEntry
 	var mutations streamingpb.TransformMutationEntry
 	var ordinal uint64
 	appendBody := func(body message.ImmutableMessage) error {
@@ -124,11 +114,7 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 				return nil
 			}
 			deleted := &streamingpb.TransformDeleteBlock{
-				PartitionId: request.GetPartitionID(), PrimaryKeys: proto.Clone(request.GetPrimaryKeys()).(*schemapb.IDs), SourceOrdinal: index,
-			}
-			if kind == TransformLogKindDelete {
-				deletes.Blocks = append(deletes.Blocks, deleted)
-				return nil
+				PartitionId: request.GetPartitionID(), PrimaryKeys: proto.Clone(request.GetPrimaryKeys()).(*schemapb.IDs),
 			}
 			block.Mutation = &streamingpb.TransformMutationBlock_Delete{Delete: deleted}
 		case message.MessageTypeUpdate:
@@ -148,15 +134,23 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 	} else {
 		_ = appendBody(msg)
 	}
-	switch {
-	case len(mutations.Blocks) > 0:
-		entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: &mutations}
-	case len(deletes.Blocks) > 0:
-		entry.Entry = &streamingpb.TransformLogEntry_Delete{Delete: &deletes}
-	default:
+	if len(mutations.Blocks) == 0 {
 		return nil
 	}
+	entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: &mutations}
 	return entry
+}
+
+// MutationsFromLegacyDeletes converts a persisted or received delete-only payload.
+func MutationsFromLegacyDeletes(deletes *streamingpb.TransformDeleteEntry) *streamingpb.TransformMutationEntry {
+	blocks := make([]*streamingpb.TransformMutationBlock, 0, len(deletes.GetBlocks()))
+	for _, d := range deletes.GetBlocks() {
+		blocks = append(blocks, &streamingpb.TransformMutationBlock{
+			SourceOrdinal: d.GetSourceOrdinal(),
+			Mutation:      &streamingpb.TransformMutationBlock_Delete{Delete: d},
+		})
+	}
+	return &streamingpb.TransformMutationEntry{Blocks: blocks}
 }
 
 // PrimaryKeyCount counts the primary keys of a DeleteRequest.

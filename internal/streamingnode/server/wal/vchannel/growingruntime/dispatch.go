@@ -185,10 +185,11 @@ func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, reque
 }
 
 func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
-	if entry == nil || entry.GetDelete() == nil {
-		return nil
-	}
-	for _, block := range entry.GetDelete().GetBlocks() {
+	for _, mutation := range entry.GetMutations().GetBlocks() {
+		block := mutation.GetDelete()
+		if block == nil {
+			continue
+		}
 		if err := r.deleteFromSegments(ctx, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
 			return err
 		}

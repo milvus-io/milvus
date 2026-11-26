@@ -260,48 +260,6 @@ type walMaterializeTask struct {
 	err      error
 }
 
-// verifyWALMutationEntry checks the extracted operation and ordinal against each
-// retained WAL body before any sibling scope can reach registration.
-func verifyWALMutationEntry(msg message.ImmutableMessage, entry *streamingpb.TransformLogEntry) error {
-	if entry.GetTimeTick() != msg.TimeTick() {
-		return merr.WrapErrDataIntegrityMsg("missing WAL mutation entry at TimeTick %d", msg.TimeTick())
-	}
-	deletes := entry.GetDelete().GetBlocks()
-	mutations := entry.GetMutations().GetBlocks()
-	var ordinal uint64
-	check := func(body message.ImmutableMessage) error {
-		index := ordinal
-		ordinal++
-		op := body.MessageType()
-		if op != message.MessageTypeDelete && op != message.MessageTypeUpdate {
-			return nil
-		}
-		if len(mutations) > 0 {
-			block := mutations[0]
-			mutations = mutations[1:]
-			if uint64(block.GetSourceOrdinal()) == index &&
-				(op == message.MessageTypeUpdate && block.GetUpdate() != nil || op == message.MessageTypeDelete && block.GetDelete() != nil) {
-				return nil
-			}
-		} else if len(deletes) > 0 && op == message.MessageTypeDelete && deletes[0] != nil && uint64(deletes[0].GetSourceOrdinal()) == index {
-			deletes = deletes[1:]
-			return nil
-		}
-		return merr.WrapErrDataIntegrityMsg("missing or mismatched WAL %s at TimeTick %d body %d", op, msg.TimeTick(), index)
-	}
-	if msg.MessageType() == message.MessageTypeTxn {
-		if err := message.AsImmutableTxnMessage(msg).RangeOver(check); err != nil {
-			return err
-		}
-	} else if err := check(msg); err != nil {
-		return err
-	}
-	if len(deletes) != 0 || len(mutations) != 0 {
-		return merr.WrapErrDataIntegrityMsg("unexpected extra WAL mutation blocks at TimeTick %d", msg.TimeTick())
-	}
-	return nil
-}
-
 func (t *walMaterializeTask) Execute(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -323,9 +281,12 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		if isL0FlushMessage(msg.MessageType()) {
 			continue
 		}
+		if m.schemaAt != nil && t.schemas[msg.TimeTick()] == nil {
+			return merr.WrapErrDataIntegrityMsg("missing delta schema at %d", msg.TimeTick())
+		}
 		entry := messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
-		if err := verifyWALMutationEntry(msg, entry); err != nil {
-			return err
+		if len(entry.GetMutations().GetBlocks()) == 0 {
+			return merr.WrapErrDataIntegrityMsg("empty WAL mutation entry at TimeTick %d", msg.TimeTick())
 		}
 		entries = append(entries, entry)
 		positions[entry.GetTimeTick()] = utility.NewMessagePosition(msg, m.vchannel)

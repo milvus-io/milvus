@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
@@ -312,6 +313,9 @@ func (s *EventStream) handleMessageBatch(resp *streamingpb.TransformMessageBatch
 		return
 	}
 	for _, entry := range resp.GetEntries() {
+		if deleted := entry.GetDelete(); deleted != nil {
+			entry.Entry = &streamingpb.TransformLogEntry_Mutations{Mutations: messageutil.MutationsFromLegacyDeletes(deleted)}
+		}
 		mlog.Debug(s.ctx, "handler transform log event stream received entry",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.FieldVChannel(resp.GetVchannel()),
