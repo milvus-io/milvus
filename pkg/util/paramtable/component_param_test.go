@@ -232,6 +232,14 @@ func TestProxyQueryViewStreamingConfig(t *testing.T) {
 	assert.Equal(t, "true", config.EnableReduceStream.DefaultValue)
 	assert.True(t, config.EnableReduceStream.GetAsBool())
 	assert.Equal(t, 256*1024, config.ReduceStreamChunkBytes.GetAsInt())
+	require.Equal(t, 1.0, config.ReduceStreamPreAllocFactor.GetAsFloat())
+	for _, tc := range []struct {
+		raw  string
+		want float64
+	}{{"0", 0}, {"0.125", 0.125}, {"1", 1}, {"NaN", 1}, {"-0.1", 1}, {"1.01", 1}, {"bad", 1}} {
+		require.NoError(t, base.Save(config.ReduceStreamPreAllocFactor.Key, tc.raw))
+		require.Equal(t, tc.want, config.ReduceStreamPreAllocFactor.GetAsFloat())
+	}
 	assert.NoError(t, base.Save(config.EnableReduceStream.Key, "false"))
 	assert.NoError(t, base.Save(config.ReduceStreamChunkBytes.Key, "128"))
 	assert.False(t, config.EnableReduceStream.GetAsBool())
@@ -256,7 +264,7 @@ func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
 	t.Cleanup(base.mgr.Close)
 	cfg := proxyConfig{}
 	cfg.init(base)
-	for _, name := range []string{"EnableReduceStream", "ReduceStreamChunkBytes"} {
+	for _, name := range []string{"EnableReduceStream", "ReduceStreamChunkBytes", "ReduceStreamPreAllocFactor"} {
 		field, ok := reflect.TypeOf(&cfg).Elem().FieldByName(name)
 		require.True(t, ok)
 		require.Equal(t, "true", field.Tag.Get("refreshable"))
@@ -268,11 +276,11 @@ func TestProxyQueryViewStreamingConfigFileRefresh(t *testing.T) {
 		bytes     string
 		wantBytes int
 	}{{true, "64", 64}, {true, "256KB", 256 * 1024}, {true, "128", 128}, {true, "-1", 256 * 1024}, {false, "256", 256}} {
-		body := fmt.Sprintf("proxy:\n  queryView:\n    enableReduceStream: %t\n    reduceStreamChunkBytes: %s\n", tc.enabled, tc.bytes)
+		body := fmt.Sprintf("proxy:\n  queryView:\n    reduceStream:\n      enabled: %t\n      chunkBytes: %s\n      preAllocFactor: 0.25\n", tc.enabled, tc.bytes)
 		require.NoError(t, os.WriteFile(path+".tmp", []byte(body), 0o600))
 		require.NoError(t, os.Rename(path+".tmp", path))
 		require.Eventually(t, func() bool {
-			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.wantBytes
+			return cfg.EnableReduceStream.GetAsBool() == tc.enabled && cfg.ReduceStreamChunkBytes.GetAsInt() == tc.wantBytes && cfg.ReduceStreamPreAllocFactor.GetAsFloat() == 0.25
 		}, 5*time.Second, 10*time.Millisecond)
 	}
 }

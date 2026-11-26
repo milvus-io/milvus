@@ -81,6 +81,7 @@ type SearchTask struct {
 	Condition
 	ctx context.Context
 	*internalpb.SearchRequest
+	preAllocFactor float64 // Shared by retries and Hybrid sub-searches for this request.
 
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
@@ -1576,6 +1577,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	// Refresh applies to new requests, not retries or Hybrid sub-searches.
 	enableReduceStream := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
 	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
+	t.preAllocFactor = paramtable.Get().ProxyCfg.ReduceStreamPreAllocFactor.GetAsFloat()
 	searchRequest := t.SearchRequest
 	if enableReduceStream && len(t.orderByFields) > 0 &&
 		(t.GetGroupByFieldId() > 0 || len(t.GetGroupByFieldIds()) > 0) {
@@ -1723,6 +1725,7 @@ func appendFinalSearchChunk(
 	seenPerQuery []int64,
 	offset int64,
 	limit int64,
+	initialRows int64,
 	scoreInfo searchScoreInfo,
 	preserveCandidates bool,
 ) (int64, error) {
@@ -1764,7 +1767,7 @@ func appendFinalSearchChunk(
 	var fieldIndexComputer *typeutil.FieldDataIdxComputer
 	if len(chunk.GetFieldsData()) > 0 {
 		if len(output.GetFieldsData()) == 0 {
-			output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), output.GetNumQueries()*limit)
+			output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), initialRows)
 		}
 		if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 			return 0, merr.WrapErrServiceInternalMsg("Search CHUNK field count %d does not match final result field count %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
@@ -1780,7 +1783,7 @@ func appendFinalSearchChunk(
 	var groupIndexComputer *typeutil.FieldDataIdxComputer
 	if len(chunkGroups) > 0 {
 		if len(output.GetGroupByFieldValues()) == 0 {
-			output.GroupByFieldValues = typeutil.PrepareResultFieldData(chunkGroups, output.GetNumQueries()*limit)
+			output.GroupByFieldValues = typeutil.PrepareResultFieldData(chunkGroups, initialRows)
 		}
 		if len(output.GetGroupByFieldValues()) != len(chunkGroups) {
 			return 0, merr.WrapErrServiceInternalMsg("Search Chunk group-by field count changed")
@@ -1836,7 +1839,7 @@ func appendFinalSearchChunk(
 			output.Scores = append(output.Scores, score)
 			if chunk.GetElementIndices() != nil {
 				if output.ElementIndices == nil {
-					output.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, output.GetNumQueries()*limit)}
+					output.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, initialRows)}
 				}
 				output.ElementIndices.Data = append(output.ElementIndices.Data, chunk.GetElementIndices().GetData()[rowIndex])
 			}
@@ -1874,11 +1877,12 @@ func (t *SearchTask) consumeSearchResultStream(
 		return nil, scoreInfo, merr.WrapErrServiceInternalMsg("invalid final Search limit %d", limit)
 	}
 
+	initialRows := initialStreamResultRows(request.GetNq()*limit, t.preAllocFactor)
 	data := &schemapb.SearchResultData{
 		NumQueries: request.GetNq(),
 		TopK:       limit,
 		Ids:        &schemapb.IDs{},
-		Scores:     make([]float32, 0, request.GetNq()*limit),
+		Scores:     make([]float32, 0, initialRows),
 		Topks:      make([]int64, request.GetNq()),
 	}
 	seenPerQuery := make([]int64, request.GetNq())
@@ -1905,6 +1909,7 @@ func (t *SearchTask) consumeSearchResultStream(
 			seenPerQuery,
 			offset,
 			limit,
+			initialRows,
 			scoreInfo,
 			preserveCandidates,
 		)

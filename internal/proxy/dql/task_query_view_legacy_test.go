@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,6 +132,76 @@ func (*fakeLegacySearchStream) Interrupt() (*internalpb.SearchResults, error) {
 type fakeLegacyQueryRecv struct {
 	chunk *internalpb.RetrieveResults
 	err   error
+}
+
+func TestStreamResultPreallocation(t *testing.T) {
+	require.EqualValues(t, 0, initialStreamResultRows(16384, 0))
+	require.EqualValues(t, 3, initialStreamResultRows(10, 0.25))
+	require.EqualValues(t, 1024, initialStreamResultRows(16384, 1))
+
+	field := testFloatVectorFieldData("v", []float32{1, 2}, 2)
+	fields := []*schemapb.FieldData{field}
+	growQueryFloatVectors(fields, fields, 1, 5)
+	require.Equal(t, 4, cap(field.GetVectors().GetFloatVector().Data))
+	growQueryFloatVectors(fields, fields, 4, 5)
+	require.Equal(t, 10, cap(field.GetVectors().GetFloatVector().Data))
+	require.Equal(t, []float32{1, 2}, field.GetVectors().GetFloatVector().Data)
+
+	field.ValidData = []bool{true, false}
+	growQueryFloatVectors(fields, fields, 16, 32)
+	require.Equal(t, 10, cap(field.GetVectors().GetFloatVector().Data))
+}
+
+func TestQueryStreamVectorPageGrowth(t *testing.T) {
+	// A final chunk may cross the limit. Preserve its prefix and the earlier
+	// vectors, and never grow capacity past the requested page.
+	for _, factor := range []float64{0, 0.25, 1} {
+		task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: 5}, preAllocFactor: factor}
+		stream := &fakeLegacyQueryStream{}
+		for _, values := range [][]float32{{1, 2}, {3, 4, 5, 6}, {7, 8, 9, 10, 11, 12}} {
+			stream.recv = append(stream.recv, fakeLegacyQueryRecv{chunk: &internalpb.RetrieveResults{
+				Status: merr.Success(), FieldsData: []*schemapb.FieldData{testFloatVectorFieldData("v", values, 2)},
+			}})
+		}
+		result, err := task.consumeQueryResultStream(stream)
+		require.NoError(t, err)
+		got := result.GetFieldsData()[0].GetVectors().GetFloatVector().GetData()
+		require.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, got)
+		require.Equal(t, 10, cap(got))
+	}
+}
+
+func BenchmarkConsumeQueryResultStreamFloatVector(b *testing.B) {
+	const dim, chunkRows, limit = 1536, 42, 16384
+	for _, rows := range []int{1, 1024, 1025, limit} {
+		b.Run(fmt.Sprintf("rows=%d", rows), func(b *testing.B) {
+			task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: limit}, preAllocFactor: 1}
+			data := make([]float32, rows*dim)
+			for i := range data {
+				data[i] = float32(i % 8191)
+			}
+			var chunks []fakeLegacyQueryRecv
+			for start := 0; start < rows; start += chunkRows {
+				end := min(rows, start+chunkRows)
+				field := testFloatVectorFieldData("v", data[start*dim:end*dim], dim)
+				chunks = append(chunks, fakeLegacyQueryRecv{chunk: &internalpb.RetrieveResults{
+					Status: merr.Success(), FieldsData: []*schemapb.FieldData{field},
+				}})
+			}
+			var result *internalpb.RetrieveResults
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var err error
+				result, err = task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: chunks})
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			require.True(b, slices.Equal(data, result.GetFieldsData()[0].GetVectors().GetFloatVector().Data))
+		})
+	}
 }
 
 type fakeLegacyQueryStream struct {

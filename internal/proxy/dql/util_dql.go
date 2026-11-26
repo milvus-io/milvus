@@ -19,6 +19,7 @@ package dql
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -48,6 +49,11 @@ const (
 	strongTS  = 0
 	boundedTS = 2
 )
+
+// The requested page is an upper bound, not an estimate of how many rows match.
+func initialStreamResultRows(rows int64, factor float64) int64 {
+	return int64(min(1024, math.Ceil(float64(rows)*factor)))
+}
 
 // isAlpha returns true if the byte is an ASCII letter.
 func isAlpha(c uint8) bool {

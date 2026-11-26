@@ -119,7 +119,7 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, newSearchScoreInfo(metric.L2, false), false)
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, 2, newSearchScoreInfo(metric.L2, false), false)
 		require.NoError(t, err)
 	}
 
@@ -152,10 +152,33 @@ func TestAppendFinalSearchChunkRejectsMalformedShape(t *testing.T) {
 			case "hit_count":
 				chunk.Topks[0] = 2
 			}
-			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, newSearchScoreInfo(metric.IP, false), false)
+			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, 1, newSearchScoreInfo(metric.IP, false), false)
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Empty(t, output.GetScores())
 		})
+	}
+}
+
+func TestSearchStreamInitialCapacityAcrossNQ(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 4000}
+	chunk := newFinalSearchChunk([]int64{7}, []float32{1}, "v1")
+	chunk.ResultData.NumQueries, chunk.ResultData.Topks = 2, []int64{0, 1}
+	chunk.ResultData.FieldsData = newFinalQueryChunk([]int64{7}, 1).FieldsData
+	chunk.ResultData.GroupByFieldValues = newFinalQueryChunk([]int64{3}, 1).FieldsData
+	chunk.ResultData.ElementIndices = &schemapb.LongArray{Data: []int64{9}}
+	for _, tc := range []struct {
+		factor float64
+		want   int
+	}{{1, 1024}, {0.1, 800}} {
+		stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{chunk}}
+		result, _, err := (&SearchTask{preAllocFactor: tc.factor}).consumeSearchResultStream(stream, request, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
+		require.NoError(t, err)
+		data := result.Results
+		require.Equal(t, []int64{7}, data.GetIds().GetIntId().GetData())
+		require.Equal(t, tc.want, cap(data.Scores))
+		require.Equal(t, tc.want, cap(data.FieldsData[0].GetScalars().GetLongData().Data))
+		require.Equal(t, tc.want, cap(data.GroupByFieldValues[0].GetScalars().GetLongData().Data))
+		require.Equal(t, tc.want, cap(data.GetElementIndices().Data))
 	}
 }
 

@@ -2929,10 +2929,11 @@ type proxyConfig struct {
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
-	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
-	QueryNodePoolingSize   ParamItem `refreshable:"false"`
-	EnableReduceStream     ParamItem `refreshable:"true"`
-	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
+	SlowQuerySpanInSeconds     ParamItem `refreshable:"true"`
+	QueryNodePoolingSize       ParamItem `refreshable:"false"`
+	EnableReduceStream         ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes     ParamItem `refreshable:"true"`
+	ReduceStreamPreAllocFactor ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
@@ -3726,7 +3727,8 @@ Disabled if the value is less or equal to 0.`,
 	p.SearchPlaceholderLogMaxBytes.Init(base.mgr)
 
 	p.EnableReduceStream = ParamItem{
-		Key:          "proxy.queryView.enableReduceStream",
+		Key:          "proxy.queryView.reduceStream.enabled",
+		FallbackKeys: []string{"proxy.queryView.enableReduceStream"},
 		Version:      "3.1.0",
 		DefaultValue: "true",
 		Doc:          "Refreshable. Route supported new requests through Streaming Reduce.",
@@ -3735,8 +3737,10 @@ Disabled if the value is less or equal to 0.`,
 	p.EnableReduceStream.Init(base.mgr)
 
 	const defaultReduceStreamChunkBytes = "262144"
+	// Config key identity ignores case and dots, so the old
+	// queryView.reduceStreamChunkBytes spelling already resolves to this key.
 	p.ReduceStreamChunkBytes = ParamItem{
-		Key:          "proxy.queryView.reduceStreamChunkBytes",
+		Key:          "proxy.queryView.reduceStream.chunkBytes",
 		Version:      "3.1.0",
 		DefaultValue: defaultReduceStreamChunkBytes,
 		Doc:          "Refreshable. Reducible-payload byte threshold captured once per request. Invalid or non-positive values use the default of 262144 bytes.",
@@ -3750,6 +3754,22 @@ Disabled if the value is less or equal to 0.`,
 		},
 	}
 	p.ReduceStreamChunkBytes.Init(base.mgr)
+
+	p.ReduceStreamPreAllocFactor = ParamItem{
+		Key:          "proxy.queryView.reduceStream.preAllocFactor",
+		Version:      "3.1.0",
+		DefaultValue: "1",
+		Doc:          "Fraction of the requested rows to reserve for a streaming result, capped at 1024 rows. Use 0 for no initial reservation. Invalid values use 1.",
+		Export:       true,
+		Formatter: func(value string) string {
+			factor, err := strconv.ParseFloat(value, 64)
+			if err != nil || math.IsNaN(factor) || factor < 0 || factor > 1 {
+				return "1"
+			}
+			return value
+		},
+	}
+	p.ReduceStreamPreAllocFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
