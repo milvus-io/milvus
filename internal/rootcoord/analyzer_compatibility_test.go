@@ -23,6 +23,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -60,7 +61,7 @@ func TestAnalyzerAdmissionOnlyValidatesChangedDefinitions(t *testing.T) {
 		require.Equal(t, "text", infos[0].Field)
 		return nil, merr.WrapErrParameterInvalidMsg("outside current policy")
 	})
-	schema := coll.ToCollectionSchemaPB()
+	schema := proto.Clone(coll.ToCollectionSchemaPB()).(*schemapb.CollectionSchema)
 	_, err := core.validateChangedAnalyzers(context.Background(), coll, schema)
 	require.NoError(t, err)
 	require.Zero(t, calls)
@@ -74,7 +75,7 @@ func TestAnalyzerAdmissionOnlyValidatesChangedDefinitions(t *testing.T) {
 func TestResolveMultiAnalyzerPreservesUnchangedLegacyRelativePath(t *testing.T) {
 	paramtable.Init()
 	field := func(value string) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{Name: "text", TypeParams: []*commonpb.KeyValuePair{
+		return &schemapb.FieldSchema{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
 			{Key: "enable_analyzer", Value: "true"}, {Key: "multi_analyzer_params", Value: value},
 		}}
 	}
