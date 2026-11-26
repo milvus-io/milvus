@@ -581,3 +581,27 @@ func TestRuntimConfig(t *testing.T) {
 	SetLocalComponentEnabled(typeutil.QueryCoordRole)
 	assert.True(t, IsLocalComponentEnabled(typeutil.QueryCoordRole))
 }
+
+func TestTLSAllowedPath(t *testing.T) {
+	for _, tc := range []struct{ name, storageRoot, configured, want string }{
+		{"default", "/var/lib/milvus/data", "", "/var/lib/milvus/data/tls"},
+		{"custom_storage", "/srv/milvus", "", "/srv/milvus/tls"},
+		{"explicit", "/srv/milvus", "/etc/milvus/certs", "/etc/milvus/certs"},
+		{"relative", "/srv/milvus", "certs", ""},
+		{"root", "/srv/milvus", "/", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(base.mgr.Close)
+			require.NoError(t, base.Save("localStorage.path", tc.storageRoot))
+			require.NoError(t, base.Save("tls.allowedPath", tc.configured))
+			var params ServiceParam
+			if tc.want == "" {
+				require.Panics(t, func() { params.init(base) })
+				return
+			}
+			params.init(base)
+			require.Equal(t, tc.want, params.TLSAllowedPath.GetValue())
+		})
+	}
+}

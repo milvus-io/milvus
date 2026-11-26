@@ -7,6 +7,7 @@ mod demo_c;
 mod direct_bitset_collector;
 mod docid_collector;
 mod error;
+mod file_reader;
 mod hashmap_c;
 mod index_json_key_stats_writer;
 mod index_json_key_stats_writer_c;
