@@ -59,6 +59,7 @@ func BuildRuntimeOptions() map[string]any {
 	return map[string]any{
 		LinderaDictURLKey:  buildLinderaDownloadURLs(cfg.FunctionCfg.LinderaDownloadUrls.GetValue()),
 		DefaultDictPathKey: cfg.FunctionCfg.LocalResourcePath.GetValue(),
+		"tls_allowed_path": cfg.TLSAllowedPath.GetValue(),
 	}
 }
 

@@ -183,6 +183,7 @@ func TestBuildRuntimeOptions(t *testing.T) {
 	defer params.Reset(urlKey)
 
 	options := BuildRuntimeOptions()
+	assert.Equal(t, params.TLSAllowedPath.GetValue(), options["tls_allowed_path"])
 	assert.Equal(t, localResourcePath, options[DefaultDictPathKey])
 	assert.Equal(t,
 		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz", "http://b.test/ipadic.tar.gz"}},

@@ -17,10 +17,13 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/util"
@@ -332,4 +335,37 @@ func TestRuntimConfig(t *testing.T) {
 
 	SetLocalComponentEnabled(typeutil.QueryCoordRole)
 	assert.True(t, IsLocalComponentEnabled(typeutil.QueryCoordRole))
+}
+
+func TestTLSAllowedPath(t *testing.T) {
+	workingDir, err := os.Getwd()
+	require.NoError(t, err)
+	for _, tc := range []struct{ name, storageRoot, configured, want string }{
+		{"default", "/var/lib/milvus/data", "", "/var/lib/milvus/data/tls"},
+		{"custom_storage", "/srv/milvus", "", "/srv/milvus/tls"},
+		{"relative_storage", "data", "", filepath.Join(workingDir, "data", "tls")},
+		{"explicit", "/srv/milvus", "/etc/milvus/certs", "/etc/milvus/certs"},
+		{"relative", "/srv/milvus", "certs", ""},
+		{"root", "/srv/milvus", "/", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(base.mgr.Close)
+			require.NoError(t, base.Save("localStorage.path", tc.storageRoot))
+			require.NoError(t, base.Save("tls.allowedPath", tc.configured))
+			var params ServiceParam
+			if tc.want == "" {
+				require.Panics(t, func() { params.init(base) })
+				return
+			}
+			params.init(base)
+			require.Equal(t, tc.want, params.TLSAllowedPath.GetValue())
+			for _, changed := range []string{"/changed", "relative", "/"} {
+				require.NoError(t, base.Save("tls.allowedPath", changed))
+				require.Equal(t, tc.want, params.TLSAllowedPath.GetValue())
+			}
+			require.NoError(t, base.Save("localStorage.path", "/changed"))
+			require.Equal(t, tc.want, params.TLSAllowedPath.GetValue())
+		})
+	}
 }
