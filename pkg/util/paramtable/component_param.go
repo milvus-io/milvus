@@ -7658,7 +7658,7 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Version:      "3.0.0",
 		DefaultValue: "true",
 		Forbidden:    summaryMode,
-		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
+		Doc: `Whether completed StorageV3 index builds publish to segment manifests. On by default: successful builds with files and explicit skipped completions in the default metadata mode publish a new revision and atomically retire the etcd task row. The new revision advances the DataView and can drive QueryView resource preparation. Summary mode records no-file completions in SegmentInfo. Unissued, InProgress, and Failed tasks remain in etcd. Off keeps the legacy etcd-only path. StorageV1/V2 always use etcd.
 New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
 The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
 The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
@@ -7697,7 +7697,8 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 		Key:          "dataCoord.index.manifestIndexBackfill.includeSkipped",
 		Version:      "3.0.1",
 		DefaultValue: "false",
-		Doc:          "Include skipped StorageV3 index builds in manifest backfill. Requires manifest index publication and backfill. Enable after all DataCoord replicas can recover skipped entries. Use manifest index rollback before downgrading.",
+		Forbidden:    true,
+		Doc:          "Include existing etcd-backed skipped StorageV3 builds in backfill. Requires manifest publication and backfill. Newly skipped manifest-mode tasks publish directly in the default metadata mode regardless of this setting.",
 		Export:       true,
 	}
 	p.ManifestIndexBackfillIncludeSkipped.Init(base.mgr)

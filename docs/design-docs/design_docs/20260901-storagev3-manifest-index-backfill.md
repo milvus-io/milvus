@@ -134,8 +134,9 @@ Existing clusters can set `dataCoord.index.manifestIndexBackfill.includeSkipped`
 to `true` in addition to enabling manifest publication and backfill. The
 default is `false`. Eligible catalog rows have the existing explicit
 `fake finished index success` completion reason and no files. The inspector
-also picks up new skipped completions. It batches by segment with the same
-limits as artifact backfill.
+batches these catalog rows by segment with the same limits as artifact backfill.
+In the default metadata mode, newly skipped manifest-mode tasks publish directly
+at completion, independently of this setting.
 
 The manifest entry retains index/build identity and the canonical
 `<build>/<version>` path, and uses the reserved property

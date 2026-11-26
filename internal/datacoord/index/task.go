@@ -240,7 +240,7 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
-	published, err := it.publishIndexToManifest(result)
+	published, err := it.publishIndexToManifest(it.meta.Ctx, result)
 	if err != nil {
 		return err
 	}
@@ -248,6 +248,23 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 		return it.finishUnpublishedTask(it.meta.Ctx, result)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
+	return nil
+}
+
+func (it *indexBuildTask) finishSkippedTask(ctx context.Context) error {
+	result := &workerpb.IndexTaskInfo{
+		BuildID:    it.BuildID,
+		State:      commonpb.IndexState_Finished,
+		FailReason: model.SkippedIndexBuildReason,
+	}
+	published, err := it.publishIndexToManifest(ctx, result)
+	if err != nil {
+		return err
+	}
+	if !published {
+		return it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, result.GetFailReason())
+	}
+	it.SetState(indexpb.JobState_JobStateFinished, result.GetFailReason())
 	return nil
 }
 
@@ -271,14 +288,14 @@ func (it *indexBuildTask) finishUnpublishedTask(ctx context.Context, result *wor
 // CommitSegmentManifest. That is what lets the entry be built from the
 // segment's current revision instead of the possibly-stale revision the build
 // was issued against.
-func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo) (bool, error) {
-	ctx := it.meta.Ctx
+func (it *indexBuildTask) publishIndexToManifest(ctx context.Context, result *workerpb.IndexTaskInfo) (bool, error) {
 	if result.GetState() != commonpb.IndexState_Finished {
 		return false, nil
 	}
-	// A fake-finished build (a segment too small to train an index) uploads no
-	// files and has no artifact to register.
-	if len(result.GetIndexFileKeys()) == 0 {
+	// Only an explicit skipped build can publish a zero-file entry. In
+	// summary mode, no-file completions are recorded in SegmentInfo instead.
+	if len(result.GetIndexFileKeys()) == 0 &&
+		(result.GetFailReason() != model.SkippedIndexBuildReason || it.indexMeta.UsesSegmentSummaries()) {
 		return false, nil
 	}
 	segment := it.meta.GetSegment(ctx, it.SegmentID)
@@ -360,7 +377,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 				mlog.Int64("buildID", it.BuildID), mlog.Int64("segmentID", it.SegmentID))
 			return false, nil
 		}
-		return false, merr.Wrap(err, "publish index artifact through segment manifest")
+		return false, merr.Wrap(err, "publish index completion through segment manifest")
 	}
 	return true, nil
 }
@@ -560,9 +577,8 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 		now := time.Now()
 		it.SetTaskTime(taskcommon.TimeStart, now)
 		it.SetTaskTime(taskcommon.TimeEnd, now)
-		if err := it.updateStateWithMeta(ctx, indexpb.JobState_JobStateFinished, model.SkippedIndexBuildReason); err != nil {
+		if err := it.finishSkippedTask(ctx); err != nil {
 			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
-			return nil
 		}
 		return nil
 	}

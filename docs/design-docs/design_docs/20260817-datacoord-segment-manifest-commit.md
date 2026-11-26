@@ -546,9 +546,9 @@ After the clean branch is complete:
 2. replace its local `packed.AddIndexInfosToManifest`,
    `RemoveIndexInfosFromManifest`, and manifest-pointer publication logic with
    `CommitSegmentManifest` actions;
-3. keep `SegmentIndex.IndexFileKeys` as the read path's only file-list source -
-   no manifest fallback is needed, since a record without keys is a
-   fake-finished build, which publishes no manifest entry either; and
+3. keep `SegmentIndex.IndexFileKeys` as the default-mode read path's file-list
+   source. A skipped build recovered from an explicit manifest entry has an
+   empty file list; and
 4. re-run the full lifecycle audit: build, load, query, copy/restore, snapshot,
    compaction, dropped-segment GC, and recovery.
 
