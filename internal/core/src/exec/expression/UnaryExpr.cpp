@@ -1554,12 +1554,12 @@ template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
     if (IsTextIndexOpType(expr_->op_type_)) {
-        if (has_offset_input_) {
+        if (has_offset_input_ && !expr_->column_.element_level_) {
             ThrowInfo(
                 OpTypeInvalid,
                 fmt::format("match query does not support iterative filter"));
         }
-        return ExecTextMatch();
+        return ExecTextMatch(context.get_offset_input());
     } else if (CanUseNgramIndex()) {
         auto res = ExecNgramMatch(context);
         // If nullopt is returned, it means the query cannot be
@@ -2275,8 +2275,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
 }
 
 VectorPtr
-PhyUnaryRangeFilterExpr::ExecTextMatch() {
-    using Index = index::TextMatchIndex;
+PhyUnaryRangeFilterExpr::ExecTextMatch(const OffsetVector* offsets) {
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -2330,15 +2329,36 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         max_edit_distance = static_cast<uint32_t>(distance);
     }
 
-    auto real_batch_size = GetNextBatchSize();
-    if (real_batch_size == 0) {
+    const bool elements = expr_->column_.element_level_;
+    const auto batch = GetNextRealBatchSize(offsets, elements);
+    if (!batch.has_value()) {
         return nullptr;
     }
+    const auto real_batch_size = *batch;
+    if (auto empty =
+            AdvanceEmptyElementBatch(offsets, elements, real_batch_size)) {
+        return empty;
+    }
+    const auto mapping =
+        elements ? GetStructElementOffsets(field_id_) : nullptr;
+    AssertInfo(!elements || mapping,
+               "missing array element offsets for text field {}",
+               field_id_.get());
+    const auto position = [&](int64_t row) -> int64_t {
+        return mapping ? mapping->ElementIDRangeOfRow(row).first : row;
+    };
 
     // Cache lookup + full-bitset compute via helper
     if (cached_match_res_ == nullptr) {
+        // Shared cache slots contain segment-row bitmaps. The element bitmap
+        // lives on this expression so every batch uses the same pinned result.
+        // A growing text reader may also publish at a fixed active row count.
+        const auto visible_count = position(active_count_);
+        const auto* cache_segment =
+            !elements && segment_->type() == SegmentType::Sealed ? segment_
+                                                                 : nullptr;
         auto cached = exec::ExprCacheHelper::GetOrCompute(
-            segment_,
+            cache_segment,
             this->ToString(),
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
@@ -2357,24 +2377,34 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                               op_type);
                 }
                 auto valid_res = index->IsNotNull();
-                if (res.size() < static_cast<size_t>(active_count_)) {
-                    // some entities are not visible in inverted index.
-                    // only happens on growing segment.
-                    TargetBitmap tail(active_count_ - res.size());
+                if (elements && segment_->type() == SegmentType::Sealed) {
+                    AssertInfo(res.size() == mapping->GetTotalElementCount(),
+                               "text index document count differs from array "
+                               "element count");
+                }
+                // A growing reader can publish more documents between the
+                // hits and validity reads. Only expose positions covered by both.
+                const auto covered =
+                    std::min({res.size(),
+                              valid_res.size(),
+                              static_cast<size_t>(visible_count)});
+                res.resize(covered);
+                valid_res.resize(covered);
+                if (covered < static_cast<size_t>(visible_count)) {
+                    TargetBitmap tail(visible_count - covered);
                     res.append(tail);
                     valid_res.append(tail);
-                } else if (res.size() > static_cast<size_t>(active_count_)) {
-                    // on growing segments, the text index may have indexed
-                    // rows beyond the query timestamp. Truncate to
-                    // active_count_.
-                    res.resize(active_count_);
-                    valid_res.resize(active_count_);
                 }
                 return {std::move(res), std::move(valid_res)};
             },
             enable_sub_expr_cache_write_);
         cached_match_res_ = cached.result;
         cached_index_chunk_valid_res_ = cached.valid;
+    }
+
+    if (offsets != nullptr) {
+        return GatherCachedResultByOffsets(
+            *cached_match_res_, *cached_index_chunk_valid_res_, *offsets);
     }
 
     // When execute_all_at_once_ and result is not shared with cache, move to avoid copy
@@ -2387,11 +2417,9 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     TargetBitmap result;
     TargetBitmap valid_result;
-    result.append(
-        *cached_match_res_, current_data_global_pos_, real_batch_size);
-    valid_result.append(*cached_index_chunk_valid_res_,
-                        current_data_global_pos_,
-                        real_batch_size);
+    const auto start = position(current_data_global_pos_);
+    result.append(*cached_match_res_, start, real_batch_size);
+    valid_result.append(*cached_index_chunk_valid_res_, start, real_batch_size);
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(result),
                                           std::move(valid_result));

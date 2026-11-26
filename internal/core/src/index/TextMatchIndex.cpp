@@ -16,6 +16,9 @@
 #include <shared_mutex>
 
 #include "index/TextMatchIndex.h"
+#include "common/ArrayTextValues.h"
+#include "common/Utils.h"
+#include "common/FieldData.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "storage/ThreadPools.h"
@@ -288,6 +291,39 @@ TextMatchIndex::AddTextsGrowing(size_t n,
     wrapper_->add_data(texts, n, offset_begin);
     if (shouldTriggerCommit()) {
         Commit();
+    }
+}
+
+void
+TextMatchIndex::BuildWithFieldData(
+    const std::vector<FieldDataPtr>& field_datas) {
+    if (schema_.data_type() != proto::schema::DataType::Array) {
+        InvertedIndexTantivy<std::string>::BuildWithFieldData(field_datas);
+        return;
+    }
+    AssertInfo(IsStructSubField(schema_.name()) &&
+                   schema_.element_type() == proto::schema::DataType::VarChar,
+               "array text index requires VarChar elements");
+    int64_t document = 0;
+    for (const auto& data : field_datas) {
+        const bool native =
+            dynamic_cast<const FieldData<ArrayValue>*>(data.get()) != nullptr;
+        for (int64_t i = 0; i < data->get_num_rows(); ++i) {
+            if (schema_.nullable() && !data->is_valid(i))
+                continue;
+            ArrayTextValues docs;
+            if (native) {
+                docs.Append(
+                    static_cast<const ArrayValue*>(data->RawValue(i))->View());
+            } else {
+                docs.Append(*static_cast<const Array*>(data->RawValue(i)));
+            }
+            for (size_t j = 0; j < docs.values.size(); ++j) {
+                AddTextSealed(docs.values[j],
+                              docs.valid.empty() || docs.valid[j],
+                              document++);
+            }
+        }
     }
 }
 

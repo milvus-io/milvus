@@ -19,6 +19,7 @@
 #include <optional>
 
 #include "Consts.h"
+#include "common/Utils.h"
 #include "NamedType/named_type_impl.hpp"
 #include "boost/cstdint.hpp"
 #include "common/Common.h"
@@ -160,8 +161,31 @@ ParseTokenizerParams(const TypeParams& params) {
     return iter->second;
 }
 
+namespace {
+bool
+ArrayTextFlag(const TypeParams& params, const char* key) {
+    auto it = params.find(key);
+    if (it == params.end()) {
+        return false;
+    }
+    const auto& value = it->second;
+    return value == "true" || value == "TRUE" || value == "True" ||
+           value == "1" || value == "t" || value == "T";
+}
+}  // namespace
+
+bool
+FieldMeta::is_struct_varchar() const {
+    return type_ == DataType::ARRAY && element_type_ == DataType::VARCHAR &&
+           IsStructSubField(name_.get());
+}
+
 bool
 FieldMeta::enable_match() const {
+    if (is_struct_varchar()) {
+        return enable_analyzer() &&
+               ArrayTextFlag(array_type_params_, "enable_match");
+    }
     if (!IsStringDataType(type_)) {
         return false;
     }
@@ -173,6 +197,9 @@ FieldMeta::enable_match() const {
 
 bool
 FieldMeta::enable_analyzer() const {
+    if (is_struct_varchar()) {
+        return ArrayTextFlag(array_type_params_, "enable_analyzer");
+    }
     if (!IsStringDataType(type_)) {
         return false;
     }
@@ -189,8 +216,8 @@ FieldMeta::get_analyzer_params() const {
             Unsupported,
             fmt::format("unsupported text index when not enable analyzer"));
     }
-    auto params = string_info_->params;
-    return ParseTokenizerParams(params);
+    return ParseTokenizerParams(is_struct_varchar() ? array_type_params_
+                                                   : string_info_->params);
 }
 
 milvus::proto::schema::FieldSchema

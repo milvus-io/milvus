@@ -54,6 +54,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
+#include "common/ArrayTextValues.h"
 #include "common/StructElementOffsets.h"
 #include "common/ColumnarArrayChunkBuilder.h"
 #include "common/ArrowDataWrapper.h"
@@ -5663,7 +5664,44 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                               id_,
                               field_id.get(),
                               "ChunkedSegmentSealedImpl::CreateTextIndex()");
-            if (field_meta.get_data_type() == DataType::TEXT) {
+            if (field_meta.is_struct_varchar()) {
+                int64_t document = 0;
+                const auto append = [&](const auto& batch) {
+                    const auto& [rows, valid] = batch.get();
+                    for (size_t i = 0; i < rows.size(); ++i) {
+                        if (valid && !valid[i])
+                            continue;
+                        ArrayTextValues docs;
+                        docs.Append(rows[i]);
+                        for (size_t j = 0; j < docs.values.size(); ++j) {
+                            index->AddTextSealed(
+                                docs.values[j],
+                                docs.valid.empty() || docs.valid[j],
+                                document++);
+                        }
+                    }
+                };
+                for (int64_t chunk = 0; chunk < column->num_chunks(); ++chunk) {
+                    const int64_t rows = column->chunk_row_nums(chunk);
+                    for (int64_t start = 0; start < rows;
+                         start += kTextLobIndexBuildBatchSize) {
+                        CheckCancellation(op_ctx,
+                                          id_,
+                                          field_id.get(),
+                                          "build array text index");
+                        const auto range = std::pair{
+                            start,
+                            std::min<int64_t>(rows - start,
+                                              kTextLobIndexBuildBatchSize)};
+                        if (field_meta.is_native_list_array()) {
+                            append(
+                                column->ArrayValueViews(op_ctx, chunk, range));
+                        } else {
+                            append(column->ArrayViews(op_ctx, chunk, range));
+                        }
+                    }
+                }
+            } else if (field_meta.get_data_type() == DataType::TEXT) {
                 const auto* path_map = &target_runtime->text_lob_paths;
                 auto it = path_map->find(field_id);
                 AssertInfo(it != path_map->end(),
@@ -5756,6 +5794,16 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                        "failed to create text index, field index cannot be "
                        "converted to string index");
             auto n = impl->Count();
+            if (field_meta.is_struct_varchar()) {
+                auto offsets =
+                    target_runtime->struct_element_offsets_map.find(field_id);
+                AssertInfo(
+                    impl->IsNestedIndex() &&
+                        offsets !=
+                            target_runtime->struct_element_offsets_map.end() &&
+                        n == offsets->second->GetTotalElementCount(),
+                    "array text index requires one source value per element");
+            }
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {

@@ -30,6 +30,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/FieldMeta.h"
 #include "common/FieldDataInterface.h"
 #include "common/Types.h"
 #include "glog/logging.h"
@@ -170,17 +171,30 @@ MemFileManagerImpl::LoadIndexToMemory(
 
 std::vector<FieldDataPtr>
 MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
+    // Native-list VarChar arrays need a typed Arrow list decoder to preserve
+    // element validity. Ordinary array indexes use the existing row decoder.
+    std::optional<proto::schema::TypeSchema> array_type;
+    const auto& field = field_meta_.field_schema;
+    if (field.data_type() == proto::schema::DataType::Array &&
+        field.element_type() == proto::schema::DataType::VarChar &&
+        field.element_nullable() &&
+        index::GetValueFromConfig<bool>(config, "is_text_match")
+            .value_or(false)) {
+        array_type = FieldMeta::ParseFrom(field).get_array_type_schema();
+    }
     auto storage_version =
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
     if (storage_version == STORAGE_V2 || storage_version == STORAGE_V3) {
-        return cache_raw_data_to_memory_storage_v2(config);
+        return cache_raw_data_to_memory_storage_v2(config, array_type);
     }
-    return cache_raw_data_to_memory_internal(config);
+    return cache_raw_data_to_memory_internal(config, array_type);
 }
 
 std::vector<FieldDataPtr>
-MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
+MemFileManagerImpl::cache_raw_data_to_memory_internal(
+    const Config& config,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
     auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
@@ -194,7 +208,11 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
     std::vector<FieldDataPtr> field_datas;
 
     auto FetchRawData = [&]() {
-        auto raw_datas = GetObjectData(rcm_.get(), batch_files);
+        auto raw_datas = GetObjectData(rcm_.get(),
+                                       batch_files,
+                                       ThreadPoolPriority::HIGH,
+                                       true,
+                                       array_type);
         storage::ProcessFuturesInOrder(
             raw_datas, [&](std::unique_ptr<DataCodec> codec) {
                 field_datas.emplace_back(codec->GetFieldData());
@@ -218,7 +236,9 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
 }
 
 std::vector<FieldDataPtr>
-MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
+MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(
+    const Config& config,
+    const std::optional<proto::schema::TypeSchema>& array_type) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
     AssertInfo(data_type.has_value(),
                "[StorageV2] data type is empty when build index");
@@ -261,7 +281,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          data_type,
                                          dim,
                                          element_type,
-                                         storage_column_mapping);
+                                         storage_column_mapping,
+                                         array_type);
     }
 
     auto& remote_files = segment_insert_files.value();
@@ -273,7 +294,8 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                                   data_type.value(),
                                                   element_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  array_type);
     // field data list could differ for storage v2 group list
     return field_datas;
 }

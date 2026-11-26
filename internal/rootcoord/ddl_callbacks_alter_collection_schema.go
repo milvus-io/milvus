@@ -357,7 +357,7 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	}
 	// Only the added sub-field: stored siblings may carry these params from an
 	// earlier version, so the merged struct below is not checked for them.
-	if err := schemautil.RejectStructSubFieldTextMatch(field); err != nil {
+	if err := schemautil.ValidateStructSubFieldTextMatch(field); err != nil {
 		return err
 	}
 	// Segments written before this add have no column for the new sub-field;
