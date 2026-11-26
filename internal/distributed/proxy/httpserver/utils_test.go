@@ -7096,10 +7096,11 @@ func TestFieldSchemaStructArrayHelpers(t *testing.T) {
 func TestPrintStructArrayFieldsV2QualifiedSubFields(t *testing.T) {
 	printed := printStructArrayFieldsV2([]*schemapb.StructArrayFieldSchema{
 		{
-			FieldID:     10,
-			Name:        "my_struct",
-			Description: "qualified names",
-			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			FieldID:       10,
+			Name:          "my_struct",
+			ExternalField: "raw_struct",
+			Description:   "qualified names",
+			TypeParams:    []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:     11,

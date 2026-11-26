@@ -452,12 +452,10 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		if err != nil {
 			return nil, err
 		}
-		// Reimport missing physical groups using numeric field IDs; the generic
-		// appender cannot interpret source snapshot manifests.
-		refreshMilvusTableColumns := len(missingColumns) > 0 && t.parsedSpec != nil &&
+		restoreMilvusTableColumns := len(missingColumns) > 0 && t.parsedSpec != nil &&
 			t.parsedSpec.Format == externalspec.FormatMilvusTable
 		var patchedSegment *datapb.SegmentInfo
-		if shouldRefreshDeltalogs || refreshMilvusTableColumns {
+		if shouldRefreshDeltalogs || restoreMilvusTableColumns {
 			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, shouldRefreshDeltalogs)
 			if err != nil {
 				return nil, err
@@ -466,18 +464,28 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			if shouldRefreshDeltalogs {
 				deltalogRefreshedSegments++
 			}
-			if refreshMilvusTableColumns {
+			if restoreMilvusTableColumns {
 				missingColumnPatchedSegments++
 			}
 			taskLog.Info(ctx, "Segment kept with refreshed milvus-table manifest",
 				mlog.FieldSegmentID(seg.GetID()),
-				mlog.String("updateReason", "refreshed_milvus_table_manifest"),
+				mlog.String("updateReason", "refreshed_milvus_table_deltalogs"),
+				mlog.Bool("deltalogsChanged", shouldRefreshDeltalogs),
+				mlog.Strings("restoredColumns", missingColumns),
 				mlog.String("oldManifestPath", seg.GetManifestPath()),
 				mlog.String("newManifestPath", updatedSegment.GetManifestPath()))
 		}
 
-		if len(missingColumns) > 0 && !refreshMilvusTableColumns {
-			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
+		// Milvus-table fragments contain source manifests, not data-file paths.
+		// The refresh above imports their physical groups and retains local artifacts.
+		if len(missingColumns) > 0 && !restoreMilvusTableColumns {
+			segmentToPatch := seg
+			patchFragments := fragments
+			if patchedSegment != nil {
+				segmentToPatch = patchedSegment
+				patchFragments = matchedNewFragments
+			}
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -489,9 +497,11 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				mlog.Strings("missingColumns", missingColumns))
 		}
 
-		if patchedSegment != nil && (refreshMilvusTableColumns || len(patchedSegment.GetBinlogs()) == 0) {
-			// Restore fake binlogs omitted by catalog recovery, and update field
-			// coverage and load sizes when reimporting missing physical columns.
+		if patchedSegment != nil && (len(patchedSegment.GetBinlogs()) == 0 || restoreMilvusTableColumns) {
+			// Catalog recovery omits V3 fake binlogs. Even when every physical
+			// column exists, DataCoord requires them on a same-ID manifest patch.
+			// Restore metadata from the final manifest without appending columns.
+			// Repaired columns also invalidate any pre-existing size/coverage estimate.
 			patchedSegment, err = t.rebuildSegmentFakeBinlogs(ctx, patchedSegment, patchedSegment.GetManifestPath())
 			if err != nil {
 				return nil, err
@@ -654,7 +664,7 @@ func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.Segme
 			return nil, nil
 		}
 		names := make(map[string]string)
-		for _, field := range schema.GetFields() {
+		for _, field := range typeutil.GetAllFieldSchemas(schema) {
 			names[strconv.FormatInt(field.GetFieldID(), 10)] = field.GetExternalField()
 		}
 		columns := make([]string, 0, len(missing))
@@ -671,8 +681,7 @@ func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.Segme
 		typeutil.WithStorageColumnExternalSpec(t.req.GetExternalSpec()))
 	coveredFields := coveredFieldsFromChildFields(seg)
 	var columns []string
-	externalNames := make(map[string]string)
-	for _, field := range schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		if field.GetExternalField() == "" {
 			continue
 		}
@@ -681,7 +690,6 @@ func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.Segme
 		}
 		if column, ok := resolver.ManifestStoredColumnName(field); ok {
 			columns = append(columns, column)
-			externalNames[column] = field.GetExternalField()
 		}
 	}
 	missing := columns
@@ -696,11 +704,7 @@ func (t *RefreshExternalCollectionTask) missingExternalColumns(seg *datapb.Segme
 			return nil, merr.Wrapf(err, "check external columns for segment %d", seg.GetID())
 		}
 	}
-	var missingColumns []string
-	for _, column := range missing {
-		missingColumns = append(missingColumns, externalNames[column])
-	}
-	return missingColumns, nil
+	return missing, nil
 }
 
 func (t *RefreshExternalCollectionTask) patchSegmentForMissingColumns(
@@ -1277,7 +1281,7 @@ func (t *RefreshExternalCollectionTask) createManifestWithFunctions(
 func buildFakeBinlogs(logID, numRows, memorySize int64, schema *schemapb.CollectionSchema, format string) []*datapb.FieldBinlog {
 	var childFields []int64
 	if schema != nil {
-		for _, field := range schema.GetFields() {
+		for _, field := range typeutil.GetAllFieldSchemas(schema) {
 			childFields = append(childFields, field.GetFieldID())
 		}
 	}
@@ -1330,10 +1334,15 @@ func sumFieldSizes(fieldSizes map[string]int64, schema *schemapb.CollectionSchem
 	}
 	columnResolver := typeutil.NewStorageColumnResolver(schema)
 	var total int64
-	for _, field := range schema.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
 		columnName, ok := columnResolver.SourceDataColumnName(field)
 		if !ok {
 			continue
+		}
+		if !columnResolver.IsMilvusTable() {
+			// Sampling reports each logical projection separately: sibling Struct
+			// children share a physical parent but have distinct decoded sizes.
+			columnName = field.GetExternalField()
 		}
 		if avgBytes, ok := fieldSizes[columnName]; ok && avgBytes > 0 {
 			total += avgBytes

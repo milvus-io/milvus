@@ -33,6 +33,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
@@ -119,7 +120,8 @@ class ManifestGroupTranslator
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
             MmapChunkWritebackMode::Disabled,
-        bool enable_async_load = false);
+        bool enable_async_load = false,
+        OrdinaryStructProjections struct_projections = {});
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -259,6 +261,7 @@ class ManifestGroupTranslator
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     std::unordered_map<std::string, std::vector<FieldId>>
         physical_column_field_ids_;
+    OrdinaryStructProjections struct_projections_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

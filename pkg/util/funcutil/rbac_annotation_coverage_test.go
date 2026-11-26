@@ -64,6 +64,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"Dummy": "legacy debug shim with query-mode disabled",
 	// DumpMessages is authorized by the proxy stream chain (streamMethodAuthorizers, #52608): cluster-admin grant.
 	"DumpMessages": "stream-authenticated CDC/salvage dump",
+	// ExecuteDQL checks the Search privilege for each item in its resolved database and collection.
+	"ExecuteDQL": "per-item Search authorization in the proxy",
 	// GetCompactionState only polls the state of a previously-started compaction job.
 	"GetCompactionState": "async compaction status polling",
 	// GetCompactionStateWithPlans only polls detailed state for a previously-started compaction job.
@@ -102,8 +104,6 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"ListIndexedSegment": "unimplemented feder endpoint",
 	// ListRefreshExternalCollectionJobs lists external-collection refresh jobs, optionally scoped by collection.
 	"ListRefreshExternalCollectionJobs": "external-collection refresh job listing",
-	// ExecuteDQL checks the Search privilege for each item in its resolved database and collection.
-	"ExecuteDQL": "per-item Search authorization in the proxy",
 	// RegisterLink only reports proxy deployment metadata for client link registration.
 	"RegisterLink": "client link registration",
 	// ReplicateMessage is the CDC message-replication endpoint.

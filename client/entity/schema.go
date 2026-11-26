@@ -151,10 +151,11 @@ func (s *Schema) ProtoMessage() *schemapb.CollectionSchema {
 			return nil, false
 		}
 		f := &schemapb.StructArrayFieldSchema{
-			Name:        field.Name,
-			Description: field.Description,
-			TypeParams:  MapKvPairs(field.TypeParams),
-			Nullable:    field.Nullable,
+			Name:          field.Name,
+			Description:   field.Description,
+			TypeParams:    MapKvPairs(field.TypeParams),
+			Nullable:      field.Nullable,
+			ExternalField: field.ExternalField,
 		}
 		// max_capacity declared on the parent struct field must be carried onto each sub-field —
 		// the server validates it per sub-field on insert.
@@ -306,14 +307,15 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 		structSchema.WithField(field)
 	}
 	return &Field{
-		ID:           p.GetFieldID(),
-		Name:         p.GetName(),
-		Description:  p.GetDescription(),
-		DataType:     FieldTypeArray,
-		ElementType:  FieldTypeStruct,
-		TypeParams:   typeParams,
-		Nullable:     p.GetNullable(),
-		StructSchema: structSchema,
+		ID:            p.GetFieldID(),
+		Name:          p.GetName(),
+		Description:   p.GetDescription(),
+		DataType:      FieldTypeArray,
+		ElementType:   FieldTypeStruct,
+		TypeParams:    typeParams,
+		Nullable:      p.GetNullable(),
+		ExternalField: p.GetExternalField(),
+		StructSchema:  structSchema,
 	}
 }
 
