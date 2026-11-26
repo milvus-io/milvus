@@ -178,8 +178,8 @@ func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
 	})
 	const id int64 = 9007199254740993
 	dir := filepath.Join(pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()), "9007199254740993")
-	require.NoError(t, os.MkdirAll(dir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the\n"), 0600))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the\n"), 0o600))
 	require.NoError(t, UpdateGlobalResourceInfo(map[string]int64{"dictionary": id}))
 	params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
 	for _, extra := range []string{"", `{"resource_map":{"dictionary":9007199254740993}}`} {
@@ -188,7 +188,7 @@ func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
 		restored.Destroy()
 	}
 	// Linux permits backslashes in basenames that predate admission restrictions.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, `legacy\stop.txt`), []byte("the\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, `legacy\stop.txt`), []byte("the\n"), 0o600))
 	legacy := strings.Replace(params, `"file_name":"stop.txt"`, `"file_name":"legacy\\stop.txt"`, 1)
 	restored, err := RestoreAnalyzer(legacy, "")
 	require.NoError(t, err)

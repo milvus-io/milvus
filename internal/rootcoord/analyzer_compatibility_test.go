@@ -90,6 +90,7 @@ func TestResolveMultiAnalyzerPreservesUnchangedLegacyRelativePath(t *testing.T) 
 	require.Contains(t, result, "/new.txt")
 	require.False(t, sameAnalyzerParams(`{"tokenizer":"standard"} trailing`, `{"tokenizer":"standard"}`))
 }
+
 func TestMinHashAnalyzerAdmissionWithoutEnableAnalyzer(t *testing.T) {
 	paramtable.Init()
 	field := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
