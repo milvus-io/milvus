@@ -56,7 +56,7 @@ const (
 	// Load admission defaults apply only when async loading is enabled and the
 	// corresponding parameter is absent. Explicit values, including 0, win.
 	DefaultLoadTransientBudgetBytes       = 2 * 1024 * 1024 * 1024
-	DefaultLoadAdmissionSlotsPerCPU       = 2
+	DefaultLoadAdmissionSlotsPerCPU       = 10
 	DefaultJSONStatsBuildMaxInflightBytes = 512 * 1024 * 1024
 	// DefaultLoadFieldDataReadWindowSizeBytes is the default threshold
 	// for a Storage V3 field-data async read window.
@@ -1117,13 +1117,14 @@ Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will b
 	p.DiskWriteNumThreads = ParamItem{
 		Key:          "common.diskWriteNumThreads",
 		Version:      "2.6.0",
-		DefaultValue: "0",
+		DefaultValue: strconv.Itoa(hardware.GetCPUNum()),
 		Doc: `This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
 Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
 The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
 For example, set this parameter to 1 to serialize these local file writes.
-The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
-		Export: true,
+When unset, defaults to the CPU count reported by Milvus at initialization.
+Explicit 0 disables the dedicated pool and the concurrency limit; callers perform local file work directly.`,
+		Export: false,
 	}
 	p.DiskWriteNumThreads.Init(base.mgr)
 
@@ -6330,7 +6331,7 @@ user-task-polling:
 
 	p.LoadTransientBudgetBytes = ParamItem{
 		Key:          "queryNode.segcore.load.admission.transientBudgetBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: strconv.FormatInt(DefaultLoadTransientBudgetBytes, 10),
 		Doc: `QueryNode transient memory budget in bytes shared by supported ` +
 			`field-data and index loaders. It gates ` +
@@ -6355,13 +6356,13 @@ user-task-polling:
 
 	p.LoadAdmissionSlots = ParamItem{
 		Key:          "queryNode.segcore.load.admission.slots",
-		Version:      "3.0.1",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(DefaultLoadAdmissionSlotsPerCPU * hardware.GetCPUNum()),
 		Doc: `QueryNode limit on admitted, unfinished work shared by supported ` +
 			`field-data and index loaders. Each ` +
 			`window, batch, or stream slice reserves one slot together with its ` +
 			`transient bytes until its temporary data is released after consumption ` +
-			`or finalization. When unset, defaults to twice the CPU count reported ` +
+			`or finalization. When unset, defaults to ten times the CPU count reported ` +
 			`by Milvus at initialization with queryNode.segcore.load.asyncReadEnabled ` +
 			`enabled, otherwise 0. Explicit values apply regardless of that switch; ` +
 			`0 disables the slot limit. Async metadata operations also reserve one slot.`,
@@ -6380,7 +6381,7 @@ user-task-polling:
 
 	p.LoadFieldDataCellTargetSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.load.fieldData.cellTargetSizeBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: "4194304", // 4 MiB
 		Doc: `Target average byte size per field-data cell. Parquet row groups are ` +
 			`greedily packed so that rgs_per_cell * avg_row_group_size ≈ this target. ` +
@@ -6401,8 +6402,8 @@ user-task-polling:
 
 	p.LoadAsyncReadEnabled = ParamItem{
 		Key:          "queryNode.segcore.load.asyncReadEnabled",
-		Version:      "3.0.1",
-		DefaultValue: "false",
+		Version:      "3.1.0",
+		DefaultValue: "true",
 		Doc:          "Enable asynchronous storage reads for supported field data and index loaders. Change this setting by restarting QueryNode; existing translators retain their mode.",
 		Export:       false,
 	}
@@ -6410,7 +6411,7 @@ user-task-polling:
 
 	p.LoadExecutorThreads = ParamItem{
 		Key:          "queryNode.segcore.load.executorThreads",
-		Version:      "3.0.1",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(max(1, min(hardware.GetCPUNum(), DefaultThreadPoolMaxThreadsSize))),
 		Doc: `Worker count for the shared QueryNode async-load executor. ` +
 			`Must be a positive integer; defaults to min(CPUNUM, 16). ` +
@@ -6431,7 +6432,7 @@ user-task-polling:
 
 	p.LoadFieldDataReadWindowSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.load.fieldData.readWindowSizeBytes",
-		Version:      "3.0.0",
+		Version:      "3.1.0",
 		DefaultValue: strconv.Itoa(DefaultLoadFieldDataReadWindowSizeBytes),
 		Doc: `Target estimated loaded-byte threshold for one Storage V3 field-data async read window. ` +
 			`Each window contains at least one cell, so an oversized cell may exceed the threshold. ` +
