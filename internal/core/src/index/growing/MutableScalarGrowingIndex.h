@@ -35,10 +35,9 @@ struct MutableScalarIndexOptions {
 // including allocations retained by older pins, rather than on IIndex.
 struct MutableScalarIndexOwner {
     std::unique_ptr<IGrowingIndex> owner;
-    // Canonical storage is charged by the Segment; query-created cache storage
-    // charges the cache manager directly and must not be counted twice.
+    // Reporting only: all storage charges/refunds the cache manager directly.
+    // The Segment must not add these bytes to its resource-tracking estimate.
     std::function<size_t()> resident_bytes;
-    std::function<size_t()> self_charged_bytes;
 };
 
 MutableScalarIndexOwner

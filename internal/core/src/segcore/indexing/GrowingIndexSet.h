@@ -66,9 +66,8 @@ class GrowingIndexSet {
         // families can release the column after a covering reader owns raw.
         bool source_backed{false};
         FieldIndexCapability capability;
-        // Optional concrete-storage accounting; no resource methods on IIndex.
+        // Optional reporting of self-charged storage; no methods on IIndex.
         std::function<size_t()> resident_bytes;
-        std::function<size_t()> self_charged_bytes;
     };
 
     using AppenderMap = std::map<FieldId, Appender>;
@@ -101,10 +100,6 @@ class GrowingIndexSet {
 
     size_t
     ResidentBytes() const;
-
-    // Excludes storage already charged directly by its concrete owner.
-    size_t
-    UnchargedResidentBytes() const;
 
     // True only when a fixed reader covers the query-visible prefix and can
     // reproduce original values without borrowing the growing column.

@@ -307,7 +307,6 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                                                              DataType::VARCHAR},
                           std::move(created.owner));
         appender.resident_bytes = std::move(created.resident_bytes);
-        appender.self_charged_bytes = std::move(created.self_charged_bytes);
         LOG_INFO(
             "growing mutable scalar index created: segment={}, field={}, "
             "backend=btree, hot_bitmap_bytes={}",
@@ -474,21 +473,6 @@ GrowingIndexSet::Has(FieldId field_id) const {
 
 size_t
 GrowingIndexSet::ResidentBytes() const {
-    std::shared_lock lock(mutex_);
-    size_t bytes = 0;
-    for (const auto& [field_id, appender] : appenders_) {
-        if (appender.resident_bytes) {
-            bytes += appender.resident_bytes();
-        }
-        if (appender.self_charged_bytes) {
-            bytes += appender.self_charged_bytes();
-        }
-    }
-    return bytes;
-}
-
-size_t
-GrowingIndexSet::UnchargedResidentBytes() const {
     std::shared_lock lock(mutex_);
     size_t bytes = 0;
     for (const auto& [field_id, appender] : appenders_) {

@@ -43,11 +43,23 @@ namespace milvus::index {
 namespace {
 
 struct ScalarAllocationCounter {
-    explicit ScalarAllocationCounter(bool charge_directly = false)
-        : charge_directly(charge_directly) {
+    void
+    Charge(size_t size) {
+        if (size == 0)
+            return;
+        cachinglayer::Manager::GetInstance().ChargeLoadedResource(
+            {static_cast<int64_t>(size), 0});
+        bytes.fetch_add(size, std::memory_order_relaxed);
+    }
+    void
+    Refund(size_t size) noexcept {
+        if (size == 0)
+            return;
+        cachinglayer::Manager::GetInstance().RefundLoadedResource(
+            {static_cast<int64_t>(size), 0});
+        bytes.fetch_sub(size, std::memory_order_relaxed);
     }
     std::atomic<size_t> bytes{0};
-    const bool charge_directly;
 };
 using ByteCounter = std::shared_ptr<ScalarAllocationCounter>;
 
@@ -67,25 +79,17 @@ struct ScalarAllocator {
     allocate(size_t n) {
         auto* result = std::allocator<T>{}.allocate(n);
         try {
-            if (bytes->charge_directly) {
-                cachinglayer::Manager::GetInstance().ChargeLoadedResource(
-                    {static_cast<int64_t>(n * sizeof(T)), 0});
-            }
+            bytes->Charge(n * sizeof(T));
         } catch (...) {
             std::allocator<T>{}.deallocate(result, n);
             throw;
         }
-        bytes->bytes.fetch_add(n * sizeof(T), std::memory_order_relaxed);
         return result;
     }
     void
     deallocate(T* p, size_t n) noexcept {
-        bytes->bytes.fetch_sub(n * sizeof(T), std::memory_order_relaxed);
         std::allocator<T>{}.deallocate(p, n);
-        if (bytes->charge_directly) {
-            cachinglayer::Manager::GetInstance().RefundLoadedResource(
-                {static_cast<int64_t>(n * sizeof(T)), 0});
-        }
+        bytes->Refund(n * sizeof(T));
     }
     template <typename U>
     bool
@@ -99,11 +103,14 @@ struct ScalarMemoryCharge {
     size_t bytes;
     ScalarMemoryCharge(ByteCounter counter, size_t bytes)
         : counter(std::move(counter)), bytes(bytes) {
-        this->counter->bytes.fetch_add(bytes, std::memory_order_relaxed);
+        this->counter->Charge(bytes);
     }
     ~ScalarMemoryCharge() {
-        counter->bytes.fetch_sub(bytes, std::memory_order_relaxed);
+        counter->Refund(bytes);
     }
+    ScalarMemoryCharge(const ScalarMemoryCharge&) = delete;
+    ScalarMemoryCharge&
+    operator=(const ScalarMemoryCharge&) = delete;
 };
 
 using ScalarString =
@@ -167,15 +174,13 @@ struct MutableScalarStorage {
 
     MutableScalarStorage(DataType type,
                          MutableScalarIndexOptions options,
-                         ByteCounter bytes,
-                         ByteCounter cache_counter)
+                         ByteCounter bytes)
         : bytes(std::move(bytes)),
-          cache_counter(std::move(cache_counter)),
           object_charge(this->bytes, sizeof(MutableScalarStorage)),
           type(type),
           options(options),
           tree(ScalarLess<T>{}, ScalarAllocator<Pair>(this->bytes)),
-          cache(ScalarAllocator<CachedMembership>(this->cache_counter)) {
+          cache(ScalarAllocator<CachedMembership>(this->bytes)) {
     }
 
     void
@@ -224,7 +229,7 @@ struct MutableScalarStorage {
                     // privately; allocation failure leaves canonical postings.
                     try {
                         Words bitmap(
-                            words, 0, ScalarAllocator<uint64_t>(cache_counter));
+                            words, 0, ScalarAllocator<uint64_t>(bytes));
                         for (const auto offset : posting.offsets) {
                             bitmap[offset / 64] |= uint64_t{1} << (offset % 64);
                         }
@@ -232,9 +237,8 @@ struct MutableScalarStorage {
                             bitmap.capacity() * sizeof(uint64_t);
                         if (capacity <=
                             options.hot_bitmap_bytes - cache_bytes) {
-                            cache.push_back(
-                                {OwnScalarKey<T>(key, cache_counter),
-                                 std::move(bitmap)});
+                            cache.push_back({OwnScalarKey<T>(key, bytes),
+                                             std::move(bitmap)});
                             posting.cache = std::prev(cache.end());
                             posting.cached = true;
                             cache_bytes += capacity;
@@ -268,10 +272,9 @@ struct MutableScalarStorage {
         }
     }
 
+    // Tree, postings, validity and hot cache share one self-charged counter.
+    // Segment statistics may report it but must not charge it again.
     ByteCounter bytes;
-    // Query-created cache allocations charge/refund the cache manager directly,
-    // including keys and list nodes. They never wait for a subsequent insert.
-    ByteCounter cache_counter;
     ScalarMemoryCharge object_charge;
     const DataType type;
     const MutableScalarIndexOptions options;
@@ -468,10 +471,9 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
  public:
     MutableScalarGrowingOwner(DataType type,
                               MutableScalarIndexOptions options,
-                              ByteCounter bytes,
-                              ByteCounter cache_counter)
+                              ByteCounter bytes)
         : storage_(std::make_shared<MutableScalarStorage<T>>(
-              type, options, std::move(bytes), std::move(cache_counter))) {
+              type, options, std::move(bytes))) {
         PublishAccepted();
     }
     DataType
@@ -590,13 +592,9 @@ MutableScalarIndexOwner
 MakeMutableScalarOwner(DataType type,
                        const MutableScalarIndexOptions& options) {
     auto bytes = std::make_shared<ScalarAllocationCounter>();
-    auto cache_bytes = std::make_shared<ScalarAllocationCounter>(true);
-    return {std::make_unique<MutableScalarGrowingOwner<T>>(
-                type, options, bytes, cache_bytes),
-            [bytes] { return bytes->bytes.load(std::memory_order_relaxed); },
-            [cache_bytes] {
-                return cache_bytes->bytes.load(std::memory_order_relaxed);
-            }};
+    return {
+        std::make_unique<MutableScalarGrowingOwner<T>>(type, options, bytes),
+        [bytes] { return bytes->bytes.load(std::memory_order_relaxed); }};
 }
 
 }  // namespace

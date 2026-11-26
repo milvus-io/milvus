@@ -27,7 +27,7 @@ Existing insert / Growing recovery
 
 | Component | Responsibility |
 | --- | --- |
-| `SegmentGrowingImpl` | Feed contiguous raw-ready rows, account resources, then publish the visible insert prefix. |
+| `SegmentGrowingImpl` | Keep its existing resource accounting, feed contiguous raw-ready rows, then publish the visible insert prefix. |
 | `GrowingIndexSet` | Select eligible fields, own their appenders, and expose existing abstract reader capabilities. |
 | Mutable scalar owner | Maintain value memberships and publish fixed-prefix readers over shared storage. |
 | Expr | Use existing predicate dispatch, bound results to the query prefix, and retain existing NULL and visibility semantics. |
@@ -89,11 +89,13 @@ Ranges and prefixes retain the postings path and do not create per-value cache e
 | `hotQueryThreshold` | `8` | Point-query uses required before admission. |
 | `hotPostingThreshold` | `256` | Minimum postings count for admission. |
 
-The bitmap budget does not bound total index memory. Allocator counters track keys, postings
-capacity, validity buffers, and cache allocations. Canonical storage is charged by Segment before
-ACK; query-created cache buffers, keys, and list nodes charge/refund the cache manager directly,
-so they do not wait for another insert and are not charged twice. These are allocation counts,
-not process RSS. Automatic whole-index eviction is outside this draft.
+The bitmap budget does not bound total index memory. Tree nodes, keys, postings capacity, and
+hot-cache allocations use one counter that charges/refunds the cache manager directly on
+allocation/release. Storage objects and shared validity buffers use the same accounting through
+lifetime guards; old readers retain their buffer charges until release. Segment resource
+estimation and its existing tracking calls remain unchanged and exclude these self-charged
+bytes. The segment's memory-size report includes the counter without charging it again. These
+are allocation counts, not process RSS. Automatic whole-index eviction is outside this draft.
 
 ## Draft verification and follow-up
 
