@@ -122,7 +122,7 @@ func TestAnalyzerAdmissionOnlyValidatesChangedDefinitions(t *testing.T) {
 func TestResolveMultiAnalyzerPreservesUnchangedLegacyRelativePath(t *testing.T) {
 	paramtable.Init()
 	field := func(value string) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{Name: "text", TypeParams: []*commonpb.KeyValuePair{
+		return &schemapb.FieldSchema{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{
 			{Key: "enable_analyzer", Value: "true"}, {Key: "multi_analyzer_params", Value: value},
 		}}
 	}
