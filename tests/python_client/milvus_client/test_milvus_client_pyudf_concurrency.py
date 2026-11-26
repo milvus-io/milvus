@@ -14,6 +14,7 @@ import pyarrow as pa
 import pytest
 import requests
 from common import common_func as cf
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import assert_pyudf_deadline, build_wheel
 from minio import Minio
 from pymilvus import FunctionChain, FunctionChainStage, MilvusClient, MilvusException
@@ -180,7 +181,7 @@ def test_pyudf_worker_pool_matrix_cold_resources_and_precise_results(
             for _ in range(2):
                 name = "pyudf_r2_concurrent_" + uuid.uuid4().hex[:12]
                 data = build_wheel(name, CONCURRENT_MODULE)
-                key = "pyudf_r2/" + name + ".whl"
+                key = file_resource_path("pyudf_r2/") + name + ".whl"
                 # Own writes before sending them: a lost reply can hide success.
                 uploaded.append(key)
                 storage.put_object(bucket, key, io.BytesIO(data), len(data))
@@ -283,7 +284,7 @@ def test_pyudf_256_workers_serving_search_with_bounded_load(request, runtime_con
     )
     client, storage, bucket = runtime_connection
     resource = "pyudf_upper_" + uuid.uuid4().hex[:12]
-    path = "pyudf_r2/" + resource + ".whl"
+    path = file_resource_path("pyudf_r2/") + resource + ".whl"
     wheel = build_wheel(resource, UPPER_WORKER_MODULE)
     registered, uploaded = [], []
     try:
@@ -458,7 +459,7 @@ def test_pyudf_search_cancels_loader_wait_and_later_query_batches(request, runti
                     "__OBSERVER__", repr(is_observer)
                 )
                 wheel = build_wheel(name, module)
-                path = "pyudf_r2/" + name + ".whl"
+                path = file_resource_path("pyudf_r2/") + name + ".whl"
                 uploaded.append(path)
                 storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
                 registered.append(name)

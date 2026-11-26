@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pymilvus
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from pymilvus import DataType, FunctionChain, FunctionChainStage
 from pymilvus.function_chain import col
@@ -318,7 +319,7 @@ def prepare(client, storage, args, evidence, stop_file=None):
         resource = f"{name}_wheel_{number}"
         package = f"{name}_pkg_{number}"
         wheel = build_wheel(package, MODULE)
-        path = f"pyudf_r1/{resource}.whl"
+        path = file_resource_path(f"pyudf_r1/{resource}.whl")
         (evidence / f"{resource}.whl").write_bytes(wheel)
         # Persist ownership before remote writes, including ambiguous RPC failures.
         wheels.append({"resource": resource, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})

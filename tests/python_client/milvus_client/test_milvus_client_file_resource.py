@@ -8,15 +8,16 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import file_resource_path
 from pymilvus import DataType, Function, FunctionType
 
 prefix = "file_resource"
 
-# MinIO object paths (relative to bucket root, without rootPath prefix)
-JIEBA_DICT_PATH = "jieba/jieba_dict.txt"
-SYNONYMS_PATH = "synonyms/synonyms.txt"
-STOPWORDS_PATH = "stopwords/stop_words.txt"
-DECOMPOUNDER_PATH = "decompounder/decompounder_dict.txt"
+# Complete MinIO object keys under the configured file-resource source prefix
+JIEBA_DICT_PATH = file_resource_path("jieba/jieba_dict.txt")
+SYNONYMS_PATH = file_resource_path("synonyms/synonyms.txt")
+STOPWORDS_PATH = file_resource_path("stopwords/stop_words.txt")
+DECOMPOUNDER_PATH = file_resource_path("decompounder/decompounder_dict.txt")
 
 
 class FileResourceTestBase(TestMilvusClientV2Base):
@@ -259,7 +260,7 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         self.add_file_resource(
             client,
             cf.gen_unique_str(prefix),
-            "not/exist.txt",
+            file_resource_path("not/exist.txt"),
             check_task=CheckTasks.err_res,
             check_items=error,
         )
@@ -1285,7 +1286,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = f"large_test/{res_name}/jieba_5mb.txt"
+        remote_path = file_resource_path(f"large_test/{res_name}/jieba_5mb.txt")
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(5)
         self._upload_and_add(client, bucket, remote_path, content)
@@ -1331,7 +1332,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = f"large_test/{res_name}/jieba_50mb.txt"
+        remote_path = file_resource_path(f"large_test/{res_name}/jieba_50mb.txt")
         # 1. generate and upload large dict
         content = self._generate_large_jieba_dict(50)
         self._upload_and_add(client, bucket, remote_path, content)
@@ -1376,7 +1377,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = f"large_test/{res_name}/stopwords_5mb.txt"
+        remote_path = file_resource_path(f"large_test/{res_name}/stopwords_5mb.txt")
         # 1. generate and upload large stop words
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(5)
@@ -1422,7 +1423,7 @@ class TestMilvusClientFileResourceLargeFile(FileResourceTestBase):
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
         col_name = cf.gen_unique_str(prefix)
-        remote_path = f"large_test/{res_name}/stopwords_50mb.txt"
+        remote_path = file_resource_path(f"large_test/{res_name}/stopwords_50mb.txt")
         # 1. generate and upload large stop words
         real_stops = "的\n是\n在\n了\n和\n"
         generated = self._generate_large_stopwords(50)
@@ -1491,7 +1492,7 @@ class TestMilvusClientFileResourceUpdate(FileResourceTestBase):
         client = self._client()
         bucket = file_resource_env["bucket"]
         res_name = cf.gen_unique_str(prefix)
-        remote_path = f"update_test/{res_name}/custom_stop.txt"
+        remote_path = file_resource_path(f"update_test/{res_name}/custom_stop.txt")
         text = "这是一个在测试的文本和数据在这里了"
         v1_only_stop = {"的", "是"}
         v2_only_stop = {"在", "了", "和"}
@@ -1624,28 +1625,37 @@ class TestMilvusClientFileResourceNameBoundary(FileResourceTestBase):
 
 
 class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
-    """Path-dimension boundary cases.
-
-    Server validates only Exist(path) on MinIO — no ../ stripping,
-    no absolute/relative rules, path is used as raw object key.
-    """
+    """Complete object keys must stay beneath the configured source prefix."""
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_path_with_dotdot_rejected(self, file_resource_env):
-        """
-        target: path containing `..` is not accepted — server either returns
-                path-not-exist or MinIO rejects the literal key (400 Bad Request)
-        method: add with 'foo/../jieba/jieba_dict.txt'
-        expected: raise Exception (either "path not exist" or "IO failed")
-        """
+        """Reject traversal before accessing object storage."""
         client = self._client()
-        error = {ct.err_code: 1001, ct.err_msg: "IO failed"}
+        error = {ct.err_code: 1100, ct.err_msg: "invalid file resource path"}
         self.add_file_resource(
             client,
             cf.gen_unique_str(prefix),
-            "foo/../" + JIEBA_DICT_PATH,
+            file_resource_path("foo/../jieba/jieba_dict.txt"),
             check_task=CheckTasks.err_res,
             check_items=error,
+        )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("exists", [False, True])
+    def test_path_outside_source_rejected(self, file_resource_env, exists):
+        client = self._client()
+        bucket = file_resource_env["bucket"]
+        outside = file_resource_path("").rstrip("/") + "-outside/" + cf.gen_unique_str(prefix)
+        if exists:
+            self._minio_objects_to_cleanup.append((bucket, outside))
+            payload = b"FILE_SECRET_MARKER"
+            self._minio_client.put_object(bucket, outside, io.BytesIO(payload), len(payload))
+        self.add_file_resource(
+            client,
+            cf.gen_unique_str(prefix),
+            outside,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "file resource path is outside the configured directory"},
         )
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1657,7 +1667,7 @@ class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        nested = f"a/b/c/d/e/f/{cf.gen_unique_str(prefix)}_deep_dict.txt"
+        nested = file_resource_path(f"a/b/c/d/e/f/{cf.gen_unique_str(prefix)}_deep_dict.txt")
         self._minio_objects_to_cleanup.append((bucket, nested))
         payload = b"deeply nested word 5 n\n"
         self._minio_client.put_object(bucket, nested, io.BytesIO(payload), len(payload))
@@ -1674,7 +1684,7 @@ class TestMilvusClientFileResourcePathBoundary(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = f"with space/{cf.gen_unique_str(prefix)} dict file.txt"
+        remote = file_resource_path(f"with space/{cf.gen_unique_str(prefix)} dict file.txt")
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = b"word 5 n\n"
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1698,7 +1708,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = f"empty/{cf.gen_unique_str(prefix)}_zero.txt"
+        remote = file_resource_path(f"empty/{cf.gen_unique_str(prefix)}_zero.txt")
         self._minio_objects_to_cleanup.append((bucket, remote))
         self._minio_client.put_object(bucket, remote, io.BytesIO(b""), 0)
         res_name = cf.gen_unique_str(prefix)
@@ -1715,7 +1725,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = f"encoding/{cf.gen_unique_str(prefix)}_gbk_stop.txt"
+        remote = file_resource_path(f"encoding/{cf.gen_unique_str(prefix)}_gbk_stop.txt")
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "的\n是\n".encode("gbk")
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1734,7 +1744,7 @@ class TestMilvusClientFileResourceContent(FileResourceTestBase):
         client = self._client()
         bucket = file_resource_env["bucket"]
         file_name = f"{cf.gen_unique_str(prefix)}_bom_crlf_stop.txt"
-        remote = f"encoding/{file_name}"
+        remote = file_resource_path(f"encoding/{file_name}")
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "﻿的\r\n是\r\n".encode()
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))
@@ -1953,7 +1963,7 @@ class TestMilvusClientFileResourceLifecycleAdvanced(FileResourceTestBase):
         """
         client = self._client()
         bucket = file_resource_env["bucket"]
-        remote = f"cache_test/{cf.gen_unique_str(prefix)}/stop.txt"
+        remote = file_resource_path(f"cache_test/{cf.gen_unique_str(prefix)}/stop.txt")
         self._minio_objects_to_cleanup.append((bucket, remote))
         payload = "的\n是\n".encode()
         self._minio_client.put_object(bucket, remote, io.BytesIO(payload), len(payload))

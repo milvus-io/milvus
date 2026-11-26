@@ -6,6 +6,7 @@ import uuid
 from contextlib import contextmanager
 
 import numpy as np
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from pymilvus import DataType, FunctionChain, FunctionChainStage
 from pymilvus.function_chain import col
@@ -172,7 +173,7 @@ def expected_distances(vectors, query, kind, metric):
 def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metric="L2"):
     name = "pyudf_r1_probe_" + uuid.uuid4().hex[:12]
     resource = name + "_resource"
-    path = f"pyudf_r1/{resource}.whl"
+    path = file_resource_path(f"pyudf_r1/{resource}.whl")
     wheel = build_wheel(name + "_pkg", PROBE_MODULE)
     collection_owned = resource_owned = object_owned = False
     failure = None

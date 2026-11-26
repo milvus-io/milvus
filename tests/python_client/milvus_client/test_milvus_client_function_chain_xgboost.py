@@ -16,6 +16,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import file_resource_path
 from pymilvus import AnnSearchRequest, DataType, FunctionChain, FunctionChainStage, RRFRanker
 from pymilvus.client.types import LoadState
 from pymilvus.function_chain import col, fn
@@ -880,7 +881,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             num_boost_round=num_boost_round,
         )
         resource_name = cf.gen_unique_str(f"{case_name}_resource")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         minio_client = self._upload_model(
             client,
             minio_host,
@@ -955,7 +956,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_relevance_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         columns, features, embeddings, query_vectors, labels = self._regression_dataset(
             feature_seed=19530,
             embedding_seed=19531,
@@ -1053,7 +1054,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_multi_segment_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
 
         columns, features, embeddings, query_vectors, labels = self._regression_dataset(
             feature_seed=19540,
@@ -1395,7 +1396,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str(f"xgboost_{search_mode}_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         columns, features, embeddings, query_vectors, labels = self._regression_dataset(
             feature_seed=19536,
             embedding_seed=19537,
@@ -1608,7 +1609,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         assert all(order != candidates for order, candidates in zip(expected_ids, candidate_ids))
         rows = self._build_rows(columns, embeddings)
         resource_name = cf.gen_unique_str("xgboost_l1_l2_resource")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         minio_client = self._upload_model(
             client,
             minio_host,
@@ -1690,7 +1691,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         )
         query_vectors = self._generate_query_vectors(19548)
         corrupted_resource = cf.gen_unique_str("xgboost_corrupted_ubj")
-        corrupted_path = f"xgboost/{corrupted_resource}.ubj"
+        corrupted_path = file_resource_path(f"xgboost/{corrupted_resource}.ubj")
         valid_bytes = fixture["model_path"].read_bytes()
         truncated_bytes = valid_bytes[: max(64, len(valid_bytes) // 2)]
         assert 0 < len(truncated_bytes) < len(valid_bytes)
@@ -1759,7 +1760,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_click_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         columns, features = self._generate_recommendation_features(
             seed=19533,
             with_missing=True,
@@ -2249,7 +2250,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
                     num_boost_round=trees,
                 )
                 resource_name = cf.gen_unique_str(f"xgboost_nf_model_{trees}_resource")
-                remote_path = f"xgboost/{resource_name}.ubj"
+                remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
                 model_info = {
                     "trees": trees,
                     "resource_name": resource_name,
@@ -2364,7 +2365,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             "reg:squarederror",
             num_boost_round=120,
         )
-        remote_path_b = f"xgboost/{fixture['resource_name']}_v2.ubj"
+        remote_path_b = file_resource_path(f"xgboost/{fixture['resource_name']}_v2.ubj")
         model_b_bytes = model_b_path.read_bytes()
         fixture["minio_client"].put_object(
             minio_bucket,
@@ -3194,7 +3195,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             "reg:squarederror",
         )
         resource_name = cf.gen_unique_str("xgboost_nf_chaos_cold_minio_resource")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         minio_client = self._new_minio_client(minio_host)
         if not minio_client.bucket_exists(minio_bucket):
             minio_client.make_bucket(minio_bucket)
@@ -3480,7 +3481,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             "reg:squarederror",
             num_boost_round=120,
         )
-        remote_path_b = f"xgboost/{fixture['resource_name']}_replica_v2.ubj"
+        remote_path_b = file_resource_path(f"xgboost/{fixture['resource_name']}_replica_v2.ubj")
         model_b_bytes = model_b_path.read_bytes()
         fixture["minio_client"].put_object(
             minio_bucket,
@@ -4057,7 +4058,7 @@ class TestMilvusClientFunctionChainXGBoost(TestMilvusClientV2Base):
             tmp_path, "xgboost_l2_multi_proxy", features, labels, "reg:squarederror"
         )
         resource_name = cf.gen_unique_str("xgboost_l2_multi_proxy")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         storage = self._new_minio_client(minio_host)
         # Four rows from each sealed/growing batch; FLAT plus this filter fixes the full candidate set.
         selected_ids = [base + offset for base in (0, self.nb, 2 * self.nb) for offset in range(1, 5)]

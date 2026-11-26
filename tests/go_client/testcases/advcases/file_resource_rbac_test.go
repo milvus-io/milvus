@@ -4,6 +4,8 @@ package advcases
 
 import (
 	"context"
+	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -49,7 +51,15 @@ func TestFileResourceRBAC(t *testing.T) {
 		Password: password,
 	})
 	resourceName := common.GenRandomString("file_resource_rbac", 6)
-	missingPath := "file-resource-rbac/not-exist.txt"
+	sourcePrefix := os.Getenv("MILVUS_FILE_RESOURCE_PREFIX")
+	if sourcePrefix == "" {
+		rootPath, set := os.LookupEnv("MINIO_ROOT_PATH")
+		if !set {
+			rootPath = "file" // Helm test deployments.
+		}
+		sourcePrefix = path.Join(rootPath, "file_resource")
+	}
+	missingPath := path.Join(sourcePrefix, "file-resource-rbac/not-exist.txt")
 
 	// The three cluster privileges are independent. Without explicit grants,
 	// authorization must reject each operation before its business validation.

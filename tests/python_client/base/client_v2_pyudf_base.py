@@ -9,6 +9,7 @@ import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CheckTasks
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from pymilvus import DataType, FunctionChain, FunctionChainStage, MilvusClient
 from pymilvus.function_chain import col
@@ -150,7 +151,7 @@ def create_udf(context):
         package_name = cf.gen_unique_str("pyudf_contract_e2e").lower()
         resource_name = cf.gen_unique_str("pyudf_contract_resource")
         collection_name = cf.gen_unique_str("pyudf")
-        remote_path = f"pyudf/{resource_name}.whl"
+        remote_path = file_resource_path(f"pyudf/{resource_name}.whl")
         wheel_path = self._build_wheel(tmp_path, package_name, module=module, entry_points=entry_points)
         if wheel_bytes is not None:
             wheel_path.write_bytes(wheel_bytes)

@@ -10,6 +10,7 @@ import pytest
 from base.client_v2_pyudf_base import PyUDFClientBase
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import file_resource_path
 from google.protobuf.message import DecodeError
 from pymilvus import (
     AnnSearchRequest,
@@ -67,7 +68,7 @@ class TestMilvusClientPyUDF(PyUDFClientBase):
         package_name = cf.gen_unique_str("pyudf_e2e").lower()
         resource_name = cf.gen_unique_str("pyudf_resource")
         collection_name = cf.gen_unique_str(prefix)
-        remote_path = f"pyudf/{resource_name}.whl"
+        remote_path = file_resource_path(f"pyudf/{resource_name}.whl")
         wheel_path = self._build_wheel(tmp_path, package_name)
         minio_client = Minio(
             f"{minio_host}:9000",
@@ -199,7 +200,7 @@ class TestMilvusClientPyUDF(PyUDFClientBase):
         package_name = cf.gen_unique_str("pyudf_failure_e2e").lower()
         resource_name = cf.gen_unique_str("pyudf_failure_resource")
         collection_name = cf.gen_unique_str(prefix)
-        remote_path = f"pyudf/{resource_name}.whl"
+        remote_path = file_resource_path(f"pyudf/{resource_name}.whl")
         failure_message = "intentional user PyUDF failure"
         wheel_path = self._build_wheel(
             tmp_path,
@@ -524,7 +525,7 @@ def create_udf(context):
         package_name = cf.gen_unique_str("pyudf_decay_e2e").lower()
         resource_name = cf.gen_unique_str("pyudf_decay_resource")
         collection_name = cf.gen_unique_str(prefix)
-        remote_path = f"pyudf/{resource_name}.whl"
+        remote_path = file_resource_path(f"pyudf/{resource_name}.whl")
         wheel_path = self._build_wheel(tmp_path, package_name)
         minio_client = Minio(
             f"{minio_host}:9000",
@@ -674,12 +675,12 @@ def create_udf(context):
         resources = [
             (
                 first_resource,
-                f"pyudf/{first_resource}.whl",
+                file_resource_path(f"pyudf/{first_resource}.whl"),
                 self._build_wheel(tmp_path, first_package),
             ),
             (
                 second_resource,
-                f"pyudf/{second_resource}.whl",
+                file_resource_path(f"pyudf/{second_resource}.whl"),
                 self._build_wheel(tmp_path, second_package),
             ),
         ]
@@ -841,12 +842,12 @@ def create_udf(context):
         resources = [
             (
                 removed_resource,
-                f"pyudf/{removed_resource}.whl",
+                file_resource_path(f"pyudf/{removed_resource}.whl"),
                 self._build_wheel(tmp_path, removed_package),
             ),
             (
                 retained_resource,
-                f"pyudf/{retained_resource}.whl",
+                file_resource_path(f"pyudf/{retained_resource}.whl"),
                 self._build_wheel(tmp_path, retained_package),
             ),
         ]
