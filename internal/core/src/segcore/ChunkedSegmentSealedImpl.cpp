@@ -1073,14 +1073,6 @@ ChunkedSegmentSealedImpl::BuildPkIndexSlot(
     return slot;
 }
 
-bool
-ChunkedSegmentSealedImpl::StagedStateCommitter::IsVectorIndexReady(
-    FieldId field_id) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return get_bit_if_present(staged_state_->index_ready_bitset, field_id) ||
-           get_bit_if_present(staged_state_->binlog_index_bitset, field_id);
-}
-
 void
 ChunkedSegmentSealedImpl::StagedStateCommitter::StageVectorIndexMutationLocked(
     std::shared_ptr<IndexInventory::Entry> entry, bool drop_existing) {
@@ -2565,16 +2557,58 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info,
                                         bool is_replace) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto snapshot = CapturePublishedState();
+    std::optional<LoadFieldDataInfo> resolved_load_info;
+    ArrowSchemaPtr planning_schema;
+    std::unordered_set<FieldId> loaded_fields;
+    for (const auto& [id, info] : load_info.field_infos) {
+        if (load_info.storage_version == STORAGE_V2 &&
+            !info.child_field_ids.empty()) {
+            for (const auto field_id : info.child_field_ids) {
+                loaded_fields.emplace(field_id);
+            }
+        } else if (load_info.storage_version == STORAGE_V2 &&
+                   id < START_USER_FIELDID) {
+            // Multi-field legacy groups need the same footer lookup as the loader.
+            // Resolve once before planning and reuse the IDs during execution.
+            AssertInfo(info.row_count > 0,
+                       "[StorageV2] The row count of field data is 0");
+            if (!resolved_load_info) {
+                resolved_load_info.emplace(load_info);
+                planning_schema = snapshot->fields->ConvertToArrowSchema();
+            }
+            auto files = info.insert_files;
+            storage::SortByPath(files);
+            AssertInfo(!files.empty(), "column group {} has no files", id);
+            auto ids = storage::GetFieldIDList(
+                FieldId(id),
+                files.front(),
+                planning_schema,
+                milvus::segcore::GetDefaultArrowFileSystem());
+            auto& child_fields =
+                resolved_load_info->field_infos.at(id).child_field_ids;
+            child_fields.reserve(ids.size());
+            for (size_t i = 0; i < ids.size(); ++i) {
+                child_fields.push_back(ids.Get(i));
+                loaded_fields.emplace(ids.Get(i));
+            }
+        } else {
+            // GetFieldIDList returns the group ID without I/O for single fields.
+            loaded_fields.emplace(id);
+        }
+    }
+    const auto interim_indexes =
+        PlanDirectInterimIndexes(*snapshot, snapshot->fields, loaded_fields);
     auto runtime = CloneRuntimeResourceState(snapshot->runtime);
     auto staged = ClonePublishedState(snapshot);
     staged->runtime = ToConstRuntimeState(runtime);
     StagedStateCommitter committer(*this, runtime.get(), staged.get());
-    LoadFieldData(load_info,
+    LoadFieldData(resolved_load_info ? *resolved_load_info : load_info,
                   *snapshot->load_info,
                   op_ctx,
                   is_replace,
                   snapshot->fields,
                   committer);
+    BuildInterimIndexes(interim_indexes, snapshot->fields, op_ctx, committer);
     auto delta = MakeStateDelta(snapshot->fields,
                                 snapshot->load_info,
                                 ToConstRuntimeState(std::move(runtime)),
@@ -2655,12 +2689,6 @@ ChunkedSegmentSealedImpl::LoadLazyColumnGroup(
         const auto& field_meta = field_metas.at(field_id);
         auto column = std::make_shared<ProxyChunkColumn>(
             lazy_group, field_id, field_meta);
-        generate_interim_index(field_meta,
-                               schema_snapshot,
-                               segment_load_info.GetNumOfRows(),
-                               column,
-                               op_ctx,
-                               &committer);
         columns.emplace_back(field_id, column);
     }
 
@@ -7689,6 +7717,84 @@ ChunkedSegmentSealedImpl::CanUseLazyManifestColumnGroup(
         });
 }
 
+// Direct loads previously built each field inline, so keep one serial group.
+std::vector<std::vector<FieldId>>
+ChunkedSegmentSealedImpl::PlanDirectInterimIndexes(
+    const PublishedSegmentState& current,
+    const SealedFieldLayoutPtr& layout,
+    const std::unordered_set<FieldId>& fields) {
+    std::vector<std::vector<FieldId>> planned(1);
+    auto& selected = planned.front();
+    selected.reserve(fields.size());
+    for (const auto field : fields) {
+        if (layout->has_field(field) &&
+            IsVectorDataType((*layout)[field].get_data_type()) &&
+            !RuntimeVectorIndexReady(current.runtime.get(), field)) {
+            selected.push_back(field);
+        }
+    }
+    if (selected.empty()) {
+        planned.clear();
+    }
+    return planned;
+}
+
+// Preserve the raw-load groups' serial field builds while allowing groups to overlap.
+void
+ChunkedSegmentSealedImpl::BuildInterimIndexes(
+    const std::vector<std::vector<FieldId>>& groups,
+    const SealedFieldLayoutPtr& layout,
+    milvus::OpContext* op_ctx,
+    StagedStateCommitter& committer) {
+    if (groups.empty()) {
+        return;
+    }
+    auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<folly::SemiFuture<folly::Unit>> futures;
+    futures.reserve(groups.size());
+    try {
+        for (const auto& fields : groups) {
+            std::vector<
+                std::pair<FieldId, std::shared_ptr<ChunkedColumnInterface>>>
+                columns;
+            columns.reserve(fields.size());
+            for (const auto field : fields) {
+                const auto it = committer.runtime()->fields.find(field);
+                AssertInfo(it != committer.runtime()->fields.end(),
+                           "planned interim index field {} is not loaded",
+                           field.get());
+                columns.emplace_back(field, it->second);
+            }
+            auto build = [this,
+                          layout,
+                          columns = std::move(columns),
+                          op_ctx,
+                          &committer]() {
+                for (const auto& [field, column] : columns) {
+                    CheckCancellation(
+                        op_ctx, id_, field.get(), "BuildInterimIndex");
+                    generate_interim_index((*layout)[field],
+                                           layout,
+                                           column->NumRows(),
+                                           column,
+                                           op_ctx,
+                                           &committer);
+                }
+            };
+            futures.push_back(folly::via(&pool, std::move(build)).semi());
+        }
+    } catch (...) {
+        const auto error = std::current_exception();
+        // Submitted tasks borrow the staged state even if later submission fails.
+        try {
+            storage::WaitAllFutures(futures);
+        } catch (...) {
+        }
+        std::rethrow_exception(error);
+    }
+    storage::WaitAllFutures(futures);
+}
+
 bool
 ChunkedSegmentSealedImpl::generate_interim_index(
     const FieldMeta& field_meta,
@@ -7702,7 +7808,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(
     if (index_meta == nullptr || !index_meta->HasField(field_id)) {
         return false;
     }
-    auto snapshot = CapturePublishedState();
     // Reopen may be preparing a field absent from the published layout. Its
     // metadata belongs to the target state supplied by the loading operation.
     auto& field_index_meta = index_meta->GetFieldIndexMeta(field_id);
@@ -7734,24 +7839,13 @@ ChunkedSegmentSealedImpl::generate_interim_index(
             field_index_meta.IsFlatIndex()) {
             return false;
         }
-        // check index exist
-        if (committer != nullptr) {
-            if (committer->IsVectorIndexReady(field_id)) {
-                return false;
-            }
-        } else {
-            if (RuntimeVectorIndexReady(snapshot->runtime.get(), field_id)) {
-                return false;
-            }
-        }
         return true;
     };
     if (!enable_binlog_index()) {
         return false;
     }
     try {
-        auto vec_data =
-            loaded_column != nullptr ? loaded_column : get_column(field_id);
+        const auto& vec_data = loaded_column;
         AssertInfo(
             vec_data != nullptr, "vector field {} not loaded", field_id.get());
         int64_t row_count = num_rows;
@@ -7986,13 +8080,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                              segment_load_info.GetStorageVersion() < STORAGE_V2,
                              op_ctx);
     }
-
-    generate_interim_index((*schema_snapshot)[field_id],
-                           schema_snapshot,
-                           num_rows,
-                           column,
-                           op_ctx,
-                           &committer);
 
     // Build the geometry cache OUTSIDE the publish lock (it decodes the whole
     // column), then stage it in the same immutable runtime snapshot as the
@@ -8468,8 +8555,6 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                  false,
                                  committer);
             }
-            // Replace batches stay ordered: ComputeDiffReloadFields and
-            // ComputeDiffColumnGroups may both emit the same field.
             if (!column_groups_to_replace.empty()) {
                 LoadColumnGroups(column_groups,
                                  properties,
@@ -8599,21 +8684,18 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                 committer);
     }
 
-    milvus::monitor::SegmentLoadTiming::SwitchTo(
-        timing, milvus::monitor::SegmentLoadPhase::DefaultFields);
-    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
-    if (!diff.fields_to_fill_default.empty()) {
-        FillDefaultValueFields(diff.fields_to_fill_default,
-                               segment_load_info,
-                               schema_snapshot,
-                               committer);
-    }
-
-    milvus::monitor::SegmentLoadTiming::SwitchTo(
-        timing, milvus::monitor::SegmentLoadPhase::CreateTextIndexes);
-    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
-    if (!diff.text_indexes_to_create.empty()) {
-        for (const auto& field_id : diff.text_indexes_to_create) {
+    // Index, field and LOB preparation above satisfies every non-default dependency.
+    auto create_text_indexes = [&](bool defaults_filled) {
+        milvus::monitor::SegmentLoadTiming::SwitchTo(
+            timing, milvus::monitor::SegmentLoadPhase::CreateTextIndexes);
+        CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+        for (const auto& [field_id, dependencies] :
+             diff.text_indexes_to_create) {
+            const bool needs_defaults = dependencies.data_preparation ==
+                                        TextIndexDataPreparation::FillDefault;
+            if (needs_defaults != defaults_filled) {
+                continue;
+            }
             CreateTextIndexWithSchema(
                 field_id, schema_snapshot, op_ctx, committer);
             RecordTextIndexCreated(segment_load_info, field_id);
@@ -8623,7 +8705,19 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                     std::make_shared<const SegmentLoadInfo>(segment_load_info);
             });
         }
+    };
+    create_text_indexes(false);
+
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::DefaultFields);
+    CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
+    if (!diff.fields_to_fill_default.empty()) {
+        FillDefaultValueFields(diff.fields_to_fill_default,
+                               segment_load_info,
+                               schema_snapshot,
+                               committer);
     }
+    create_text_indexes(true);
 }
 
 void
@@ -8730,6 +8824,8 @@ ChunkedSegmentSealedImpl::FinalizeLoadDiffForReopen(
             }
         }
     });
+    BuildInterimIndexes(
+        diff.interim_indexes_to_build, schema_snapshot, op_ctx, committer);
 }
 
 void
@@ -8798,14 +8894,7 @@ ChunkedSegmentSealedImpl::ReopenSchemaLocked(milvus::OpContext* op_ctx,
     sch = new_local.BindManifestFields(sch);
     new_local.ReplaceSchemaForReopen(sch);
 
-    auto diff = current_mutable.ComputeDiff(new_local, sch);
-    // LoadFieldData may publish a real column without adding binlogs to
-    // SegmentLoadInfo. Its ready bit still makes it an existing field, not a
-    // candidate for default backfill during schema-only reopen.
-    std::erase_if(diff.fields_to_fill_default, [&](FieldId field_id) {
-        return current_schema->has_field(field_id) &&
-               get_bit_if_present(current->field_data_ready_bitset, field_id);
-    });
+    auto diff = current_mutable.ComputeDiff(new_local, sch, current);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
     // Populate manifest cache before publishing; readers do not take
@@ -8888,11 +8977,7 @@ ChunkedSegmentSealedImpl::Reopen(
         }
     }
 
-    auto diff = current_mutable.ComputeDiff(new_local, target_schema);
-    std::erase_if(diff.fields_to_fill_default, [&](FieldId field_id) {
-        return current_schema->has_field(field_id) &&
-               get_bit_if_present(current->field_data_ready_bitset, field_id);
-    });
+    auto diff = current_mutable.ComputeDiff(new_local, target_schema, current);
     new_local.SetFieldsFilledWithDefault(
         current_mutable.GetDefaultFilledFieldsForNewInfo(new_local));
     // Populate manifest cache before publishing; readers do not take
@@ -10402,7 +10487,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
         mutable_copy.SetTextIndexCreated(fid);
     }
     mutable_copy.ResolveLegacyBinlogChildFields(fields, nullptr);
-    auto diff = mutable_copy.GetLoadDiff(fields);
+    auto diff = mutable_copy.GetLoadDiff(fields, snapshot);
     LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
     ApplyLoadDiff(op_ctx, mutable_copy, diff, fields, &timing);

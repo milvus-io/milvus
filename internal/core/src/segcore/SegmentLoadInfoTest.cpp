@@ -39,6 +39,7 @@
 #include "pb/index_coord.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentLoadInfo.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Types.h"
 #include "storage/loon_ffi/util.h"
 
@@ -90,6 +91,26 @@ SealedFieldLayoutPtr
 LoadFieldsFor(const SchemaPtr& schema) {
     return std::make_shared<const SealedFieldLayout>(
         schema, LoadScope::FromLegacySchema(*schema));
+}
+std::shared_ptr<const PublishedSegmentState>
+ExistingSnapshot(const SealedFieldLayoutPtr& fields,
+                 std::initializer_list<FieldId> raw_fields = {},
+                 std::initializer_list<FieldId> interim_fields = {}) {
+    auto snapshot = std::make_shared<PublishedSegmentState>();
+    snapshot->fields = fields;
+    auto runtime = std::make_shared<RuntimeResourceState>();
+    for (const auto field : raw_fields) {
+        const auto pos = field.get() - START_USER_FIELDID;
+        if (snapshot->field_data_ready_bitset.size() <= pos) {
+            snapshot->field_data_ready_bitset.resize(pos + 1);
+        }
+        snapshot->field_data_ready_bitset[pos] = true;
+    }
+    for (const auto field : interim_fields) {
+        runtime->vec_binlog_config.emplace(field, nullptr);
+    }
+    snapshot->runtime = std::move(runtime);
+    return snapshot;
 }
 }  // namespace
 
@@ -2020,7 +2041,8 @@ TEST_F(SegmentLoadInfoTest, LoadDiffHasChangesWithTextIndexesToCreate) {
     LoadDiff diff;
     EXPECT_FALSE(diff.HasChanges());
 
-    diff.text_indexes_to_create.insert(FieldId(102));
+    diff.text_indexes_to_create.emplace(FieldId(102),
+                                        TextIndexBuildDependencies{});
     EXPECT_TRUE(diff.HasChanges());
 }
 
@@ -2029,7 +2051,8 @@ TEST_F(SegmentLoadInfoTest, LoadDiffToStringIncludesTextIndexes) {
     LoadDiff diff;
     diff.text_indexes_to_load[FieldId(101)] =
         std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
-    diff.text_indexes_to_create.insert(FieldId(102));
+    diff.text_indexes_to_create.emplace(FieldId(102),
+                                        TextIndexBuildDependencies{});
 
     std::string str = diff.ToString();
     EXPECT_TRUE(str.find("text_indexes_to_load") != std::string::npos);
@@ -2712,7 +2735,7 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffDefaultFilledFieldBecomesReplace) {
 }
 
 // ==================== Raw Data Lifecycle Tests ====================
-// Tests for field_data_to_drop generation and ComputeDiffReloadFields behavior
+// Tests for field_data_to_drop generation and raw-data restoration
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffNewIndexWithRawDataNoFieldDrop) {
     // Test 1.1: When a new index has raw data (ASCENDING_SORT for scalar),
@@ -4549,4 +4572,374 @@ TEST(SealedFieldLayoutTest, OrdinaryStructProjectionRespectsLoadScope) {
     ASSERT_EQ(all_projection.size(), 1);
     EXPECT_EQ(all_projection.at("items").child_field_ids,
               (std::vector<FieldId>{FieldId(201), FieldId(202)}));
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanUsesTargetIndexBeforeLoading) {
+    proto_.clear_manifest_path();
+    auto fields = LoadFieldsFor(schema_);
+    SegmentLoadInfo indexed(proto_, fields);
+    auto with_index = indexed.GetLoadDiff(fields);
+    ASSERT_TRUE(with_index.indexes_to_load.contains(FieldId(101)));
+    ASSERT_FALSE(with_index.binlogs_to_load.empty());
+    EXPECT_TRUE(with_index.interim_indexes_to_build.empty());
+
+    proto_.clear_index_infos();
+    SegmentLoadInfo raw(proto_, fields);
+    auto without_index = raw.GetLoadDiff(fields);
+    EXPECT_EQ(without_index.interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{FieldId(101)}}));
+    EXPECT_TRUE(
+        raw.GetLoadDiff(fields, ExistingSnapshot(fields, {}, {FieldId(101)}))
+            .interim_indexes_to_build.empty());
+    auto unchanged = raw.ComputeDiff(raw, fields);
+    EXPECT_TRUE(unchanged.interim_indexes_to_build.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanExcludesRetainedAndReplacedIndexes) {
+    proto_.clear_manifest_path();
+    auto fields = LoadFieldsFor(schema_);
+    SegmentLoadInfo current(proto_, fields);
+    proto_.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/new_binlog");
+    SegmentLoadInfo retained(proto_, fields);
+    auto retained_diff = current.ComputeDiff(retained, fields);
+    ASSERT_FALSE(retained_diff.binlogs_to_replace.empty());
+    ASSERT_TRUE(retained_diff.indexes_to_load.empty());
+    ASSERT_TRUE(retained_diff.indexes_to_replace.empty());
+    EXPECT_TRUE(retained_diff.interim_indexes_to_build.empty());
+
+    proto_.mutable_index_infos(0)->set_indexid(9001);
+    SegmentLoadInfo replaced(proto_, fields);
+    auto replaced_diff = current.ComputeDiff(replaced, fields);
+    ASSERT_TRUE(replaced_diff.indexes_to_replace.contains(FieldId(101)));
+    EXPECT_TRUE(replaced_diff.interim_indexes_to_build.empty());
+
+    proto_.clear_index_infos();
+    SegmentLoadInfo removed(proto_, fields);
+    auto removed_diff = current.ComputeDiff(removed, fields);
+    ASSERT_TRUE(removed_diff.indexes_to_drop.contains(FieldId(101)));
+    EXPECT_EQ(removed_diff.interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{FieldId(101)}}));
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanDeduplicatesRawReloadActions) {
+    proto_.clear_manifest_path();
+    proto_.mutable_index_infos(0)->mutable_index_params(0)->set_value(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+    auto fields = LoadFieldsFor(schema_);
+    SegmentLoadInfo current(proto_, fields);
+    proto_.clear_index_infos();
+    proto_.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "/path/to/new_binlog");
+    SegmentLoadInfo target(proto_, fields);
+    auto diff = current.ComputeDiff(target, fields);
+    // Index raw-data removal and changed binlogs produce one target action.
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    EXPECT_EQ(diff.interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{FieldId(101)}}));
+    EXPECT_TRUE(current
+                    .ComputeDiff(target,
+                                 fields,
+                                 ExistingSnapshot(fields, {}, {FieldId(101)}))
+                    .interim_indexes_to_build.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanKeepsCompactedManifestIndexIdentity) {
+    auto fields = LoadFieldsFor(schema_);
+    auto groups = MakeExternalColumnGroups({{{"101"}, {"old.parquet"}}});
+    SegmentLoadInfo current(proto_, fields);
+    current.SetColumnGroupsForTesting(groups);
+    SegmentLoadInfo target(proto_, fields);
+    target.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"101"}, {"new.parquet"}}}));
+    current.CompactRuntimeInfoForManifest();
+    target.CompactRuntimeInfoForManifest();
+    ASSERT_FALSE(target.HasIndexInfo(FieldId(101)));
+    auto diff = current.ComputeDiff(target, fields);
+    ASSERT_FALSE(diff.column_groups_to_replace.empty());
+    ASSERT_TRUE(diff.indexes_to_load.empty());
+    ASSERT_TRUE(diff.indexes_to_replace.empty());
+    EXPECT_TRUE(diff.interim_indexes_to_build.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanRetainsUnchangedExternalRawFields) {
+    schema_->set_external_source("s3://external-bucket/table");
+    proto_.clear_index_infos();
+    auto fields = LoadFieldsFor(schema_);
+    SegmentLoadInfo initial(proto_, fields);
+    auto groups = MakeExternalColumnGroups({{{"101"}, {"vec.parquet"}}});
+    initial.SetColumnGroupsForTesting(groups);
+    auto initial_diff = initial.GetLoadDiff(fields);
+    ASSERT_TRUE(initial_diff.load_external_manifest);
+    EXPECT_EQ(initial_diff.interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{FieldId(101)}}));
+    EXPECT_TRUE(
+        initial.GetLoadDiff(fields, ExistingSnapshot(fields, {FieldId(101)}))
+            .interim_indexes_to_build.empty());
+
+    proto_.set_manifest_path("/path/to/new_manifest");
+    SegmentLoadInfo updated(proto_, fields);
+    updated.SetColumnGroupsForTesting(groups);
+    auto diff = initial.ComputeDiff(
+        updated, fields, ExistingSnapshot(fields, {FieldId(101)}));
+    ASSERT_TRUE(diff.manifest_updated);
+    ASSERT_TRUE(diff.load_external_manifest);
+    EXPECT_EQ(diff.interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{FieldId(101)}}));
+    updated.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100"}, {"pk.parquet"}}}));
+    EXPECT_TRUE(
+        initial.ComputeDiff(updated, fields).interim_indexes_to_build.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, BinlogRestoreAndFileChangeEmitOneGroupAction) {
+    proto_.clear_manifest_path();
+    proto_.clear_binlog_paths();
+    proto_.clear_index_infos();
+    auto* group = proto_.add_binlog_paths();
+    group->set_fieldid(10);
+    group->add_child_fields(101);
+    group->add_child_fields(108);
+    group->add_binlogs()->set_log_path("old-packed-file");
+    for (const auto& [field, type] :
+         std::vector<std::pair<int64_t, std::string>>{
+             {101, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+             {108, milvus::index::ASCENDING_SORT}}) {
+        auto* index = proto_.add_index_infos();
+        index->set_fieldid(field);
+        index->set_indexid(field);
+        index->add_index_file_paths("old-index");
+        auto* param = index->add_index_params();
+        param->set_key("index_type");
+        param->set_value(type);
+    }
+    const auto fields = LoadFieldsFor(schema_);
+    SegmentLoadInfo current(proto_, fields);
+    ASSERT_TRUE(current.FieldIndexHasRawData(FieldId(101)));
+    ASSERT_TRUE(current.FieldIndexHasRawData(FieldId(108)));
+    proto_.clear_index_infos();
+    proto_.mutable_binlog_paths(0)->mutable_binlogs(0)->set_log_path(
+        "new-packed-file");
+    SegmentLoadInfo target(proto_, fields);
+    const auto diff = current.ComputeDiff(target, fields);
+    ASSERT_EQ(diff.binlogs_to_replace.size(), 1);
+    EXPECT_EQ(diff.binlogs_to_replace.front().first,
+              (std::vector<FieldId>{FieldId(101), FieldId(108)}));
+    EXPECT_EQ(diff.binlogs_to_replace.front().second.binlogs(0).log_path(),
+              "new-packed-file");
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+}
+
+TEST_F(SegmentLoadInfoTest, ManifestRestoreUsesOneTargetActionAndLoadPolicy) {
+    const auto vec = FieldId(101);
+    const auto scalar = FieldId(105);
+    const auto fields = std::make_shared<const SealedFieldLayout>(
+        schema_, LoadScope({vec.get(), scalar.get()}, {scalar.get()}));
+    proto_.mutable_index_infos(0)->mutable_index_params(0)->set_value(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+    SegmentLoadInfo current(proto_, fields);
+    current.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"101", "105"}, {"old.parquet"}}}));
+    proto_.mutable_index_infos(0)->set_indexid(9001);
+    proto_.mutable_index_infos(0)->mutable_index_params(0)->set_value(
+        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8);
+    for (const auto* path : {"old.parquet", "new.parquet"}) {
+        SCOPED_TRACE(path);
+        SegmentLoadInfo target(proto_, fields);
+        target.SetColumnGroupsForTesting(
+            MakeExternalColumnGroups({{{"101", "105"}, {path}}}));
+        const auto diff = current.ComputeDiff(target, fields);
+        ASSERT_EQ(diff.column_groups_to_lazyreplace.size(), 1);
+        EXPECT_EQ(diff.column_groups_to_lazyreplace.front().second,
+                  (std::vector<FieldId>{vec}));
+        EXPECT_TRUE(diff.column_groups_to_load.empty());
+        EXPECT_TRUE(diff.column_groups_to_lazyload.empty());
+        if (std::string_view(path) == "new.parquet") {
+            ASSERT_EQ(diff.column_groups_to_replace.size(), 1);
+            EXPECT_EQ(diff.column_groups_to_replace.front().second,
+                      (std::vector<FieldId>{scalar}));
+        } else {
+            EXPECT_TRUE(diff.column_groups_to_replace.empty());
+        }
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, TextBuildPlansDataAndIndexPrerequisites) {
+    const auto schema = CreateSchemaWithTextMatchField();
+    const auto fields = LoadFieldsFor(schema);
+    const auto text_field = FieldId(102);
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(100);
+    proto.set_num_of_rows(1000);
+    auto* pk = proto.add_binlog_paths();
+    pk->set_fieldid(100);
+    pk->add_binlogs()->set_log_path("pk-binlog");
+    SegmentLoadInfo defaults(proto, fields);
+    auto diff = defaults.GetLoadDiff(fields);
+    ASSERT_EQ(diff.text_indexes_to_create.size(), 1);
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::FillDefault);
+    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+    diff = defaults.GetLoadDiff(fields, ExistingSnapshot(fields, {text_field}));
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::Existing);
+    EXPECT_EQ(std::count(diff.fields_to_fill_default.begin(),
+                         diff.fields_to_fill_default.end(),
+                         text_field),
+              0);
+
+    auto* raw = proto.add_binlog_paths();
+    raw->set_fieldid(text_field.get());
+    raw->add_binlogs()->set_log_path("text-binlog");
+    SegmentLoadInfo current(proto, fields);
+    diff = current.GetLoadDiff(fields);
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::Load);
+    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+    SegmentLoadInfo unchanged(proto, fields);
+    diff = current.ComputeDiff(unchanged, fields);
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::Existing);
+    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+
+    auto* index = proto.add_index_infos();
+    index->set_fieldid(text_field.get());
+    index->set_indexid(9001);
+    index->add_index_file_paths("new-scalar-index");
+    auto* param = index->add_index_params();
+    param->set_key("index_type");
+    param->set_value(milvus::index::INVERTED_INDEX_TYPE);
+    SegmentLoadInfo indexed(proto, fields);
+    diff = current.ComputeDiff(indexed, fields);
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::Existing);
+    EXPECT_TRUE(diff.text_indexes_to_create.at(text_field).load_index);
+    proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_log_path(
+        "new-text-binlog");
+    SegmentLoadInfo replaced(proto, fields);
+    diff = current.ComputeDiff(replaced, fields);
+    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
+              TextIndexDataPreparation::Load);
+    EXPECT_TRUE(diff.text_indexes_to_create.at(text_field).load_index);
+}
+
+TEST_F(SegmentLoadInfoTest, TextBuildWaitsForLazyManifestColumn) {
+    const auto schema = CreateSchemaWithTextMatchField();
+    const auto fields =
+        std::make_shared<const SealedFieldLayout>(schema, LoadScope({102}, {}));
+    SegmentLoadInfo info(MakeManifestProto("/manifest/v1"), fields);
+    info.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"102"}, {"text.parquet"}}}));
+    const auto diff = info.GetLoadDiff(fields);
+    ASSERT_EQ(diff.column_groups_to_lazyload.size(), 1);
+    EXPECT_EQ(diff.text_indexes_to_create.at(FieldId(102)).data_preparation,
+              TextIndexDataPreparation::Load);
+    EXPECT_FALSE(diff.text_indexes_to_create.at(FieldId(102)).load_index);
+}
+
+TEST_F(SegmentLoadInfoTest,
+       TextBuildRetainsExternalColumnUnlessManifestChanges) {
+    const auto schema = CreateSchemaWithTextMatchField();
+    schema->set_external_source("s3://external-bucket/table");
+    const auto fields = LoadFieldsFor(schema);
+    const auto groups = MakeExternalColumnGroups({{{"102"}, {"text.parquet"}}});
+    SegmentLoadInfo current(MakeManifestProto("/manifest/v1"), fields);
+    current.SetColumnGroupsForTesting(groups);
+    const auto text_field = FieldId(102);
+    EXPECT_EQ(current.GetLoadDiff(fields)
+                  .text_indexes_to_create.at(text_field)
+                  .data_preparation,
+              TextIndexDataPreparation::Load);
+    EXPECT_EQ(
+        current.GetLoadDiff(fields, ExistingSnapshot(fields, {text_field}))
+            .text_indexes_to_create.at(text_field)
+            .data_preparation,
+        TextIndexDataPreparation::Existing);
+    SegmentLoadInfo target(MakeManifestProto("/manifest/v2"), fields);
+    target.SetColumnGroupsForTesting(groups);
+    EXPECT_EQ(
+        current
+            .ComputeDiff(target, fields, ExistingSnapshot(fields, {text_field}))
+            .text_indexes_to_create.at(text_field)
+            .data_preparation,
+        TextIndexDataPreparation::Load);
+}
+
+TEST_F(SegmentLoadInfoTest, InterimPlanPreservesGroupBuildConcurrency) {
+    const auto other_vec = schema_->AddDebugField(
+        "other_vec", DataType::VECTOR_FLOAT, 128, knowhere::metric::L2);
+    const auto vec = FieldId(101);
+    proto_.clear_index_infos();
+    const auto groups = MakeExternalColumnGroups(
+        {{{"101", std::to_string(other_vec.get())}, {"vectors.parquet"}}});
+    const auto eager = std::make_shared<const SealedFieldLayout>(
+        schema_,
+        LoadScope({vec.get(), other_vec.get()}, {vec.get(), other_vec.get()}));
+    SegmentLoadInfo together(proto_, eager);
+    together.SetColumnGroupsForTesting(groups);
+    EXPECT_EQ(together.GetLoadDiff(eager).interim_indexes_to_build,
+              (std::vector<std::vector<FieldId>>{{vec, other_vec}}));
+
+    const auto mixed = std::make_shared<const SealedFieldLayout>(
+        schema_, LoadScope({vec.get(), other_vec.get()}, {vec.get()}));
+    SegmentLoadInfo separate(proto_, mixed);
+    separate.SetColumnGroupsForTesting(groups);
+    const auto split_plan = separate.GetLoadDiff(mixed);
+    ASSERT_EQ(split_plan.interim_indexes_to_build.size(), 2);
+    for (const auto& group : split_plan.interim_indexes_to_build) {
+        EXPECT_EQ(group.size(), 1);
+    }
+}
+
+TEST_F(SegmentLoadInfoTest, ExternalInterimGroupsFollowVectorIndexWarmup) {
+    proto_.clear_index_infos();
+    const auto groups =
+        MakeExternalColumnGroups({{{"101", "111"}, {"vectors.parquet"}}});
+    for (const auto& policy : {"sync", "disable"}) {
+        SCOPED_TRACE(policy);
+        proto::schema::CollectionSchema schema_proto;
+        auto* pk = schema_proto.add_fields();
+        pk->set_fieldid(100);
+        pk->set_name("pk");
+        pk->set_data_type(proto::schema::DataType::Int64);
+        pk->set_is_primary_key(true);
+        for (const auto id : {101, 111}) {
+            auto* field = schema_proto.add_fields();
+            field->set_fieldid(id);
+            field->set_name(std::to_string(id));
+            field->set_data_type(proto::schema::DataType::FloatVector);
+            auto* dim = field->add_type_params();
+            dim->set_key("dim");
+            dim->set_value("128");
+        }
+        auto* warmup = schema_proto.add_properties();
+        warmup->set_key("warmup.vectorIndex");
+        warmup->set_value(policy);
+        auto schema = Schema::ParseFrom(schema_proto);
+        schema->set_external_source("s3://bucket/table");
+        const auto fields = std::make_shared<const SealedFieldLayout>(
+            schema, LoadScope({101, 111}, {101, 111}));
+        SegmentLoadInfo info(proto_, fields);
+        info.SetColumnGroupsForTesting(groups);
+        const auto plan = info.GetLoadDiff(fields);
+        if (std::string_view(policy) == "sync") {
+            EXPECT_EQ(plan.interim_indexes_to_build,
+                      (std::vector<std::vector<FieldId>>{
+                          {FieldId(101), FieldId(111)}}));
+        } else {
+            ASSERT_EQ(plan.interim_indexes_to_build.size(), 2);
+            for (const auto& group : plan.interim_indexes_to_build) {
+                EXPECT_EQ(group.size(), 1);
+            }
+        }
+        const auto mixed = std::make_shared<const SealedFieldLayout>(
+            schema, LoadScope({101, 111}, {101}));
+        SegmentLoadInfo separate(proto_, mixed);
+        separate.SetColumnGroupsForTesting(groups);
+        const auto split_plan = separate.GetLoadDiff(mixed);
+        ASSERT_EQ(split_plan.interim_indexes_to_build.size(), 2);
+        for (const auto& group : split_plan.interim_indexes_to_build) {
+            EXPECT_EQ(group.size(), 1);
+        }
+    }
 }
