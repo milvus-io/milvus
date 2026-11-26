@@ -400,11 +400,16 @@ class JsonKeyStats {
     // JSON, either as a fallback or to recheck ambiguous rows, until the stats
     // are rebuilt. Shared BSON strings are lossless.
     bool
-    CanUseForPath(const std::string& pointer) {
+    CanUseForPath(const std::string& pointer, bool include_descendants) {
         if (preserves_empty_strings_) {
             return true;
         }
-        for (const auto& field : GetShreddingFieldsWithPrefix(pointer)) {
+        // Scalar comparisons only read the exact path. EXISTS also depends
+        // on descendants, whose lost empty strings can make a parent exist.
+        const auto fields = include_descendants
+                                ? GetShreddingFieldsWithPrefix(pointer)
+                                : GetShreddingFields(pointer);
+        for (const auto& field : fields) {
             if (shred_field_data_type_map_.at(field) == JSONType::STRING) {
                 return false;
             }

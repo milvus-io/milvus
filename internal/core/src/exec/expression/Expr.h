@@ -4190,6 +4190,13 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    // Scalar predicates depend only on their exact path. EXISTS overrides
+    // this because a nonempty descendant also establishes parent existence.
+    virtual bool
+    JsonStatsRequiresDescendants() const {
+        return false;
+    }
+
     // Opt-in requires the stats evaluator to recheck unknown rows against raw
     // JSON before publishing/caching its result, including the validity bitmap.
     virtual bool
@@ -4277,8 +4284,9 @@ class SegmentExpr : public Expr {
                 if (stats == nullptr) {
                     return;
                 }
-                if (!stats->CanUseForPath(
-                        milvus::Json::pointer(nested_path_))) {
+                if (!stats->CanUseForPath(milvus::Json::pointer(nested_path_),
+                                          /*include_descendants=*/
+                                          JsonStatsRequiresDescendants())) {
                     if (!SupportsLegacyJsonStatsRecheck()) {
                         return;
                     }

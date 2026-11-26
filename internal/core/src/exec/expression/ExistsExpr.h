@@ -96,6 +96,16 @@ class PhyExistsFilterExpr : public SegmentExpr {
         return true;
     }
 
+    bool
+    JsonStatsRequiresDescendants() const override {
+        return true;
+    }
+
+    bool
+    SupportsLegacyJsonStatsRecheck() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override;
 
@@ -108,6 +118,9 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
     VectorPtr
     EvalJsonExistsForDataSegmentByStats();
+
+    void
+    RecheckLegacyJsonStatsExists(TargetBitmapView result);
 
  private:
     std::shared_ptr<const milvus::expr::ExistsExpr> expr_;
