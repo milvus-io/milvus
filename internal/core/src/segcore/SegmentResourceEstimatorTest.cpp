@@ -21,11 +21,11 @@
 
 #include "gtest/gtest.h"
 #include "segcore/memory_planner.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/segment_resource_c.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPools.h"
 #include "storage/FileWriter.h"
+#include "storage/LoadConfig.h"
 #include "storage/LocalFileIOPool.h"
 
 namespace milvus::segcore {
@@ -35,12 +35,12 @@ class SegmentResourceEstimatorTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        old_async_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        old_async_ = storage::LoadAsyncReadEnabled();
         old_file_workers_ =
             storage::LocalFileIOPool::GetInstance().GetWorkerCount();
         old_slots_ =
             storage::LoadAdmissionController::GetInstance().CapacitySlots();
-        storagev2translator::SetStorageV2AsyncLoadEnabled(false);
+        storage::SetLoadAsyncReadEnabled(false);
         old_budget_ =
             storage::LoadAdmissionController::GetInstance().CapacityBytes();
         storage::LoadAdmissionController::SetLoadTransientBudgetBytes(1);
@@ -52,7 +52,7 @@ class SegmentResourceEstimatorTest : public ::testing::Test {
             old_budget_);
         storage::LoadAdmissionController::GetInstance().SetCapacitySlots(
             old_slots_);
-        storagev2translator::SetStorageV2AsyncLoadEnabled(old_async_);
+        storage::SetLoadAsyncReadEnabled(old_async_);
         storage::LocalFileIOPool::GetInstance().Configure(old_file_workers_);
     }
 
@@ -418,7 +418,7 @@ TEST_F(SegmentResourceEstimatorTest, UnlimitedBudgetStillUsesExecutorBound) {
 }
 
 TEST_F(SegmentResourceEstimatorTest, AsyncMmapUsesBudgetAndWriterExecutor) {
-    storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+    storage::SetLoadAsyncReadEnabled(true);
     auto& admission = storage::LoadAdmissionController::GetInstance();
     admission.SetCapacitySlots(3);
     storage::LocalFileIOPool::GetInstance().Configure(1);
@@ -450,7 +450,7 @@ TEST_F(SegmentResourceEstimatorTest, AsyncMmapUsesBudgetAndWriterExecutor) {
 }
 
 TEST_F(SegmentResourceEstimatorTest, AsyncReadsUseAdmissionSlots) {
-    storagev2translator::SetStorageV2AsyncLoadEnabled(true);
+    storage::SetLoadAsyncReadEnabled(true);
     auto& admission = storage::LoadAdmissionController::GetInstance();
     admission.SetCapacityBytes(0);
     proto::cgo::BatchLoadResourceRequest request;

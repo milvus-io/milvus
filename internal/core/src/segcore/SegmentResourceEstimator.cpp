@@ -38,10 +38,10 @@
 #include "index/Meta.h"
 #include "knowhere/index/index_factory.h"
 #include "segcore/memory_planner.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
+#include "storage/LoadConfig.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/ThreadPools.h"
 
@@ -591,8 +591,7 @@ EstimateSegmentResources(const proto::cgo::BatchLoadResourceRequest& request) {
     RuntimeLimits limits{};
     if (!request.final_only()) {
         auto& admission = storage::LoadAdmissionController::GetInstance();
-        const bool async_load =
-            storagev2translator::StorageV2AsyncLoadEnabled();
+        const bool async_load = storage::LoadAsyncReadEnabled();
         const auto slots = admission.CapacitySlots();
         // V2 still finalizes on synchronous load workers. Avoid initializing
         // those executors when the batch only uses asynchronous V3 loading.
@@ -626,8 +625,7 @@ EstimateSegmentResources(const proto::cgo::BatchLoadResourceRequest& request) {
             static_cast<uint64_t>(FieldDataLoadBatchTargetBytes()),
             storage::FileWriter::GetBufferSize(),
             async_load,
-            static_cast<uint64_t>(
-                storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes()),
+            static_cast<uint64_t>(storage::LoadFieldDataReadWindowSizeBytes()),
             sync_workers,
             local_workers != 0 ? local_workers : async_workers,
             SaturatingAdd(sync_workers,
