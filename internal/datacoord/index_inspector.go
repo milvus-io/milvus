@@ -195,16 +195,24 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		indexType = newIndexType
 	}
 
+	legacyRowDomain := false
+	if !isVectorIndex {
+		if coll := i.meta.GetCollection(segment.CollectionID); coll != nil {
+			legacyRowDomain = isStructArrayScalarField(coll.Schema, fieldID)
+		}
+	}
+
 	segIndex := &model.SegmentIndex{
-		SegmentID:      segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		NumRows:        segment.NumOfRows,
-		IndexID:        indexID,
-		BuildID:        buildID,
-		CreatedUTCTime: uint64(time.Now().Unix()),
-		WriteHandoff:   false,
-		IndexType:      indexType,
+		SegmentID:       segment.ID,
+		CollectionID:    segment.CollectionID,
+		PartitionID:     segment.PartitionID,
+		NumRows:         segment.NumOfRows,
+		IndexID:         indexID,
+		BuildID:         buildID,
+		CreatedUTCTime:  uint64(time.Now().Unix()),
+		WriteHandoff:    false,
+		IndexType:       indexType,
+		LegacyRowDomain: legacyRowDomain,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

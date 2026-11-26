@@ -55,3 +55,17 @@ func TestUnmarshalSegmentIndexModel(t *testing.T) {
 	assert.Equal(t, indexModel2.SegmentID, ret.SegmentID)
 	assert.Nil(t, UnmarshalSegmentIndexModel(nil))
 }
+
+func TestSegmentIndex_LegacyRowDomain(t *testing.T) {
+	pb := &indexpb.SegmentIndex{
+		SegmentID:       segmentID,
+		BuildID:         buildID,
+		LegacyRowDomain: true,
+	}
+	m := UnmarshalSegmentIndexModel(pb)
+	assert.True(t, m.LegacyRowDomain)
+	cloned := CloneSegmentIndex(m)
+	assert.True(t, cloned.LegacyRowDomain)
+	roundTripped := MarshalSegmentIndexModel(cloned)
+	assert.True(t, roundTripped.GetLegacyRowDomain())
+}

@@ -285,6 +285,7 @@ const (
 	BitmapCardinalityLimitKey         = "bitmap_cardinality_limit"
 	HybridLowCardinalityIndexTypeKey  = "hybrid_low_cardinality_index_type"
 	HybridHighCardinalityIndexTypeKey = "hybrid_high_cardinality_index_type"
+	LegacyRowDomainKey                = "legacy_row_domain"
 	IgnoreGrowing                     = "ignore_growing"
 	ConsistencyLevel                  = "consistency_level"
 	HintsKey                          = "hints"

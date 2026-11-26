@@ -1056,6 +1056,12 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 						segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
 					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+					if segIdx.LegacyRowDomain {
+						indexParams = append(indexParams, &commonpb.KeyValuePair{
+							Key:   common.LegacyRowDomainKey,
+							Value: "true",
+						})
+					}
 					// respect segment-based index type
 					for _, param := range indexParams {
 						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {

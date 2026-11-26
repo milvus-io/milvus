@@ -575,13 +575,37 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		// Load collection information asynchronously
 		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
 		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+			s.meta.setLegacyStructIndexMigrationRunning()
+			err := retry.Do(s.ctx, func() error {
+				if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
+					s.meta.setLegacyStructIndexMigrationError(err)
+					return err
+				}
+				if err := s.meta.markLegacyStructArrayScalarSegmentIndexes(s.ctx); err != nil {
+					s.meta.setLegacyStructIndexMigrationError(err)
+					return err
+				}
+				return nil
 			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
+			if err != nil {
+				s.meta.setLegacyStructIndexMigrationFailed(err)
+			} else {
+				s.meta.setLegacyStructIndexMigrationCompleted()
+			}
 		}()
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
+}
+
+func (s *Server) GetLegacyStructIndexMigrationStatus() LegacyStructIndexMigrationStatus {
+	if s.GetStateCode() != commonpb.StateCode_Healthy || s.meta == nil {
+		return LegacyStructIndexMigrationStatus{
+			State: LegacyStructIndexMigrationPending,
+			Ready: false,
+		}
+	}
+	return s.meta.getLegacyStructIndexMigrationStatus()
 }
 
 func (s *Server) initAnalyzeInspector() {

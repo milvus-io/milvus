@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -139,6 +140,10 @@ func (m *segmentBuildInfo) Remove(key UniqueID) {
 
 func (m *segmentBuildInfo) List() []*model.SegmentIndex {
 	return m.buildID2SegmentIndex.Values()
+}
+
+func (m *segmentBuildInfo) Range(f func(key UniqueID, value *model.SegmentIndex) bool) {
+	m.buildID2SegmentIndex.Range(f)
 }
 
 func (m *segmentBuildInfo) GetTaskStats() []*metricsinfo.IndexTaskStats {
@@ -276,6 +281,174 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 		m.updateSegmentIndex(segIdx)
 	}
 	return nil
+}
+
+func isStructArrayScalarField(schema *schemapb.CollectionSchema, fieldID UniqueID) bool {
+	if schema == nil {
+		return false
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == fieldID && subField.GetDataType() == schemapb.DataType_Array {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func structArrayScalarFieldIDs(schema *schemapb.CollectionSchema) []UniqueID {
+	if schema == nil {
+		return nil
+	}
+	var fieldIDs []UniqueID
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetDataType() == schemapb.DataType_Array {
+				fieldIDs = append(fieldIDs, subField.GetFieldID())
+			}
+		}
+	}
+	return fieldIDs
+}
+
+func (m *indexMeta) MarkLegacyRowDomain(ctx context.Context, buildID UniqueID) error {
+	m.keyLock.Lock(buildID)
+	defer m.keyLock.Unlock(buildID)
+
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
+	if !ok || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+		return nil
+	}
+	cloned := model.CloneSegmentIndex(segIdx)
+	cloned.LegacyRowDomain = true
+	if err := m.catalog.AlterSegmentIndexes(ctx, []*model.SegmentIndex{cloned}); err != nil {
+		return err
+	}
+	m.updateSegmentIndex(cloned)
+	return nil
+}
+
+const (
+	// Keep each migration transaction well below etcd's default max-txn-ops (128)
+	// and 1.5 MiB request size limit.
+	legacyRowDomainMarkBatchSize     = 64
+	legacyRowDomainMarkMaxBatchBytes = 512 * 1024
+)
+
+func (m *indexMeta) MarkLegacyRowDomainForCollections(ctx context.Context, collFieldIDs map[UniqueID][]UniqueID, onBatchMarked func(int)) (int, error) {
+	if len(collFieldIDs) == 0 {
+		return 0, nil
+	}
+
+	targetIndexes := make(map[UniqueID]map[UniqueID]struct{})
+	m.fieldIndexLock.RLock()
+	for collID, fieldIDs := range collFieldIDs {
+		if len(fieldIDs) == 0 {
+			continue
+		}
+		collIndexes, ok := m.indexes[collID]
+		if !ok {
+			continue
+		}
+		fieldSet := make(map[UniqueID]struct{}, len(fieldIDs))
+		for _, fieldID := range fieldIDs {
+			fieldSet[fieldID] = struct{}{}
+		}
+		var indexSet map[UniqueID]struct{}
+		for indexID, index := range collIndexes {
+			if index.IsDeleted {
+				continue
+			}
+			if _, match := fieldSet[index.FieldID]; match {
+				if indexSet == nil {
+					indexSet = make(map[UniqueID]struct{})
+				}
+				indexSet[indexID] = struct{}{}
+			}
+		}
+		if len(indexSet) > 0 {
+			targetIndexes[collID] = indexSet
+		}
+	}
+	m.fieldIndexLock.RUnlock()
+
+	if len(targetIndexes) == 0 {
+		return 0, nil
+	}
+
+	var candidateBuildIDs []UniqueID
+	m.segmentBuildInfo.Range(func(buildID UniqueID, segIdx *model.SegmentIndex) bool {
+		if segIdx == nil || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+			return true
+		}
+		if indexSet, ok := targetIndexes[segIdx.CollectionID]; ok {
+			if _, match := indexSet[segIdx.IndexID]; match {
+				candidateBuildIDs = append(candidateBuildIDs, buildID)
+			}
+		}
+		return true
+	})
+
+	if len(candidateBuildIDs) == 0 {
+		return 0, nil
+	}
+
+	// Acquire per-build locks in deterministic ascending order and deduplicate IDs.
+	slices.Sort(candidateBuildIDs)
+	candidateBuildIDs = slices.Compact(candidateBuildIDs)
+
+	unlockBatch := func(lockedIDs []UniqueID) {
+		for j := len(lockedIDs) - 1; j >= 0; j-- {
+			m.keyLock.Unlock(lockedIDs[j])
+		}
+	}
+
+	marked := 0
+	for i := 0; i < len(candidateBuildIDs); {
+		batch := make([]*model.SegmentIndex, 0, min(legacyRowDomainMarkBatchSize, len(candidateBuildIDs)-i))
+		lockedIDs := make([]UniqueID, 0, cap(batch))
+		batchBytes := 0
+
+		for i < len(candidateBuildIDs) && len(batch) < legacyRowDomainMarkBatchSize {
+			buildID := candidateBuildIDs[i]
+			m.keyLock.Lock(buildID)
+			segIdx, ok := m.segmentBuildInfo.Get(buildID)
+			if !ok || segIdx.IsDeleted || segIdx.LegacyRowDomain {
+				m.keyLock.Unlock(buildID)
+				i++
+				continue
+			}
+			cloned := model.CloneSegmentIndex(segIdx)
+			cloned.LegacyRowDomain = true
+			recBytes := proto.Size(model.MarshalSegmentIndexModel(cloned))
+			if len(batch) > 0 && batchBytes+recBytes > legacyRowDomainMarkMaxBatchBytes {
+				m.keyLock.Unlock(buildID)
+				break
+			}
+			batch = append(batch, cloned)
+			lockedIDs = append(lockedIDs, buildID)
+			batchBytes += recBytes
+			i++
+		}
+
+		if len(batch) == 0 {
+			continue
+		}
+		if err := m.catalog.AlterSegmentIndexes(ctx, batch); err != nil {
+			unlockBatch(lockedIDs)
+			return marked, err
+		}
+		for _, cloned := range batch {
+			m.updateSegmentIndex(cloned)
+		}
+		unlockBatch(lockedIDs)
+		marked += len(batch)
+		if onBatchMarked != nil {
+			onBatchMarked(len(batch))
+		}
+	}
+	return marked, nil
 }
 
 func (m *indexMeta) updateIndexMeta(index *model.Index, updateFunc func(clonedIndex *model.Index) error) error {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
@@ -62,6 +63,7 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			{management.ConfigGetPath, s.HandleGetConfig},
 			// ops
 			{management.ReplicaLoadConfigCompliancePath, s.HandleReplicaLoadConfigCompliance},
+			{management.LegacyStructIndexMigrationStatusPath, s.HandleLegacyStructIndexMigrationStatus},
 		}
 
 		// Loop through the slice and register each route.
@@ -72,6 +74,22 @@ func RegisterMgrRoute(s *mixCoordImpl) {
 			})
 		}
 	})
+}
+
+func (s *mixCoordImpl) HandleLegacyStructIndexMigrationStatus(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeJSONError(w, "Method not allowed, use GET", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.datacoordServer == nil {
+		writeJSONResponse(w, http.StatusOK, datacoord.LegacyStructIndexMigrationStatus{
+			State:     datacoord.LegacyStructIndexMigrationPending,
+			Ready:     false,
+			LastError: "datacoord server is not initialized",
+		})
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, s.datacoordServer.GetLegacyStructIndexMigrationStatus())
 }
 
 func (s *mixCoordImpl) HandleDatacoordGC(w http.ResponseWriter, req *http.Request) {

@@ -33,6 +33,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+func TestHandleLegacyStructIndexMigrationStatus(t *testing.T) {
+	coord := &mixCoordImpl{}
+
+	t.Run("non-GET returns method not allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/management/datacoord/legacy_struct_index/status", nil)
+		w := httptest.NewRecorder()
+		coord.HandleLegacyStructIndexMigrationStatus(w, req)
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	})
+
+	t.Run("nil datacoord server returns pending", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/management/datacoord/legacy_struct_index/status", nil)
+		w := httptest.NewRecorder()
+		coord.HandleLegacyStructIndexMigrationStatus(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			State     string `json:"state"`
+			Ready     bool   `json:"ready"`
+			LastError string `json:"last_error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Pending", resp.State)
+		assert.False(t, resp.Ready)
+		assert.NotEmpty(t, resp.LastError)
+	})
+}
+
 func TestMalformedConfigRequestLogsDoNotContainPayload(t *testing.T) {
 	paramtable.Init()
 	coord := &mixCoordImpl{}

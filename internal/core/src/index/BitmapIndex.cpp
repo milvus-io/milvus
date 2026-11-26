@@ -1408,6 +1408,7 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     // V3 format: meta goes into __meta__ entry
     writer->PutMeta(BITMAP_INDEX_LENGTH, data_.size());
     writer->PutMeta(BITMAP_INDEX_NUM_ROWS, total_num_rows_);
+    writer->PutMeta("is_nested", false);
 
     auto index_data_size = GetIndexDataSize();
     std::shared_ptr<uint8_t[]> index_data(new uint8_t[index_data_size]);
