@@ -41,3 +41,46 @@ func SanitizeReplicateConfiguration(config *commonpb.ReplicateConfiguration) *co
 
 	return sanitized
 }
+
+// FillRedactedConnectionTokens returns a copy of incoming in which a cluster
+// with an empty connection token takes the token stored for the same cluster in
+// current.
+//
+// SanitizeReplicateConfiguration clears connection tokens on every read, so a
+// caller that reads the configuration, edits the topology and writes it back
+// cannot send a token it was never given. The validator requires connection
+// parameters to be unchanged, so without this the read-modify-write round trip
+// is always rejected with "connection_param.token cannot be changed", and
+// simply accepting the empty token would store it and erase the credential CDC
+// uses to reach the peer.
+//
+// A non-empty incoming token is left untouched, so an actual attempt to change
+// a token is still rejected by the validator.
+func FillRedactedConnectionTokens(incoming, current *commonpb.ReplicateConfiguration) *commonpb.ReplicateConfiguration {
+	if incoming == nil || current == nil {
+		return incoming
+	}
+
+	stored := make(map[string]string, len(current.GetClusters()))
+	for _, cluster := range current.GetClusters() {
+		if token := cluster.GetConnectionParam().GetToken(); token != "" {
+			stored[cluster.GetClusterId()] = token
+		}
+	}
+	if len(stored) == 0 {
+		return incoming
+	}
+
+	filled := proto.Clone(incoming).(*commonpb.ReplicateConfiguration)
+	for _, cluster := range filled.GetClusters() {
+		// A nil ConnectionParam is left alone: its uri is empty too, and that
+		// mismatch is reported on its own.
+		if cluster.GetConnectionParam() == nil || cluster.GetConnectionParam().GetToken() != "" {
+			continue
+		}
+		if token, ok := stored[cluster.GetClusterId()]; ok {
+			cluster.ConnectionParam.Token = token
+		}
+	}
+	return filled
+}

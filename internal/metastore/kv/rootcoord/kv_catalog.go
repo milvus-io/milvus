@@ -757,10 +757,13 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		return err
 	}
 	saves := map[string]string{newKey: string(value)}
+	removals := []string{}
 	// no default aliases will be created.
 	// save fields info to new path.
 	if fieldModify {
+		newFieldIDs := make(map[int64]struct{}, len(newColl.Fields))
 		for _, field := range newColl.Fields {
+			newFieldIDs[field.FieldID] = struct{}{}
 			k := BuildFieldKey(newColl.CollectionID, field.FieldID)
 			fieldInfo := model.MarshalFieldModel(field)
 			v, err := proto.Marshal(fieldInfo)
@@ -769,8 +772,15 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			}
 			saves[k] = string(v)
 		}
+		for _, field := range oldColl.Fields {
+			if _, ok := newFieldIDs[field.FieldID]; !ok {
+				removals = append(removals, BuildFieldKey(oldColl.CollectionID, field.FieldID))
+			}
+		}
 
+		newStructArrayFieldIDs := make(map[int64]struct{}, len(newColl.StructArrayFields))
 		for _, structArrayField := range newColl.StructArrayFields {
+			newStructArrayFieldIDs[structArrayField.FieldID] = struct{}{}
 			k := BuildStructArrayFieldKey(newColl.CollectionID, structArrayField.FieldID)
 			structArrayFieldInfo := model.MarshalStructArrayFieldModel(structArrayField)
 			v, err := proto.Marshal(structArrayFieldInfo)
@@ -779,7 +789,15 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			}
 			saves[k] = string(v)
 		}
+		for _, structArrayField := range oldColl.StructArrayFields {
+			if _, ok := newStructArrayFieldIDs[structArrayField.FieldID]; !ok {
+				removals = append(removals, BuildStructArrayFieldKey(oldColl.CollectionID, structArrayField.FieldID))
+			}
+		}
+
+		newFunctionIDs := make(map[int64]struct{}, len(newColl.Functions))
 		for _, function := range newColl.Functions {
+			newFunctionIDs[function.ID] = struct{}{}
 			k := BuildFunctionKey(newColl.CollectionID, function.ID)
 			functionInfo := model.MarshalFunctionModel(function)
 			v, err := proto.Marshal(functionInfo)
@@ -788,9 +806,20 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			}
 			saves[k] = string(v)
 		}
+		for _, function := range oldColl.Functions {
+			if _, ok := newFunctionIDs[function.ID]; !ok {
+				removals = append(removals, BuildFunctionKey(oldColl.CollectionID, function.ID))
+			}
+		}
 	}
 
 	maxTxnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if len(removals) > 0 {
+		if len(saves)+len(removals) <= maxTxnNum {
+			return kc.Txn.MultiSaveAndRemove(ctx, saves, removals)
+		}
+		return batchMultiSaveAndRemove(ctx, kc.Txn, maxTxnNum, saves, removals)
+	}
 	return etcd.SaveByBatchWithLimit(saves, maxTxnNum, func(partialKvs map[string]string) error {
 		return kc.Txn.MultiSave(ctx, partialKvs)
 	})
