@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/cockroachdb/errors"
 
@@ -34,91 +33,27 @@ func importPrivilegeDenied() error {
 	return merr.WrapErrPrivilegeNotPermitted("not allowed to access import job")
 }
 
-type importResource struct {
-	dbName          string
-	collectionName  string
-	updateTimestamp uint64
-	revisionKnown   bool
-}
-
 // resolveImportResource uses the persisted ID, not a caller-selected database or
-// a job's historical name. A shared metadata cache can outlive drop/recreate or
-// rename, so resolve the currently available collection at the coordinator.
-func (node *Proxy) resolveImportResource(ctx context.Context, collectionID int64) (*importResource, error) {
-	if collectionID <= 0 {
-		// Old coordinators omit the added identity fields. Never fall back to
-		// authorizing a name in the caller's database during a rolling upgrade.
-		return nil, merr.WrapErrServiceUnavailable("import resource identity is unavailable")
+// a job's historical name.
+func (node *Proxy) resolveImportResource(ctx context.Context, collectionID int64) (*collectionResource, error) {
+	resource, err := node.resolveCollectionResource(ctx, collectionID, "import resource")
+	if err == nil && resource == nil {
+		return nil, importPrivilegeDenied()
 	}
-	resp, err := node.mixCoord.DescribeCollection(describeCollectionMetadataContext(ctx), &milvuspb.DescribeCollectionRequest{
-		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-		CollectionID: collectionID,
-	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		if errors.IsAny(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound) {
-			return nil, importPrivilegeDenied()
-		}
-		return nil, merr.Wrap(err, "resolve import resource")
-	}
-	if resp.GetCollectionID() != collectionID || resp.GetDbName() == "" || resp.GetSchema().GetName() == "" {
-		return nil, merr.WrapErrServiceUnavailable("import resource identity is unavailable")
-	}
-	return &importResource{
-		dbName: resp.GetDbName(), collectionName: resp.GetSchema().GetName(),
-		updateTimestamp: resp.GetUpdateTimestamp(),
-		revisionKnown:   resp.GetUpdateTimestampStr() == strconv.FormatUint(resp.GetUpdateTimestamp(), 10),
-	}, nil
+	return resource, err
 }
 
 func importSubject(ctx context.Context) (rbacSubject, error) {
-	if authorizationDisabled() {
-		return rbacSubject{bypass: true}, nil
-	}
-	return getCurrentUserRBACSubject(ctx)
+	return resourceSubject(ctx)
 }
 
-func (r *importResource) authorize(subject rbacSubject) error {
-	if subject.bypass {
-		return nil
-	}
-	// The name is already canonical. Resolving it as an alias again through
-	// a potentially stale cache could change the resource being authorized.
-	for _, role := range subject.roleNames {
-		allowed, err := isRolePermitted(role, r.dbName, commonpb.ObjectType_Collection.String(), r.collectionName, commonpb.ObjectPrivilege_PrivilegeImport.String())
-		if err != nil {
-			return err
-		}
-		if allowed {
-			return nil
-		}
-	}
-	return importPrivilegeDenied()
-}
-
-func (node *Proxy) authorizeImportResource(ctx context.Context, collectionID int64, resource *importResource, subject rbacSubject) error {
-	if err := resource.authorize(subject); err != nil {
-		return err
-	}
-	if subject.bypass {
-		return nil
-	}
-	if !resource.revisionKnown {
-		// Current coordinators explicitly encode even a legacy stored zero as
-		// "0". Preserve those unchanged collections while rejecting responses
-		// that omit the revision projection entirely.
-		return merr.WrapErrServiceUnavailable("import resource revision is unavailable")
-	}
-	// Grants are keyed by name. A delayed identity lookup can overlap a drop,
-	// same-name recreation and new grant. Recheck after reading the policy so
-	// that the new collection's grant cannot authorize the old collection's job.
-	// Include the metadata revision: moving away and back can restore the same
-	// DB/name while an intermediate collection's name-keyed grant was observed.
-	current, err := node.resolveImportResource(ctx, collectionID)
+func (node *Proxy) authorizeImportResource(ctx context.Context, collectionID int64, resource *collectionResource, subject rbacSubject) error {
+	allowed, err := node.authorizeCollectionResource(ctx, collectionID, resource, subject, commonpb.ObjectPrivilege_PrivilegeImport.String(), "import resource")
 	if err != nil {
 		return err
 	}
-	if *current != *resource {
-		return merr.WrapErrServiceUnavailable("import resource changed during authorization")
+	if !allowed {
+		return importPrivilegeDenied()
 	}
 	return nil
 }
@@ -155,7 +90,7 @@ func (node *Proxy) filterImportJobs(ctx context.Context, dbName string, collecti
 		}
 	}
 	type decision struct {
-		resource *importResource
+		resource *collectionResource
 		err      error
 	}
 	// Several jobs commonly belong to one collection. Resolve and authorize it

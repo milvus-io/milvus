@@ -64,10 +64,10 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"Dummy": "legacy debug shim with query-mode disabled",
 	// DumpMessages is authorized by the proxy stream chain (streamMethodAuthorizers, #52608): cluster-admin grant.
 	"DumpMessages": "stream-authenticated CDC/salvage dump",
-	// GetCompactionState only polls the state of a previously-started compaction job.
-	"GetCompactionState": "async compaction status polling",
-	// GetCompactionStateWithPlans only polls detailed state for a previously-started compaction job.
-	"GetCompactionStateWithPlans": "async compaction plan status polling",
+	// GetCompactionState hides compactions outside the caller's collection Compaction grants in Proxy.
+	"GetCompactionState": "collection Compaction authorization in Proxy.GetCompactionState",
+	// GetCompactionStateWithPlans authorizes the named collection and the tasks' collections in Proxy.
+	"GetCompactionStateWithPlans": "collection Compaction authorization in Proxy.GetCompactionStateWithPlans",
 	// GetComponentStates reports component liveness and does not access user objects.
 	"GetComponentStates": "component liveness diagnostics",
 	// GetClientTelemetry is root-only in the proxy handler until proto carries a telemetry privilege.
@@ -82,14 +82,14 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"GetPersistentSegmentInfo": "explicit collection GetStatistics authorization",
 	// GetQuerySegmentInfo explicitly requires collection GetStatistics in Proxy.
 	"GetQuerySegmentInfo": "explicit collection GetStatistics authorization",
-	// GetRefreshExternalCollectionProgress only polls the state of an external-collection refresh job.
-	"GetRefreshExternalCollectionProgress": "async external-collection refresh status polling",
+	// GetRefreshExternalCollectionProgress authorizes the job's collection RefreshExternalCollection in Proxy.
+	"GetRefreshExternalCollectionProgress": "owning-collection authorization in Proxy.GetRefreshExternalCollectionProgress",
 	// GetReplicas explicitly requires collection GetLoadState, resolving ID-only targets in Proxy.
 	"GetReplicas": "explicit collection GetLoadState authorization",
 	// GetReplicateInfo reports CDC checkpoint metadata for replication recovery.
 	"GetReplicateInfo": "CDC checkpoint diagnostics",
-	// GetRestoreSnapshotState only polls the state of a snapshot restore job.
-	"GetRestoreSnapshotState": "async snapshot-restore status polling",
+	// GetRestoreSnapshotState authorizes the job's target or source collection, or external restore, in Proxy.
+	"GetRestoreSnapshotState": "restore job authorization in Proxy.GetRestoreSnapshotState",
 	// GetVersion returns build/version metadata and does not access user objects.
 	"GetVersion": "build metadata",
 	// HasCollection is an existence probe kept public for SDK compatibility.
@@ -100,8 +100,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"ListImportTasks": "resource filtering in Proxy.ListImports",
 	// ListIndexedSegment is an unimplemented feder endpoint that returns service-unavailable.
 	"ListIndexedSegment": "unimplemented feder endpoint",
-	// ListRefreshExternalCollectionJobs lists external-collection refresh jobs, optionally scoped by collection.
-	"ListRefreshExternalCollectionJobs": "external-collection refresh job listing",
+	// ListRefreshExternalCollectionJobs keeps only jobs whose collection the caller may refresh, in Proxy.
+	"ListRefreshExternalCollectionJobs": "owning-collection filtering in Proxy.ListRefreshExternalCollectionJobs",
 	// RegisterLink only reports proxy deployment metadata for client link registration.
 	"RegisterLink": "client link registration",
 	// ReplicateMessage is the CDC message-replication endpoint.

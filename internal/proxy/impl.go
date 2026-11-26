@@ -4225,6 +4225,11 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
+	authorizer, err := node.newSegmentInfoAuthorizer(ctx)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 	infoResp, err := node.mixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs:       req.GetSegmentIDs(),
 		IncludeUnHealthy: true,
@@ -4235,7 +4240,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	err = merr.Error(infoResp.GetStatus())
+	err = authorizer.check(ctx, req.GetSegmentIDs(), infoResp.GetInfos(), merr.Error(infoResp.GetStatus()))
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4637,7 +4642,29 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	mlog.Debug(context.TODO(), "received GetCompactionState response",
 		mlog.Any("resp", resp),
 		mlog.Err(err))
-	return resp, err
+	if err != nil || !merr.Ok(resp.GetStatus()) || authorizationDisabled() {
+		return resp, err
+	}
+	// The response does not say which collection the compaction belongs to;
+	// its tasks do. Read them after the state, so that tasks generated in
+	// between are authorized rather than counted unchecked.
+	plans, err := node.mixCoord.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{
+		CompactionID: req.GetCompactionID(),
+	})
+	if err := merr.CheckRPCCall(plans, err); err != nil {
+		return &milvuspb.GetCompactionStateResponse{Status: merr.Status(err)}, nil
+	}
+	visible, err := node.compactionPlansVisible(ctx, plans)
+	if err != nil {
+		return &milvuspb.GetCompactionStateResponse{Status: merr.Status(err)}, nil
+	}
+	if !visible {
+		return &milvuspb.GetCompactionStateResponse{
+			Status: merr.Success(),
+			State:  compactionNotVisible().GetState(),
+		}, nil
+	}
+	return resp, nil
 }
 
 // ManualCompaction invokes compaction on specified collection
@@ -4714,6 +4741,19 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
+		// Authorize the name before resolving it, with the privilege that
+		// starts a manual compaction, so that a collection the caller may not
+		// compact and one that does not exist look the same.
+		req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
+		var err error
+		ctx, err = node.authorizeCollectionMetadata(ctx, &milvuspb.ManualCompactionRequest{
+			DbName:         req.GetDbName(),
+			CollectionName: req.GetCollectionName(),
+		})
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -4726,7 +4766,20 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	mlog.Debug(context.TODO(), "received GetCompactionStateWithPlans response",
 		mlog.Any("resp", resp),
 		mlog.Err(err))
-	return resp, err
+	if err != nil || !merr.Ok(resp.GetStatus()) || authorizationDisabled() {
+		return resp, err
+	}
+	// Selected by compaction ID, the tasks can belong to any collection.
+	// Selected by name, they belong to the authorized collection unless it was
+	// renamed or recreated after the name was resolved; check them either way.
+	visible, err := node.compactionPlansVisible(ctx, resp)
+	if err != nil {
+		return &milvuspb.GetCompactionPlansResponse{Status: merr.Status(err)}, nil
+	}
+	if !visible {
+		return compactionNotVisible(), nil
+	}
+	return resp, nil
 }
 
 // GetFlushState gets the flush state based on the provided segment IDs.
@@ -7600,9 +7653,25 @@ func (node *Proxy) GetRefreshExternalCollectionProgress(ctx context.Context, req
 	})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		mlog.Warn(context.TODO(), "failed to get refresh external collection progress", mlog.Err(err))
+		// DataCoord reports an absent job as ParameterInvalid. Hide its
+		// existence exactly as for a job outside the caller's grants.
+		if !authorizationDisabled() && errors.Is(err, merr.ErrParameterInvalid) {
+			err = refreshJobDenied()
+		}
 		return &milvuspb.GetRefreshExternalCollectionProgressResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	authorizer, err := node.newRefreshJobAuthorizer(ctx)
+	if err != nil {
+		return &milvuspb.GetRefreshExternalCollectionProgressResponse{Status: merr.Status(err)}, nil
+	}
+	allowed, err := authorizer.permits(ctx, resp.GetJobInfo())
+	if err == nil && !allowed {
+		err = refreshJobDenied()
+	}
+	if err != nil {
+		return &milvuspb.GetRefreshExternalCollectionProgressResponse{Status: merr.Status(err)}, nil
 	}
 
 	mlog.Debug(ctx, rpcDone(method),
@@ -7643,8 +7712,22 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 			}, nil
 		}
 
+		// Authorize the name before resolving it, so that a collection the
+		// caller may not refresh and one that does not exist look the same.
+		dbName := GetCurDBNameFromRequestOrContext(ctx, req)
+		var err error
+		ctx, err = node.authorizeCollectionMetadata(ctx, &milvuspb.RefreshExternalCollectionRequest{
+			DbName:         dbName,
+			CollectionName: req.GetCollectionName(),
+		})
+		if err != nil {
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
 		// Get collection info from cache and validate it's an external collection
-		collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), 0)
+		collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, dbName, req.GetCollectionName(), 0)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 			return &milvuspb.ListRefreshExternalCollectionJobsResponse{
@@ -7677,9 +7760,23 @@ func (node *Proxy) ListRefreshExternalCollectionJobs(ctx context.Context, req *m
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
+	// Without a collection name DataCoord returns the jobs of every external
+	// collection in the cluster; keep the ones the caller may see.
+	authorizer, err := node.newRefreshJobAuthorizer(ctx)
+	if err != nil {
+		return &milvuspb.ListRefreshExternalCollectionJobsResponse{Status: merr.Status(err)}, nil
+	}
+
 	// Convert internal JobInfos to external JobInfos
 	externalJobs := make([]*milvuspb.RefreshExternalCollectionJobInfo, 0, len(resp.GetJobs()))
 	for _, job := range resp.GetJobs() {
+		allowed, err := authorizer.permits(ctx, job)
+		if err != nil {
+			return &milvuspb.ListRefreshExternalCollectionJobsResponse{Status: merr.Status(err)}, nil
+		}
+		if !allowed {
+			continue
+		}
 		externalJobs = append(externalJobs, convertToExternalCollectionJobInfo(job))
 	}
 
