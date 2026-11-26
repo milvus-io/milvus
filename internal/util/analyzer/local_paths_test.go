@@ -17,6 +17,8 @@
 package analyzer
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,4 +38,26 @@ func TestResolveLocalPaths(t *testing.T) {
 	require.JSONEq(t, resolved, again)
 	_, err = ResolveLocalPaths(`{"filter":[{"stop_words_file":{"type":"local","path":"../secret"}}]}`, "/dictionary", "/credentials")
 	require.Error(t, err)
+}
+
+func TestResolveLocalPathsPreservesNestedUnchangedInput(t *testing.T) {
+	params := strings.Repeat(`{"unused":`, 512) + `"` + strings.Repeat("x", 1<<20) + `"` + strings.Repeat("}", 512)
+	resolved, err := ResolveLocalPaths(params, "/dictionary", "/credentials")
+	require.NoError(t, err)
+	require.Equal(t, params, resolved)
+}
+
+func BenchmarkResolveLocalPathsNested(b *testing.B) {
+	for _, depth := range []int{1, 512} {
+		b.Run(strconv.Itoa(depth), func(b *testing.B) {
+			params := strings.Repeat(`{"unused":`, depth) + `"` + strings.Repeat("x", 1<<20) + `"` + strings.Repeat("}", depth)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := ResolveLocalPaths(params, "/dictionary", "/credentials"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
