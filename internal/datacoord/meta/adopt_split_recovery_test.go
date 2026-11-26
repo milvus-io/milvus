@@ -110,10 +110,13 @@ func TestSplitAdoptionPreservesRevisionMetadata(t *testing.T) {
 	manifest := packed.MarshalManifestPath("/tmp/split-adoption/insert_log/100/1/10", 2)
 	stats := &datapb.Statistics{
 		InsertBinlogSize: 1200, StatsBinlogSize: 64, InsertBinlogCount: 1,
-		FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: storage.FieldLogicalSizeVersion, RowCount: 3,
-			Fields: map[int64]*datapb.FieldLogicalSize{105: {PayloadBytes: 90003, ValidityBits: 3}}},
+		FieldLogicalSizes: &datapb.FieldLogicalSizes{
+			Version: storage.FieldLogicalSizeVersion, RowCount: 3,
+			Fields: map[int64]*datapb.FieldLogicalSize{105: {PayloadBytes: 90003, ValidityBits: 3}},
+		},
 	}
-	task := &datapb.CompactionTask{PlanID: 7, CollectionID: 100, InputSegments: []int64{1}, Channel: "s",
+	task := &datapb.CompactionTask{
+		PlanID: 7, CollectionID: 100, InputSegments: []int64{1}, Channel: "s",
 		Type: datapb.CompactionType_SplitShardRewriteCompaction, Schema: schema,
 		SplitRewrite: &datapb.SplitShardRewritePlan{RoutingModulus: 2, Targets: []*datapb.SplitShardTaskTarget{{Vchannel: "t", Residues: []uint64{0}}, {Vchannel: "u", Residues: []uint64{1}}}},
 	}
@@ -144,7 +147,8 @@ func TestSplitAdoptionPreservesRevisionMetadata(t *testing.T) {
 	assertRevision(original, "s")
 	record, err := original.PrepareSplitAdoption(ctx, &datapb.SplitShardTask{TaskId: 7, CollectionId: 100, SourceVchannel: "s"}, []split.AdoptionMove{{SegmentID: 10, PartitionID: 1, Target: "t", TransformStart: 100}})
 	require.NoError(t, err)
-	view := &viewpb.DataViewOfCollection{CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, ShardSetEpoch: 3,
+	view := &viewpb.DataViewOfCollection{
+		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}, ShardSetEpoch: 3,
 		Shards: []*viewpb.DataViewOfShard{{Vchannel: "t", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10}, SegmentManifestVersions: []int64{2}, SegmentTransformStartAfterTimeticks: []uint64{100}}}}},
 	}
 	require.NoError(t, original.AdoptSplit(ctx, record, view))
