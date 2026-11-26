@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/coord/resourcewatermark"
 	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -169,7 +170,8 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, err
 	}
 	feedback := viewfeedback.New(loadConfigStore, deps.dataViewProvider)
-	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, feedback, deps.pchannels)
+	watermarks := resourcewatermark.New()
+	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, feedback, deps.pchannels, syncer.WithResourceWatermarks(watermarks))
 	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {
 		nodePublisher.Close()
@@ -178,13 +180,14 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, err
 	}
 
+	shardViewRegistry.SetResourceWatermarksReader(watermarks)
 	loadConfigStore.EnableGC()
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
 	var schemaVersion balancer.SchemaVersionProvider
 	if deps.getCollectionInfo != nil {
 		schemaVersion = reconcileSchemaVersionProvider(deps.getCollectionInfo, shardViewRegistry.PublishCollectionSchema)
 	}
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback)), schemaVersion))
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback), balancer.WithResourceWatermarks(watermarks)), schemaVersion))
 	if deps.balancerFactory != nil {
 		balancerController = deps.balancerFactory(balanceCache)
 	}

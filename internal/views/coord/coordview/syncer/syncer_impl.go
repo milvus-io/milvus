@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -18,8 +19,9 @@ var (
 )
 
 type reliableSyncer struct {
-	client          ViewSyncClient
-	feedbackHandler ViewFeedbackHandler
+	client             ViewSyncClient
+	feedbackHandler    ViewFeedbackHandler
+	resourceWatermarks ResourceWatermarksHandler
 
 	mu               sync.Mutex
 	resumableSyncers map[qviews.WorkNodeKey]*resumableSyncer
@@ -33,7 +35,7 @@ type reliableSyncer struct {
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
-func NewReliableSyncer(client ViewSyncClient, feedbackHandler ViewFeedbackHandler, pchannels []string) ReliableSyncer {
+func NewReliableSyncer(client ViewSyncClient, feedbackHandler ViewFeedbackHandler, pchannels []string, options ...SyncerOption) ReliableSyncer {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &reliableSyncer{
 		client:           client,
@@ -43,12 +45,15 @@ func NewReliableSyncer(client ViewSyncClient, feedbackHandler ViewFeedbackHandle
 		cancel:           cancel,
 		nodeChanged:      make(chan struct{}, 1),
 	}
+	for _, option := range options {
+		option(s)
+	}
 	// Seed all known PChannels, including those temporarily without an owner.
 	// SyncViews adds targets introduced after this snapshot.
 	for _, pchannel := range pchannels {
 		node := qviews.StreamingNode{PChannel: pchannel}
 		if s.resumableSyncers[node.Key()] == nil {
-			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
+			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler, s.resourceWatermarks)
 		}
 	}
 	s.drainWG.Add(1)
@@ -68,12 +73,18 @@ func (s *reliableSyncer) notifyNodeChanged() {
 
 func (s *reliableSyncer) watchNodeChanged() {
 	defer s.drainWG.Done()
+	ticker := time.NewTicker(qviews.ViewFeedbackInterval)
+	defer ticker.Stop()
+	s.ensureQueryNodes()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
+		case <-ticker.C:
+			s.ensureQueryNodes()
 		case <-s.nodeChanged:
 			s.drainRemovedNodes()
+			s.ensureQueryNodes()
 		}
 	}
 }
@@ -142,7 +153,7 @@ func (s *reliableSyncer) syncViewsToNode(ctx context.Context, nodeKey qviews.Wor
 
 	mlog.Info(ctx, "ReliableSyncer: node discovered on demand, creating ResumableSyncer",
 		mlog.String("node", nodeKey))
-	rs := newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
+	rs := newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler, s.resourceWatermarks)
 	s.resumableSyncers[nodeKey] = rs
 	rs.Sync(views)
 	return false, nil
@@ -224,4 +235,32 @@ func (s *reliableSyncer) drainRemovedNodes() {
 type removedNode struct {
 	key    string
 	syncer *resumableSyncer
+}
+
+// Idle QNs need a stream too, so they can advertise admission headroom before
+// their first placement. Legacy/test clients may provide only on-demand sync.
+func (s *reliableSyncer) ensureQueryNodes() {
+	if s.resourceWatermarks == nil {
+		return
+	}
+	lister, ok := s.client.(interface {
+		QueryNodes(context.Context) ([]qviews.QueryNode, error)
+	})
+	if !ok {
+		return
+	}
+	nodes, err := lister.QueryNodes(s.ctx)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	for _, node := range nodes {
+		if s.resumableSyncers[node.Key()] == nil && s.client.IsNodeAlive(s.ctx, node) {
+			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler, s.resourceWatermarks)
+		}
+	}
 }

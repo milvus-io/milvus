@@ -37,6 +37,8 @@ type QNQueryViewStateMachine struct {
 	readySegments map[int64]map[int64]struct{}
 	// Per-partition assigned segment set used for Ready transition counting.
 	assignedSegments map[int64]map[int64]struct{}
+	// Failure facts belong to this exact View and survive reconnect reports.
+	failedSegments []*viewpb.SegmentPerparingFailure
 
 	// Counters for O(1) completion check.
 	totalSegments int
@@ -160,11 +162,14 @@ func buildAssignedSegmentSet(qnView *viewpb.QueryViewOfQueryNode) (map[int64]map
 // OnUnrecoverable reports a fatal error (e.g., OOM during segment loading).
 // Transitions from Preparing to Unrecoverable.
 // Only valid in Preparing state; ignored in other states.
-func (sm *QNQueryViewStateMachine) OnUnrecoverable() {
+func (sm *QNQueryViewStateMachine) OnUnrecoverable(failures ...*viewpb.SegmentPerparingFailure) {
 	if sm.state != qviews.QueryViewStatePreparing {
 		return
 	}
 	sm.state = qviews.QueryViewStateUnrecoverable
+	for _, failure := range failures {
+		sm.failedSegments = append(sm.failedSegments, proto.Clone(failure).(*viewpb.SegmentPerparingFailure))
+	}
 	sm.pendingReport = sm.buildReport()
 }
 
@@ -246,6 +251,10 @@ func (sm *QNQueryViewStateMachine) buildReport() *viewpb.QueryViewOfShard {
 	meta.State = viewpb.QueryViewState(sm.state)
 
 	qnView := proto.Clone(sm.qnView).(*viewpb.QueryViewOfQueryNode)
+	qnView.FailedSegments = nil
+	for _, failure := range sm.failedSegments {
+		qnView.FailedSegments = append(qnView.FailedSegments, proto.Clone(failure).(*viewpb.SegmentPerparingFailure))
+	}
 	// Populate ReadySegmentIds from tracked sets.
 	for _, p := range qnView.Partitions {
 		p.ReadySegmentIds = sm.readySegmentSlice(p.PartitionId)

@@ -136,7 +136,8 @@ type PhysicalSegmentLoader interface {
 }
 
 type SegmentResourceEstimator interface {
-	Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error)
+	// competing reports other in-flight loading reservations at admission.
+	Reserve(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (reservation ResourceReservation, competing bool, err error)
 }
 
 type ResourceReservation interface {

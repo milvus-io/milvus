@@ -60,13 +60,25 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	if len(entries) > 0 && len(ctx.nodes) == 0 {
 		return nil
 	}
-	original := currentSegmentNodes(p, shardID)
+	// Pin failure facts once for both mandatory and optional placement.
+	var original map[int64]int64
+	if entry := collection.GetShard(shardID); entry != nil {
+		if target := entry.Target(); target != nil {
+			original = target.Assignments
+		}
+		ctx.capacity = newCapacityPlacement(p, shardID, ctx.segments, entry.Stats().FailedResources)
+	}
 	eligible := make(map[int64]bool, len(ctx.nodes))
 	for _, node := range ctx.nodes {
 		eligible[node] = true
 	}
 	for _, segment := range entries {
 		if node, exists := original[segment.SegmentID]; exists && eligible[node] {
+			if !optional && ctx.capacity != nil && !ctx.reusable[segment.SegmentID][node] {
+				if blocked, _, _ := ctx.capacity.state(segment.SegmentID, node); blocked {
+					continue
+				}
+			}
 			ctx.assign([]*SegmentDataView{segment}, node)
 		}
 	}
@@ -78,10 +90,33 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 			return nil
 		}
 		best, bestGain := ctx.nodes[0], -math.MaxFloat64
+		var bestFailure qviews.QueryViewVersion
+		bestBlocked, selected := false, false
+		bestRisk := 0.0
 		for _, node := range ctx.nodes {
 			gain, _ := ctx.evaluate([]*SegmentDataView{segment}, node)
-			if gain > bestGain+scoreEpsilon {
-				best, bestGain = node, gain
+			if ctx.capacity == nil {
+				if gain > bestGain+scoreEpsilon {
+					best, bestGain = node, gain
+				}
+				continue
+			}
+			blocked, risk, failure := ctx.capacity.state(segment.SegmentID, node)
+			if ctx.reusable[segment.SegmentID][node] {
+				blocked, risk = false, 0
+			}
+			better := !selected || (bestBlocked && !blocked)
+			if selected && blocked == bestBlocked {
+				if blocked && failure != bestFailure {
+					// No feasible alternative: keep probing fairly under the existing
+					// preparation backoff, without dropping the old serving view.
+					better = bestFailure.GT(failure)
+				} else {
+					better = risk < bestRisk-scoreEpsilon || (math.Abs(risk-bestRisk) <= scoreEpsilon && gain > bestGain+scoreEpsilon)
+				}
+			}
+			if better {
+				best, bestGain, bestRisk, bestFailure, bestBlocked, selected = node, gain, risk, failure, blocked, true
 			}
 		}
 		ctx.assign([]*SegmentDataView{segment}, best)

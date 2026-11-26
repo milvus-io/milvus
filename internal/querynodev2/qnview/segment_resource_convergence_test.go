@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -89,9 +90,9 @@ func TestSegmentResourceRetriesLoadAndReleasesReservation(t *testing.T) {
 			return &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID}, nil
 		}).Build()
 		f.manager.estimator = &resourceTestEstimator{}
-		mockey.Mock((*resourceTestEstimator).Reserve).To(func(*resourceTestEstimator, context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (ResourceReservation, error) {
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(*resourceTestEstimator, context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (ResourceReservation, bool, error) {
 			reserved.Add(1)
-			return &resourceTestReservation{}, nil
+			return &resourceTestReservation{}, false, nil
 		}).Build()
 		mockey.Mock((*resourceTestReservation).Release).To(func(*resourceTestReservation) { released.Add(1) }).Build()
 		req := f.acquire(1, 1, 1)
@@ -104,7 +105,7 @@ func TestSegmentResourceRetriesLoadAndReleasesReservation(t *testing.T) {
 
 type resourceTestEstimator struct{}
 
-func (*resourceTestEstimator) Reserve(context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (ResourceReservation, error) {
+func (*resourceTestEstimator) Reserve(context.Context, *querypb.SegmentLoadInfo, CollectionRuntime) (ResourceReservation, bool, error) {
 	panic("unpatched")
 }
 
@@ -122,7 +123,7 @@ func TestSegmentResourceMetadataFailureLeavesReadyViewsQueryable(t *testing.T) {
 		failed := make(chan struct{}, 1)
 		next := f.request(2, 1, 1)
 		next.View.Partitions[0].SegmentManifestVersions = []int64{2}
-		next.OnUnrecoverable = func() { failed <- struct{}{} }
+		next.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { failed <- struct{}{} }
 		f.manager.Acquire(next)
 		select {
 		case <-failed:
@@ -144,7 +145,7 @@ func TestSegmentResourceCatchupFailureDoesNotReportReady(t *testing.T) {
 		mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).Return(nil, merr.WrapErrServiceNotReadyMsg("buffer unavailable")).Build()
 		failed := make(chan struct{}, 1)
 		req := f.request(1, 1, 1)
-		req.OnUnrecoverable = func() { failed <- struct{}{} }
+		req.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { failed <- struct{}{} }
 		f.manager.Acquire(req)
 		select {
 		case <-failed:
@@ -240,7 +241,7 @@ func TestSegmentResourceInvalidatesAfterLiveTransformFailure(t *testing.T) {
 		}).Build()
 		failed := make(chan struct{}, 1)
 		req := f.request(1, 1, 1)
-		req.OnUnrecoverable = func() { failed <- struct{}{} }
+		req.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { failed <- struct{}{} }
 		f.manager.Acquire(req)
 		f.await(t, 1)
 		callback := <-observer
@@ -333,7 +334,7 @@ func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
 		}).Build()
 		failed := make(chan struct{}, 1)
 		first := f.request(1, 1, 1)
-		first.OnUnrecoverable = func() { failed <- struct{}{} }
+		first.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { failed <- struct{}{} }
 		f.manager.Acquire(first)
 		f.await(t, 1)
 		healthy := f.request(2, 1, 1)
@@ -395,12 +396,12 @@ func TestSegmentResourceUsesViewIndexSelection(t *testing.T) {
 		}).Build()
 		observed := make(chan int64, 2)
 		f.manager.estimator = &resourceTestEstimator{}
-		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, c CollectionRuntime) (ResourceReservation, error) {
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, c CollectionRuntime) (ResourceReservation, bool, error) {
 			require.Len(t, info.IndexInfos, 1)
 			require.Equal(t, c.IndexInfos()[0].IndexID, info.IndexInfos[0].IndexID)
 			info.EstimatedBytesPerRow = 123
 			observed <- info.IndexInfos[0].IndexID
-			return nil, nil
+			return nil, false, nil
 		}).Build()
 		f.prepareMock.UnPatch()
 		mockey.Mock((*resourceTestLoader).PrepareReadState).To(func(_ *resourceTestLoader, _ context.Context, _ TransformSegment, _ segments.ReadState, c CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (segments.ReadState, error) {
@@ -450,9 +451,9 @@ func TestSegmentResourceConcurrentViewPreparationPreservesSharedMetadata(t *test
 			return &fakeCollectionRuntimeGuard{schemaVersion: 1, schema: &schemapb.CollectionSchema{Version: 1}, updatedIndexes: []*indexpb.IndexInfo{{FieldID: 100, IndexID: id}}}, false, nil
 		}).Build()
 		f.manager.estimator = &resourceTestEstimator{}
-		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, error) {
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (ResourceReservation, bool, error) {
 			info.EstimatedBytesPerRow = collection.IndexInfos()[0].IndexID
-			return nil, nil
+			return nil, false, nil
 		}).Build()
 		prepared := make(chan *querypb.SegmentLoadInfo, 2)
 		start := make(chan struct{})

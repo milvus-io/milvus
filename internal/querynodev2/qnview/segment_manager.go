@@ -26,8 +26,10 @@ type AcquireSegments struct {
 	OnReady func(readySegments map[int64][]int64)
 
 	// OnUnrecoverable is called when a fatal error prevents segment loading.
+	// Optional failures identify requirements that actually failed. Omitted
+	// details mean unknown cause, never the complement of OnReady.
 	// Must NOT be called synchronously during Acquire.
-	OnUnrecoverable func()
+	OnUnrecoverable func(failures ...*viewpb.SegmentPerparingFailure)
 }
 
 // ReleaseSegments describes a segment release request for a query view.

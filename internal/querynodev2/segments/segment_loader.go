@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -79,6 +80,7 @@ const (
 var errRetryTimerNotified = errors.New("retry timer notified")
 
 type Loader interface {
+	GetResourceWatermarks() *viewpb.NodeResourceWatermarks
 	// Load loads binlogs, and spawn segments,
 	// NOTE: make sure the ref count of the corresponding collection will never go down to 0 during this
 	Load(ctx context.Context, collectionID int64, segmentType SegmentType, version int64, segments ...*querypb.SegmentLoadInfo) ([]Segment, error)
@@ -86,6 +88,9 @@ type Loader interface {
 	// ReserveLoadResourceWithSchema reserves memory and storage for segment loading. The
 	// returned reservation must be released after the load attempt finishes.
 	ReserveLoadResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error)
+	// ReserveLoadResourceWithStatus also returns competing reservations observed
+	// by the same admission check, so callers can distinguish load contention.
+	ReserveLoadResourceWithStatus(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, LoadResource, error)
 
 	// LoadDeltaLogs load deltalog and write delta data into provided segment.
 	// it also executes resource protection logic in case of OOM.
@@ -579,11 +584,16 @@ func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, sche
 }
 
 func (loader *segmentLoader) ReserveLoadResourceWithSchema(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, error) {
+	reservation, _, err := loader.ReserveLoadResourceWithStatus(ctx, schema, infos...)
+	return reservation, err
+}
+
+func (loader *segmentLoader) ReserveLoadResourceWithStatus(ctx context.Context, schema *schemapb.CollectionSchema, infos ...*querypb.SegmentLoadInfo) (LoadResourceReservation, LoadResource, error) {
 	result, err := loader.requestResourceWithSchema(ctx, schema, infos...)
 	if err != nil {
-		return nil, err
+		return nil, result.CommittedResource, err
 	}
-	return &loadResourceReservation{loader: loader, result: result}, nil
+	return &loadResourceReservation{loader: loader, result: result}, result.CommittedResource, nil
 }
 
 // freeRequestResource returns request memory & storage usage request.
@@ -1865,7 +1875,7 @@ func (loader *segmentLoader) checkLoadingResource(
 				mlog.Float64("totalMemMB", logutil.ToMB(float64(totalMem))),
 				mlog.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
 			)
-			return merr.WrapErrSegmentRequestResourceFailed("Memory")
+			return &resourceAdmissionError{error: merr.WrapErrSegmentRequestResourceFailed("Memory"), reason: viewpb.SegmentPerparingFailure_MemoryLimitExceeded}
 		}
 
 		if predictDiskUsage > uint64(float64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())*paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
@@ -1876,7 +1886,7 @@ func (loader *segmentLoader) checkLoadingResource(
 				mlog.Float64("totalDiskMB", logutil.ToMB(float64(uint64(paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64())))),
 				mlog.Float64("thresholdFactor", paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()),
 			)
-			return merr.WrapErrSegmentRequestResourceFailed("Disk")
+			return &resourceAdmissionError{error: merr.WrapErrSegmentRequestResourceFailed("Disk"), reason: viewpb.SegmentPerparingFailure_DiskLimitExceeded}
 		}
 	}
 

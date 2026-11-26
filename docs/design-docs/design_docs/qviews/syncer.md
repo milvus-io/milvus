@@ -37,7 +37,7 @@
 ```
 
 **ReliableSyncer**: Top-level component that:
-1. Creates SN/PChannel `resumableSyncer` instances from the initial full cluster channel list, even without pending Views. `SyncViews` creates targets added after that snapshot; QN streams are also created on first `SyncViews`.
+1. Creates SN/PChannel `resumableSyncer` instances from the initial full cluster channel list, even without pending Views. `SyncViews` creates targets added after that snapshot; QN streams are also created on first `SyncViews`. When resource feedback is enabled, QN discovery proactively creates idle QN streams at startup and on membership updates; a five-second retry covers transient discovery failures.
 2. Watches node changes via `ViewSyncClient` and drains `resumableSyncer` instances for removed nodes.
 3. Detects QueryNode loss via service discovery (not reconnect timeout).
 
@@ -201,7 +201,7 @@ node-change worker:
 ```
 
 Key design decisions:
-- **SN keepalive**: runtime initialization reads `channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels` and passes the snapshot to `NewReliableSyncer`. This includes channels without a current owner. Subsequent `SyncViews` adds new PChannels on demand. Existing SN streams keep resuming across idle periods and assignment gaps; shutdown closes them. QN streams remain lazy and the QN membership notifier handles their removal.
+- **SN keepalive**: runtime initialization reads `channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels` and passes the snapshot to `NewReliableSyncer`. This includes channels without a current owner. Subsequent `SyncViews` adds new PChannels on demand. Existing SN streams keep resuming across idle periods and assignment gaps; shutdown closes them. QN streams are proactively established for all discovered live QNs when resource feedback is enabled; the QN membership notifier handles their removal.
 - **No reconnect timeout**: `resumableSyncer` retries indefinitely with backoff until closed.
 - **Separation of concerns**: Stream reconnection (resumableSyncer) is independent of node liveness (service discovery).
 
@@ -349,3 +349,24 @@ from the local ChannelManager; later View synchronization adds targets. HandlerC
 continues resolving SN owners for opening and reconnecting streams. Temporary
 assignment gaps do not discard pending View commands or stop SN reconnection.
 Feedback does not introduce a separate source, subscriber or recovery-ready gate.
+
+## Node resource watermarks
+
+`SyncResponse.resource_watermarks` carries node-wide loader admission memory
+and disk percentages independently of QueryView identity. QN sends a sample on
+connection establishment and every five seconds, including while idle. Sending
+uses the existing single send loop. Collection count does not multiply samples
+or streams. One ReliableSyncer owns one resumable stream per QN ID; server-side
+global singleton enforcement is not assumed during coordinator transitions.
+
+The receiver accepts reports only from a QN stream and obtains node identity
+from the stream target. A per-connection generation fences old reports and late
+disconnect callbacks. Disconnect invalidates the sample. Uninitialized/failed
+measurements are omitted and expire after fifteen seconds at the coordinator;
+unknown is distinct from an explicit zero. NaN, infinity and out-of-range values
+are rejected. Older peers may omit or ignore the additive response variant.
+
+The node-wide store has no subscribers or balance dirty notifications. Balancer
+reads fresh samples lazily only for failure-bearing shard decisions, pinning each
+node at most once per pass. Resource feedback does not publish node topology or
+collection/shard statistics. It is advisory; QN admission remains authoritative.

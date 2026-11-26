@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
+	"github.com/milvus-io/milvus/internal/views/coord/resourcewatermark"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -25,11 +26,12 @@ import (
 //
 // All methods are safe for concurrent use.
 type ShardViewRegistry struct {
-	mu             sync.RWMutex
-	ctx            context.Context
-	flushScheduler *DirtyViewFlushScheduler
-	dataViewRefs   DataViewRefProvider
-	loadInfoRefs   LoadInfoRefProvider
+	mu                 sync.RWMutex
+	ctx                context.Context
+	flushScheduler     *DirtyViewFlushScheduler
+	dataViewRefs       DataViewRefProvider
+	loadInfoRefs       LoadInfoRefProvider
+	resourceWatermarks resourcewatermark.Reader
 
 	version  uint64
 	shards   map[qviews.ShardID]*ShardViewManager
@@ -165,6 +167,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	if version, ok := r.publishedSchemas[collectionID]; ok {
 		mgr.publishedSchema = &version
 	}
+	mgr.resourceWatermarks = r.resourceWatermarks
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
 	r.addCollectionShardLocked(shardID)
@@ -541,5 +544,22 @@ func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version 
 	r.mu.Unlock()
 	for _, manager := range managers {
 		manager.PublishSchema(version)
+	}
+}
+
+// SetResourceWatermarksReader binds the node-wide source during runtime setup.
+// It installs no subscription; reports cannot publish shard changes.
+func (r *ShardViewRegistry) SetResourceWatermarksReader(reader resourcewatermark.Reader) {
+	r.mu.Lock()
+	r.resourceWatermarks = reader
+	managers := make([]*ShardViewManager, 0, len(r.shards))
+	for _, manager := range r.shards {
+		managers = append(managers, manager)
+	}
+	r.mu.Unlock()
+	for _, manager := range managers {
+		manager.mu.Lock()
+		manager.resourceWatermarks = reader
+		manager.mu.Unlock()
 	}
 }

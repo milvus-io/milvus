@@ -194,7 +194,7 @@ func TestSegmentResourceCloseWaitsForDetachedQueryHandles(t *testing.T) {
 		f.manager.Close()
 		rejected := make(chan struct{})
 		next := f.request(2, 1, 1)
-		next.OnUnrecoverable = func() { close(rejected) }
+		next.OnUnrecoverable = func(...*viewpb.SegmentPerparingFailure) { close(rejected) }
 		bind := mockey.Mock((*fakeTransformLogBuffer).Bind).Return(nil, nil).Build()
 		f.manager.Acquire(next)
 		awaitShutdown(t, rejected)

@@ -77,3 +77,18 @@ func (c *DefaultViewSyncClient) OpenSyncStream(ctx context.Context, node qviews.
 }
 
 func (c *DefaultViewSyncClient) Close() {}
+
+func (c *DefaultViewSyncClient) QueryNodes(ctx context.Context) ([]qviews.QueryNode, error) {
+	if c.queryNodes == nil {
+		return nil, nil
+	}
+	nodes, err := c.queryNodes.GetAllQueryNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]qviews.QueryNode, 0, len(nodes))
+	for id := range nodes {
+		result = append(result, qviews.QueryNode{ID: id})
+	}
+	return result, nil
+}

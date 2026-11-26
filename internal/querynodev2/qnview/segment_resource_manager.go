@@ -68,11 +68,13 @@ type segmentBinding struct {
 	partitionID int64
 	manifest    int64
 	// Zero-manifest requirements validate fresh metadata before reusing a read.
-	snapshot     *SegmentLoadInfoSnapshot
-	prepared     *preparedSegmentRead
-	reported     bool
-	retryAfter   time.Time
-	retryBackoff *backoff.ExponentialBackOff
+	snapshot              *SegmentLoadInfoSnapshot
+	prepared              *preparedSegmentRead
+	reported              bool
+	retryAfter            time.Time
+	retryBackoff          *backoff.ExponentialBackOff
+	capacityRejectedSince time.Time
+	capacityFirstRejected time.Time
 }
 
 type preparedSegmentRead struct {
@@ -245,7 +247,7 @@ func waitResourceRetry(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-func (m *SegmentResourceManager) failView(v *viewResources, err error) {
+func (m *SegmentResourceManager) failView(v *viewResources, err error, failures ...*viewpb.SegmentPerparingFailure) {
 	m.mu.Lock()
 	notify := !v.failed && !v.released
 	v.failed = true
@@ -258,7 +260,7 @@ func (m *SegmentResourceManager) failView(v *viewResources, err error) {
 	if notify {
 		mlog.Warn(v.ctx, "query view resource preparation failed", mlog.FieldCollectionID(v.req.Meta.GetCollectionId()), mlog.Err(err))
 		if v.req.OnUnrecoverable != nil {
-			v.req.OnUnrecoverable()
+			v.req.OnUnrecoverable(failures...)
 		}
 	}
 }
@@ -555,8 +557,16 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		return !ok
 	})
 	if m.estimator != nil {
-		reservation, err := m.estimator.Reserve(ctx, info, collection)
+		reservation, competing, err := m.estimator.Reserve(ctx, info, collection)
+		m.mu.Lock()
+		replan := b.reservationNeedsReplanLocked(time.Now(), competing, err)
+		m.mu.Unlock()
 		if err != nil {
+			if replan && ctx.Err() == nil && b.view.ctx.Err() == nil {
+				m.failView(b.view, err, &viewpb.SegmentPerparingFailure{
+					SegmentId: r.id, Reason: reservationFailureReason(err),
+				})
+			}
 			return nil, err
 		}
 		if reservation != nil {

@@ -67,6 +67,7 @@ func preferredFanout(previous, nodes, segments int, rows int64, cfg *BalanceConf
 }
 
 type allocationContext struct {
+	capacity                                     *capacityPlacement
 	opened                                       int
 	config                                       *BalanceConfig
 	nodes                                        []int64
@@ -260,7 +261,12 @@ func (ctx *allocationContext) optimize(entries []*SegmentDataView, cursor *searc
 		} else {
 			segments = entries[group-len(groups) : group-len(groups)+1]
 		}
-		gain, global := ctx.evaluate(segments, destination)
+		risk, allowed := ctx.capacityCost(segments, destination)
+		gain, global := -math.MaxFloat64, 0.0
+		if allowed {
+			gain, global = ctx.evaluate(segments, destination)
+			gain -= risk
+		}
 		if global >= -scoreEpsilon && gain > ctx.config.MinScoreGain {
 			ctx.assign(segments, destination)
 		}

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/resourcewatermark"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -12,11 +13,12 @@ import (
 // DefaultBalancePolicy retains target layouts across batches. Actual facts and
 // row predictions remain in the cache and call-local planning context respectively.
 type DefaultBalancePolicy struct {
-	feedback ViewFeedbackReader
-	mu       sync.Mutex
-	layouts  layoutManager
-	fanouts  map[qviews.ShardID]int
-	search   map[qviews.ShardID]*searchCursor
+	resourceWatermarks resourcewatermark.Reader
+	feedback           ViewFeedbackReader
+	mu                 sync.Mutex
+	layouts            layoutManager
+	fanouts            map[qviews.ShardID]int
+	search             map[qviews.ShardID]*searchCursor
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
@@ -47,6 +49,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 	snap := newPlanningContext(reader)
 	snap.feedback = p.feedback
+	snap.resourceWatermarks = p.resourceWatermarks
 	dirty = p.layouts.prepare(snap, dirty)
 	if p.fanouts == nil {
 		p.fanouts = make(map[qviews.ShardID]int)

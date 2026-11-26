@@ -126,3 +126,15 @@ type ViewSyncClient interface {
 type ViewFeedbackHandler interface {
 	OnViewFeedback(qviews.ViewFeedbackWindow)
 }
+
+// ResourceWatermarksHandler creates a stream-scoped receiver. nil reports
+// invalidate it on disconnect. Implementations must not trigger balancing.
+type ResourceWatermarksHandler interface {
+	Start(node int64) func(*viewpb.NodeResourceWatermarks)
+}
+
+type SyncerOption func(*reliableSyncer)
+
+func WithResourceWatermarks(handler ResourceWatermarksHandler) SyncerOption {
+	return func(s *reliableSyncer) { s.resourceWatermarks = handler }
+}

@@ -95,8 +95,8 @@ func (s *qnShardView) applyOneLocked(av *handler.ApplyView) {
 				OnReady: func(readySegments map[int64][]int64) {
 					s.notifySegmentsReady(key.QueryViewVersion, readySegments)
 				},
-				OnUnrecoverable: func() {
-					s.notifyUnrecoverable(key.QueryViewVersion)
+				OnUnrecoverable: func(failures ...*viewpb.SegmentPerparingFailure) {
+					s.notifyUnrecoverable(key.QueryViewVersion, failures...)
 				},
 			})
 		case qviews.QueryViewStateDropped:
@@ -160,7 +160,7 @@ func (s *qnShardView) notifySegmentsReady(version qviews.QueryViewVersion, ready
 
 // notifyUnrecoverable is called by SegmentManager callback when a fatal error
 // occurs during segment loading.
-func (s *qnShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
+func (s *qnShardView) notifyUnrecoverable(version qviews.QueryViewVersion, failures ...*viewpb.SegmentPerparingFailure) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -171,7 +171,7 @@ func (s *qnShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
 
 	key := entry.View.QueryViewKey()
 	before := entry.sm.State()
-	entry.sm.OnUnrecoverable()
+	entry.sm.OnUnrecoverable(failures...)
 	qvobserve.Observe(context.TODO(), qvobserve.QueryNodeSegmentUnrecoverableEvent{
 		ViewStateTransition: qvobserve.ViewStateTransition{
 			CollectionID: collectionIDForEntry(entry),
