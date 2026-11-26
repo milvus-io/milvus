@@ -60,6 +60,8 @@ T_switch 不是 S 的最后一条本地控制消息。S 此后仍可能接收本
 
 ### 3.4 读拓扑缓存的权威和身份
 
+尚未发生 split 的集合继续复用 master 的零身份读路径，此时 GetQueryViewLoadInfo 不承诺返回持久化的 g0 publication。请求观察到 split 后，使用完整已发布读身份；g1 尚未就绪时等待或明确失败，不把缺失发布当作空分片集合。
+
 QueryCoord 继续负责本集群 serving generation 的发布。Proxy 缓存该发布结果，RootCoord 负责逻辑写路由及谱系。g1/g2 的可服务状态绑定本集群副本、加载范围和 schema，复制接收端使用自己的发布结果。
 
 缓存按本地集群和 collection ID 隔离。缓存项包含加载配置版本、读 schema 版本、shard-set epoch、完整服务分片列表和谱系，作为不可变对象整体替换。复用现有 GetQueryViewLoadInfo 的 load version 和服务分片信息，并在同一发布快照中补齐读 schema 身份。本轮已增加持久 `ServingGeneration`，`GetQueryViewLoadInfo` 的同一快照返回 load/schema/epoch/shards；`GetQueryPlan` 携带 load/schema 身份，SN 在新计划准入时精确匹配。Release 后再次 Load 即使 shard-set epoch 相同，也必须通过加载版本区分。恢复和缓存回填使用精确版本身份，避免迟到响应覆盖当前发布。
