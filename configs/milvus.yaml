@@ -1044,7 +1044,7 @@ grpc:
 
 # Configure external tls.
 tls:
-  allowedPath: "" # Base for request-selected TLS files (gRPC tokenizer); empty uses localStorage.path/tls. Keep separate from dictionary/resource sources. Files are limited to 1 MiB; restart required.
+  allowedPath:  # Base directory for request-selected TLS files, currently used by the gRPC tokenizer. Empty uses localStorage.path/tls. Must be separate from dictionary and file-resource source directories. Restart required.
   serverPemPath: configs/cert/server.pem
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
