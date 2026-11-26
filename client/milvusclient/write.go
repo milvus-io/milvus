@@ -18,10 +18,10 @@ package milvusclient
 
 import (
 	"context"
-	"errors"
 	"math"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
