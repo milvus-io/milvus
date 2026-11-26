@@ -39,7 +39,11 @@ RunLocalFileIOAsync(std::function<void()> operation,
         folly::CancellationToken{},
         folly::coro::co_withExecutor(
             ResolveAsyncLoadExecutor(
-                LocalFileIOPool::GetInstance().GetExecutor(), priority),
+                LocalFileIOPool::GetInstance().GetExecutor(),
+                ResolveAsyncLoadPriority(
+                    co_await folly::coro::co_current_executor, priority),
+                GetAsyncLoadSequence(
+                    co_await folly::coro::co_current_executor)),
             run()));
 }
 namespace {

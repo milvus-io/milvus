@@ -92,14 +92,6 @@ class WindowFailureState {
     folly::CancellationSource cancellation_source_;
 };
 
-// Maps load priority to the load admission class.
-[[nodiscard]] constexpr storage::LoadAdmissionPriority
-AdmissionPriority(const milvus::proto::common::LoadPriority priority) noexcept {
-    return priority == milvus::proto::common::LoadPriority::LOW
-               ? storage::LoadAdmissionPriority::Low
-               : storage::LoadAdmissionPriority::High;
-}
-
 // Throws FollyCancel when a pipeline phase observes cancellation.
 void
 CheckCancellationToken(const folly::CancellationToken& cancellation_token,
@@ -214,8 +206,12 @@ LoadWindowAsync(const int64_t segment_id,
         }
 
         co_await folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor(std::move(finalization_executor),
-                                              load_priority),
+            storage::ResolveAsyncLoadExecutor(
+                std::move(finalization_executor),
+                storage::ResolveAsyncLoadPriority(
+                    co_await folly::coro::co_current_executor, load_priority),
+                storage::GetAsyncLoadSequence(
+                    co_await folly::coro::co_current_executor)),
             FinalizeWindowAsync(segment_id,
                                 std::move(window),
                                 std::move(consume_cell),
@@ -274,19 +270,21 @@ ReadCellsAsyncImpl(
     auto windows = BuildAsyncReadWindows(cells, effective_read_window_bytes);
     auto& admission = storage::LoadAdmissionController::GetInstance();
     const auto* const priority_name =
-        admission_priority == storage::LoadAdmissionPriority::High ? "high"
-                                                                   : "low";
+        admission_priority == storage::LoadAdmissionPriority::Urgent ? "urgent"
+        : admission_priority == storage::LoadAdmissionPriority::High ? "high"
+                                                                     : "low";
     LOG_INFO(
         "[StorageV3] async load pipeline: segment {} loads {} cells in {} "
         "windows (read_window={}MB, budget_capacity={}MB, slot_capacity={}, "
-        "priority={})",
+        "priority={}, sequence_id={})",
         segment_id,
         cells.size(),
         windows.size(),
         effective_read_window_bytes >> 20,
         admission.CapacityBytes() >> 20,
         admission.CapacitySlots(),
-        priority_name);
+        priority_name,
+        storage::GetAsyncLoadSequence(work_executor.get()));
     const auto shared_consumer =
         std::make_shared<CellReadCallback>(std::move(consume_cell));
     const auto window_failure_state = std::make_shared<WindowFailureState>();
@@ -307,10 +305,11 @@ ReadCellsAsyncImpl(
                     windows[i].budget_bytes,
                     priority_name);
             }
-            auto lease =
-                co_await admission.AcquireAsync({windows[i].budget_bytes, 1},
-                                                admission_priority,
-                                                window_cancellation_token);
+            auto lease = co_await admission.AcquireAsync(
+                {windows[i].budget_bytes, 1},
+                admission_priority,
+                window_cancellation_token,
+                storage::GetAsyncLoadSequence(work_executor.get()));
             if (debug_logging_enabled) {
                 const auto admission_wait_us =
                     std::chrono::duration_cast<std::chrono::microseconds>(
@@ -447,12 +446,14 @@ ReadCellsAsync(const milvus::OpContext* ctx,
                CellReadCallback consume_cell,
                AsyncLoadPipelineOptions options) {
     try {
-        auto executor_keep_alive = storage::ResolveAsyncLoadExecutor(
-            std::move(options.executor), options.load_priority);
+        auto executor_keep_alive =
+            storage::ResolveAsyncLoadExecutor(std::move(options.executor),
+                                              options.load_priority,
+                                              ctx ? ctx->sequence_id : 0);
         auto finalization_executor_provider =
             std::move(options.finalization_executor_provider);
-        const auto admission_priority =
-            AdmissionPriority(options.load_priority);
+        const auto admission_priority = storage::ResolveAsyncLoadPriority(
+            executor_keep_alive.get(), options.load_priority);
         const auto context_cancellation_token =
             ctx ? ctx->cancellation_token : folly::CancellationToken{};
 

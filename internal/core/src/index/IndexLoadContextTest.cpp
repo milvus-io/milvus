@@ -28,6 +28,7 @@ TEST(IndexLoadContextTest, PriorityOverridePreservesCallerStateAndAccounting) {
         parent.runtime_load_priority = runtime;
         {
             IndexLoadContext load(&parent, 1);
+            EXPECT_EQ(load.ctx.sequence_id, parent.sequence_id);
             EXPECT_EQ(load.ctx.runtime_load_priority, runtime.value_or(1));
             EXPECT_EQ(load.ctx.coload_fields, parent.coload_fields);
             EXPECT_EQ(load.ctx.pinned_segment_state,
@@ -43,6 +44,7 @@ TEST(IndexLoadContextTest, PriorityOverridePreservesCallerStateAndAccounting) {
     EXPECT_EQ(parent.storage_usage.scanned_cold_bytes, 9);
     EXPECT_EQ(parent.storage_usage.scanned_total_bytes, 15);
     IndexLoadContext warmup(nullptr, 1);
+    EXPECT_GT(warmup.ctx.sequence_id, parent.sequence_id);
     EXPECT_EQ(warmup.ctx.runtime_load_priority, 1);
 }
 

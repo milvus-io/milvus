@@ -68,7 +68,9 @@ RunLegacyLoad(LegacyIndexSource& source,
     co_return co_await folly::coro::co_withCancellation(
         token,
         folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor({}, priority), run()));
+            storage::ResolveAsyncLoadExecutor(
+                {}, priority, context ? context->sequence_id : 0),
+            run()));
 }
 
 }  // namespace milvus::index

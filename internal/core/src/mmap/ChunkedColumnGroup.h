@@ -60,8 +60,10 @@ class ChunkedColumnGroup {
         std::function<std::unique_ptr<Translator<GroupChunk>>(OpContext*)>;
 
     explicit ChunkedColumnGroup(
-        std::unique_ptr<Translator<GroupChunk>> translator)
-        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        std::unique_ptr<Translator<GroupChunk>> translator,
+        OpContext* op_ctx = nullptr)
+        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator),
+                                                       op_ctx)) {
         num_chunks_ = slot_->num_cells();
         auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
             slot_->meta());

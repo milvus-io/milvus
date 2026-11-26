@@ -288,18 +288,22 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
         // Capture the exact metadata before scheduling. The CCollection handle
         // may be released once its Go owner has joined this operation; retained
         // PublishedStates continue owning the layout independently.
+        const auto sequence_id = milvus::OpContext{}.sequence_id;
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [c_segment, info = std::move(info), layout = std::move(layout)](
-                folly::CancellationToken token) -> bool* {
+            [c_segment,
+             sequence_id,
+             info = std::move(info),
+             layout =
+                 std::move(layout)](folly::CancellationToken token) -> bool* {
                 auto* segment =
                     dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
                         static_cast<milvus::segcore::SegmentInterface*>(
                             c_segment));
                 AssertInfo(segment != nullptr,
                            "borrowed schema reopen requires a sealed segment");
-                milvus::OpContext ctx(token);
+                milvus::OpContext ctx(token, sequence_id);
                 segment->Reopen(&ctx, info, layout);
                 return nullptr;
             },
@@ -339,15 +343,17 @@ AsyncReopenSegment(CTraceContext c_trace,
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
+        const auto sequence_id = milvus::OpContext{}.sequence_id;
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
             [c_trace,
              segment,
+             sequence_id,
              load_info = std::move(load_info),
              schema = std::move(schema)](
                 folly::CancellationToken cancel_token) -> bool* {
-                milvus::OpContext op_ctx(cancel_token);
+                milvus::OpContext op_ctx(cancel_token, sequence_id);
                 segment->Reopen(&op_ctx, load_info, schema);
                 return nullptr;
             },
@@ -441,14 +447,16 @@ CFuture*
 AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
+    const auto sequence_id = milvus::OpContext{}.sequence_id;
     auto future = milvus::futures::Future<bool>::async(
         milvus::futures::getLoadCPUExecutor(),
         milvus::futures::ExecutePriority::NORMAL,
-        [c_trace, segment](folly::CancellationToken cancel_token) -> bool* {
+        [c_trace, segment, sequence_id](
+            folly::CancellationToken cancel_token) -> bool* {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
 
-            milvus::OpContext op_ctx(cancel_token);
+            milvus::OpContext op_ctx(cancel_token, sequence_id);
             segment->Load(trace_ctx, &op_ctx);
 
             return nullptr;

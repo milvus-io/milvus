@@ -4910,6 +4910,7 @@ type queryNodeConfig struct {
 	LoadAdmissionSlots               ParamItem `refreshable:"true"`
 	LoadFieldDataCellTargetSizeBytes ParamItem `refreshable:"true"`
 	LoadFieldDataReadWindowSizeBytes ParamItem `refreshable:"true"`
+	LoadSchedulingWeights            ParamItem `refreshable:"false"`
 
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
@@ -6428,6 +6429,32 @@ user-task-polling:
 		},
 	}
 	p.LoadExecutorThreads.Init(base.mgr)
+
+	p.LoadSchedulingWeights = ParamItem{
+		Key:          "queryNode.segcore.load.schedulingWeights",
+		FallbackKeys: []string{"queryNode.segcore.storageV2.asyncLoadSchedulingWeights"},
+		Version:      "3.0.1",
+		DefaultValue: "32,8,1",
+		Doc:          "POC CPU task-count and admission request-count weights in URGENT,HIGH,LOW order. Three positive int32 values; restart QueryNode to apply. Does not assign Search to URGENT.",
+		Export:       true,
+		Formatter: func(v string) string {
+			parts := strings.Split(v, ",")
+			valid := len(parts) == 3
+			for i, part := range parts {
+				parts[i] = strings.TrimSpace(part)
+				n, err := strconv.ParseInt(parts[i], 10, 32)
+				if err != nil || n <= 0 {
+					valid = false
+				}
+			}
+			if !valid {
+				mlog.Warn(context.TODO(), "Invalid async load scheduling weights, using 32,8,1", mlog.String("configured", v))
+				return "32,8,1"
+			}
+			return strings.Join(parts, ",")
+		},
+	}
+	p.LoadSchedulingWeights.Init(base.mgr)
 
 	p.LoadFieldDataReadWindowSizeBytes = ParamItem{
 		Key:          "queryNode.segcore.load.fieldData.readWindowSizeBytes",
