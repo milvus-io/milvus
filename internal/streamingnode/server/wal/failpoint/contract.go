@@ -21,7 +21,6 @@ package failpoint
 const (
 	BeforeIdempotencyAppend = "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/beforeIdempotencyAppend"
 	AfterIdempotencyAppend  = "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/afterIdempotencyAppend"
-	AfterBackendAppend      = "github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/afterBackendAppend"
 )
 
 // Config selects one request and, optionally, one shard. Each point fires once
@@ -31,7 +30,7 @@ type Config struct {
 	Key         string `json:"key"`
 	VChannel    string `json:"vchannel"`
 	MessageType string `json:"message_type"`
-	Action      string `json:"action"` // observe, pause, or error
+	Action      string `json:"action"` // observe or pause
 	Directory   string `json:"directory"`
 }
 

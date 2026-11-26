@@ -73,6 +73,11 @@ const (
 	RoleConfigDBName     = "db_name"
 	RoleConfigPrivilege  = "privilege"
 
+	// PreserveFieldIdsKey is a CreateCollection request-only directive (introduced
+	// in v3.0.0 via #44361) instructing RootCoord to retain the source field IDs
+	// from the request schema. It is stripped before WAL/metadata persistence and
+	// filtered on DescribeCollection for pre-existing v3.0.0–v3.0.6 collections;
+	// see stripCreateOnlyProperties in internal/rootcoord/preserve_field_ids.go.
 	PreserveFieldIdsKey = "preserve_field_ids"
 
 	// PrivilegeExpr is deprecated: the /expr endpoint it guarded has been removed.

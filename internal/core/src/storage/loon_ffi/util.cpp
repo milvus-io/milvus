@@ -15,8 +15,10 @@
 #include <mutex>
 #include <regex>
 #include <cctype>
+#include <charconv>
 #include <arpa/inet.h>
 #include "arrow/util/uri.h"
+#include "arrow/util/string.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
@@ -719,13 +721,6 @@ StripURIScheme(const std::string& addr) {
     return (pos != std::string::npos) ? addr.substr(pos + 3) : addr;
 }
 
-// IsCloudEndpointHost returns true when `host` matches a known cloud provider
-// domain family. Used to identify Milvus-form URIs whose host is an endpoint
-// variant (global / accelerate / dual-stack / VPC / FIPS / sovereign) that
-// DeriveEndpoint does not produce verbatim. When the host belongs to a cloud
-// family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
-// region) equals the host string. Keep list in sync with Go
-// externalspec.IsCloudEndpointHost.
 // IsAzureStorageAuthority returns true for the bare Azure Storage
 // authorities that azure://<authority>/<container>/<blob> names. An Azure
 // container name cannot contain a dot, so such a host is never a container.
@@ -739,43 +734,32 @@ IsAzureStorageAuthority(const std::string& host) {
            h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
 }
 
-static bool
-IsCloudEndpointHost(const std::string& host) {
-    std::string h = host;
-    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
-        return std::tolower(c);
-    });
-    auto ends_with = [&](const std::string& suffix) {
-        return h.size() >= suffix.size() &&
-               h.compare(h.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
-    // AWS (global, regional, accelerate, dualstack, FIPS, VPC, China).
-    if (ends_with(".amazonaws.com") || ends_with(".amazonaws.com.cn")) {
-        return true;
+// Keep the endpoint domain families in sync with Go externalspec.IsCloudEndpointHost.
+static std::string_view
+CloudEndpointProvider(const std::string& host) {
+    const auto h = arrow::internal::AsciiToLower(host);
+    if (h.ends_with(".amazonaws.com") || h.ends_with(".amazonaws.com.cn")) {
+        return "aws";
     }
-    // GCP Cloud Storage.
-    if (ends_with(".googleapis.com")) {
-        return true;
+    if (h.ends_with(".googleapis.com")) {
+        return "gcp";
     }
-    // Aliyun OSS (public, internal, accelerate, VPC).
-    if (ends_with(".aliyuncs.com")) {
-        return true;
+    if (h.ends_with(".aliyuncs.com")) {
+        return "aliyun";
     }
-    // Tencent Cloud COS.
-    if (ends_with(".myqcloud.com")) {
-        return true;
+    if (h.ends_with(".myqcloud.com")) {
+        return "tencent";
     }
-    // Huawei Cloud OBS.
-    if (ends_with(".myhuaweicloud.com")) {
-        return true;
+    if (h.ends_with(".myhuaweicloud.com")) {
+        return "huawei";
     }
-    // Azure Blob Storage (public, China, US Gov, Germany).
-    if (ends_with(".core.windows.net") || ends_with(".core.chinacloudapi.cn") ||
-        ends_with(".core.usgovcloudapi.net") ||
-        ends_with(".core.cloudapi.de")) {
-        return true;
+    if (h.ends_with(".core.windows.net") ||
+        h.ends_with(".core.chinacloudapi.cn") ||
+        h.ends_with(".core.usgovcloudapi.net") ||
+        h.ends_with(".core.cloudapi.de")) {
+        return "azure";
     }
-    return false;
+    return {};
 }
 
 static arrow::Status
@@ -791,24 +775,16 @@ InjectExternalSpecProperties(
     // External origin filesystems retain the same SDK backend as internal I/O.
     properties[extfs_prefix + "s3.use_crt"] = std::string("false");
 
-    // Layer 0: zero-init bool fields only (milvus-storage rejects empty
-    // strings on enum-constrained keys like cloud_provider).
-    //
-    // "anonymous" is intentionally skipped: milvus-storage's fs.* property
-    // registry does not yet declare PROPERTY_FS_ANONYMOUS, so any SetValue
-    // on "extfs.<cid>.anonymous" hits strict "undefined key" in
-    // ExtractExternalFsProperties (iceberg explore path). Skipping the
-    // default zero-init keeps the slot absent — equivalent to anonymous=false
-    // — so the default credential path stays unaffected. Once the upstream
-    // registry adds the key, this skip can be removed without further
-    // changes (and user-supplied anonymous=true via Layer 2 will start
-    // working automatically — we deliberately do NOT drop it on Layer 2 so
-    // the future fix is a one-line revert here).
+    // Only set registered boolean defaults. Storage has no fs.anonymous key.
     for (const auto& [name, is_bool] : kExtfsFields) {
         if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
     }
+
+    // Absent keys default to minioadmin in storage and conflict with GCP tokens.
+    properties[extfs_prefix + "access_key_id"] = std::string();
+    properties[extfs_prefix + "access_key_value"] = std::string();
 
     // IOPS limiting is an External Table read policy, not an attribute of the
     // internal filesystem. Keep it out of fs.* and stamp it only into the
@@ -863,6 +839,7 @@ InjectExternalSpecProperties(
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
+    rest = rest.substr(0, rest.find_first_of("?#"));
     auto slash_pos = rest.find('/');
     // No slash after authority (e.g. "s3://mybucket"): entire rest is host,
     // path is empty. Only assert against the pathological "scheme://" case
@@ -912,6 +889,7 @@ InjectExternalSpecProperties(
     std::string spec_cloud_provider;
     std::string spec_region;
     std::string spec_endpoint_url;
+    std::optional<std::string> spec_bucket_name;
     bool has_spec_endpoint_url = false;
     std::string broker_endpoint;
     bool legacy_broker = false;
@@ -935,11 +913,23 @@ InjectExternalSpecProperties(
                                 collection_id);
                             continue;
                         }
-                        auto val =
-                            std::string(field.value().get_string().value());
+                        // Match Go's map[string]string: null is an empty string.
+                        auto json_value = field.value();
+                        std::string_view text;
+                        if (!json_value.is_null().value() &&
+                            json_value.get_string().get(text) !=
+                                simdjson::SUCCESS) {
+                            return arrow::Status::Invalid(
+                                "extfs.", key, " must be a JSON string");
+                        }
+                        auto val = std::string(text);
                         if (key == "endpoint_url") {
                             has_spec_endpoint_url = true;
                             spec_endpoint_url = val;
+                            continue;
+                        }
+                        if (key == "bucket_name") {
+                            spec_bucket_name = std::move(val);
                             continue;
                         }
                         if (val.empty()) {
@@ -957,6 +947,12 @@ InjectExternalSpecProperties(
                             broker_endpoint = std::move(endpoint);
                             legacy_broker = legacy_broker ||
                                             key == "azure_credential_endpoint";
+                            continue;
+                        }
+                        if (key == "anonymous" && val == "false") {
+                            // Explicit false clears the override. The storage
+                            // property registry has no fs.anonymous entry.
+                            properties.erase(extfs_prefix + key);
                             continue;
                         }
                         if (key == "cloud_provider") {
@@ -978,12 +974,10 @@ InjectExternalSpecProperties(
                             (extfs_prefix + key).c_str(),
                             val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
-                        LOG_WARN(
-                            "extfs field parse failed, skipping "
-                            "(collection_id={}): {}",
-                            collection_id,
-                            per_field.what());
-                        continue;
+                        // A field that cannot be read would leave the spec
+                        // partially applied.
+                        return arrow::Status::Invalid(
+                            "extfs field parse failed: ", per_field.what());
                     }
                 }
             }
@@ -1000,6 +994,32 @@ InjectExternalSpecProperties(
         }
     }
 
+    const auto value = [&](const char* key) {
+        return PropertyValueAsString(properties, (extfs_prefix + key).c_str())
+            .value_or("");
+    };
+    const bool use_iam =
+        arrow::internal::AsciiEqualsCaseInsensitive(value("use_iam"), "true");
+    const bool has_target = !value("gcp_target_service_account").empty();
+    const auto validate_token_lifetime = [&](const char* mode) {
+        const auto lifetime = value("load_frequency");
+        if (lifetime.empty()) {
+            return arrow::Status::OK();
+        }
+        uint64_t seconds = 0;
+        const auto* end = lifetime.data() + lifetime.size();
+        const auto [ptr, error] =
+            std::from_chars(lifetime.data(), end, seconds);
+        if (error != std::errc{} || ptr != end) {
+            return arrow::Status::Invalid(mode,
+                                          " has an invalid token lifetime");
+        }
+        if (seconds < 900 || seconds > 3600) {
+            return arrow::Status::Invalid(
+                mode, " requires load_frequency in [900, 3600]");
+        }
+        return arrow::Status::OK();
+    };
     if (!broker_endpoint.empty()) {
         if (legacy_broker && spec_cloud_provider != "azure") {
             return arrow::Status::Invalid(
@@ -1007,33 +1027,70 @@ InjectExternalSpecProperties(
         }
         if (spec_cloud_provider != "aws" && spec_cloud_provider != "aliyun" &&
             spec_cloud_provider != "tencent" &&
-            spec_cloud_provider != "azure") {
+            spec_cloud_provider != "azure" && spec_cloud_provider != "gcp") {
             return arrow::Status::Invalid(
                 "Unsupported credential broker cloud provider");
         }
-        const auto value = [&](const char* key) {
-            return PropertyValueAsString(properties,
-                                         (extfs_prefix + key).c_str())
-                .value_or("");
-        };
-        if (spec_cloud_provider == "azure" && value("use_iam") == "true") {
-            return arrow::Status::Invalid(
-                "Azure SAS broker cannot use native IAM");
-        }
-        if (spec_cloud_provider != "azure" && value("use_iam") == "true") {
-            for (const auto* key : {"role_arn",
-                                    "external_id",
-                                    "session_name",
-                                    "access_key_id",
-                                    "access_key_value",
-                                    "gcp_target_service_account",
-                                    "azure_client_id",
-                                    "azure_tenant_id"}) {
-                if (!value(key).empty()) {
-                    return arrow::Status::Invalid(
-                        "Inactive credential field in broker IAM: ", key);
+        const auto reject_fields =
+            [&](const char* mode, std::initializer_list<const char*> keys) {
+                for (const auto* key : keys) {
+                    if (!value(key).empty()) {
+                        return arrow::Status::Invalid(
+                            "Inactive credential field in ", mode, ": ", key);
+                    }
                 }
+                return arrow::Status::OK();
+            };
+        if (spec_cloud_provider == "azure") {
+            if (value("access_key_id").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires access_key_id");
             }
+            if (use_iam) {
+                // Existing Azure target specs may carry unused S3 session fields.
+                ARROW_RETURN_NOT_OK(reject_fields("Azure broker IAM",
+                                                  {"azure_client_id",
+                                                   "azure_tenant_id",
+                                                   "external_id",
+                                                   "session_name"}));
+                ARROW_RETURN_NOT_OK(
+                    validate_token_lifetime("Azure broker IAM"));
+            } else if (value("azure_client_id").empty() ||
+                       value("azure_tenant_id").empty() ||
+                       value("region").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires azure_client_id, azure_tenant_id "
+                    "and region without use_iam=true");
+            }
+            ARROW_RETURN_NOT_OK(reject_fields("Azure broker",
+                                              {"access_key_value",
+                                               "role_arn",
+                                               "gcp_target_service_account"}));
+            if (value("anonymous") == "true") {
+                return arrow::Status::Invalid(
+                    "anonymous conflicts with Azure broker");
+            }
+        } else if (spec_cloud_provider == "gcp" || use_iam) {
+            const bool is_gcp = spec_cloud_provider == "gcp";
+            if (is_gcp && use_iam == has_target) {
+                return arrow::Status::Invalid(
+                    "GCP broker requires exactly one of use_iam=true and "
+                    "gcp_target_service_account");
+            }
+            if (!is_gcp && has_target) {
+                return arrow::Status::Invalid(
+                    "Inactive credential field in broker IAM: "
+                    "gcp_target_service_account");
+            }
+            ARROW_RETURN_NOT_OK(
+                reject_fields(is_gcp ? "GCP broker" : "broker IAM",
+                              {"role_arn",
+                               "external_id",
+                               "session_name",
+                               "access_key_id",
+                               "access_key_value",
+                               "azure_client_id",
+                               "azure_tenant_id"}));
         }
         ARROW_RETURN_NOT_OK(CheckCredentialBrokerEndpoint(broker_endpoint));
         properties.erase(extfs_prefix + "azure_credential_endpoint");
@@ -1051,6 +1108,11 @@ InjectExternalSpecProperties(
     // The Go API boundary validates the full URL contract. The checks here are
     // defense in depth for corrupted metadata or callers that bypass Go.
     if (has_spec_endpoint_url) {
+        if (spec_bucket_name.has_value()) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name cannot be set with extfs.endpoint_url; "
+                "the bucket comes from external_source");
+        }
         std::string effective_endpoint = spec_endpoint_url;
         if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
             effective_endpoint.pop_back();
@@ -1130,11 +1192,54 @@ InjectExternalSpecProperties(
                        spec_cp.end(),
                        spec_cp.begin(),
                        [](unsigned char c) { return std::tolower(c); });
+        const auto colon = host.find(':');
+        const auto provider = CloudEndpointProvider(host.substr(0, colon));
         bool uri_host_is_cloud_endpoint =
-            IsCloudEndpointHost(host) ||
+            (colon == std::string::npos && !provider.empty()) ||
             (spec_cp == "azure" && IsAzureStorageAuthority(host));
-        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-            StripURIScheme(derived) != host) {
+        if (colon != std::string::npos && provider == spec_cp &&
+            (provider == "aws" || provider == "aliyun" ||
+             provider == "tencent" ||
+             (provider == "gcp" &&
+              (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
+               arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))))) {
+            // Classify the DNS hostname, but keep the complete address for
+            // matching the storage URI and connecting to its explicit port.
+            arrow::util::Uri endpoint;
+            if (!endpoint.Parse("https://" + host).ok() ||
+                endpoint.port() <= 0 || endpoint.port() > 65535 ||
+                !endpoint.username().empty() || !endpoint.password().empty()) {
+                return arrow::Status::Invalid(
+                    "Cloud endpoint requires a port between 1 and 65535");
+            }
+            uri_host_is_cloud_endpoint = true;
+        }
+        const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
+                                    !derived.empty() &&
+                                    StripURIScheme(derived) != host;
+        // StorageUri::Parse decodes the path before splitting out the bucket.
+        auto source_bucket =
+            bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
+        source_bucket = source_bucket.substr(0, source_bucket.find('/'));
+        if (spec_bucket_name && !spec_bucket_name->empty() &&
+            *spec_bucket_name != source_bucket) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name must match the bucket in "
+                "external_source");
+        }
+        if (!bucket_in_host && !path_bucket.empty()) {
+            if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
+                path_bucket != source_bucket) {
+                return arrow::Status::Invalid(
+                    "Azure broker IAM requires an unescaped source "
+                    "container");
+            }
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                source_bucket.c_str());
+        }
+        if (bucket_in_host) {
             milvus_storage::api::SetValue(
                 properties,
                 (extfs_prefix + "bucket_name").c_str(),
@@ -1150,29 +1255,42 @@ InjectExternalSpecProperties(
     // `options.blob_storage_authority = ".blob." + config_.address`, so the
     // address must be a bare authority (e.g. "core.windows.net"); prepending
     // a scheme would break the concatenation.
-    auto final_properties =
-        std::make_shared<const milvus_storage::api::Properties>(properties);
-    auto final_cp = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "cloud_provider").c_str());
-    bool is_azure = final_cp.ok() && *final_cp == "azure";
-    auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "use_ssl").c_str());
-    auto final_address = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "address").c_str());
-    if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
-        final_address->find("://") == std::string::npos) {
-        const char* scheme =
-            (*final_use_ssl == "true") ? "https://" : "http://";
+    auto final_address = value("address");
+    const bool use_ssl = value("use_ssl") == "true";
+    if (value("cloud_provider") != "azure" && !final_address.empty() &&
+        final_address.find("://") == std::string::npos) {
+        final_address = (use_ssl ? "https://" : "http://") + final_address;
         milvus_storage::api::SetValue(properties,
                                       (extfs_prefix + "address").c_str(),
-                                      (scheme + *final_address).c_str());
+                                      final_address.c_str());
     }
 
-    // External Tables share the filesystem tuning, with an independently
-    // configured mode. Local external filesystems never use Talon.
-    const bool external_is_local =
-        PropertyValueAsString(
-            properties, (extfs_prefix + "storage_type").c_str()) == "local";
+    // Target impersonation and Broker tokens have the same endpoint contract
+    // in Go admission and native readers, including persisted specs. Plain IAM
+    // retains GcpCredentialRegistry's operator-trusted endpoint delivery policy.
+    if (spec_cloud_provider == "gcp" &&
+        (has_target || !broker_endpoint.empty())) {
+        arrow::util::Uri endpoint;
+        ARROW_RETURN_NOT_OK(endpoint.Parse(final_address));
+        const auto hostname = arrow::internal::AsciiToLower(endpoint.host());
+        constexpr std::string_view suffix = ".googleapis.com";
+        if (!use_ssl || endpoint.scheme() != "https" ||
+            hostname.size() <= suffix.size() || !hostname.ends_with(suffix)) {
+            return arrow::Status::Invalid(
+                "GCP Bearer credentials require HTTPS and a *.googleapis.com "
+                "endpoint");
+        }
+        ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
+    }
+
+    // Talon's S3 broker accepts target roles only for AWS. Preserve native
+    // routing for Aliyun and Tencent target roles.
+    const bool native_target_role =
+        !broker_endpoint.empty() &&
+        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent") &&
+        !use_iam;
+    const bool origin_only =
+        native_target_role || value("storage_type") == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
@@ -1185,13 +1303,7 @@ InjectExternalSpecProperties(
                                      : key;
         const auto value = PropertyValueAsString(properties, source_key);
         const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
-        // Keep Broker credential acquisition and refresh on the origin filesystem.
-        if (!broker_endpoint.empty()) {
-            properties.erase(extfs_key);
-            if (std::string_view(key) == PROPERTY_FS_TALON_MODE) {
-                properties[extfs_key] = std::string("0");
-            }
-        } else if (external_is_local) {
+        if (origin_only) {
             properties.erase(extfs_key);
         } else if (value.has_value()) {
             properties[extfs_key] = *value;

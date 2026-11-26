@@ -36,6 +36,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -272,6 +273,7 @@ func TestExecuteDQLRendersOrderedSearchResults(t *testing.T) {
 		},
 	}
 	server := initHTTPServerV2(mock, false)
+	recorder := recordActions(t)
 	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), `{"requests":[
 		{"search":{}},
 		{"search":{"collectionName":"papers","filter":"id > 0","partitionNames":["test"],"data":[[1,0],[0,1]]}},
@@ -296,10 +298,34 @@ func TestExecuteDQLRendersOrderedSearchResults(t *testing.T) {
 	require.Equal(t, merr.Code(merr.ErrServiceRateLimit), body.Data[2].Code)
 	require.NotEmpty(t, body.Data[2].Message)
 	require.Nil(t, body.Data[2].Search)
+	require.Empty(t, recorder.authorizeActions(), "quota refusal must not emit an authorization report")
 	require.Equal(t, merr.Code(merr.ErrCollectionNotFound), body.Data[3].Code)
 	require.NotEmpty(t, body.Data[3].Message)
 	require.Nil(t, body.Data[3].Search)
 	require.Equal(t, []int{2, 1}, checked)
+}
+
+func TestExecuteDQLSearchWithoutVectorField(t *testing.T) {
+	schema, err := metacache.NewSchemaInfo(&schemapb.CollectionSchema{
+		Name:   "papers",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	})
+	require.NoError(t, err)
+	server := initHTTPServerV2(&executeDQLRESTProxy{cache: &executeDQLRESTCache{schema: schema}}, false)
+	response := postJSONBody(server, versionalV2(EntityCategory, ExecuteDQLAction), `{"requests":[
+		{"search":{"collectionName":"papers","data":[[1,0]]}},
+		{"search":{"collectionName":"papers","ids":[1]}}
+	]}`)
+	require.Equal(t, http.StatusOK, response.Code)
+	var body executeDQLRESTResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Zero(t, body.Code)
+	require.Len(t, body.Data, 2)
+	for _, item := range body.Data {
+		require.Equal(t, merr.Code(merr.ErrParameterInvalid), item.Code)
+		require.Contains(t, item.Message, "collection papers has no vector field, search is not supported")
+		require.Nil(t, item.Search)
+	}
 }
 
 func TestExecuteDQLRoutesAndAuthorizesEachDatabase(t *testing.T) {
@@ -388,6 +414,7 @@ func TestExecuteDQLRoutesAndAuthorizesEachDatabase(t *testing.T) {
 			}, nil
 		},
 	})
+	recorder := recordActions(t)
 	post := func(headerDB, bodyDB, items string) executeDQLRESTResponse {
 		t.Helper()
 		parent := metadata.NewIncomingContext(trace.ContextWithSpanContext(t.Context(), span), metadata.Pairs(
@@ -429,6 +456,16 @@ func TestExecuteDQLRoutesAndAuthorizesEachDatabase(t *testing.T) {
 		require.Contains(t, item.Message, "`archive` database")
 		require.Nil(t, item.Search)
 	}
+	reports := recorder.authorizeActions()
+	require.Len(t, reports, 2)
+	for _, report := range reports {
+		caller, ok := report.ctx.Value(hook.GinParamsKey).(*gin.Context)
+		require.True(t, ok)
+		require.Equal(t, username, caller.GetString(ContextUsername))
+		require.Equal(t, versionalV2(EntityCategory, ExecuteDQLAction), caller.Request.URL.Path)
+		require.Equal(t, milvuspb.MilvusService_Search_FullMethodName, report.fullMethod)
+	}
+	require.NotSame(t, reports[0].ctx.Value(hook.GinParamsKey), reports[1].ctx.Value(hook.GinParamsKey))
 	require.ElementsMatch(t, []quotaCharge{
 		{11, map[int64][]int64{101: {201}}, 2},
 		{12, map[int64][]int64{102: {202}}, 1},

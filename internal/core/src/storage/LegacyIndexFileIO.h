@@ -43,6 +43,14 @@ ReadLegacyIndexFile(ChunkManager& chunk_manager,
                     proto::common::LoadPriority priority,
                     folly::CancellationToken token = {});
 
+// Uses synchronous I/O on the supplied caller executor, but suspends for
+// descriptor admission. The input manager and path must outlive the task.
+folly::coro::Task<std::unique_ptr<DataCodec>>
+ReadLegacyIndexFileAsync(ChunkManager& chunk_manager,
+                         const std::string& path,
+                         proto::common::LoadPriority priority,
+                         folly::CancellationToken token = {});
+
 // Opens an exact legacy index object path. Local paths retain ChunkManager semantics;
 // object-store paths use Arrow range I/O when a filesystem is available.
 // Holds one shared load slot through open/size I/O, then releases it.
@@ -83,6 +91,15 @@ InspectLegacyIndexFile(const ChunkManagerPtr& chunk_manager,
                        const std::string& path,
                        proto::common::LoadPriority priority,
                        folly::CancellationToken token = {});
+
+// Await descriptor admission with synchronous range I/O. Run this task on
+// HIGH/LOW; manager, filesystem and path remain borrowed until completion.
+folly::coro::Task<LegacyIndexFileInfo>
+InspectLegacyIndexFileSyncAsync(const ChunkManagerPtr& chunk_manager,
+                                const milvus_storage::ArrowFileSystemPtr& fs,
+                                const std::string& path,
+                                proto::common::LoadPriority priority,
+                                folly::CancellationToken token = {});
 
 // Async has no per-load window. HIGH/LOW retains its 128 MiB batch allowance;
 // whole-object decode buffers can require additional scratch within that batch.

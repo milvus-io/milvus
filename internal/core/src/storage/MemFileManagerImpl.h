@@ -62,6 +62,12 @@ class MemFileManagerImpl : public FileManagerImpl {
                       milvus::proto::common::LoadPriority priority,
                       folly::CancellationToken token = {});
 
+    // Awaits bounded HIGH/LOW batches; issued reads drain on every failure.
+    folly::coro::Task<std::map<std::string, std::unique_ptr<DataCodec>>>
+    LoadIndexToMemoryAsync(const std::vector<std::string>& remote_files,
+                           milvus::proto::common::LoadPriority priority,
+                           folly::CancellationToken token = {});
+
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);
 

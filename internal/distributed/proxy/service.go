@@ -167,10 +167,19 @@ func authenticate(c *gin.Context) {
 		mlog.Warn(c.Request.Context(), "fail to verify apikey", mlog.Err(err))
 	}
 
-	hookutil.GetExtension().ReportAction(c.Request.Context(), nil, &milvuspb.BoolResponse{
+	// The request ends here. Leave behind what the gRPC entry leaves for a
+	// refused request, so the access log and the audit report can show it when
+	// their configuration asks for it: the user name the client claimed, the
+	// returned code and message, and the gin context the audit report reads the
+	// client address and user agent from. No handler runs after the abort, so
+	// the claimed name is never taken for an authenticated identity.
+	if username != "" {
+		c.Set(httpserver.ContextUsername, username)
+	}
+	hookutil.GetExtension().ReportAction(httpserver.ContextWithGin(c.Request.Context(), c), nil, &milvuspb.BoolResponse{
 		Status: merr.Status(merr.ErrNeedAuthenticate),
 	}, nil, c.FullPath(), hookutil.ActionAuthorize)
-	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+	httpserver.HTTPAbortReturn(c, http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
 // registerHTTPServer register the http server, panic when failed

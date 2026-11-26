@@ -318,6 +318,7 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 		if spec.fill != nil {
 			spec.fill(i, ts, values)
 		}
+		pk = values[bumpFxPKField]
 		var pkValue storage.PrimaryKey
 		if spec.varCharPK {
 			pkValue = storage.NewVarCharPrimaryKey(pk.(string))
@@ -340,14 +341,15 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 	written := segments[0]
 
 	segment := &datapb.CompactionSegmentBinlogs{
-		CollectionID:    CollectionID,
-		PartitionID:     PartitionID,
-		SegmentID:       written.GetSegmentID(),
-		FieldBinlogs:    written.GetInsertLogs(),
-		InsertChannel:   "bump_ut_channel",
-		StorageVersion:  written.GetStorageVersion(),
-		Manifest:        written.GetManifest(),
-		CommitTimestamp: spec.commitTs,
+		CollectionID:      CollectionID,
+		PartitionID:       PartitionID,
+		SegmentID:         written.GetSegmentID(),
+		FieldBinlogs:      written.GetInsertLogs(),
+		InsertChannel:     "bump_ut_channel",
+		StorageVersion:    written.GetStorageVersion(),
+		Manifest:          written.GetManifest(),
+		CommitTimestamp:   spec.commitTs,
+		FieldLogicalSizes: written.GetStats().GetFieldLogicalSizes(),
 	}
 
 	// Real V3 deltalog: production recipe from BulkPackWriterV3.writeDelta.
@@ -920,6 +922,12 @@ func TestBumpUTLegacyCoordinatorGetsCompleteManifest(t *testing.T) {
 	}
 	expected := expectedBM25SparseRows(t, fix.targetSchema, fix.targetSchema.GetFunctions()[0], texts)
 	requireSparseRows(t, fix, seg.GetManifest(), 102, len(fix.rows), expected)
+	var payload uint64
+	for _, row := range expected {
+		payload += uint64(len(row))
+	}
+	require.Equal(t, []int64{102}, seg.GetFieldLogicalSizeUpdateIds())
+	require.Equal(t, map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: payload}}, seg.GetStats().GetFieldLogicalSizes().GetFields())
 	stats, err := packed.NewStatsResolver(seg.GetManifest(), fix.cfg).BM25StatsPaths()
 	require.NoError(t, err)
 	require.NotEmpty(t, stats[102])
@@ -1122,6 +1130,13 @@ func TestBumpUTAdditiveMixedColumns(t *testing.T) {
 	verifySegmentData(t, fix.cfg, manifest, readSchema, want)
 	verifyManifestFields(t, fix.cfg, manifest, []int64{nullID, defID, textID}, nil)
 	require.EqualValues(t, 3, seg.GetStats().GetInsertBinlogCount())
+	require.ElementsMatch(t, []int64{nullID, defID, textID}, seg.GetFieldLogicalSizeUpdateIds())
+	sizes := seg.GetStats().GetFieldLogicalSizes()
+	n := uint64(len(fix.rows))
+	require.EqualValues(t, n, sizes.GetRowCount())
+	require.Equal(t, map[int64]*datapb.FieldLogicalSize{
+		nullID: {ValidityBits: n}, defID: {PayloadBytes: 8 * n, ValidityBits: n}, textID: {ValidityBits: n},
+	}, sizes.GetFields())
 }
 
 // [A4][S0] BM25 materialization: sparse output present for every row and the
@@ -1492,6 +1507,7 @@ func TestBumpUTFullRewriteAllRowsDeleted(t *testing.T) {
 	seg := runCompact(t, fix)
 	require.EqualValues(t, 0, seg.GetNumOfRows())
 	require.Empty(t, seg.GetManifest())
+	require.Nil(t, seg.GetStats().GetFieldLogicalSizes())
 	require.Zero(t, textIndexCalls, "text index must not run for an empty rewrite")
 }
 
@@ -2315,9 +2331,12 @@ func TestBumpUTFullRewriteTextLOBRewritesAcrossPartitionNamespaces(t *testing.T)
 
 	gotPayloads := readLOBPayloads(t, fix, segment.GetManifest(), textID)
 	require.Len(t, gotPayloads, rows)
+	var payloadBytes int
 	for i := 0; i < rows; i++ {
 		require.Equal(t, bumpFxLobText(i), gotPayloads[i])
+		payloadBytes += len(gotPayloads[i])
 	}
+	require.EqualValues(t, payloadBytes, segment.GetStats().GetFieldLogicalSizes().GetFields()[textID].GetPayloadBytes())
 	for _, lobFile := range mustManifestLobFiles(t, fix, segment.GetManifest()) {
 		if lobFile.FieldID == textID {
 			require.NotContains(t, lobFile.Path, "/files/insert_log/")

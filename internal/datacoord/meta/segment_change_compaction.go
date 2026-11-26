@@ -132,6 +132,13 @@ func (m *Meta) stagedCompactionResultLocked(task *datapb.CompactionTask, result 
 	if !segmentIDSetEqual(ids, expected) {
 		return nil, true, merr.WrapErrDataIntegrityMsg("compaction plan %d replay changed its registered outputs", task.GetPlanID())
 	}
+	for _, output := range result.GetSegments() {
+		if stored := m.Segments.GetSegment(output.GetSegmentID()); stored != nil {
+			if err := checkCompactionFieldSizeReplay(stored.SegmentInfo, output); err != nil {
+				return nil, true, err
+			}
+		}
+	}
 	segments := make([]*SegmentInfo, 0, len(ids))
 	for _, id := range CompactionGroupResultIDs(g, task) {
 		if seg := m.Segments.GetSegment(id); seg != nil {

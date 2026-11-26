@@ -34,7 +34,7 @@
 #include "segcore/Utils.h"
 #include "segcore/storagev2translator/AsyncLoadException.h"
 #include "storage/AsyncLoadExecutor.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/ThreadPools.h"
 #include "storage/LoadAdmissionController.h"
 
@@ -147,13 +147,14 @@ FinalizeWindow(const int64_t segment_id,
 // transient-memory lease until all Arrow-backed buffers are released.
 folly::coro::Task<void>
 FinalizeWindowAsync(const int64_t segment_id,
-                    folly::CancellationToken cancellation_token,
                     AsyncReadWindow window,
                     std::shared_ptr<const CellReadCallback> consume_cell,
                     storage::LoadAdmissionLease lease,
                     RecordBatches batches,
                     std::shared_ptr<WindowFailureState> failure_state) {
     try {
+        const auto& cancellation_token =
+            co_await folly::coro::co_current_cancellation_token;
         (void)lease;
         FinalizeWindow(segment_id,
                        cancellation_token,
@@ -179,9 +180,10 @@ LoadWindowAsync(const int64_t segment_id,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
                 const milvus::proto::common::LoadPriority load_priority,
-                folly::CancellationToken cancellation_token,
                 std::shared_ptr<WindowFailureState> failure_state) {
     try {
+        const auto& cancellation_token =
+            co_await folly::coro::co_current_cancellation_token;
         CheckCancellationToken(
             cancellation_token, segment_id, "AsyncLoadPipeline::admission");
 
@@ -215,7 +217,6 @@ LoadWindowAsync(const int64_t segment_id,
             storage::ResolveAsyncLoadExecutor(std::move(finalization_executor),
                                               load_priority),
             FinalizeWindowAsync(segment_id,
-                                cancellation_token,
                                 std::move(window),
                                 std::move(consume_cell),
                                 std::move(lease),
@@ -267,8 +268,9 @@ ReadCellsAsyncImpl(
                    cell.file_idx);
     }
 
-    const auto effective_read_window_bytes = read_window_bytes.value_or(
-        static_cast<size_t>(StorageV2AsyncLoadReadWindowSizeBytes()));
+    const auto effective_read_window_bytes =
+        read_window_bytes.value_or(static_cast<size_t>(
+            milvus::storage::LoadFieldDataReadWindowSizeBytes()));
     auto windows = BuildAsyncReadWindows(cells, effective_read_window_bytes);
     auto& admission = storage::LoadAdmissionController::GetInstance();
     const auto* const priority_name =
@@ -336,7 +338,6 @@ ReadCellsAsyncImpl(
                                     std::move(lease),
                                     finalization_executor_provider,
                                     load_priority,
-                                    window_cancellation_token,
                                     window_failure_state))));
         }
     } catch (...) {

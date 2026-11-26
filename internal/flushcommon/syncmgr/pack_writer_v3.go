@@ -52,6 +52,7 @@ type packedBatchWriter interface {
 	GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64
 	GetWrittenPaths(columnGroup typeutil.UniqueID) string
 	GetWrittenRowNum() int64
+	GetFieldLogicalSizes() *datapb.FieldLogicalSizes
 }
 
 type BulkPackWriterV3 struct {
@@ -187,6 +188,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// final ManifestUpdates instead of mutating shared state.
 	var (
 		insertFiles  packed.WriterOutput
+		fieldSizes   *datapb.FieldLogicalSizes
 		statEntries  []packed.StatEntry
 		deltaEntries []packed.DeltaLogEntry
 		bm25Entries  []packed.StatEntry
@@ -197,7 +199,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 		}
 	}()
 
-	if inserts, insertFiles, err = bw.writeInserts(ctx, pack, basePath); err != nil {
+	if inserts, insertFiles, fieldSizes, err = bw.writeInserts(ctx, pack, basePath); err != nil {
 		mlog.Warn(ctx, "failed to write insert data", mlog.Err(err))
 		return
 	}
@@ -244,7 +246,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 
 	// V3 feeds the tracked statsBlobSize instead of summing a stats array (it
 	// returns no stats array); finalizeStats produces the cumulative Statistics.
-	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize)
+	segmentStats, err = bw.finalizeStats(pack, digested, inserts, deltas, bw.statsBlobSize, fieldSizes)
 	if err != nil {
 		// The manifest is already committed. A bookkeeping failure must not
 		// restart phase 1 and publish the same batch a second time.
@@ -271,25 +273,25 @@ func classifyStorageV3Err(err error) error {
 // the produced WriterOutput plus the per-column-group binlog metadata.
 // The returned WriterOutput is owned by the caller and must be Destroy'd
 // after the surrounding commit (success or failure).
-func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, basePath string) (logs map[int64]*datapb.FieldBinlog, files packed.WriterOutput, err error) {
+func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, basePath string) (logs map[int64]*datapb.FieldBinlog, files packed.WriterOutput, fieldSizes *datapb.FieldLogicalSizes, err error) {
 	if len(pack.insertData) == 0 {
-		return make(map[int64]*datapb.FieldBinlog), nil, nil
+		return make(map[int64]*datapb.FieldBinlog), nil, nil, nil
 	}
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
 	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// LOB base path is at partition level: {basePath}/.. = {root}/insert_log/{coll}/{part}
@@ -309,7 +311,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Ensure the FFI writer's C resources are reclaimed even if Write fails
@@ -331,12 +333,12 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 			mlog.FieldCollectionID(pack.collectionID),
 			mlog.FieldSegmentID(pack.segmentID),
 			mlog.Err(err))
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	closeAttempted = true
 	if files, err = w.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	getFieldNullCounts := func(columnGroup storagecommon.ColumnGroup) map[int64]int64 {
@@ -361,7 +363,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		getFieldNullCounts,
 	)
 	setFieldValidElementCounts(logs, bw.columnGroups, bw.schema, rec)
-	return logs, files, nil
+	return logs, files, w.GetFieldLogicalSizes(), nil
 }
 
 // setFieldValidElementCounts records the valid element counts of the

@@ -1379,6 +1379,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 			}},
 		}},
 	}
+	oldSeg.Stats = &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{101: {PayloadBytes: 52}}}}
+	oldSeg.FieldLogicalSizesManifest = oldSeg.ManifestPath
 	mt.Segments.SetSegment(segmentID, meta.NewSegmentInfo(oldSeg))
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
@@ -1415,6 +1417,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 	assert.True(t, got.GetIsSorted())
 	assert.Equal(t, `{"base_path":"old","ver":2}`, got.GetManifestPath())
 	assert.Equal(t, int32(4), got.GetSchemaVersion())
+	assert.Nil(t, got.GetStats().GetFieldLogicalSizes())
+	assert.Empty(t, got.GetFieldLogicalSizesManifest())
 	assert.ElementsMatch(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
 }
 
@@ -1432,6 +1436,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	}
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	incoming.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 1)
+	incoming.FieldLogicalSizesManifest = incoming.ManifestPath
+	incoming.Stats = &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{101: {}}}}
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
@@ -1442,6 +1448,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		[]*datapb.SegmentInfo{incoming},
 	)
 	assert.NoError(t, err)
+	assert.Nil(t, mt.Segments.GetSegment(segmentID).GetStats().GetFieldLogicalSizes())
+	assert.Empty(t, mt.Segments.GetSegment(segmentID).GetFieldLogicalSizesManifest())
 
 	// Match the V3 catalog representation after a DataCoord restart: the
 	// manifest and aggregate stats survive, while fake binlogs do not. Also

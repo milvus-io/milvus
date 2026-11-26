@@ -48,6 +48,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcproxyclient "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	accessinfo "github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
@@ -2047,4 +2049,95 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 	resp, err := server.ListRefreshExternalCollectionJobs(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+}
+
+type recordedAction struct {
+	ctx        context.Context
+	fullMethod string
+	action     string
+	code       int32
+}
+
+type recordingExtension struct {
+	hookutil.DefaultExtension
+	actions []recordedAction
+}
+
+func (e *recordingExtension) ReportAction(ctx context.Context, _ interface{}, resp interface{}, _ error, fullMethod string, action string) error {
+	record := recordedAction{ctx: ctx, fullMethod: fullMethod, action: action}
+	if withStatus, ok := resp.(interface{ GetStatus() *commonpb.Status }); ok {
+		record.code = withStatus.GetStatus().GetCode()
+	}
+	e.actions = append(e.actions, record)
+	return nil
+}
+
+// A RESTful request refused by authentication has to leave the same facts
+// behind as a gRPC one: who the client claimed to be, the code and the message.
+// Whether a log shows them is the formatter's decision, not the middleware's.
+func TestHttpAuthenticateFailureIsLogged(t *testing.T) {
+	passwordMock := mockey.Mock(proxy.PasswordVerify).Return(false).Build()
+	defer passwordMock.UnPatch()
+	apiKeyMock := mockey.Mock(proxy.VerifyAPIKey).Return("", errors.New("invalid API key")).Build()
+	defer apiKeyMock.UnPatch()
+
+	originalExtension := hookutil.GetExtension()
+	t.Cleanup(func() { hookutil.SetTestExtension(originalExtension) })
+
+	withIdentity := accesslog.NewFormatter("<$user_name> [code: $error_code] [msg: $error_msg] [error_type: $error_type]")
+	withoutIdentity := accesslog.NewFormatter("[code: $error_code]")
+
+	for _, tc := range []struct {
+		name          string
+		authorization string
+		wantUser      string
+	}{
+		{name: "wrong password", authorization: "Bearer alice:wrong", wantUser: "alice"},
+		{name: "invalid api key", authorization: "Bearer 123456", wantUser: accessinfo.Unknown},
+		{name: "no credential", wantUser: accessinfo.Unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extension := &recordingExtension{}
+			hookutil.SetTestExtension(extension)
+
+			var ginCtx *gin.Context
+			var full, short string
+			handlerReached := false
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				ginCtx = c
+				accessInfo := accessinfo.NewRestfulInfo(c)
+				c.Set(httpserver.ContextUsername, "")
+				c.Next()
+				full = withIdentity.Format(accessInfo)
+				short = withoutIdentity.Format(accessInfo)
+			})
+			router.Use(authenticate)
+			router.POST("/v2/vectordb/entities/search", func(c *gin.Context) { handlerReached = true })
+
+			req := httptest.NewRequest(http.MethodPost, "/v2/vectordb/entities/search", nil)
+			if tc.authorization != "" {
+				req.Header.Set("Authorization", tc.authorization)
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+			assert.False(t, handlerReached, "a refused request must not reach the handler")
+			assert.JSONEq(t, `{"code":1800,"message":"user hasn't authenticated"}`, w.Body.String())
+
+			// The access log shows the refusal where the format asks for it...
+			assert.Equal(t, "<"+tc.wantUser+"> [code: 1800] [msg: user hasn't authenticated] [error_type: input_error]\n", full)
+			// ...and nothing more than the format asks for.
+			assert.Equal(t, "[code: 1800]\n", short)
+
+			// The audit report can read the HTTP caller from the gin context.
+			require.Len(t, extension.actions, 1)
+			report := extension.actions[0]
+			assert.Equal(t, hookutil.ActionAuthorize, report.action)
+			assert.Equal(t, "/v2/vectordb/entities/search", report.fullMethod)
+			assert.EqualValues(t, 1800, report.code)
+			assert.Same(t, ginCtx, report.ctx.Value(hook.GinParamsKey))
+		})
+	}
 }

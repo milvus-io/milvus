@@ -41,16 +41,21 @@ func NewEmptySegmentStats() *SegmentStats {
 // Statistics, restoring the cumulative collector on datanode recovery so a
 // growing segment keeps accumulating from where it left off (rather than
 // undercounting from empty). stats is the SegmentInfo.Stats loaded from etcd;
-// numRows its persisted row count. nil stats yields an empty collector.
+// numRows its persisted row count, including historical rows with no stats.
 func NewSegmentStatsFromStats(stats *datapb.Statistics, numRows int64) *SegmentStats {
 	return &SegmentStats{collector: storage.NewStatisticsCollectorFromStats(stats, numRows)}
 }
 
 // Digest folds one sync's writes into the cumulative collector.
 func (s *SegmentStats) Digest(inserts map[int64]*datapb.FieldBinlog, delta *datapb.FieldBinlog, statsBlobSize, rows int64, tsFrom, tsTo uint64) {
+	s.DigestWithFieldSizes(inserts, delta, statsBlobSize, rows, tsFrom, tsTo, nil)
+}
+
+// DigestWithFieldSizes folds the V3 writer's batch measurements into the same snapshot.
+func (s *SegmentStats) DigestWithFieldSizes(inserts map[int64]*datapb.FieldBinlog, delta *datapb.FieldBinlog, statsBlobSize, rows int64, tsFrom, tsTo uint64, sizes *datapb.FieldLogicalSizes) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
-	s.collector.Digest(inserts, delta, statsBlobSize, rows, tsFrom, tsTo)
+	s.collector.DigestWithFieldSizes(inserts, delta, statsBlobSize, rows, tsFrom, tsTo, sizes)
 }
 
 // Publish returns the cumulative Statistics digested so far.

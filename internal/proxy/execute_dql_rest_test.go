@@ -1280,12 +1280,12 @@ func TestRESTSearchKeepsOrdinaryPartitionQuotaLookup(t *testing.T) {
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 			return body.Code
 		}
-		require.Equal(t, merr.Code(merr.ErrHTTPRateLimit), search("e.*"))
+		require.Zero(t, search("e.*"), "an exact quota lookup miss lets ordinary Search resolve the partition pattern")
 		require.Empty(t, limiter.snapshot())
 		require.Zero(t, search("east"))
 		require.Equal(t, []executeDQLQuotaCall{
 			{dbID: 10, partitions: map[int64][]int64{11: {12}}, rateType: internalpb.RateType_DQLSearch, nq: 2},
 		}, limiter.snapshot())
-		require.Equal(t, []int64{0}, searched)
+		require.Equal(t, []int64{0, 0}, searched)
 	})
 }

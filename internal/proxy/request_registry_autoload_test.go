@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -33,34 +34,42 @@ import (
 )
 
 // TestOperatorCancelWhileWaitingForAutoLoad covers the part of a DQL request
-// that runs before any task exists: the retry loop asks the coordinator to
-// load the collection and waits. The request must already be registered at
+// where the retry loop asks the coordinator to load the collection after
+// the first attempt reports it missing. The request must already be registered at
 // that point, an operator cancel must end the wait, and the client must get
 // ErrRequestCanceled rather than a plain context error.
 func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 	enableAutoLoad(t)
 	oldRateCol := rateCol
 	t.Cleanup(func() { rateCol = oldRateCol })
+	search := mockey.Mock((*Proxy).search).Return(
+		&milvuspb.SearchResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, false, false, false, nil).Build()
+	hybrid := mockey.Mock((*Proxy).hybridSearch).Return(
+		&milvuspb.SearchResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, false, false, nil).Build()
+	query := mockey.Mock((*Proxy).executeQuery).Return(
+		&milvuspb.QueryResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, nil).Build()
+	t.Cleanup(func() {
+		search.UnPatch()
+		hybrid.UnPatch()
+		query.UnPatch()
+	})
 
 	for _, tc := range []struct {
 		name string
 		typ  string
-		call func(ctx context.Context, node *Proxy) *commonpb.Status
+		call func(ctx context.Context, node *Proxy) (*commonpb.Status, error)
 	}{
-		{"search", reqregistry.TypeSearch, func(ctx context.Context, node *Proxy) *commonpb.Status {
+		{"search", reqregistry.TypeSearch, func(ctx context.Context, node *Proxy) (*commonpb.Status, error) {
 			rsp, err := node.Search(ctx, &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection", Nq: 1})
-			require.NoError(t, err)
-			return rsp.GetStatus()
+			return rsp.GetStatus(), err
 		}},
-		{"hybrid search", reqregistry.TypeHybridSearch, func(ctx context.Context, node *Proxy) *commonpb.Status {
+		{"hybrid search", reqregistry.TypeHybridSearch, func(ctx context.Context, node *Proxy) (*commonpb.Status, error) {
 			rsp, err := node.HybridSearch(ctx, &milvuspb.HybridSearchRequest{DbName: "db", CollectionName: "collection"})
-			require.NoError(t, err)
-			return rsp.GetStatus()
+			return rsp.GetStatus(), err
 		}},
-		{"query", reqregistry.TypeQuery, func(ctx context.Context, node *Proxy) *commonpb.Status {
+		{"query", reqregistry.TypeQuery, func(ctx context.Context, node *Proxy) (*commonpb.Status, error) {
 			rsp, err := node.Query(ctx, &milvuspb.QueryRequest{DbName: "db", CollectionName: "collection", Expr: "id > 0"})
-			require.NoError(t, err)
-			return rsp.GetStatus()
+			return rsp.GetStatus(), err
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,8 +89,15 @@ func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 			node.UpdateStateCode(commonpb.StateCode_Healthy)
 			require.NoError(t, node.initRateCollector())
 
-			done := make(chan *commonpb.Status, 1)
-			go func() { done <- tc.call(context.Background(), node) }()
+			type outcome struct {
+				status *commonpb.Status
+				err    error
+			}
+			done := make(chan outcome, 1)
+			go func() {
+				status, err := tc.call(t.Context(), node)
+				done <- outcome{status: status, err: err}
+			}()
 			awaitAutoLoadSchedulerResult(t, waiting)
 
 			listed := node.listRunningRequests(reqregistry.Filter{})
@@ -92,8 +108,9 @@ func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 			require.Len(t, canceled, 1)
 			require.Empty(t, notFound)
 
-			status := awaitAutoLoadSchedulerResult(t, done)
-			require.Equal(t, merr.RequestCanceledCode, status.GetCode())
+			result := awaitAutoLoadSchedulerResult(t, done)
+			require.NoError(t, result.err)
+			require.Equal(t, merr.RequestCanceledCode, result.status.GetCode())
 			require.Empty(t, node.listRunningRequests(reqregistry.Filter{}), "the entry is removed when the RPC returns")
 		})
 	}
@@ -105,6 +122,10 @@ func TestExecuteDQLChildCompletionKeepsParentCancelable(t *testing.T) {
 	enableAutoLoad(t)
 	oldRateCol := rateCol
 	t.Cleanup(func() { rateCol = oldRateCol })
+	search := mockey.Mock((*Proxy).search).To(func(*Proxy, context.Context, *milvuspb.SearchRequest, bool, bool, bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		return &milvuspb.SearchResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, false, false, false, nil
+	}).Build()
+	t.Cleanup(func() { search.UnPatch() })
 	p := NewExecuteDQLTestProxy(t, 1, 1)
 	p.setMetaCache(&executeDQLTestCache{Cache: mockSearchCollectionMeta(t, 100, []string{"v0"})})
 	require.NoError(t, p.initRateCollector())

@@ -2,6 +2,7 @@ package wp
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	woodpecker "github.com/zilliztech/woodpecker/woodpecker/log"
@@ -18,13 +19,17 @@ type scannerImpl struct {
 	*helper.ScannerHelper
 	reader     woodpecker.LogReader
 	msgChannel chan message.ImmutableMessage
+	onClose    func()
+	closeOnce  sync.Once
+	closeErr   error
 }
 
-func newScanner(scannerName string, reader woodpecker.LogReader) *scannerImpl {
+func newScanner(scannerName string, reader woodpecker.LogReader, onClose func()) *scannerImpl {
 	s := &scannerImpl{
 		ScannerHelper: helper.NewScannerHelper(scannerName),
 		reader:        reader,
 		msgChannel:    make(chan message.ImmutableMessage, 1),
+		onClose:       onClose,
 	}
 	go s.executeConsumer()
 	return s
@@ -35,17 +40,20 @@ func (s *scannerImpl) Chan() <-chan message.ImmutableMessage {
 }
 
 func (s *scannerImpl) Close() error {
-	err := s.ScannerHelper.Close()
-	if err != nil {
-		mlog.Warn(s.Context(), "failed to close wp scanner", mlog.Err(err))
-	}
-	if s.reader != nil {
-		err = s.reader.Close(context.Background())
-		if err != nil {
-			mlog.Warn(s.Context(), "failed to close wp reader", mlog.Err(err))
+	s.closeOnce.Do(func() {
+		s.closeErr = s.ScannerHelper.Close()
+		if s.closeErr != nil {
+			mlog.Warn(s.Context(), "failed to close wp scanner", mlog.Err(s.closeErr))
 		}
-	}
-	return err
+		s.closeErr = s.reader.Close(context.Background())
+		if s.closeErr != nil {
+			mlog.Warn(s.Context(), "failed to close wp reader", mlog.Err(s.closeErr))
+		}
+		if s.onClose != nil {
+			s.onClose()
+		}
+	})
+	return s.closeErr
 }
 
 func (s *scannerImpl) executeConsumer() {

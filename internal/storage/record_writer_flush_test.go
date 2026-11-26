@@ -128,6 +128,23 @@ func TestPackedTextBatchWriterFlushesUnflushedInput(t *testing.T) {
 	}
 }
 
+func TestPackedTextBatchWriterEmptyBatchFieldLogicalSizes(t *testing.T) {
+	w, schema, _, _ := newTextFlushTestWriter(t, 0)
+	require.Nil(t, w.GetFieldLogicalSizes())
+	record := newTextFlushTestRecord(t, schema, nil, nil)
+	defer record.Release()
+	require.NoError(t, w.Write(record))
+	out, err := w.Close()
+	require.NoError(t, err)
+	require.NotNil(t, out)
+	defer out.Destroy()
+	sizes := w.GetFieldLogicalSizes()
+	require.NotNil(t, sizes)
+	require.Zero(t, sizes.RowCount)
+	requireLogicalSize(t, sizes.Fields[100], 0, 0)
+	requireLogicalSize(t, sizes.Fields[flushTestTextFieldID], 0, 0)
+}
+
 func TestPackedTextBatchWriterPropagatesFlushError(t *testing.T) {
 	w, schema, _, _ := newTextFlushTestWriter(t, 1)
 
@@ -138,10 +155,12 @@ func TestPackedTextBatchWriterPropagatesFlushError(t *testing.T) {
 	record := newTextFlushTestRecord(t, schema, []int64{1}, []string{"first text"})
 	defer record.Release()
 	require.ErrorIs(t, w.Write(record), flushErr)
+	require.Nil(t, w.GetFieldLogicalSizes(), "failed buffered flush cannot publish the batch")
 
 	if output, closeErr := w.Close(); closeErr == nil && output != nil {
 		output.Destroy()
 	}
+	require.Nil(t, w.GetFieldLogicalSizes(), "closing for cleanup must not resurrect rejected rows")
 }
 
 // TestPackedTextBatchWriterKeepsOutputAcrossMidStreamFlushes writes two records
@@ -163,11 +182,20 @@ func TestPackedTextBatchWriterKeepsOutputAcrossMidStreamFlushes(t *testing.T) {
 		record.Release()
 	}
 
+	beforeClose := w.GetFieldLogicalSizes()
+	require.NotContains(t, beforeClose.Fields, flushTestTextFieldID, "the raw TEXT encoder supplies its total at close")
+	requireLogicalSize(t, beforeClose.Fields[100], 32, 0)
 	output, err := w.Close()
 	require.NoError(t, err)
 	require.NotNil(t, output)
 	defer output.Destroy()
 	require.Equal(t, int64(len(wantTexts)), w.GetWrittenRowNum())
+	sizes := w.GetFieldLogicalSizes()
+	require.Equal(t, w.GetWrittenRowNum(), sizes.GetRowCount())
+	requireLogicalSize(t, sizes.Fields[flushTestTextFieldID], uint64(len(strings.Join(wantTexts, ""))), 0)
+	requireLogicalSize(t, sizes.Fields[common.RowIDField], 32, 0)
+	requireLogicalSize(t, sizes.Fields[common.TimeStampField], 32, 0)
+	requireLogicalSize(t, sizes.Fields[100], 32, 0)
 
 	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(segmentPath, packed.ManifestEarliest), config,
 		&packed.ManifestUpdates{NewFiles: output})

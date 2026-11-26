@@ -757,13 +757,22 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	}
 }
 
+// ContextWithGin attaches the gin context to ctx under the key the hook
+// extension looks it up by. With it the extension reads the caller of a RESTful
+// request (user, client address, user agent) from the HTTP request; without it
+// the extension looks for gRPC metadata and a gRPC peer, which a RESTful request
+// does not have.
+func ContextWithGin(ctx context.Context, c *gin.Context) context.Context {
+	return context.WithValue(ctx, hook.GinParamsKey, c)
+}
+
 func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, req interface{}) error {
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
-		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
+		hookutil.GetExtension().ReportAction(ContextWithGin(ctx, c), req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
 	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
@@ -771,7 +780,7 @@ func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, i
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
-		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
+		hookutil.GetExtension().ReportAction(ContextWithGin(ctx, c), req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
 	}
 
@@ -799,7 +808,10 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		_, err := CheckLimiter(ctx, req, pxy)
 		if err != nil {
 			mlog.Warn(context.TODO(), "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
-			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
+			// A rate limit rejection is not an authorization decision and is
+			// not reported as one; the gRPC limiter does not report it either.
+			// The request still reaches the audit log through the report made
+			// when the RESTful request returns.
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
 				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
@@ -811,8 +823,7 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
 		return forwardRESTProxy(reqCtx, req, ginCtx.GetString(ContextToken), fullMethod, handler)
 	}
-	ctx = context.WithValue(ctx, hook.GinParamsKey, ginCtx)
-	response, err := proxy.HookInterceptor(ctx, req, ginCtx.GetString(ContextUsername), fullMethod, forwardHandler)
+	response, err := proxy.HookInterceptor(ContextWithGin(ctx, ginCtx), req, ginCtx.GetString(ContextUsername), fullMethod, forwardHandler)
 	if response != nil {
 		ginCtx.Set(ContextResponse, response)
 	}
@@ -825,8 +836,8 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 
 	if err != nil {
 		// Expose the exact classification (incl. boundary InputError marks) to
-		// the REST access log; key must match accesslog/info.ContextErrorType.
-		ginCtx.Set("error_type", merr.GetErrorType(err).String())
+		// the REST access log.
+		ginCtx.Set(ContextErrorType, merr.GetErrorType(err).String())
 		mlog.Warn(ctx, "high level restful api, grpc call failed", mlog.Err(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -2040,6 +2051,15 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
+// Check the schema before decoding vectors so that scalar-only collections
+// return the same error as the Proxy for both ordinary and batched searches.
+func validateSearchVectorField(collSchema *schemapb.CollectionSchema, collectionName string) error {
+	if !typeutil.HasVectorField(collSchema) {
+		return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", collectionName)
+	}
+	return nil
+}
+
 func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
 	var err error
 	var vectorField *schemapb.FieldSchema
@@ -2194,6 +2214,9 @@ func newRESTSearchRequest(ctx context.Context, httpReq *SearchReqV2, dbName stri
 }
 
 func prepareRESTSearch(ctx context.Context, req *milvuspb.SearchRequest, httpReq *SearchReqV2, collSchema *schemapb.CollectionSchema, body string) error {
+	if err := validateSearchVectorField(collSchema, httpReq.CollectionName); err != nil {
+		return err
+	}
 	var err error
 	// Check if search by primary keys or by vectors
 	hasIDs := len(httpReq.Ids) > 0
@@ -2513,6 +2536,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
 		return nil, err
+	}
+	if err := validateSearchVectorField(collSchema, httpReq.CollectionName); err != nil {
+		return nil, abortRESTSearchError(c, err)
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	searchArray := gjson.Get(string(body.([]byte)), "search").Array()

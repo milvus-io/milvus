@@ -202,8 +202,12 @@ func (h *HandlersV2) executeDQL(ctx context.Context, c *gin.Context, anyReq any,
 	}
 
 	options := proxy.ExecuteDQLOptions{MaxConcurrency: req.MaxConcurrency, ExecutionDeadline: deadline}
+	// Attempts can outlive the HTTP response. Give each hook its own Gin
+	// context with the original caller, independent of the request pool.
+	caller := c.Copy()
 	results, err := p.RunExecuteDQL(ctx, options, preparers, func(ctx context.Context, search *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 		db, collection := search.GetDbName(), search.GetCollectionName()
+		ctx = ContextWithGin(ctx, caller.Copy())
 		ctx, requestMetrics := proxy.WithRequestMetrics(ctx)
 		result, err := h.executeExecuteDQLItem(ctx, search, username, token)
 		requestMetrics.Record("Search", db, collection, result, err)
@@ -309,7 +313,6 @@ func (h *HandlersV2) executeExecuteDQLItem(ctx context.Context, req *milvuspb.Se
 		}
 	}
 	if err := h.checkExecuteDQLQuota(ctx, req); err != nil {
-		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(err), nil, searchMethod, hookutil.ActionAuthorize)
 		return nil, err
 	}
 	response, err := proxy.HookInterceptor(ctx, req, username, searchMethod, func(ctx context.Context, req any) (any, error) {
