@@ -375,33 +375,35 @@ func TestProxyWatcher_StopDuringInitialList(t *testing.T) {
 	require.NoError(t, ctx.Err())
 }
 
-func TestProxyWatcher_SnapshotTimeoutAborts(t *testing.T) {
+func TestProxyWatcher_RetriesSnapshotTimeout(t *testing.T) {
 	paramtable.Init()
 	key := paramtable.Get().EtcdCfg.RequestTimeout.Key
 	old := paramtable.Get().EtcdCfg.RequestTimeout.GetValue()
 	require.NoError(t, paramtable.Get().Save(key, "100"))
 	t.Cleanup(func() { paramtable.Get().Save(key, old) })
-	blockUntilTimeout := func(ctx context.Context, _ int32) (*etcdserverpb.RangeResponse, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
 
-	t.Run("initial", func(t *testing.T) {
-		cli, service := newProxyRecoveryClient(t, blockUntilTimeout)
-		p := NewProxyWatcher(cli)
-		t.Cleanup(p.Stop)
-		require.ErrorIs(t, p.WatchProxy(context.Background()), context.DeadlineExceeded)
-		require.EqualValues(t, 1, service.rangeCalls.Load(), "a snapshot timeout must not be retried")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cli, service := newProxyRecoveryClient(t, func(ctx context.Context, call int32) (*etcdserverpb.RangeResponse, error) {
+		// Expire the first read both on startup and after watch compaction.
+		if call == 1 || call == 3 {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return proxySnapshot(), nil
 	})
-	t.Run("recovery", func(t *testing.T) {
-		cli, service := newProxyRecoveryClient(t, blockUntilTimeout)
-		p := NewProxyWatcher(cli)
-		t.Cleanup(p.Stop)
-		events := make(chan clientv3.WatchResponse, 1)
-		events <- clientv3.WatchResponse{CompactRevision: 1}
-		require.Panics(t, func() { p.startWatchEtcd(context.Background(), events) })
-		require.EqualValues(t, 1, service.rangeCalls.Load(), "a snapshot timeout must not be retried")
-	})
+	p := NewProxyWatcher(cli)
+	added := make(chan int64, 1)
+	p.AddSessionFunc(func(s *sessionutil.Session) { added <- s.ServerID })
+	t.Cleanup(p.Stop)
+	require.NoError(t, p.WatchProxy(ctx))
+	select {
+	case id := <-added:
+		require.EqualValues(t, 201, id)
+	case <-ctx.Done():
+		t.Fatal("watch did not deliver an event after snapshot recovery")
+	}
+	require.EqualValues(t, 4, service.rangeCalls.Load())
 }
 
 func TestProxyWatcher_RetryInitialSnapshot(t *testing.T) {

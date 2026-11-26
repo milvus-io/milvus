@@ -30,6 +30,8 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
@@ -149,16 +151,25 @@ func newBufconnEtcdClient(t *testing.T, kv etcdserverpb.KVServer) *clientv3.Clie
 }
 
 func TestController_ListRetriesTransientEtcdError(t *testing.T) {
-	// The leader change outlasts clientv3's own retry and reaches the controller.
-	kv := &failingRangeServer{failures: 3, err: rpctypes.ErrGRPCLeaderChanged}
-	resource.InitForTest(t, resource.OptETCD(newBufconnEtcdClient(t, kv)))
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"leader change", rpctypes.ErrGRPCLeaderChanged},
+		{"request deadline", status.Error(codes.DeadlineExceeded, "range timed out")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv := &failingRangeServer{failures: 3, err: tc.err}
+			resource.InitForTest(t, resource.OptETCD(newBufconnEtcdClient(t, kv)))
 
-	ctrl := NewController()
-	defer ctrl.cancel()
-	m, err := ctrl.listReplicatePChannels()
-	require.NoError(t, err)
-	require.EqualValues(t, 10, m.Revision)
-	require.EqualValues(t, 4, kv.calls.Load())
+			ctrl := NewController()
+			defer ctrl.cancel()
+			m, err := ctrl.listReplicatePChannels()
+			require.NoError(t, err)
+			require.EqualValues(t, 10, m.Revision)
+			require.EqualValues(t, 4, kv.calls.Load())
+		})
+	}
 }
 
 func TestController_ListAbortsOnNonTransientError(t *testing.T) {
@@ -170,6 +181,26 @@ func TestController_ListAbortsOnNonTransientError(t *testing.T) {
 	_, err := ctrl.listReplicatePChannels()
 	require.ErrorIs(t, err, rpctypes.ErrPermissionDenied)
 	require.EqualValues(t, 1, kv.calls.Load())
+}
+
+func TestController_CancelWhileRetryingSnapshotTimeout(t *testing.T) {
+	kv := &failingRangeServer{failures: 10, err: status.Error(codes.DeadlineExceeded, "range timed out")}
+	resource.InitForTest(t, resource.OptETCD(newBufconnEtcdClient(t, kv)))
+	ctrl := NewController()
+	defer ctrl.cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := ctrl.listReplicatePChannels()
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return kv.calls.Load() >= 2 }, 5*time.Second, 10*time.Millisecond)
+	ctrl.cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not stop snapshot retries")
+	}
 }
 
 func TestController_ListWithCanceledContext(t *testing.T) {

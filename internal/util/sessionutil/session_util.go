@@ -1001,7 +1001,7 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// watcher is stopped: deciding that etcd has been unavailable for too long
 	// belongs to the session keepalive, which exits the process once the lease
 	// really expires. A non-transient failure aborts immediately.
-	if reErr := retry.Do(w.ctx, w.handleReWatch, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
+	if reErr := retry.Handle(w.ctx, w.handleReWatch, retry.Attempts(0)); reErr != nil {
 		if w.ctx.Err() != nil {
 			return w.ctx.Err()
 		}
@@ -1016,21 +1016,21 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // sessions (a unary request that also refreshes the etcd auth token), replays
 // them through the rewatch hook, then opens a fresh watch stream from the new
 // revision.
-func (w *sessionWatcher) handleReWatch() error {
+func (w *sessionWatcher) handleReWatch() (bool, error) {
 	sessions, revision, err := w.s.GetSessions(w.ctx, w.prefix)
 	if err != nil {
-		return err
+		return etcd.IsRequestTimeout(err) || etcd.IsRetriableWatchErr(err), err
 	}
 	if w.rewatch == nil {
 		mlog.Warn(w.ctx, "re-watch session service but no rewatch logic provided", mlog.String("prefix", w.prefix))
 	} else if err = w.rewatch(sessions); err != nil {
-		return err
+		return retry.IsRecoverable(err) && etcd.IsRetriableWatchErr(err), err
 	}
 	if w.ctx.Err() != nil {
-		return w.ctx.Err()
+		return false, w.ctx.Err()
 	}
 	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
-	return nil
+	return false, nil
 }
 
 func (w *sessionWatcher) EventChannel() <-chan *SessionEvent {
