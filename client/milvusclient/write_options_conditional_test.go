@@ -226,6 +226,23 @@ func TestConditionalWriteClient(t *testing.T) {
 			assert.Equal(t, len(tc.ids), result.IDs.Len())
 		})
 	}
+	t.Run("partial update without a condition", func(t *testing.T) {
+		// Ordinary partial updates can return existing PKs before new PKs.
+		patch := mockey.Mock((*service).Upsert).Return(&milvuspb.MutationResult{
+			Status: merr.Success(), UpsertCnt: 2, SuccIndex: []uint32{0, 1},
+			IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 99}}}},
+		}, nil).Build()
+		defer patch.UnPatch()
+
+		result, err := c.Upsert(ctx, NewColumnBasedInsertOption(coll.Name).
+			WithInt64Column("id", []int64{99, 1}).
+			WithInt64Column("version", []int64{1, 10}).
+			WithPartialUpdate(true))
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, result.UpsertCount)
+		assert.Equal(t, column.NewColumnInt64("id", []int64{1, 99}), result.IDs)
+		assert.Nil(t, result.SuccIndex)
+	})
 	_, err := c.Insert(ctx, opt)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.ErrorContains(t, err, "only supported for Upsert")

@@ -75,6 +75,12 @@ const (
 // WriteCondition specifies a business-version guard for conditional upsert.
 // When configured, Proxy compares the incoming integer version in Field against
 // the stored version using Op and writes only qualifying rows.
+//
+// Upgrade all serving Proxies before using a condition. Older Proxies can
+// ignore the condition and perform an unconditional upsert.
+// With streaming.partialUpdate.enableCAS disabled, a concurrent write can
+// invalidate the version comparison before commit. Each channel commits
+// independently, so a request spanning channels can partially commit.
 type WriteCondition struct {
 	Field     string
 	Op        WriteConditionOp
