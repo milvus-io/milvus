@@ -33,7 +33,7 @@ func TestLoadInfoRegistryRecoveryAndRelease(t *testing.T) {
 	view := testBuilder(1, 1, 1).SetLoadInfoVersion(first).Build()
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
-	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.DataViewOfCollection(nil), nil).Build()
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
 	defer generations.UnPatch()
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return([]*viewpb.QueryViewOfShard{view}, nil).Build(),
@@ -102,7 +102,7 @@ func TestLoadInfoFailedRecoveryRollsBackReferences(t *testing.T) {
 	valid := testBuilder(1, 1, 1).SetLoadInfoVersion(first).Build()
 	missing := testBuilder(1, 1, 2).SetLoadInfoVersion(first + 100).Build()
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
-	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.DataViewOfCollection(nil), nil).Build()
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
 	defer generations.UnPatch()
 	list := mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return([]*viewpb.QueryViewOfShard{valid, missing}, nil).Build()
 	defer list.UnPatch()

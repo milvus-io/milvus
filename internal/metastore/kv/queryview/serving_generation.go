@@ -14,8 +14,8 @@ import (
 // ServingGenerationCatalog persists cluster-local read publication independently
 // of RootCoord's replicated routing and of individual QueryView cleanup.
 type ServingGenerationCatalog interface {
-	ListServingGenerations(context.Context) ([]*viewpb.DataViewOfCollection, error)
-	SaveServingGeneration(context.Context, *viewpb.DataViewOfCollection) error
+	ListServingGenerations(context.Context) ([]*viewpb.ServingGeneration, error)
+	SaveServingGeneration(context.Context, *viewpb.ServingGeneration) error
 	RemoveServingGeneration(context.Context, int64) error
 }
 
@@ -23,14 +23,14 @@ func (c *queryViewCatalog) servingPrefix() string {
 	return strings.TrimSuffix(c.prefix, queryViewKeyPrefix) + "qv-serving/"
 }
 
-func (c *queryViewCatalog) ListServingGenerations(ctx context.Context) ([]*viewpb.DataViewOfCollection, error) {
+func (c *queryViewCatalog) ListServingGenerations(ctx context.Context) ([]*viewpb.ServingGeneration, error) {
 	_, values, err := c.metaKV.LoadWithPrefix(ctx, c.servingPrefix())
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*viewpb.DataViewOfCollection, 0, len(values))
+	result := make([]*viewpb.ServingGeneration, 0, len(values))
 	for _, value := range values {
-		generation := &viewpb.DataViewOfCollection{}
+		generation := &viewpb.ServingGeneration{}
 		if err := proto.Unmarshal([]byte(value), generation); err != nil {
 			return nil, merr.Wrap(err, "decode serving generation")
 		}
@@ -39,7 +39,7 @@ func (c *queryViewCatalog) ListServingGenerations(ctx context.Context) ([]*viewp
 	return result, nil
 }
 
-func (c *queryViewCatalog) SaveServingGeneration(ctx context.Context, generation *viewpb.DataViewOfCollection) error {
+func (c *queryViewCatalog) SaveServingGeneration(ctx context.Context, generation *viewpb.ServingGeneration) error {
 	encoded, err := proto.Marshal(generation)
 	if err != nil {
 		return merr.Wrap(err, "encode serving generation")

@@ -10,16 +10,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ResolveServingGeneration publishes the desired shard set only after every
-// shard is Up on every requested replica. Prior publication remains readable
-// during preparation. A crash after Save but before preemption resumes it here.
-func (r *ShardViewRegistry) ResolveServingGeneration(ctx context.Context, desired *viewpb.DataViewOfCollection, replicas []int64) (*viewpb.DataViewOfCollection, error) {
+// ResolveServingGeneration publishes one complete read identity only when every
+// replica serves its exact load, public read schema, shard set and lineage.
+func (r *ShardViewRegistry) ResolveServingGeneration(ctx context.Context, desired *viewpb.DataViewOfCollection, loadVersion uint64, replicas []int64) (*viewpb.ServingGeneration, error) {
 	r.servingMu.Lock()
 	defer r.servingMu.Unlock()
 	id := desired.GetCollectionId()
+	r.mu.RLock()
+	readSchema, published := r.publishedSchemas[id]
+	r.mu.RUnlock()
+	if !published || loadVersion == 0 {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d has no active published read identity", id)
+	}
 	current := r.serving[id]
-	if current == nil && desired.GetShardSetEpoch() > 1 {
-		previous := proto.Clone(desired).(*viewpb.DataViewOfCollection)
+	next := &viewpb.ServingGeneration{
+		CollectionId: id, LoadInfoVersion: loadVersion, ReadSchemaVersion: readSchema,
+		ShardSetEpoch: desired.GetShardSetEpoch(),
+	}
+	for _, shard := range desired.GetShards() {
+		// A serving publication owns logical membership, not DataView watermarks
+		// or segment membership. The view selected by SN owns those resources.
+		copy := &viewpb.DataViewOfShard{Vchannel: shard.GetVchannel()}
+		if shard.GetLineage() != nil {
+			copy.Lineage = proto.Clone(shard.GetLineage()).(*viewpb.QueryViewLineage)
+		}
+		next.Shards = append(next.Shards, copy)
+	}
+	if current == nil && next.GetShardSetEpoch() > 1 {
+		previous := proto.Clone(next).(*viewpb.ServingGeneration)
 		previous.ShardSetEpoch = 0
 		targets := make(map[string]bool)
 		for _, shard := range previous.Shards {
@@ -28,65 +46,60 @@ func (r *ShardViewRegistry) ResolveServingGeneration(ctx context.Context, desire
 			}
 		}
 		previous.Shards = nil
-		for _, shard := range desired.GetShards() {
+		for _, shard := range next.Shards {
 			if !targets[shard.GetVchannel()] {
-				copy := proto.Clone(shard).(*viewpb.DataViewOfShard)
-				copy.Lineage = nil
-				copy.Partitions = nil
-				previous.Shards = append(previous.Shards, copy)
+				previous.Shards = append(previous.Shards, &viewpb.DataViewOfShard{Vchannel: shard.GetVchannel()})
 			}
 		}
-		if r.generationReady(previous, replicas) && r.servingCatalog != nil {
-			if err := r.servingCatalog.SaveServingGeneration(ctx, previous); err != nil {
+		if r.generationReady(previous, replicas) {
+			if err := r.saveServingGeneration(ctx, previous); err != nil {
 				return nil, err
 			}
-			if r.serving == nil {
-				r.serving = make(map[int64]*viewpb.DataViewOfCollection)
-			}
-			r.serving[id], current = previous, previous
+			current = previous
 		}
 	}
-	if current != nil && current.GetShardSetEpoch() > desired.GetShardSetEpoch() {
-		return proto.Clone(current).(*viewpb.DataViewOfCollection), nil
+	// Load versions and shard epochs are monotonic. A request that captured an
+	// older load snapshot must never regress a concurrent Reload publication.
+	if current != nil && (current.GetLoadInfoVersion() > loadVersion || current.GetShardSetEpoch() > next.GetShardSetEpoch()) {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d serving snapshot changed", id)
 	}
-	ready := r.generationReady(desired, replicas)
-	if ready && (current == nil || current.GetShardSetEpoch() < desired.GetShardSetEpoch()) {
-		if r.servingCatalog == nil {
-			return nil, merr.WrapErrServiceNotReadyMsg("serving generation catalog is not initialized")
-		}
-		next := proto.Clone(desired).(*viewpb.DataViewOfCollection)
-		// Publication stores only membership and lineage, never a segment snapshot.
-		for _, shard := range next.Shards {
-			shard.Partitions = nil
-		}
-		if err := r.servingCatalog.SaveServingGeneration(ctx, next); err != nil {
+	if !proto.Equal(current, next) && r.generationReady(next, replicas) {
+		if err := r.saveServingGeneration(ctx, next); err != nil {
 			return nil, err
 		}
-		if r.serving == nil {
-			r.serving = make(map[int64]*viewpb.DataViewOfCollection)
-		}
-		r.serving[id], current = next, next
+		current = next
 	}
-	if current == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("collection %d has no published serving generation", id)
+	// Retaining the shard-set fence across Release must not make its obsolete
+	// load requirements serve a later Load, even if the epoch is unchanged.
+	if current == nil || current.GetLoadInfoVersion() != loadVersion || current.GetReadSchemaVersion() != readSchema {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d has no published serving generation for load %d and schema %d", id, loadVersion, readSchema)
 	}
-	// The durable generation controls every resident shard, including S after
-	// adoption removes it from the desired set.
 	for _, sid := range r.CollectionShards(id) {
 		if manager := r.Get(sid); manager != nil {
-			manager.PublishServingGeneration(current.GetShardSetEpoch(), current.GetSchemaVersion())
+			manager.PublishServingGeneration(current.GetShardSetEpoch(), current.GetReadSchemaVersion(), current.GetLoadInfoVersion())
 			manager.preemptOlderGenerations(current.GetShardSetEpoch())
 		}
 	}
-	return proto.Clone(current).(*viewpb.DataViewOfCollection), nil
+	return proto.Clone(current).(*viewpb.ServingGeneration), nil
 }
 
-func (m *ShardViewManager) servesGeneration(epoch uint64, schema int32, lineage *viewpb.QueryViewLineage) bool {
+func (r *ShardViewRegistry) saveServingGeneration(ctx context.Context, generation *viewpb.ServingGeneration) error {
+	if err := r.servingCatalog.SaveServingGeneration(ctx, generation); err != nil {
+		return err
+	}
+	r.serving[generation.GetCollectionId()] = generation
+	return nil
+}
+
+func (m *ShardViewManager) servesGeneration(generation *viewpb.ServingGeneration, lineage *viewpb.QueryViewLineage) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, sm := range m.views {
 		meta := sm.View().GetMeta()
-		if sm.State() == qviews.QueryViewStateUp && sm.snState == qviews.QueryViewStateUp && meta.GetShardSetEpoch() == epoch && meta.GetSchemaVersion() == schema && proto.Equal(meta.GetLineage(), lineage) {
+		if sm.State() == qviews.QueryViewStateUp && sm.snState == qviews.QueryViewStateUp &&
+			meta.GetLoadInfoVersion() == generation.GetLoadInfoVersion() &&
+			meta.GetShardSetEpoch() == generation.GetShardSetEpoch() &&
+			meta.GetSchemaVersion() == generation.GetReadSchemaVersion() && proto.Equal(meta.GetLineage(), lineage) {
 			return true
 		}
 	}
@@ -112,14 +125,14 @@ func (m *ShardViewManager) preemptOlderGenerations(epoch uint64) {
 	m.submitDirtyEvent(event)
 }
 
-func (r *ShardViewRegistry) generationReady(desired *viewpb.DataViewOfCollection, replicas []int64) bool {
+func (r *ShardViewRegistry) generationReady(desired *viewpb.ServingGeneration, replicas []int64) bool {
 	if len(replicas) == 0 || len(desired.GetShards()) == 0 {
 		return false
 	}
 	for _, replica := range replicas {
 		for _, shard := range desired.GetShards() {
 			manager := r.Get(qviews.ShardID{ReplicaID: replica, VChannel: shard.GetVchannel()})
-			if manager == nil || !manager.servesGeneration(desired.GetShardSetEpoch(), desired.GetSchemaVersion(), shard.GetLineage()) {
+			if manager == nil || !manager.servesGeneration(desired, shard.GetLineage()) {
 				return false
 			}
 		}
@@ -169,7 +182,7 @@ func (r *ShardViewRegistry) RemoveServingGeneration(ctx context.Context, id int6
 	return nil
 }
 
-func (m *ShardViewManager) PublishServingGeneration(epoch uint64, schema int32) {
+func (m *ShardViewManager) PublishServingGeneration(epoch uint64, schema int32, loadVersion uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.publishedServingEpoch != nil && *m.publishedServingEpoch > epoch {
@@ -177,6 +190,7 @@ func (m *ShardViewManager) PublishServingGeneration(epoch uint64, schema int32) 
 	}
 	m.publishedServingEpoch = &epoch
 	m.publishedServingSchema = schema
+	m.publishedServingLoadInfoVersion = loadVersion
 }
 
 func (r *ShardViewRegistry) ServingCollectionIDs() []int64 {

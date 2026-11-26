@@ -47,7 +47,7 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	})
 	require.NoError(t, err)
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
-	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.DataViewOfCollection(nil), nil).Build()
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
 	t.Cleanup(func() { generations.UnPatch() })
 	list := mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return(nil, nil).Build()
 	t.Cleanup(func() { list.UnPatch() })

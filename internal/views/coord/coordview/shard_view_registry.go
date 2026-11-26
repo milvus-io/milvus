@@ -27,7 +27,7 @@ import (
 type ShardViewRegistry struct {
 	servingMu      sync.Mutex
 	servingCatalog queryview.ServingGenerationCatalog
-	serving        map[int64]*viewpb.DataViewOfCollection
+	serving        map[int64]*viewpb.ServingGeneration
 	mu             sync.RWMutex
 	ctx            context.Context
 	flushScheduler *DirtyViewFlushScheduler
@@ -115,6 +115,7 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 		shards:           shards,
 		stats:            make(map[qviews.ShardID]*ShardStats, len(shards)),
 		collectionShards: make(map[int64]map[qviews.ShardID]struct{}),
+		serving:          make(map[int64]*viewpb.ServingGeneration),
 		nodeShards:       make(map[int64]map[qviews.ShardID]struct{}),
 	}
 	if catalog, ok := catalog.(queryview.ServingGenerationCatalog); ok {
@@ -127,7 +128,7 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 			return nil, err
 		}
 		registry.servingCatalog = catalog
-		registry.serving = make(map[int64]*viewpb.DataViewOfCollection, len(recovered))
+		registry.serving = make(map[int64]*viewpb.ServingGeneration, len(recovered))
 		for _, generation := range recovered {
 			registry.serving[generation.GetCollectionId()] = generation
 		}
@@ -138,7 +139,7 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 	for sid, mgr := range shards {
 		_, collectionID, _, _ := funcutil.ParseVChannel(sid.VChannel)
 		if generation := registry.serving[collectionID]; generation != nil {
-			mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetSchemaVersion())
+			mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetReadSchemaVersion(), generation.GetLoadInfoVersion())
 		}
 		stats := mgr.Stats()
 		registry.stats[sid] = stats
@@ -198,7 +199,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	// its caller so a stale preparation cannot resurrect an obsolete epoch.
 	r.servingMu.Lock()
 	if generation := r.serving[collectionID]; generation != nil {
-		mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetSchemaVersion())
+		mgr.PublishServingGeneration(generation.GetShardSetEpoch(), generation.GetReadSchemaVersion(), generation.GetLoadInfoVersion())
 	}
 	r.servingMu.Unlock()
 	return mgr
@@ -555,6 +556,8 @@ func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *Sh
 // PublishCollectionSchema records the public read generation recovered from or
 // durably committed to RootCoord. Manager calls run without the registry lock.
 func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version int32) {
+	r.servingMu.Lock()
+	defer r.servingMu.Unlock()
 	r.mu.Lock()
 	if old, ok := r.publishedSchemas[collectionID]; ok && old > version {
 		r.mu.Unlock()

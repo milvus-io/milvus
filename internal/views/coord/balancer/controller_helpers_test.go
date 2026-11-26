@@ -37,7 +37,7 @@ func emptyRegistry(t *testing.T, syncCallbacks ...func(context.Context, syncer.S
 	patch.UnPatch()
 	require.NoError(t, err)
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
-	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.DataViewOfCollection(nil), nil).Build()
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
 	t.Cleanup(func() { generations.UnPatch() })
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return(nil, nil).Build(),

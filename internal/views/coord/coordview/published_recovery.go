@@ -82,7 +82,7 @@ func (m *ShardViewManager) validatePreparationLocked(view *viewpb.QueryViewOfSha
 	}
 	retained := m.views[*source]
 	schemaPublished := m.publishedSchema != nil && meta.GetSchemaVersion() == *m.publishedSchema
-	generationPublished := m.publishedServingEpoch != nil && meta.GetShardSetEpoch() == *m.publishedServingEpoch && meta.GetSchemaVersion() == m.publishedServingSchema
+	generationPublished := m.publishedServingEpoch != nil && meta.GetShardSetEpoch() == *m.publishedServingEpoch && meta.GetSchemaVersion() == m.publishedServingSchema && meta.GetLoadInfoVersion() == m.publishedServingLoadInfoVersion
 	if retained == nil || retained != m.latestViewLocked() || (!schemaPublished && !generationPublished) ||
 		!recoverablePlacementState(retained.State()) ||
 		meta.GetSchemaVersion() != retained.View().GetMeta().GetSchemaVersion() || meta.GetShardSetEpoch() != retained.View().GetMeta().GetShardSetEpoch() ||
@@ -106,7 +106,7 @@ func (m *ShardViewManager) PublishedGenerationRecovery() *PublishedRecovery {
 	if m.publishedSchema != nil {
 		schema = *m.publishedSchema
 	}
-	if source == nil || source.View().GetMeta().GetShardSetEpoch() != *m.publishedServingEpoch || source.View().GetMeta().GetSchemaVersion() != schema || !recoverablePlacementState(source.State()) {
+	if source == nil || source.View().GetMeta().GetShardSetEpoch() != *m.publishedServingEpoch || source.View().GetMeta().GetSchemaVersion() != schema || source.View().GetMeta().GetLoadInfoVersion() != m.publishedServingLoadInfoVersion || !recoverablePlacementState(source.State()) {
 		return nil
 	}
 	result := &PublishedRecovery{View: source.viewWithState(source.State()), Sizes: make(map[int64]int64)}

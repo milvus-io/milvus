@@ -13,27 +13,27 @@ import (
 )
 
 type generationTestCatalog struct {
-	saved []*viewpb.DataViewOfCollection
+	saved []*viewpb.ServingGeneration
 	err   error
 }
 
-func (c *generationTestCatalog) ListServingGenerations(context.Context) ([]*viewpb.DataViewOfCollection, error) {
+func (c *generationTestCatalog) ListServingGenerations(context.Context) ([]*viewpb.ServingGeneration, error) {
 	return c.saved, nil
 }
 
-func (c *generationTestCatalog) SaveServingGeneration(_ context.Context, g *viewpb.DataViewOfCollection) error {
+func (c *generationTestCatalog) SaveServingGeneration(_ context.Context, g *viewpb.ServingGeneration) error {
 	if c.err != nil {
 		return c.err
 	}
-	c.saved = append(c.saved, proto.Clone(g).(*viewpb.DataViewOfCollection))
+	c.saved = append(c.saved, proto.Clone(g).(*viewpb.ServingGeneration))
 	return nil
 }
 
 func generationTestView(epoch uint64, channel string, replica int64, lineage *viewpb.QueryViewLineage) *viewpb.QueryViewOfShard {
 	return &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{
 		CollectionId: 100, ReplicaId: replica, Vchannel: channel, ShardSetEpoch: epoch,
-		Version:       &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1},
-		SchemaVersion: 1, State: viewpb.QueryViewState_QueryViewStateUp, Lineage: lineage,
+		Version:         &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1},
+		LoadInfoVersion: 10, SchemaVersion: 1, State: viewpb.QueryViewState_QueryViewStateUp, Lineage: lineage,
 	}, StreamingNode: &viewpb.QueryViewOfStreamingNode{}}
 }
 
@@ -53,6 +53,7 @@ func TestServingGenerationWaitsForEveryReplicaAndLineage(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	catalog := &generationTestCatalog{}
 	reg.servingCatalog = catalog
+	reg.PublishCollectionSchema(100, 1)
 	lineage := &viewpb.QueryViewLineage{Vchannels: []string{"p_100v1", "p_100v2"}, SwitchTimetick: 100}
 	desired := &viewpb.DataViewOfCollection{CollectionId: 100, ShardSetEpoch: 2, SchemaVersion: 1, Shards: []*viewpb.DataViewOfShard{
 		{Vchannel: "p_100v0", Lineage: lineage}, {Vchannel: "p_100v1"}, {Vchannel: "p_100v2"},
@@ -64,21 +65,21 @@ func TestServingGenerationWaitsForEveryReplicaAndLineage(t *testing.T) {
 	}
 	// One replica still has S without target subscriptions. It must not publish.
 	installGenerationView(reg, 2, "p_100v0", 2, nil)
-	_, err := reg.ResolveServingGeneration(t.Context(), desired, []int64{1, 2})
+	_, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1, 2})
 	require.Error(t, err)
 	require.Empty(t, catalog.saved)
 	installGenerationView(reg, 2, "p_100v0", 2, lineage)
 	catalog.err = errors.New("catalog unavailable")
-	_, err = reg.ResolveServingGeneration(t.Context(), desired, []int64{1, 2})
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1, 2})
 	require.ErrorIs(t, err, catalog.err)
 	require.Empty(t, reg.serving)
 	catalog.err = nil
-	got, err := reg.ResolveServingGeneration(t.Context(), desired, []int64{1, 2})
+	got, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1, 2})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, got.GetShardSetEpoch())
 	require.Len(t, catalog.saved, 1)
 	got.Shards[0].Vchannel = "mutated"
-	again, err := reg.ResolveServingGeneration(t.Context(), desired, []int64{1, 2})
+	again, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1, 2})
 	require.NoError(t, err)
 	require.Equal(t, "p_100v0", again.GetShards()[0].GetVchannel())
 	require.Len(t, catalog.saved, 1)
@@ -90,6 +91,7 @@ func TestServingPublicationWaitsForSNAndReplaysPreemptionAfterRecovery(t *testin
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	catalog := &generationTestCatalog{}
 	reg.servingCatalog = catalog
+	reg.PublishCollectionSchema(100, 1)
 	source := "p_100v0"
 	lineage := &viewpb.QueryViewLineage{Vchannels: []string{"p_100v1", "p_100v2"}, SwitchTimetick: 100}
 	desired := &viewpb.DataViewOfCollection{CollectionId: 100, ShardSetEpoch: 2, SchemaVersion: 1, Shards: []*viewpb.DataViewOfShard{{Vchannel: source, Lineage: lineage}, {Vchannel: "p_100v1"}, {Vchannel: "p_100v2"}}}
@@ -109,14 +111,14 @@ func TestServingPublicationWaitsForSNAndReplaysPreemptionAfterRecovery(t *testin
 	}
 	next.snState = qviews.QueryViewStateReady
 	manager.mu.Unlock()
-	first, err := reg.ResolveServingGeneration(t.Context(), desired, []int64{1})
+	first, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
 	require.NoError(t, err)
 	require.Zero(t, first.GetShardSetEpoch(), "Coord Up intent cannot publish before SN confirms Up")
 	require.Len(t, first.GetShards(), 1)
 	manager.mu.Lock()
 	next.snState = qviews.QueryViewStateUp
 	manager.mu.Unlock()
-	published, err := reg.ResolveServingGeneration(t.Context(), desired, []int64{1})
+	published, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, published.GetShardSetEpoch())
 	require.False(t, reg.ServingTransitionComplete(100, 2, false), "persisted preemption is not delivery proof")
@@ -124,7 +126,7 @@ func TestServingPublicationWaitsForSNAndReplaysPreemptionAfterRecovery(t *testin
 	require.True(t, old.View().GetMeta().GetControl().GetPreemptServingLease())
 	old.snState = qviews.QueryViewStateNil // recovery does not assume prior SN acknowledgments
 	manager.mu.Unlock()
-	_, err = reg.ResolveServingGeneration(t.Context(), desired, []int64{1})
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
 	require.NoError(t, err)
 	require.False(t, reg.ServingTransitionComplete(100, 2, false))
 	manager.mu.Lock()
@@ -133,4 +135,98 @@ func TestServingPublicationWaitsForSNAndReplaysPreemptionAfterRecovery(t *testin
 	require.True(t, reg.ServingTransitionComplete(100, 2, false))
 	require.NoError(t, reg.RemoveServingGeneration(t.Context(), 100))
 	require.Empty(t, reg.serving)
+}
+
+func TestServingPublicationBindsSameEpochLoadAndPublicSchema(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	catalog := &generationTestCatalog{}
+	reg.servingCatalog = catalog
+	reg.PublishCollectionSchema(100, 1)
+	desired := &viewpb.DataViewOfCollection{CollectionId: 100, ShardSetEpoch: 2, SchemaVersion: 1, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v0", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 20}}, SnapshotHistoryFloor: 123}}}
+	installGenerationView(reg, 2, "p_100v0", 1, nil)
+	first, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
+	require.NoError(t, err)
+	require.EqualValues(t, 10, first.GetLoadInfoVersion())
+	require.EqualValues(t, 1, first.GetReadSchemaVersion())
+	require.Empty(t, first.Shards[0].Partitions)
+	require.Zero(t, first.Shards[0].SnapshotHistoryFloor)
+	// A new Load may retain exactly the same shard epoch. Until its resource
+	// scope is Up, the retained old publication is only a shard-set fence.
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 11, []int64{1})
+	require.Error(t, err)
+	require.Len(t, catalog.saved, 1)
+	manager := reg.Get(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+	for _, sm := range manager.views {
+		sm.View().Meta.LoadInfoVersion = 11
+	}
+	reloaded, err := reg.ResolveServingGeneration(t.Context(), desired, 11, []int64{1})
+	require.NoError(t, err)
+	require.EqualValues(t, 11, reloaded.GetLoadInfoVersion())
+	require.Equal(t, first.GetShardSetEpoch(), reloaded.GetShardSetEpoch())
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
+	require.Error(t, err, "an older config cannot regress Reload")
+	// Prepared schema is not public. Existing read identity is retained even
+	// if DataView and a newly prepared view already carry the target schema.
+	desired.SchemaVersion = 2
+	for _, sm := range manager.views {
+		sm.View().Meta.SchemaVersion = 2
+	}
+	prepared, err := reg.ResolveServingGeneration(t.Context(), desired, 11, []int64{1})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, prepared.GetReadSchemaVersion())
+	require.Len(t, catalog.saved, 2)
+	reg.PublishCollectionSchema(100, 2)
+	published, err := reg.ResolveServingGeneration(t.Context(), desired, 11, []int64{1})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, published.GetReadSchemaVersion())
+	require.Len(t, catalog.saved, 3)
+	require.EqualValues(t, 11, manager.publishedServingLoadInfoVersion)
+}
+
+func TestServingPublicationRequiresActiveLoadAndPublishedSchema(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	catalog := &generationTestCatalog{}
+	reg.servingCatalog = catalog
+	desired := &viewpb.DataViewOfCollection{CollectionId: 100, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v0"}}}
+	installGenerationView(reg, 0, "p_100v0", 1, nil)
+	_, err := reg.ResolveServingGeneration(t.Context(), desired, 10, []int64{1})
+	require.Error(t, err)
+	reg.PublishCollectionSchema(100, 1)
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 0, []int64{1})
+	require.Error(t, err)
+	_, err = reg.ResolveServingGeneration(t.Context(), desired, 10, nil)
+	require.Error(t, err)
+	require.Empty(t, catalog.saved)
+}
+
+type servingRecoveryCatalog struct {
+	*mockCatalog
+	*generationTestCatalog
+}
+
+func TestServingPublicationRecoveryRetainsExactLoadIdentity(t *testing.T) {
+	catalog := &servingRecoveryCatalog{mockCatalog: newMockCatalog(), generationTestCatalog: &generationTestCatalog{saved: []*viewpb.ServingGeneration{{CollectionId: 100, LoadInfoVersion: 42, ReadSchemaVersion: 7, ShardSetEpoch: 3, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v1"}}}}}}
+	reg, err := RecoverShardViewRegistry(t.Context(), catalog, newMockSyncer())
+	require.NoError(t, err)
+	defer reg.Close()
+	manager := reg.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v1"})
+	require.EqualValues(t, 42, manager.publishedServingLoadInfoVersion)
+	require.EqualValues(t, 7, manager.publishedServingSchema)
+	require.EqualValues(t, 3, *manager.publishedServingEpoch)
+	reg.PublishCollectionSchema(100, 7)
+	_, err = reg.ResolveServingGeneration(t.Context(), &viewpb.DataViewOfCollection{CollectionId: 100, ShardSetEpoch: 3}, 43, []int64{1})
+	require.Error(t, err, "recovering a publication does not admit a new Load before exact Up coverage")
+	manager.mu.Lock()
+	old := generationTestView(3, "p_100v1", 1, nil)
+	old.Meta.SchemaVersion = 7
+	old.Meta.LoadInfoVersion = 41
+	sm := RecoverCoordQueryViewStateMachineWithRef(old, nil)
+	manager.views[sm.Version()] = sm
+	manager.mu.Unlock()
+	require.Nil(t, manager.PublishedGenerationRecovery(), "an older load must not recreate a published generation")
+	manager.mu.Lock()
+	sm.view = proto.Clone(old).(*viewpb.QueryViewOfShard)
+	sm.view.Meta.LoadInfoVersion = 42
+	manager.mu.Unlock()
+	require.NotNil(t, manager.PublishedGenerationRecovery())
 }

@@ -154,7 +154,7 @@ func TestAdoptedSourceRebuildsPublishedG1WithoutSchemaChange(t *testing.T) {
 	require.Eventually(t, func() bool { return manager.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
 	old := *manager.Stats().UpVersion
 	manager.PublishSchema(0)
-	manager.PublishServingGeneration(2, 0)
+	manager.PublishServingGeneration(2, 0, manager.Stats().UpLoadInfoVersion)
 	require.Nil(t, manager.PublishedRecovery(0), "no newer schema is pending")
 	require.NotNil(t, manager.PublishedGenerationRecovery())
 	targets := &CollectionDataView{CollectionID: 1, ShardSetEpoch: 3, DataVersion: qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, Shards: []*ShardDataView{{VChannel: "p1_1v1", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 100}, {VChannel: "p2_1v2", GrowingTransformStartAfterTimetick: 100, CompactedTransformStartAfterTimetick: 100}}}
@@ -170,6 +170,6 @@ func TestAdoptedSourceRebuildsPublishedG1WithoutSchemaChange(t *testing.T) {
 	require.EqualValues(t, 2, recovered.View.GetMeta().GetShardSetEpoch())
 	require.Equal(t, oldData.Shards[0].Lineage.GetVchannels(), recovered.View.GetMeta().GetLineage().GetVchannels())
 	require.EqualValues(t, 100, recovered.View.GetMeta().GetLineage().GetSwitchTimetick())
-	manager.PublishServingGeneration(3, 0)
+	manager.PublishServingGeneration(3, 0, manager.Stats().UpLoadInfoVersion)
 	require.Nil(t, manager.PublishedGenerationRecovery(), "g2 publication ends the old source recovery obligation")
 }

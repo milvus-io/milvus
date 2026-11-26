@@ -51,11 +51,7 @@ func (r *qviewsRuntime) splitTargetAdmission(ctx context.Context, request *query
 		return false, merr.WrapErrServiceNotReadyMsg("split DataView unavailable")
 	}
 	defer ref.Deref()
-	var replicas []int64
-	for _, replica := range cfg.Replicas {
-		replicas = append(replicas, replica.ReplicaID)
-	}
-	published, err := r.shardViewRegistry.ResolveServingGeneration(ctx, ref.DataView(), replicas)
+	published, err := r.resolveServingGeneration(ctx, ref.DataView(), cfg)
 	if err != nil {
 		return false, err
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -106,12 +105,17 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		schemaVersion = request.LegacyRetrieveRequest.GetSchemaVersion()
 	}
-	var lease *snview.QueryViewLease
-	if req.GetStatisticsRequest() != nil {
-		lease, err = w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, nil, req.GetShardSetEpoch())
-	} else {
-		lease, err = w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, &schemaVersion, req.GetShardSetEpoch())
+	var schema *int32
+	if req.GetLoadInfoVersion() > 0 {
+		if req.GetStatisticsRequest() == nil && schemaVersion != req.GetReadSchemaVersion() {
+			return nil, viewerror.NewViewInvalidated("query request schema %d differs from published read schema %d", schemaVersion, req.GetReadSchemaVersion())
+		}
+		schemaVersion = req.GetReadSchemaVersion()
+		schema = &schemaVersion
+	} else if req.GetStatisticsRequest() == nil {
+		schema = &schemaVersion
 	}
+	lease, err := w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, schema, req.GetShardSetEpoch(), req.GetLoadInfoVersion())
 	if err != nil {
 		return nil, err
 	}

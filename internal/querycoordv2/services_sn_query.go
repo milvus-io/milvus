@@ -3,7 +3,9 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -52,19 +54,42 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 				return resp, nil
 			}
 			defer ref.Deref()
-			var replicas []int64
-			if cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID()); cfg != nil {
-				for _, replica := range cfg.Replicas {
-					replicas = append(replicas, replica.ReplicaID)
-				}
+			cfg := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
+			if cfg == nil {
+				resp.Status = merr.Status(merr.WrapErrCollectionNotLoaded(req.GetCollectionID()))
+				return resp, nil
 			}
-			generation, err := s.qviewsRuntime.shardViewRegistry.ResolveServingGeneration(ctx, ref.DataView(), replicas)
+			generation, err := s.qviewsRuntime.resolveServingGeneration(ctx, ref.DataView(), cfg)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			// Resolve all load scope from this publication, never from the earlier
+			// latest lookup that may have raced a same-epoch Release/Reload.
+			info, err = s.qviewsRuntime.loadConfigStore.GetLoadInfo(ctx, req.GetCollectionID(), generation.GetLoadInfoVersion())
 			if err != nil {
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
 			info.ShardSetEpoch, info.ServingShards = generation.GetShardSetEpoch(), generation.GetShards()
+			info.ReadSchemaVersion = generation.GetReadSchemaVersion()
 		}
 	}
 	return info, nil
+}
+
+// Serialize publication with load/release so a captured config cannot republish
+// an obsolete load identity after StopPlanning or a concurrent Reload.
+func (r *qviewsRuntime) resolveServingGeneration(ctx context.Context, desired *viewpb.DataViewOfCollection, cfg *loadmgr.LoadConfig) (*viewpb.ServingGeneration, error) {
+	var generation *viewpb.ServingGeneration
+	err := r.loadConfigStore.WithCurrentConfig(cfg, func() error {
+		replicas := make([]int64, 0, len(cfg.Replicas))
+		for _, replica := range cfg.Replicas {
+			replicas = append(replicas, replica.ReplicaID)
+		}
+		var err error
+		generation, err = r.shardViewRegistry.ResolveServingGeneration(ctx, desired, cfg.Version, replicas)
+		return err
+	})
+	return generation, err
 }

@@ -317,7 +317,7 @@ func TestMarshalForPersistence_ClearsReadySegmentIds(t *testing.T) {
 func TestServingGenerationCatalogIsSeparateFromQueryViewCleanup(t *testing.T) {
 	catalog, _ := newTestCatalog(t)
 	serving := catalog.(ServingGenerationCatalog)
-	generation := &viewpb.DataViewOfCollection{CollectionId: 100, ShardSetEpoch: 2, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v0", Lineage: &viewpb.QueryViewLineage{Vchannels: []string{"p_100v1", "p_100v2"}, SwitchTimetick: 100}}}}
+	generation := &viewpb.ServingGeneration{CollectionId: 100, LoadInfoVersion: 10, ReadSchemaVersion: 7, ShardSetEpoch: 2, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v0", Lineage: &viewpb.QueryViewLineage{Vchannels: []string{"p_100v1", "p_100v2"}, SwitchTimetick: 100}}}}
 	require.NoError(t, serving.SaveServingGeneration(t.Context(), generation))
 	views, err := catalog.ListQueryViews(t.Context())
 	require.NoError(t, err)

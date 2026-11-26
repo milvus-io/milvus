@@ -46,3 +46,44 @@ func TestSourceFenceInstalledWhileResolvingBarrierInvalidatesG0Plan(t *testing.T
 		require.True(t, released)
 	})
 }
+
+func TestQueryPlanRejectsIncompleteOrConflictingServingIdentity(t *testing.T) {
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+	for _, req := range []*viewpb.GetQueryPlanRequest{
+		{ShardSetEpoch: 2},
+		{ShardSetEpoch: 2, LoadInfoVersion: 10, ReadSchemaVersion: 1, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 0}}},
+		{ShardSetEpoch: 2, LoadInfoVersion: 10, ReadSchemaVersion: 0, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 1}}},
+	} {
+		req.ShardId = &viewpb.ShardID{Vchannel: "p_100v0"}
+		_, err := w.GetQueryPlan(t.Context(), req)
+		require.True(t, viewerror.AsViewError(err).IsViewInvalidated())
+		require.True(t, viewerror.AsViewError(err).IsRetryable())
+	}
+}
+
+func TestQueryPlanPassesExactSchemaForEveryRequestKind(t *testing.T) {
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+	for _, schema := range []int32{0, 7} {
+		for _, req := range []*viewpb.GetQueryPlanRequest{
+			{Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: schema}}},
+			{Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: schema}}},
+			{Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{}}},
+		} {
+			req.ShardId = &viewpb.ShardID{Vchannel: "p_100v0"}
+			req.ShardSetEpoch, req.LoadInfoVersion, req.ReadSchemaVersion = 2, 10, schema
+			called := false
+			patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtGeneration).To(func(_ *snview.SNQueryViewHandler, _ context.Context, _ qviews.ShardID, actual *int32, epoch, load uint64) (*snview.QueryViewLease, error) {
+				called = true
+				require.NotNil(t, actual)
+				require.Equal(t, schema, *actual)
+				require.EqualValues(t, 2, epoch)
+				require.EqualValues(t, 10, load)
+				return nil, viewerror.NewViewNotFound("not ready")
+			}).Build()
+			_, err := w.GetQueryPlan(t.Context(), req)
+			patch.UnPatch()
+			require.True(t, called)
+			require.True(t, viewerror.AsViewError(err).IsRetryable())
+		}
+	}
+}
