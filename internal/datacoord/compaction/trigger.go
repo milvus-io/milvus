@@ -654,7 +654,7 @@ func (t *compactionTrigger) generatePlansLegacy(segments []*meta.SegmentInfo, si
 		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
-	smallRemaining := t.squeezeSmallSegmentsToBuckets(toMerge.Candidates, buckets, expectedSize)
+	t.squeezeSmallSegmentsToBuckets(toMerge.Candidates, buckets, expectedSize)
 
 	result := make([]*compactionBucket, 0, len(buckets))
 	for _, b := range buckets {
@@ -677,13 +677,6 @@ func (t *compactionTrigger) generatePlansLegacy(segments []*meta.SegmentInfo, si
 			mlog.Int("nonPlannedSegments", len(nonPlannedSegments)),
 			mlog.Strings("reasons", reasons))
 	}
-	if len(smallRemaining) > 0 {
-		mlog.RatedInfo(context.TODO(), rate.Limit(300), "remain small segments",
-			mlog.FieldCollectionID(signal.CollectionID),
-			mlog.FieldPartitionID(signal.partitionID),
-			mlog.String("channel", signal.channel),
-			mlog.Int("smallRemainingCount", len(smallRemaining)))
-	}
 	return result
 }
 
@@ -695,7 +688,7 @@ func isExpandableSmallSegment(segment *meta.SegmentInfo, expectedSize int64) boo
 	return segment.GetSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*meta.SegmentInfo, buckets [][]*meta.SegmentInfo, expectedSize int64) (remaining []*meta.SegmentInfo) {
+func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*meta.SegmentInfo, buckets [][]*meta.SegmentInfo, expectedSize int64) {
 	for i := len(small) - 1; i >= 0; i-- {
 		s := small[i]
 		if !isExpandableSmallSegment(s, expectedSize) {
@@ -707,11 +700,9 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*meta.SegmentI
 				continue
 			}
 			buckets[bidx] = append(buckets[bidx], s)
-			small = append(small[:i], small[i+1:]...)
 			break
 		}
 	}
-	return small
 }
 
 // getCandidates converts signal criterion into corresponding compaction candidate groups
