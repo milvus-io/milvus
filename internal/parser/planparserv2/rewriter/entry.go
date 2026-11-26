@@ -42,9 +42,29 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 	case *planpb.Expr_RandomSampleExpr:
 		real.RandomSampleExpr.Predicate = v.visitExpr(real.RandomSampleExpr.GetPredicate()).(*planpb.Expr)
 		return expr
+	case *planpb.Expr_MatchExpr:
+		if v.optimizeEnabled {
+			m := real.MatchExpr
+			// Keep MATCH_ANY(arr, FALSE). Both [] and [NULL] have zero hits,
+			// but a NULL array yields UNKNOWN. Folding the whole MATCH to FALSE
+			// would make NOT MATCH_ANY select NULL arrays. MATCH_ALL also needs
+			// the array length: with zero hits, only an empty array matches.
+			foldZeroHits := paramtable.Get().CommonCfg.EnableMatchConstantPredicate.GetAsBool()
+			m.Predicate = v.rewriteMatchPredicate(m.GetPredicate(), foldZeroHits)
+		}
+		return expr
 	case *planpb.Expr_ElementFilterExpr:
-		real.ElementFilterExpr.ElementExpr = v.visitExpr(real.ElementFilterExpr.GetElementExpr()).(*planpb.Expr)
-		real.ElementFilterExpr.Predicate = v.visitExpr(real.ElementFilterExpr.GetPredicate()).(*planpb.Expr)
+		ef := real.ElementFilterExpr
+		ef.Predicate = v.visitExpr(ef.GetPredicate()).(*planpb.Expr)
+		ef.ElementExpr = v.visitExpr(ef.GetElementExpr()).(*planpb.Expr)
+		// Keep the usual element_filter rewrites (including IN and text rules).
+		// Only at the root may a contradiction on a nullable element become
+		// FALSE: the filter selects definite TRUE hits, just like MATCH.
+		b := ef.ElementExpr.GetBinaryExpr()
+		if v.optimizeEnabled && b != nil && b.GetOp() == planpb.BinaryExpr_LogicalAnd &&
+			paramtable.Get().CommonCfg.EnableMatchConstantPredicate.GetAsBool() {
+			ef.ElementExpr = v.mergeElementComparisons(b.GetOp(), flattenLogicalExpr(b), true)
+		}
 		return expr
 	// no optimization for other types
 	default:
@@ -96,7 +116,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 func (v *visitor) mergeAnd(left, right *planpb.Expr) *planpb.Expr {
 	parts := flattenAnd(left, right)
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
-	parts = v.combineAndRangePredicates(parts)
+	parts = combineAndRangePredicates(parts, canFoldPredicateToBoolConstant)
 	parts = v.combineAndBinaryRanges(parts)
 	parts = v.combineAndInWithIn(parts)
 	parts = v.combineAndInWithNotEqual(parts)

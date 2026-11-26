@@ -106,18 +106,21 @@ MatchSingleRow(int64_t bitset_start,
 }
 
 bool
-MatchEmptyElements(MatchType match_type, int64_t threshold) {
+MatchHitCount(MatchType match_type,
+              int64_t threshold,
+              int64_t hits,
+              int64_t elements) {
     switch (match_type) {
         case MatchType::MatchAny:
-            return false;
+            return hits > 0;
         case MatchType::MatchAll:
-            return true;
+            return hits == elements;
         case MatchType::MatchLeast:
-            return threshold <= 0;
+            return hits >= threshold;
         case MatchType::MatchMost:
-            return threshold >= 0;
+            return hits <= threshold;
         case MatchType::MatchExact:
-            return threshold == 0;
+            return hits == threshold;
         default:
             ThrowInfo(UnexpectedError,
                       "Unsupported match type: {}",
@@ -132,6 +135,22 @@ struct MatchBatchOffsets {
     FixedVector<int32_t> starts;
     FixedVector<std::pair<int32_t, int32_t>> ranges;
 };
+
+// The rewriter encodes FALSE as NOT(AlwaysTrue). A constant child has no
+// element column to supply its batch length; reduce its hit count directly.
+static std::optional<bool>
+ConstantMatchPredicate(const expr::TypedExprPtr& predicate) {
+    if (dynamic_cast<const expr::AlwaysTrueExpr*>(predicate.get())) {
+        return true;
+    }
+    auto* unary = dynamic_cast<const expr::LogicalUnaryExpr*>(predicate.get());
+    if (unary &&
+        unary->op_type_ == expr::LogicalUnaryExpr::OpType::LogicalNot &&
+        dynamic_cast<const expr::AlwaysTrueExpr*>(unary->inputs()[0].get())) {
+        return false;
+    }
+    return std::nullopt;
+}
 
 // Process contiguous rows [row_start, row_start + row_count)
 template <MatchType match_type, bool all_valid>
@@ -269,6 +288,48 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     const auto& candidates = context.get_bitmap_input();
     const bool has_candidates = !candidates.empty() && !candidates.all();
+    if (auto constant = ConstantMatchPredicate(expr_->inputs()[0])) {
+        const auto type = expr_->get_match_type();
+        const auto threshold = expr_->get_count();
+        // With zero hits, only ALL depends on length (vacuous truth).
+        // With every element a hit, ALL is true at every length.
+        const bool need_lengths = *constant ? type != MatchType::MatchAll
+                                            : type == MatchType::MatchAll;
+        TargetBitmap hits(batch_rows, false);
+        if (need_lengths) {
+            MatchBatchOffsets offsets;
+            if (input) {
+                offsets.ranges.resize(batch_rows);
+                struct_element_offsets->CopyRowElementRanges(
+                    input->data(), batch_rows, offsets.ranges.data());
+            } else {
+                offsets.starts.resize(batch_rows + 1);
+                struct_element_offsets->CopyRowElementStarts(
+                    current_pos_, batch_rows, offsets.starts.data());
+            }
+            for (int64_t i = 0; i < batch_rows; ++i) {
+                const auto count =
+                    input ? offsets.ranges[i].second - offsets.ranges[i].first
+                          : offsets.starts[i + 1] - offsets.starts[i];
+                hits[i] = MatchHitCount(
+                    type, threshold, *constant ? count : 0, count);
+            }
+        } else if (MatchHitCount(type, threshold, 0, 0)) {
+            hits.set();
+        }
+        if (has_candidates) {
+            hits.inplace_and(candidates, batch_rows);
+        }
+        auto rows = std::make_shared<ColumnVector>(
+            std::move(hits), TargetBitmap(batch_rows, true));
+        ApplyStructRowValidity(
+            rows.get(), field_meta.get_id(), input, batch_rows);
+        result = std::move(rows);
+        if (!input) {
+            current_pos_ += batch_rows;
+        }
+        return;
+    }
     bool sparse_batch = false;
     MatchBatchOffsets batch_offsets;
     auto& starts = batch_offsets.starts;
@@ -291,8 +352,8 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             // MoveCursor selects/advances the appropriate sequential cursors.
             inputs_[0]->MoveCursor();
             TargetBitmap hits(batch_rows, false);
-            if (MatchEmptyElements(expr_->get_match_type(),
-                                   expr_->get_count())) {
+            if (MatchHitCount(
+                    expr_->get_match_type(), expr_->get_count(), 0, 0)) {
                 hits.inplace_or(candidates, batch_rows);
             }
             auto empty_result = std::make_shared<ColumnVector>(
@@ -388,6 +449,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                              .first -
                          elem_start;
         }
+        eval_ctx.set_input_batch_size(elem_count);
         if (has_candidates) {
             // Keep index/dense execution sequential and expose candidates in
             // the same element coordinates as this batch's result.
@@ -430,7 +492,7 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                    "Match child returned empty result for non-empty element "
                    "batch, elem_count={}",
                    elem_count);
-        if (MatchEmptyElements(match_type, threshold)) {
+        if (MatchHitCount(match_type, threshold, 0, 0)) {
             if (select_rows) {
                 for (const auto position : output_positions) {
                     bitset_view[position] = true;

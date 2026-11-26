@@ -30,12 +30,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
 func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		"common.enableMatchConstantPredicate":               "true",
 		"dataCoord.compaction.enableAutoCompaction":         "false",
 		"indexCoord.segment.minSegmentNumRowsToEnableIndex": "1",
 	})
@@ -54,6 +56,8 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 	}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{
 		FieldID: 103, Name: "reviews", Nullable: true, Fields: []*schemapb.FieldSchema{
 			varcharArray(104, "body", true, true), varcharArray(105, "lang", false, false),
+			{FieldID: 107, Name: "weight", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float,
+				Nullable: true, TypeParams: []*commonpb.KeyValuePair{kv(common.MaxCapacityKey, "8")}},
 			{FieldID: 106, Name: "vec", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
 				Nullable: true, TypeParams: []*commonpb.KeyValuePair{kv(common.DimKey, "8"), kv(common.MaxCapacityKey, "8")}},
 		},
@@ -73,29 +77,42 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			embedding = append(embedding, vector(float32(pk))...)
 		}
 		var reviewVectors []*schemapb.VectorField
+		var weights []*schemapb.ScalarField
 		for i, row := range body {
 			if row.ValidData == nil {
 				for range row.GetStringData().GetData() {
 					row.ValidData = append(row.ValidData, true)
 				}
 			}
-			var values []float32
+			var values, rowWeights []float32
 			for j := range row.ValidData {
+				// 16777217 in a predicate rounds to the first element's FLOAT value.
+				weight := float32(9)
+				if j == 0 {
+					weight = 16777216
+				}
+				rowWeights = append(rowWeights, weight)
 				values = append(values, vsVector(float32(i+j+1), int64(i), j)...)
 			}
 			reviewVectors = append(reviewVectors, vectorRow(values))
+			weights = append(weights, &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: rowWeights}}})
 		}
 		vecData := vectorField("vec", 106, reviewVectors...)
+		weightData := scalarField("weight", 107, weights...)
 		bodyData, langData := scalarField("body", 104, body...), scalarField("lang", 105, lang...)
-		for _, field := range []*schemapb.FieldData{bodyData, langData, vecData} {
+		for _, field := range []*schemapb.FieldData{bodyData, langData, vecData, weightData} {
 			typeutil.SetFieldDataValidData(field, valid)
 		}
 		fields := []*schemapb.FieldData{
 			{FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pks}}}}},
 			{FieldName: "embedding", FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: vectorRow(embedding)}},
-			{FieldName: "reviews", FieldId: 103, Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{bodyData, langData, vecData}}}},
+			{FieldName: "reviews", FieldId: 103, Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{bodyData, langData, vecData, weightData}}}},
 		}
-		s.Require().NoError(s.insert(ctx, name, fields))
+		res, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
+			CollectionName: name, FieldsData: fields, NumRows: uint32(len(pks)),
+			HashKeys: integration.GenerateHashKeys(len(pks)),
+		})
+		s.Require().NoError(merr.CheckRPCCall(res, err))
 	}
 	query := func(t *testing.T, expr string, ignoreGrowing bool) ([]int64, []*milvuspb.ElementIndices) {
 		t.Helper()
@@ -116,6 +133,12 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			ids  []int64
 		}{
 			{"pk > 0", []int64{1, 2, 3, 4, 5, 6}},
+			{`NOT MATCH_ANY(reviews, FALSE)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_ALL(reviews, FALSE)`, []int64{3}},
+			{`MATCH_ALL(reviews, TRUE)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_LEAST(reviews, TRUE, threshold=2)`, []int64{1, 2, 6}},
+			{`MATCH_MOST(reviews, 1 == 2, threshold=0)`, []int64{1, 2, 3, 4, 6}},
+			{`MATCH_EXACT(reviews, FALSE && $[body] == "new", threshold=0)`, []int64{1, 2, 3, 4, 6}},
 			{`MATCH_ANY(reviews, TEXT_MATCH($[body], "york"))`, []int64{1, 2, 4, 6}},
 			{`MATCH_ANY(reviews, PHRASE_MATCH($[body], "new york", 99))`, []int64{1, 4, 6}},
 			{`MATCH_LEAST(reviews, PHRASE_MATCH($[body], "new york"), threshold=1)`, []int64{1, 4, 6}},
@@ -141,6 +164,19 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 			{`pk >= 2 && ELEMENT_FILTER(reviews, TEXT_MATCH($[body], "new york", minimum_should_match=2) && $[lang] == "en")`, []hit{{4, 0}}},
 			{`MATCH_ANY(reviews, $[lang] == "en") && ELEMENT_FILTER(reviews, PHRASE_MATCH($[body], "new york"))`, []hit{{1, 0}, {4, 0}, {6, 1}}},
 			{`ELEMENT_FILTER(reviews, NOT TEXT_MATCH($[body], "york"))`, []hit{{1, 1}, {2, 0}}},
+			{`ELEMENT_FILTER(reviews, true || $[lang] == "en")`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, false && $[lang] == "en")`, nil},
+			{`ELEMENT_FILTER(reviews, TRUE)`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, FALSE)`, nil},
+			{`ELEMENT_FILTER(reviews, 1 == 1)`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`pk in [3, 5] && ELEMENT_FILTER(reviews, 1 == 1)`, nil}, // Empty and NULL parents.
+			{`pk < 0 && ELEMENT_FILTER(reviews, 1 == 1)`, nil},
+			{`ELEMENT_FILTER(reviews, $[weight] in [16777217.0, 9.0] && $[weight] == 16777216.0)`, []hit{{1, 0}, {2, 0}, {4, 0}, {6, 0}}},
+			{`ELEMENT_FILTER(reviews, $[weight] in [16777217.0, 9.0] && $[weight] in [16777216.0, 10.0])`, []hit{{1, 0}, {2, 0}, {4, 0}, {6, 0}}},
+			{`ELEMENT_FILTER(reviews, $[weight] in [16777217.0, 9.0] && $[weight] in [16777216.0, 9.0])`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 0}, {6, 1}}},
+			{`pk >= 4 && ELEMENT_FILTER(reviews, true || $[lang] == "en")`, []hit{{4, 0}, {6, 0}, {6, 1}}},
+			{`ELEMENT_FILTER(reviews, $[body] == "new" && $[body] == "york")`, nil},
+			{`ELEMENT_FILTER(reviews, NOT ($[body] == "new" && $[body] == "york"))`, []hit{{1, 0}, {1, 1}, {2, 0}, {2, 1}, {4, 0}, {6, 1}}},
 		} {
 			var want []hit
 			for _, h := range tc.hits {
@@ -263,4 +299,28 @@ func (s *ElementNullableSuite) TestArrayTextMatchLifecycle() {
 	s.T().Logf("compaction %d rewrote segments %v to %v", id, sources, targets)
 	waitForIndexedSegments(len(targets), targets...)
 	s.Run("compacted", func() { check(s.T(), 6, true) })
+	s.Run("sparse_parent", func() {
+		// One selected row in 512 forces the element-offset execution path.
+		const emptyParents = 511
+		pks := make([]int64, emptyParents)
+		rows := make([]*schemapb.ScalarField, emptyParents)
+		valid := make([]bool, emptyParents)
+		for i := range rows {
+			valid[i] = true
+			pks[i] = int64(1000 + i)
+			rows[i] = stringRow()
+		}
+		insert(pks, rows, rows, valid)
+		hits, _ := query(s.T(), "pk >= 1000 && ELEMENT_FILTER(reviews, 1 == 1)", false)
+		s.Empty(hits, "the growing segment contains only empty arrays")
+
+		pair := func() []*schemapb.ScalarField { return []*schemapb.ScalarField{stringRow("a", "b")} }
+		insert([]int64{1511}, pair(), pair(), []bool{true})
+		hits, offsets := query(s.T(), "pk == 1511 && ELEMENT_FILTER(reviews, 1 == 1)", false)
+		s.Require().Equal([]int64{1511}, hits)
+		s.Require().Len(offsets, 1)
+		s.Equal([]int64{0, 1}, offsets[0].GetIndices().GetData())
+		hits, _ = query(s.T(), "pk == 1511 && ELEMENT_FILTER(reviews, 1 == 2)", false)
+		s.Empty(hits)
+	})
 }

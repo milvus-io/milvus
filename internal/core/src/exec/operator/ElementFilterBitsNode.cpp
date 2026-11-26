@@ -278,13 +278,14 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         while (num_processed_elements < total_elements) {
             const auto next_row = std::min(num_processed_rows + batch_size_,
                                            query_context_->get_active_count());
+            const auto element_end =
+                struct_element_offsets->ElementIDRangeOfRow(next_row).first;
+            const auto batch_elements = element_end - num_processed_elements;
+            eval_ctx.set_input_batch_size(batch_elements);
             eval_ctx.clear_bitmap_input();
             if (!all_parents) {
-                const auto element_end =
-                    struct_element_offsets->ElementIDRangeOfRow(next_row).first;
                 const auto candidates =
-                    elem_bitset.view(num_processed_elements,
-                                     element_end - num_processed_elements);
+                    elem_bitset.view(num_processed_elements, batch_elements);
                 if (!candidates.all()) {
                     eval_ctx.set_bitmap_input(candidates);
                 }
@@ -308,6 +309,11 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
             }
 
             auto col_vec_size = col_vec->size();
+            AssertInfo(
+                col_vec_size == batch_elements,
+                "Element filter batch returned {} positions, expected {}",
+                col_vec_size,
+                batch_elements);
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             eval_bitset.append(view);
             TargetBitmapView valid_view(col_vec->GetValidRawData(),
