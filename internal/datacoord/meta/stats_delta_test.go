@@ -115,7 +115,7 @@ func TestAddStatsDelta(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := addStatsDelta(context.TODO(), 1, tc.base, tc.delta)
+			got := addFileStatsDelta(context.TODO(), 1, tc.base, tc.delta)
 			assert.Equal(t, tc.expect.GetInsertBinlogSize(), got.GetInsertBinlogSize())
 			assert.Equal(t, tc.expect.GetInsertBinlogCount(), got.GetInsertBinlogCount())
 			assert.Equal(t, tc.expect.GetStatsBinlogSize(), got.GetStatsBinlogSize())
@@ -140,7 +140,7 @@ func TestAddStatsDeltaDoesNotAliasBase(t *testing.T) {
 		InsertBinlogSize: 100,
 		NullCounts:       map[int64]int64{100: 1},
 	}
-	got := addStatsDelta(context.TODO(), 1, base, &datapb.Statistics{
+	got := addFileStatsDelta(context.TODO(), 1, base, &datapb.Statistics{
 		InsertBinlogSize: 10,
 		NullCounts:       map[int64]int64{101: 0},
 	})
@@ -161,7 +161,7 @@ func TestAddStatsDeltaDoesNotAliasBaseNilDelta(t *testing.T) {
 		InsertBinlogSize: 100,
 		NullCounts:       map[int64]int64{100: 1},
 	}
-	got := addStatsDelta(context.TODO(), 1, base, nil)
+	got := addFileStatsDelta(context.TODO(), 1, base, nil)
 
 	got.InsertBinlogSize = 999
 	got.NullCounts[100] = 999
@@ -180,12 +180,12 @@ func TestAddStatsDeltaValidElementCounts(t *testing.T) {
 		NullCounts:         map[int64]int64{103: 0},
 		ValidElementCounts: map[int64]int64{101: 2, 102: 3, 103: 4},
 	}
-	got := addStatsDelta(ctx, 1, base, delta)
+	got := addFileStatsDelta(ctx, 1, base, delta)
 	// 101 had a count: summed. 102 has data but no count: stays unknown.
 	// 103 is a new column: its whole count.
 	assert.Equal(t, map[int64]int64{101: 7, 103: 4}, got.GetValidElementCounts())
 	assert.Equal(t, map[int64]int64{101: 5}, base.GetValidElementCounts())
 
-	got = addStatsDelta(ctx, 1, nil, &datapb.Statistics{ValidElementCounts: map[int64]int64{103: 4}})
+	got = addFileStatsDelta(ctx, 1, nil, &datapb.Statistics{ValidElementCounts: map[int64]int64{103: 4}})
 	assert.Equal(t, map[int64]int64{103: 4}, got.GetValidElementCounts())
 }

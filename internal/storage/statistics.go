@@ -56,6 +56,8 @@ type quantileEntry struct {
 // Not safe for concurrent use — the metacache SegmentStats wrapper guards it.
 type StatisticsCollector struct {
 	numRows            int64
+	unmeasuredPrefix   bool // A recovered nonempty segment had no Statistics to seed its collector.
+	fieldLogicalSizes  *datapb.FieldLogicalSizes
 	insertBinlogSize   int64
 	insertBinlogCount  int64
 	statsBinlogSize    int64
@@ -89,14 +91,17 @@ func NewStatisticsCollector() *StatisticsCollector {
 // the segment's authoritative row count (Statistics omits the insert row
 // count). The persisted TimestampQuantiles are reconstructed as synthetic
 // per-bucket entries so post-restart quantiles round-trip and keep
-// accumulating as new syncs arrive. Returns an empty collector when stats is
-// nil.
+// accumulating as new syncs arrive. A nil stats envelope can cover a nonempty
+// historical prefix. In that case future batches cannot establish field totals,
+// and existing statistics such as quantiles still start with the first new batch.
 func NewStatisticsCollectorFromStats(stats *datapb.Statistics, numRows int64) *StatisticsCollector {
-	c := &StatisticsCollector{}
 	if stats == nil {
-		return c
+		return &StatisticsCollector{unmeasuredPrefix: numRows > 0}
 	}
-	c.numRows = numRows
+	c := &StatisticsCollector{numRows: numRows}
+	if sizes := stats.GetFieldLogicalSizes(); FieldLogicalSizesCover(sizes, numRows) {
+		c.fieldLogicalSizes = cloneFieldLogicalSizes(sizes)
+	}
 	c.insertBinlogSize = stats.GetInsertBinlogSize()
 	c.insertBinlogCount = stats.GetInsertBinlogCount()
 	c.statsBinlogSize = stats.GetStatsBinlogSize()
@@ -241,6 +246,18 @@ func (c *StatisticsCollector) Digest(
 	statsBlobSize, rows int64,
 	tsFrom, tsTo uint64,
 ) {
+	c.DigestWithFieldSizes(inserts, delta, statsBlobSize, rows, tsFrom, tsTo, nil)
+}
+
+// DigestWithFieldSizes records one sync. sizes describes the inserted rows of
+// this sync, before they become part of the segment's committed prefix.
+func (c *StatisticsCollector) DigestWithFieldSizes(
+	inserts map[int64]*datapb.FieldBinlog, delta *datapb.FieldBinlog,
+	statsBlobSize, rows int64, tsFrom, tsTo uint64, sizes *datapb.FieldLogicalSizes,
+) {
+	if !c.unmeasuredPrefix && (rows != 0 || c.fieldLogicalSizes == nil) {
+		c.fieldLogicalSizes = AppendFieldLogicalSizes(c.fieldLogicalSizes, c.numRows, sizes, rows)
+	}
 	c.numRows += rows
 	c.digestValidElementCounts(inserts)
 	for _, fb := range inserts {
@@ -356,7 +373,7 @@ func (c *StatisticsCollector) digestValidElementCounts(inserts map[int64]*datapb
 // has been digested. No scaling — the value reflects exactly what the collector
 // has seen.
 func (c *StatisticsCollector) Publish() *datapb.Statistics {
-	if c.numRows == 0 && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 && c.columnGroups == nil {
+	if c.numRows == 0 && c.fieldLogicalSizes == nil && c.deltaBinlogCount == 0 && c.statsBinlogSize == 0 && c.insertBinlogCount == 0 && c.columnGroups == nil {
 		return nil
 	}
 	var nullCounts map[int64]int64
@@ -394,6 +411,7 @@ func (c *StatisticsCollector) Publish() *datapb.Statistics {
 		TimestampTo:        c.timestampTo,
 		NullCounts:         nullCounts,
 		ValidElementCounts: validElementCounts,
+		FieldLogicalSizes:  cloneFieldLogicalSizes(c.fieldLogicalSizes),
 		TimestampQuantiles: c.quantiles(),
 		Formats:            formats,
 	}
@@ -440,6 +458,7 @@ func (c *StatisticsCollector) quantiles() []int64 {
 // SegmentStats wrapper to share the accumulator by pointer across Clone().
 func (c *StatisticsCollector) Clone() *StatisticsCollector {
 	cp := *c
+	cp.fieldLogicalSizes = cloneFieldLogicalSizes(c.fieldLogicalSizes)
 	if c.nullCounts != nil {
 		cp.nullCounts = make(map[int64]int64, len(c.nullCounts))
 		for f, n := range c.nullCounts {

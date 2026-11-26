@@ -153,12 +153,12 @@ func (t *CreateCollectionTask) OnEnqueue() error {
 	return nil
 }
 
-func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context) error {
+func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context, schema *schemapb.CollectionSchema) error {
 	idx := -1
-	for i, field := range t.schema.Fields {
+	for i, field := range schema.Fields {
 		if field.GetIsPartitionKey() {
 			if idx != -1 {
-				return merr.WrapErrParameterInvalidMsg("there are more than one partition key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name)
+				return merr.WrapErrParameterInvalidMsg("there are more than one partition key, field name = %s, %s", schema.Fields[idx].Name, field.Name)
 			}
 
 			if field.GetIsPrimaryKey() {
@@ -198,7 +198,7 @@ func (t *CreateCollectionTask) validatePartitionKey(ctx context.Context) error {
 	}
 
 	// Fields in StructArrayFields should not be partition key
-	for _, field := range t.schema.StructArrayFields {
+	for _, field := range schema.StructArrayFields {
 		for _, subField := range field.Fields {
 			if subField.GetIsPartitionKey() {
 				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
@@ -326,6 +326,17 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	// With preserve_field_ids the schema may carry the dynamic and namespace
+	// fields, only for their source field IDs. They are not user fields.
+	preserveFieldIDs := isPreserveFieldIDs(t.GetProperties())
+	var preservedSystemFields []*schemapb.FieldSchema
+	if preserveFieldIDs {
+		preservedSystemFields, err = takePreservedSystemFields(t.schema, t.GetProperties())
+		if err != nil {
+			return err
+		}
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
@@ -376,7 +387,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
-	if vectorFields == 0 {
+	if vectorFields == 0 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
 	}
 
@@ -427,12 +438,24 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate partition key mode
-	if err := t.validatePartitionKey(ctx); err != nil {
+	// RootCoord recreates a preserved namespace field as a partition key.
+	// Validate that role using the canonicalized stub from takePreservedSystemFields
+	// without exposing the hidden field to user-field checks.
+	partitionKeySchema := t.schema
+	for _, field := range preservedSystemFields {
+		if field.GetName() == common.NamespaceFieldName {
+			partitionKeySchema = &schemapb.CollectionSchema{
+				Fields:            append(append([]*schemapb.FieldSchema{}, t.schema.GetFields()...), field),
+				StructArrayFields: t.schema.GetStructArrayFields(),
+			}
+			break
+		}
+	}
+	if err := t.validatePartitionKey(ctx, partitionKeySchema); err != nil {
 		return err
 	}
 
-	hasPartitionKey := hasPartitionKeyModeField(t.schema)
+	hasPartitionKey := hasPartitionKeyModeField(partitionKeySchema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
 		return err
 	}
@@ -489,10 +512,13 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	// RootCoord skips this check when preserve_field_ids is set, as for a
-	// snapshot restore, which does not go through proxy.
-	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
-		return err
+	// A schema with preserved field IDs restores an existing collection, whose
+	// stored sub-fields may carry enable_match or enable_analyzer from an
+	// earlier version; RootCoord skips this check for it too.
+	if !preserveFieldIDs {
+		if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
@@ -522,6 +548,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.schema.Fields = append(t.schema.Fields, preservedSystemFields...)
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
@@ -1288,7 +1315,7 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	// Check: cannot drop the last vector field. GetVectorFieldSchemas counts
 	// vectors in both top-level Fields and StructArrayField sub-fields.
 	if typeutil.IsVectorType(targetField.DataType) {
-		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
 		}
 	}
@@ -1329,7 +1356,8 @@ func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schem
 	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
 	}
-	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 &&
+		!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", storedName)
 	}
 	for _, fn := range schema.GetFunctions() {
@@ -1378,7 +1406,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop struct array field %s: it would leave no vector field in the collection",
 			sf.GetName())
@@ -1418,7 +1446,7 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop function %s: it would leave no vector field in the collection",
 			functionName)
@@ -3210,10 +3238,14 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field
@@ -3477,10 +3509,14 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field

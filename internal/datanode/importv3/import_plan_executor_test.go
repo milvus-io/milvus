@@ -17,8 +17,12 @@ package importv3
 
 import (
 	"context"
+	"io"
+	"path/filepath"
+	"strconv"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -102,6 +108,8 @@ type planFakeBinlogWriter struct {
 	manifest      string
 	expirQuantile []int64
 	statsBlobSize int64
+	logicalSizes  *datapb.FieldLogicalSizes
+	closed        bool
 
 	writeCount int
 	written    []int
@@ -114,11 +122,17 @@ func (w *planFakeBinlogWriter) Write(record storage.Record) error {
 }
 
 func (w *planFakeBinlogWriter) GetWrittenUncompressed() uint64 { return 0 }
-func (w *planFakeBinlogWriter) Close() error                   { return nil }
-func (w *planFakeBinlogWriter) GetRowNum() int64               { return w.rows }
-func (w *planFakeBinlogWriter) GetStatsBlobSize() int64        { return w.statsBlobSize }
-func (w *planFakeBinlogWriter) FlushChunk() error              { return nil }
-func (w *planFakeBinlogWriter) GetBufferUncompressed() uint64  { return 0 }
+func (w *planFakeBinlogWriter) Close() error                   { w.closed = true; return nil }
+func (w *planFakeBinlogWriter) GetFieldLogicalSizes() *datapb.FieldLogicalSizes {
+	if !w.closed {
+		return nil
+	}
+	return w.logicalSizes
+}
+func (w *planFakeBinlogWriter) GetRowNum() int64              { return w.rows }
+func (w *planFakeBinlogWriter) GetStatsBlobSize() int64       { return w.statsBlobSize }
+func (w *planFakeBinlogWriter) FlushChunk() error             { return nil }
+func (w *planFakeBinlogWriter) GetBufferUncompressed() uint64 { return 0 }
 func (w *planFakeBinlogWriter) Schema() *schemapb.CollectionSchema {
 	return nil
 }
@@ -167,7 +181,12 @@ func TestExecuteImportPlanManifestLastWrite(t *testing.T) {
 		"f1": planFragmentSource(t, "f1", []int64{1, 2}, []string{"a", "b"}, fragmentSchema),
 		"f2": planFragmentSource(t, "f2", []int64{3}, []string{"c"}, fragmentSchema),
 	}
-	fake := &planFakeBinlogWriter{rows: 3, manifest: "import_v3/1/reshard/2/manifests/3.pb"}
+	fake := &planFakeBinlogWriter{
+		rows: 3, manifest: "import_v3/1/reshard/2/manifests/3.pb", statsBlobSize: 71,
+		logicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{
+			100: {PayloadBytes: 24}, 101: {PayloadBytes: 3}, common.TimeStampField: {PayloadBytes: 24},
+		}},
+	}
 	req := newImportPlanRequest(schema,
 		[]*importv3pb.FragmentRef{{Path: "f1", Rows: 2}, {Path: "f2", Rows: 1}},
 		3, defaultImportPlanWriterSpec(schema))
@@ -180,9 +199,86 @@ func TestExecuteImportPlanManifestLastWrite(t *testing.T) {
 	require.Empty(t, results[0].GetInsertLogs(), "Storage V3 crosses the boundary by manifest only")
 	require.Nil(t, results[0].GetPkLog())
 	require.Empty(t, results[0].GetBm25Logs())
+	require.Equal(t, fake.logicalSizes, results[0].GetStatistics().GetFieldLogicalSizes())
+	require.EqualValues(t, 71, results[0].GetStatistics().GetStatsBinlogSize())
 	// The merged record reached the formal writer exactly once.
 	require.Equal(t, 1, fake.writeCount)
 	require.Equal(t, []int{3}, fake.written)
+}
+
+// Three physical fragments and fan-in two force one local merge round before
+// the final manifest writer sees the rows. Only its three rows count.
+func TestExecuteImportPlanFinalLogicalSizes(t *testing.T) {
+	for _, backup := range []bool{false, true} {
+		t.Run("backup="+strconv.FormatBool(backup), func(t *testing.T) {
+			initReshardPipelineParams(t)
+			root := t.TempDir()
+			initcore.CleanArrowFileSystem()
+			require.NoError(t, initcore.InitLocalArrowFileSystem(root))
+			t.Cleanup(initcore.CleanArrowFileSystem)
+			schema := importPlanTestSchema()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+			fragmentSchema := importutilv2.FragmentSchema(schema, backup)
+			var fragments []*importv3pb.FragmentRef
+			for i, note := range []string{"猫", "", "hello"} {
+				pk := int64(3 - i)
+				data := &storage.InsertData{Data: map[int64]storage.FieldData{
+					100:               &storage.Int64FieldData{Data: []int64{pk}},
+					101:               &storage.StringFieldData{Data: []string{note}},
+					common.RowIDField: &storage.Int64FieldData{Data: []int64{1000 + pk}},
+				}}
+				if backup {
+					data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: []int64{2000 + pk}}
+				}
+				r, err := storage.NewInsertDataRecordReader(data, fragmentSchema)
+				require.NoError(t, err)
+				rec, err := r.Next()
+				require.NoError(t, err)
+				w, err := newImportV3PackedRecordWriter("", []string{filepath.Join(root, strconv.Itoa(i)+".parquet")}, fragmentSchema, 64<<10, cfg, nil)
+				require.NoError(t, err)
+				require.NoError(t, w.Write(rec))
+				require.NoError(t, r.Close())
+				require.NoError(t, w.Close())
+				fragments = append(fragments, &importv3pb.FragmentRef{Path: w.GetWrittenPaths(0), Rows: w.GetWrittenRowNum()})
+			}
+			req := newImportPlanRequest(schema, fragments, 3, defaultImportPlanWriterSpec(schema))
+			req.StorageConfig = cfg
+			req.LogRange = &datapb.IDRange{Begin: 100, End: 1000}
+			req.Plan.FanIn, req.Plan.Backup = 2, backup
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+			result, err := executeImportPlan(context.Background(), cm, req, req.Plan, nil)
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			segment := result[0]
+			require.NotEmpty(t, segment.ManifestPath)
+			sizes := segment.GetStatistics().GetFieldLogicalSizes()
+			require.EqualValues(t, 1, sizes.GetVersion())
+			require.EqualValues(t, 3, sizes.GetRowCount())
+			require.Equal(t, map[int64]*datapb.FieldLogicalSize{
+				100: {PayloadBytes: 24}, 101: {PayloadBytes: uint64(len("猫hello"))},
+				common.RowIDField: {PayloadBytes: 24}, common.TimeStampField: {PayloadBytes: 24},
+			}, sizes.GetFields())
+
+			reader, err := storage.NewRecordReaderFromManifest(segment.ManifestPath, typeutil.AppendSystemFields(schema), 64<<10, cfg, nil)
+			require.NoError(t, err)
+			defer reader.Close()
+			var timestamps []int64
+			for {
+				record, err := reader.Next()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				timestamps = append(timestamps, record.Column(common.TimeStampField).(*array.Int64).Int64Values()...)
+			}
+			if backup {
+				require.Equal(t, []int64{2001, 2002, 2003}, timestamps)
+			} else {
+				ts := int64(req.Plan.GetDataTs())
+				require.Equal(t, []int64{ts, ts, ts}, timestamps)
+			}
+		})
+	}
 }
 
 // TestExecuteImportPlanBinlogBranch pins the Storage V2 branch: with no manifest
@@ -204,6 +300,7 @@ func TestExecuteImportPlanBinlogBranch(t *testing.T) {
 		},
 		statsLog:     statsLog,
 		bm25StatsLog: map[storage.FieldID]*datapb.FieldBinlog{102: bm25},
+		logicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 2},
 	}
 	req := newImportPlanRequest(schema,
 		[]*importv3pb.FragmentRef{{Path: "f1", Rows: 2}}, 2, defaultImportPlanWriterSpec(schema))
@@ -213,6 +310,7 @@ func TestExecuteImportPlanBinlogBranch(t *testing.T) {
 	require.Len(t, results, 1)
 	require.Equal(t, int64(2), results[0].GetRows())
 	require.Empty(t, results[0].GetManifestPath())
+	require.Nil(t, results[0].GetStatistics().GetFieldLogicalSizes())
 	require.Len(t, results[0].GetInsertLogs(), 1)
 	require.Equal(t, int64(100), results[0].GetInsertLogs()[0].GetFieldID())
 	require.Same(t, statsLog, results[0].GetPkLog())
@@ -237,6 +335,13 @@ func TestExecuteImportPlanRejectsWriterRowMismatch(t *testing.T) {
 	_, err := runExecuteImportPlan(t, fake, sources, req)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "writer/result row mismatch")
+
+	// The writer completed both rows, but its snapshot covers only one.
+	fake.rows, fake.manifest = 2, "manifest"
+	fake.logicalSizes = &datapb.FieldLogicalSizes{Version: 1, RowCount: 1}
+	results, err := runExecuteImportPlan(t, fake, sources, req)
+	require.NoError(t, err)
+	require.Nil(t, results[0].GetStatistics().GetFieldLogicalSizes())
 }
 
 func TestBuildImportV3WriterOptionsValidation(t *testing.T) {

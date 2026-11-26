@@ -114,6 +114,18 @@ func TestAccessLogMiddlewareBridgesAccessKey(t *testing.T) {
 	assert.Equal(t, got, v)
 }
 
+func TestRESTAccessLogFormatsColdSearch(t *testing.T) {
+	ctx := newRESTTestContext(t).Request.Context()
+	accessInfo := ctx.Value(AccessKey{}).(info.AccessInfo)
+	formatter := NewFormatter("[is_cold_search: $is_cold_search]")
+
+	assert.Equal(t, "[is_cold_search: n/a]\n", formatter.Format(accessInfo))
+	SetColdSearch(ctx, false)
+	assert.Equal(t, "[is_cold_search: false]\n", formatter.Format(accessInfo))
+	SetColdSearch(ctx, true)
+	assert.Equal(t, "[is_cold_search: true]\n", formatter.Format(accessInfo))
+}
+
 func TestConsistencyLevelHelperRESTPath(t *testing.T) {
 	// REST request relying on the default consistency: the protobuf field is
 	// the zero value (Strong), while the collection default resolves to Bounded.

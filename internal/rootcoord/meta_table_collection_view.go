@@ -31,6 +31,10 @@ import (
 func collectionSchemaPB(coll *model.Collection, dbName string) *schemapb.CollectionSchema {
 	schema := coll.SchemaView()
 	schema.DbName = dbName
+	// Hide legacy create-only directives (such as preserve_field_ids persisted
+	// on v3.0.0–v3.0.6) from DescribeCollection and downstream views/snapshots
+	// without mutating coll.Properties in MetaTable.
+	schema.Properties = stripCreateOnlyProperties(schema.Properties)
 	return schema
 }
 
@@ -76,15 +80,16 @@ func (mt *MetaTable) buildCollectionViewLocked(coll *model.Collection) *metacach
 	if shardsNum == 0 {
 		shardsNum = int32(len(coll.VirtualChannelNames))
 	}
+	schema := collectionSchemaPB(coll, dbName)
 	return &metacache.CollectionInfo{
 		ID:                 coll.CollectionID,
-		Schema:             collectionSchemaPB(coll, dbName),
+		Schema:             schema,
 		State:              state,
 		Partitions:         partitions,
 		DroppingPartitions: dropping,
 		PartitionIDsByName: idsByName,
 		VChannelNames:      coll.VirtualChannelNames,
-		Properties:         coll.Properties,
+		Properties:         schema.Properties,
 		DatabaseName:       dbName,
 		DatabaseID:         coll.DBID,
 		StartPositions:     coll.StartPositions,

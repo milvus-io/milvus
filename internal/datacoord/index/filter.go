@@ -73,6 +73,19 @@ func FilterInIndexedSegments(ctx context.Context, handler meta.Handler, indexMet
 				targetFieldIds = append(targetFieldIds, index.FieldID)
 			}
 		}
+		// A collection without a vector field has no index to wait for here.
+		// Without this branch its segments were returned only when they had a
+		// segment index record, so with no index defined the automatic
+		// compaction of such a collection got no input.
+		if len(targetFieldIds) == 0 {
+			for _, segment := range segmentList {
+				if meta.IsFlushState(segment.GetState()) || segment.GetState() == commonpb.SegmentState_Dropped {
+					ret = append(ret, segment)
+				}
+			}
+			continue
+		}
+
 		segmentIDs := lo.Map(segmentList, func(seg *meta.SegmentInfo, _ int) UniqueID {
 			return seg.GetID()
 		})
