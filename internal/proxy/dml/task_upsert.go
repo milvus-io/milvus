@@ -886,6 +886,12 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				typeutil.SetFieldDataValidData(existField, validData)
 			}
 
+			if upsertField == nil && fieldSchema.GetElementNullable() && fieldSchema.GetDataType() == schemapb.DataType_Array {
+				existField = proto.Clone(existField).(*schemapb.FieldData)
+				if err := compactRetrievedStructChild(existField, fieldSchema); err != nil {
+					return nil, merr.Wrapf(err, "retrieved array field %q", fieldSchema.GetName())
+				}
+			}
 			isNullableVector := typeutil.IsCompactNullableVectorFieldData(existField)
 			existComputer := typeutil.NewFieldDataIdxComputer([]*schemapb.FieldData{existField})
 			existSrcIndices := make([]int64, len(updateIdxInUpsert))
@@ -929,9 +935,22 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 					if plan.isPathReplace() {
 						pathIndex = []int{plan.index}
 					}
-					if err := typeutil.UpdateArrayFieldByColumnWithOp(
-						dstField, upsertField, dstIndices, upsertSrcIndices, op, readMaxCapacity(fieldSchema), pathIndex...,
-					); err != nil {
+					var mergeErr error
+					if plan.isPathReplace() && fieldSchema.GetElementNullable() {
+						rows := dstField.GetScalars().GetArrayData().GetData()
+						updates := upsertField.GetScalars().GetArrayData().GetData()
+						for i, src := range upsertSrcIndices {
+							rows[i], mergeErr = replaceNullableArrayElement(rows[i], updates[src], fieldSchema, plan.index)
+							if mergeErr != nil {
+								break
+							}
+						}
+					} else {
+						mergeErr = typeutil.UpdateArrayFieldByColumnWithOp(
+							dstField, upsertField, dstIndices, upsertSrcIndices, op, readMaxCapacity(fieldSchema), pathIndex...,
+						)
+					}
+					if err := mergeErr; err != nil {
 						// PATH_REPLACE operands and existing targets were validated
 						// above; a merge failure now indicates an internal invariant
 						// violation. APPEND can still exceed max_capacity after merge,

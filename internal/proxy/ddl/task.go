@@ -1060,7 +1060,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 			if !plan.Field.GetNullable() {
 				return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("added field must be nullable, please check it, field name = %s", plan.Field.GetName()))
 			}
-			return nil
+			return validateNativeListArrayGrowingSourceFlush(t.oldSchema, plan.Field)
 		}
 	}
 	if plan.HasFunction() {

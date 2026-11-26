@@ -1310,7 +1310,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Array:
-					// A null element has nowhere to go: an array has no
+					if field.GetElementNullable() {
+						array := gjson.Parse(dataString)
+						if !array.IsArray() {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s requires an array", fieldName)
+						}
+						scalar, err := parseStructSubScalars(field, field.GetElementType(), array.Array(), true, compatibilityMode)
+						if err != nil {
+							return reallyDataArray, validDataMap, err
+						}
+						reallyData[fieldName] = scalar
+						break
+					}
+					// An array without element nullability has no
 					// element-level validity, so it can only be dropped into the
 					// element's zero value. sonic already refuses one for an
 					// integer or string element, but accepts it for a boolean or
@@ -1616,6 +1628,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			return nil, merr.WrapErrParameterInvalidMsg("data[%d] must be a JSON object", rowIndex)
 		}
 		for _, field := range arrayFields {
+			if field.GetElementNullable() {
+				continue
+			}
 			rawValue := gjson.Get(row.Raw, field.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				continue
@@ -4349,7 +4364,11 @@ func legacyArrayValue(row *schemapb.ScalarField, enableInt64 bool) any {
 		if values := data.LongData.GetData(); len(values) > 0 {
 			inner["data"] = formatInt64(values)
 		}
-		return map[string]any{"Data": map[string]any{"LongData": inner}}
+		wrapper := map[string]any{"Data": map[string]any{"LongData": inner}}
+		if valid := typeutil.GetArrayElementValidData(row); len(valid) > 0 {
+			wrapper["valid_data"] = valid
+		}
+		return wrapper
 	case *schemapb.ScalarField_ArrayData:
 		inner := map[string]any{}
 		if elements := data.ArrayData.GetData(); len(elements) > 0 {
@@ -4398,6 +4417,10 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 	// failure would widen this change beyond the serialization format it fixes.
 	if field == nil {
 		return nil, nil
+	}
+
+	if valid := typeutil.GetArrayElementValidData(field); len(valid) > 0 {
+		return expandElementValidity(scalarArrayToInterfaces(field, enableInt64), valid)
 	}
 
 	switch data := field.GetData().(type) {
