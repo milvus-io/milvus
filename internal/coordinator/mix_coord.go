@@ -1706,3 +1706,12 @@ func (s *mixCoordImpl) initDataAndQueryCoord() error {
 
 	return nil
 }
+
+// ReadQuotaSnapshot keeps large immutable control data on the in-process path.
+func (s *mixCoordImpl) ReadQuotaSnapshot(ctx context.Context, full bool) (*metricsinfo.QuotaSnapshot, error) {
+	return s.datacoordServer.ReadQuotaSnapshot(ctx, full)
+}
+
+func (s *mixCoordImpl) AcknowledgeQuotaSnapshot(snapshot *metricsinfo.QuotaSnapshot) {
+	s.datacoordServer.AcknowledgeQuotaSnapshot(snapshot)
+}

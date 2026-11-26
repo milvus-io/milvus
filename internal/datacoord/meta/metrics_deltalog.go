@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
 // deltalogQuantiles are the summary quantiles published for the per-segment
@@ -150,40 +151,60 @@ func reportDeltalogMetrics(aggregates map[string]*deltalogAggregate) {
 	deltalogPublishMu.Lock()
 	defer deltalogPublishMu.Unlock()
 
+	for collectionID, agg := range aggregates {
+		publishCollectionDeltalogMetrics(agg.dbName, collectionID, agg.l0FileCount, agg.quantiles())
+	}
+	for collectionID := range publishedDeltalogLevels {
+		if _, present := aggregates[collectionID]; !present {
+			removeCollectionDeltalogMetrics(collectionID)
+		}
+	}
+}
+
+// The caller holds deltalogPublishMu.
+func publishCollectionDeltalogMetrics(dbName, collectionID string, l0FileCount int64, quantiles map[string]metricsinfo.QuotaDeltalogQuantiles) {
+	metrics.DataCoordL0DeltalogFileNum.WithLabelValues(dbName, collectionID).Set(float64(l0FileCount))
+	levels := make(map[string]struct{}, len(quantiles))
+	for level, values := range quantiles {
+		levels[level] = struct{}{}
+		publishDeltalogQuantiles(dbName, collectionID, level, values)
+	}
+	for level := range publishedDeltalogLevels[collectionID] {
+		if _, present := levels[level]; !present {
+			metrics.CleanupDataCoordDeltalogLevelMetrics(collectionID, level)
+		}
+	}
+	publishedDeltalogLevels[collectionID] = levels
+}
+
+func removeCollectionDeltalogMetrics(collectionID string) {
+	metrics.CleanupDataCoordDeltalogMetrics(collectionID)
+	delete(publishedDeltalogLevels, collectionID)
+}
+
+func (a *deltalogAggregate) quantiles() map[string]metricsinfo.QuotaDeltalogQuantiles {
+	if len(a.byLevel) == 0 {
+		return nil
+	}
 	qs := make([]float64, len(deltalogQuantiles))
 	for i, p := range deltalogQuantiles {
 		qs[i] = p.q
 	}
+	result := make(map[string]metricsinfo.QuotaDeltalogQuantiles, len(a.byLevel))
+	for level, d := range a.byLevel {
+		result[level.String()] = metricsinfo.QuotaDeltalogQuantiles{
+			FileCount:    quantilesInPlace(d.fileCounts, qs),
+			Size:         quantilesInPlace(d.sizes, qs),
+			DeletedRatio: quantilesInPlace(d.deletedRatios, qs),
+		}
+	}
+	return result
+}
 
-	published := make(map[string]map[string]struct{}, len(aggregates))
-	for collectionID, agg := range aggregates {
-		metrics.DataCoordL0DeltalogFileNum.WithLabelValues(agg.dbName, collectionID).Set(float64(agg.l0FileCount))
-		levels := make(map[string]struct{}, len(agg.byLevel))
-		for level, d := range agg.byLevel {
-			levelStr := level.String()
-			levels[levelStr] = struct{}{}
-			fcQ := quantilesInPlace(d.fileCounts, qs)
-			szQ := quantilesInPlace(d.sizes, qs)
-			drQ := quantilesInPlace(d.deletedRatios, qs)
-			for i, p := range deltalogQuantiles {
-				metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(fcQ[i])
-				metrics.DataCoordSegmentDeltalogSize.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(szQ[i])
-				metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(agg.dbName, collectionID, levelStr, p.label).Set(drQ[i])
-			}
-		}
-		published[collectionID] = levels
+func publishDeltalogQuantiles(dbName, collectionID, level string, values metricsinfo.QuotaDeltalogQuantiles) {
+	for i, p := range deltalogQuantiles {
+		metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues(dbName, collectionID, level, p.label).Set(values.FileCount[i])
+		metrics.DataCoordSegmentDeltalogSize.WithLabelValues(dbName, collectionID, level, p.label).Set(values.Size[i])
+		metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues(dbName, collectionID, level, p.label).Set(values.DeletedRatio[i])
 	}
-	for collectionID, levels := range publishedDeltalogLevels {
-		current, ok := published[collectionID]
-		if !ok {
-			metrics.CleanupDataCoordDeltalogMetrics(collectionID)
-			continue
-		}
-		for levelStr := range levels {
-			if _, ok := current[levelStr]; !ok {
-				metrics.CleanupDataCoordDeltalogLevelMetrics(collectionID, levelStr)
-			}
-		}
-	}
-	publishedDeltalogLevels = published
 }

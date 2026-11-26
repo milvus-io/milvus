@@ -132,6 +132,8 @@ type Meta struct {
 	Broker               broker.Broker
 	CompactionProtection CompactionProtection
 	PartitionStats       PartitionStatsPublication
+	quotaMetricsMu       sync.Mutex
+	quotaDisplay         *quotaDisplayCache
 
 	// groupMu guards segmentChangeGroups and its reverse indexes. A write that
 	// also writes segments takes it after their writer locks.
@@ -439,7 +441,7 @@ type dbSegmentStateKey struct {
 	state  commonpb.SegmentState
 }
 
-func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+func (m *Meta) getQuotaInfoByScan() *metricsinfo.DataCoordQuotaMetrics {
 	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	collectionBinlogSize := make(map[UniqueID]int64)
@@ -586,7 +588,7 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	return info
 }
 
-func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
+func (m *Meta) getAllCollectionNumRowsByScan() map[int64]int64 {
 	ret := make(map[int64]int64)
 	m.Segments.RangeReused(func(segment *SegmentInfo) bool {
 		if IsSegmentHealthy(segment) {

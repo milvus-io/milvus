@@ -41,13 +41,15 @@ const (
 
 // quotaConfig is configuration for quota and limitations.
 type quotaConfig struct {
-	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
-	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
-	FactorChangeThreshold      ParamItem `refreshable:"true"`
-	ForceDenyAllDDL            ParamItem `refreshable:"true"`
-	AllocRetryTimes            ParamItem `refreshable:"false"`
-	AllocWaitInterval          ParamItem `refreshable:"false"`
-	ComplexDeleteLimitEnable   ParamItem `refreshable:"false"`
+	QuotaAndLimitsEnabled        ParamItem `refreshable:"false"`
+	QuotaCenterCollectInterval   ParamItem `refreshable:"false"`
+	CollectionStatsCacheEnabled  ParamItem `refreshable:"true"`
+	LocalQuotaCalculationEnabled ParamItem `refreshable:"true"`
+	FactorChangeThreshold        ParamItem `refreshable:"true"`
+	ForceDenyAllDDL              ParamItem `refreshable:"true"`
+	AllocRetryTimes              ParamItem `refreshable:"false"`
+	AllocWaitInterval            ParamItem `refreshable:"false"`
+	ComplexDeleteLimitEnable     ParamItem `refreshable:"false"`
 
 	// ddl
 	DDLLimitEnabled   ParamItem `refreshable:"true"`
@@ -175,6 +177,12 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.QuotaAndLimitsEnabled.Init(base.mgr)
+
+	p.CollectionStatsCacheEnabled = ParamItem{Key: "quotaAndLimits.collectionStatsCacheEnabled", Version: "3.0.0", DefaultValue: "false", Doc: "DataCoord: cache per-collection quota statistics and recompute only changed collections; disable to use the full-scan reference.", Export: true}
+	p.CollectionStatsCacheEnabled.Init(base.mgr)
+
+	p.LocalQuotaCalculationEnabled = ParamItem{Key: "quotaAndLimits.localQuotaCalculationEnabled", Version: "3.0.0", DefaultValue: "false", Doc: "MixCoord: recompute quota policies from changed local metadata and statistics. Requires collectionStatsCacheEnabled.", Export: true}
+	p.LocalQuotaCalculationEnabled.Init(base.mgr)
 
 	const defaultInterval = "3.0"
 	p.QuotaCenterCollectInterval = ParamItem{

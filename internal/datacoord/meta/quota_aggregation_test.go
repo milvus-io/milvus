@@ -36,9 +36,22 @@ func resetQuotaDisplayMetrics() {
 	metrics.DataCoordSegmentBinLogFileCount.Reset()
 	metrics.DataCoordNumStoredRows.Reset()
 	metrics.DataCoordL0DeleteEntriesNum.Reset()
+	metrics.DataCoordL0DeltalogFileNum.Reset()
+	metrics.DataCoordSegmentDeltalogFileCount.Reset()
+	metrics.DataCoordSegmentDeltalogSize.Reset()
+	metrics.DataCoordSegmentDeletedRowsRatio.Reset()
 }
 
 func TestQuotaInfoAggregatePreservesControlData(t *testing.T) {
+	for _, enabled := range []string{"false", "true"} {
+		t.Run(enabled, func(t *testing.T) {
+			setQuotaTestParam(t, &Params.QuotaConfig.CollectionStatsCacheEnabled, enabled)
+			testQuotaInfoAggregatePreservesControlData(t)
+		})
+	}
+}
+
+func testQuotaInfoAggregatePreservesControlData(t *testing.T) {
 	previous := metrics.CollectionLevelMetricsMode()
 	t.Cleanup(func() {
 		metrics.SetCollectionLevelMetricsMode(previous)
@@ -163,6 +176,77 @@ func BenchmarkQuotaInfoAggregate(b *testing.B) {
 			for b.Loop() {
 				m.GetQuotaInfo()
 			}
+		})
+	}
+}
+
+func TestQuotaIncrementalDisplayLifecycle(t *testing.T) {
+	setQuotaTestParam(t, &Params.QuotaConfig.CollectionStatsCacheEnabled, "true")
+	previous := metrics.CollectionLevelMetricsMode()
+	t.Cleanup(func() { metrics.SetCollectionLevelMetricsMode(previous); resetQuotaDisplayMetrics() })
+	for _, mode := range []string{metrics.CollectionLevelMetricsModeFull, metrics.CollectionLevelMetricsModeAggregate} {
+		t.Run(mode, func(t *testing.T) {
+			metrics.SetCollectionLevelMetricsMode(mode)
+			resetQuotaDisplayMetrics()
+			store := metacache.NewMetaStore(nil)
+			m := &Meta{MetaStore: store, Segments: NewSegmentsInfo(store)}
+			for _, id := range []int64{1, 2} {
+				m.MetaStore.PutCollection(&CollectionInfo{ID: id, DatabaseName: "old", Schema: &schemapb.CollectionSchema{Name: strconv.FormatInt(id, 10)}})
+				segment := BuildSegment(id, id, id, "channel")
+				segment.Level = datapb.SegmentLevel_L0
+				segment.Stats = &datapb.Statistics{InsertBinlogSize: 100, InsertBinlogCount: 1, DeleteNumRows: 2, DeltaBinlogCount: 1}
+				m.Segments.SetSegment(id, segment)
+				flushed := BuildSegment(id, id, id+10, "channel")
+				flushed.Level = datapb.SegmentLevel_L1
+				flushed.State = commonpb.SegmentState_Flushed
+				flushed.NumOfRows = 10
+				flushed.Stats = &datapb.Statistics{DeltaBinlogCount: 2, DeltaBinlogSize: 8, DeleteNumRows: 3}
+				m.Segments.SetSegment(id+10, flushed)
+			}
+			publish := func() {
+				snapshot := m.Segments.ReadQuotaSnapshot(false)
+				m.recordQuotaChanges(snapshot)
+				m.Segments.AcknowledgeQuotaSnapshot(snapshot)
+			}
+			publish()
+			if mode == metrics.CollectionLevelMetricsModeFull {
+				require.EqualValues(t, 2, testutil.ToFloat64(metrics.DataCoordSegmentDeltalogFileCount.WithLabelValues("old", "1", "L1", "1.0")))
+				require.EqualValues(t, 8, testutil.ToFloat64(metrics.DataCoordSegmentDeltalogSize.WithLabelValues("old", "1", "L1", "1.0")))
+				require.InDelta(t, 0.3, testutil.ToFloat64(metrics.DataCoordSegmentDeletedRowsRatio.WithLabelValues("old", "1", "L1", "1.0")), 1e-9)
+			} else {
+				require.EqualValues(t, 2, testutil.ToFloat64(metrics.DataCoordL0DeltalogFileNum.WithLabelValues("old", metrics.AllLabel)))
+				require.Zero(t, testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogFileCount))
+			}
+			m.Segments.DropSegment(11)
+			publish()
+			if mode == metrics.CollectionLevelMetricsModeFull {
+				require.Equal(t, len(deltalogQuantiles), testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogFileCount))
+			}
+			m.Segments.DropSegment(12)
+			m.MetaStore.PutCollection(&CollectionInfo{ID: 1, DatabaseName: "new", Schema: &schemapb.CollectionSchema{Name: "renamed"}})
+			publish()
+			m.MetaStore.RemoveCollection(2)
+			publish()
+			require.Equal(t, 1, testutil.CollectAndCount(metrics.DataCoordStoredBinlogSize))
+			require.Equal(t, 1, testutil.CollectAndCount(metrics.DataCoordNumStoredRows))
+			require.Equal(t, 1, testutil.CollectAndCount(metrics.DataCoordL0DeleteEntriesNum))
+			require.Equal(t, 1, testutil.CollectAndCount(metrics.DataCoordL0DeltalogFileNum))
+			require.Zero(t, testutil.CollectAndCount(metrics.DataCoordSegmentDeltalogFileCount))
+			m.MetaStore.RemoveCollection(1)
+			publish()
+			require.Zero(t, testutil.CollectAndCount(metrics.DataCoordStoredBinlogSize))
+			require.Zero(t, testutil.CollectAndCount(metrics.DataCoordNumStoredRows))
+			require.Zero(t, testutil.CollectAndCount(metrics.DataCoordL0DeleteEntriesNum))
+			require.Zero(t, testutil.CollectAndCount(metrics.DataCoordL0DeltalogFileNum))
+			if mode == metrics.CollectionLevelMetricsModeAggregate {
+				require.EqualValues(t, 0, testutil.ToFloat64(metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(metrics.AllLabel)))
+			} else {
+				require.Zero(t, testutil.CollectAndCount(metrics.DataCoordSegmentBinLogFileCount))
+			}
+			require.EqualValues(t, 200, m.Segments.ReadQuotaSnapshot(false).TotalBytes)
+			setQuotaTestParam(t, &Params.QuotaConfig.CollectionStatsCacheEnabled, "false")
+			m.GetQuotaInfo()
+			require.Nil(t, m.quotaDisplay)
 		})
 	}
 }

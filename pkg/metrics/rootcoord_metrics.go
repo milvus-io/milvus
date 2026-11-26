@@ -250,6 +250,7 @@ var (
 
 // RegisterRootCoord registers RootCoord metrics
 func RegisterMixCoord(registry *prometheus.Registry) {
+	registry.MustRegister(RootCoordQuotaCalculatedScopes)
 	registry.Register(RootCoordProxyCounter)
 
 	// for time tick

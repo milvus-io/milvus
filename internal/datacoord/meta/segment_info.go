@@ -63,6 +63,7 @@ type SegmentsInfo struct {
 	// It changes together with the segments, while their write holds the
 	// store (see PublishSegments), and is read under store.ViewCollection.
 	compactionTo *typeutil.ConcurrentMap[UniqueID, []UniqueID]
+	quota        collectionQuotaCache
 }
 
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
@@ -151,11 +152,18 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 // provided MetaStore as the primary proto storage. DC-only fields are kept
 // in a local dcState map. Writers of a segment must hold its writer lock.
 func NewSegmentsInfo(store metacache.MetaStore) *SegmentsInfo {
-	return &SegmentsInfo{
+	s := &SegmentsInfo{
 		store:        store,
 		dcState:      typeutil.NewConcurrentMap[UniqueID, *dcSegmentState](),
 		compactionTo: typeutil.NewConcurrentMap[UniqueID, []UniqueID](),
 	}
+	store.OnCollectionAdded(s.invalidateQuotaCollection)
+	store.OnCollectionRemoved(s.invalidateQuotaCollection)
+	store.OnCollectionDropping(s.invalidateQuotaCollection)
+	store.OnCollectionAltered(func(old, current *metacache.CollectionInfo) {
+		s.invalidateQuotaCollection(current.ID)
+	})
+	return s
 }
 
 // RebuildFromStore initializes the DataCoord-side state for every segment
@@ -365,6 +373,7 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	}
 	s.store.ApplySegments(nil, []int64{segmentID}, func() {
 		s.deleteCompactFrom(seg.GetCompactionFrom())
+		s.invalidateQuota(seg, nil)
 	})
 	s.dcState.Remove(segmentID)
 }
@@ -402,6 +411,9 @@ func (s *SegmentsInfo) PublishSegments(segments []*SegmentInfo) {
 	}
 	s.store.ApplySegments(protos, nil, func() {
 		s.updateCompactionTo(olds, protos)
+		for i, segment := range protos {
+			s.invalidateQuota(olds[i], segment)
+		}
 	})
 	for _, segment := range segments {
 		s.dcState.Insert(segment.GetID(), &dcSegmentState{
@@ -420,7 +432,15 @@ func (s *SegmentsInfo) ModifyProto(segmentID UniqueID, fn func(*datapb.SegmentIn
 	}
 	cloned := proto.Clone(seg).(*datapb.SegmentInfo)
 	fn(cloned)
-	s.store.PutSegment(cloned)
+	s.store.ApplySegments([]*datapb.SegmentInfo{cloned}, nil, func() {
+		// Positions and allocation bookkeeping do not affect quota inputs.
+		if seg.GetNumOfRows() != cloned.GetNumOfRows() || seg.GetState() != cloned.GetState() ||
+			seg.GetIsImporting() != cloned.GetIsImporting() || seg.GetLevel() != cloned.GetLevel() ||
+			seg.GetCollectionID() != cloned.GetCollectionID() || seg.GetPartitionID() != cloned.GetPartitionID() ||
+			!proto.Equal(seg.GetStats(), cloned.GetStats()) {
+			s.invalidateQuota(seg, cloned)
+		}
+	})
 }
 
 func (s *SegmentsInfo) SetLastWrittenTime(segmentID UniqueID) {

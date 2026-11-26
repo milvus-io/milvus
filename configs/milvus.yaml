@@ -1535,6 +1535,8 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  collectionStatsCacheEnabled: false # Cache per-collection DataCoord quota statistics.
+  localQuotaCalculationEnabled: false # Recompute changed and previously limited collections in MixCoord. Requires collectionStatsCacheEnabled.
   # FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
   # If the factor change is less than this threshold (e.g., 5%), the update is skipped
   # to reduce unnecessary proxy updates. Range: (0, 1]
