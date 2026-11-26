@@ -148,6 +148,9 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
 	impl.genesis.Delete(dropCollectionMessage.Header().GetCollectionId())
+	impl.splitGateMu.Lock()
+	delete(impl.splitGates, dropCollectionMessage.VChannel())
+	impl.splitGateMu.Unlock()
 	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), WALFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
