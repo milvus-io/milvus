@@ -222,6 +222,11 @@ var timeoutContextKeysToPropagate = []string{
 	HTTPReturnMessage,
 	ContextRequest,
 	ContextResponse,
+	// Without it the access log, which reads the original context, falls
+	// back to the default classification of the code and loses the marks
+	// made at the proxy boundary (for example a not-found name is an input
+	// error there, a system error by default).
+	ContextErrorType,
 	"traceID",
 }
 

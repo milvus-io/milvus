@@ -154,6 +154,7 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			FieldLogicalSizes:   meta.SegmentFieldLogicalSizes(segInfo.SegmentInfo),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segments = append(segments, segInfo)
@@ -530,6 +531,9 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 	// This replaces the resultManifest==currentManifest replay check the pre-baked
 	// adoption path used, and unlike an in-memory Binlogs diff it survives restart.
 	if current.GetSchemaVersion() == newSchemaVersion {
+		if err := meta.CheckMaterializationFieldSizeReplay(current.SegmentInfo, resultSegment); err != nil {
+			return nil, err
+		}
 		mlog.Info(ctx, "schema bump materialization already applied; skipping manifest commit",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 			mlog.Int64("segmentID", segmentID),
@@ -572,7 +576,7 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 		},
 		CatalogMutation: meta.SegmentCatalogMutation{
 			Operators: []meta.UpdateOperator{
-				meta.UpdateBumpSchemaVersionMaterializationOperator(segmentID, newSchemaVersion, resultSegment.GetInsertLogs(), resultSegment.GetStats()),
+				meta.UpdateBumpSchemaVersionMaterializationOperator(segmentID, t.GetTaskProto().GetSchema(), resultSegment),
 			},
 		},
 	}); err != nil {

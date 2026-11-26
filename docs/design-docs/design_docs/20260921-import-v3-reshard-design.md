@@ -2,7 +2,7 @@
 
 - **Created:** 2026-09-21
 - **Status:** Implemented behind the one-way `dataCoord.import.enableImportV3` gate
-  (default `false`); see the Import V3 reshard PR/commit for the implementation.
+  (default `auto`, auto-enabling at `3.0.7`); see the Import V3 reshard PR/commit for the implementation.
 - **Component:** DataCoord, DataNode, Storage
 
 ## Summary
@@ -121,9 +121,10 @@ Core invariants:
 `msgpb.ImportMsg.version` (`int64`) is the durable execution
 compatibility marker: `0`/absent and `2` mean ImportTaskV2, `3` means
 ReshardTask + ImportTaskV3. A direct request arrives unspecified (`0`; the proxy
-sets no version), and DataCoord resolves it **before broadcast** — V2 by
-default, upgraded to V3 only when `dataCoord.import.enableImportV3=true` and the
-job is not L0 — so the broadcast ImportMsg carries the resolved `2` or `3`. On
+sets no version), and DataCoord resolves it **before broadcast** — V3 when
+`dataCoord.import.enableImportV3` evaluates to `true` (forced or auto-switched
+at `3.0.7`) and the job is not L0, otherwise V2 — so the broadcast ImportMsg carries
+the resolved `2` or `3`. On
 the ACK callback (`createImportJobFromAck`), `3` maps to `ImportVersionV3`
 and `0`/absent/`2` map to `ImportVersionV2`. Request, WAL and job share the
 single `internal.ImportVersion` enum, so there is no Task→Job version boundary
@@ -514,12 +515,16 @@ IndexBuilding:
 
 ## Rollout and Configuration
 
-- `dataCoord.import.enableImportV3` (default `false`) is a one-way release gate
-  selecting V3 for **new unversioned** ordinary/backup requests; L0 and any
-  explicit/message version keep their chosen path. It must be opened only after
-  all DataNodes and all potentially-active DataCoords support V3. The version
-  is persisted in the WAL and job, so a created V3 job always completes as V3;
-  no scheduler per-task version filter is added.
+- `dataCoord.import.enableImportV3` (default `auto`, `VersionGateSwitcher` with
+  pre-switch `false` and target `true` at gate version `3.0.7`) is a one-way
+  release gate selecting V3 for **new unversioned** ordinary/backup requests; L0
+  and any explicit/message version keep their chosen path. In `auto` mode, it
+  switches on only after all DataNodes, StreamingNodes, and DataCoords reach
+  `3.0.7` and the stability window elapses; manually setting `true` is safe
+  only once all DataNodes, StreamingNodes, and all potentially-active
+  DataCoords support V3 (for example, when upgrading from a release that already
+  ships V3). The version is persisted in the WAL and job, so a created V3 job
+  always completes as V3; no scheduler per-task version filter is added.
 - Rollback to a binary that does not understand V3 is forbidden while any V3
   broadcaster task, non-terminal job/task or uncleaned temporary prefix exists.
 
@@ -527,7 +532,7 @@ New knobs:
 
 | Config | Default | Role |
 | --- | --- | --- |
-| `dataCoord.import.enableImportV3` | `false` | one-way V3 gate |
+| `dataCoord.import.enableImportV3` | `auto` | one-way V3 gate (`3.0.7`) |
 | `dataCoord.import.fragmentSizeInMB` | `128` | per-bucket fragment soft target |
 | `dataCoord.import.fragmentMergeFanIn` | `128` | max direct merge fan-in, `[2,1024]` |
 | `dataCoord.import.reshardResidentBucketCap` | `16` | buckets kept fully resident before spilling |

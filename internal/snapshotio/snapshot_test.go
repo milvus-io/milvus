@@ -568,6 +568,29 @@ func TestOCFManifestRetainsUpstreamIndexMarker(t *testing.T) {
 	}
 }
 
+func TestSegmentFieldLogicalSizesRoundTrip(t *testing.T) {
+	sizes := &datapb.FieldLogicalSizes{Version: 1, RowCount: 2, Fields: map[int64]*datapb.FieldLogicalSize{
+		101: {}, 104: {PayloadBytes: ^uint64(0), ValidityBits: 1 << 63},
+	}}
+	for _, snapshot := range []*datapb.FieldLogicalSizes{nil, sizes, {Version: 1, RowCount: 2}} {
+		segment := &datapb.SegmentDescription{SegmentId: 7, NumOfRows: 2, StorageVersion: 3, FieldLogicalSizes: snapshot}
+		data, err := MarshalSegmentManifest(segment)
+		require.NoError(t, err)
+		got, err := ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(snapshot, got.GetFieldLogicalSizes()), "%v", got.GetFieldLogicalSizes())
+	}
+	for version := 0; version <= 5; version++ {
+		schema, err := ManifestSchemaByVersion(version)
+		require.NoError(t, err)
+		raw, err := avro.Marshal(schema, SegmentToManifestEntry(&datapb.SegmentDescription{FieldLogicalSizes: sizes}))
+		require.NoError(t, err)
+		got, err := ParseSegmentManifest(raw, version)
+		require.NoError(t, err)
+		require.Nil(t, got.GetFieldLogicalSizes())
+	}
+}
+
 func TestSegmentIndexTypeCompatibility(t *testing.T) {
 	segment := &datapb.SegmentDescription{SegmentId: 101, IndexFiles: []*indexpb.IndexFilePathInfo{
 		{IndexID: 10, BuildID: 20, IndexName: "custom_vector", IndexType: "HNSW_SQ", IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}}},
