@@ -2,15 +2,15 @@
 
 ## 1. 状态、范围与结论
 
-本文替代第 4.1 版，整合代码评审及本轮讨论后的完整方案。代码基线为 master 30c7552ed8；已有六层初版实现为 qv-l6 / 67687fb9dd。本文描述目标设计，不能据此认定初版代码已经实现或验证了所有机制。本文为实现目标；r5 实施分支为 qv-r5，具体完成范围以代码及验证记录为准。
+本次于 2026-11-26 完善第 5 版方案。源码核对基线为六个 PR 的集成提交 `1bad020dc76f1f51b26d78cbb2d407359365191d`。本文同步该实现的路由、幂等重试、改挂提交、版本分页回收、快照和主备准入约束，并记录六个 PR 在本轮的实施范围。[基线实施稿](https://github.com/milvus-io/milvus/blob/1bad020dc76f/docs/design-docs/design_docs/20261113-shard_split_on_queryview_r5.md)
 
-核心路线保持不变：单条可复制的 SplitShard 决定逻辑切分；写路由立即切到两个目标；旧行暂时由源 shard 服务；源数据持有者订阅目标删除流；一次相关查询使用同一个读时间点；各集群本地完成后台清洗、整体改挂和源退休。
+单条可复制的 SplitShard 决定逻辑切分。RootCoord 发布新的写路由，目标本地写入在读代际准入通过后开放。旧行暂由源 shard 服务，源数据持有者订阅目标删除流。相关查询固定读时间点，各集群独立完成后台清洗、整体改挂和源退休。
 
-本轮收敛的事项：改挂分批准备、整体发布；源 L0 有限，目标持续产生的新 L0 不阻塞历史收尾；利用现有动态 PChannel 能力扩容；删除历史依赖持久 Summary，内存只做有界缓存；接受残余 flush 阶段的 DDL 锁等待；fence 后拒绝新 g0 计划，保留一致性并接受短暂读重试。
+本轮接入 QueryCoord 权威下的 Proxy 读拓扑缓存、完整发布身份、全请求规划屏障及流式输出重试边界，并增加 TEXT/LOB 清洗与改挂元数据回归。BM25 排序另做对照实验。PChannel 保留既有空闲/分配数量排序，速率采样及自动扩容闭环仍属后续工作。广播锁缩短按第 13.1 节的前提推进，具备持久消费确认和完整生命周期保护后才改变释放时机。
 
-CDC 场景下，子切分等待当前拓扑每个成员确认父任务退休。强制升主时，目标本地写需要原主真实源 Fence 的复制凭据。第 14 节给出两项准入的恢复条件；生产复制开关默认关闭。
+R5 已实现集合模数、逐 shard 余数集合及 O(1) 内存槽位表。跨切分 AutoID 继续按原始行偏移取模确定分片，改挂保留 attempt ID 条件提交，DataView 页按创建它的版本回收。主备继续保留真实源 Fence 凭据和全拓扑父任务退休准入。
 
-首版支持主键 hash 路由的内部 collection。namespace、TEXT 重写、residue collection 的 import、snapshot/restore 等未闭合能力见第 15 节。查询引擎不增加按行 shard 过滤，不增加第二条依赖物理清洗完成的可复制切换消息。
+本文中注明“后续实施”“实验”的内容不应视为已实现功能。第 22 节区分历史验证和本轮证据，第 23 节给出六个 PR 的归属；构建和真实集群验收须绑定各自的源码提交。
 
 ## 2. 目标与基本规则
 
@@ -58,6 +58,12 @@ DataView 持有 shard-set epoch；声明目标和删除源各推进一次。普�
 
 T_switch 不是 S 的最后一条本地控制消息。S 此后仍可能接收本地不复制的 schema 转发、flush 或退休消息；它只是最后的业务写边界。
 
+### 3.4 读拓扑缓存的权威和身份
+
+QueryCoord 继续负责本集群 serving generation 的发布。Proxy 缓存该发布结果，RootCoord 负责逻辑写路由及谱系。g1/g2 的可服务状态绑定本集群副本、加载范围和 schema，复制接收端使用自己的发布结果。
+
+缓存按本地集群和 collection ID 隔离。缓存项包含加载配置版本、读 schema 版本、shard-set epoch、完整服务分片列表和谱系，作为不可变对象整体替换。复用现有 GetQueryViewLoadInfo 的 load version 和服务分片信息，并在同一发布快照中补齐读 schema 身份。本轮已增加持久 `ServingGeneration`，`GetQueryViewLoadInfo` 的同一快照返回 load/schema/epoch/shards；`GetQueryPlan` 携带 load/schema 身份，SN 在新计划准入时精确匹配。Release 后再次 Load 即使 shard-set epoch 相同，也必须通过加载版本区分。恢复和缓存回填使用精确版本身份，避免迟到响应覆盖当前发布。
+
 ## 4. 路由与物理通道
 
 ### 4.1 主键 residue 路由
@@ -76,7 +82,7 @@ T_switch 不是 S 的最后一条本地控制消息。S 此后仍可能接收本
 
 Split 的前置条件是两个目标 PChannel 已经完成必要的创建、分配和可用性检查。通道不足时，先扩容并等待可用，再重新规划；不能在 S fence 后才发现 topic 无法创建。自动扩容触发、预算及运维入口是配套工作，现有 Split 规划器本身不能被描述为已自动创建通道。
 
-复制拓扑还需各集群追加通道列表、保留既有索引映射并完成复制配置更新；仅主集群本地加通道不代表 CDC 已可用。这部分和第 14 节一起验收。
+当前 R5 的复制配置校验已支持通道列表仅在末尾扩展，各集群保持相同数量且既有通道索引映射保持原位，并为新增映射建立 CDC 任务。split 使用新位置前仍需验证复制配置与目标 WAL 就绪。此能力按实际代码核实，自动扩容触发、配额预算和全站就绪闭环属于第 4.5 节的后续实施。[配置校验](https://github.com/milvus-io/milvus/blob/1bad020dc76f/pkg/util/replicateutil/config_validator.go#L272)
 
 ### 4.3 数量边界
 
@@ -89,6 +95,24 @@ Split 的前置条件是两个目标 PChannel 已经完成必要的创建、分�
 例如 N=8 时，理论最大存活 shard 为 32768、二分 32760 次、累计创建 65528 个 shard。只沿同一条热点分支不断二分，可能在其他分支仍很粗时先达到 modulus 翻倍深度上限；此时不能继续二分该单 residue。
 
 底层上限同时取决于 MQ 的 topic/partition 配额、broker 与 SN 资源、连接、恢复时间及元数据容量，不能只写为统一的 topic 数上限。首版不以解除 MaxModulus 或支持任意 shard 数为目标。
+
+### 4.4 路由表与 AutoID 幂等的实施约束
+
+持久化的 `routing_modulus` 和逐 shard `buckets` 编译为 `routing.Table`。所有余数恰好归属一个 shard，Proxy 用 `slots[hash(pk) % M]` 查找。路由表及其 vchannel 列表从同一个缓存快照取得。多余数分裂保持 M，单余数分裂翻倍 M，并等价展开其他 shard 的余数。[路由实现](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/util/routing/routing.go)
+
+带幂等键的 AutoID 使用原始 `rowOffset % M` 确定所属 shard，再分配主键 hash 符合该归属的 ID。这样未分裂 collection 的 `rowOffset % N` 语义在首次及连续分裂时保持稳定。改成 `hash(rowOffset) % M` 会在首次升级时改变部分未分裂 shard 的行归属。两个初始 shard 下，offset 为 1 时旧归属为奇数桶，而当前 Int64 hash 得到 1392991556，归属变成偶数桶。
+
+带键重试继续探测相关已封口源的幂等窗口，按原始 offset 恢复首次提交的 ID，仅为确定未提交的行分配和发送后续写。源窗口在约定 TTL 内的恢复与可达性需要覆盖源退休、节点迁移和连续分裂。当前方案采用已有源窗口探测路径，若后续迁移窗口至目标，应另行定义完整记录、继承链、恢复与 GC 协议。[AutoID 与重试实现](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/proxy/dml/task_insert_idempotency_autoid.go) · [源窗口探测](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/proxy/dml/split_fence_idempotency.go)
+
+### 4.5 目标 PChannel 的负载择优
+
+现有分配器已按分配数量排序，空闲通道自然优先；本轮没有新增速率采样器。后续速率择优仍在既有分配器中为 split 选择目标。先按第 4.2 节过滤同集合曾用通道、复制不可用通道及尚未确认的读写 WAL，再在合格集合里优先选择空闲通道，随后考虑可比较的近期写入速率和已有分配负载。两个目标必须落在不同 PChannel。负载排序只影响性能，不能放宽隔离、复制或就绪条件。
+
+复用分配器已有负载信息。引入写入速率时需明确采样窗口、刷新时间和来源，缺失或过期数据按未知处理，使用已有负载排序，不将其当作零流量。沿现有分配器排序和锁内重检，实际注册后更新负载信息。不同 collection 可以共享 PChannel，空闲优先属于软偏好。规划取消、超时或扩容部分完成后重新检查已有可用通道，避免遗留额外容量预留。
+
+候选不足时，在 fence 前、split 广播资源锁外完成容量检查、扩容申请和就绪等待，复制配置更新也在该锁外完成。之后重新获取 collection 资源锁校验路由与目标。MQ 配额、授权、预创建 topic 或 WAL 打开失败时返回可识别错误，源继续正常服务。已有动态通道发现链路负责创建与分配，自动发起扩容及预算控制属于后续实施。
+
+低流量放置减少 Summary pin 对共享 PChannel 的影响。容量预算仍需计入重写窗口内的新增 Summary、重写文件和目标 L0。运行中流量上升会增大保留量，应报告实际使用和等待年龄。源墓碑与同集合旧 PChannel 的复用继续受注册及恢复状态约束，回收证明需覆盖陈旧请求、WAL 重放、复制和幂等窗口。
 
 ## 5. 全局不变式
 
@@ -165,11 +189,37 @@ S 的自身业务前沿固定为 T_switch，Phase 2 同时携带共同 B 和每�
 
 ### 8.3 代际与请求重试
 
-一个请求固定完整 shard 列表、epoch 和 schema。任一 shard 无法精确匹配时，丢弃本轮所有部分结果，刷新 serving generation 后整请求重试；不能只重试后把两代结果拼起来。
+一个请求固定完整 shard 列表、加载版本、读 schema 和 shard-set epoch。缓存填充从 QueryCoord 的同一发布快照取得这些字段，SN 的 GetQueryPlan 精确校验请求身份。普通 flush 或 manifest 更新可产生新的物理 view，语义上的服务代际仍按其各自版本定义。
 
-可缓存不可变 serving generation，依赖 SN 的精确 epoch 校验检测过期并刷新。缓存不能使已退出的 view 重新接受请求；不能在协调器失败时回退为写路由列表。初版每请求拉取的路径可以先保留，缓存是后续优化。
+已用每个 queryclient 内按 collection ID 索引的不可变 serving generation 缓存替换 split 查询的逐请求 Coordinator 拓扑 RPC，LRU 容量为 1024。正常命中只访问缓存和查询节点。首次访问、发布失效或精确匹配失败时刷新，合并同一 collection 的并发刷新，并用本地缓存项身份隔离迟到响应。容量淘汰只控制内存，服务端身份校验决定是否可服务；没有以 TTL 替代身份校验。
 
-search requery、统计、表达式删除和 iterator 都必须保持选定的 schema/时间点及其原有语义。跨分页快照若需要继续存活，须有相应引用或保留契约；若已无法执行，返回明确的快照/游标失效，不能静默换 B。不能仅因固定时间点字段存在就宣称 iterator 的跨代保留已经实现。
+g0/g1/g2 发布、schema 或加载范围变化、Release/Load、Drop 后，旧身份必须失效。现有 Proxy collection/database 缓存失效入口同时清理 serving 缓存与 load probe；g1/g2 的异步发布没有新增逐次推送通知，依靠 SN 的精确匹配和源 fence 检查触发缓存刷新。通知只加快收敛，不承担安全证明。请求一旦观察到 split，后续较旧的元数据响应不得把它退回 g0。写路由可用于检查服务列表覆盖，查询的参与分片由已发布读拓扑决定。
+
+Coordinator 不可达时，已有缓存项仍需通过节点的全部身份和服务有效性检查。缓存缺失或服务端拒绝后，刷新失败沿请求原 deadline 返回。尚未发布的拓扑在原 deadline 内退避重试，避免将暂时缺少 serving generation 错判为可执行的空分片集合。
+
+Search、Query、统计、表达式删除的读阶段、search requery 和 iterator 均使用同一身份解析规则。固定时间点保持原 B。requery 继承其初始结果的计划和 B，资源失效时显式失败。长期 iterator 只在真实资源保留契约内继续，固定时间戳字段本身不构成保留承诺。
+
+### 8.3.1 全请求规划屏障
+
+已将带服务发布身份或 split 谱系的请求执行拆为以下步骤，保持第 8.2 节的前缀证明。未切分且无发布身份的路径保留既有执行策略。
+
+1. 从同一缓存项取得分片列表、加载身份、schema、epoch 和谱系，解析所需字段及 partition 范围。
+2. 按第 8.2 节为谱系组固定 B。明确给定的快照原样保留，操作要求集合级固定时间点时全部参与分片使用该点。普通无谱系分片保持相应操作的一致性语义。
+3. 目标先以 `barrier_mvcc=B` 完成 Phase 1，分别证明完整前缀覆盖 B，返回 `X_i@B`。源计划固定自身业务前沿为 T_switch，并绑定该组 B 和全部目标删除前沿。
+4. 等本请求全部参与分片规划成功，校验加载身份、schema、epoch、查询范围及计划中的资源描述。任何失败都会取消本轮 RPC，丢弃计划与暂存结果，释放实际持有的引用，在允许重试时重新规划整单。
+5. 屏障通过后才向执行节点发起 Phase 2。源 SN/QN 等待对应目标删除前沿后以 B 读取，目标按其在 B 上的计划读取。Phase 1 已返回的内联统计结果仅暂存，两阶段搜索中需要执行节点参与的准备步骤也在屏障之后启动。
+
+`fanOutShards` 为请求创建统一屏障，目标接受有效计划后先发布 `OnPlan` 以放行源规划，再到达屏障；源和普通兄弟分片也必须到达。Search、Query、内部流式归并、统计与两阶段搜索共用此入口。GetQueryPlan 的 lease 仍只保护已有生命周期，屏障不延长资源寿命。Phase 2 继续验证计划有效性，旧 view 被抢占、过期或节点恢复后按下一节处理。
+
+### 8.3.2 流式输出与局部重试
+
+对 unary 请求，在向客户端返回前，Proxy 可以取消执行并清空本轮全部归并状态，再整请求重试。对流式请求，重试条件同时取决于客户端输出和内部 reducer 是否已消费不可撤回的结果。
+
+本轮对通过规划屏障的请求关闭执行阶段的 shard 局部重规划和首个流式接收前的局部 restart；错误返回整请求重试边界。batch/setup 由 queryclient 重试，内部流的接收失败由现有 Proxy 在关闭本轮流并清空归并状态后决定是否重试。重试保留失败 worker/replica 信息，身份失配才驱逐 serving 缓存，传输故障不驱逐有效拓扑。
+
+将来若开放同 shard 局部重试，需同时满足原 collection、加载身份、schema、epoch、B 和查询范围一致，目标副本仍可执行完整计划，失败 shard 的本轮输出可完整撤回或尚未进入不可回滚的归并。重试前取消并等待旧 shard 尝试退出，或以明确的尝试身份拒绝旧回调，再清空对应归并状态。仅有相同 epoch 和 B 无法证明重试安全。
+
+首版在首个批次进入不可撤回的发送阶段、或归并器已经消费无法撤回的部分结果后，遇到无法继续的节点或计划故障即终止该流，返回明确失败。发送报错可能已部分送达，不能由此推断客户端尚未收到数据。实现精确续传后才能扩大局部重试范围，续传需有稳定排序、继续位置和去重证明。所有重试共用原 deadline。
 
 ### 8.4 g2 和未加载 collection
 
@@ -215,7 +265,7 @@ SN 恢复、变更所有者及 Summary GC 必须在接受可能依赖历史的 v
 
 重写不依赖目标的新写是否停止，也不在本阶段折叠目标删除；产出继续以 T_switch 为目标历史重放起点。因此目标持续写不会改变清洗的有限输入集合。
 
-输入保护、输出准备和 compaction 提交复用现有框架；任务失败不改输入可见性，输出对象在发布前不可服务，重试及孤儿 GC 保持现有规范。索引、BM25/统计、manifest 和 TEXT 等附属数据必须逐类验证，不能仅验证行分桶。
+输入保护、输出准备和 compaction 提交复用现有框架；任务失败不改输入可见性，输出对象在发布前不可服务，重试及孤儿 GC 保持现有规范。索引、BM25/统计、manifest 和 TEXT 等附属数据必须逐类验证，不能仅验证行分桶。本轮 split compactor 复用 LOBCompactionContext 对 TEXT 强制重写：按源 manifest 的真实 namespace 解码，按目标 partition namespace 生成独立 LOB，覆盖 canonical、legacy namespace 及 inline-only 源。目标不依赖源 LOB 的存活；已有参数生成路径将 TEXT 输出设为 V3。改挂继续通过 revision clone 保留统计、字段逻辑大小 manifest 与已完成索引 inventory，并验证安装、恢复和清理后的读取。
 
 目标 L0 compaction 在 adoption/g1 退出之前暂停，防止删除只折进目标现有段后丢掉 L0，而源行仍未获得持久删除基线。
 
@@ -257,6 +307,14 @@ prepare 批次写入暂存归属，不覆盖当前生效 InsertChannel。schema�
 
 每个所需 replica 全部 Up 后发布 g2，停止 g1 发放新计划，等待既定失效/引用退出完成。旧 g1 的资源查询以被引用的精确历史 DataView、已提交的段改挂记录及受保留的实际资源验证归属；目标普通 compaction 替换该段后，SN 冷启动仍可重建旧 g1 的 BM25 IDF。
 
+### 11.6 当前实现及优化边界
+
+当前 `Meta.AdoptSplit` 已在持久提交后一次发布更新后的内存 SegmentInfo。常规读取直接取得一致的有效归属，后台规范化按段加锁，写入当前有效元数据，保护期间发生的 manifest 更新。恢复先在 Catalog 层还原已提交归属，再开放调度和查询。[内存发布和规范化](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/datacoord/meta/adopt_split.go)
+
+保留 Prepared 根的 attempt ID 比较及结果未知时的确认屏障。即使回读暂时看到 Prepared，旧事务也可能稍后到达。必须先确认 Committed，或通过条件状态变更使旧事务无法再提交，才能释放内存发布屏障并启动新尝试。此规则同时适用于 leader 重启和客户端取消。[提交恢复](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/metastore/kv/datacoord/split_adoption.go)
+
+分页根引用本版本专属页，历史版本满足引用退出条件后按版本前缀回收。准备失败的未发布页和写成功丢响应的页也纳入故障验收，清理必须与活跃准备 owner 串行化，避免删除尚可提交的数据。按版本回收已发布页的证据只覆盖其实际回收路径。
+
 ## 12. 有限历史收尾与退休
 
 ### 12.1 固定 F_i
@@ -294,6 +352,34 @@ schema 变更沿原 AlterCollection 消息和回调执行。PrepareSchema 前向
 DropCollection 清理整个 collection，包含源、目标及本地准备/任务状态。DropPartition/Truncate 在 collection 级移除源相关段，同时处理 preparing adoption 的输入失效；进入该回调前已有残余 ACK 保证。不能只广播到写列表后假设源自然消失。
 
 CreatePartition/Flush 主要作用于目标；源读 partition 选择仍须与本集群 load 配置一致。Release 后可停止读资源，但不能丢失恢复和后续 Load 所需的切分事实。
+
+### 13.1 缩短广播锁的后续设计
+
+当前实现仍按本节的残余完成条件释放广播锁。优化目标是将源残余排空交给持久 split 任务，使无冲突操作更早继续。优化实施需同时完成以下条件。
+
+源排空阶段可由现有 `WindowOpen + SourceAcked=false` 表达，确认后进入既有 ResidualFlushed 和后续重写阶段，复用同一持久任务权威。
+
+1. 写路由 post-image、目标创世身份、split owner、谱系和历史保护均已持久化。已加载集合的 g1 完整发布并停止新 g0 计划准入。未加载集合按第 8.4 节证明旧 view 已退出。升主后的真实源 Fence 凭据继续独立约束目标本地 DML，补写副本可以推进广播及 g1 收敛，广播完成不得反过来等待无法补造的真实源凭据。
+2. `SourceAcked` 仅由源消费完成确认设置，绑定 collection、task、源和本地 fence 位置。确认覆盖 fence 封存的 L1 与必要 L0 的最终 DataCoord 发布。WAL append ACK 只证明消息追加，分区 checkpoint 或文件已上传都不能替代该完成条件。
+3. 源消费 ACK 在广播已转 TOMBSTONE 后仍需写入现存 split owner。主站普通 ACK 与复制源 ACK 都覆盖这一时序。当前普通主站的完成后 ACK 会被忽略，实施必须修正该入口。广播完成或回收后，ACK 接收还能从持久 split owner 验证身份并更新进度。SN 只有在进度持久化得到确认后才能释放消息完成引用，失败按既有 ACK 机制重试。
+4. 以持久 owner 记录可恢复的等待状态。ACK 先到、回调先到、Coordinator 或 SN 任意重启都能收敛。后台清洗仅在 SourceAcked 成立后获取封闭输入，复制真实源 Fence 的凭据继续单独保存。
+5. 释放前完成各生命周期入口的准入及锁顺序核查。入口读取持久阶段并在现有资源锁和本地 lifecycle guard 内重检，已经进入 WAL 的回调继续按消息顺序恢复。后台持 guard 时不等待广播资源锁。g1 发布和消费 ACK 持久化路径不得取得被等待方持有的 lifecycle guard。跨集群复制回调覆盖相同状态检查。
+
+释放条件与剩余动作采用如下约束。
+
+| 操作 | 源残余尚未完成时的设计要求 |
+| --- | --- |
+| 目标 DML、flush、正常 view 更新 | 按本地写准入继续，保留源和目标的历史保护 |
+| 源清洗与 adoption | 等待持久 SourceAcked 后进入封闭输入阶段 |
+| schema、DropPartition、Truncate、import、snapshot | 源排空阶段的本地新请求在广播前、持有对应资源锁时检查持久任务，依赖残余完成的请求返回明确可重试的未就绪错误。已经入 WAL 的消息和复制回调按消息顺序恢复，不能因本地进度落后直接丢弃。ResidualFlushed 后恢复原有 schema 转发和生命周期处理，import、snapshot 仍执行第 15 节的独立限制 |
+| CreatePartition 与索引变更 | 逐入口核对源读 partition 范围、schema 和重写输出的索引身份，确认生命周期串行化后才在源排空期放行 |
+| Release/Load | 可撤销读加载义务，保留 split 事实、历史保护及后续 Load 的恢复依据 |
+| DropCollection | 覆盖源、目标和任务。若要越过残余等待，先设计并验证持久 Drop tombstone，使迟到 ACK、flush、改挂提交均无法复活 owner 或段 |
+| FlushAll、复制配置变更及升主 | 保留原有全局锁及 WAL 顺序，复核活动 split、复制身份与目标写准入。集群操作自身的 flush 仍可能等待真实存储完成 |
+
+SN 消费 ACK 还按消息 ResourceKeys 保持顺序，失败的残余工作可能继续阻塞相冲突的消费确认。Coordinator 提前释放资源锁减少该层等待，集群操作仍受真实消费前缀和各自完成条件约束。
+
+上述条件通过故障验收后再移除回调中的残余等待。每个真实源确认、迟到提交和 Drop 竞态都需有恢复证据。切换耗时分别记录源 fence、目标创世、g1 就绪和残余持久化，按实测分位数报告。
 
 ## 14. 主备复制与切分准入
 
@@ -387,6 +473,36 @@ PChannel/CDC：复用现有动态新增能力，补齐可用性和扩容准入�
 
 Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真实原生库、对象存储及独立集群测试；stub 环境不能证明引擎删除可见性。CDC 验收需实际验证源流断流升主、备站落后时延迟子切分以及追平后的放行。
 
+### 18.1 本轮新增验收用例
+
+| 范围 | 必测时序与判定 |
+| --- | --- |
+| 读拓扑缓存 | g0→g1→g2、失效通知丢失、并发填充、旧刷新迟到、Coordinator 重启/不可达、同名删建、Release/Load、partition 和 schema 变化。缓存命中无逐请求 Coordinator 拓扑 RPC，已撤销资格的旧身份不能取得新计划，先前合法固定的调用按引用契约完成或明确失效 |
+| 统一读点 | 目标完整前缀分别为 120 与 100，时间戳 110 的 upsert 尚未完整发布。Eventually 选 B=100，更新尚不可见。Strong/Session 下限或固定快照要求 B=120 时，等待慢目标覆盖 120，再验证旧行删除与新行可见性同时成立，否则失败。另测固定 B 早于保留基线 |
+| 全请求屏障 | 一个 shard 规划超时、目标规划后源失效、g2 抢占、lease 到期。屏障前 Phase 2 调用数为零，失败释放本轮全部计划 |
+| 流式重试 | 首批前失败、reducer 已消费但客户端尚未输出、首批后失败、同 epoch 换副本、跨代失效。验证无重复批次、无混代、无静默改变 B |
+| AutoID 幂等 | offset=1 的首次切分反例、未分裂兄弟 shard 已提交丢响应、单行/跨子 shard 批次、连续切分、TTL 内源重启/迁移/退休，原始 offset 和首次 PK 精确复原 |
+| PChannel | 空闲、冷热混合、缺少负载样本、并发选择、只就绪一个目标、MQ 配额和 WAL 打开失败、规划取消后重试、CDC 通道映射变更。失败发生在 fence 前，原写入持续可用，无遗留容量预留 |
+| 改挂及分页 | 提交延迟到回读之后、提交成功丢响应、leader 重启、prepare 期间目标 flush/manifest 更新、未发布孤儿页与已发布版本 GC，验证无半改挂、无新段丢失、无活跃页误删 |
+| 广播锁优化 | 普通主站 late ACK、复制源 ACK、广播完成/回收后 ACK、持久进度写失败、Drop 与迟到 flush/ACK、准入检查到 append 间的竞态、复制 DDL 先于本地残余完成、Release/Load、FlushAll、升主并发。补写广播可完成，缺真实源凭据时目标持续拒绝本地写，验证无永久等待和已删除状态复活 |
+| 主备 | 正常复制后升主、源 Fence 之前断流后升主且目标拒写、备站父任务未退休时阻止子切分及追平后放行，继续在两个独立集群验证 |
+
+测试记录绑定源码提交、二进制、原生依赖及故障注入点。已通过的历史测试仅证明其对应实现，新增优化按本表重新执行相关用例。
+
+### 18.2 BM25 排序对照实验
+
+当前 IDF Oracle 使用每个 vchannel 最近准备成功的 sealed 基线与已应用 growing 增量。统计未按请求 DataVersion 或 B 回溯，Delete 也不直接逐条扣减该统计。Phase 1 固定请求的 IDF/avgdl，Proxy 按各 shard 返回的分数归并。统一 B 证明行可见性，BM25 统计身份需另行记录。[BM25 优化入口](https://github.com/milvus-io/milvus/blob/1bad020dc76f/internal/streamingnode/server/wal/vchannel/queryresource/global_optimizer.go)
+
+实验分三组执行。
+
+1. 固定 D0 数据、查询集、分析器、BM25 参数、partition/load 范围和搜索参数，停写后分别测 g0、g1、g2，隔离拓扑变化。记录 flush/compaction 状态、各 shard 的 N、df、avgdl 和实际统计版本。
+2. 未切分对照集合与切分集合重放相同 D1 新增量及 Delete/Upsert 序列，在相同逻辑检查点比较。构造同文本、同词频和长度的旧行/新行配对，以不同 PK 覆盖 S、T1、T2 和未切分兄弟 shard。覆盖稀有词、常见词、多词查询、长短文本、空目标和两个目标写入严重不均衡。
+3. g2 与按最终 residue 归属构造的静态对照集合比较，控制相同数据和物化状态。继续覆盖 flush、清洗、adoption、节点重启及 Release/Load。对照路由应精确匹配最终余数归属。
+
+正确性门槛包括同一数据快照无漏行、重复和删除重返，统计贡献符合当前模型且无重复计入，计数合法、`0 <= df <= N`、分数有限。用记录的统计离线重算候选分数，预先定义浮点容差，同分按等价组比较。排序质量报告 Top-K overlap、配对分数比、排名变化和新行入选率，有标注语料时增加 NDCG@K。质量门槛在实验结果和业务要求明确后定案，既有 BM25 功能 E2E 的通过记录不能替代该实验。
+
+本轮先实施实验。`BM25CorpusSeed` 作为实验候选，需证明收益后再定实现。源基线分别叠加两个目标的不同增量会产生不同统计，评估必须记录这种差异。seed 若进入实现，需绑定字段/函数签名、partition 范围、统计版本和消费截止点，持久化完整性校验及引用保护。空载或 lazy 初始化源需定义可重建来源，容量按词项数量预算。增量重放、growing→sealed、源 compaction 与 adoption 都要避免重复贡献。g2 加入旧行真实统计时须原子移除对应 seed，并验证 g1/g2 并存及恢复语义。
+
 ## 19. 可观测性与运维
 
 记录每个任务的逻辑阶段、准备批次、发布 epoch、等待 replica、源残余等待年龄、固定 F_i、物化/基线覆盖差距、pin 原因和退休重试原因。
@@ -394,6 +510,8 @@ Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真
 提供节点/流的缓存预算与占用、历史 replay 字节/耗时、gap 补读、慢订阅、持久历史容量及窗口时长；指标维度遵守现有规范，详细段列表进入可查询诊断信息而非无限高基数标签。
 
 运维可区分“写尚未放开”“g1 服务但后台清洗慢”“adoption 已提交但 g2 未 Up”“历史折叠慢”“只剩规范化清理”。禁止提供未经协议支持的强制解除 fence、丢弃 pin 或跳过批次操作。
+
+新增设计需要观测读拓扑缓存命中/刷新/过期拒绝、全请求规划等待、重规划次数、流式失败前的输出状态，以及缓存身份和服务发布身份的差异。记录 PChannel 选择时的资格、负载数据时间和就绪等待。锁优化分别记录广播完成与源消费完成的时间及未确认 ACK。BM25 实验记录统计模型和查询参数，以便复现实验差异。沿用现有低基数指标规范，collection/task/view 明细放入诊断记录。
 
 ## 20. 相对第 4.1 版的关键变化
 
@@ -422,16 +540,34 @@ Go 测试使用 -tags dynamic,test、-gcflags="all=-N -l"、-count=1。还需真
 
 ## 22. R6 端到端验证后的约束补全
 
-空 Summary 必须持久化第一次未知历史前缀，包括有效的零起点；原始边界发布前，global checkpoint 不能继续越过它。重启不能用更晚 checkpoint 重建更晚的初始 floor。真实 GC watermark 仍严格检查，已经丢失旧起点的草稿状态不能凭空修复。
+空 Summary 必须持久化第一次未知历史前缀，包括有效的零起点。原始边界发布前，global checkpoint 保持在安全位置。重启沿持久起点恢复，真实 GC watermark 继续严格检查。目标创世身份可证明其创世之前没有目标业务消息，所需历史仍由持久覆盖及保留状态共同证明。
 
-WAL growing base 的初始 C 来自真实 CreateSegment 消息的 TimeTick，经已有 AllocSegment 生命周期持久化。首次 data pack 尚未写出 StartPosition 时，L0 筛选可使用这个显式下界；legacy 零值和非 streaming 请求继续保守处理，重试不能覆盖已有更高 C。
+WAL growing base 的初始 C 来自真实 CreateSegment 消息的 TimeTick，经已有 AllocSegment 生命周期持久化。首次 data pack 尚未写出 StartPosition 时，L0 筛选可使用这个显式下界。正式旧数据的零值和非 streaming 请求继续按真实兼容要求处理，重试保留已有更高 C。
 
-存活 Preparing/Up QueryView 的读 schema 引用必须参加 schema GC 保留集，不能仅依赖 segment 引用。注册和 GC 使用同一个 owner 锁，恢复先重建引用再启后台清理。DropCollection 的加载义务撤销应在等待 split lifecycle guard 前完成，后续物理及元数据清理继续受 guard 保护。
+存活 Preparing/Up QueryView 的读 schema 引用参加 schema GC 保留集。注册和 GC 使用同一个 owner 锁，恢复先重建引用再启后台清理。DropCollection 的加载义务撤销在等待 split lifecycle guard 前完成，后续物理及元数据清理继续受 guard 保护。
 
-Snapshot 等 collection 资源锁期间可能完成 split、rename 或 move。取得锁后重新读取 immutable collection view，并核验所锁 DB/name 仍匹配；构造广播的 channel 列表不得沿用锁前版本。
+Snapshot 等待 collection 资源锁期间可能完成 split、rename 或 move。取得锁后重新读取 immutable collection view，并核验所锁 DB/name 仍匹配，广播 channel 列表从锁内快照构建。
 
-R6 累计 54 个独立 e2e 场景取得通过记录：功能/查询/实际物理合并 9、恢复/历史/存储故障 22、准入/DDL/TTL/快照恢复 18、MQ/独立集群 3、大 moves/未加载并发 2。真实环境包含精确 30c7552 原生库、MinIO、RocksMQ/Pulsar/Kafka，以及 2 SN/2 QN/2 replica 独立进程集群。39 个主要场景在最终两次构建中复测；14 个额外恢复阶段沿用较早修复版本证据，最后 CDC 保护增加一个独立场景。记录按实际源码、binary SHA、native 和运行目录区分，不声称 54 项均在同一个二进制重跑。
+此前 R6 验证轮记录了累计 54 个独立 E2E 场景，运行分布在多个修复版本。随后 R5 评审修复轮记录了 24 个独立真实进程场景通过，其中 3 个是双集群主备场景。两轮存在覆盖重叠，结果按各自提交和二进制记录。R6 是验证轮名称，本设计版本仍为 R5。[基线文档中的历史验证说明](https://github.com/milvus-io/milvus/blob/1bad020dc76f/docs/design-docs/design_docs/20261113-shard_split_on_queryview_r5.md)
 
-验证包含持续全 DML 下有限 F 退休、同 PK 并发更新的 search/requery 一致性、1100 项真实两页 adoption 的 Prepared 崩溃恢复、单条 19 MB 历史回放与队列溢出、S3 503、提交成功丢响应、Pulsar topic quota，以及不对称三 shard 快照恢复后删写和再次 split。六项问题有真实 e2e 红绿证据；Snapshot 锁前代际竞态另有确定性 service-entry 红绿回归，不冒充窄竞态的真实网络注入。
+最近评审修复记录位于 `/home/zc/test/scratch/shard-split-review-20261119/TEST-REPORT.md`。其集成提交为 `1bad020dc76f`。主备覆盖正常复制后升主、源流在 Fence 前被截断后的目标拒写、备站父任务落后时阻止子切分及追平后的放行。验收环境以报告列出的两套独立 Milvus、CDC、存储和测试门禁为准。
 
-这些结果不代表生产部署、CDC 数据复制、旧 reader 恢复新 residue 快照、任意历史 iterator 保留、最大规模或长期压力已验收。修复前实验 split 快照缺失 routing 的需要重新生成；生产默认开关和未声明的版本门禁继续关闭。
+本轮已接入完整发布身份、serving 缓存、全请求规划屏障、流式重试约束及 TEXT 清洗修复。Go 回归、真实原生存储测试和真实进程/CDC 结果分别记录；旧提交的通过结果不代替最新提交验收。PChannel 速率采样、自动扩容闭环、广播锁提前释放和 BM25 seed 均未实现。生产启用、最大规模、长期压力和长期 iterator 保留各有独立验收要求。
+
+
+## 23. 本轮完善项的实施归属
+
+六个 PR 保持原有层次。跨层接线及完整缓存身份放在最后一层，以保证之前五层可独立编译；全请求屏障本身放在查询层。广播锁优化在其恢复条件齐备后接入，BM25 seed 根据实验决定。
+
+| PR | 本轮设计的关联工作 | 状态 |
+| --- | --- | --- |
+| #53366，WAL 协议 | 保留 source-first、源 fence 和创世顺序；同步 master WAL 切换接口及 Go 测试入口 | 已接入；广播 ACK 锁时机保持原方案 |
+| #53093，写路径 | 保留 residue 路由、原始 offset 分桶、源幂等窗口探测及未知提交边界 | 已接入，随新 master 回归 |
+| #53095，协调与任务 | 保留目标通道数量排序、现有扩容准入及持久任务 | 已接入；写速率排序与锁优化待实施 |
+| #53097，段改挂 | 保留 attempt CAS 和版本专属分页；修复 TEXT/LOB 清洗并验证改挂元数据 | 已接入；原生存储及崩溃恢复回归通过 |
+| #53096，查询与删除重放 | 全请求规划屏障、流式谱系读点及禁止屏障后局部重规划 | 已接入；完整 queryclient race 回归通过 |
+| #52604，代际发布与退休 | load/schema/epoch 同一发布快照、SN 精确校验、serving 缓存与整请求重试；退休 runner 和 Drop gate 清理 | 已接入；最终集成及真实进程验收另记录 |
+
+新接口复用现有 QueryView 与 load 版本表达，确需增加字段时直接更新六层未合并草稿及生成代码。正式协议的既有兼容要求按真实使用方保留。上线以实际完成的构建、原生 E2E、主备故障和资源边界结果为依据。
+
+本轮对照资料为 [在线分片分裂架构设计](https://zilliverse.feishu.cn/docx/B6jGdwr1XooPtQxGxnbcGrmzngd)。实施验收按第 18 节执行，实验结果不替代未验证的资源及规模边界。
