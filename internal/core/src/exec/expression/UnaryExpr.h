@@ -951,6 +951,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    SupportsJsonStatsPrefetchCacheLookup() const override {
+        return true;
+    }
+
+    bool
     CanUseOffsetsForSequentialBatch() override {
         EnsureExecPathDetermined();
         return expr_->column_.element_level_ &&

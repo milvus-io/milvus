@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <charconv>
 #include <chrono>
@@ -540,7 +541,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     static void
     WaitForPrefetches(const std::vector<std::shared_ptr<Expr>>& exprs);
 
-    double
+    virtual double
     PrefetchWaitMicros() const;
 
     // Bind the request-scoped sealed read snapshot to this expression.
@@ -564,7 +565,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     void
     JoinPrefetch(std::optional<folly::Future<folly::Unit>>& pending);
 
-    double prefetch_wait_us_{0};
+    mutable double prefetch_wait_us_{0};
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
@@ -856,8 +857,8 @@ class SegmentExpr : public Expr {
     }
 
     ExprExecPath
-    GetExecPath() const {
-        EnsureExecPathDetermined();
+    GetExecPath(bool on_prefetch_thread = false) const {
+        EnsureExecPathDetermined(on_prefetch_thread);
         return exec_path_;
     }
 
@@ -1219,15 +1220,12 @@ class SegmentExpr : public Expr {
             segment_, snapshot_, std::move(signature));
     }
 
-    // Try to load the full bitset from ExprResCache.
-    // Returns true if cache hit (cached_index_chunk_res_ populated).
-    // Call at the top of ByStats / ByIndex methods to skip computation.
-    bool
-    TryCacheGet() {
+    ExprCacheHelper::CachedBitmaps
+    LookupCachedIndexBitmaps() const {
         if (!ExprResCacheManager::IsEnabled() || !HasExprCacheIdentity()) {
-            return false;
+            return {};
         }
-        bool cache_hit = false;
+        ExprCacheHelper::CachedBitmaps cached;
         RunExprCacheBestEffort([&]() {
             auto& manager = ExprResCacheManager::Instance();
             if (!manager.CanCacheSegment(segment_->type())) {
@@ -1237,16 +1235,27 @@ class SegmentExpr : public Expr {
             ExprResCacheManager::Value got;
             got.active_count = active_count_;
             if (manager.Get(key, got)) {
-                cached_index_chunk_res_ = got.result;
-                cached_index_chunk_valid_res_ = got.valid_result;
-                cached_index_chunk_id_ = 0;
-                cache_hit = true;
+                cached = {std::move(got.result), std::move(got.valid_result)};
             }
         });
-        if (cache_hit) {
-            MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
+        return cached;
+    }
+
+    // Install the full cached bitmap pair on demand in ByStats / ByIndex.
+    bool
+    TryCacheGet() {
+        auto cached = std::move(prefetched_json_stats_cache_);
+        if (!cached.result) {
+            cached = LookupCachedIndexBitmaps();
         }
-        return cache_hit;
+        if (!cached.result) {
+            return false;
+        }
+        cached_index_chunk_res_ = std::move(cached.result);
+        cached_index_chunk_valid_res_ = std::move(cached.valid);
+        cached_index_chunk_id_ = 0;
+        MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
+        return true;
     }
 
     // Put the current cached_index_chunk_res_ into ExprResCache.
@@ -4197,6 +4206,13 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    // Whether the JsonStats evaluator consumes TryCacheGet() before reading
+    // a projection.
+    virtual bool
+    SupportsJsonStatsPrefetchCacheLookup() const {
+        return false;
+    }
+
     // JSON shredding is a typed column scan, not an index lookup: it still
     // visits every row of the segment on every query. A JSON path index that
     // serves this expression is preferred; the shredded columns are the
@@ -4240,20 +4256,38 @@ class SegmentExpr : public Expr {
     }
 
     void
-    EnsureExecPathDetermined() const {
-        std::call_once(determine_exec_path_once_, [this]() {
-            // Publish a terminal failure as well as a successful path. Letting
-            // an exception escape can leave pthread_once active on this runtime,
-            // so cleanup's second call would wait forever after prefetch fails.
-            try {
-                auto self = const_cast<SegmentExpr*>(this);
-                self->DetermineExecPath();
-                self->FallbackToJsonStatsIfEligible();
-                self->RecordExecPath();
-            } catch (...) {
-                determine_exec_path_error_ = std::current_exception();
+    EnsureExecPathDetermined(bool on_prefetch_thread = false) const {
+        if (!exec_path_ready_.load(std::memory_order_acquire)) {
+            using Clock = std::chrono::steady_clock;
+            const auto start =
+                on_prefetch_thread ? Clock::time_point{} : Clock::now();
+            bool selected_here = false;
+            std::call_once(determine_exec_path_once_, [&]() {
+                selected_here = true;
+                exec_path_selected_by_prefetch_ = on_prefetch_thread;
+                // Publish a terminal failure as well as a successful path. Letting
+                // an exception escape can leave pthread_once active on this runtime,
+                // so cleanup's second call would wait forever after prefetch fails.
+                try {
+                    auto self = const_cast<SegmentExpr*>(this);
+                    self->DetermineExecPath();
+                    self->FallbackToJsonStatsIfEligible();
+                    self->RecordExecPath();
+                } catch (...) {
+                    determine_exec_path_error_ = std::current_exception();
+                }
+                exec_path_ready_.store(true, std::memory_order_release);
+            });
+            // Only the foreground time spent waiting for path selection by
+            // prefetch contributes to this metric. A later future join measures
+            // only the remaining wait.
+            if (!on_prefetch_thread && !selected_here &&
+                exec_path_selected_by_prefetch_) {
+                prefetch_wait_us_ += std::chrono::duration<double, std::micro>(
+                                         Clock::now() - start)
+                                         .count();
             }
-        });
+        }
         if (determine_exec_path_error_) {
             std::rethrow_exception(determine_exec_path_error_);
         }
@@ -4490,7 +4524,7 @@ class SegmentExpr : public Expr {
             op_ctx_->cancellation_token.isCancellationRequested()) {
             return;
         }
-        EnsureExecPathDetermined();
+        EnsureExecPathDetermined(/*on_prefetch_thread=*/true);
         if (exec_path_ == ExprExecPath::JsonStats) {
             PrefetchJsonStats();
             return;
@@ -4666,6 +4700,9 @@ class SegmentExpr : public Expr {
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};
     mutable std::once_flag determine_exec_path_once_;
+    mutable std::atomic<bool> exec_path_ready_{false};
+    // Written by the once callback and read after std::call_once returns.
+    mutable bool exec_path_selected_by_prefetch_{false};
     // Flag set by SetExecuteAllAtOnce() to enable move-based fast paths,
     // avoiding bitmap copies in ProcessIndexChunks/SliceCachedResult.
     bool execute_all_at_once_{false};
@@ -4741,6 +4778,8 @@ class SegmentExpr : public Expr {
     bool cached_index_all_valid_{false};
 
     // Legacy cache fields — TODO: remove after all subclasses migrated to cached_result_.
+    // A speculative hit is installed by Eval only after joining prefetch.
+    ExprCacheHelper::CachedBitmaps prefetched_json_stats_cache_;
     int64_t cached_index_chunk_id_{-1};
     std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
     std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};

@@ -106,6 +106,12 @@ SegmentExpr::PrefetchJsonStats() {
     if (value_type_ == DataType::NONE && !allow_any_json_cast_type_) {
         return;
     }
+    if (SupportsJsonStatsPrefetchCacheLookup()) {
+        prefetched_json_stats_cache_ = LookupCachedIndexBitmaps();
+        if (prefetched_json_stats_cache_.result) {
+            return;
+        }
+    }
     try {
         auto stats = segment_->GetJsonStats(op_ctx_, field_id_);
         if (stats) {
