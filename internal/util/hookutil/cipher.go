@@ -48,13 +48,11 @@ var (
 	errCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
-type BackupInterface interface {
+// EZBackupCipher backs up an encryption zone and resolves backup artifacts on import.
+// ResolveImportEZ decrypts this backup with its source credentials on each call
+// and returns the original EZ ID and raw keyset for this artifact.
+type EZBackupCipher interface {
 	Backup(ezID int64) (string, error)
-}
-
-// ImportResolverInterface decrypts this backup with its source credentials on each call.
-// The result is the original EZ ID and raw keyset for this artifact.
-type ImportResolverInterface interface {
 	ResolveImportEZ(artifact string) (int64, []byte, error)
 }
 
@@ -313,25 +311,51 @@ func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 // GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode.
 // An encrypted target must not fall back to a plaintext writer when its key is unavailable.
 func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
-	if ez := GetEzByCollProperties(collProps, collectionID); ez != nil {
-		return GetPluginContext(ez.EzID, ez.CollectionID)
+	ezID, hasTarget, err := parseTargetEzID(collProps)
+	if err != nil {
+		return nil, err
+	}
+	if hasTarget {
+		return GetPluginContext(ezID, collectionID)
 	}
 	return nil, nil
+}
+
+// GetImportStoragePluginContext resolves the ordered [source, target] plugin contexts
+// for an import or preimport dispatch.
+func GetImportStoragePluginContext(artifact string, collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	var result []*commonpb.KeyValuePair
+	if artifact != "" {
+		sourceCtx, err := ResolveImportEZ(artifact)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, sourceCtx...)
+	}
+	targetCtx, err := GetStoragePluginContext(collProps, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, targetCtx...)
+	return result, nil
 }
 
 // GetCollectionPluginContext resolves the collection's required storage context.
 // Only a collection without an EZ may use a nil context.
 func GetCollectionPluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	ez := GetEzByCollProperties(collProps, collectionID)
-	if ez == nil {
+	ezID, hasTarget, err := parseTargetEzID(collProps)
+	if err != nil {
+		return nil, err
+	}
+	if !hasTarget {
 		return nil, nil
 	}
-	key, err := requiredEZKey(ez.EzID, collectionID)
+	key, err := requiredEZKey(ezID, collectionID)
 	if err != nil {
 		return nil, err
 	}
 	return &indexcgopb.StoragePluginContext{
-		EncryptionZoneId: ez.EzID,
+		EncryptionZoneId: ezID,
 		CollectionId:     collectionID,
 		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
 	}, nil
@@ -395,6 +419,15 @@ func BackupEZKFromDBProperties(dbProperties []*commonpb.KeyValuePair) (string, e
 func InitTestCipher() {
 	InitOnceCipher()
 	storeCipher(testCipher{})
+}
+
+// SetTestCipher swaps the singleton cipher for tests and returns a cleanup restoring the previous value.
+func SetTestCipher(c hook.Cipher) func() {
+	previous := GetCipher()
+	storeCipher(c)
+	return func() {
+		storeCipher(previous)
+	}
 }
 
 // cipherContainer is Container to wrap hook.Cipher interface

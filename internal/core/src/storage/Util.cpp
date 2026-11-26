@@ -57,20 +57,12 @@
 #include "common/Schema.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
-#include "storage/StorageV2FSCache.h"
-#ifdef AZURE_BUILD_DIR
-#include "storage/azure/AzureChunkManager.h"
-#endif
-#ifdef ENABLE_GCP_NATIVE
-#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
-#endif
 #include "storage/ArrowFileSystemChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/minio/MinioChunkManager.h"
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -173,27 +165,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
                              bool nullable,
                              DataType element_type,
                              const FieldMeta& field_meta,
-                             bool preserve_array_element_validity = false);
-
-enum class CloudProviderType : int8_t {
-    UNKNOWN = 0,
-    AWS = 1,
-    GCP = 2,
-    ALIYUN = 3,
-    AZURE = 4,
-    TENCENTCLOUD = 5,
-    GCPNATIVE = 6,
-    HUAWEICLOUD = 7,
-};
-
-std::map<std::string, CloudProviderType> CloudProviderType_Map = {
-    {"aws", CloudProviderType::AWS},
-    {"gcp", CloudProviderType::GCP},
-    {"aliyun", CloudProviderType::ALIYUN},
-    {"azure", CloudProviderType::AZURE},
-    {"tencent", CloudProviderType::TENCENTCLOUD},
-    {"gcpnative", CloudProviderType::GCPNATIVE},
-    {"huawei", CloudProviderType::HUAWEICLOUD}};
+                             bool preserve_array_element_validity = false,
+                             std::string_view physical_column_name = {});
 
 // in arrow, null_bitmap read from the least significant bit
 std::vector<uint8_t>
@@ -1199,13 +1172,21 @@ GetObjectData(ChunkManager* remote_chunk_manager,
         };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(folly::via(&pool,
-                                        std::bind(DownloadAndDeserialize,
-                                                  remote_chunk_manager,
-                                                  is_field_data,
-                                                  array_type,
-                                                  file))
-                                 .semi());
+        try {
+            futures.emplace_back(folly::via(&pool,
+                                            std::bind(DownloadAndDeserialize,
+                                                      remote_chunk_manager,
+                                                      is_field_data,
+                                                      array_type,
+                                                      file))
+                                     .semi());
+        } catch (...) {
+            // Return the error with issued reads so callers can drain their owners.
+            futures.emplace_back(
+                folly::makeSemiFuture<std::unique_ptr<DataCodec>>(
+                    folly::exception_wrapper(std::current_exception())));
+            break;
+        }
     }
     return futures;
 }
@@ -1286,149 +1267,38 @@ ReleaseArrowUnused() {
     }
 }
 
-static std::atomic<bool> use_arrow_fs_chunk_manager{false};
-
-void
-SetUseArrowFileSystemChunkManager(bool use) {
-    use_arrow_fs_chunk_manager.store(use);
-    LOG_INFO("remote chunk manager backend set to {}",
-             use ? "ArrowFileSystemChunkManager" : "legacy");
-}
-
-bool
-UseArrowFileSystemChunkManager() {
-    return use_arrow_fs_chunk_manager.load();
-}
-
-// Route a storage config to the ArrowFileSystem backed chunk manager when the
-// switch is on. milvus-storage owns provider-support classification: Make
-// returns nullptr for any config it has no producer for (unknown / empty /
-// gcpnative provider, or a rejected config), and CreateChunkManager then falls
-// back to the legacy chunk managers.
-static ChunkManagerPtr
-TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
-    if (!UseArrowFileSystemChunkManager()) {
-        return nullptr;
-    }
-    return ArrowFileSystemChunkManager::Make(storage_config);
-}
-
 ChunkManagerPtr
-CreateLegacyChunkManager(const StorageConfig& storage_config) {
-    auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
-    switch (storage_type) {
-        case ChunkManagerType::Local: {
-            return std::make_shared<LocalChunkManager>(
-                storage_config.root_path);
-        }
-        case ChunkManagerType::Minio: {
-            return std::make_shared<MinioChunkManager>(storage_config);
-        }
-        case ChunkManagerType::Remote: {
-            auto cloud_provider_type =
-                CloudProviderType_Map[storage_config.cloud_provider];
-            switch (cloud_provider_type) {
-                case CloudProviderType::AWS: {
-                    return std::make_shared<AwsChunkManager>(storage_config);
-                }
-                case CloudProviderType::GCP: {
-                    return std::make_shared<GcpChunkManager>(storage_config);
-                }
-                case CloudProviderType::ALIYUN: {
-                    return std::make_shared<AliyunChunkManager>(storage_config);
-                }
-                case CloudProviderType::TENCENTCLOUD: {
-                    return std::make_shared<TencentCloudChunkManager>(
-                        storage_config);
-                }
-                case CloudProviderType::HUAWEICLOUD: {
-                    return std::make_shared<HuaweiCloudChunkManager>(
-                        storage_config);
-                }
-#ifdef AZURE_BUILD_DIR
-                case CloudProviderType::AZURE: {
-                    return std::make_shared<AzureChunkManager>(storage_config);
-                }
-#endif
-#ifdef ENABLE_GCP_NATIVE
-                case CloudProviderType::GCPNATIVE: {
-                    return std::make_shared<GcpNativeChunkManager>(
-                        storage_config);
-                }
-#endif
-                default: {
-                    return std::make_shared<MinioChunkManager>(storage_config);
-                }
-            }
-        }
-        default: {
-            ThrowInfo(ConfigInvalid,
-                      "unsupported storage_config.storage_type {}",
-                      fmt::underlying(storage_type));
-        }
+CreateChunkManager(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    const auto storage_type =
+        GetStorageProperty<std::string>(properties, PROPERTY_FS_STORAGE_TYPE);
+    if (storage_type == "local") {
+        return std::make_shared<LocalChunkManager>(
+            GetStorageProperty<std::string>(properties, PROPERTY_FS_ROOT_PATH));
     }
+    if (storage_type != "minio" && storage_type != "remote") {
+        ThrowInfo(ConfigInvalid, "unsupported storage type {}", storage_type);
+    }
+    return ArrowFileSystemChunkManager::Make(properties);
 }
 
-ChunkManagerPtr
-CreateChunkManager(const StorageConfig& storage_config) {
-    // The ArrowFileSystem backed chunk manager (when enabled) handles every
-    // storage type; try it once up front and fall back to the legacy managers
-    // when it declines (switch off, or no producer for the provider).
-    if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-        cm != nullptr) {
-        return cm;
-    }
-    return CreateLegacyChunkManager(storage_config);
-}
-
-StorageV2FSCache::Key
-ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
-    StorageV2FSCache::Key conf;
-    conf.talon_mode = storage_config.talon_mode;
-    conf.talon_enabled_stages = storage_config.talon_enabled_stages;
-    if (storage_config.storage_type == "local") {
-        std::string path(storage_config.root_path);
-        conf.root_path = path;
-        conf.storage_type = "local";
-    } else {
-        conf.address = std::string(storage_config.address);
-        conf.bucket_name = std::string(storage_config.bucket_name);
-        conf.access_key_id = std::string(storage_config.access_key_id);
-        conf.access_key_value = std::string(storage_config.access_key_value);
-        conf.root_path = std::string(storage_config.root_path);
-        // milvus-storage only understands "remote"; "minio" is the
-        // deprecated alias of it in `common.storageType`.
-        conf.storage_type = storage_config.storage_type == "minio"
-                                ? "remote"
-                                : std::string(storage_config.storage_type);
-        conf.cloud_provider = std::string(storage_config.cloud_provider);
-        conf.iam_endpoint = std::string(storage_config.iam_endpoint);
-        conf.log_level = std::string(storage_config.log_level);
-        conf.region = std::string(storage_config.region);
-        conf.useSSL = storage_config.useSSL;
-        conf.sslCACert = std::string(storage_config.sslCACert);
-        conf.useIAM = storage_config.useIAM;
-        conf.useVirtualHost = storage_config.useVirtualHost;
-        conf.requestTimeoutMs = storage_config.requestTimeoutMs;
-        conf.gcp_credential_json =
-            std::string(storage_config.gcp_credential_json);
-        conf.use_custom_part_upload = true;
-        conf.max_connections = storage_config.max_connections;
-        conf.tls_min_version = storage_config.tls_min_version;
-        conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
-        conf.talon_small_read_threshold =
-            storage_config.talon_small_read_threshold;
-        conf.talon_coordinator = storage_config.talon_coordinator;
-        conf.talon_block_size = storage_config.talon_block_size;
-        conf.talon_max_idle_per_addr = storage_config.talon_max_idle_per_addr;
-    }
-    return conf;
+arrow::Result<milvus_storage::ArrowFileSystemPtr>
+GetArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    return milvus_storage::FilesystemCache::getInstance().get(
+        MakeInternalProperties(properties), "");
 }
 
 milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
-    return StorageV2FSCache::Instance().Get(
-        ToStorageV2FSCacheKey(storage_config));
+InitArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    auto fs = GetArrowFileSystem(properties);
+    if (!fs.ok()) {
+        LOG_WARN("create arrow file system failed, error: {}",
+                 fs.status().ToString());
+        return nullptr;
+    }
+    return *fs;
 }
 
 FieldDataPtr
@@ -2172,6 +2042,9 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
     }
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         GetLoonManifest(manifest_path, properties)->columnGroups());
+    if (ReadMilvusTableFieldIdMapping(*column_groups) != nullptr) {
+        return std::nullopt;
+    }
     for (size_t i = 0; i < column_groups->size(); ++i) {
         const auto& group = column_groups->at(i);
         if (std::find(group->columns.begin(), group->columns.end(), column) ==
@@ -2342,6 +2215,7 @@ VisitFieldDataFromManifestPaged(
     auto loon_manifest = GetLoonManifest(manifest_path, loon_ffi_properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
+    const auto field_id_mapping = ReadMilvusTableFieldIdMapping(*column_groups);
 
     // Determine the column name to use. New index-build callers pass the
     // storage column mapping through FileManagerContext. The fallback keeps
@@ -2363,6 +2237,31 @@ VisitFieldDataFromManifestPaged(
         column_name = std::to_string(field_meta.field_id);
     }
 
+    const auto missing_field = [&]() {
+        // External mappings become readable only after explicit refresh.
+        // FieldMissing allows index builders to synthesize NULL/default rows;
+        // report a retriable error instead so they retry the refreshed manifest.
+        if (is_external) {
+            ThrowInfo(FieldNotLoaded,
+                      "mapped external field {} ({}) is not available in the "
+                      "current segment manifest; run RefreshExternalCollection "
+                      "before accessing this field",
+                      field_meta.field_id,
+                      ext_field);
+        }
+        return VisitOutcome::FieldMissing;
+    };
+
+    if (field_id_mapping != nullptr) {
+        is_external = true;
+        const auto mapped =
+            field_id_mapping->physical_columns.find(field_meta.field_id);
+        if (mapped == field_id_mapping->physical_columns.end()) {
+            return missing_field();
+        }
+        column_name = mapped->second;
+    }
+
     // TODO remove manual check after loon support read null for non-exists field
     auto column_exists = [&](const std::string& name) {
         for (size_t i = 0; i < column_groups->size(); i++) {
@@ -2377,7 +2276,7 @@ VisitFieldDataFromManifestPaged(
     };
     bool field_exists = column_exists(column_name);
     if (!field_exists) {
-        return VisitOutcome::FieldMissing;
+        return missing_field();
     }
 
     std::vector<std::string> needed_columns = {column_name};
@@ -2636,7 +2535,9 @@ VisitFieldDataFromManifestPaged(
                                 dim,
                                 nullable,
                                 element_type_v,
-                                *normalize_field_meta);
+                                *normalize_field_meta,
+                                false,
+                                column_name);
                         }
                         auto chunked_array =
                             std::make_shared<arrow::ChunkedArray>(raw_column);
@@ -2796,13 +2697,14 @@ VisitFieldDataFromManifestPaged(
 
             auto raw_column = batch->GetColumnByName(column_name);
             if (is_external) {
-                raw_column =
-                    NormalizeExternalArrowByType(raw_column,
-                                                 data_type_v,
-                                                 dim,
-                                                 nullable,
-                                                 element_type_v,
-                                                 *normalize_field_meta);
+                raw_column = NormalizeExternalArrowByType(raw_column,
+                                                          data_type_v,
+                                                          dim,
+                                                          nullable,
+                                                          element_type_v,
+                                                          *normalize_field_meta,
+                                                          false,
+                                                          column_name);
             }
             auto chunked_array =
                 std::make_shared<arrow::ChunkedArray>(raw_column);
@@ -3728,6 +3630,10 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
 // Arrow type normalization helpers for external table loading
 // ============================================================
 
+// Forward decl: defined alongside CanonicalizeArrowVariants below.
+static std::shared_ptr<arrow::Buffer>
+RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array);
+
 arrow::ArrayVector
 ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
     arrow::ArrayVector result;
@@ -3771,10 +3677,10 @@ ConvertFixedSizeBinaryToBinary(const arrow::ArrayVector& arrays) {
             }
         }
 
-        // Reuse the original null bitmap
+        // The new buffers start at zero, even when the input is sliced.
         auto bin_data = arrow::ArrayData::Make(arrow::binary(),
                                                n,
-                                               {fsb->data()->buffers[0],
+                                               {RebuildNullBitmap(fsb),
                                                 std::move(offsets_buf),
                                                 std::move(data_buf)},
                                                fsb->null_count(),
@@ -3801,10 +3707,6 @@ ConvertStringArrayToBinary(const arrow::ArrayVector& arrays) {
     }
     return result;
 }
-
-// Forward decl: defined alongside CanonicalizeArrowVariants below.
-static std::shared_ptr<arrow::Buffer>
-RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array);
 
 // Rebuild null bitmap as a fresh buffer at offset=0.
 // Required when constructing a new arrow::Array that does not share the
@@ -3847,7 +3749,8 @@ RebuildNullBitmap(const std::shared_ptr<arrow::Array>& array) {
 //   FIXED_SIZE_LIST            -> FIXED_SIZE_LIST (recurses into inner values)
 //   anything else              -> unchanged
 std::shared_ptr<arrow::Array>
-CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
+CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array,
+                          bool discard_null_list_payload) {
     const auto tid = array->type_id();
 
     // Variable-length string variants -> STRING
@@ -4021,7 +3924,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                           "child values",
                           i);
             }
-            if (array->IsNull(i) && length != 0) {
+            if (!discard_null_list_payload && array->IsNull(i) && length != 0) {
                 ThrowInfo(ErrorCode::DataFormatBroken,
                           "CanonicalizeArrowVariants: null list row {} has "
                           "a non-empty child range",
@@ -4071,10 +3974,42 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
                       "CanonicalizeArrowVariants: list has no child values");
         }
 
-        auto canonical_values = CanonicalizeArrowVariants(values);
+        // External Arrow null lists may own hidden child ranges. Remove them
+        // before recursion: invisible nested values must not affect validation.
+        bool compacted = false;
+        if (discard_null_list_payload) {
+            int64_t next = 0;
+            arrow::ArrayVector visible;
+            for (int64_t i = 0; i < array->length(); ++i) {
+                auto [start, end] = ranges[i];
+                const int64_t length = array->IsNull(i) ? 0 : end - start;
+                compacted |= start != next || end != next + length;
+                if (length > 0) {
+                    visible.push_back(values->Slice(start, length));
+                }
+                ranges[i] = {next, next + length};
+                next += length;
+            }
+            compacted |= next != values->length();
+            if (compacted) {
+                if (visible.empty()) {
+                    values = values->Slice(0, 0);
+                } else {
+                    auto result = arrow::Concatenate(visible);
+                    if (!result.ok()) {
+                        ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                                  "compact external list: {}",
+                                  result.status().ToString());
+                    }
+                    values = result.ValueOrDie();
+                }
+            }
+        }
+        auto canonical_values =
+            CanonicalizeArrowVariants(values, discard_null_list_payload);
 
         // Fast path: already canonical LIST and inner unchanged -> return as-is
-        if (tid == arrow::Type::LIST &&
+        if (tid == arrow::Type::LIST && !compacted &&
             canonical_values.get() == values.get()) {
             return array;
         }
@@ -4148,7 +4083,8 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     if (tid == arrow::Type::FIXED_SIZE_LIST) {
         auto fsl = std::static_pointer_cast<arrow::FixedSizeListArray>(array);
         auto inner = fsl->values();
-        auto canonical_inner = CanonicalizeArrowVariants(inner);
+        auto canonical_inner =
+            CanonicalizeArrowVariants(inner, discard_null_list_payload);
         if (canonical_inner.get() == inner.get()) {
             return array;
         }
@@ -4578,7 +4514,8 @@ NormalizeVectorArrayInner(const arrow::ArrayVector& arrays,
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
                        const FieldMeta& field_meta,
-                       bool preserve_array_element_validity) {
+                       bool preserve_array_element_validity,
+                       std::string_view physical_column_name) {
     auto dt = field_meta.get_data_type();
     int64_t dim = (IsVectorDataType(dt) && !IsSparseFloatVectorDataType(dt))
                       ? field_meta.get_dim()
@@ -4592,20 +4529,23 @@ NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
                                         field_meta.is_nullable(),
                                         element_type,
                                         field_meta,
-                                        preserve_array_element_validity);
+                                        preserve_array_element_validity,
+                                        physical_column_name);
 }
 
 // Load path: batch wrapper.
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
-                             const FieldMeta& field_meta) {
+                             const FieldMeta& field_meta,
+                             std::string_view physical_column_name) {
     if (arrays.empty()) {
         return arrays;
     }
     arrow::ArrayVector result;
     result.reserve(arrays.size());
     for (const auto& arr : arrays) {
-        result.push_back(NormalizeExternalArrow(arr, field_meta));
+        result.push_back(NormalizeExternalArrow(
+            arr, field_meta, false, physical_column_name));
     }
     return result;
 }
@@ -4994,6 +4934,211 @@ NormalizeExternalSparseVector(const std::shared_ptr<arrow::Array>& array,
     return result;
 }
 
+// Validate untrusted native-list projections without materializing a second
+// copy just for refresh sampling. Chunk builders still validate their buffers.
+static void
+ValidateProjectedArray(const std::shared_ptr<arrow::Array>& array,
+                       const proto::schema::TypeSchema& type,
+                       const FieldMeta& field_meta) {
+    if (!type.nullable() && array->null_count() != 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "non-nullable Struct child contains null values{}",
+                  FieldErrorSuffix(field_meta));
+    }
+    if (type.has_array_element()) {
+        auto list = std::dynamic_pointer_cast<arrow::ListArray>(array);
+        if (!list) {
+            AssertExternalArrowType(array, "list", field_meta);
+        }
+        ValidateProjectedArray(
+            list->values(), type.array_element(), field_meta);
+    } else {
+        auto expected = GetArrowDataType(DataType(type.leaf_type()));
+        if (!array->type()->Equals(expected)) {
+            AssertExternalArrowType(array, expected->ToString(), field_meta);
+        }
+    }
+}
+
+// Ordinary Struct parents project to the existing per-child List layout.
+// Numeric snapshot columns already contain flat leaves. Physical identity lets
+// us reject malformed ordinary parents without rejecting those snapshot leaves.
+static std::shared_ptr<arrow::Array>
+ProjectExternalStructColumn(const std::shared_ptr<arrow::Array>& input,
+                            const FieldMeta& field_meta,
+                            std::string_view physical_column_name) {
+    auto logical_parent = GetStructNameForArrayField(field_meta);
+    if (!field_meta.is_external_field() || !logical_parent.has_value()) {
+        return input;
+    }
+    auto external_path =
+        ParseStructSubFieldPath(field_meta.get_external_field());
+    const std::string parent_name = external_path.has_value()
+                                        ? external_path->first
+                                        : logical_parent.value();
+    const std::string child_name =
+        external_path.has_value() ? external_path->second
+                                  : field_meta.get_name().get().substr(
+                                        logical_parent->size() + 1,
+                                        field_meta.get_name().get().size() -
+                                            logical_parent->size() - 2);
+    if (!input) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "missing Struct column {}",
+                  parent_name);
+    }
+    const auto tid = input->type_id();
+    const auto& children = input->data()->child_data;
+    const bool list_of_struct =
+        (tid == arrow::Type::LIST || tid == arrow::Type::LARGE_LIST ||
+         tid == arrow::Type::LIST_VIEW ||
+         tid == arrow::Type::FIXED_SIZE_LIST) &&
+        children.size() == 1 && children.front() &&
+        children.front()->type->id() == arrow::Type::STRUCT;
+    if (physical_column_name != parent_name && tid != arrow::Type::STRUCT &&
+        !list_of_struct) {
+        return input;
+    }
+    auto valid = input->ValidateFull();
+    if (!valid.ok()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid Struct source{}: {}",
+                  FieldErrorSuffix(field_meta),
+                  valid.ToString());
+    }
+    std::shared_ptr<arrow::StructArray> objects;
+    std::vector<std::pair<int64_t, int64_t>> ranges;
+    auto collect = [&](const auto& list) {
+        objects = std::dynamic_pointer_cast<arrow::StructArray>(list->values());
+        if (objects) {
+            ranges.reserve(list->length());
+            for (int64_t row = 0; row < list->length(); ++row) {
+                ranges.emplace_back(
+                    list->value_offset(row),
+                    list->IsNull(row) ? 0 : list->value_length(row));
+            }
+        }
+    };
+    switch (input->type_id()) {
+        case arrow::Type::STRUCT:
+            objects = std::static_pointer_cast<arrow::StructArray>(input);
+            ranges.reserve(input->length());
+            for (int64_t row = 0; row < input->length(); ++row) {
+                ranges.emplace_back(row, input->IsNull(row) ? 0 : 1);
+            }
+            break;
+        case arrow::Type::LIST:
+            collect(std::static_pointer_cast<arrow::ListArray>(input));
+            break;
+        case arrow::Type::LARGE_LIST:
+            collect(std::static_pointer_cast<arrow::LargeListArray>(input));
+            break;
+        case arrow::Type::LIST_VIEW:
+            collect(std::static_pointer_cast<arrow::ListViewArray>(input));
+            break;
+        case arrow::Type::FIXED_SIZE_LIST:
+            collect(std::static_pointer_cast<arrow::FixedSizeListArray>(input));
+            break;
+        default:
+            break;
+    }
+    if (!objects) {
+        if (physical_column_name == parent_name) {
+            AssertExternalArrowType(
+                input, "struct or list<struct>", field_meta);
+        }
+        return input;
+    }
+    auto child = objects->GetFieldByName(child_name);
+    if (!child) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Struct {} child '{}' not found",
+                  parent_name,
+                  child_name);
+    }
+    auto check = [](const arrow::Status& status) {
+        if (!status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(status),
+                      "projecting external Struct: {}",
+                      status.ToString());
+        }
+    };
+    arrow::Int32Builder offsets;
+    check(offsets.Reserve(input->length() + 1));
+    check(offsets.Append(0));
+    int64_t count = 0;
+    // Coalesce contiguous ranges so ordinary non-null batches are zero-copy.
+    std::vector<std::pair<int64_t, int64_t>> selected;
+    for (int64_t row = 0; row < input->length(); ++row) {
+        const auto [start, length] = ranges[row];
+        if (input->IsNull(row) && !field_meta.is_nullable()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "non-nullable Struct {} contains null row {}",
+                      parent_name,
+                      row);
+        }
+        if (length > 0) {
+            ValidateNoNullValuesInRange(
+                objects, start, start + length, "Struct array");
+            if (length > std::numeric_limits<int32_t>::max() - count) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Struct projection exceeds int32 offsets{}",
+                          FieldErrorSuffix(field_meta));
+            }
+            if (!selected.empty() &&
+                selected.back().first + selected.back().second == start) {
+                selected.back().second += length;
+            } else {
+                selected.emplace_back(start, length);
+            }
+            count += length;
+        }
+        check(offsets.Append(static_cast<int32_t>(count)));
+    }
+    arrow::ArrayVector slices;
+    slices.reserve(selected.size());
+    for (const auto& [start, length] : selected) {
+        slices.push_back(child->Slice(start, length));
+    }
+    std::shared_ptr<arrow::Array> values;
+    if (slices.empty()) {
+        values = child->Slice(0, 0);
+    } else if (slices.size() == 1) {
+        values = slices.front();
+    } else {
+        auto result = arrow::Concatenate(slices);
+        check(result.status());
+        values = result.ValueOrDie();
+    }
+    values = CanonicalizeArrowVariants(values, true);
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        values = NormalizeVectorArrays({values},
+                                       field_meta.get_element_type(),
+                                       field_meta.get_dim(),
+                                       field_meta.is_element_nullable(),
+                                       field_meta)
+                     .front();
+    } else if (!field_meta.is_element_nullable()) {
+        ValidateNoNullValuesInRange(
+            values, 0, values->length(), "Struct child");
+    }
+    std::shared_ptr<arrow::Array> offsets_array;
+    check(offsets.Finish(&offsets_array));
+    auto result = arrow::ListArray::FromArrays(*offsets_array,
+                                               *values,
+                                               arrow::default_memory_pool(),
+                                               RebuildNullBitmap(input),
+                                               input->null_count());
+    check(result.status());
+    auto projected = result.ValueOrDie();
+    if (field_meta.get_data_type() == DataType::ARRAY &&
+        field_meta.is_native_list_array()) {
+        ValidateProjectedArray(
+            projected, field_meta.get_array_type_schema(), field_meta);
+    }
+    return projected;
+}
+
 static std::shared_ptr<arrow::Array>
 NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
                              DataType data_type,
@@ -5001,7 +5146,8 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
                              bool nullable,
                              DataType element_type,
                              const FieldMeta& field_meta,
-                             bool preserve_array_element_validity) {
+                             bool preserve_array_element_validity,
+                             std::string_view physical_column_name) {
     // Sparse conversion must inspect the original buffers before allocating:
     // canonicalizing BinaryView/LargeBinary here would bypass its budget.
     if (IsSparseFloatVectorDataType(data_type)) {
@@ -5012,7 +5158,9 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
     // BINARY_VIEW/LARGE_BINARY -> BINARY, LARGE_LIST/LIST_VIEW -> LIST
     // (recursive into list inner). Downstream branches only need to dispatch
     // on canonical type_ids.
-    auto array = CanonicalizeArrowVariants(array_in);
+    auto projected =
+        ProjectExternalStructColumn(array_in, field_meta, physical_column_name);
+    auto array = CanonicalizeArrowVariants(projected);
     auto type_id = array->type_id();
 
     if (data_type == DataType::TIMESTAMPTZ) {

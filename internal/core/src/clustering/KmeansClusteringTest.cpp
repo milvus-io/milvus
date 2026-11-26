@@ -387,13 +387,15 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     ASSERT_EQ(v3.NumColumnGroups(), 1);
 
     // The fixture wrote to the local filesystem and ManifestPathJson() returns
-    // an absolute base_path. MakeInternalPropertiesFromStorageConfig uses "/"
+    // an absolute base_path. MakeInternalProperties uses "/"
     // as the local filesystem root, leaving that complete path unchanged.
-    // Leaving StorageConfig at its default ("minio") would send the manifest
-    // reader to object storage.
     auto storage_config = gen_local_storage_config(root_path);
-    ASSERT_EQ(storage_config.storage_type, "local");
-    ASSERT_EQ(storage_config.root_path, root_path);
+    ASSERT_EQ(milvus::storage::GetStorageProperty<std::string>(
+                  storage_config, PROPERTY_FS_STORAGE_TYPE),
+              "local");
+    ASSERT_EQ(milvus::storage::GetStorageProperty<std::string>(
+                  storage_config, PROPERTY_FS_ROOT_PATH),
+              root_path);
     auto cm = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
 
@@ -418,8 +420,12 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
     field_schema->set_fieldid(vec_fid.get());
     field_schema->set_data_type(milvus::proto::schema::DataType::FloatVector);
     auto* pb_storage_config = info.mutable_storage_config();
-    pb_storage_config->set_storage_type(storage_config.storage_type);
-    pb_storage_config->set_root_path(storage_config.root_path);
+    pb_storage_config->set_storage_type(
+        milvus::storage::GetStorageProperty<std::string>(
+            storage_config, PROPERTY_FS_STORAGE_TYPE));
+    pb_storage_config->set_root_path(
+        milvus::storage::GetStorageProperty<std::string>(
+            storage_config, PROPERTY_FS_ROOT_PATH));
 
     // Mirror analyze_c.cpp: the field schema is carried in FieldDataMeta, and
     // the loon properties come from the production storage-config helper.
@@ -429,8 +435,7 @@ TEST(KmeansClusteringTest, ReadFromManifestStorageV3) {
         0, vec_fid.get(), index_build_id, index_version};
     milvus::storage::FileManagerContext ctx(
         field_data_meta, index_meta, cm, fs);
-    ctx.set_loon_ffi_properties(MakeInternalPropertiesFromStorageConfig(
-        ToCStorageConfig(storage_config)));
+    ctx.set_loon_ffi_properties(MakeInternalProperties(storage_config));
 
     auto job = std::make_unique<milvus::clustering::KmeansClustering>(ctx);
     job->Run<float>(info);

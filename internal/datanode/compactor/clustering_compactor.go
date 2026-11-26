@@ -426,12 +426,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			fieldStats.UpdateMinMax(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, key))
 		}
 
-		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
-			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
-		)
+		writer, err := t.newBucketWriter(ctx)
 		if err != nil {
 			return err
 		}
@@ -449,12 +444,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			return err
 		}
 
-		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
-			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
-		)
+		writer, err := t.newBucketWriter(ctx)
 		if err != nil {
 			return err
 		}
@@ -509,12 +499,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 		fieldStats.SetVectorCentroids(centroidValues...)
 
-		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
-			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
-			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			t.getWriterOpts()...,
-		)
+		writer, err := t.newBucketWriter(ctx)
 		if err != nil {
 			return err
 		}
@@ -1154,6 +1139,24 @@ func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64
 	}
 	buckets = append(buckets, currentBucket)
 	return buckets
+}
+
+// newBucketWriter creates the writer of one bucket. The writer cuts an output
+// segment on bytes (plan.MaxSize) and, under the row cap, on rows: one key
+// with more rows than the bucket budget, or the null bucket, would otherwise
+// become one segment above the cap.
+func (t *clusteringCompactionTask) newBucketWriter(ctx context.Context) (*MultiSegmentWriter, error) {
+	alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
+	writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+		t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+		t.partitionID, t.collectionID, t.plan.Channel, 100,
+		t.getWriterOpts()...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	writer.SetSegmentMaxRows(t.compactionParams.SegmentMaxRows)
+	return writer, nil
 }
 
 func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {

@@ -499,6 +499,24 @@ message SegmentInfo {
   // Exclusive TransformLog replay start for this exact data/manifest revision.
   // Persisted with the base; compaction inherits its actual input coverage.
   uint64 transform_start_after_timetick = 42;
+  repeated SegmentIndexSummary index_summaries = 43;
+  // Canonical manifest identity at which DataCoord last verified stats.field_logical_sizes.
+  // Older coordinators may retain unknown stats fields when replacing a manifest at the same row count.
+  string field_logical_sizes_manifest = 44;
+}
+
+// Completed index inventory. File ownership remains in the pinned manifest.
+message SegmentIndexSummary {
+  int64 index_id = 1;
+  int64 field_id = 2;
+  int64 build_id = 3;
+  bool has_artifact = 4;
+  int64 index_version = 5;
+  uint64 serialized_size = 6;
+  uint64 mem_size = 7;
+  int32 vector_engine_version = 8;
+  int32 scalar_engine_version = 9;
+  string index_type = 10;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -560,6 +578,21 @@ message Statistics {
   // task_index for the minimum-vector-count check of element-nullable
   // VectorArray indexes.
   map<int64, int64> valid_element_counts = 16;
+  FieldLogicalSizes field_logical_sizes = 17;
+}
+
+// Logical sizes of persisted insert values, before compression or indexing.
+message FieldLogicalSizes {
+  uint32 version = 1; // Version of the accounting rules.
+  int64 row_count = 2; // Every entry covers all of these rows.
+  // Keyed by schema field ID. A missing field is unknown. An empty value is a known zero.
+  map<int64, FieldLogicalSize> fields = 3;
+}
+
+message FieldLogicalSize {
+  uint64 payload_bytes = 1;
+  // Count nullable positions. Round to bytes only after summing the selected entries.
+  uint64 validity_bits = 2;
 }
 
 message SegmentStartPosition {
@@ -849,6 +882,8 @@ message CompactionSegmentBinlogs {
   // expiry during compaction: isEntityExpired uses max(row_ts, commit_ts)
   // so stale row timestamps never cause rows to be silently dropped.
   uint64 commit_timestamp = 14;
+  // A full input-column total can follow the rows into one output on TEXT reuse.
+  FieldLogicalSizes field_logical_sizes = 15;
 }
 
 message CompactionPlan {
@@ -970,6 +1005,8 @@ message CompactionSegment {
   // (ManifestMutationCommitUpdates), rebasing the column-group / stats adds
   // onto the segment's current manifest instead of a datanode-pinned base.
   SegmentManifestDelta manifest_delta = 17;
+  // All fields materialized in place. Clear the old size for each ID without a new entry.
+  repeated int64 field_logical_size_update_ids = 18;
 }
 
 message CompactionPlanResult {
@@ -1287,6 +1324,7 @@ message CopySegmentSource {
 
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
+  FieldLogicalSizes field_logical_sizes = 17;
 }
 
 message CopySegmentTarget {
@@ -1357,6 +1395,7 @@ message VectorScalarIndexInfo {
   string index_name = 9;                   // Index name for multi-index-per-field lookup
   index.IndexStorePathVersion index_store_path_version = 10;
   string index_type = 11;
+  optional uint64 mem_size = 12;  // Estimated memory size, independent of index_size.
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation
@@ -1388,6 +1427,7 @@ message CopySegmentResult {
   // Absence identifies an older worker and requires DataCoord read-back.
   optional bool manifest_index_rewritten = 11;
   repeated int64 manifest_index_build_ids = 12;
+  FieldLogicalSizes field_logical_sizes = 13;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1796,6 +1836,16 @@ message QuerySlotResponse {
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
   bool copy_segment_shared_indexes = 4;
+  // Two-dimensional report. A worker that predates it leaves total_* at zero,
+  // and a coordinator that sees total_memory == 0 places on available_slots.
+  // available_cpu = total_cpu - sum(cpu of accepted, unfinished tasks).
+  // available_memory = max(total_memory - sum(memory of accepted, unfinished tasks), 0).
+  int64 total_cpu = 6;
+  int64 available_cpu = 7;
+  int64 total_memory = 8;   // bytes
+  int64 available_memory = 9; // bytes
+  // No accepted background work.
+  bool idle = 10;
 }
 
 enum CompactionTaskState {
@@ -2099,6 +2149,7 @@ message SegmentDescription {
   // Index presence marker copied from SegmentInfo. Presence lets restore skip
   // manifest index reads when false; old snapshots leave it absent.
   optional bool manifest_has_index = 19;
+  FieldLogicalSizes field_logical_sizes = 20;
 }
 
 message CollectionDescription {

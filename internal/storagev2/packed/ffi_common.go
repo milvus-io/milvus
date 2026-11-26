@@ -310,6 +310,10 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, "fs.talon.coordinator")
 		values = append(values, coordinator)
 	}
+	if namespace := storageConfig.GetTalonNamespace(); namespace != "" {
+		keys = append(keys, "fs.talon.namespace")
+		values = append(values, namespace)
+	}
 
 	if extraKVs[PropertyWriterEncEnable] == "true" {
 		extraKVs = maps.Clone(extraKVs)

@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -369,15 +368,13 @@ func (c *Core) startTimeTickLoop() {
 	streamingNotifier := snmanager.NewStreamingReadyNotifier()
 	defer streamingNotifier.Release()
 
-	if streamingutil.IsStreamingServiceEnabled() {
-		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(c.ctx, streamingNotifier); err != nil {
-			mlog.Info(context.TODO(), "register streaming enabled listener failed", mlog.Err(err))
-			return
-		}
-		if streamingNotifier.IsReady() {
-			mlog.Info(context.TODO(), "streaming service has been enabled, ddl timetick from rootcoord should not start")
-			return
-		}
+	if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(c.ctx, streamingNotifier); err != nil {
+		mlog.Info(context.TODO(), "register streaming enabled listener failed", mlog.Err(err))
+		return
+	}
+	if streamingNotifier.IsReady() {
+		mlog.Info(context.TODO(), "streaming service has been enabled, ddl timetick from rootcoord should not start")
+		return
 	}
 
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
@@ -1312,7 +1309,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-	resp.Properties = collInfo.Properties
+	// Reuse the filtered slice from collectionSchemaPB so legacy create-only
+	// directives persisted on v3.0.0–v3.0.6 are never returned by DescribeCollection.
+	resp.Properties = resp.Schema.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
@@ -3532,7 +3531,7 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 }
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
-	return c.quotaCenter.getQuotaMetrics(), nil
+	return c.quotaCenter.getQuotaMetrics(ctx), nil
 }
 
 // GetFeatureUsage computes the collection-derived groups of the feature usage

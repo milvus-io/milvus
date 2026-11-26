@@ -95,7 +95,7 @@ func TestReshardRejectsInvalidSourceEncryptionBeforeIO(t *testing.T) {
 	}{
 		{"invalid base64", "!", "failed to decode EZK"},
 		{"invalid JSON", base64.StdEncoding.EncodeToString([]byte("not JSON")), "failed to unmarshal EZK"},
-		{"missing dispatched source", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":31}`)), "missing a keyset"},
+		{"missing dispatched source", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":31}`)), "missing a source keyset"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fix := newReshardPipelineFixture()

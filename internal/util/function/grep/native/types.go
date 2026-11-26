@@ -22,7 +22,6 @@ import (
 	"context"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus/internal/util/function/grep"
 )
@@ -33,6 +32,7 @@ type CompileLimits struct {
 
 type ExecutionLimits struct {
 	BatchSize      int64 // Candidate rows per read batch; independent of the matching limit.
+	MaxScanRows    int64 // Soft text-row threshold per segment, checked between batches; zero disables it.
 	MaxResultBytes uint64
 }
 
@@ -47,19 +47,25 @@ type ScanRequest struct {
 }
 
 // Segment is borrowed and kept pinned by the query task through ScanGrep.
+// Input is a borrowed RecordBatch with one non-null $seg_offset:Int64 column.
+// Columns are resolved by name; additional companion columns remain available
+// for native consumers. No input buffers are retained after the call returns.
 // The native adapter compiles one plan per call, creates a local session, reads
-// bounded text batches, skips NULL and stops at Limit complete matching records.
+// bounded text batches and skips NULL. Limit counts matching documents, or
+// selected elements when $query_element_indices is present; boundary documents
+// remain complete. This is a segment-local cap, before cross-segment deduplication.
 // Plan/session/cancel state and counters belong to that native call and are
 // released on success, error or cancellation before it returns. They are never
 // shared between segments or retained by the Go operator. Returned details own
-// their buffers independently of native temporary results. No partial success.
+// their buffers independently of native temporary results. Errors never return
+// partial success; the soft scan threshold may stop before input exhaustion.
 // Successful results are non-nil, contain at most Limit rows, and have strictly
 // increasing in-range Positions aligned with non-null, non-empty Details rows
 // of GrepDetailsType. Implementations validate this at the native boundary.
 // The segcore adapter delegates to the independent C++ Grep runner; Segment
 // itself has no Grep-specific method.
 type Segment interface {
-	ScanGrep(context.Context, *array.Int64, ScanRequest) (*ScanResult, error)
+	ScanGrep(context.Context, arrow.Record, ScanRequest) (*ScanResult, error)
 }
 
 // ScanResult owns Details even on failure. Positions are increasing immediate-

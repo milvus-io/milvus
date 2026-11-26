@@ -59,6 +59,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	if cColumnSplits == nil {
 		return nil, merr.WrapErrServiceInternalMsg("failed to allocate column splits")
 	}
+	defer C.FreeCColumnSplits(cColumnSplits)
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
@@ -71,7 +72,6 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		ok := C.AddCColumnSplit(cColumnSplits, (*C.int)(cGroup), C.int(len(group.Columns)))
 		C.free(cGroup)
 		if !bool(ok) {
-			C.FreeCColumnSplits(cColumnSplits)
 			return nil, merr.WrapErrServiceInternalMsg("failed to record column split group")
 		}
 	}
@@ -117,6 +117,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 			talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
 			talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
 			talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
+			talon_namespace:                 C.CString(storageConfig.GetTalonNamespace()),
 			talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
 			talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
 			talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
@@ -135,6 +136,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 		defer C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
+		defer C.free(unsafe.Pointer(cStorageConfig.talon_namespace))
 		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, cStorageConfig, &cPackedWriter, pluginContextPtr)
 	} else {
 		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnSplits, &cPackedWriter, pluginContextPtr)

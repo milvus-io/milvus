@@ -35,7 +35,7 @@ GetEncParams(CPluginContext* context, char** out_key, char** out_meta) {
         *out_key = nullptr;
         *out_meta = nullptr;
         auto [raw_key, metadata] =
-            milvus::storage::GetPackedWriterKeys(context);
+            milvus::storage::GetWriterEncryptionParams(context);
         // Both cgo and Loon properties use NUL-terminated strings. Encode the
         // binary DEK before crossing either boundary. The Parquet writer
         // decodes it when constructing its encryption configuration.

@@ -100,7 +100,7 @@ BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 USE_TSAN="${USE_TSAN:-OFF}"
 USE_DYNAMIC_SIMD="ON"
-USE_SVS="OFF"
+USE_SVS="AUTO"
 WITH_CRT="OFF"
 TANTIVY_FEATURES=""
 : "${TANTIVY_ANALYZER_REMOTE_TLS:=ON}"
@@ -109,7 +109,6 @@ ENABLE_AZURE_FS="ON"
 if [[ "$(uname)" == "Darwin" ]]; then
   ENABLE_AZURE_FS="OFF"
 fi
-: "${ENABLE_GCP_NATIVE:="OFF"}"
 # Build acceleration options (override via env vars)
 : "${USE_PCH:="ON"}"
 : "${USE_UNITY_BUILD:="OFF"}"
@@ -188,7 +187,7 @@ parameter:
 -a: build milvus with AddressSanitizer(default: false)
 -T: build milvus with ThreadSanitizer (ON/OFF, default: OFF; Linux CPU only)
 -Z: build milvus without azure-sdk-for-cpp, so cannot use azure blob
--S: build milvus with SVS/Intel Scalable Vector Search(default: OFF)
+-S: build milvus with SVS (AUTO/ON/OFF, default: AUTO enables SVS on Linux x86-64 without TSan)
 -R: build milvus-storage with AWS S3 CRT read path(default: OFF)
 -f: build milvus with tantivy features(default: '')
 -h: help
@@ -214,7 +213,7 @@ case "${USE_TSAN}" in
   *) echo "ERROR: -T must be ON or OFF" >&2; exit 1 ;;
 esac
 if [[ "${USE_TSAN}" == "ON" ]]; then
-  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" == "ON" ]]; then
+  if [[ "${USE_ASAN}" == "ON" || "${WITH_GPU}" =~ ^(ON|on|TRUE|True|true|1)$ ]]; then
     echo "ERROR: ThreadSanitizer cannot be combined with AddressSanitizer or GPU builds" >&2
     exit 1
   fi
@@ -314,11 +313,10 @@ ${CMAKE_EXTRA_ARGS} \
 -DUSE_TSAN=${USE_TSAN} \
 -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
 -DCPU_ARCH=${CPU_ARCH} \
--DWITH_SVS=${USE_SVS} \
+-DWITH_SVS:STRING=${USE_SVS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DTANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS} \
--DENABLE_GCP_NATIVE=${ENABLE_GCP_NATIVE} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
 -DWITH_CRT=${WITH_CRT} \
 -DMILVUS_USE_PCH=${USE_PCH} \

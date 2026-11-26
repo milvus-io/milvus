@@ -53,7 +53,7 @@ type FailpointSuite struct {
 func (s *FailpointSuite) SetupSuite() {
 	s.controlDir = s.T().TempDir()
 	var points []string
-	for _, point := range []string{walpoint.BeforeIdempotencyAppend, walpoint.AfterIdempotencyAppend, walpoint.AfterBackendAppend} {
+	for _, point := range []string{walpoint.BeforeIdempotencyAppend, walpoint.AfterIdempotencyAppend} {
 		points = append(points, point+`=return("`+s.configPath(point)+`")`)
 	}
 	s.WithClusterOptions(cluster.WithProcessEnv(func(role string, _ int64) map[string]string {
@@ -272,41 +272,15 @@ func (s *FailpointSuite) verify(ctx context.Context, req *milvuspb.InsertRequest
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 }
 
-func (s *FailpointSuite) TestBackendAcknowledgementLost() {
-	for _, tc := range writeCases {
-		s.Run(tc.name, func() {
-			ctx, cancel := context.WithTimeout(s.T().Context(), 5*time.Minute)
-			defer cancel()
-			req, _ := s.create(ctx, tc, 1)
-			key := funcutil.GenRandomStr()
-			dir := s.arm(walpoint.AfterBackendAppend, key, "", tc.messageType, "error")
-			observed := s.arm(walpoint.AfterIdempotencyAppend, key, "", tc.messageType, "observe")
-			first, err := s.insert(ctx, req, key)
-			s.Require().NoError(merr.CheckRPCCall(first, err))
-			lost := s.receipts(dir, 1)[0]
-			committed := s.receipts(observed, 1)
-			s.Require().Equal(lost.TimeTick, committed[0].TimeTick, "backend retry must preserve the logical append")
-			s.Require().NotEqual(lost.MessageID, committed[0].MessageID, "the backend must actually be retried")
-			ids := s.retry(ctx, req, key)
-			s.Require().Equal(first.GetIDs().GetIntId().GetData(), ids)
-			s.assertOriginalIDs(ids, committed)
-			// Also exercise WAL reopening and recovered idempotency state.
-			s.restartStreamingNode()
-			s.Require().Equal(ids, s.retry(ctx, req, key))
-			s.verify(ctx, req, ids, tc.dim)
-		})
-	}
-}
-
-func (s *FailpointSuite) TestUnrelatedRequestDoesNotConsumeFault() {
+func (s *FailpointSuite) TestUnrelatedRequestDoesNotConsumeObservation() {
 	ctx, cancel := context.WithTimeout(s.T().Context(), 3*time.Minute)
 	defer cancel()
 	tc := writeCases[0]
 	req, _ := s.create(ctx, tc, 1)
 	key := funcutil.GenRandomStr()
-	dir := s.arm(walpoint.AfterBackendAppend, key, "", tc.messageType, "error")
+	dir := s.arm(walpoint.BeforeIdempotencyAppend, key, "", tc.messageType, "observe")
 
-	// An unrelated write must not consume the selected request's one-shot hit.
+	// An unrelated write must not consume the selected request's one-shot observation.
 	unrelated, _ := s.create(ctx, tc, 1)
 	unrelatedIDs := s.retry(ctx, unrelated, funcutil.GenRandomStr())
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))

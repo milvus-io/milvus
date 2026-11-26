@@ -42,9 +42,10 @@ class RemoteChunkManagerSingleton {
     }
 
     void
-    Init(const StorageConfig& storage_config) {
+    Init(const std::shared_ptr<const milvus_storage::api::Properties>&
+             properties) {
         if (rcm_ == nullptr) {
-            rcm_ = CreateChunkManager(storage_config);
+            rcm_ = CreateChunkManager(properties);
         }
     }
 

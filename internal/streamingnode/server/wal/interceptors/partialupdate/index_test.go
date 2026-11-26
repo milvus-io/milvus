@@ -137,7 +137,7 @@ func TestPKVersionIndexAcceptsIdleSnapshot(t *testing.T) {
 	}
 }
 
-func TestPKVersionIndexRejectsConflictAfterEviction(t *testing.T) {
+func TestPKVersionIndexReclaimsExpiredStorage(t *testing.T) {
 	for _, pk := range []any{int64(1), "pk-1"} {
 		t.Run(fmt.Sprint(pk), func(t *testing.T) {
 			idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(2))
@@ -146,11 +146,21 @@ func TestPKVersionIndexRejectsConflictAfterEviction(t *testing.T) {
 			commitTS := tsoutil.AddPhysicalDurationOnTs(readTS, time.Hour)
 			idx.UpdateAll("v1", []any{pk}, writeTS)
 			idx.Advance(commitTS)
+			channel := idx.channel("v1")
+			require.Nil(t, channel.int64Versions)
+			require.Nil(t, channel.stringVersions)
+			require.Nil(t, channel.expirations)
 			require.Zero(t, idx.budget.used.Load())
 			requirePartialUpdateRetryable(t, idx.Verify("v1", []any{pk}, readTS, commitTS))
 			require.NoError(t, idx.Verify("v1", []any{pk}, writeTS, commitTS))
 			// TimeTick cleanup on this WAL must not invalidate other channels.
 			require.NoError(t, idx.Verify("v2", []any{pk}, readTS, commitTS))
+
+			// A later write allocates storage again and is visible to CAS.
+			idx.UpdateAll("v1", []any{pk}, commitTS)
+			require.Len(t, channel.expirations, 1)
+			requirePartialUpdateRetryable(t, idx.Verify("v1", []any{pk}, writeTS, commitTS))
+			require.NoError(t, idx.Verify("v1", []any{pk}, commitTS, commitTS))
 		})
 	}
 }

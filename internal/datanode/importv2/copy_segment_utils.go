@@ -577,6 +577,12 @@ func CopySegmentAndIndexFiles(
 		result.ManifestPath = targetManifestPath
 		result.ManifestIndexRewritten = proto.Bool(true)
 		result.ManifestIndexBuildIds = manifestIndexBuildIDs
+		// This path copied the complete immutable insert files without row
+		// filtering or column projection. Only index entries were republished.
+		if sizes := source.GetFieldLogicalSizes(); !source.GetIsExternalCollection() && source.GetStorageVersion() == storage.StorageV3 &&
+			storage.FieldLogicalSizesCover(sizes, source.GetNumOfRows()) && result.GetImportedRows() == source.GetNumOfRows() {
+			result.FieldLogicalSizes = proto.Clone(sizes).(*datapb.FieldLogicalSizes)
+		}
 	} else if source.GetStorageVersion() == storage.StorageV2 && source.GetManifestPath() != "" {
 		targetManifestPath, ok := mappings[source.GetManifestPath()]
 		if !ok {
@@ -757,7 +763,7 @@ func buildTargetManifestIndexes(
 			IndexVersion:              info.GetVersion(),
 			NumRows:                   numRows,
 			SerializedSize:            info.GetIndexSize(),
-			MemSize:                   info.GetIndexSize(),
+			MemSize:                   int64(metautil.CopiedIndexMemSize(info)),
 			CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 			IndexStorePathVersion:     info.GetIndexStorePathVersion(),
@@ -1150,6 +1156,10 @@ func buildIndexInfoFromSource(
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
+		}
+		// Older snapshots have no separately recorded estimate.
+		if memSize := srcIndex.GetMemSize(); memSize > 0 {
+			indexInfos[buildID].MemSize = proto.Uint64(memSize)
 		}
 		if target.IndexStorePathVersion != nil {
 			indexInfos[buildID].IndexStorePathVersion = target.GetIndexStorePathVersion()

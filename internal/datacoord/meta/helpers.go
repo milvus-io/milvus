@@ -168,6 +168,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			TalonEnabledStages:          Params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonNamespace:              Params.CommonCfg.TalonNamespace(),
 			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 			TalonMaxIdlePerAddr:         Params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 			TalonEnableForExternalTable: Params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -196,6 +197,7 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			TalonEnabledStages:          Params.CommonCfg.StorageTalonEnabledStages.GetAsUint32(),
 			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
 			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonNamespace:              Params.CommonCfg.TalonNamespace(),
 			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 			TalonMaxIdlePerAddr:         Params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 			TalonEnableForExternalTable: Params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
@@ -273,48 +275,60 @@ type ChanPartSegments struct {
 	Segments     []*SegmentInfo
 }
 
-func GetReadPluginContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
-	importEzk, err := importutilv2.GetEZK(options)
+func WrapImportPluginContext(collectionID int64, properties, options []*commonpb.KeyValuePair, msg proto.Message) error {
+	artifact, err := importutilv2.GetEZK(options)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return hookutil.ResolveImportEZ(importEzk)
+	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
+	if err != nil {
+		return err
+	}
+	if len(pluginContext) == 0 {
+		return nil
+	}
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	case *datapb.PreImportRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	case *datapb.ReshardTaskRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	case *datapb.ImportTaskV3Request:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	}
+	return nil
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetOptions(), msg)
+	case *datapb.PreImportRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetOptions(), msg)
+	case *datapb.ReshardTaskRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetPlan().GetOptions(), msg)
+	}
+
 	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
 	if err != nil {
 		return err
 	}
-	if pluginContext == nil {
+	if len(pluginContext) == 0 {
 		return nil
 	}
 
 	switch msg := msg.(type) {
 	case *datapb.CompactionPlan:
-		plan := msg
-		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateJobRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.AnalyzeRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ReshardTaskRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *datapb.ImportTaskV3Request:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	default:
 		return nil
 	}

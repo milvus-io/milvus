@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -68,13 +69,15 @@ func (s *stubAllocator) AllocN(n int64) (typeutil.UniqueID, typeutil.UniqueID, e
 // stubCluster is a simple stub implementation of Cluster for testing
 type stubCluster struct {
 	session.Cluster
-	refreshReq    *datapb.RefreshExternalCollectionTaskRequest
-	droppedNodeID int64
-	droppedTaskID int64
+	refreshReq      *datapb.RefreshExternalCollectionTaskRequest
+	refreshResource taskcommon.Resource
+	droppedNodeID   int64
+	droppedTaskID   int64
 }
 
-func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
+func (s *stubCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource) error {
 	s.refreshReq = req
+	s.refreshResource = resource
 	return nil
 }
 
@@ -467,7 +470,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, nil, alloc) // mt is nil
 
 		cluster := &stubCluster{}
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
@@ -505,7 +508,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		defer mockSave.UnPatch()
 
 		cluster := &stubCluster{}
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		// Task state should remain Init since version update failed
 	})
@@ -540,7 +543,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		defer mockAllocN.UnPatch()
 
 		cluster := &stubCluster{}
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
@@ -574,7 +577,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		task := newRefreshExternalCollectionTask(protoTask, refreshMeta, mt, alloc)
 
 		cluster := &stubCluster{}
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		// Task should be marked as failed since collection is not in meta
 		metaTask := refreshMeta.GetTask(1001)
@@ -618,7 +621,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		mockCreate := mockey.Mock((*stubCluster).CreateRefreshExternalCollectionTask).Return(errors.New("create task failed")).Build()
 		defer mockCreate.UnPatch()
 
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		// Task should be marked as failed
 		metaTask := refreshMeta.GetTask(1001)
@@ -636,7 +639,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			externalRefreshOwnershipPlanVersion,
 			[]int64{1},
 		)
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, metaTask.GetState())
@@ -644,11 +647,13 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 		assert.Equal(t, paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), cluster.refreshReq.GetClusterID())
 		assert.Equal(t, int64(10), cluster.refreshReq.GetPartitionID())
 		assert.Equal(t, int64(12345), cluster.refreshReq.GetTargetRowsPerSegment())
+		// The request carries the task's price so the worker books it.
+		assert.Equal(t, taskresource.ExternalRefresh(), cluster.refreshResource)
 	})
 
 	t.Run("legacy_task", func(t *testing.T) {
 		task, refreshMeta, cluster := newOwnershipTask(t, 0, nil)
-		task.CreateTaskOnWorker(1, cluster)
+		task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 		metaTask := refreshMeta.GetTask(1001)
 		assert.Equal(t, indexpb.JobState_JobStateFailed, metaTask.GetState())
@@ -692,7 +697,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker(t *testing.T) {
 			if test.prepare != nil {
 				test.prepare(task)
 			}
-			task.CreateTaskOnWorker(1, cluster)
+			task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 			metaTask := refreshMeta.GetTask(1001)
 			if test.wantError != "" {
@@ -1374,6 +1379,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 			}},
 		}},
 	}
+	oldSeg.Stats = &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{101: {PayloadBytes: 52}}}}
+	oldSeg.FieldLogicalSizesManifest = oldSeg.ManifestPath
 	mt.Segments.SetSegment(segmentID, meta.NewSegmentInfo(oldSeg))
 
 	patched := proto.Clone(oldSeg).(*datapb.SegmentInfo)
@@ -1410,6 +1417,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 	assert.True(t, got.GetIsSorted())
 	assert.Equal(t, `{"base_path":"old","ver":2}`, got.GetManifestPath())
 	assert.Equal(t, int32(4), got.GetSchemaVersion())
+	assert.Nil(t, got.GetStats().GetFieldLogicalSizes())
+	assert.Empty(t, got.GetFieldLogicalSizesManifest())
 	assert.ElementsMatch(t, []int64{100, 101, 102, 103}, got.GetBinlogs()[0].GetChildFields())
 }
 
@@ -1427,6 +1436,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 	}
 	incoming := newTestExternalRefreshSegment(segmentID, collectionID, 100)
 	incoming.ManifestPath = packed.MarshalManifestPath(manifestBasePath, 1)
+	incoming.FieldLogicalSizesManifest = incoming.ManifestPath
+	incoming.Stats = &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{101: {}}}}
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
@@ -1437,6 +1448,8 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		[]*datapb.SegmentInfo{incoming},
 	)
 	assert.NoError(t, err)
+	assert.Nil(t, mt.Segments.GetSegment(segmentID).GetStats().GetFieldLogicalSizes())
+	assert.Empty(t, mt.Segments.GetSegment(segmentID).GetFieldLogicalSizesManifest())
 
 	// Match the V3 catalog representation after a DataCoord restart: the
 	// manifest and aggregate stats survive, while fake binlogs do not. Also
@@ -2252,7 +2265,7 @@ func TestRefreshExternalCollectionTask_CreateTaskOnWorker_TaskNotFoundAfterVersi
 	mockGetTask := mockey.Mock((*ExternalCollectionRefreshMeta).GetTask).Return(nil).Build()
 	defer mockGetTask.UnPatch()
 
-	task.CreateTaskOnWorker(1, cluster)
+	task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
 
 	// Task should be marked as failed
 	// Note: since GetTask is mocked to return nil, we check the in-memory state

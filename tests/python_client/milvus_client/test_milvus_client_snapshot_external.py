@@ -489,19 +489,17 @@ class MilvusTableExternalTestBase(TestMilvusClientV2Base):
                 )
         return hits
 
-    def _assert_schema_alignment(self, source_info, target_info, mapping, target_owned=()):
+    def _assert_schema_mapping(self, source_info, target_info, mapping):
         source_fields = {field["name"]: field for field in source_info["fields"]}
         target_fields = {field["name"]: field for field in target_info["fields"]}
-        source_ids = {int(field["field_id"]) for field in source_info["fields"]}
+        target_ids = {int(field["field_id"]) for field in target_info["fields"]}
+        assert len(target_ids) == len(target_fields)
 
         for target_name, source_name in mapping.items():
             target_field = target_fields[target_name]
             source_field = source_fields[source_name]
             assert target_field.get("external_field") == source_name
-            assert int(target_field["field_id"]) == int(source_field["field_id"])
-
-        for target_name in target_owned:
-            assert int(target_fields[target_name]["field_id"]) not in source_ids
+            assert target_field["type"] == source_field["type"]
 
     def _core_signature(self, client, collection_name, sample_ids):
         rows = self._query_source_pks(
@@ -613,7 +611,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
 
         target_info = self.describe_collection(client, target)[0]
         assert target_info["external_source"] == snapshot.external_source
-        self._assert_schema_alignment(source_info, target_info, CORE_FIELD_MAPPING)
+        self._assert_schema_mapping(source_info, target_info, CORE_FIELD_MAPPING)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_table_snapshot_virtual_pk_user_reads(self, request):
@@ -668,13 +666,11 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         fields = {field["name"]: field for field in target_info["fields"]}
         assert fields["__virtual_pk__"]["is_primary"] is True
         assert fields["__virtual_pk__"]["auto_id"] is True
+        assert fields["__virtual_pk__"].get("external_field") in (None, "")
         assert fields["source_pk"].get("is_primary", False) is False
-        self._assert_schema_alignment(
-            source_info,
-            target_info,
-            CORE_FIELD_MAPPING,
-            target_owned=("__virtual_pk__",),
-        )
+        source_pk_field = next(field for field in source_info["fields"] if field["name"] == "pk")
+        assert int(fields["source_pk"]["field_id"]) != int(source_pk_field["field_id"])
+        self._assert_schema_mapping(source_info, target_info, CORE_FIELD_MAPPING)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_table_snapshot_includes_unflushed_dml(self, request):
@@ -983,7 +979,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         assert _hit_id(hits[0]) == survivor_key
         assert all(isinstance(_hit_id(hit), str) for hit in hits)
         assert all(_row_value(hit, "group_alias") == 3 for hit in hits)
-        self._assert_schema_alignment(
+        self._assert_schema_mapping(
             source_info,
             self.describe_collection(client, target)[0],
             CORE_FIELD_MAPPING,
@@ -1491,7 +1487,7 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
             assert _row_value(hit, "source_pk") == row_id
             assert float(_row_value(hit, "distance")) == pytest.approx(0.0, abs=tolerance)
 
-        self._assert_schema_alignment(
+        self._assert_schema_mapping(
             source_info,
             self.describe_collection(client, target)[0],
             mixed_mapping,
@@ -1500,9 +1496,9 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_table_target_owned_bm25_output(self, request):
         """
-        target: generate a target-owned BM25 field from externally mapped TEXT
-        method: snapshot TEXT rows, add an unmapped sparse function output, refresh, index, and search
-        expected: TEXT_MATCH and BM25 work while the sparse field keeps a target-owned field ID
+        target: reject target-owned BM25 function output fields on milvus-table external collections
+        method: snapshot TEXT rows, declare a target BM25 sparse output field on milvus-table
+        expected: create_collection fails with an explicit unsupported function output error
         """
         client = self._client()
         cfg = self._minio_cfg(request)
@@ -1532,7 +1528,6 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
         ]
         self.insert(client, source, rows)
         self._flush_rate_limited(client, source)
-        source_info = self.describe_collection(client, source)[0]
         snapshot = self._create_snapshot_ref(client, source, cfg, suffix="bm25")
 
         target_schema = self.create_schema(
@@ -1575,73 +1570,10 @@ class TestMilvusClientMilvusTableExternal(MilvusTableExternalTestBase):
                 params={},
             )
         )
-        self.create_collection(client, collection_name=target, schema=target_schema)
-        job_id = self.refresh_external_collection(client, target)[0]
-        refresh_info = self._wait_refresh_terminal(client, job_id)
-        if _value(refresh_info, "state", "") == "RefreshFailed":
-            reason = _value(refresh_info, "reason", "") or ""
-            lowered = reason.lower()
-            # #52303: refresh cannot materialize BM25 input from StorageV3 TEXT
-            # LOB references (DataNode fails appending the TEXT field with a
-            # "Wrong row type" error). Only xfail when the failure matches this
-            # known bug; any other failure (schema/API regression, or an
-            # assertion below) must remain a real failure.
-            if "append field text_alias" in lowered and "wrong row type" in lowered and "expected=string" in lowered:
-                pytest.xfail(f"known bug #52303: {reason}")
-            raise AssertionError(f"refresh {job_id} failed for an unexpected reason: {reason}")
-        assert _value(refresh_info, "state", "") == "RefreshCompleted", (
-            f"refresh {job_id} failed: {_value(refresh_info, 'reason', '')}"
-        )
-        self._index_and_load(
-            client,
-            target,
-            indexes=[
-                ("vector", "FLAT", "L2", {}),
-                ("bm25_sparse", "SPARSE_INVERTED_INDEX", "BM25", {}),
-            ],
-        )
-
-        # This intentionally covers current product behavior beyond the
-        # original design document's TEXT_MATCH non-goal.
-        topic = "topic7"
-        text_rows = self.query(
-            client,
-            target,
-            filter=f'TEXT_MATCH(text_alias, "{topic}")',
-            output_fields=["source_pk", "text_alias"],
-            limit=30,
-        )[0]
-        expected_topic_rows = len([row_id for row_id in range(SMALL_ROWS) if row_id % 17 == 7])
-        assert len(text_rows) == expected_topic_rows
-        assert all(topic in row["text_alias"].split() for row in text_rows)
-
-        search_results = self.search(
-            client,
-            target,
-            data=[topic],
-            anns_field="bm25_sparse",
-            limit=10,
-            output_fields=["source_pk", "text_alias"],
-            search_params={"metric_type": "BM25", "params": {}},
-        )[0]
-        assert len(search_results) == 1
-        hits = search_results[0]
-        _assert_search_hits(hits, 10, "BM25")
-        for hit in hits:
-            assert _row_value(hit, "source_pk") is not None
-            assert topic in _row_value(hit, "text_alias").split()
-
-        target_info = self.describe_collection(client, target)[0]
-        fields = {field["name"]: field for field in target_info["fields"]}
-        bm25_field = fields["bm25_sparse"]
-        assert bm25_field.get("external_field") in (None, "")
-        assert bm25_field.get("is_function_output") is True
-        self._assert_schema_alignment(
-            source_info,
-            target_info,
-            {"source_pk": "pk", "vector": "embedding", "text_alias": "text_field"},
-            target_owned=("bm25_sparse",),
-        )
-        functions = {function["name"]: function for function in target_info.get("functions", [])}
-        assert functions["target_bm25"]["input_field_names"] == ["text_alias"]
-        assert functions["target_bm25"]["output_field_names"] == ["bm25_sparse"]
+        if target not in self.tear_down_collection_names:
+            self.tear_down_collection_names.append(target)
+        with pytest.raises(MilvusException) as exc_info:
+            client.create_collection(collection_name=target, schema=target_schema)
+        assert exc_info.value.code == 1100
+        assert "does not support function output fields" in str(exc_info.value)
+        self._assert_collection_absent(client, target)

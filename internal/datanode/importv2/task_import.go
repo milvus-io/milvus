@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -51,18 +52,21 @@ type ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	resource     taskcommon.Resource
 
 	allocator  allocator.Interface
 	manager    TaskManager
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
+	picker     *SegmentPicker
 }
 
 func NewImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 	cipher ...hookutil.ImportCipherContext,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,10 +91,15 @@ func NewImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
-		allocator:    alloc,
-		manager:      manager,
-		syncMgr:      syncMgr,
-		cm:           cm,
+		// Every reader of an import reserves from the import allocator; the
+		// hashed batches waiting for sync come on top, covered by the same
+		// factor DataCoord's estimate applies.
+		resource:  resource,
+		allocator: alloc,
+		manager:   manager,
+		syncMgr:   syncMgr,
+		cm:        cm,
+		picker:    NewSegmentPicker(),
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -114,6 +123,10 @@ func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+func (t *ImportTask) GetResource() taskcommon.Resource {
+	return t.resource
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
@@ -164,11 +177,13 @@ func (t *ImportTask) Clone() Task {
 		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		resource:     t.resource,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		picker:       t.picker,
 	}
 }
 
@@ -353,7 +368,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				continue
 			}
 			partitionID := t.GetPartitionIDs()[partitionIdx]
-			segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+			segmentID, err := t.picker.PickSegment(t.req.GetRequestSegments(), channel, partitionID, int64(data.GetMemorySize()))
 			if err != nil {
 				return nil, nil, err
 			}

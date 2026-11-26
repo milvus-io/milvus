@@ -207,7 +207,15 @@ class TestMilvusClientPaimonRefresh(_ClientBase):
     @pytest.mark.parametrize(
         "fixture,mode,index_type,metric,params,search_params",
         [
-            ("dv", "direct-file", "HNSW", "COSINE", {"M": 16, "efConstruction": 200}, {"ef": 200}),
+            (
+                "dv",
+                "direct-file",
+                "HNSW",
+                "COSINE",
+                # Returned distances are checked against exact raw vectors in PaimonOracle.assert_search.
+                {"M": 16, "efConstruction": 200, "refine_quant_type": "NONE"},
+                {"ef": 200},
+            ),
             ("mor", "data-split", "IVF_FLAT", "L2", {"nlist": 32}, {"nprobe": 32}),
         ],
     )
@@ -1025,7 +1033,7 @@ class TestMilvusClientPaimonSearchFunctions(_ClientBase):
         dim = len(vectors[0])
         assert all(len(vector) == dim and np.isfinite(vector).all() for vector in vectors)
         record_property("paimon_tei_model", json.dumps(info.json(), sort_keys=True))
-        oracle = PaimonOracle([{**row, "dense": vector} for row, vector in zip(rows, vectors, strict=True)])
+        tei_by_id = {row["id"]: vector for row, vector in zip(rows, vectors, strict=True)}
         schema = self.create_schema(
             case.client,
             external_source=source.source,
@@ -1047,10 +1055,28 @@ class TestMilvusClientPaimonSearchFunctions(_ClientBase):
         name = case.create(source, schema=schema)
         case.refresh(name)
         case.index_load(name, field="dense")
+        fields = ("id", "doc", "dense")
+        stored_rows = case.rows(name, fields)
+        source.oracle().assert_rows(stored_rows, ("id", "doc"))
+        for row in stored_rows:
+            actual = np.asarray(row["dense"], dtype=np.float64)
+            expected = np.asarray(tei_by_id[row["id"]], dtype=np.float64)
+            context = f"TEI embedding for business id={row['id']}"
+            assert actual.shape == (dim,), context
+            # Independent fp16 TEI calls can differ by several 1e-4 per component.
+            np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-3, equal_nan=False, err_msg=context)
+            norm_product = np.linalg.norm(actual) * np.linalg.norm(expected)
+            assert norm_product > 0, context
+            cosine = np.dot(actual, expected) / norm_product
+            assert cosine >= 0.9999, f"{context}: {cosine=}"
+
+        # FLAT L2 distances and search output refer to the exact vectors stored at load time.
+        oracle = PaimonOracle(stored_rows)
+        queries = [vectors[i] for i in (0, len(vectors) // 2, -1)]
         for reload in [False, True]:
             if reload:
                 case.reload(name)
-            case.verify(name, oracle, fields=("id", "doc", "dense"), field="dense")
+            case.verify(name, oracle, fields=fields, field="dense", queries=queries)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("mode", ["direct-file", "data-split"])

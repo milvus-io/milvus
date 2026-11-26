@@ -71,6 +71,12 @@ type SegmentInfo struct {
 	LastFlushTime   time.Time
 	IsCompacting    bool
 	LastWrittenTime time.Time
+	// minRowSize is the minimum number of bytes one row is charged by
+	// GetSegmentSize and GetResidualSegmentSize; 0 charges the stored bytes
+	// only. It is set with WithMinRowSize on the copies a compaction planner
+	// works on, to apply a per-segment row cap through the byte based packing,
+	// and is never set on a segment stored in meta.
+	minRowSize float64
 }
 
 // EnsureStats returns a non-nil Statistics view for read-only aggregate
@@ -480,6 +486,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
+		minRowSize:      s.minRowSize,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -494,6 +501,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
+		minRowSize:      s.minRowSize,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -542,6 +550,14 @@ func (s *SegmentsInfo) deleteCompactFrom(compactionFrom []int64) {
 
 // SegmentInfoOption is the option to set fields in segment info
 type SegmentInfoOption func(segment *SegmentInfo)
+
+// WithMinRowSize makes GetSegmentSize and GetResidualSegmentSize of the copy
+// charge at least minRowSize bytes per row. See SegmentInfo.minRowSize.
+func WithMinRowSize(minRowSize float64) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.minRowSize = minRowSize
+	}
+}
 
 // SetRowCount is the option to set row count for segment info
 func SetRowCount(rowCount int64) SegmentInfoOption {
@@ -594,10 +610,20 @@ func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 
 func (s *SegmentInfo) GetSegmentSize() int64 {
 	stats := s.EnsureStats()
-	return stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
+	size := stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
+	if s.minRowSize > 0 {
+		size = max(size, int64(float64(s.GetNumOfRows())*s.minRowSize))
+	}
+	return size
 }
 
-func (s *SegmentInfo) GetFieldBinlogSize(fieldID int64) int64 {
+// RecordedFieldSize is the bytes meta recorded for one field of the segment:
+// its own FieldBinlog (or the column group that contains it) in storage v1/v2,
+// and, for a StorageV3 manifest segment that persists no FieldBinlog arrays,
+// the matching column group in Stats.LoadResource (GroupId or member FieldIds).
+// It is 0 when meta holds nothing for the field, so the caller can decide what
+// to fall back to.
+func (s *SegmentInfo) RecordedFieldSize(fieldID int64) int64 {
 	var size int64
 	for _, binlogs := range s.GetBinlogs() {
 		if binlogs.GetFieldID() == fieldID {
@@ -615,12 +641,10 @@ func (s *SegmentInfo) GetFieldBinlogSize(fieldID int64) int64 {
 		}
 	}
 	// StorageV3 manifest segments persist no FieldBinlog arrays (the manifest
-	// is the source of truth), so the loop above sums nothing for them and
-	// the whole-segment fallback below would overcount the field by every
-	// non-indexed field's bytes (e.g. index task slots sized by segment size
-	// instead of vector size). Their per-column-group sizes ship inside
-	// Stats.LoadResource instead; mirror the array matching rules (GroupId or
-	// member FieldIds) so both storage versions size the same field the same.
+	// is the source of truth), so the loop above sums nothing for them. Their
+	// per-column-group sizes ship inside Stats.LoadResource instead; mirror the
+	// array matching rules (GroupId or member FieldIds) so both storage
+	// versions size the same field the same.
 	if size <= 0 {
 		for _, group := range s.EnsureStats().GetLoadResource().GetColumnGroups() {
 			if group.GetGroupId() == fieldID || slices.Contains(group.GetFieldIds(), fieldID) {
@@ -628,10 +652,16 @@ func (s *SegmentInfo) GetFieldBinlogSize(fieldID int64) int64 {
 			}
 		}
 	}
-	if size <= 0 {
-		return s.GetSegmentSize()
-	}
 	return size
+}
+
+// GetFieldBinlogSize is RecordedFieldSize with the whole segment as the
+// fallback for a field meta knows nothing about.
+func (s *SegmentInfo) GetFieldBinlogSize(fieldID int64) int64 {
+	if size := s.RecordedFieldSize(fieldID); size > 0 {
+		return size
+	}
+	return s.GetSegmentSize()
 }
 
 func (s *SegmentInfo) getDeltaCount() int64 {

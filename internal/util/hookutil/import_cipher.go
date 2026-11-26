@@ -18,7 +18,6 @@ package hookutil
 
 import (
 	"encoding/base64"
-	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -32,22 +31,16 @@ type ImportCipherContext struct {
 	Target *indexcgopb.StoragePluginContext
 }
 
-func registerTaskKey(context *indexcgopb.StoragePluginContext, readOnly bool) error {
+func registerImportContext(context *indexcgopb.StoragePluginContext, readOnly bool) error {
 	if context == nil {
 		return nil
 	}
-	cipher := GetCipher()
-	if cipher == nil {
-		return merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
-	}
-	config := map[string]string{
-		CipherConfigCreateEZ:  strconv.FormatInt(context.GetEncryptionZoneId(), 10),
-		CipherConfigUnsafeEZK: context.GetEncryptionKey(),
-	}
+	var err error
 	if readOnly {
-		config[CipherConfigReadOnly] = "true"
+		err = RegisterLocalImportEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
+	} else {
+		err = CreateLocalEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
 	}
-	err := cipher.Init(config)
 	if err != nil && !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
 		err = merr.Combine(err, merr.ErrImportSysFailed)
 	}
@@ -80,18 +73,18 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 		}
 	}
 
-	take := func(ezID, collID int64) (*indexcgopb.StoragePluginContext, error) {
+	take := func(role string, ezID, collID int64) (*indexcgopb.StoragePluginContext, error) {
 		if len(cipherEntries) == 0 {
-			return nil, merr.WrapErrImportSysFailedMsg("import task is missing a keyset for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task is missing a %s keyset for EZ %d", role, ezID)
 		}
 		zone, key, err := decodeEZContext(cipherEntries[0].GetValue())
 		cipherEntries = cipherEntries[1:]
 		if err != nil || ezID <= 0 || zone != ezID {
-			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid key context for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid %s key context for EZ %d", role, ezID)
 		}
 		decoded, err := base64.StdEncoding.DecodeString(key)
 		if err != nil || len(decoded) == 0 {
-			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid keyset for EZ %d", ezID)
+			return nil, merr.WrapErrImportSysFailedMsg("import task has an invalid %s keyset for EZ %d", role, ezID)
 		}
 		return &indexcgopb.StoragePluginContext{EncryptionZoneId: zone, CollectionId: collID, EncryptionKey: key}, nil
 	}
@@ -99,14 +92,17 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 	var result ImportCipherContext
 	if sourceEZ != 0 {
 		var err error
-		result.Source, err = take(sourceEZ, 0)
+		result.Source, err = take("source", sourceEZ, 0)
 		if err != nil {
 			return ImportCipherContext{}, err
 		}
 	}
-	if target := GetEzByCollProperties(properties, collectionID); target != nil {
-		var err error
-		result.Target, err = take(target.EzID, collectionID)
+	targetID, hasTarget, err := parseTargetEzID(properties)
+	if err != nil {
+		return ImportCipherContext{}, merr.Combine(err, merr.ErrImportSysFailed)
+	}
+	if hasTarget {
+		result.Target, err = take("target", targetID, collectionID)
 		if err != nil {
 			return ImportCipherContext{}, err
 		}
@@ -114,10 +110,14 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 	if len(cipherEntries) != 0 {
 		return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("import task has unexpected cipher.ezk entries")
 	}
-	if err := registerTaskKey(result.Source, true); err != nil {
+	if (result.Source != nil || result.Target != nil) && !IsClusterEncryptionEnabled() {
+		return ImportCipherContext{}, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
+	}
+	// Register the authoritative target before registering a same-zone source read-only.
+	if err := registerImportContext(result.Target, false); err != nil {
 		return ImportCipherContext{}, err
 	}
-	if err := registerTaskKey(result.Target, false); err != nil {
+	if err := registerImportContext(result.Source, true); err != nil {
 		return ImportCipherContext{}, err
 	}
 	return result, nil

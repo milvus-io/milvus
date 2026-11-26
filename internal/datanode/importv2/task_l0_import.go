@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -48,18 +49,21 @@ type L0ImportTask struct {
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
 	req          *datapb.ImportRequest
+	resource     taskcommon.Resource
 
 	allocator  allocator.Interface
 	manager    TaskManager
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
+	picker     *SegmentPicker
 }
 
 func NewL0ImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
+	resource taskcommon.Resource,
 	cipher ...hookutil.ImportCipherContext,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,10 +81,12 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
 		req:          req,
+		resource:     resource,
 		allocator:    alloc,
 		manager:      manager,
 		syncMgr:      syncMgr,
 		cm:           cm,
+		picker:       NewSegmentPicker(),
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -104,6 +110,10 @@ func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 
 func (t *L0ImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
+}
+
+func (t *L0ImportTask) GetResource() taskcommon.Resource {
+	return t.resource
 }
 
 // L0 import task buffer size is fixed
@@ -135,11 +145,13 @@ func (t *L0ImportTask) Clone() Task {
 		cancel:       t.cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		resource:     t.resource,
 		allocator:    t.allocator,
 		manager:      t.manager,
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		picker:       t.picker,
 	}
 }
 
@@ -255,7 +267,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			continue
 		}
 		partitionID := t.GetPartitionIDs()[0]
-		segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+		segmentID, err := t.picker.PickSegment(t.req.GetRequestSegments(), channel, partitionID, data.Size())
 		if err != nil {
 			return nil, nil, err
 		}

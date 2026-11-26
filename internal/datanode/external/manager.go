@@ -22,12 +22,14 @@ import (
 	"runtime/debug"
 	"sync"
 
+	"github.com/panjf2000/ants/v2"
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -110,8 +112,10 @@ type ExternalCollectionManager struct {
 	ctx       context.Context
 	mu        sync.RWMutex
 	tasks     map[TaskKey]*TaskInfo
-	pool      *conc.Pool[any]
+	pool      *ants.Pool
 	closeOnce sync.Once
+
+	booked taskcommon.Resource // protected by mu, includes tasks waiting for the pool
 }
 
 // NewExternalCollectionManager constructs a manager with the provided worker pool size.
@@ -119,7 +123,7 @@ func NewExternalCollectionManager(ctx context.Context, poolSize int) *ExternalCo
 	return &ExternalCollectionManager{
 		ctx:   ctx,
 		tasks: make(map[TaskKey]*TaskInfo),
-		pool:  conc.NewPool[any](poolSize),
+		pool:  lo.Must(ants.NewPool(poolSize)),
 	}
 }
 
@@ -133,8 +137,15 @@ func (m *ExternalCollectionManager) Close() {
 	})
 }
 
+// Resource returns the cpu/memory booked by submitted, unfinished tasks.
+func (m *ExternalCollectionManager) Resource() taskcommon.Resource {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.booked
+}
+
 // LoadOrStore adds a task entry if absent and returns the existing entry if present.
-func (m *ExternalCollectionManager) LoadOrStore(clusterID string, taskID int64, info *TaskInfo) *TaskInfo {
+func (m *ExternalCollectionManager) LoadOrStore(clusterID string, taskID int64, resource taskcommon.Resource, info *TaskInfo) *TaskInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := makeTaskKey(clusterID, taskID)
@@ -142,6 +153,7 @@ func (m *ExternalCollectionManager) LoadOrStore(clusterID string, taskID int64, 
 		return oldInfo
 	}
 	m.tasks[key] = info
+	m.booked = m.booked.Add(resource)
 	return nil
 }
 
@@ -179,8 +191,8 @@ func (m *ExternalCollectionManager) UpdateState(clusterID string, taskID int64, 
 	}
 }
 
-// UpdateResult commits the latest state plus kept/updated segments atomically.
-func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
+// updateResult commits the latest state plus kept/updated segments atomically.
+func (m *ExternalCollectionManager) updateResult(key TaskKey, info *TaskInfo,
 	state indexpb.JobState,
 	failReason string,
 	keptSegments []int64,
@@ -188,13 +200,14 @@ func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	key := makeTaskKey(clusterID, taskID)
-	if info, ok := m.tasks[key]; ok {
-		info.State = state
-		info.FailReason = failReason
-		info.KeptSegments = append([]int64(nil), keptSegments...)
-		info.UpdatedSegments = cloneSegments(updatedSegments)
+	// A dropped execution may finish after another submission reuses its ID.
+	if m.tasks[key] != info {
+		return
 	}
+	info.State = state
+	info.FailReason = failReason
+	info.KeptSegments = append([]int64(nil), keptSegments...)
+	info.UpdatedSegments = cloneSegments(updatedSegments)
 }
 
 // CancelTask triggers the context cancellation for a task if it exists.
@@ -214,12 +227,15 @@ func (m *ExternalCollectionManager) CancelTask(clusterID string, taskID int64) b
 }
 
 // SubmitTask registers and runs a task asynchronously in the manager pool.
+// Registration books resources once, including while submission waits for a worker.
 func (m *ExternalCollectionManager) SubmitTask(
 	clusterID string,
 	req *datapb.RefreshExternalCollectionTaskRequest,
+	resource taskcommon.Resource,
 	taskFunc func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error),
 ) error {
 	taskID := req.GetTaskID()
+	key := makeTaskKey(clusterID, taskID)
 
 	taskCtx, cancel := context.WithCancel(m.ctx)
 	keptSegments := extractSegmentIDs(req.GetCurrentSegments())
@@ -233,7 +249,8 @@ func (m *ExternalCollectionManager) SubmitTask(
 		UpdatedSegments: nil,
 	}
 
-	if oldInfo := m.LoadOrStore(clusterID, taskID, info); oldInfo != nil {
+	if oldInfo := m.LoadOrStore(clusterID, taskID, resource, info); oldInfo != nil {
+		cancel()
 		// Task already exists — this is a duplicate dispatch (e.g. from
 		// scheduler TOCTOU race between Enqueue dedup check and Push).
 		// Treat as idempotent success since the task is already running.
@@ -243,8 +260,14 @@ func (m *ExternalCollectionManager) SubmitTask(
 		return nil
 	}
 
-	// Submit to pool
-	m.pool.Submit(func() (_ any, retErr error) {
+	release := func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.booked.CPU -= resource.CPU
+		m.booked.Memory -= resource.Memory
+	}
+	err := m.pool.Submit(func() {
+		defer release()
 		defer cancel()
 		// Defense-in-depth: isolate panics in a single task so a buggy
 		// external source cannot crash the whole datanode process (e.g.
@@ -258,9 +281,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 					mlog.Any("panic", r),
 					mlog.ByteString("stack", stack))
 				reason := fmt.Sprintf("task panicked: %v", r)
-				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
-				// A recovered panic is a server-side failure, never caller input.
-				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
+				m.updateResult(key, info, indexpb.JobState_JobStateFailed, reason, keptSegments, nil)
 			}
 		}()
 		mlog.Info(m.ctx, "executing external collection task in pool",
@@ -270,11 +291,11 @@ func (m *ExternalCollectionManager) SubmitTask(
 		// Execute the task
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
-			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
+			m.updateResult(key, info, indexpb.JobState_JobStateFailed, err.Error(), keptSegments, nil)
 			mlog.Warn(m.ctx, "external collection task failed",
 				mlog.FieldTaskID(taskID),
 				mlog.Err(err))
-			return nil, err
+			return
 		}
 
 		state := resp.GetState()
@@ -283,11 +304,16 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
+		m.updateResult(key, info, state, failReason, kept, resp.GetUpdatedSegments())
 		mlog.Info(m.ctx, "external collection task completed",
 			mlog.FieldTaskID(taskID))
-		return nil, nil
 	})
-
+	if err != nil {
+		cancel()
+		err = merr.WrapErrServiceUnavailableErr(err, "external refresh pool rejected submission")
+		m.updateResult(key, info, indexpb.JobState_JobStateFailed, err.Error(), keptSegments, nil)
+		release()
+		return err
+	}
 	return nil
 }

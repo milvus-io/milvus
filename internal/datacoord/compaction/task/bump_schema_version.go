@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -50,6 +51,7 @@ type BumpSchemaVersionTask struct {
 	compactionTaskMeta *CompactionTaskMeta
 	ievm               index.IndexEngineVersionManager
 	times              *taskcommon.Times
+	resource           taskresource.Cache
 }
 
 func NewBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, mt meta.CompactionMeta, compactionTaskMeta *CompactionTaskMeta, ievm index.IndexEngineVersionManager) *BumpSchemaVersionTask {
@@ -78,6 +80,19 @@ func (t *BumpSchemaVersionTask) GetTaskState() taskcommon.State {
 
 func (t *BumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
+}
+
+// GetTaskResource: a schema bump streams one segment through the mix
+// compaction writer, so it is priced like a mix compaction of that segment.
+func (t *BumpSchemaVersionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		// The bump rewrites its one segment with that segment's delete map.
+		inputSize, readerBytes, deleteMapBytes, ok := mixCompactionInputs(t.meta, t.GetTaskProto())
+		if !ok {
+			return taskresource.Default(), false
+		}
+		return taskresource.MixCompaction(inputSize, readerBytes, deleteMapBytes), true
+	})
 }
 
 func (t *BumpSchemaVersionTask) GetTaskSlot() int64 {
@@ -139,6 +154,7 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			FieldLogicalSizes:   meta.SegmentFieldLogicalSizes(segInfo.SegmentInfo),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 		segments = append(segments, segInfo)
@@ -230,7 +246,7 @@ func (t *BumpSchemaVersionTask) ProcessFailed() bool {
 	return true
 }
 
-func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
@@ -239,14 +255,16 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to build compaction request", mlog.Err(err))
+		if merr.IsRetryableErr(err) {
+			return
+		}
 		err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
 		return
 	}
-
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -516,6 +534,9 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 	// This replaces the resultManifest==currentManifest replay check the pre-baked
 	// adoption path used, and unlike an in-memory Binlogs diff it survives restart.
 	if current.GetSchemaVersion() == newSchemaVersion {
+		if err := meta.CheckMaterializationFieldSizeReplay(current.SegmentInfo, resultSegment); err != nil {
+			return nil, err
+		}
 		mlog.Info(ctx, "schema bump materialization already applied; skipping manifest commit",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
 			mlog.Int64("segmentID", segmentID),
@@ -558,7 +579,7 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 		},
 		CatalogMutation: meta.SegmentCatalogMutation{
 			Operators: []meta.UpdateOperator{
-				meta.UpdateBumpSchemaVersionMaterializationOperator(segmentID, newSchemaVersion, resultSegment.GetInsertLogs(), resultSegment.GetStats()),
+				meta.UpdateBumpSchemaVersionMaterializationOperator(segmentID, t.GetTaskProto().GetSchema(), resultSegment),
 			},
 		},
 	}); err != nil {

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -73,7 +74,8 @@ type ClusteringCompactionTask struct {
 
 	maxRetryTimes int32
 
-	times *taskcommon.Times
+	times    *taskcommon.Times
+	resource taskresource.Cache
 }
 
 func (t *ClusteringCompactionTask) GetTaskID() int64 {
@@ -86,6 +88,19 @@ func (t *ClusteringCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *ClusteringCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource: a clustering compaction buckets its input in memory up to
+// a share of the worker, so it is priced by its input with that share as the
+// cap (see taskresource.ClusteringCompaction).
+func (t *ClusteringCompactionTask) GetTaskResource() taskcommon.Resource {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return taskresource.Default(), false
+		}
+		return taskresource.ClusteringCompaction(inputSize), true
+	})
 }
 
 func (t *ClusteringCompactionTask) GetTaskSlot() int64 {
@@ -120,7 +135,7 @@ func (t *ClusteringCompactionTask) retryOnError(err error) {
 	}
 }
 
-func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	var err error
 	defer func() {
 		t.retryOnError(err)
@@ -136,7 +151,7 @@ func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 			err = merr.WrapErrClusteringCompactionSubmitTaskFail("analyze", err)
 		}
 	} else {
-		err = t.doCompact(nodeID, cluster)
+		err = t.doCompact(nodeID, cluster, resource)
 		if err != nil {
 			mlog.Warn(context.TODO(), "fail to submit compaction task", mlog.Err(err))
 			err = merr.WrapErrClusteringCompactionSubmitTaskFail("compact", err)
@@ -432,12 +447,10 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 
-	// Namespace-enabled clustering compaction is routed to the namespace compactor on the
-	// DataNode, which builds the text index inline and needs the analyzer resources in ref mode.
+	// The namespace compactor builds the text index inline and needs analyzer resources in ref mode.
 	taskSchema := taskProto.GetSchema()
-	if fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) &&
-		taskSchema.GetEnableNamespace() &&
-		len(taskSchema.GetFileResourceIds()) > 0 {
+	if len(taskSchema.GetFileResourceIds()) > 0 && common.UsesNamespacePartitionKey(taskSchema) &&
+		fileresource.IsRefMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()) {
 		resources, err := t.meta.GetFileResources(context.Background(), taskSchema.GetFileResourceIds()...)
 		if err != nil {
 			mlog.Warn(context.TODO(), "get file resources for clustering compaction failed", mlog.Int64("collectionID", taskProto.GetCollectionID()), mlog.Err(err))
@@ -464,6 +477,7 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			IsSortedByNamespace: segInfo.GetIsSortedByNamespace(),
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
+			FieldLogicalSizes:   meta.SegmentFieldLogicalSizes(segInfo.SegmentInfo),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
 		})
 	}
@@ -890,7 +904,7 @@ func (t *ClusteringCompactionTask) doAnalyze() error {
 	return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_analyzing))
 }
 
-func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster) error {
+func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) error {
 	var err error
 	t.plan, err = t.BuildCompactionRequest()
 	if err != nil {
@@ -926,7 +940,7 @@ func (t *ClusteringCompactionTask) doCompact(nodeID int64, cluster session.Clust
 				mlog.Err(dropErr))
 		}
 	}
-	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID())
+	err = cluster.CreateCompaction(nodeID, t.GetPlan(), t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		mlog.Warn(context.TODO(), "Failed to notify compaction tasks to DataNode",

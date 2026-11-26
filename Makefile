@@ -57,8 +57,6 @@ endif
 
 USE_TSAN ?= OFF
 export USE_TSAN
-# Preserve Go's default C++ flags when the caller did not provide an override.
-CGO_CXXFLAGS ?= $(shell $(GO) env CGO_CXXFLAGS)
 ifneq ($(USE_TSAN),ON)
 ifneq ($(USE_TSAN),OFF)
 $(error USE_TSAN must be ON or OFF)
@@ -76,6 +74,9 @@ endif
 ifneq ($(filter -race -race=true,$(GOFLAGS) $(shell $(GO) env GOFLAGS)),)
 $(error USE_TSAN cannot be combined with Go -race)
 endif
+# Preserve Go's default C++ flags before appending TSan flags so ordinary
+# builds do not stamp CGO_CXXFLAGS="-O2 -g" into Go buildinfo.
+	CGO_CXXFLAGS ?= $(shell $(GO) env CGO_CXXFLAGS)
 	override CGO_CFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
 	override CGO_CXXFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
 	override CGO_LDFLAGS += -fsanitize=thread -shared-libsan
@@ -105,7 +106,7 @@ ifdef TANTIVY_ANALYZER_REMOTE_TLS
 endif
 
 
-use_svs = OFF
+use_svs = AUTO
 ifdef USE_SVS
 	use_svs = ${USE_SVS}
 endif
@@ -637,7 +638,7 @@ rpm: install
 	@cp -r lib ~/rpmbuild/BUILD/
 	@cp -r configs ~/rpmbuild/BUILD/
 	@cp -r build/rpm/services ~/rpmbuild/BUILD/
-	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec
+	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild $(if $(wildcard $(LIBRARY_PATH)/libsvs_runtime.so),--with,--without) svs -ba ./build/rpm/milvus.spec
 
 generate-mockery-types: getdeps
 	# MixCoord

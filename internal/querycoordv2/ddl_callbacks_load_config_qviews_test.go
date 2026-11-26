@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
@@ -110,9 +111,11 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 		captured = msg
 	})
 
-	require.NoError(t, server.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+	released, err := server.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		CollectionID: collectionID,
-	}))
+	}, false)
+	require.NoError(t, err)
+	require.True(t, released)
 	require.NotNil(t, captured)
 	// The broadcaster resolves an empty target list to the control channel.
 	assert.Empty(t, captured.BroadcastHeader().VChannels)
@@ -151,6 +154,9 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	t.Helper()
 	paramtable.Init()
 	initStreamingSystem()
+	t.Cleanup(withStreamingQueryNodes(map[string]typeutil.UniqueSet{
+		meta.DefaultResourceGroupName: typeutil.NewUniqueSet(10001),
+	}))
 
 	catalog := metastoremocks.NewQueryCoordCatalog(t)
 	catalog.EXPECT().GetCollections(mock.Anything).Return(nil, nil).Once()

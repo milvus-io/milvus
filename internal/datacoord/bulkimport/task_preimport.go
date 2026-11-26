@@ -21,7 +21,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -38,10 +41,11 @@ var _ ImportTask = (*PreImportTask)(nil)
 type PreImportTask struct {
 	Task atomic.Pointer[datapb.PreImportTask]
 
-	ImportMeta ImportMeta
-	Tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	retryTimes int64
+	ImportMeta           ImportMeta
+	Tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	retryTimes           int64
+	nonRetryableFailures int64
 }
 
 func (p *PreImportTask) GetJobID() int64 {
@@ -88,6 +92,36 @@ func (p *PreImportTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(p.GetState())
 }
 
+// GetTaskResource prices a pre-import by one base read buffer per file,
+// mirroring what the worker allocates (taskresource.PreImport). A
+// snapshot-source task takes the snapshot reservation its slot is sized on. Not cached,
+// for the same reason as Task.GetTaskResource.
+func (p *PreImportTask) GetTaskResource() taskcommon.Resource {
+	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	if job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID()); job != nil {
+		if rowBytes, deleteBytes, ok := snapshotImportBufferBytes(p, job, base); ok {
+			return taskresource.PreImport(rowBytes + deleteBytes)
+		}
+	}
+	return taskresource.PreImport(taskresource.ImportBufferedBytes(p.GetFileStats(), base))
+}
+
+// NodeMemoryShare implements task.NodeMemoryBounded. Only a snapshot-source
+// pre-import reserves its readers from the worker's import allocator
+// (reserveSnapshotRead). A pre-import syncs nothing, so the allocator's share
+// is its whole bound. A plain pre-import reads without the allocator and is not
+// bounded.
+func (p *PreImportTask) NodeMemoryShare() float64 {
+	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil {
+		return 0
+	}
+	if _, _, ok := snapshotImportBufferBytes(p, job, 0); !ok {
+		return 0
+	}
+	return taskresource.ImportNodeMemoryShare()
+}
+
 func (p *PreImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.ImportMeta))
 }
@@ -124,28 +158,26 @@ func (p *PreImportTask) setFileStats(fileStats []*datapb.ImportFileStats) {
 	p.Task.Load().FileStats = fileStats
 }
 
-func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
-	req, err := AssemblePreImportRequest(p, job)
-	if err != nil {
-		if retryableImportSourceError(err) {
-			p.retryTimes++
-			return
-		}
-		// Report source inventory, source key, and target key errors to the job.
-		failImportDispatch(p, p.ImportMeta, err)
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
 		return
 	}
-
-	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
-		if isBackupCipherRejection(req.GetOptions(), err) {
+		if errors.Is(err, errSnapshotTaskSource) {
+			mlog.Warn(context.TODO(), "assemble preimport request failed", WrapTaskLog(p, mlog.Err(err))...)
 			failImportDispatch(p, p.ImportMeta, err)
 			return
 		}
+		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
+		return
+	}
+	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
+	if err != nil {
 		p.retryTimes++
+		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = p.ImportMeta.UpdateTask(context.TODO(), p.GetTaskID(),

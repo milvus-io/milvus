@@ -29,8 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -43,13 +45,14 @@ import (
 )
 
 type importTaskV3 struct {
-	task       atomic.Pointer[datapb.ImportTaskV3]
-	importMeta ImportMeta
-	meta       *meta.Meta
-	alloc      allocator.Allocator
-	tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	metrics    importTaskMetrics
+	task                 atomic.Pointer[datapb.ImportTaskV3]
+	importMeta           ImportMeta
+	meta                 *meta.Meta
+	alloc                allocator.Allocator
+	tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	metrics              importTaskMetrics
+	nonRetryableFailures int64
 }
 
 func NewImportTaskV3(p *datapb.ImportTaskV3, importMeta ImportMeta, mt *meta.Meta, alloc allocator.Allocator) *importTaskV3 {
@@ -92,6 +95,18 @@ func (t *importTaskV3) GetTaskSlot() int64 {
 
 func (t *importTaskV3) GetTaskVersion() int64 { return t.task.Load().GetRunId() }
 
+// GetTaskResource prices the final merge on the same reshardmem working set
+// the slot charge is derived from (importV3WorkingSet), so the two never
+// disagree. A job that is gone is priced at the floor so the task can be
+// retired.
+func (t *importTaskV3) GetTaskResource() taskcommon.Resource {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default()
+	}
+	return taskresource.ImportV3(importV3WorkingSet(len(t.task.Load().GetFragments()), getImportV3Config(), job.GetSchema()))
+}
+
 func (t *importTaskV3) SetTaskTime(tt taskcommon.TimeType, tm time.Time) { t.times.SetTaskTime(tt, tm) }
 
 func (t *importTaskV3) GetTaskTime(tt taskcommon.TimeType) time.Time { return tt.GetTaskTime(t.times) }
@@ -131,7 +146,7 @@ func (t *importTaskV3) setOldSegmentIDs(segmentIDs []UniqueID) {
 	t.task.Load().OldSegmentIds = append([]int64(nil), segmentIDs...)
 }
 
-func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	p := t.task.Load()
 	if p.GetRunId() == 0 || p.GetLogRange() == nil {
 		t.Fail("import v3 task has no run resources")
@@ -146,16 +161,22 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		t.Fail(fmt.Sprintf("import v3 task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
-		if !retryableImportSourceError(err) {
-			failImportDispatch(t, t.importMeta, err)
-		}
-		return
-	}
 	plan, slot, err := importPlan(job, p, getImportV3Config())
 	if err != nil {
 		t.Fail(err.Error())
+		return
+	}
+	// Resolve source and target encryption contexts before dropping superseded
+	// segments or creating the new segment record so dispatch retries never mutate
+	// segment metadata.
+	req := &datapb.ImportTaskV3Request{
+		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
+		LogRange: p.GetLogRange(), Slot: slot,
+		StorageConfig: meta.CreateStorageConfig(),
+		Plan:          plan,
+	}
+	if err := meta.WrapImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req); err != nil {
+		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	// Drop the segments a superseded run used to own but this run no longer
@@ -183,17 +204,6 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 			return
 		}
 	}
-	req := &datapb.ImportTaskV3Request{
-		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
-		LogRange: p.GetLogRange(), Slot: slot,
-		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: readContext,
-		Plan:          plan,
-	}
-	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
-	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.
 	// Clearing old_segment_ids here is safe: the superseded segments were dropped
@@ -202,7 +212,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		mlog.Warn(context.TODO(), "persist import v3 task running state failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID())
+	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic
@@ -380,7 +390,7 @@ func (t *importTaskV3) acceptResult(results []*datapb.ImportTaskV3Result) error 
 	if err := validateImportResults(results, 1); err != nil {
 		return err
 	}
-	namespaceSorted := job.GetSchema().GetEnableNamespace()
+	namespaceSorted := common.UsesNamespacePartitionKey(job.GetSchema())
 	return applyImportResults(context.TODO(), t.meta, p.GetCollectionId(), schemaVersion, []int64{p.GetSegmentId()}, !namespaceSorted, namespaceSorted, results)
 }
 

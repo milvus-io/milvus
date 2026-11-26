@@ -33,6 +33,7 @@ import (
 )
 
 const (
+	importEZKey            = "cipher.ez.import"
 	createEZKey            = "cipher.ez.create"
 	unsafeEZK              = "cipher.ezk"
 	kmsKeyARN              = "cipher.kmsKeyArn"
@@ -68,8 +69,24 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 	if role := params["cipher.milvusRoleName"]; role != "" {
 		c.role = role
 	}
-	if backup := params["cipher.ez.import"]; backup != "" {
-		zone, key, err := c.ResolveImportEZ(backup)
+	if importParam := params[importEZKey]; importParam != "" {
+		if rawKey := params[unsafeEZK]; rawKey != "" {
+			ezID, err := strconv.ParseInt(importParam, 10, 64)
+			if err != nil {
+				return fmt.Errorf("fixture cipher: invalid import EZ id %q: %w", importParam, err)
+			}
+			key, err := parseAndValidateEZKey(ezID, rawKey)
+			if err != nil {
+				return err
+			}
+			if c.readKeys == nil {
+				c.readKeys = make(map[int64][]byte)
+			}
+			c.readKeys[ezID] = key
+			c.record(ezID, 0, "register", "available", nil)
+			return nil
+		}
+		zone, key, err := c.ResolveImportEZ(importParam)
 		if err != nil {
 			return err
 		}
@@ -85,43 +102,47 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 		return fmt.Errorf("fixture cipher: invalid EZ id %q: %w", ezText, err)
 	}
 
-	key := params[unsafeEZK]
-	if key != "" {
-		if parts := strings.SplitN(key, ":", 2); len(parts) == 2 {
-			contextEZID, parseErr := strconv.ParseInt(parts[0], 10, 64)
-			if parseErr != nil || contextEZID != ezID {
-				return fmt.Errorf("fixture cipher: unexpected EZ key context %q for EZ %d", parts[0], ezID)
-			}
-			key, err = decodeKey(parts[1])
-		} else {
-			key, err = decodeKey(key)
-		}
+	var key []byte
+	if rawKey := params[unsafeEZK]; rawKey != "" {
+		key, err = parseAndValidateEZKey(ezID, rawKey)
 		if err != nil {
-			return fmt.Errorf("fixture cipher: decode EZ key: %w", err)
-		}
-		if !hmac.Equal([]byte(key), deriveEZKey(ezID)) {
-			return fmt.Errorf("fixture cipher: unexpected EZ key for EZ %d", ezID)
+			return err
 		}
 	} else {
-		key = params[kmsKeyARN]
-		if key == "" {
+		rootKey := params[kmsKeyARN]
+		if rootKey == "" {
 			return fmt.Errorf("fixture cipher: missing EZ key for EZ %d", ezID)
 		}
-		if key != expectedFixtureRootKey {
-			return fmt.Errorf("fixture cipher: unexpected root key %q for EZ %d", key, ezID)
+		if rootKey != expectedFixtureRootKey {
+			return fmt.Errorf("fixture cipher: unexpected root key %q for EZ %d", rootKey, ezID)
 		}
-		key = string(deriveEZKey(ezID))
+		key = deriveEZKey(ezID)
 	}
-	if params["cipher.ez.readOnly"] == "true" {
-		if c.readKeys == nil {
-			c.readKeys = make(map[int64][]byte)
-		}
-		c.readKeys[ezID] = []byte(key)
-		c.record(ezID, 0, "register", "available", nil)
-		return nil
-	}
-	c.register(ezID, []byte(key))
+	c.register(ezID, key)
 	return nil
+}
+
+func parseAndValidateEZKey(ezID int64, raw string) ([]byte, error) {
+	var (
+		key string
+		err error
+	)
+	if parts := strings.SplitN(raw, ":", 2); len(parts) == 2 {
+		contextEZID, parseErr := strconv.ParseInt(parts[0], 10, 64)
+		if parseErr != nil || contextEZID != ezID {
+			return nil, fmt.Errorf("fixture cipher: unexpected EZ key context %q for EZ %d", parts[0], ezID)
+		}
+		key, err = decodeKey(parts[1])
+	} else {
+		key, err = decodeKey(raw)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fixture cipher: decode EZ key: %w", err)
+	}
+	if !hmac.Equal([]byte(key), deriveEZKey(ezID)) {
+		return nil, fmt.Errorf("fixture cipher: unexpected EZ key for EZ %d", ezID)
+	}
+	return []byte(key), nil
 }
 
 func (c *fixtureCipher) ResolveImportEZ(backup string) (int64, []byte, error) {

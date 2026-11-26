@@ -733,7 +733,7 @@ func TestMixCompactionBloomFilterTTL(t *testing.T) {
 					for _, seg := range s.task.plan.SegmentBinlogs {
 						seg.IsSorted = mergeSort
 					}
-					s.Require().Equal(mergeSort, canMergeSort(s.task.plan, s.task.compactionParams))
+					s.Require().Equal(mergeSort, compaction.CanMergeSort(s.task.plan, s.task.compactionParams))
 					result, err := s.task.Compact()
 					s.Require().NoError(err)
 					s.Greater(s.task.estimatedOutputSegmentCount, int64(1))

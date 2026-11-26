@@ -23,15 +23,19 @@
 #include <arrow/result.h>
 #include <arrow/status.h>
 #include <arrow/type.h>
+#include <arrow/util/base64.h>
 #include <arrow/util/key_value_metadata.h>
 #include <folly/ScopeGuard.h>
 #include <gmock/gmock.h>
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/constants.h"
@@ -39,9 +43,12 @@
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
+#include "storage/KeyRetriever.h"
 #include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/PlannerCipherPlugin.h"
 
@@ -450,3 +457,261 @@ TEST(CPackedTest, PackedReaderEagerPrebuffer) {
         EXPECT_EQ(status.error_code, 0);
     }
 }
+
+namespace {
+namespace plugin = milvus::storage::plugin;
+using EncryptorResult =
+    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>;
+using ::testing::AtLeast;
+using ::testing::Return;
+using ::testing::StrictMock;
+
+class OrdinaryCipher : public plugin::ICipherPlugin {
+ public:
+    std::string
+    getPluginName() const override {
+        return "CipherPlugin";
+    }
+    MOCK_METHOD(void,
+                Update,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptor,
+                (int64_t, int64_t),
+                (const, override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptor,
+                (int64_t, int64_t, const std::string&),
+                (const, override));
+};
+
+class ImportCipher : public OrdinaryCipher {
+ public:
+    MOCK_METHOD(void,
+                RegisterReadKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+};
+
+class ParquetFileKey : public plugin::IEncryptor, public plugin::IDecryptor {
+ public:
+    MOCK_METHOD(std::string, GetKey, (), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (const std::string&), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (std::string_view), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (const void*, size_t), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (const std::string&), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (std::string_view), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (const void*, size_t), (const, override));
+};
+
+::testing::AssertionResult
+CheckStatus(CStatus status) {
+    if (status.error_code == 0) {
+        return ::testing::AssertionSuccess();
+    }
+    auto failure = ::testing::AssertionFailure() << status.error_msg;
+    free(const_cast<char*>(status.error_msg));
+    return failure;
+}
+
+class CPackedImportTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        int column = 0;
+        ASSERT_TRUE(AddCColumnSplit(splits, &column, 1));
+    }
+    void
+    TearDown() override {
+        FreeCColumnSplits(splits);
+        milvus::storage::PluginLoader::GetInstance().unregisterPluginForTest(
+            "CipherPlugin");
+    }
+
+    static constexpr int64_t buffer_size = 1 << 20;
+    CColumnSplits splits = NewCColumnSplits();
+    std::shared_ptr<arrow::Schema> schema = arrow::schema(
+        {arrow::field("int64",
+                      arrow::int64(),
+                      false,
+                      arrow::key_value_metadata(
+                          {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
+};
+
+TEST_F(CPackedImportTest, ReportsWriterKeysetErrors) {
+    CPluginContext target{17, 23, "dGFyZ2V0"};
+    char* enc_key = nullptr;
+    char* enc_meta = nullptr;
+    auto missing_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(missing_enc.error_code, milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(missing_enc.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    CPluginContext null_key{17, 23, nullptr};
+    CPluginContext empty_key{17, 23, ""};
+    for (auto* context :
+         {static_cast<CPluginContext*>(nullptr), &null_key, &empty_key}) {
+        auto invalid = GetEncParams(context, &enc_key, &enc_meta);
+        EXPECT_EQ(invalid.error_code, milvus::ErrorCode::InvalidParameter);
+        EXPECT_FALSE(CheckStatus(invalid));
+        EXPECT_EQ(enc_key, nullptr);
+        EXPECT_EQ(enc_meta, nullptr);
+    }
+
+    auto cipher = std::make_shared<StrictMock<ImportCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    auto file_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*file_key, GetKey())
+        .WillOnce(Return(std::string(32, 'a')))
+        .WillOnce(Return(std::string(32, 'a')))
+        .WillOnce(Return("short"));
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, target.key))
+        .WillOnce(Return(EncryptorResult{}))
+        .WillOnce(Return(EncryptorResult{file_key, ""}))
+        .WillOnce(
+            Return(EncryptorResult{file_key, std::string("wrapped\0key", 11)}))
+        .WillOnce(Return(EncryptorResult{file_key, "wrapped"}))
+        .WillOnce(Return(EncryptorResult{}))
+        .WillOnce(::testing::Throw(milvus::SegcoreError(
+            milvus::ErrorCode::Unsupported, "writer keysets are unsupported")));
+    std::string file = TestLocalPath + "rejected-target.parquet";
+    char* path = file.data();
+    for (const auto* reason : {"cipher plugin returned no encryptor",
+                               "unusable encryption parameters",
+                               "unusable encryption parameters",
+                               "unusable encryption parameters"}) {
+        SCOPED_TRACE(reason);
+        ArrowSchema c_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        CPackedWriter writer = nullptr;
+        auto status = NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, splits, &writer, &target);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        if (status.error_msg != nullptr) {
+            EXPECT_THAT(status.error_msg, ::testing::HasSubstr(reason));
+        }
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(writer, nullptr);
+        if (writer != nullptr) {
+            EXPECT_TRUE(CheckStatus(CloseWriter(writer)));
+        }
+    }
+
+    auto bad_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(bad_enc.error_code, milvus::ErrorCode::InvalidParameter);
+    if (bad_enc.error_msg != nullptr) {
+        EXPECT_THAT(
+            bad_enc.error_msg,
+            ::testing::HasSubstr("cipher plugin returned no encryptor"));
+    }
+    EXPECT_FALSE(CheckStatus(bad_enc));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    auto unsupported_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(unsupported_enc.error_code, milvus::ErrorCode::Unsupported);
+    EXPECT_FALSE(CheckStatus(unsupported_enc));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+}
+
+TEST_F(CPackedImportTest, ReportsReaderKeysetErrors) {
+    auto cipher = std::make_shared<StrictMock<ImportCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    std::string file = TestLocalPath + "rejected-reader.parquet";
+    char* path = file.data();
+
+    CPluginContext empty_key{17, 0, ""};
+    CPluginContext bad_key{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, bad_key.key))
+        .WillOnce(::testing::Throw(std::runtime_error("conflicting key ID")));
+
+    for (auto [ctx, expected_code] : {
+             std::pair{&empty_key, milvus::ErrorCode::InvalidParameter},
+             std::pair{&bad_key, milvus::ErrorCode::UnexpectedError},
+         }) {
+        ArrowSchema c_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        CPackedReader reader = nullptr;
+        auto status =
+            NewPackedReader(&path, 1, &c_schema, 1024, false, &reader, ctx);
+        if (c_schema.release != nullptr) {
+            c_schema.release(&c_schema);
+        }
+        EXPECT_EQ(status.error_code, expected_code);
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(reader, nullptr);
+    }
+}
+
+TEST_F(CPackedImportTest, PluginContextUpdateExceptionsReturnStatus) {
+    for (CPluginContext invalid :
+         {CPluginContext{17, 23, nullptr}, CPluginContext{17, 23, ""}}) {
+        auto status = PutOrRefPluginContext(invalid);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        EXPECT_FALSE(CheckStatus(status));
+    }
+    auto cipher = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    CPluginContext context{17, 23, "dGFyZ2V0"};
+
+    EXPECT_CALL(*cipher, Update(17, 23, context.key))
+        .WillOnce(::testing::Throw(milvus::SegcoreError(
+            milvus::ErrorCode::InvalidParameter, "invalid plugin context")));
+    auto status = PutOrRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+    EXPECT_FALSE(CheckStatus(status));
+
+    EXPECT_CALL(*cipher, Update(17, 23, ""))
+        .WillOnce(::testing::Throw(std::runtime_error("unref failed")));
+    status = UnRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::UnexpectedError);
+    EXPECT_FALSE(CheckStatus(status));
+}
+
+TEST_F(CPackedImportTest, FileImportUsesEncryptedLegacyTarget) {
+    std::string file = TestLocalPath + "legacy-file-import.parquet";
+    char* path = file.data();
+    CPluginContext target{17, 45, "dGFyZ2V0"};
+    CPackedWriter writer = nullptr;
+    auto open = [&](CPluginContext* context) {
+        ArrowSchema c_schema;
+        EXPECT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        return NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, splits, &writer, context);
+    };
+    auto expect_rejected = [&](CStatus status, milvus::ErrorCode code) {
+        EXPECT_EQ(status.error_code, code);
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(writer, nullptr);
+        if (writer) {
+            EXPECT_TRUE(CheckStatus(CloseWriter(writer)));
+            writer = nullptr;
+        }
+    };
+    expect_rejected(open(&target), milvus::ErrorCode::Unsupported);
+
+    auto cipher = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    CPluginContext missing_key{17, 45, ""};
+    expect_rejected(open(&missing_key), milvus::ErrorCode::InvalidParameter);
+
+    auto key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*key, GetKey()).WillRepeatedly(Return(std::string(32, 'k')));
+    {
+        ::testing::InSequence ordered;
+        EXPECT_CALL(*cipher, Update(17, 45, "dGFyZ2V0"));
+        EXPECT_CALL(*cipher, GetEncryptor(17, 45))
+            .WillOnce(Return(EncryptorResult{key, "wrapped-target"}));
+    }
+    ASSERT_TRUE(CheckStatus(open(&target)));
+    ASSERT_TRUE(CheckStatus(CloseWriter(writer)));
+    writer = nullptr;
+}
+}  // namespace

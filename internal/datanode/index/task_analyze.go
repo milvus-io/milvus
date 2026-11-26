@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -44,7 +45,9 @@ type analyzeTask struct {
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	manager  *TaskManager
+	info     *AnalyzeTaskInfo
 	analyze  analyzecgowrapper.CodecAnalyze
+	resource taskcommon.Resource
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -53,7 +56,9 @@ func NewAnalyzeTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.AnalyzeRequest,
 	manager *TaskManager,
+	info *AnalyzeTaskInfo,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *analyzeTask {
 	return &analyzeTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -61,7 +66,9 @@ func NewAnalyzeTask(ctx context.Context,
 		cancel:        cancel,
 		req:           req,
 		manager:       manager,
+		info:          info,
 		pluginContext: pluginContext,
+		resource:      resource,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 	}
 }
@@ -76,6 +83,10 @@ func (at *analyzeTask) Name() string {
 
 func (at *analyzeTask) GetSlot() int64 {
 	return at.req.GetTaskSlot()
+}
+
+func (at *analyzeTask) GetResource() taskcommon.Resource {
+	return at.resource
 }
 
 func (at *analyzeTask) IsVectorIndex() bool {
@@ -117,6 +128,7 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 		TalonEnabledStages:          req.GetStorageConfig().GetTalonEnabledStages(),
 		TalonSmallReadThreshold:     req.GetStorageConfig().GetTalonSmallReadThreshold(),
 		TalonCoordinator:            req.GetStorageConfig().GetTalonCoordinator(),
+		TalonNamespace:              req.GetStorageConfig().GetTalonNamespace(),
 		TalonBlockSize:              req.GetStorageConfig().GetTalonBlockSize(),
 		TalonMaxIdlePerAddr:         req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
 		TalonEnableForExternalTable: req.GetStorageConfig().GetTalonEnableForExternalTable(),
@@ -217,6 +229,7 @@ func (at *analyzeTask) PostExecute(ctx context.Context) error {
 
 	at.manager.StoreAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
+		at.info,
 		centroidsFile)
 	at.tr.Elapse("index building all done")
 	log.Info(ctx, "Successfully save analyze files")
@@ -233,7 +246,7 @@ func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
-	at.manager.StoreAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
+	at.manager.StoreAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), at.info, state, failReason)
 }
 
 func (at *analyzeTask) GetState() indexpb.JobState {

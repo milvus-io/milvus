@@ -6,6 +6,8 @@
 %global release 1%{?dist}
 %endif
 
+%bcond_without svs
+
 Name:             milvus
 Version:          %{version}
 Release:          %{release}
@@ -57,8 +59,6 @@ for lib in \
     liblzma.so* \
     libmilvus-common.so* \
     libmilvus_core.so* \
-    libmilvus-planparser-cpp.so* \
-    libmilvus-planparser.so* \
     libmilvus-storage.so* \
     libprotobuf.so* \
     librdkafka.so* \
@@ -76,6 +76,10 @@ for lib in \
     libutf8_range_lib.so*; do
     cp -a lib/${lib} %{buildroot}/lib64/milvus/
 done
+
+%if %{with svs}
+cp -a lib/libsvs_runtime.so* %{buildroot}/lib64/milvus/
+%endif
 
 # conf
 install -m 755 configs/milvus.yaml %{buildroot}/etc/milvus/configs/milvus.yaml
@@ -129,11 +133,12 @@ systemctl daemon-reload
 /lib64/milvus/libicudata.so*
 /lib64/milvus/libjemalloc.so*
 /lib64/milvus/libknowhere.so*
+%if %{with svs}
+/lib64/milvus/libsvs_runtime.so*
+%endif
 /lib64/milvus/liblzma.so*
 /lib64/milvus/libmilvus-common.so*
 /lib64/milvus/libmilvus_core.so*
-/lib64/milvus/libmilvus-planparser-cpp.so*
-/lib64/milvus/libmilvus-planparser.so*
 /lib64/milvus/libmilvus-storage.so*
 /lib64/milvus/libprotobuf.so*
 /lib64/milvus/librdkafka.so*

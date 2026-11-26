@@ -3133,7 +3133,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
             )
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Namespace-partition sealed preparation hits compaction: partition key field is not found")
     def test_hybrid_search_dynamic_namespace_sealed(self):
         client = self._client()
         rows = self._hybrid_edge_rows()
@@ -3196,7 +3195,6 @@ class TestFunctionChain(TestMilvusClientV2Base):
         )
         if partition_mode:
             # Exercise direct dynamic-field materialization on growing rows.
-            # Namespace-partition flush currently depends on separate compaction support.
             self.insert(client, name, rows, namespace="_default")
         else:
             self.insert(client, name, rows[:1])

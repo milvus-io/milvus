@@ -21,10 +21,16 @@ package packed
 #include "milvus-storage/ffi_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
+
+// The pre-merge header aliased close to a symbol the merged library omits.
+#ifdef loon_segment_writer_close
+#error "milvus-storage must provide the merged loon_segment_writer_close ABI"
+#endif
 */
 import "C"
 
 import (
+	"maps"
 	"strings"
 	"unsafe"
 
@@ -182,12 +188,18 @@ func (w *FFISegmentWriter) SyncBuffered() error {
 // CommitManifestUpdates (success or failure). Destroy is idempotent; a
 // nil column_groups pointer indicates the handle has already been released.
 type SegmentOutput struct {
-	cOutput     C.LoonSegmentWriteOutput
-	rowsWritten int64
+	cOutput          C.LoonSegmentWriteOutput
+	rowsWritten      int64
+	textLogicalBytes map[int64]uint64
 }
 
 // RowsWritten returns the number of rows the segment writer reported.
 func (f *SegmentOutput) RowsWritten() int64 { return f.rowsWritten }
+
+// TextLogicalBytes returns an independent snapshot of UTF-8 payload bytes by
+// FieldID for TEXT columns encoded across every output row, including NULLs.
+// An absent field has no native total. The snapshot is available after Destroy.
+func (f *SegmentOutput) TextLogicalBytes() map[int64]uint64 { return maps.Clone(f.textLogicalBytes) }
 
 // Destroy releases the C output (LOB file strings + array). Safe to call
 // multiple times — the nil column_groups pointer left behind serves as
@@ -261,10 +273,21 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, err
 	}
-	return &SegmentOutput{
-		cOutput:     cOutput,
-		rowsWritten: int64(cOutput.rows_written),
-	}, nil
+	var textLogicalBytes map[int64]uint64
+	summaries := unsafe.Slice(cOutput.text_summaries, cOutput.num_text_summaries)
+	if len(summaries) > 0 {
+		textLogicalBytes = make(map[int64]uint64, len(summaries))
+		for _, summary := range summaries {
+			// A failed Write can advance a LOB counter before the batch is accepted.
+			if summary.total_entries == cOutput.rows_written && summary.total_bytes >= 0 {
+				textLogicalBytes[int64(summary.field_id)] = uint64(summary.total_bytes)
+			}
+		}
+	}
+	// The writer owns the summary array and is destroyed when Close returns.
+	cOutput.text_summaries = nil
+	cOutput.num_text_summaries = 0
+	return &SegmentOutput{cOutput: cOutput, rowsWritten: int64(cOutput.rows_written), textLogicalBytes: textLogicalBytes}, nil
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.

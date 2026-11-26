@@ -54,7 +54,6 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 	}
 	collectionID := req.GetCollectionID()
 	runtime := s.qviewsRuntime
-	s.collectionUsage.touch(collectionID)
 	progress := loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, req.GetExpectedVchannels())
 	if progress.Ready() {
 		return nil
@@ -87,10 +86,6 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}
-		if r.Err == nil {
-			// A long load gets a fresh TTI interval immediately before query execution.
-			s.collectionUsage.touch(collectionID)
-		}
 		return r.Err
 	case <-ctx.Done():
 		return context.Cause(ctx)
@@ -108,10 +103,15 @@ func (s *Server) prepareAutoLoadRequest(ctx context.Context, coll *milvuspb.Desc
 	}
 	indexes, err := s.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: coll.GetCollectionID()})
 	if err = merr.CheckRPCCall(indexes, err); err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return nil, err
+		}
+		// A collection with no vector field needs no index to be loaded, as in
+		// the Proxy LoadCollection task.
+		if typeutil.HasVectorField(schema) {
 			return nil, merr.WrapErrIndexNotFoundForCollection(coll.GetCollectionName())
 		}
-		return nil, err
+		indexes = &indexpb.DescribeIndexResponse{}
 	}
 	fieldIndexes := make(map[int64]int64)
 	for _, index := range indexes.GetIndexInfos() {

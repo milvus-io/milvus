@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -510,10 +511,18 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerUsesJobExternalFlag() {
 			mockAssemble := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
 			defer mockAssemble.UnPatch()
 
+			charged := taskcommon.Resource{CPU: 3, Memory: 123 << 20}
+			var placed taskcommon.Resource
 			cluster := session.NewMockCluster(s.T())
-			cluster.EXPECT().CreateCopySegment(int64(10), req, int64(100), test.external).Return(nil)
+			cluster.EXPECT().CreateCopySegment(int64(10), req, int64(100), test.external, mock.Anything).RunAndReturn(
+				func(_ int64, _ *datapb.CopySegmentRequest, _ int64, _ bool, resource taskcommon.Resource) error {
+					placed = resource
+					return nil
+				})
 
-			task.CreateTaskOnWorker(10, cluster)
+			task.CreateTaskOnWorker(10, cluster, charged)
+			// The dispatch ships exactly what the scheduler placed the task on.
+			s.Equal(charged, placed)
 
 			updated := copyMeta.GetTask(context.Background(), task.GetTaskId())
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskInProgress, updated.GetState())
@@ -545,7 +554,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTas
 			"unrecognized task type '%s'", taskcommon.ExternalCopySegment)).Build()
 	defer createMock.UnPatch()
 
-	task.CreateTaskOnWorker(10, cluster)
+	task.CreateTaskOnWorker(10, cluster, task.GetTaskResource())
 
 	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
@@ -600,7 +609,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 				Return(test.err).Build()
 			defer createMock.UnPatch()
 
-			task.CreateTaskOnWorker(10, cluster)
+			task.CreateTaskOnWorker(10, cluster, task.GetTaskResource())
 
 			updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
 			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskPending, updatedTask.GetState())
@@ -689,8 +698,8 @@ func (s *CopySegmentTaskSuite) TestScheduler_OneOffTransientErrorDoesNotRedispat
 			}, nil
 		})
 	var creates atomic.Int32
-	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(int64, *datapb.CopySegmentRequest, int64, bool) error {
+	cluster.EXPECT().CreateCopySegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(int64, *datapb.CopySegmentRequest, int64, bool, taskcommon.Resource) error {
 			creates.Add(1)
 			return nil
 		}).Maybe()
@@ -1941,6 +1950,119 @@ func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64
 		SnapshotCache: &CopySegmentSnapshotCache{data: snapshotData},
 	}
 	return task, job
+}
+
+func TestCopySegmentFieldLogicalSizes(t *testing.T) {
+	ctx := context.Background()
+	srcSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "title", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "other", DataType: schemapb.DataType_Int64},
+	}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 110, Name: "items", Nullable: true, Fields: []*schemapb.FieldSchema{{FieldID: 111, Name: "price", DataType: schemapb.DataType_Int64}}}}}
+	dstSchema := proto.CloneOf(srcSchema)
+	dstSchema.Fields[1].Name = "different_field"
+	task, job := newManifestFallbackAssembleFixture(ctx, 1)
+	mt, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	mt.AddCollection(&meta.CollectionInfo{ID: 100, Schema: dstSchema})
+	task.Meta = mt
+	snapshot := job.SnapshotCache.data
+	snapshot.Collection = &datapb.CollectionDescription{Schema: srcSchema}
+	source := snapshot.Segments[0]
+	source.NumOfRows, source.SegmentLevel, source.ManifestHasIndex = 10, datapb.SegmentLevel_L1, proto.Bool(false)
+	source.FieldLogicalSizes = &datapb.FieldLogicalSizes{Version: 1, RowCount: 10, Fields: map[int64]*datapb.FieldLogicalSize{101: {}, 102: {PayloadBytes: 80}, 110: {ValidityBits: 10}, 111: {PayloadBytes: 88}}}
+	req, err := AssembleCopySegmentRequest(task, job)
+	require.NoError(t, err)
+	matched := req.GetSources()[0].GetFieldLogicalSizes()
+	require.Len(t, matched.GetFields(), 3)
+	require.NotNil(t, matched.GetFields()[101])
+	require.NotContains(t, matched.GetFields(), int64(102))
+	require.EqualValues(t, 10, matched.GetFields()[110].GetValidityBits())
+	require.EqualValues(t, 88, matched.GetFields()[111].GetPayloadBytes())
+	// Even equal leaf definitions cease to match if the parent changes nullability.
+	dstSchema = proto.CloneOf(dstSchema)
+	dstSchema.StructArrayFields[0].Nullable = false
+	require.NotContains(t, copyFieldIdentity(srcSchema, dstSchema), int64(111))
+	source.FieldLogicalSizes.RowCount++
+	require.Nil(t, copySourceFieldSizes(source, copyFieldIdentity(srcSchema, srcSchema)))
+	source.FieldLogicalSizes = nil
+	require.Nil(t, copySourceFieldSizes(source, copyFieldIdentity(srcSchema, srcSchema)))
+
+	target := RestoredSegmentInfo(source, 100, 10, 2001, "ch1", 1)
+	require.NoError(t, mt.AddSegment(ctx, target))
+	result := &datapb.CopySegmentResult{SegmentId: 2001, ImportedRows: 10, ManifestPath: packed.MarshalManifestPath("files/insert_log/100/10/2001", 4), ManifestIndexRewritten: proto.Bool(true), FieldLogicalSizes: matched}
+	apply := func() error {
+		return mt.UpdateSegmentsInfo(ctx, meta.UpdateBinlogsOperator(2001, nil, nil, nil, nil), meta.UpdateManifest(2001, result.ManifestPath), copiedFieldSizesOperator(task, result))
+	}
+	require.NoError(t, apply())
+	stored := mt.GetSegment(ctx, 2001)
+	require.True(t, proto.Equal(matched, meta.SegmentFieldLogicalSizes(stored.SegmentInfo)))
+	require.Equal(t, result.ManifestPath, stored.GetFieldLogicalSizesManifest())
+	result.ImportedRows--
+	require.NoError(t, apply())
+	require.Nil(t, mt.GetSegment(ctx, 2001).GetStats().GetFieldLogicalSizes())
+}
+
+func TestCopySegmentFieldLogicalSizesReplay(t *testing.T) {
+	for _, mode := range []string{"direct", "staged"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, strconv.FormatBool(mode == "staged"))
+			task := CreateTestCopyTask(100, 2001).(*Task)
+			copies, _ := NewCopySegmentTaskTestMeta(t, task)
+			mt, err := meta.NewMemoryMeta(t)
+			require.NoError(t, err)
+			task.Meta, task.CopyMeta = mt, copies
+			target := NewTestCopySegment(2001)
+			target.StorageVersion, target.Level, target.IsImporting = storage.StorageV3, datapb.SegmentLevel_L1, true
+			require.NoError(t, mt.AddSegment(ctx, target))
+			base := "files/insert_log/100/10/2001"
+			manifest := packed.MarshalManifestPath(base, 4)
+			sizes := &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{101: {}}}
+			result := &datapb.CopySegmentResult{SegmentId: 2001, ImportedRows: 100, ManifestPath: manifest, ManifestIndexRewritten: proto.Bool(true), FieldLogicalSizes: sizes}
+			resp := &datapb.QueryCopySegmentResponse{State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, SegmentResults: []*datapb.CopySegmentResult{result}}
+			preCompletion := proto.CloneOf(task.Task.Load())
+			sync := func() error { return SyncCopySegmentTask(ctx, task, resp, copies, mt, nil) }
+			require.NoError(t, sync())
+			require.NoError(t, sync())
+			if mode == "staged" {
+				require.NotNil(t, mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""))
+			}
+			original := mt.GetSegment(ctx, 2001).SegmentInfo
+			require.NotNil(t, meta.SegmentFieldLogicalSizes(original).GetFields()[101])
+			sizes.Fields[101].PayloadBytes++
+			require.ErrorIs(t, sync(), merr.ErrDataIntegrity)
+			require.False(t, task.GetCleanupRequired())
+			require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+			// Lose the task completion marker. Both the staged group and the
+			// individually finalized target precede that marker in the catalog.
+			catalog := copies.(*Meta).Catalog
+			require.NoError(t, catalog.SaveCopySegmentTask(ctx, preCompletion))
+			copies, err = NewCopySegmentMeta(ctx, catalog, mt, nil, nil, nil)
+			require.NoError(t, err)
+			task = copies.GetTask(ctx, preCompletion.GetTaskId()).(*Task)
+			require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+			require.ErrorIs(t, sync(), merr.ErrDataIntegrity)
+			require.False(t, task.GetCleanupRequired())
+			require.True(t, proto.Equal(original, mt.GetSegment(ctx, 2001).SegmentInfo))
+			if mode == "direct" {
+				// Cleanup may already be armed from the first successful file
+				// publication. The scheduler must not fail its owner on replay.
+				require.NoError(t, copies.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskCleanup(true)))
+				cluster := session.NewMockCluster(t)
+				cluster.EXPECT().QueryCopySegment(mock.Anything, mock.Anything).Return(resp, nil).Once()
+				task.QueryTaskOnWorker(cluster)
+				require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+			}
+			// A later revision may have legitimately rewritten field 101.
+			next := packed.MarshalManifestPath(base, 5)
+			require.NoError(t, mt.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{SegmentID: 2001, ExpectedManifest: manifest, Mutation: meta.ManifestMutation{Type: meta.ManifestMutationNoop, ManifestPath: next}}))
+			require.NoError(t, sync())
+			stored := mt.GetSegment(ctx, 2001)
+			require.Equal(t, next, stored.GetManifestPath())
+			require.Zero(t, meta.SegmentFieldLogicalSizes(stored.SegmentInfo).GetFields()[101].GetPayloadBytes())
+			require.False(t, task.GetCleanupRequired())
+		})
+	}
 }
 
 func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing.T) {

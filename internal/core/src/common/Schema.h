@@ -57,10 +57,30 @@ struct PhysicalColumnMapping {
     bool is_external_column = false;
 };
 
+// Expansion is restricted to children registered under an actual Struct parent.
+struct OrdinaryStructProjection {
+    FieldId parent_field_id;
+    std::vector<FieldId> child_field_ids;
+};
+using OrdinaryStructProjections =
+    std::unordered_map<std::string, OrdinaryStructProjection>;
+
 PhysicalColumnMapping
 ResolvePhysicalColumnMapping(
     bool is_milvus_table,
     const milvus::proto::schema::FieldSchema& field_schema);
+
+inline std::optional<std::pair<std::string, std::string>>
+ParseStructSubFieldPath(std::string_view path) {
+    auto left = path.find('[');
+    if (left == std::string_view::npos || left == 0 || path.back() != ']' ||
+        left + 2 >= path.size()) {
+        return std::nullopt;
+    }
+    return std::make_pair(
+        std::string(path.substr(0, left)),
+        std::string(path.substr(left + 1, path.size() - left - 2)));
+}
 
 inline std::optional<std::string>
 GetStructNameForArrayField(const FieldMeta& field_meta) {
@@ -69,14 +89,11 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
         return std::nullopt;
     }
 
-    const auto& field_name = field_meta.get_name().get();
-    auto left = field_name.find('[');
-    auto right = field_name.find(']', left == std::string::npos ? 0 : left);
-    if (left == std::string::npos || right == std::string::npos || left == 0) {
+    auto parsed = ParseStructSubFieldPath(field_meta.get_name().get());
+    if (!parsed.has_value()) {
         return std::nullopt;
     }
-
-    return field_name.substr(0, left);
+    return std::move(parsed->first);
 }
 
 ArrowSchemaPtr
@@ -545,6 +562,19 @@ class Schema {
     std::vector<FieldId>
     ResolveColumnFieldIds(const std::string& column_name) const;
 
+    bool
+    IsOrdinaryExternalStruct(const std::string& physical_column_name) const {
+        return is_external_collection() &&
+               !is_milvus_table_external_collection() &&
+               external_struct_parents_.count(physical_column_name) != 0;
+    }
+
+    // An empty selection produces no projections. Only selected, registered
+    // children of ordinary external Struct fields are included.
+    OrdinaryStructProjections
+    GetOrdinaryStructProjections(
+        const std::vector<FieldId>& selected_fields) const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
@@ -745,6 +775,12 @@ class Schema {
 
     // struct_name -> field ID of the struct array field (built in ParseFrom)
     std::unordered_map<std::string, FieldId> struct_field_ids_;
+    std::unordered_map<std::string, std::vector<FieldId>>
+        struct_field_children_;
+    // struct_name -> physical external parent column name (built in ParseFrom)
+    std::unordered_map<std::string, std::string> struct_external_fields_;
+    // physical external parent column name -> struct_name (built in ParseFrom)
+    std::unordered_map<std::string, std::string> external_struct_parents_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

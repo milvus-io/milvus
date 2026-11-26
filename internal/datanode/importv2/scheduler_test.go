@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -66,8 +67,8 @@ func TestSnapshotPartitionMappingTaskMismatch(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	for _, partitions := range [][]int64{{10}, {10, 20}} {
 		manager := NewTaskManager()
-		pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, PartitionIDs: partitions, ImportFiles: []*internalpb.ImportFile{file}}, manager, nil)
-		imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, PartitionIDs: partitions, Files: []*internalpb.ImportFile{file}}, manager, nil, nil)
+		pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, PartitionIDs: partitions, ImportFiles: []*internalpb.ImportFile{file}}, manager, nil, taskcommon.Resource{})
+		imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, PartitionIDs: partitions, Files: []*internalpb.ImportFile{file}}, manager, nil, nil, taskcommon.Resource{})
 		for _, task := range []Task{pre, imp} {
 			manager.Add(task)
 			require.ErrorIs(t, conc.AwaitAll(task.Execute()...), merr.ErrServiceInternal)
@@ -97,8 +98,8 @@ func TestSnapshotInlineL0RejectedBothPhases(t *testing.T) {
 		recovered := &internalpb.ImportFile{}
 		require.NoError(t, proto.Unmarshal(encoded, recovered))
 		manager := NewTaskManager()
-		pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{recovered}}, manager, nil)
-		imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{recovered}}, manager, nil, nil)
+		pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{recovered}}, manager, nil, taskcommon.Resource{})
+		imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{recovered}}, manager, nil, nil, taskcommon.Resource{})
 		for _, task := range []Task{pre, imp} {
 			manager.Add(task)
 			require.ErrorIs(t, conc.AwaitAll(task.Execute()...), merr.ErrServiceUnimplemented)
@@ -117,8 +118,8 @@ func TestSnapshotSharedL0MissingInventoryBothPhases(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}, {Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
 	manager := NewTaskManager()
-	pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{file}}, manager, nil)
-	imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{file}}, manager, nil, nil)
+	pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options, ImportFiles: []*internalpb.ImportFile{file}}, manager, nil, taskcommon.Resource{})
+	imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options, Files: []*internalpb.ImportFile{file}}, manager, nil, nil, taskcommon.Resource{})
 	for _, task := range []Task{pre, imp} {
 		manager.Add(task)
 		require.ErrorContains(t, conc.AwaitAll(task.Execute()...), "lost its shared L0 inventory")
@@ -205,12 +206,12 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		TaskID: 1, Schema: schema, Options: options, StorageConfig: &indexpb.StorageConfig{},
 		ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
-	}, manager, nil, cipher)
+	}, manager, nil, taskcommon.Resource{}, cipher).(*PreImportTask)
 	defer pre.Cancel()
 	imp := NewImportTask(&datapb.ImportRequest{
 		TaskID: 2, Schema: schema, Options: options, StorageConfig: &indexpb.StorageConfig{}, Files: []*internalpb.ImportFile{file},
 		Ts: 999, IDRange: &datapb.IDRange{Begin: 100, End: 110}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
-	}, manager, nil, nil, cipher)
+	}, manager, nil, nil, taskcommon.Resource{}, cipher).(*ImportTask)
 	defer imp.Cancel()
 	for _, task := range []Task{pre, imp} {
 		manager.Add(task)
@@ -246,7 +247,7 @@ func TestSnapshotSharedTaskLifecycle(t *testing.T) {
 			memoryPatch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
 			defer memoryPatch.UnPatch()
 			manager := NewTaskManager()
-			task := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1}, manager, nil)
+			task := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1}, manager, nil, taskcommon.Resource{})
 			defer task.Cancel()
 			manager.Add(task)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -554,7 +555,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				TaskID: 1, Schema: schema, Options: options, ImportFiles: taskFiles,
 				PartitionIDs: []int64{10}, Vchannels: []string{"target"}, StorageConfig: targetCfg,
 				SnapshotL0Source: l0Source,
-			}, manager, targetCM)
+			}, manager, targetCM, taskcommon.Resource{})
 			defer pre.Cancel()
 			manager.Add(pre)
 			if mode == "shared_large_preimport_budget" {
@@ -590,7 +591,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				Ts: 9999, IDRange: &datapb.IDRange{Begin: 100, End: 1000}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
 				StorageConfig:    targetCfg,
 				SnapshotL0Source: l0Source,
-			}, manager, nil, targetCM)
+			}, manager, nil, targetCM, taskcommon.Resource{})
 			defer imp.Cancel()
 			manager.Add(imp)
 			if mode == "import_admission" {
@@ -728,12 +729,12 @@ func TestSnapshotReaderBudgetsAndCleanup(t *testing.T) {
 				task = NewPreImportTask(&datapb.PreImportRequest{
 					TaskID: 1, Schema: schema, Options: options,
 					ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
-				}, manager, nil)
+				}, manager, nil, taskcommon.Resource{})
 			} else {
 				task = NewImportTask(&datapb.ImportRequest{
 					TaskID: 1, Schema: schema, Options: options,
 					Files: []*internalpb.ImportFile{file}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
-				}, manager, nil, nil)
+				}, manager, nil, nil, taskcommon.Resource{})
 			}
 			defer task.Cancel()
 			manager.Add(task)
@@ -850,11 +851,46 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 		TaskSlot:     10,
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
 	s.Equal(int64(10), slots)
+}
+
+func (s *SchedulerSuite) TestScheduler_Resource() {
+	// A pending task books what DataCoord priced it at.
+	preimportReq := &datapb.PreImportRequest{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+	}
+	s.manager.Add(NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{CPU: 1, Memory: 256 << 20}))
+	s.Equal(taskcommon.Resource{CPU: 1, Memory: 256 << 20}, s.scheduler.Resource())
+
+	// A second task adds to the ledger.
+	importReq := &datapb.ImportRequest{
+		JobID:        1,
+		TaskID:       3,
+		CollectionID: 3,
+		PartitionIDs: []int64{4},
+		Vchannels:    []string{"ch-0"},
+		Schema:       s.schema,
+		Files:        []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
+		TaskSlot:     10,
+	}
+	s.manager.Add(NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{CPU: 2, Memory: 512 << 20}))
+	s.Equal(taskcommon.Resource{CPU: 3, Memory: 768 << 20}, s.scheduler.Resource())
+
+	// A completed task no longer books anything.
+	s.manager.Update(2, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.manager.Update(3, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
@@ -887,7 +923,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -935,7 +971,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -996,7 +1032,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -1057,7 +1093,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -1096,7 +1132,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
-	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm, taskcommon.Resource{})
 	s.manager.Add(preimportTask)
 	err = preimportTask.(*PreImportTask).readFileStat(s.reader, 0)
 	s.NoError(err)
@@ -1148,7 +1184,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader, nil)
 	s.NoError(err)
@@ -1261,7 +1297,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm, taskcommon.Resource{})
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader, nil)
 	s.NoError(err)
@@ -1489,25 +1525,134 @@ func (s *SchedulerSuite) TestScheduler_CollectDropsFailedAndRemovedTasks() {
 
 	// Both tasks still have an unfinished file future.
 	release := make(chan struct{})
-	defer close(release)
 	blocked := func() *conc.Future[any] {
 		return conc.Go(func() (any, error) {
 			<-release
 			return nil, nil
 		})
 	}
-	s.scheduler.futures[3001] = []*conc.Future[any]{blocked()}
-	s.scheduler.futures[3002] = []*conc.Future[any]{blocked()}
+	f1, f2 := blocked(), blocked()
+	s.scheduler.futures[3001] = []*conc.Future[any]{f1}
+	s.scheduler.futures[3002] = []*conc.Future[any]{f2}
 
 	// Mark one task Failed and remove the other.
 	s.manager.Update(3001, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("mock failure"))
 	s.manager.Remove(3002)
 
+	// Failed and removed tasks are canceled and removed from the future registry.
 	s.scheduler.collectCompletedTasks()
-
-	s.Empty(s.scheduler.futures)
+	s.NotContains(s.scheduler.futures, int64(3001))
+	s.NotContains(s.scheduler.futures, int64(3002))
 	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3001).GetState())
 	s.Nil(s.manager.Get(3002))
+
+	// Once their futures return, the next collection drops them.
+	close(release)
+	s.Eventually(func() bool { return f1.Done() && f2.Done() }, 5*time.Second, 10*time.Millisecond)
+	s.scheduler.collectCompletedTasks()
+	s.Empty(s.scheduler.futures)
+	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3001).GetState())
+}
+
+func (s *SchedulerSuite) TestScheduler_CanceledReadersRemainAccountedByAllocator() {
+	for _, removed := range []bool{false, true} {
+		s.Run(strconv.FormatBool(removed), func() {
+			ma := NewMemoryAllocator(1 << 30)
+			patch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
+			defer patch.UnPatch()
+			task := newFakeImportTask(3101, s.manager, nil)
+			task.resource = taskcommon.Resource{CPU: 1, Memory: 256 << 20}
+			s.manager.Add(task)
+			s.Require().NoError(ma.BlockingAllocate(task.ctx, 3101, 512<<20))
+			if removed {
+				s.manager.Remove(3101)
+			} else {
+				s.manager.Update(3101, UpdateState(datapb.ImportTaskStateV2_Failed))
+			}
+			s.ErrorIs(task.ctx.Err(), context.Canceled)
+			s.Equal(taskcommon.Resource{Memory: 512 << 20}, s.scheduler.Resource())
+			ma.Release(3101, 512<<20)
+			s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
+			s.manager.Remove(3101)
+		})
+	}
+}
+
+// TestScheduler_SubmitRegistersBooking: scheduleTasks stores the task's
+// booking with its futures, so it is counted from the entry and only once.
+func (s *SchedulerSuite) TestScheduler_SubmitRegistersBooking() {
+	booked := taskcommon.Resource{CPU: 1, Memory: 256 << 20}
+	release := make(chan struct{})
+	task := newFakeImportTask(3401, s.manager, func() []*conc.Future[any] {
+		return []*conc.Future[any]{conc.Go(func() (any, error) {
+			<-release
+			return nil, nil
+		})}
+	})
+	task.resource = booked
+	s.manager.Add(task)
+	s.Equal(booked, s.scheduler.Resource(), "pending, not submitted yet")
+
+	s.scheduler.scheduleTasks()
+	s.scheduler.submitMu.Lock()
+	s.Require().Contains(s.scheduler.futures, int64(3401))
+	s.scheduler.submitMu.Unlock()
+	s.Equal(booked, s.scheduler.Resource(), "in progress and submitted: counted once")
+
+	close(release)
+	s.Eventually(func() bool { return allDone(s.scheduler.futures[3401]) }, 5*time.Second, 10*time.Millisecond)
+	s.scheduler.collectCompletedTasks()
+	s.Equal(datapb.ImportTaskStateV2_Completed, s.manager.Get(3401).GetState())
+	s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
+}
+
+// TestScheduler_FailedTaskWithDoneFuturesBooksNothing: when every future of a
+// failed task has already returned, nothing is left holding memory.
+func (s *SchedulerSuite) TestScheduler_FailedTaskWithDoneFuturesBooksNothing() {
+	task := newFakeImportTask(3102, s.manager, nil)
+	task.resource = taskcommon.Resource{CPU: 1, Memory: 512 << 20}
+	s.manager.Add(task)
+	done := conc.Go(func() (any, error) { return nil, errors.New("mock file failure") })
+	s.Eventually(done.Done, 5*time.Second, 10*time.Millisecond)
+	s.scheduler.futures[3102] = []*conc.Future[any]{done}
+	s.manager.Update(3102, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason("mock file failure"))
+
+	s.scheduler.collectCompletedTasks()
+	s.Empty(s.scheduler.futures)
+	s.Equal(taskcommon.Resource{}, s.scheduler.Resource())
+}
+
+// TestScheduler_ResourceCoversAllocatorReservations: DataCoord prices a small
+// file by its own size, but its reader reserves a whole buffer from the import
+// memory allocator. Resource() must not report less memory than that.
+func (s *SchedulerSuite) TestScheduler_ResourceCoversAllocatorReservations() {
+	ma := NewMemoryAllocator(64 << 30)
+	patch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
+	defer patch.UnPatch()
+
+	priced := taskcommon.Resource{CPU: 1, Memory: 16 << 20}
+	task := newFakeImportTask(3201, s.manager, nil)
+	task.resource = priced
+	s.manager.Add(task)
+	s.Equal(priced, s.scheduler.Resource(), "nothing reserved yet: the priced booking")
+
+	// Two readers each reserve a 512MiB buffer for files priced far below it.
+	s.Require().NoError(ma.BlockingAllocate(context.Background(), 3201, 512<<20))
+	s.Require().NoError(ma.BlockingAllocate(context.Background(), 3201, 512<<20))
+	s.Equal(int64(1<<30), ma.Used())
+	s.Equal(taskcommon.Resource{CPU: 1, Memory: 1 << 30}, s.scheduler.Resource())
+
+	// Once the readers release, the priced booking is what is left.
+	ma.Release(3201, 512<<20)
+	ma.Release(3201, 512<<20)
+	s.Equal(priced, s.scheduler.Resource())
+
+	// A reservation with no booked task still counts: a node is never reported
+	// idle while import buffers are held.
+	s.manager.Update(3201, UpdateState(datapb.ImportTaskStateV2_Completed))
+	s.Require().NoError(ma.BlockingAllocate(context.Background(), 3202, 256<<20))
+	s.Equal(taskcommon.Resource{Memory: 256 << 20}, s.scheduler.Resource())
+	ma.Release(3202, 256<<20)
 }
 
 func (s *SchedulerSuite) TestScheduler_FailedTaskWithNoFuturesStaysFailed() {
@@ -1533,4 +1678,41 @@ func (s *SchedulerSuite) TestScheduler_FailedTaskWithNoFuturesStaysFailed() {
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, new(SchedulerSuite))
+}
+
+func (s *SchedulerSuite) TestScheduler_FailureCancelsSiblingsDuringSubmission() {
+	pool := conc.NewPool[any](2)
+	defer pool.Release()
+	allowFailure := make(chan struct{})
+	readerStarted := make(chan struct{})
+	var task *fakeTask
+	task = newFakeImportTask(3501, s.manager, func() []*conc.Future[any] {
+		fs := []*conc.Future[any]{pool.Submit(func() (any, error) {
+			<-allowFailure
+			s.manager.Update(3501, UpdateState(datapb.ImportTaskStateV2_Failed))
+			return nil, errors.New("reader failed")
+		})}
+		fs = append(fs, pool.Submit(func() (any, error) {
+			close(readerStarted)
+			<-task.ctx.Done()
+			return nil, task.ctx.Err()
+		}))
+		// Submit blocks until failure cancels the sibling occupying the pool.
+		fs = append(fs, pool.Submit(func() (any, error) {
+			<-task.ctx.Done()
+			return nil, task.ctx.Err()
+		}))
+		return fs
+	})
+	s.manager.Add(task)
+	s.scheduler.scheduleTasks()
+	<-readerStarted
+	close(allowFailure)
+	s.scheduler.submitMu.Lock()
+	defer s.scheduler.submitMu.Unlock()
+	s.Eventually(func() bool { return allDone(s.scheduler.futures[3501]) }, time.Second, time.Millisecond)
+	s.ErrorIs(task.ctx.Err(), context.Canceled)
+	s.scheduler.collectCompletedTasks()
+	s.Empty(s.scheduler.futures)
+	s.Equal(datapb.ImportTaskStateV2_Failed, s.manager.Get(3501).GetState())
 }

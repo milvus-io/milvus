@@ -57,7 +57,6 @@ import (
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
 
 // Mark source resolution separately from target and inventory failures.
-var errImportSourceKey = errors.New("cannot resolve backup encryption key")
 
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
@@ -104,6 +103,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       meta.NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format(time.RFC3339),
@@ -207,6 +207,29 @@ func GetSegmentMaxSize(job ImportJob, indexMeta *index.IndexMeta) int {
 	}
 
 	return int(policy.GetExpectedSegmentSize(indexMeta, job.GetCollectionID(), job.GetSchema()))
+}
+
+// CapSegmentMaxSizeByRows lowers the byte target of an import job by the row
+// cap (see policy.GetSegmentMaxRows) so that a segment of that size holds
+// about the row cap: min(segmentMaxSize, maxRows x row size), where the row
+// size is measured from the job's own data, totalBytes / totalRows. Rows wider
+// than segmentMaxSize / maxRows keep the byte target.
+//
+// An import job sizes its segments once from this static target, so a per-job
+// measurement cannot make it disagree with itself. Row sizes that differ
+// between partitions make the row count per segment approximate; compaction
+// counts the rows of every segment afterwards, and a segment holding the cap
+// is full to it whatever its byte size.
+func CapSegmentMaxSizeByRows(job ImportJob, segmentMaxSize int64, totalBytes int64, totalRows int64) int64 {
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return segmentMaxSize
+	}
+	maxRows := policy.GetSegmentMaxRows()
+	if maxRows <= 0 || totalBytes <= 0 || totalRows <= 0 {
+		return segmentMaxSize
+	}
+	rowSize := float64(totalBytes) / float64(totalRows)
+	return max(min(segmentMaxSize, int64(float64(maxRows)*rowSize)), 1)
 }
 
 func importStorageVersion(isL0Import bool) int64 {
@@ -391,33 +414,18 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
-func resolveImportReadContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
-	ctx, err := meta.GetReadPluginContext(options)
-	if err != nil {
-		return nil, merr.Mark(err, errImportSourceKey)
-	}
-	return ctx, nil
-}
+const maxImportDispatchRetries = 3
 
-func retryableImportSourceError(err error) bool {
-	if !errors.Is(err, errImportSourceKey) {
-		return false
+func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
+	mlog.Warn(context.TODO(), "failed to dispatch import task", WrapTaskLog(task, mlog.Err(cause))...)
+	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) {
+		return
 	}
-	var timeout interface{ Timeout() bool }
-	var temporary interface{ Temporary() bool }
-	return merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) ||
-		(errors.As(err, &timeout) && timeout.Timeout()) || (errors.As(err, &temporary) && temporary.Temporary())
-}
-
-// New workers report a deterministic backup cipher rejection as an import
-// system error at CreateTask. Older workers and transient RPC failures retain
-// their existing retry behavior.
-func isBackupCipherRejection(options importutilv2.Options, err error) bool {
-	if !errors.Is(err, merr.ErrImportSysFailed) || merr.IsRetryableErr(err) {
-		return false
+	*nonRetryableFailures++
+	if *nonRetryableFailures < maxImportDispatchRetries {
+		return
 	}
-	artifact, _ := importutilv2.GetEZK(options)
-	return artifact != "" || importutilv2.IsBackup(options) || importutilv2.IsL0Import(options)
+	failImportDispatch(task, im, cause)
 }
 
 func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
@@ -430,11 +438,7 @@ func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, err
-	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
-		return nil, err
+		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),
@@ -447,7 +451,6 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    readContext,
 		SnapshotL0Source: l0Source,
 	}
 	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
@@ -464,10 +467,31 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	storageVersion := importStorageVersion(isL0Import)
+	useLoonFFI := importUseLoonFFI(isL0Import)
+
+	// Resolve source and target encryption contexts before allocating timestamps
+	// or ID ranges so dispatch retries do not consume allocator resources.
+	req := &datapb.ImportRequest{
+		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		Files:            importFiles,
+		Options:          job.GetOptions(),
+		StorageConfig:    meta.CreateStorageConfig(),
+		StorageVersion:   storageVersion,
+		UseLoonFfi:       useLoonFFI,
+		SnapshotL0Source: l0Source,
+	}
+	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
 		return nil, err
 	}
+
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
 		segment := mt.GetSegment(context.TODO(), segmentID)
@@ -512,33 +536,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		mlog.Uint64("ts", ts))...,
 	)
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	storageVersion := importStorageVersion(isL0Import)
-	useLoonFFI := importUseLoonFFI(isL0Import)
-
-	req := &datapb.ImportRequest{
-		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:            task.GetJobID(),
-		TaskID:           task.GetTaskID(),
-		CollectionID:     task.GetCollectionID(),
-		PartitionIDs:     importTaskPartitionIDs(task, job),
-		Vchannels:        job.GetVchannels(),
-		Schema:           job.GetSchema(),
-		Files:            importFiles,
-		Options:          job.GetOptions(),
-		Ts:               ts,
-		IDRange:          idRange,
-		RequestSegments:  requestSegments,
-		StorageConfig:    meta.CreateStorageConfig(),
-		TaskSlot:         task.GetTaskSlot(),
-		StorageVersion:   storageVersion,
-		PluginContext:    readContext,
-		UseLoonFfi:       useLoonFFI,
-		SnapshotL0Source: l0Source,
-	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		return nil, err
-	}
+	req.Ts = ts
+	req.IDRange = idRange
+	req.RequestSegments = requestSegments
+	req.TaskSlot = task.GetTaskSlot()
 	return req, nil
 }
 
@@ -1526,18 +1527,8 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
-	if files := task.GetFileStats(); !isL0Import && len(files) > 0 && files[0].GetImportFile().GetSnapshotSource() != nil {
-		// Typed tasks are homogeneous. Before selecting a worker we do not know
-		// its pool size or memory allowance, so use the file count as an upper
-		// bound on concurrent readers. The DN allocator remains authoritative
-		// and may admit fewer readers or smaller row buffers.
-		deleteBudget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
-		taskBufferSize = len(files) * (taskBufferSize + deleteBudget)
-		if importutilv2.SnapshotSourceUsesSharedL0(files[0].GetImportFile().GetSnapshotSource()) {
-			// One delete batch is reserved per task. The per-reader delete
-			// allowances above become the shared task's bitmap pool on the DN.
-			taskBufferSize += deleteBudget
-		}
+	if rowBytes, deleteBytes, ok := snapshotImportBufferBytes(task, job, int64(taskBufferSize)); ok {
+		taskBufferSize = int(rowBytes + deleteBytes)
 		// Round up only for the new snapshot accounting. Keep the existing
 		// ordinary/legacy L0 slot calculation unchanged.
 		memoryBasedSlots := (taskBufferSize-1)/memoryLimitPerSlot + 1
@@ -1685,3 +1676,36 @@ func GetImportSegmentIDsByVchannel(ctx context.Context, importMeta ImportMeta, m
 // attached via errors.Mark, NOT a merr error: merr's errors.Is matches by error code,
 // which would make every ImportSysFailed error (mostly transient) match it.
 var ErrRollbackImportNoVchannels = errors.New("import job has no vchannels")
+
+// snapshotImportBufferBytes returns what the worker reserves for a
+// snapshot-source task whose readers each want perReaderBuffer bytes, split
+// into the row buffers (rowBytes) and the delete budgets (deleteBytes), and
+// ok=false for any other task. Each reader takes its row buffer plus one delete
+// budget (importv2 reserveSnapshotRead / AllocateSnapshotTask), and a task
+// whose sources share one L0 set reserves one more delete batch for the task.
+// Typed tasks are homogeneous. Before selecting a worker we do not know its
+// pool size or memory allowance, so the file count is the upper bound on
+// concurrent readers. The DN allocator remains authoritative and may admit
+// fewer readers or smaller row buffers; placement bounds the memory by the
+// allocator's share of the node (ImportNodeMemoryShare). The task slot
+// (CalculateTaskSlot) is priced on the sum, the task memory (GetTaskResource)
+// on the two parts.
+func snapshotImportBufferBytes(task ImportTask, job ImportJob, perReaderBuffer int64) (rowBytes, deleteBytes int64, ok bool) {
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return 0, 0, false
+	}
+	files := task.GetFileStats()
+	if len(files) == 0 || files[0].GetImportFile().GetSnapshotSource() == nil {
+		return 0, 0, false
+	}
+	deleteBudget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	readers := int64(len(files))
+	rowBytes = readers * perReaderBuffer
+	deleteBytes = readers * deleteBudget
+	if importutilv2.SnapshotSourceUsesSharedL0(files[0].GetImportFile().GetSnapshotSource()) {
+		// The per-reader delete allowances above become the shared task's
+		// bitmap pool on the DN.
+		deleteBytes += deleteBudget
+	}
+	return rowBytes, deleteBytes, true
+}

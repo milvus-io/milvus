@@ -142,6 +142,12 @@ func (t *mixCompactionTask) preCompact() error {
 	}
 
 	t.estimatedOutputSegmentCount = int64(math.Ceil(float64(currSize) / float64(t.targetSize)))
+	if maxSegmentRows := t.plan.GetMaxSegmentRows(); maxSegmentRows > 0 {
+		// The writer also cuts an output segment on rows, so one input can
+		// split into several outputs while its bytes stay under targetSize.
+		t.estimatedOutputSegmentCount = max(t.estimatedOutputSegmentCount,
+			int64(math.Ceil(float64(t.maxRows)/float64(maxSegmentRows))))
+	}
 	mlog.Info(context.TODO(), "preCompaction analyze",
 		mlog.Int64("planID", t.GetPlanID()),
 		mlog.Int64("inputSize", currSize),
@@ -231,6 +237,7 @@ func (t *mixCompactionTask) mergeSplit(
 	if err != nil {
 		return nil, err
 	}
+	mWriter.SetSegmentMaxRows(t.plan.GetMaxSegmentRows())
 
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
@@ -241,8 +248,9 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 
-	for _, seg := range t.plan.GetSegmentBinlogs() {
-		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField, writerSchema)
+	lineage := newTextSizeLineage(writerSchema, t.lobContext, t.plan.GetSegmentBinlogs())
+	for i, seg := range t.plan.GetSegmentBinlogs() {
+		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField, writerSchema, lineage, i)
 		if err != nil {
 			mWriter.Close()
 			return nil, err
@@ -255,6 +263,7 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 	res := mWriter.GetCompactionSegments()
+	lineage.finish(res)
 	if len(res) == 0 {
 		// append an empty segment
 		id, err := segIDAlloc.AllocOne()
@@ -284,7 +293,7 @@ func (t *mixCompactionTask) mergeSplit(
 func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
-	writerSchema *schemapb.CollectionSchema,
+	writerSchema *schemapb.CollectionSchema, lineage *textSizeLineage, source int,
 ) (deletedRowCount, expiredRowCount int64, err error) {
 	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
 		storage.WithDownloader(t.binlogIO.Download),
@@ -318,6 +327,17 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	defer materializer.Close()
 
+	write := mWriter.Write
+	if lineage != nil {
+		lineage.sources[source].present = existingFields
+		write = func(r storage.Record) error {
+			if err := mWriter.Write(r); err != nil {
+				return err
+			}
+			lineage.recordRange(mWriter.currentSegmentID, source, r, 0, r.Len())
+			return nil
+		}
+	}
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	var totalRowsRead int64
 
@@ -412,7 +432,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 					if out != rec {
 						defer out.Release()
 					}
-					return mWriter.Write(out)
+					return write(out)
 				}()
 				if err != nil {
 					rb.Release()
@@ -423,7 +443,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 			rb.Release()
 		} else {
 			out := overwriteRecordTimestamps(r, seg.GetCommitTimestamp())
-			err := mWriter.Write(out)
+			err := write(out)
 			if out != r {
 				out.Release()
 			}
@@ -435,6 +455,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		cleanupMaterializedRecord(r)
 	}
 
+	if lineage != nil {
+		lineage.sources[source].read = totalRowsRead
+	}
 	deltalogDeleteEntriesCount := len(delta)
 	deletedRowCount = int64(entityFilter.GetDeletedCount())
 	expiredRowCount = int64(entityFilter.GetExpiredCount())
@@ -484,7 +507,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	useMergeSort := canMergeSort(t.plan, t.compactionParams)
+	useMergeSort := compaction.CanMergeSort(t.plan, t.compactionParams)
 
 	var res []*datapb.CompactionSegment
 	var err error
@@ -582,37 +605,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		Type:     t.plan.GetType(),
 	}
 	return planResult, nil
-}
-
-// canMergeSort reports whether this plan is eligible for storage.MergeSort,
-// which merges without sorting and so requires every input to already be
-// ordered by the plan's merge key. A plan that is not eligible falls back to
-// mergeSplit, which does not assume ordering.
-func canMergeSort(plan *datapb.CompactionPlan, params compaction.Params) bool {
-	if !params.UseMergeSort {
-		return false
-	}
-	// The two sorted flags record which order the compactors that write sorted
-	// output used. datanode/services.go derives this plan's merge key from the
-	// same EnableNamespace setting -- [pk], or [partitionKey, pk] -- so the flag
-	// that must be set is the matching one, not either one. It also rejects the
-	// plan outright when a namespace-enabled collection has no partition key
-	// (namespace.mode=partition), which is why reading the setting is enough
-	// here rather than inspecting the merge key itself.
-	namespaceEnabled := plan.GetSchema().GetEnableNamespace()
-	for _, segment := range plan.GetSegmentBinlogs() {
-		sortedByMergeKey := segment.GetIsSorted()
-		if namespaceEnabled {
-			sortedByMergeKey = segment.GetIsSortedByNamespace()
-		}
-		if !sortedByMergeKey {
-			return false
-		}
-	}
-	// Each reader holds a live record, so memory grows with the reader count. A
-	// single segment is allowed: merge sort keeps the output flagged sorted,
-	// whereas mergeSplit emits it unsorted and needs a follow-up sort compaction.
-	return len(plan.GetSegmentBinlogs()) <= params.MaxSegmentMergeSort
 }
 
 func (t *mixCompactionTask) Complete() {

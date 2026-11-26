@@ -34,10 +34,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -136,31 +138,55 @@ func TestPreImportWriterContext(t *testing.T) {
 			for _, tc := range []struct {
 				name      string
 				cipher    hook.Cipher
+				props     []*commonpb.KeyValuePair
+				retryable bool
 				wantError string
 			}{
-				{name: "empty key", cipher: &writerContextCipher{}, wantError: "cannot get ez key"},
-				{name: "missing plugin", wantError: "cipher plugin is unavailable"},
+				{name: "empty key retries", cipher: &writerContextCipher{}, retryable: true},
+				{name: "missing plugin retries", retryable: true},
+				{name: "invalid target ezID fails after budget", cipher: &writerContextCipher{key: key}, props: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "bad"}}, wantError: "invalid target"},
 				{name: "available key", cipher: &writerContextCipher{key: key}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					patch := mockey.Mock(hookutil.GetCipher).To(func() hook.Cipher { return tc.cipher }).Build()
 					t.Cleanup(func() { patch.UnPatch() })
 					job := preImportWriterContextJob(version)
+					if tc.props != nil {
+						job.Schema.Properties = tc.props
+					}
 					task, im := newPreImportWriterContextTask(t, job)
 					cluster := session.NewMockCluster(t)
 
-					if tc.wantError != "" {
-						task.CreateTaskOnWorker(42, cluster)
-						failed := im.GetJob(context.Background(), job.GetJobID())
-						require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
-						require.Contains(t, failed.GetReason(), tc.wantError)
-						require.Equal(t, int64(meta.NullNodeID), task.GetNodeID())
-						cluster.AssertNotCalled(t, "CreatePreImport", mock.Anything, mock.Anything, mock.Anything)
-						cluster.AssertNotCalled(t, "CreatePreImportV3", mock.Anything, mock.Anything, mock.Anything)
+					if tc.retryable {
+						for range maxImportDispatchRetries + 2 {
+							task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
+							require.Equal(t, internalpb.ImportJobState_PreImporting, im.GetJob(context.Background(), job.GetJobID()).GetState())
+							require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+							require.Equal(t, int64(meta.NullNodeID), task.GetNodeID())
+						}
+						cluster.AssertNotCalled(t, "CreatePreImport", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+						cluster.AssertNotCalled(t, "CreatePreImportV3", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 						return
 					}
 
-					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64) error {
+					if tc.wantError != "" {
+						for attempt := 1; attempt <= maxImportDispatchRetries; attempt++ {
+							task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
+							got := im.GetJob(context.Background(), job.GetJobID())
+							if attempt < maxImportDispatchRetries {
+								require.Equal(t, internalpb.ImportJobState_PreImporting, got.GetState())
+							} else {
+								require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+								require.Contains(t, got.GetReason(), tc.wantError)
+							}
+						}
+						require.Equal(t, int64(meta.NullNodeID), task.GetNodeID())
+						cluster.AssertNotCalled(t, "CreatePreImport", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+						cluster.AssertNotCalled(t, "CreatePreImportV3", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+						return
+					}
+
+					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64, _ taskcommon.Resource) error {
 						require.Equal(t, int64(42), nodeID)
 						require.Equal(t, task.GetTaskID(), req.GetTaskID())
 						require.Equal(t, job.GetFiles(), req.GetImportFiles())
@@ -170,11 +196,11 @@ func TestPreImportWriterContext(t *testing.T) {
 						return nil
 					}
 					if version == internalpb.ImportVersion_ImportVersionV3 {
-						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					} else {
-						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					}
-					task.CreateTaskOnWorker(42, cluster)
+					task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 					require.Equal(t, int64(42), task.GetNodeID())
 					require.Equal(t, internalpb.ImportJobState_PreImporting, im.GetJob(context.Background(), job.GetJobID()).GetState())
@@ -197,6 +223,8 @@ func (c *backupContextCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
 }
 
 func (c *backupContextCipher) Init(map[string]string) error { return errors.New("legacy import init") }
+
+func (c *backupContextCipher) Backup(int64) (string, error) { return backupArtifact, nil }
 
 func (c *backupContextCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	c.artifacts = append(c.artifacts, artifact)
@@ -245,7 +273,7 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 	t.Cleanup(func() { patch.UnPatch() })
 	task, im := newTask(t, job)
 	cluster := session.NewMockCluster(t)
-	cluster.On(rpc, int64(41), mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	cluster.On(rpc, int64(41), mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		req := args.Get(1).(interface {
 			GetPluginContext() []*commonpb.KeyValuePair
 		})
@@ -253,17 +281,23 @@ func testBackupSourceOnEachDispatch(t *testing.T, newTask importContextFixture, 
 			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:aGlzdG9yaWNhbA=="},
 			{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b3JkaW5hcnk="},
 		}, req.GetPluginContext())
-	}).Return(errors.New("worker unavailable")).Once()
+	}).Return(merr.ErrServiceUnavailable).Once()
 
-	task.CreateTaskOnWorker(41, cluster)
+	task.CreateTaskOnWorker(41, cluster, task.GetTaskResource())
 	cipher.sourceErr = errors.New("source KMS denied Decrypt")
-	task.CreateTaskOnWorker(42, cluster)
+	for attempt := 1; attempt <= maxImportDispatchRetries; attempt++ {
+		task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
+		got := im.GetJob(context.Background(), job.GetJobID())
+		if attempt < maxImportDispatchRetries {
+			require.NotEqual(t, internalpb.ImportJobState_Failed, got.GetState())
+		} else {
+			require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+			require.Contains(t, got.GetReason(), cipher.sourceErr.Error())
+		}
+	}
 
-	require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
-	failed := im.GetJob(context.Background(), job.GetJobID())
-	require.Equal(t, internalpb.ImportJobState_Failed, failed.GetState())
-	require.Contains(t, failed.GetReason(), cipher.sourceErr.Error())
-	cluster.AssertNotCalled(t, rpc, int64(42), mock.Anything, mock.Anything)
+	require.Len(t, cipher.artifacts, 1+maxImportDispatchRetries)
+	cluster.AssertNotCalled(t, rpc, int64(42), mock.Anything, mock.Anything, mock.Anything)
 }
 
 type temporarySourceError struct{ error }
@@ -305,21 +339,32 @@ func TestImportRetriesTransientSourceError(t *testing.T) {
 					t.Cleanup(func() { patch.UnPatch() })
 					task, im := stage.newTask(t, job)
 					cluster := session.NewMockCluster(t)
-					task.CreateTaskOnWorker(41, cluster)
 
-					got := im.GetJob(context.Background(), job.GetJobID())
-					cluster.AssertNotCalled(t, stage.rpc, int64(41), mock.Anything, mock.Anything)
 					if !tc.retry {
-						require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
-						require.Equal(t, "resolve backup EZK: "+cipher.sourceErr.Error(), got.GetReason())
+						for attempt := 1; attempt <= maxImportDispatchRetries; attempt++ {
+							task.CreateTaskOnWorker(41, cluster, task.GetTaskResource())
+							got := im.GetJob(context.Background(), job.GetJobID())
+							if attempt < maxImportDispatchRetries {
+								require.Equal(t, stage.state, got.GetState())
+							} else {
+								require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+								require.Contains(t, got.GetReason(), tc.err.Error())
+							}
+						}
+						cluster.AssertNotCalled(t, stage.rpc, int64(41), mock.Anything, mock.Anything, mock.Anything)
 						return
 					}
-					require.Equal(t, stage.state, got.GetState())
-					require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+
+					for range maxImportDispatchRetries + 2 {
+						task.CreateTaskOnWorker(41, cluster, task.GetTaskResource())
+						got := im.GetJob(context.Background(), job.GetJobID())
+						require.Equal(t, stage.state, got.GetState())
+						require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+					}
+					cluster.AssertNotCalled(t, stage.rpc, int64(41), mock.Anything, mock.Anything, mock.Anything)
 					cipher.sourceErr = nil
-					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Return(nil).Once()
-					task.CreateTaskOnWorker(42, cluster)
-					require.Equal(t, []string{backupArtifact, backupArtifact}, cipher.artifacts)
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+					task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 				})
 			}
@@ -335,54 +380,101 @@ func TestV3RejectsRevokedBackupBeforeDispatch(t *testing.T) {
 	for _, stage := range []string{"reshard", "import"} {
 		t.Run(stage, func(t *testing.T) {
 			job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV3)
+			job.Schema.Fields = retryTestSchema.GetFields()
 			job.Options = backupContextOptions()
+			job.DataTs = 1000
+			job.Vchannels = []string{"ch0"}
 			job.State = internalpb.ImportJobState_Resharding
 			if stage == "import" {
 				job.State = internalpb.ImportJobState_Importing
 			}
 			im := newWriterContextImportMeta(t, job)
+			mt, err := meta.NewMemoryMeta(t)
+			require.NoError(t, err)
+			_, err = addImportSegment(context.Background(), mt, 99, job.JobID, 4, job.CollectionID, 1, "ch0", datapb.SegmentLevel_L1, storage.StorageV3, 0)
+			require.NoError(t, err)
 			var task ImportTask
 			if stage == "reshard" {
-				task = newReshardTask(&datapb.ReshardTask{JobId: job.JobID, TaskId: 4, RunId: 1}, im, nil, nil)
+				task = newReshardTask(&datapb.ReshardTask{JobId: job.JobID, TaskId: 4, CollectionId: job.CollectionID, RunId: 1, FileIds: []int64{41}}, im, mt, nil)
 			} else {
-				task = NewImportTaskV3(&datapb.ImportTaskV3{JobId: job.JobID, TaskId: 4, RunId: 1, LogRange: &datapb.IDRange{Begin: 1, End: 5}}, im, nil, nil)
+				task = NewImportTaskV3(&datapb.ImportTaskV3{
+					JobId: job.JobID, TaskId: 4, CollectionId: job.CollectionID, PartitionId: 1, Vchannel: "ch0",
+					RunId: 1, SegmentId: 100, OldSegmentIds: []int64{99}, Rows: 1,
+					LogRange:  &datapb.IDRange{Begin: 1, End: 100},
+					Fragments: []*importv3pb.FragmentRef{{Path: "frag-0.parquet", Rows: 1}},
+				}, im, mt, nil)
 			}
 			cipher := &backupContextCipher{sourceErr: temporarySourceError{errors.New("temporary decrypt error")}}
 			patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
 			defer patch.UnPatch()
 			cluster := session.NewMockCluster(t)
-			task.CreateTaskOnWorker(1, cluster)
-			require.Equal(t, job.State, im.GetJob(context.Background(), job.JobID).GetState())
+			for range maxImportDispatchRetries + 1 {
+				task.CreateTaskOnWorker(1, cluster, task.GetTaskResource())
+				require.Equal(t, job.State, im.GetJob(context.Background(), job.JobID).GetState())
+			}
+			// Segment metadata must remain untouched when plugin context resolution fails.
+			require.Nil(t, mt.GetSegment(context.Background(), 100))
+			require.Equal(t, commonpb.SegmentState_Importing, mt.GetSegment(context.Background(), 99).GetState())
+
 			cipher.sourceErr = errors.New("source identity denied Decrypt")
-			task.CreateTaskOnWorker(2, cluster)
-			got := im.GetJob(context.Background(), job.JobID)
-			require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
-			require.Contains(t, got.GetReason(), cipher.sourceErr.Error())
-			require.Len(t, cipher.artifacts, 2)
+			for attempt := 1; attempt <= maxImportDispatchRetries; attempt++ {
+				task.CreateTaskOnWorker(2, cluster, task.GetTaskResource())
+				got := im.GetJob(context.Background(), job.JobID)
+				if attempt < maxImportDispatchRetries {
+					require.Equal(t, job.State, got.GetState())
+				} else {
+					require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+					require.Contains(t, got.GetReason(), cipher.sourceErr.Error())
+				}
+			}
+			require.Len(t, cipher.artifacts, maxImportDispatchRetries+1+maxImportDispatchRetries)
 			require.Empty(t, cipher.targets)
+			require.Nil(t, mt.GetSegment(context.Background(), 100))
+			require.Equal(t, commonpb.SegmentState_Importing, mt.GetSegment(context.Background(), 99).GetState())
 		})
 	}
 }
 
+func TestAssembleImportRequestSkipsAllocOnPluginContextError(t *testing.T) {
+	job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
+	job.State = internalpb.ImportJobState_Importing
+	job.DataTs = 0
+	im := newWriterContextImportMeta(t, job)
+	alloc := allocator.NewMockAllocator(t)
+	task := &Task{ImportMeta: im, alloc: alloc, Tr: timerecord.NewTimeRecorder("import key test"), times: taskcommon.NewTimes()}
+	task.Task.Store(&datapb.ImportTaskV2{
+		JobID: job.GetJobID(), TaskID: 32, CollectionID: job.GetCollectionID(),
+		NodeID: meta.NullNodeID, State: datapb.ImportTaskStateV2_Pending,
+		FileStats: []*datapb.ImportFileStats{{ImportFile: job.GetFiles()[0], TotalRows: 1}},
+	})
+	patch := mockey.Mock(hookutil.GetCipher).Return(&writerContextCipher{}).Build()
+	defer patch.UnPatch()
+
+	req, err := AssembleImportRequest(task, im.GetJob(context.Background(), job.GetJobID()), nil, alloc)
+	require.Nil(t, req)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+	alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+}
+
 func TestImportWorkerCipherRejections(t *testing.T) {
 	backup := []*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}}
-	malformed := merr.WrapErrImportSysFailedMsg("import task has an invalid keyset for EZ 17")
+	malformed := merr.WrapErrImportSysFailedMsg("import task has an invalid target keyset for EZ 17")
 	for _, stage := range backupDispatchStages {
 		t.Run(stage.rpc, func(t *testing.T) {
 			for _, tc := range []struct {
-				name     string
-				options  []*commonpb.KeyValuePair
-				err      error
-				terminal bool
+				name      string
+				options   []*commonpb.KeyValuePair
+				err       error
+				retryable bool
 			}{
-				{"conflicting read keyset", backupContextOptions(), merr.WrapErrImportSysFailedMsg("conflicting read keyset"), true},
-				{"malformed context", backup, malformed, true},
-				{"L0 with malformed context", []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}, malformed, true},
-				{"source artifact only", []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backupArtifact}}, malformed, true},
-				{"ordinary import", nil, malformed, false},
-				{"worker not ready", backup, merr.ErrServiceNotReady, false},
-				{"old worker unimplemented", backup, merr.ErrServiceUnimplemented, false},
-				{"other worker internal error", backup, merr.ErrServiceInternal, false},
+				{"conflicting read keyset", backupContextOptions(), merr.WrapErrImportSysFailedMsg("conflicting read keyset"), false},
+				{"malformed context", backup, malformed, false},
+				{"L0 with malformed context", []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}, malformed, false},
+				{"worker unavailable retries indefinitely", backup, merr.ErrServiceUnavailable, true},
+				{"worker not ready retries indefinitely", backup, merr.ErrServiceNotReady, true},
+				{"old worker unimplemented hits budget", backup, merr.ErrServiceUnimplemented, false},
+				{"other worker internal error hits budget", backup, merr.ErrServiceInternal, false},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					job := preImportWriterContextJob(internalpb.ImportVersion_ImportVersionV2)
@@ -394,17 +486,27 @@ func TestImportWorkerCipherRejections(t *testing.T) {
 					cluster := session.NewMockCluster(t)
 					// The coordinator sees the decoded application status from CreateTask.
 					workerErr := merr.CheckRPCCall(merr.Status(tc.err), nil)
-					cluster.On(stage.rpc, int64(41), mock.Anything, mock.Anything).Return(workerErr).Once()
-					task.CreateTaskOnWorker(41, cluster)
-					got := im.GetJob(context.Background(), job.GetJobID())
-					if tc.terminal {
-						require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
-						require.Equal(t, workerErr.Error(), got.GetReason())
+					if !tc.retryable {
+						cluster.On(stage.rpc, int64(41), mock.Anything, mock.Anything, mock.Anything).Return(workerErr).Times(maxImportDispatchRetries)
+						for attempt := 1; attempt <= maxImportDispatchRetries; attempt++ {
+							task.CreateTaskOnWorker(41, cluster, task.GetTaskResource())
+							got := im.GetJob(context.Background(), job.GetJobID())
+							if attempt < maxImportDispatchRetries {
+								require.Equal(t, stage.state, got.GetState())
+							} else {
+								require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+								require.Equal(t, workerErr.Error(), got.GetReason())
+							}
+						}
 						return
 					}
-					require.Equal(t, stage.state, got.GetState())
-					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Return(nil).Once()
-					task.CreateTaskOnWorker(42, cluster)
+					cluster.On(stage.rpc, int64(41), mock.Anything, mock.Anything, mock.Anything).Return(workerErr).Times(maxImportDispatchRetries + 1)
+					for range maxImportDispatchRetries + 1 {
+						task.CreateTaskOnWorker(41, cluster, task.GetTaskResource())
+						require.Equal(t, stage.state, im.GetJob(context.Background(), job.GetJobID()).GetState())
+					}
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+					task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 				})
 			}
@@ -451,14 +553,14 @@ func TestBackupImportPluginContexts(t *testing.T) {
 					t.Cleanup(func() { patch.UnPatch() })
 					task, _ := stage.newTask(t, job)
 					cluster := session.NewMockCluster(t)
-					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					cluster.On(stage.rpc, int64(42), mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 						req := args.Get(1).(interface {
 							GetPluginContext() []*commonpb.KeyValuePair
 						})
 						requireImportKeysets(t, tc.want, req.GetPluginContext())
 					}).Return(nil).Once()
 
-					task.CreateTaskOnWorker(42, cluster)
+					task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
 					if tc.source {
 						require.Equal(t, []string{backupArtifact}, cipher.artifacts)

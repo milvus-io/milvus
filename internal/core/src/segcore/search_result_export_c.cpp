@@ -258,7 +258,8 @@ BuildEmptyBatch(milvus::query::Plan* plan,
     // $seg_offset
     ARROW_ASSIGN_OR_RAISE(auto offset_arr,
                           arrow::MakeEmptyArray(arrow::int64()));
-    fields.push_back(arrow::field("$seg_offset", arrow::int64()));
+    fields.push_back(
+        arrow::field(milvus::segcore::kSegOffsetFieldName, arrow::int64()));
     arrays.push_back(offset_arr);
 
     // $group_by_<fieldID> (when group-by is enabled in the plan), kept
@@ -423,7 +424,8 @@ BuildSearchResultBatch(
         }
         std::shared_ptr<arrow::Array> seg_offset_array;
         ARROW_RETURN_NOT_OK(seg_offset_builder.Finish(&seg_offset_array));
-        fields.push_back(arrow::field("$seg_offset", arrow::int64()));
+        fields.push_back(
+            arrow::field(milvus::segcore::kSegOffsetFieldName, arrow::int64()));
         arrays.push_back(seg_offset_array);
     }
 

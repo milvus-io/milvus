@@ -28,6 +28,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -56,7 +57,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/Util.h"
@@ -100,7 +101,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     const MmapChunkWritebackMode writeback_mode,
-    const bool enable_async_load)
+    const bool enable_async_load,
+    OrdinaryStructProjections struct_projections)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -113,6 +115,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              cache_key_suffix)),
       field_metas_(field_metas),
       physical_column_field_ids_(std::move(physical_column_field_ids)),
+      struct_projections_(std::move(struct_projections)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -156,7 +159,35 @@ ManifestGroupTranslator::ManifestGroupTranslator(
       writeback_mode_(writeback_mode),
       load_priority_(load_priority),
       enable_async_load_(enable_async_load),
-      async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
+      async_read_window_bytes_(
+          milvus::storage::LoadFieldDataReadWindowSizeBytes()) {
+    std::unordered_set<FieldId> projected_ids;
+    for (const auto& [parent, projection] : struct_projections_) {
+        AssertInfo(
+            !projection.child_field_ids.empty() &&
+                projected_ids.insert(projection.parent_field_id).second &&
+                field_metas_.count(projection.parent_field_id) == 0,
+            "invalid Struct projection parent {}",
+            parent);
+        for (const auto id : projection.child_field_ids) {
+            const auto it = field_metas_.find(id);
+            AssertInfo(
+                it != field_metas_.end() && projected_ids.insert(id).second,
+                "missing or duplicate Struct projection child {}",
+                id.get());
+            auto logical = ParseStructSubFieldPath(it->second.get_name().get());
+            auto external =
+                ParseStructSubFieldPath(it->second.get_external_field());
+            AssertInfo((it->second.get_data_type() == DataType::ARRAY ||
+                        it->second.get_data_type() == DataType::VECTOR_ARRAY) &&
+                           logical.has_value() && external.has_value() &&
+                           external->first == parent &&
+                           external->second == logical->second,
+                       "invalid Struct projection child {} for parent {}",
+                       id.get(),
+                       parent);
+        }
+    }
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -181,6 +212,11 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     bool used_total_estimate = false;
     const bool full_projection = projected_columns == column_group_columns;
     auto materialized_field_count = [&](const std::string& column_name) {
+        const auto projection = struct_projections_.find(column_name);
+        if (projection != struct_projections_.end()) {
+            return std::max<size_t>(1,
+                                    projection->second.child_field_ids.size());
+        }
         const auto mapping = physical_column_field_ids_.find(column_name);
         AssertInfo(mapping != physical_column_field_ids_.end(),
                    "physical column {} has no logical field mapping",
@@ -676,10 +712,10 @@ ManifestGroupTranslator::get_cells_async(
         co_return co_await get_cells_via_async_pipeline(ctx,
                                                         std::move(cell_specs));
     }
-    co_return get_cells_legacy(ctx, cids, std::move(cell_specs));
+    co_return co_await get_cells_legacy(ctx, cids, std::move(cell_specs));
 }
 
-std::vector<ManifestGroupTranslator::CellResult>
+folly::coro::Task<ManifestGroupTranslator::CellResults>
 ManifestGroupTranslator::get_cells_legacy(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
@@ -692,7 +728,7 @@ ManifestGroupTranslator::get_cells_legacy(
     auto factory = milvus::segcore::MakeChunkReaderFactory(chunk_reader_);
 
     // Submit cell-batch loading tasks
-    auto load_futures = milvus::segcore::LoadCellBatchAsync(
+    auto loaded_batches = co_await milvus::segcore::LoadCellBatchesAsync(
         ctx,
         std::move(cell_specs),
         std::move(factory),
@@ -708,10 +744,10 @@ ManifestGroupTranslator::get_cells_legacy(
         });
 
     LOG_DEBUG(
-        "[StorageV2] translator {} submits {} batch tasks for manifest "
+        "[StorageV2] translator {} completed {} batch tasks for manifest "
         "column group {}",
         key_,
-        load_futures.size(),
+        loaded_batches.size(),
         column_group_index_);
 
     std::unordered_map<milvus::cachinglayer::cid_t,
@@ -719,38 +755,17 @@ ManifestGroupTranslator::get_cells_legacy(
         completed_cells;
     completed_cells.reserve(cids.size());
 
-    std::exception_ptr first_error;
-    for (auto& future : load_futures) {
-        try {
-            auto loaded_cells = std::move(future).get();
-            if (first_error) {
-                continue;
-            }
-            for (auto& loaded_cell : loaded_cells) {
-                try {
-                    CheckCancellation(ctx,
-                                      segment_id_,
-                                      "ManifestGroupTranslator::get_cells()");
-                    AssertInfo(loaded_cell.chunk != nullptr,
-                               "[StorageV2] translator {} cell {} is not "
-                               "finalized by batch task",
-                               key_,
-                               loaded_cell.cid);
-                    completed_cells[loaded_cell.cid] =
-                        std::move(loaded_cell.chunk);
-                } catch (...) {
-                    first_error = std::current_exception();
-                    break;
-                }
-            }
-        } catch (...) {
-            if (!first_error) {
-                first_error = std::current_exception();
-            }
+    for (auto& loaded_cells : loaded_batches) {
+        for (auto& loaded_cell : loaded_cells) {
+            CheckCancellation(
+                ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
+            AssertInfo(loaded_cell.chunk != nullptr,
+                       "[StorageV2] translator {} cell {} is not finalized "
+                       "by batch task",
+                       key_,
+                       loaded_cell.cid);
+            completed_cells[loaded_cell.cid] = std::move(loaded_cell.chunk);
         }
-    }
-    if (first_error) {
-        std::rethrow_exception(first_error);
     }
 
     for (const auto cid : cids) {
@@ -762,7 +777,7 @@ ManifestGroupTranslator::get_cells_legacy(
         cells.emplace_back(cid, std::move(it->second));
     }
 
-    return cells;
+    co_return cells;
 }
 
 folly::coro::Task<ManifestGroupTranslator::CellResults>
@@ -816,21 +831,29 @@ ManifestGroupTranslator::load_group_chunk(
     field_metas.reserve(schema->num_fields());
     std::vector<arrow::ArrayVector> array_vecs;
     array_vecs.reserve(schema->num_fields());
+    std::vector<std::string> physical_columns;
 
     // Iterate through physical fields and expand each to the logical fields
     // that map to it. The reader projects a physical column once; aliases get
     // their own normalized Raw chunks below.
     for (int i = 0; i < schema->num_fields(); ++i) {
         const auto column_name = schema->field(i)->name();
-        const auto mapping = physical_column_field_ids_.find(column_name);
-        if (mapping == physical_column_field_ids_.end()) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "[StorageV2] translator {} physical column {} has no "
-                      "logical field mapping",
-                      key_,
-                      column_name);
+        const auto projection = struct_projections_.find(column_name);
+        const std::vector<FieldId>* resolved_ids = nullptr;
+        if (projection != struct_projections_.end()) {
+            resolved_ids = &projection->second.child_field_ids;
+        } else {
+            const auto mapping = physical_column_field_ids_.find(column_name);
+            if (mapping == physical_column_field_ids_.end()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "[StorageV2] translator {} physical column {} has no "
+                          "logical field mapping",
+                          key_,
+                          column_name);
+            }
+            resolved_ids = &mapping->second;
         }
-        const auto& logical_field_ids = mapping->second;
+        const auto& logical_field_ids = *resolved_ids;
         if (logical_field_ids.size() == 1 &&
             logical_field_ids.front() == RowFieldID) {
             continue;
@@ -858,6 +881,7 @@ ManifestGroupTranslator::load_group_chunk(
             field_ids.push_back(fid);
             field_metas.push_back(it->second);
             array_vecs.push_back(merged_array_vec);
+            physical_columns.push_back(column_name);
         }
     }
 
@@ -866,7 +890,7 @@ ManifestGroupTranslator::load_group_chunk(
     // arrays, vector arrays, JSON, geometry.
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
         array_vecs[idx] = storage::NormalizeArrowForChunkWriter(
-            array_vecs[idx], field_metas[idx]);
+            array_vecs[idx], field_metas[idx], physical_columns[idx]);
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;

@@ -63,7 +63,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 
 using namespace milvus::storage;

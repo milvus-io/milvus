@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -68,12 +68,9 @@ func mapToKVPairs(m map[string]string) []*commonpb.KeyValuePair {
 	return kvs
 }
 
-func CalculateNodeSlots() int64 {
-	cpuNum := hardware.GetCPUNum()
-	memory := hardware.GetMemoryCount()
-
-	slot := int64(cpuNum / 2)
-	memorySlot := int64(memory / (8 * 1024 * 1024 * 1024))
+func CalculateNodeSlots(machine taskcommon.Resource) int64 {
+	slot := machine.CPU / 2
+	memorySlot := machine.Memory / (8 * 1024 * 1024 * 1024)
 	if slot > memorySlot {
 		slot = memorySlot
 	}

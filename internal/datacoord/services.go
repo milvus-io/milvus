@@ -629,6 +629,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 
 		if req.GetFlushed() && seg.GetSealedAtDataVersion() != nil {
+			if err := meta.CheckSealedFieldSizeReplay(seg.SegmentInfo, req); err != nil {
+				return merr.Status(err), nil
+			}
 			return dataview.FlushResultStatus(seg.GetSealedAtDataVersion()), nil
 		}
 		if seg.State == commonpb.SegmentState_Dropped {
@@ -686,12 +689,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		meta.UpdateManifest(req.GetSegmentID(), req.GetManifestPath()),
 		meta.UpdateStartPosition(req.GetStartPositions()),
 		meta.UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
-		// The request ships the complete cumulative Statistics published
-		// from the growing-segment collector; the receiver stores it
-		// wholesale. Only nil-stats flushes (storage V1 / pre-Statistics
-		// datanodes during rolling upgrade) fall back to deriving from
-		// the binlog arrays. See UpdateSegmentStats for the full contract.
-		meta.UpdateSegmentStats(req.GetSegmentID(), req.GetStats()),
+		// Install cumulative statistics against the checkpoint row count and
+		// manifest from this same mutation, not the pre-lock segment view.
+		meta.UpdateSaveBinlogStats(req),
 	)
 
 	// Update segment info in memory and meta. Stale updates (segment already
@@ -795,6 +795,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			}
 			if current.GetState() == commonpb.SegmentState_Dropped || current.GetSealedAtDataVersion() != nil {
 				abortView()
+				if current.GetState() != commonpb.SegmentState_Dropped {
+					if err := meta.CheckSealedFieldSizeReplay(current.SegmentInfo, req); err != nil {
+						return merr.Status(err), nil
+					}
+				}
 				return dataview.FlushResultStatus(current.GetSealedAtDataVersion()), nil
 			}
 			flushedVersion = flushView.GetDataVersion()
@@ -811,18 +816,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				mlog.Error(ctx, "save binlog, checkpoints and DataView failed", mlog.Err(err))
 				return merr.Status(err), nil
 			}
-			if committed {
-				commitView()
+			if !committed {
+				abortView()
+				current = s.meta.GetSegment(ctx, req.GetSegmentID())
+				if flushView == nil || current == nil || current.GetState() == commonpb.SegmentState_Dropped {
+					return dataview.FlushResultStatus(nil), nil
+				}
+				if version := current.GetSealedAtDataVersion(); version != nil {
+					return dataview.FlushResultStatus(version), nil
+				}
+				// The WAL interprets an empty version as retirement. A stale
+				// seal of a live segment has no durable publication to acknowledge.
+				return merr.Status(merr.WrapErrServiceUnavailableMsg("stale flush checkpoint or manifest for segment %d", req.GetSegmentID())), nil
 			}
-			// !committed: no SegmentMeta mutation pending AND no DataView
-			// snapshot to publish (the Collection's DataViews were dropped
-			// while this flush was in flight). Nothing was persisted, so
-			// there is nothing to commit in memory either - this is success,
-			// not an error: the flush path deliberately does no recompute
-			// here, and the in-function retry already guarantees a durable
-			// streaming_version whenever a snapshot did need publishing.
-			// PrepareFlush returned no-op callbacks for this case, so no
-			// abort is needed.
+			commitView()
 		} else {
 			if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
 				mlog.Error(ctx, "save binlog and checkpoints failed", mlog.Err(err))
@@ -2490,6 +2497,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill")), nil
+	}
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}

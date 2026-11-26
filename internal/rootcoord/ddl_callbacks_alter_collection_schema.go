@@ -88,6 +88,10 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	}
 	if plan.HasField() {
 		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+			schema := coll.ToCollectionSchemaPB()
+			if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+				return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct sub-fields", coll.Name)
+			}
 			if err := prepareAlterSchemaAddStructSubField(coll, plan); err != nil {
 				return err
 			}
@@ -128,6 +132,13 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
 	if err != nil {
 		return err
+	}
+	if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+		if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+			return err
+		}
+		properties = updateMaxFieldIDProperty(properties, maxAssignedFieldIDFromSchema(schema))
+		schema.Properties = properties
 	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
@@ -360,7 +371,19 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if err := schemautil.FillAddedStructSubFieldMaxCapacity(model.MarshalStructArrayFieldModel(parent), field); err != nil {
 		return err
 	}
-	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
+	validationField := field
+	if typeutil.NewStorageColumnResolver(coll.ToCollectionSchemaPB()).IsMilvusTable() {
+		parentExt := parent.ExternalField
+		if parentExt == "" {
+			parentExt = parent.Name
+		}
+		if field.GetExternalField() == "" {
+			field.ExternalField = storedRootStructSubFieldName(parentExt, originalName)
+		}
+		validationField = typeutil.Clone(field)
+		validationField.ExternalField = ""
+	}
+	if err := validateAddedStructSubFieldProperties(originalName, validationField); err != nil {
 		return err
 	}
 	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
@@ -469,6 +492,9 @@ func buildAlterSchemaAddSchema(coll *model.Collection, plan *schemautil.AlterSch
 
 // broadcastAlterCollectionSchemaDrop handles DropRequest: dropping fields or functions.
 func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcaster broadcaster.BroadcastAPI, coll *model.Collection, req *milvuspb.AlterCollectionSchemaRequest) error {
+	if typeutil.IsExternalCollection(coll.ToCollectionSchemaPB()) {
+		return merr.WrapErrOperationNotSupportedMsg("external collections do not support dropping fields or functions")
+	}
 	dropReq := req.GetAction().GetDropRequest()
 	if dropReq == nil {
 		return merr.WrapErrParameterInvalidMsg("drop_request is nil")
@@ -630,7 +656,8 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 			if fn, kind := functionReferencing(coll.Functions, storedName); fn != "" {
 				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field is referenced by function %s as %s, drop function first", fn, kind)
 			}
-			if typeutil.IsVectorType(sub.DataType) && len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) <= 1 {
+			if typeutil.IsVectorType(sub.DataType) && len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) <= 1 &&
+				!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop field %s: it would leave no vector field in the collection", storedName)
 			}
 
@@ -721,14 +748,15 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	}
 
 	// Mirror the proxy guard for direct-coord callers: dropping the output vector
-	// field(s) must not leave the collection with no vector field.
+	// field(s) may leave the collection with no vector field only while such
+	// collections may be created.
 	removedVectors := 0
 	for _, field := range coll.Fields {
 		if _, ok := outputFieldIDSet[field.FieldID]; ok && typeutil.IsVectorType(field.DataType) {
 			removedVectors++
 		}
 	}
-	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop function %s: it would leave no vector field in the collection", functionName)
 	}
 

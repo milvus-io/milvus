@@ -630,6 +630,9 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 					Type:    meta.ManifestMutationCommitUpdates,
 					Updates: updates,
 				},
+				CatalogMutation: meta.SegmentCatalogMutation{Operators: []meta.UpdateOperator{
+					meta.InvalidateExternalFieldSizes(segID, updates.ColumnGroups),
+				}},
 			},
 		}
 		if omitted {
@@ -650,6 +653,12 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 		return classifySegmentResult{unit: &unit}
 	}
 
+	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		return classifySegmentResult{status: &datapb.CommitBackfillResultSegmentStatus{
+			SegmentId: segID, Ok: false, Kind: "v3",
+			Reason: "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill",
+		}}
+	}
 	// Legacy mode: adopt a pre-baked version. Enforce that the base the
 	// version was built from still equals the current manifest; a source
 	// that moved (stats/index committed) means the pre-baked revision does
@@ -688,6 +697,7 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 	if entry.SourceVersion > 0 {
 		expectedManifest = packed.MarshalManifestPath(basePath, entry.SourceVersion)
 	}
+	manifest := packed.MarshalManifestPath(basePath, entry.Version)
 	return classifySegmentResult{unit: &backfillCommitUnit{
 		segmentID: segID,
 		kind:      "v3",
@@ -697,8 +707,11 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 			ExpectedManifest: expectedManifest,
 			Mutation: meta.ManifestMutation{
 				Type:         meta.ManifestMutationNoop,
-				ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
+				ManifestPath: manifest,
 			},
+			CatalogMutation: meta.SegmentCatalogMutation{Operators: []meta.UpdateOperator{
+				meta.InvalidateReplacedManifestFieldSizes(segID, manifest),
+			}},
 		},
 	}}
 }

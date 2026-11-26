@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -49,13 +50,14 @@ import (
 )
 
 type reshardTask struct {
-	task       atomic.Pointer[datapb.ReshardTask]
-	importMeta ImportMeta
-	meta       *meta.Meta
-	alloc      allocator.Allocator
-	tr         *timerecord.TimeRecorder
-	times      *taskcommon.Times
-	metrics    importTaskMetrics
+	task                 atomic.Pointer[datapb.ReshardTask]
+	importMeta           ImportMeta
+	meta                 *meta.Meta
+	alloc                allocator.Allocator
+	tr                   *timerecord.TimeRecorder
+	times                *taskcommon.Times
+	metrics              importTaskMetrics
+	nonRetryableFailures int64
 
 	// sourceProgress is the latest per-source hashed rows the worker reported.
 	// It is deliberately in-memory only: progress is transient, so it is not
@@ -118,6 +120,22 @@ func (t *reshardTask) GetTaskSlot() int64 {
 
 func (t *reshardTask) GetTaskVersion() int64 { return t.task.Load().GetRunId() }
 
+// GetTaskResource prices a reshard run on the same reshardmem working set the
+// slot charge is derived from (reshardWorkingSet), so the two never disagree.
+// A job that is gone is priced at the floor so the task can be retired; an
+// invalid fragment-size config is a transient answer, recomputed next round.
+func (t *reshardTask) GetTaskResource() taskcommon.Resource {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default()
+	}
+	workingSet, err := reshardWorkingSet(job, getImportV3Config())
+	if err != nil {
+		return taskresource.Default()
+	}
+	return taskresource.ImportV3(workingSet)
+}
+
 func (t *reshardTask) SetTaskTime(tt taskcommon.TimeType, tm time.Time) { t.times.SetTaskTime(tt, tm) }
 
 func (t *reshardTask) GetTaskTime(tt taskcommon.TimeType) time.Time { return tt.GetTaskTime(t.times) }
@@ -164,7 +182,7 @@ func importV3PreReshardState(state internalpb.ImportJobState) bool {
 	return false
 }
 
-func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	p := t.task.Load()
 	if p.GetRunId() == 0 {
 		t.Fail("reshard task has no run")
@@ -190,13 +208,6 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		t.Fail(fmt.Sprintf("reshard task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
-	readContext, err := resolveImportReadContext(job.GetOptions())
-	if err != nil {
-		if !retryableImportSourceError(err) {
-			failImportDispatch(t, t.importMeta, err)
-		}
-		return
-	}
 	cfg := getImportV3Config()
 	plan, err := reshardPlan(job, p, cfg)
 	if err != nil {
@@ -206,11 +217,10 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
 		Slot: reshardSlot(job, cfg), StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: readContext,
-		Plan:          plan,
+		Plan: plan,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	// PrepareRun: persist the intended run/node before the uncertain Create RPC.
@@ -221,7 +231,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		mlog.Warn(context.TODO(), "persist reshard task running state failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID())
+	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "create reshard task failed", WrapTaskLog(t, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic

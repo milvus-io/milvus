@@ -381,14 +381,17 @@ BuildDisk(const std::string& raw_path,
     // DiskANN needs the V1/V2 directory source's native file-manager handle.
     // A buffer-backed test source can read the entries but cannot open that
     // handle, so persist through the same sink/source pair as production.
-    storage::StorageConfig config;
-    config.storage_type = "local";
-    config.root_path = staging_dir + "/objects/";
-    std::filesystem::create_directories(config.root_path);
+    auto config = std::make_shared<milvus_storage::api::Properties>();
+    (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*config)[PROPERTY_FS_ROOT_PATH] = std::string(staging_dir + "/objects/");
+    std::filesystem::create_directories(
+        milvus::storage::GetStorageProperty<std::string>(
+            config, PROPERTY_FS_ROOT_PATH));
     const auto field_type =
         vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>();
-    auto manager =
-        std::make_shared<ValidityCountingChunkManager>(config.root_path);
+    auto manager = std::make_shared<ValidityCountingChunkManager>(
+        milvus::storage::GetStorageProperty<std::string>(
+            config, PROPERTY_FS_ROOT_PATH));
     storage::FileManagerContext context({1, 2, 3, 100},
                                         {3,
                                          100,
@@ -692,9 +695,10 @@ TEST(VectorDiskFileManagerTest, MetadataBeforeOrAfterClosePublishesRawBytes) {
         EXPECT_EQ(files[0].transport, VectorDiskFileTransport::RawUnsliced);
         EXPECT_EQ(files[0].size, bytes.size());
         VectorDiskArtifact artifact(nullptr, manager);
-        storage::StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = owner->Path() + "/objects/";
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] =
+            std::string(owner->Path() + "/objects/");
         storage::FileManagerContext context(
             {1, 2, 3, 100},
             {3, 100, 6108, 1},

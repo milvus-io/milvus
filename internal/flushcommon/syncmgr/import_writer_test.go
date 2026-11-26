@@ -18,13 +18,18 @@ package syncmgr
 
 import (
 	"context"
+	"path"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/bytedance/mockey"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,4 +57,89 @@ func (s *SyncTaskSuite) TestImportWriterUsesTaskKeyset() {
 	s.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
 	s.Require().Equal(1, attempts)
 	s.Require().Same(target, got)
+}
+
+func (s *SyncTaskSuite) TestBulkPackWriterV2RetriesTransientKeyLookup() {
+	schema := s.schema
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	defer func() { schema.Properties = nil }()
+
+	pack := new(SyncPack).WithCollectionID(s.collectionID).WithPartitionID(s.partitionID).
+		WithSegmentID(s.segmentID).WithChannelName(s.channelName).
+		WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: s.collectionID, EncryptionKey: "bmV3"}
+
+	var lookups int
+	var writerOpened int
+	lookupMock := mockey.Mock(hookutil.GetCollectionPluginContext).To(func(_ []*commonpb.KeyValuePair, _ int64) (*indexcgopb.StoragePluginContext, error) {
+		lookups++
+		if lookups == 1 {
+			return nil, merr.ErrServiceUnavailable
+		}
+		return target, nil
+	}).Build()
+	defer lookupMock.UnPatch()
+
+	openMock := mockey.Mock(packed.NewPackedWriter).To(func(_ []string, _ *arrow.Schema, _, _ int64,
+		_ []storagecommon.ColumnGroup, _ *indexpb.StorageConfig, key *indexcgopb.StoragePluginContext,
+	) (*packed.PackedWriter, error) {
+		writerOpened++
+		s.Require().Same(target, key)
+		return nil, retry.Unrecoverable(merr.ErrSegcoreUnsupported)
+	}).Build()
+	defer openMock.UnPatch()
+
+	bw := NewBulkPackWriterV2(s.metacache, schema, s.chunkManager, s.allocator, packed.DefaultWriteBufferSize, 0,
+		&indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()},
+		storagecommon.SplitColumns(schema.GetFields(), map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy()),
+		retry.Attempts(3), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond))
+
+	_, _, err := bw.writeInserts(context.Background(), pack)
+	s.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
+	s.Require().Equal(2, lookups, "transient key lookup failure must retry inside retry.Do")
+	s.Require().Equal(1, writerOpened)
+}
+
+func (s *SyncTaskSuite) TestBulkPackWriterV3RetriesTransientKeyLookup() {
+	schema := s.schema
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	defer func() { schema.Properties = nil }()
+
+	pack := new(SyncPack).WithCollectionID(s.collectionID).WithPartitionID(s.partitionID).
+		WithSegmentID(s.segmentID).WithChannelName(s.channelName).
+		WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: s.collectionID, EncryptionKey: "bmV3"}
+
+	var lookups int
+	var writerOpened int
+	lookupMock := mockey.Mock(hookutil.GetCollectionPluginContext).To(func(_ []*commonpb.KeyValuePair, _ int64) (*indexcgopb.StoragePluginContext, error) {
+		lookups++
+		if lookups == 1 {
+			return nil, merr.ErrServiceUnavailable
+		}
+		return target, nil
+	}).Build()
+	defer lookupMock.UnPatch()
+
+	openMock := mockey.Mock(packed.NewFFIPackedWriter).To(func(_ string, _ *arrow.Schema,
+		_ []storagecommon.ColumnGroup, _ *indexpb.StorageConfig, key *indexcgopb.StoragePluginContext, _ ...map[string]string,
+	) (*packed.FFIPackedWriter, error) {
+		writerOpened++
+		s.Require().Same(target, key)
+		return nil, merr.ErrSegcoreUnsupported
+	}).Build()
+	defer openMock.UnPatch()
+
+	root := s.T().TempDir()
+	basePath := path.Join(root, "insert_log/1/2/3")
+	bw := NewBulkPackWriterV3(s.metacache, schema, s.chunkManager, s.allocator, packed.DefaultWriteBufferSize, 0,
+		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
+		storagecommon.SplitColumns(schema.GetFields(), map[int64]storagecommon.ColumnStats{}, storagecommon.NewSelectedDataTypePolicy()),
+		packed.MarshalManifestPath(basePath, packed.ManifestEarliest),
+		retry.Attempts(3), retry.Sleep(time.Millisecond), retry.MaxSleepTime(time.Millisecond))
+
+	_, _, _, err := bw.writeInserts(context.Background(), pack, basePath)
+	s.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
+	s.Require().Equal(2, lookups, "transient key lookup failure must retry inside V3 writeInserts")
+	s.Require().Equal(1, writerOpened)
 }

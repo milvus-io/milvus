@@ -32,6 +32,8 @@ const (
 	TypeKey         = "task_type"
 	SubTypeKey      = "task_sub_type" // optional, only for Stats
 	SlotKey         = "task_slot"
+	CPUKey          = "task_cpu"     // optional, absent from a coordinator that predates it
+	MemoryKey       = "task_memory"  // optional, absent from a coordinator that predates it
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
 	TaskVersionKey  = "task_version" // optional, for version-aware tasks
 	CollectionIDKey = "collection_id"
@@ -87,6 +89,13 @@ func (p Properties) AppendSubType(subType string) {
 
 func (p Properties) AppendTaskSlot(slot int64) {
 	p[SlotKey] = fmt.Sprintf("%d", slot)
+}
+
+// AppendTaskResource carries DataCoord's estimate of what the task will occupy
+// on the worker for its whole run, alongside the scalar slot.
+func (p Properties) AppendTaskResource(r Resource) {
+	p[CPUKey] = fmt.Sprintf("%d", r.CPU)
+	p[MemoryKey] = fmt.Sprintf("%d", r.Memory)
 }
 
 func (p Properties) AppendNumRows(rows int64) {
@@ -200,6 +209,35 @@ func (p Properties) GetTaskSlot() (int64, error) {
 		return 0, WrapErrTaskPropertyLack(SlotKey, p[TaskIDKey])
 	}
 	return strconv.ParseInt(p[SlotKey], 10, 64)
+}
+
+// GetTaskResource reads DataCoord's estimate. Older coordinators omit both keys;
+// CreateTask converts their scalar slot to a resource estimate at RPC ingress.
+// Otherwise both keys must contain nonnegative integers.
+func (p Properties) GetTaskResource() (Resource, error) {
+	cpuStr, cpuOK := p[CPUKey]
+	memoryStr, memoryOK := p[MemoryKey]
+	if !cpuOK && !memoryOK {
+		return Resource{}, nil
+	}
+	if !cpuOK {
+		return Resource{}, WrapErrTaskPropertyLack(CPUKey, p[TaskIDKey])
+	}
+	if !memoryOK {
+		return Resource{}, WrapErrTaskPropertyLack(MemoryKey, p[TaskIDKey])
+	}
+	cpu, err := strconv.ParseInt(cpuStr, 10, 64)
+	if err != nil {
+		return Resource{}, merr.WrapErrServiceInternalErr(err, "invalid %s", CPUKey)
+	}
+	memory, err := strconv.ParseInt(memoryStr, 10, 64)
+	if err != nil {
+		return Resource{}, merr.WrapErrServiceInternalErr(err, "invalid %s", MemoryKey)
+	}
+	if cpu < 0 || memory < 0 {
+		return Resource{}, merr.WrapErrServiceInternalMsg("negative task resource: cpu=%d memory=%d", cpu, memory)
+	}
+	return Resource{CPU: cpu, Memory: memory}, nil
 }
 
 func (p Properties) GetNumRows() int64 {

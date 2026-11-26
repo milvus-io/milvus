@@ -20,13 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -89,5 +92,23 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 			assert.Equal(t, plan.To, int64(2))
 			assert.Equal(t, scoreDelta[2], 1)
 		}
+	}
+}
+
+func TestChannelCandidatesIgnoreForm(t *testing.T) {
+	nodes := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
+		Return(typeutil.NewUniqueSet(7)).Build()
+	defer nodes.UnPatch()
+
+	for _, form := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stock", true: "form"}[form], func(t *testing.T) {
+			extension.ResetForTest()
+			t.Cleanup(extension.ResetForTest)
+			if form {
+				extension.SetForm()
+			}
+			assert.Equal(t, []int64{7}, filterStreamingQueryNodes([]int64{11, 7}))
+			assert.Empty(t, filterStreamingQueryNodes([]int64{11}))
+		})
 	}
 }

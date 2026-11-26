@@ -66,19 +66,19 @@ func TestPrepareImportCipher(t *testing.T) {
 			ctx, err := PrepareImportCipher(tc.artifact, tc.properties, tc.entries, 23)
 			require.NoError(t, err)
 			var calls []map[string]string
-			if tc.artifact != "" {
-				calls = append(calls, map[string]string{CipherConfigCreateEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(sourceKey), "cipher.ez.readOnly": "true"})
-				require.Equal(t, base64.StdEncoding.EncodeToString(sourceKey), ctx.Source.GetEncryptionKey())
-				require.Zero(t, ctx.Source.GetCollectionId())
-			} else {
-				require.Nil(t, ctx.Source)
-			}
 			if tc.properties != nil {
 				calls = append(calls, map[string]string{CipherConfigCreateEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(targetKey)})
 				require.Equal(t, base64.StdEncoding.EncodeToString(targetKey), ctx.Target.GetEncryptionKey())
 				require.Equal(t, int64(23), ctx.Target.GetCollectionId())
 			} else {
 				require.Nil(t, ctx.Target)
+			}
+			if tc.artifact != "" {
+				calls = append(calls, map[string]string{CipherConfigImportEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(sourceKey)})
+				require.Equal(t, base64.StdEncoding.EncodeToString(sourceKey), ctx.Source.GetEncryptionKey())
+				require.Zero(t, ctx.Source.GetCollectionId())
+			} else {
+				require.Nil(t, ctx.Source)
 			}
 			require.Equal(t, calls, cipher.calls)
 		})
@@ -97,7 +97,23 @@ func TestPrepareImportCipher(t *testing.T) {
 			_, err := PrepareImportCipher(artifact, properties, entries, 23)
 			require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		}
+		for _, badProps := range [][]*commonpb.KeyValuePair{
+			{{Key: common.EncryptionEzIDKey, Value: "17"}, {Key: common.EncryptionEzIDKey, Value: "18"}},
+			{{Key: common.EncryptionEzIDKey, Value: "0"}},
+			{{Key: common.EncryptionEzIDKey, Value: "abc"}},
+		} {
+			_, err := PrepareImportCipher(artifact, badProps, []*commonpb.KeyValuePair{source, target}, 23)
+			require.ErrorIs(t, err, merr.ErrImportSysFailed)
+		}
 		require.Empty(t, cipher.calls)
+	})
+	t.Run("target failure stops before source registration", func(t *testing.T) {
+		cipher := &importReadCipher{err: merr.ErrServiceUnavailable}
+		storeCipher(cipher)
+		_, err := PrepareImportCipher(artifact, properties, []*commonpb.KeyValuePair{source, target}, 23)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.Len(t, cipher.calls, 1)
+		require.Equal(t, "17", cipher.calls[0][CipherConfigCreateEZ])
 	})
 	t.Run("source requires read-only registration", func(t *testing.T) {
 		storeCipher(nil)
@@ -110,5 +126,9 @@ func TestPrepareImportCipher(t *testing.T) {
 		storeCipher(&importReadCipher{err: merr.ErrServiceUnavailable})
 		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
 		require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Status(err).GetCode())
+		storeCipher(&importReadCipher{err: temporaryTestError{msg: "transient init"}})
+		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(err))
 	})
 }

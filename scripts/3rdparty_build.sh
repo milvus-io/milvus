@@ -343,10 +343,10 @@ pushd ${ROOT_DIR}/cmake_build/thirdparty
 if command -v rustup >/dev/null 2>&1; then
     # Corrosion selects this exact toolchain; an existing cargo from an older
     # builder image does not satisfy the storage bridge's Rust requirement.
-    if ! rustup run 1.94.1 rustc --version >/dev/null 2>&1; then
-        rustup toolchain install 1.94.1 --profile minimal || { echo 'rust 1.94.1 install failed'; exit 1; }
+    if ! rustup run 1.95.0 rustc --version >/dev/null 2>&1; then
+        rustup toolchain install 1.95.0 --profile minimal || { echo 'rust 1.95.0 install failed'; exit 1; }
     fi
 else
-    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.94.1 -y" || { echo 'rustup install failed'; exit 1;}
+    bash -c "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain=1.95.0 -y" || { echo 'rustup install failed'; exit 1;}
     source $HOME/.cargo/env
 fi
