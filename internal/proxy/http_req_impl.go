@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,6 +25,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -228,8 +231,23 @@ func getDataComponentMetrics(node *Proxy, metricsType string, customParams ...*c
 	}
 }
 
-// The Get request should be used to get the query parameters, not the body, such as Javascript
-// fetch API only support GET request with query parameter.
+// consoleMetadataContext preserves the verified management view and requires
+// an authenticated principal before a data-plane request reaches the coordinator.
+func consoleMetadataContext(c *gin.Context, dbName string) (context.Context, bool) {
+	ctx := c.Request.Context()
+	if _, admin := mhttp.AuthenticatedAdminFromContext(ctx); admin || authorizationDisabled() {
+		return ctx, true
+	}
+	username := c.GetString("username")
+	if username == "" {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			mhttp.HTTPReturnMessage: "metadata access requires an authenticated user",
+		})
+		return ctx, false
+	}
+	return NewContextWithMetadata(ctx, username, dbName), true
+}
+
 func listCollection(node *Proxy) gin.HandlerFunc {
 	rootCoord := node.mixCoord
 	queryCoord := node.mixCoord
@@ -239,7 +257,11 @@ func listCollection(node *Proxy) gin.HandlerFunc {
 			dbName = defaultDB
 		}
 
-		rootCollectionListResp, err := rootCoord.ShowCollections(c, &milvuspb.ShowCollectionsRequest{
+		ctx, ok := consoleMetadataContext(c, dbName)
+		if !ok {
+			return
+		}
+		rootCollectionListResp, err := rootCoord.ShowCollections(AppendUserInfoForRPC(ctx), &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
@@ -253,7 +275,7 @@ func listCollection(node *Proxy) gin.HandlerFunc {
 			return
 		}
 
-		queryCollectionListResp, err := queryCoord.ShowLoadCollections(c, &querypb.ShowCollectionsRequest{
+		queryCollectionListResp, err := queryCoord.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowCollections,
 			},
@@ -440,7 +462,11 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 
 func listDatabase(node types.ProxyComponent) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		showDatabaseResp, err := node.ListDatabases(c, &milvuspb.ListDatabasesRequest{
+		ctx, ok := consoleMetadataContext(c, "")
+		if !ok {
+			return
+		}
+		showDatabaseResp, err := node.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ListDatabases,
 			},
@@ -478,12 +504,29 @@ func describeDatabase(node types.ProxyComponent) gin.HandlerFunc {
 			return
 		}
 
-		describeDatabaseResp, err := node.DescribeDatabase(c, &milvuspb.DescribeDatabaseRequest{
+		ctx, ok := consoleMetadataContext(c, dbName)
+		if !ok {
+			return
+		}
+		req := &milvuspb.DescribeDatabaseRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DescribeDatabase,
 			},
 			DbName: dbName,
-		})
+		}
+		if _, admin := mhttp.AuthenticatedAdminFromContext(ctx); !admin {
+			var err error
+			ctx, err = PrivilegeInterceptor(ctx, req)
+			if err != nil {
+				httpStatus := http.StatusInternalServerError
+				if status.Code(err) == codes.PermissionDenied {
+					httpStatus = http.StatusForbidden
+				}
+				c.AbortWithStatusJSON(httpStatus, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+				return
+			}
+		}
+		describeDatabaseResp, err := node.DescribeDatabase(ctx, req)
 		if err := merr.CheckRPCCall(describeDatabaseResp, err); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
