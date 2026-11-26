@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
