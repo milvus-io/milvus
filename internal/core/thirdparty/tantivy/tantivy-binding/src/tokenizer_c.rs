@@ -16,10 +16,7 @@ pub extern "C" fn tantivy_create_analyzer(analyzer_params: *const c_char) -> Rus
     let analyzer = create_analyzer(&params);
     match analyzer {
         Ok(text_analyzer) => RustResult::from_ptr(create_binding(text_analyzer)),
-        Err(err) => RustResult::from_error(format!(
-            "create tokenizer failed with error: {}",
-            err,
-        )),
+        Err(err) => RustResult::from_error(format!("create tokenizer failed with error: {}", err,)),
     }
 }
 
