@@ -107,7 +107,10 @@ The previous keys `proxy.queryView.enableReduceStream` and
 controls only Proxy output capacity, not the result limit or output quota:
 reserve `ceil(requestedRows * factor)` rows initially. The default reserves the full requested page. For Search,
 the estimate covers all NQ combined; for unbounded Query, use the first nonempty
-Chunk's row count instead of a limit.
+Chunk's row count instead of a limit. Bounded row-level Query and Search grow
+dense Float32 vector buffers per Chunk, using only the rows they will append.
+For grouped Hybrid Search the sub-search page size is not a cap: all candidates
+remain available for fusion.
 
 All three [settings](../../../configs/milvus.yaml#L528) are refreshable: Proxy captures
 them once before retries and propagates Chunk bytes to workers. New requests use

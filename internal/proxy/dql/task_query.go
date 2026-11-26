@@ -1472,7 +1472,7 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 					"final Query Chunk field count %d does not match %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
 			}
 			if limit > 0 && collected < limit && !chunk.GetElementLevel() {
-				growQueryFloatVectors(output.FieldsData, chunk.GetFieldsData(), min(int64(rowCount), limit-collected), limit)
+				growStreamFloatVectors(output.FieldsData, chunk.GetFieldsData(), min(int64(rowCount), limit-collected), limit)
 			}
 			indexComputer := typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
 			// ORDER BY keeps receiving Chunks for duplicate validation after the
@@ -1530,26 +1530,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 		}
 	}
 	return output, nil
-}
-
-// Reserve once per chunk: Go's smaller growth steps repeatedly copy wide
-// vectors on dense pages. Compact nullable payloads do not have one vector per row.
-func growQueryFloatVectors(output, chunk []*schemapb.FieldData, rows, limit int64) {
-	for i := 0; i < len(output) && i < len(chunk); i++ {
-		vectors := output[i].GetVectors()
-		dst := vectors.GetFloatVector()
-		dim := vectors.GetDim()
-		if dst == nil || dim <= 0 || typeutil.IsCompactNullableVectorFieldData(chunk[i]) {
-			continue
-		}
-		capRows := int64(cap(dst.Data)) / dim
-		needed := int64(len(dst.Data))/dim + rows
-		if needed > capRows {
-			data := make([]float32, len(dst.Data), min(limit, max(needed, 2*capRows))*dim)
-			copy(data, dst.Data)
-			dst.Data = data
-		}
-	}
 }
 
 // IsInternalTask identifies synthesized reads, including search-by-primary-key

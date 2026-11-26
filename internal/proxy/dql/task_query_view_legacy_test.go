@@ -143,14 +143,14 @@ func TestStreamResultPreallocation(t *testing.T) {
 
 	field := testFloatVectorFieldData("v", []float32{1, 2}, 2)
 	fields := []*schemapb.FieldData{field}
-	growQueryFloatVectors(fields, fields, 1, 5)
+	growStreamFloatVectors(fields, fields, 1, 5)
 	require.Equal(t, 4, cap(field.GetVectors().GetFloatVector().Data))
-	growQueryFloatVectors(fields, fields, 4, 5)
+	growStreamFloatVectors(fields, fields, 4, 5)
 	require.Equal(t, 10, cap(field.GetVectors().GetFloatVector().Data))
 	require.Equal(t, []float32{1, 2}, field.GetVectors().GetFloatVector().Data)
 
 	field.ValidData = []bool{true, false}
-	growQueryFloatVectors(fields, fields, 16, 32)
+	growStreamFloatVectors(fields, fields, 16, 32)
 	require.Equal(t, 10, cap(field.GetVectors().GetFloatVector().Data))
 }
 

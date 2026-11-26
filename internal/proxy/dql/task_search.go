@@ -1745,12 +1745,17 @@ func appendFinalSearchChunk(
 		return 0, merr.WrapErrServiceInternalMsg("Search CHUNK element index count %d does not match hit count %d", len(chunk.GetElementIndices().GetData()), hitCount)
 	}
 
-	totalTopK := int64(0)
-	for _, count := range chunkTopks {
+	var totalTopK, acceptedHits int64
+	for q, count := range chunkTopks {
 		if count < 0 {
 			return 0, merr.WrapErrServiceInternalMsg("Search CHUNK contains a negative per-query hit count %d", count)
 		}
 		totalTopK += count
+		if !preserveCandidates {
+			// Only the overlap with this query's remaining page will be copied.
+			skip := min(count, max(0, offset-seenPerQuery[q])) // #nosec G602 -- chunkTopks and seenPerQuery lengths are checked above.
+			acceptedHits += min(count-skip, limit-output.Topks[q])
+		}
 	}
 	if totalTopK != int64(hitCount) {
 		return 0, merr.WrapErrServiceInternalMsg("Search CHUNK Topks total %d does not match hit count %d", totalTopK, hitCount)
@@ -1772,6 +1777,12 @@ func appendFinalSearchChunk(
 		if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 			return 0, merr.WrapErrServiceInternalMsg("Search CHUNK field count %d does not match final result field count %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
 		}
+		maxRows := output.GetNumQueries() * limit
+		if preserveCandidates {
+			// Grouped Hybrid needs every candidate for fusion; TopK is not a bound here.
+			acceptedHits, maxRows = totalTopK, math.MaxInt64
+		}
+		growStreamFloatVectors(output.FieldsData, chunk.GetFieldsData(), acceptedHits, maxRows)
 		fieldIndexComputer = typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
 	} else if len(output.GetFieldsData()) > 0 && hitCount > 0 {
 		return 0, merr.WrapErrServiceInternalMsg("Search CHUNK is missing fields present in earlier CHUNKs")
