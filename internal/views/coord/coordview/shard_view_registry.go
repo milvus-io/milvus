@@ -115,6 +115,7 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 		shards:           shards,
 		stats:            make(map[qviews.ShardID]*ShardStats, len(shards)),
 		collectionShards: make(map[int64]map[qviews.ShardID]struct{}),
+		publishedSchemas: make(map[int64]int32),
 		serving:          make(map[int64]*viewpb.ServingGeneration),
 		nodeShards:       make(map[int64]map[qviews.ShardID]struct{}),
 	}
@@ -562,9 +563,6 @@ func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version 
 	if old, ok := r.publishedSchemas[collectionID]; ok && old > version {
 		r.mu.Unlock()
 		return
-	}
-	if r.publishedSchemas == nil {
-		r.publishedSchemas = make(map[int64]int32)
 	}
 	r.publishedSchemas[collectionID] = version
 	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))

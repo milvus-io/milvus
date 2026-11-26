@@ -179,6 +179,9 @@ func (r *ShardViewRegistry) RemoveServingGeneration(ctx context.Context, id int6
 		}
 	}
 	delete(r.serving, id)
+	r.mu.Lock()
+	delete(r.publishedSchemas, id)
+	r.mu.Unlock()
 	return nil
 }
 
@@ -193,12 +196,21 @@ func (m *ShardViewManager) PublishServingGeneration(epoch uint64, schema int32, 
 	m.publishedServingLoadInfoVersion = loadVersion
 }
 
+// ServingCollectionIDs includes schema-only publications so the existing GC
+// pass can collect a schema callback that completes after logical deletion.
 func (r *ShardViewRegistry) ServingCollectionIDs() []int64 {
 	r.servingMu.Lock()
 	defer r.servingMu.Unlock()
-	ids := make([]int64, 0, len(r.serving))
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]int64, 0, len(r.serving)+len(r.publishedSchemas))
 	for id := range r.serving {
 		ids = append(ids, id)
+	}
+	for id := range r.publishedSchemas {
+		if _, exists := r.serving[id]; !exists {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }

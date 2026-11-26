@@ -230,3 +230,45 @@ func TestServingPublicationRecoveryRetainsExactLoadIdentity(t *testing.T) {
 	manager.mu.Unlock()
 	require.NotNil(t, manager.PublishedGenerationRecovery())
 }
+
+func TestServingPublicationDropClearsSchemaOnlyAfterDurableRemoval(t *testing.T) {
+	for name, schema := range map[string]int32{"zero": 0, "nonzero": 7} {
+		t.Run(name, func(t *testing.T) {
+			catalog := &servingRecoveryCatalog{
+				mockCatalog: newMockCatalog(),
+				generationTestCatalog: &generationTestCatalog{saved: []*viewpb.ServingGeneration{
+					{CollectionId: 100, LoadInfoVersion: 42, ReadSchemaVersion: schema, ShardSetEpoch: 3},
+					{CollectionId: 200, LoadInfoVersion: 50, ReadSchemaVersion: 9, ShardSetEpoch: 2},
+				}},
+			}
+			reg, err := RecoverShardViewRegistry(t.Context(), catalog, newMockSyncer())
+			require.NoError(t, err)
+			t.Cleanup(reg.Close)
+			reg.PublishCollectionSchema(100, schema)
+			reg.PublishCollectionSchema(200, 9)
+
+			// Release removes resident views while keeping the live collection's
+			// public schema and shard-set fence for a later Load.
+			shard := qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"}
+			require.NoError(t, reg.Ensure(shard).RequestRelease(t.Context()))
+			require.Contains(t, reg.publishedSchemas, int64(100))
+			require.Equal(t, schema, reg.publishedSchemas[100])
+			require.ElementsMatch(t, []int64{100, 200}, reg.ServingCollectionIDs())
+
+			catalog.err = errors.New("catalog delete unavailable")
+			require.ErrorIs(t, reg.RemoveServingGeneration(t.Context(), 100), catalog.err)
+			require.Contains(t, reg.publishedSchemas, int64(100))
+			require.Equal(t, schema, reg.publishedSchemas[100])
+			require.ElementsMatch(t, []int64{100, 200}, reg.ServingCollectionIDs())
+
+			catalog.err = nil
+			require.NoError(t, reg.RemoveServingGeneration(t.Context(), 100))
+			require.NotContains(t, reg.publishedSchemas, int64(100))
+			require.Equal(t, map[int64]int32{200: 9}, reg.publishedSchemas)
+			require.Equal(t, []int64{200}, reg.ServingCollectionIDs())
+			// An eventual repeated deletion must leave other collections intact.
+			require.NoError(t, reg.RemoveServingGeneration(t.Context(), 100))
+			require.Equal(t, map[int64]int32{200: 9}, reg.publishedSchemas)
+		})
+	}
+}

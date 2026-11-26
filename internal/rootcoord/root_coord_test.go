@@ -55,7 +55,6 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
@@ -215,7 +214,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	qvresource.Init(&qvresource.Resources{
 		Reconciler:  &testSchemaDataViews{},
 		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil, nil),
-		ShardViews: &coordview.ShardViewRegistry{}, Readiness: notifications,
+		ShardViews: newSchemaViewRegistry(t), Readiness: notifications,
 	})
 	t.Cleanup(func() { notifications.Close(); qvresource.Init(previous) })
 
