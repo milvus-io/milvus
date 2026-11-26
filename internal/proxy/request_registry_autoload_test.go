@@ -47,7 +47,7 @@ func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 	hybrid := mockey.Mock((*Proxy).hybridSearch).Return(
 		&milvuspb.SearchResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, false, false, nil).Build()
 	query := mockey.Mock((*Proxy).executeQuery).Return(
-		&milvuspb.QueryResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, nil).Build()
+		&milvuspb.QueryResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, int64(0), nil).Build()
 	t.Cleanup(func() {
 		search.UnPatch()
 		hybrid.UnPatch()
