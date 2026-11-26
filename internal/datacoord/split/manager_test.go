@@ -110,6 +110,8 @@ func newTriggerEnv(t *testing.T) *triggerEnv {
 	}
 	env.manager = NewManager(context.Background(), Dependencies{
 		Store: env.store,
+		// The default fixture has no remote replication members to wait for.
+		CheckParentRetired: func(context.Context, *datapb.SplitShardTask) error { return nil },
 		Collections: func() []Collection {
 			env.mu.Lock()
 			defer env.mu.Unlock()
