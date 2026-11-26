@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -5821,6 +5822,32 @@ func TestDroppedSegmentBatchRechecksManifestBeforeDeletion(t *testing.T) {
 	require.Nil(t, m.GetSegment(ctx, 2))
 }
 
+func assertDroppedSegmentRoundCounts(t *testing.T, ctx context.Context, gc *GarbageCollector, processed, recycled, failed int) {
+	t.Helper()
+	logFile, err := os.CreateTemp(t.TempDir(), "gc-round-*.log")
+	require.NoError(t, err)
+	defer logFile.Close()
+	logger, _, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{Level: "info", Format: "text"}, logFile)
+	require.NoError(t, err)
+	previous := mlog.L()
+	mlog.ReplaceGlobals(logger, nil)
+	defer mlog.ReplaceGlobals(previous, nil)
+
+	gc.RecycleDroppedSegments(ctx, nil)
+
+	output, err := os.ReadFile(logFile.Name())
+	require.NoError(t, err)
+	const summaryMessage = "recycleDroppedSegments candidates done"
+	require.Equal(t, 1, strings.Count(string(output), summaryMessage))
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.Contains(line, summaryMessage) {
+			assert.Contains(t, line, fmt.Sprintf("[processedDroppedSegments=%d]", processed))
+			assert.Contains(t, line, fmt.Sprintf("[recycledDroppedSegments=%d]", recycled))
+			assert.Contains(t, line, fmt.Sprintf("[failedDroppedSegments=%d]", failed))
+		}
+	}
+}
+
 func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 	checkpointCatalog := MockCheckpointCatalog(t, 1000)
 	t.Run("batches files and both metadata levels", func(t *testing.T) {
@@ -5831,7 +5858,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
 		defer gc.Close()
 
-		gc.RecycleDroppedSegments(ctx, nil)
+		assertDroppedSegmentRoundCounts(t, ctx, gc, 3, 3, 0)
 
 		cm.mu.Lock()
 		require.Len(t, cm.calls, 1)
@@ -5863,7 +5890,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
 		defer gc.Close()
 
-		gc.RecycleDroppedSegments(ctx, nil)
+		assertDroppedSegmentRoundCounts(t, ctx, gc, 2, 1, 1)
 
 		assert.Nil(t, m.GetSegment(ctx, 1))
 		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1))
@@ -6014,7 +6041,7 @@ func TestGarbageCollector_recycleDroppedSegmentsInBatches(t *testing.T) {
 		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{Cli: cm, DropTolerance: 0, StreamingNodeCatalog: checkpointCatalog}))
 		defer gc.Close()
 
-		gc.RecycleDroppedSegments(ctx, nil)
+		assertDroppedSegmentRoundCounts(t, ctx, gc, 1, 0, 1)
 
 		assert.NotNil(t, m.GetSegment(ctx, 1))
 		assert.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(1))

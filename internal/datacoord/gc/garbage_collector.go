@@ -1144,14 +1144,17 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 	defer io.Close()
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	candidateStart := time.Now()
-	processedDroppedSegments := 0
+	var stats droppedSegmentGCStats
 	defer func() {
 		log.Info(ctx, "recycleDroppedSegments candidates done",
 			mlog.Int("droppedSegments", len(drops)),
-			mlog.Int("processedDroppedSegments", processedDroppedSegments),
+			mlog.Int("processedDroppedSegments", stats.processed),
+			mlog.Int("recycledDroppedSegments", stats.recycled),
+			mlog.Int("failedDroppedSegments", stats.failed),
+			mlog.Bool("interrupted", ctx.Err() != nil),
 			mlog.Duration("timeCost", time.Since(candidateStart)))
 	}()
-	processedDroppedSegments = gc.recycleDroppedSegmentsInBatches(ctx, signal, io, drops, compactTo, indexedSet,
+	stats = gc.recycleDroppedSegmentsInBatches(ctx, signal, io, drops, compactTo, indexedSet,
 		channelCPs, loadedSegments, protected)
 }
 
@@ -1187,6 +1190,12 @@ func (gc *GarbageCollector) isDroppedSegmentGCCandidate(
 	return gc.checkDroppedSegmentGC(segment, compactTo[segmentID], indexedSet, checkpoint)
 }
 
+type droppedSegmentGCStats struct {
+	processed int
+	recycled  int
+	failed    int
+}
+
 // recycleDroppedSegmentsInBatches recycles the GC candidates among drops in
 // batches bounded by segment count and by the number of object paths.
 //
@@ -1203,12 +1212,12 @@ func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
 	channelCPs map[string]uint64,
 	loadedSegments typeutil.Set[int64],
 	protected map[int64]struct{},
-) int {
+) droppedSegmentGCStats {
 	batchSize := Params.DataCoordCfg.GCDroppedSegmentBatchSize.GetAsInt()
 	if batchSize <= 0 {
 		batchSize = 1000
 	}
-	processed := 0
+	var stats droppedSegmentGCStats
 	batchWeight := 0
 	batch := make([]*droppedSegmentGCBatchCandidate, 0, batchSize)
 	flush := func() bool {
@@ -1220,7 +1229,9 @@ func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
 			}
 		}
 		if len(active) > 0 {
-			gc.recycleDroppedSegmentBatch(ctx, active)
+			recycled, failed := gc.recycleDroppedSegmentBatch(ctx, active)
+			stats.recycled += recycled
+			stats.failed += failed
 		}
 		batch = batch[:0]
 		batchWeight = 0
@@ -1229,9 +1240,9 @@ func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
 	}
 
 	for _, segment := range drops {
-		processed++
+		stats.processed++
 		if ctx.Err() != nil {
-			return processed
+			return stats
 		}
 
 		gc.ackSignal(signal)
@@ -1252,6 +1263,7 @@ func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
 		}
 		candidate, err := gc.prepareDroppedSegmentGCBatchCandidate(ctx, io, segment.GetID(), segment)
 		if err != nil {
+			stats.failed++
 			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment failed to plan file deletion",
 				mlog.FieldSegmentID(segment.GetID()), mlog.Err(err))
 			continue
@@ -1266,16 +1278,16 @@ func (gc *GarbageCollector) recycleDroppedSegmentsInBatches(
 		}
 		weight = max(1, weight)
 		if len(batch) > 0 && batchWeight+weight > batchSize && !flush() {
-			return processed
+			return stats
 		}
 		batch = append(batch, candidate)
 		batchWeight += weight
 		if (len(batch) >= batchSize || batchWeight >= batchSize) && !flush() {
-			return processed
+			return stats
 		}
 	}
 	flush()
-	return processed
+	return stats
 }
 
 // RecycleDroppedSegment recycles one dropped segment through the batch pipeline.
@@ -1403,14 +1415,14 @@ func (gc *GarbageCollector) lockGCManifests(ctx context.Context, ids []int64) (f
 //
 // Any future refactor on either side must preserve these invariants,
 // otherwise dropped-segment GC will silently break under load.
-func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batch []*droppedSegmentGCBatchCandidate) {
+func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batch []*droppedSegmentGCBatchCandidate) (recycled, failed int) {
 	ids := make([]int64, 0, len(batch))
 	for _, candidate := range batch {
 		ids = append(ids, candidate.segment.GetID())
 	}
 	unlock, err := gc.lockGCManifests(ctx, ids)
 	if err != nil {
-		return
+		return recycled, failed
 	}
 	defer unlock()
 	// Persisted task markers keep a retained compaction ancestor from
@@ -1425,6 +1437,7 @@ func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batc
 			continue
 		}
 		if err := gc.markSegmentIndexesDeleted(ctx, candidate.indexes.summaries); err != nil {
+			failed++
 			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment index tasks failed to mark deleted, wait to retry",
 				mlog.FieldSegmentID(candidate.segment.GetID()), mlog.Err(err))
 			continue
@@ -1433,7 +1446,7 @@ func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batc
 		filePaths = append(filePaths, candidate.exactFiles...)
 	}
 	if len(marked) == 0 || ctx.Err() != nil {
-		return
+		return recycled, failed
 	}
 
 	var outcomes map[string]removeOutcome
@@ -1445,6 +1458,7 @@ func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batc
 	prefixes := make([]string, 0, len(marked))
 	for _, candidate := range marked {
 		if err := batchRemoveError(candidate.exactFiles, outcomes, batchErr); err != nil {
+			failed++
 			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment remove files failed",
 				mlog.FieldSegmentID(candidate.segment.GetID()),
 				mlog.Int("exactFiles", len(candidate.exactFiles)),
@@ -1470,6 +1484,7 @@ func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batc
 	for _, candidate := range filesRemoved {
 		if candidate.prefix != "" {
 			if err := batchRemoveError([]string{candidate.prefix}, prefixOutcomes, prefixErr); err != nil {
+				failed++
 				mlog.RatedWarn(ctx, rate.Limit(1), "GC V3 segment remove basePath failed",
 					mlog.FieldSegmentID(candidate.segment.GetID()),
 					mlog.String("basePath", candidate.prefix),
@@ -1481,33 +1496,40 @@ func (gc *GarbageCollector) recycleDroppedSegmentBatch(ctx context.Context, batc
 		segmentIndexes = append(segmentIndexes, candidate.indexes.records...)
 	}
 	if ctx.Err() != nil {
-		return
+		return recycled, failed
 	}
 
 	gc.removeSegmentIndexesInBatches(ctx, segmentIndexes)
 	if ctx.Err() != nil {
-		return
+		return recycled, failed
 	}
 
 	// The segment record is the final marker of its GC: drop it only once all
 	// of its SegmentIndex records are gone.
 	segments := make([]*meta.SegmentInfo, 0, len(removed))
 	for _, candidate := range removed {
-		if gc.segmentIndexesRemoved(candidate.indexes.summaries) {
-			segments = append(segments, candidate.segment)
+		if !gc.segmentIndexesRemoved(candidate.indexes.summaries) {
+			failed++
+			continue
 		}
+		segments = append(segments, candidate.segment)
 	}
 	metadataBatchSize := metastoreTxnBatchSize()
 	for start := 0; start < len(segments); start += metadataBatchSize {
 		if ctx.Err() != nil {
-			return
+			return recycled, failed
 		}
 		end := min(start+metadataBatchSize, len(segments))
-		if _, err := gc.Meta.DropSegments(ctx, segments[start:end]); err != nil {
+		dropped, err := gc.Meta.DropSegments(ctx, segments[start:end])
+		if err != nil {
+			// DropSegments publishes no removals when the catalog call fails.
+			failed += end - start
 			mlog.RatedWarn(ctx, rate.Limit(1), "GC segment meta failed to drop segments, wait to retry",
 				mlog.Int("segments", end-start), mlog.Err(err))
 		}
+		recycled += dropped
 	}
+	return recycled, failed
 }
 
 // metastoreTxnBatchSize is the number of records one metastore transaction may
