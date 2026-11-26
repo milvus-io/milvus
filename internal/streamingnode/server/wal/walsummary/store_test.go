@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -280,19 +282,28 @@ func TestStoreManifestInterruptedRewriteKeepsPrevious(t *testing.T) {
 		Coverage: &streamingpb.SummaryCoverage{Generation: 1, Term: 1},
 	}
 	require.NoError(t, store.WriteManifest(ctx, previous))
+	// Unrelated writes, including Go's test action log, must remain writable
+	// while the manifest failure is injected.
+	logFile, err := os.Create(filepath.Join(t.TempDir(), "testlog.txt"))
+	require.NoError(t, err)
+	defer logFile.Close()
 	// The rewrite stops halfway, as a crash or a full disk would leave it.
+	manifestDir := filepath.Dir(store.ManifestKey())
 	var original func(*os.File, []byte) (int, error)
 	patch := mockey.Mock((*os.File).Write).Origin(&original).To(func(f *os.File, b []byte) (int, error) {
-		if f == os.Stdout || f == os.Stderr {
+		if filepath.Dir(f.Name()) != manifestDir || !localstorage.IsTemp(f.Name()) {
 			return original(f, b)
 		}
 		n, _ := original(f, b[:len(b)/2])
 		return n, syscall.ENOSPC
 	}).Build()
-	err := store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
+	defer patch.UnPatch()
+	_, logErr := logFile.Write([]byte("unrelated test activity\n"))
+	err = store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
 		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1},
 	})
 	patch.UnPatch()
+	require.NoError(t, logErr)
 	require.Error(t, err)
 	// The manifest is the only index into the chunk set: the previous one must
 	// stay readable instead of failing recovery as corrupted.
