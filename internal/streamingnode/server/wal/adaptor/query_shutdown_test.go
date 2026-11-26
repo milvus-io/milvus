@@ -143,11 +143,11 @@ func TestWALCloseWakesRecoveryWaitersBeforeResourceRelease(t *testing.T) {
 
 		entered := make(chan struct{})
 		var enterOnce sync.Once
-		var orig func(*snview.SNQueryViewHandler, context.Context, qviews.ShardID, int32) (*snview.QueryViewLease, error)
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Origin(&orig).To(
-			func(h *snview.SNQueryViewHandler, ctx context.Context, shardID qviews.ShardID, schema int32) (*snview.QueryViewLease, error) {
+		var orig func(*snview.SNQueryViewHandler, context.Context, qviews.ShardID, *int32, uint64, uint64) (*snview.QueryViewLease, error)
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtGeneration).Origin(&orig).To(
+			func(h *snview.SNQueryViewHandler, ctx context.Context, shardID qviews.ShardID, schema *int32, epoch uint64, loadVersion uint64) (*snview.QueryViewLease, error) {
 				enterOnce.Do(func() { close(entered) })
-				lease, err := orig(h, ctx, shardID, schema)
+				lease, err := orig(h, ctx, shardID, schema, epoch, loadVersion)
 				acquireExited.Store(true)
 				return lease, err
 			},
@@ -165,7 +165,7 @@ func TestWALCloseWakesRecoveryWaitersBeforeResourceRelease(t *testing.T) {
 			planErr <- err
 		}()
 		waitFenceTestSignal(t, entered)
-		// Let AcquireUpViewAtSchema park on the shard recovery channel.
+		// Let AcquireUpViewAtGeneration park on the shard recovery channel.
 		time.Sleep(20 * time.Millisecond)
 
 		start := time.Now()
@@ -214,11 +214,11 @@ func TestWALCloseArmsForceCancelBeforeWaitingForShardLocks(t *testing.T) {
 
 		entered := make(chan struct{})
 		var enterOnce sync.Once
-		var orig func(*snview.SNQueryViewHandler, context.Context, qviews.ShardID, int32) (*snview.QueryViewLease, error)
-		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Origin(&orig).To(
-			func(h *snview.SNQueryViewHandler, ctx context.Context, shardID qviews.ShardID, schema int32) (*snview.QueryViewLease, error) {
+		var orig func(*snview.SNQueryViewHandler, context.Context, qviews.ShardID, *int32, uint64, uint64) (*snview.QueryViewLease, error)
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtGeneration).Origin(&orig).To(
+			func(h *snview.SNQueryViewHandler, ctx context.Context, shardID qviews.ShardID, schema *int32, epoch uint64, loadVersion uint64) (*snview.QueryViewLease, error) {
 				enterOnce.Do(func() { close(entered) })
-				return orig(h, ctx, shardID, schema)
+				return orig(h, ctx, shardID, schema, epoch, loadVersion)
 			},
 		).Build()
 
