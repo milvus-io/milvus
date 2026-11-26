@@ -20,7 +20,7 @@ use lindera_dictionary::viterbi::Lattice;
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::analyzer::options::{
     get_lindera_download_url, get_options, get_resource_path, read_resource_file,
-    FileResourcePathHelper, DEFAULT_DICT_PATH_KEY,
+    with_resource_file, FileResourcePathHelper, DEFAULT_DICT_PATH_KEY,
 };
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -372,15 +372,20 @@ fn fetch_lindera_user_dict(
             "lindera user dict file extension must be csv or bin".into(),
         ));
     }
-    let bytes = read_resource_file(helper, v, "lindera user dict file")?;
     let user_dict = match ext {
         Some("csv") => {
             // The CSV parser needs a path; never reopen the caller's file.
             let mut snapshot = tempfile::NamedTempFile::new()?;
-            std::io::Write::write_all(&mut snapshot, &bytes)?;
+            with_resource_file(helper, v, "lindera user dict file", |mut reader| {
+                std::io::copy(&mut reader, &mut snapshot)?;
+                Ok(())
+            })?;
             load_user_dictionary_from_csv(kind.clone(), snapshot.path())
         }
-        _ => UserDictionary::load(&bytes),
+        _ => {
+            let bytes = read_resource_file(helper, v, "lindera user dict file")?;
+            UserDictionary::load(&bytes)
+        }
     }
     .map_err(|_| {
         TantivyBindingError::InvalidArgument("lindera user dictionary is invalid".into())
