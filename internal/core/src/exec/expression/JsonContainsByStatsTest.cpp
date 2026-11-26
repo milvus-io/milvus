@@ -30,6 +30,7 @@
 #include "bitset/detail/element_vectorized.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
+#include "common/ChunkWriter.h"
 #include "common/Consts.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
@@ -2391,10 +2392,9 @@ TEST_P(JsonStatsExistsOrderTest, ResolvedParentSkipsRemainingColumns) {
 
         auto exists = std::make_shared<expr::ExistsExpr>(
             expr::ColumnInfo(fid, DataType::JSON, {"parent"}));
-        exec::PhyExistsFilterExpr probe(
+        ExecPathProbe<exec::PhyExistsFilterExpr> probe(
             {}, exists, "exists-probe", nullptr, segment.get(), n, n, 0);
-        probe.EnsureExecPathDetermined();
-        ASSERT_EQ(probe.GetExecPath(), exec::ExprExecPath::JsonStats);
+        ASSERT_EQ(probe.Path(), exec::ExprExecPath::JsonStats);
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, exists);
         auto result =
@@ -2540,10 +2540,10 @@ TEST(JsonStatsExistsTest, EmptyContainersMatchRawAfterReload) {
                         auto physical = std::dynamic_pointer_cast<
                             exec::PhyExistsFilterExpr>(compiled[0]);
                         ASSERT_NE(physical, nullptr);
-                        physical->EnsureExecPathDetermined();
-                        ASSERT_EQ(physical->GetExecPath(),
-                                  use_stats ? exec::ExprExecPath::JsonStats
-                                            : exec::ExprExecPath::RawData);
+                        // This fixture has JSON stats and raw data only;
+                        // only the stats path can evaluate all rows at once.
+                        ASSERT_EQ(physical->CanExecuteAllAtOnce(), use_stats);
+                        ASSERT_FALSE(physical->UseIndexCursor());
                     }
                     exec::EvalCtx eval_context(&exec_context);
                     size_t seen = 0;
