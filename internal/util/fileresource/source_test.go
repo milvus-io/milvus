@@ -103,7 +103,7 @@ func TestFileResourceLocalDefaultDirectory(t *testing.T) {
 	require.EqualValues(t, 2, size)
 	destination := filepath.Join(t.TempDir(), "downloaded")
 	err = (&BaseManager{}).downloadFile(context.Background(), storage.NewLocalChunkManager(),
-		&internalpb.FileResourceInfo{Id: 1, Path: "dict"}, destination, time.Second)
+		&internalpb.FileResourceInfo{Id: 1, Path: filepath.Join(root, "dict")}, destination, time.Second)
 	require.NoError(t, err)
 	content, err := os.ReadFile(destination)
 	require.NoError(t, err)
@@ -170,4 +170,23 @@ func TestFileResourceRemoteDefaultPrefix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRegisteredResourceSurvivesPolicyChange(t *testing.T) {
+	root := t.TempDir()
+	sourceFile := filepath.Join(root, "dict")
+	require.NoError(t, os.WriteFile(sourceFile, []byte("the\n"), 0600))
+	setSourceRoot(t, t.TempDir())
+	setting := &paramtable.Get().CommonCfg.FileResourceMaxFileSize
+	old := setting.SwapTempValue("1")
+	t.Cleanup(func() { setting.SwapTempValue(old) })
+	cm := storage.NewLocalChunkManager()
+	_, err := RestrictSource(cm).Size(context.Background(), sourceFile)
+	require.Error(t, err)
+	destination := filepath.Join(t.TempDir(), "dict")
+	err = (&BaseManager{}).downloadFile(context.Background(), cm, &internalpb.FileResourceInfo{Id: 1, Path: sourceFile}, destination, time.Second)
+	require.NoError(t, err)
+	data, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	require.Equal(t, "the\n", string(data))
 }

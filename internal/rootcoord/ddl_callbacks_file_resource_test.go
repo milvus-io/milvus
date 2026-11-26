@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -38,6 +40,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type admissionFileReader struct{ *strings.Reader }
+
+func (r *admissionFileReader) Close() error         { return nil }
+func (r *admissionFileReader) Size() (int64, error) { return r.Reader.Size(), nil }
 
 func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockBroadcastAPI {
 	t.Helper()
@@ -49,6 +56,11 @@ func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockB
 		On(string, ...interface{}) *mock.Call
 	}); ok {
 		cm.On("Size", mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	}
+	if cm, ok := core.storage.(*mock_storage.MockChunkManager); ok {
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) (storage.FileReader, error) {
+			return &admissionFileReader{strings.NewReader("x")}, nil
+		}).Maybe()
 	}
 	if core.meta == nil {
 		core.meta = mockrootcoord.NewIMetaTable(t)
@@ -292,4 +304,19 @@ func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T)
 		Path: resource.Path,
 	}))
 	require.False(t, guardHeld)
+}
+
+func TestFileResourceAdmissionChecksActualBytes(t *testing.T) {
+	old := Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("4")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(old) })
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, "dict/large.txt").Return(true, nil)
+	cm.EXPECT().Size(mock.Anything, "dict/large.txt").Return(int64(1), nil)
+	cm.EXPECT().Reader(mock.Anything, "dict/large.txt").Return(&admissionFileReader{strings.NewReader("SECRET_MARKER")}, nil).Once()
+	core := newTestCore(withStorage(cm))
+	api := mockFileResourceBroadcast(t, core)
+	err := core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{Name: "large", Path: "dict/large.txt"})
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.NotContains(t, err.Error(), "SECRET_MARKER")
+	api.AssertNotCalled(t, "Broadcast", mock.Anything, mock.Anything)
 }

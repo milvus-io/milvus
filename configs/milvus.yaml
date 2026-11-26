@@ -1299,7 +1299,7 @@ grpc:
 
 # Configure external tls.
 tls:
-  allowedPath:  # Base directory for request-selected TLS files, currently used by the gRPC tokenizer. Empty uses localStorage.path/tls. Must be separate from dictionary and file-resource source directories. Restart required.
+  allowedPath:  # Admission base for request-selected TLS files, used by the gRPC tokenizer. Empty uses localStorage.path/tls. Existing schemas retain their paths. Keep separate from dictionary and file-resource directories. Restart required.
   serverPemPath: configs/cert/server.pem
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
@@ -1495,8 +1495,8 @@ common:
       queryNode: sync # File resource mode for query node, options: [sync, close]. Default is sync.
       dataNode: sync # File resource mode for data node, options: [sync, ref, close]. Default is sync.
       proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
-    allowedPath:  # Only file resources under this complete object-key prefix (remote storage) or absolute directory (local storage) may be admitted or downloaded. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.
-    maxFileSize: 64m # Maximum size of a single file resource accepted by AddFileResource. Also limits downloaded bytes; must be positive.
+    allowedPath:  # New file resources must use this complete object-key prefix (remote storage) or absolute directory (local storage). Existing registrations are not rechecked. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.
+    maxFileSize: 64m # Maximum bytes accepted by a new AddFileResource registration, including actual reads. Existing registrations are not rechecked; must be positive.
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
     cacheTtl: 15m # Idle lease for on-demand analyzer resource files after their last consumer releases them. Accepts duration strings such as 30s or 15m; 0s disables retention. Takes effect on restart.
   groupBy:
@@ -2032,8 +2032,8 @@ function:
           enable: true # Whether to enable voyageai model service
           url:  # Your voyageai rerank url, Default is the official rerank url
   analyzer:
-    local_resource_path:  # Absolute directory containing operator-provided analyzer dictionaries. Empty uses localStorage.path/analyzer. Symbolic links below it are rejected. Restart required.
-    max_dict_size: 67108864 # Maximum bytes read from each local or file-resource analyzer dictionary. Must be positive; restart required.
+    local_resource_path:  # Admission directory for new or changed analyzer dictionaries. Empty uses localStorage.path/analyzer. Existing schemas retain their paths; new reads reject symbolic links. Restart required.
+    max_dict_size: 67108864 # Maximum dictionary bytes for new or changed analyzers and inline requests. Existing schemas are not rechecked. Must be positive; restart required.
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
   pyUDF:

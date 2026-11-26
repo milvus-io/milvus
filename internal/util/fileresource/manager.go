@@ -164,7 +164,6 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
-	downloader = RestrictSource(downloader)
 	size, err := downloader.Size(downloadCtx, resource.GetPath())
 	if err != nil {
 		return merr.Wrapf(err, "get file resource size for %s", resource.GetPath())
@@ -172,9 +171,11 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 	if size < 0 {
 		return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", resource.GetPath(), size)
 	}
-	limit := paramtable.Get().CommonCfg.FileResourceMaxFileSize.GetAsSize()
-	if limit <= 0 || limit == math.MaxInt64 || size > limit {
-		return merr.WrapErrParameterTooLarge("file resource", "configured read limit exceeded or invalid")
+	// Registered metadata has already passed admission. Do not apply a new
+	// operator policy during recovery; still bound this download to its stat size.
+	limit := size
+	if limit == math.MaxInt64 {
+		return merr.WrapErrIoFailedMsg("file resource size cannot be represented safely")
 	}
 	reader, err := downloader.Reader(downloadCtx, resource.GetPath())
 	if err != nil {
@@ -213,7 +214,7 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 		return merr.Wrapf(err, "download file resource %s", resource.GetPath())
 	}
 	if written > limit {
-		return merr.WrapErrParameterTooLarge("file resource", "configured read limit exceeded")
+		return merr.WrapErrIoFailedMsg("file resource grew during download")
 	}
 	if written != size {
 		return merr.WrapErrIoUnexpectEOF(resource.GetPath(), errors.Newf("expected %d bytes, downloaded %d", size, written))

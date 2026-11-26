@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// RestrictSource applies the same boundary before admission probes and downloads.
+// RestrictSource applies the operator boundary to new resource admission.
 // Local paths may be relative to the allowed directory; object keys stay complete.
-func RestrictSource(cm storage.ChunkManager) storage.ChunkManager {
+func RestrictSource(cm storage.ChunkManager) *restrictedSource {
 	root := paramtable.Get().CommonCfg.FileResourceAllowedPath.GetValue()
 	if root == "" {
 		if _, local := cm.(*storage.LocalChunkManager); local {
@@ -67,6 +67,18 @@ func (s *restrictedSource) relativePath(name string) (string, error) {
 		}
 	}
 	return relative, nil
+}
+
+// ResolvePath fixes local relative paths before the resource is persisted.
+func (s *restrictedSource) ResolvePath(name string) (string, error) {
+	relative, err := s.relativePath(name)
+	if err != nil {
+		return "", err
+	}
+	if _, local := s.ChunkManager.(*storage.LocalChunkManager); local {
+		return filepath.Join(s.root, relative), nil
+	}
+	return name, nil
 }
 
 func (s *restrictedSource) openLocal(relative string) (*storage.LocalReader, error) {

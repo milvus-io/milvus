@@ -64,6 +64,7 @@ impl TokenStream for GrpcTokenStream {
 impl GrpcTokenizer {
     pub fn from_json(
         params: &json::Map<String, json::Value>,
+        enforce_file_access: bool,
     ) -> crate::error::Result<GrpcTokenizer> {
         let endpoint = params
             .get(ENDPOINTKEY)
@@ -185,7 +186,7 @@ impl GrpcTokenizer {
             let root = crate::analyzer::options::get_options("tls_allowed_path")
                 .and_then(|v| v.as_str().map(std::path::PathBuf::from))
                 .unwrap_or_default();
-            let config = build_tls_config(params.get(TLSKEY), domain, &root)?;
+            let config = build_tls_config(params.get(TLSKEY), domain, &root, enforce_file_access)?;
             channel_endpoint.tls_config(config).map_err(|_| {
                 TantivyBindingError::InvalidArgument(
                     "grpc tokenizer TLS configuration is invalid".into(),
@@ -271,6 +272,7 @@ fn build_tls_config(
     tls: Option<&json::Value>,
     endpoint_domain: String,
     root: &std::path::Path,
+    enforce_file_access: bool,
 ) -> crate::error::Result<ClientTlsConfig> {
     let Some(tls) = tls else {
         return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
@@ -292,8 +294,12 @@ fn build_tls_config(
                 "grpc tokenizer TLS file path must be a non-empty string".into(),
             )
         })?;
-        crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
-            .map(Some)
+        if enforce_file_access {
+            crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
+                .map(Some)
+        } else {
+            Ok(Some(std::fs::read(path)?))
+        }
     };
     let domain = tls
         .get("domain")
@@ -327,7 +333,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
 
         assert!(tokenizer.is_err()); // This test is expected to fail because the endpoint is not valid for testing
     }
@@ -339,7 +345,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
 
         assert!(tokenizer.is_err());
     }
@@ -352,7 +358,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
         assert!(tokenizer.is_err());
         let err = tokenizer.err().unwrap().to_string();
         assert!(

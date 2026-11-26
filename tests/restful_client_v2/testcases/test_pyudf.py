@@ -554,7 +554,9 @@ class TestPyUDF(PyUDFRestBase):
             if operation == "search":
                 response = self._search_once(payload, client=VectorClient(self.endpoint, self.invalid_api_key))
             elif operation == "add":
-                response = invalid.file_resource_add({"name": resource, "path": f"{FILE_RESOURCE_PREFIX}/pyudf/{resource}.whl"})
+                response = invalid.file_resource_add(
+                    {"name": resource, "path": f"{FILE_RESOURCE_PREFIX}/pyudf/{resource}.whl"}
+                )
             elif operation == "remove":
                 response = invalid.file_resource_remove({"name": resource})
             else:

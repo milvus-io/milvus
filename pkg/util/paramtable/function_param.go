@@ -316,7 +316,7 @@ func (p *functionConfig) init(base *BaseTable, localStoragePath string) {
 		Export:       true,
 		DefaultValue: "",
 		Forbidden:    true,
-		Doc:          "Absolute directory containing operator-provided analyzer dictionaries. Empty uses localStorage.path/analyzer. Symbolic links below it are rejected. Restart required.",
+		Doc:          "Admission directory for new or changed analyzer dictionaries. Empty uses localStorage.path/analyzer. Existing schemas retain their paths; new reads reject symbolic links. Restart required.",
 		Formatter: func(value string) string {
 			if value == "" {
 				value = filepath.Join(localStoragePath, "analyzer")
@@ -333,7 +333,7 @@ func (p *functionConfig) init(base *BaseTable, localStoragePath string) {
 		Key:          "function.analyzer.max_dict_size",
 		Version:      "3.0",
 		DefaultValue: "67108864",
-		Doc:          "Maximum bytes read from each local or file-resource analyzer dictionary. Must be positive; restart required.",
+		Doc:          "Maximum dictionary bytes for new or changed analyzers and inline requests. Existing schemas are not rechecked. Must be positive; restart required.",
 		Export:       true,
 		Forbidden:    true,
 		Formatter: func(value string) string {

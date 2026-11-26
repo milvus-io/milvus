@@ -112,7 +112,7 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	}
 
 	for name, param := range analyzersParam {
-		analyzer, err := analyzer.NewAnalyzer(string(param), analyzerExtraInfo(extraInfo))
+		analyzer, err := analyzer.RestoreAnalyzer(string(param), analyzerExtraInfo(extraInfo))
 		if err != nil {
 			return nil, merr.Wrapf(err, "bm25 function create analyzer %s failed", name)
 		}

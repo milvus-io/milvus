@@ -25,6 +25,9 @@ pub(crate) fn with_resource_file<T>(
     parse: impl FnOnce(&mut dyn BufRead) -> Result<T>,
 ) -> Result<T> {
     let path = get_resource_path(helper, params, key)?;
+    if !helper.enforce_file_access {
+        return parse(&mut std::io::BufReader::new(std::fs::File::open(path)?));
+    }
     let root_key = if params.get("type").and_then(json::Value::as_str) == Some("local") {
         super::DEFAULT_DICT_PATH_KEY
     } else {
