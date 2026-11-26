@@ -115,6 +115,48 @@ func TestCheckLimiter_ZeroTokenRequestsBypassLimiter(t *testing.T) {
 	}
 }
 
+// A request naming a partition that does not exist is not a rate limit
+// rejection: the limiter is not consulted and the request goes on to the Proxy
+// method, which reports the real error, as it does behind the gRPC rate limit
+// interceptor.
+func TestCheckLimiter_MetaLookupFailureIsNotARateLimitRejection(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(&proxy.SimpleLimiter{}, nil).Build()
+	defer getLimiter.UnPatch()
+	check := mockey.Mock((*proxy.SimpleLimiter).Check).Return(nil).Build()
+	defer check.UnPatch()
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).Return(&metacache.DatabaseInfo{DBID: 100}, nil).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(10), nil).Build()
+	defer getCollection.UnPatch()
+	getPartition := mockey.Mock((*proxy.MetaCache).GetPartitionInfo).Return(nil, merr.WrapErrPartitionNotFound("nopart")).Build()
+	defer getPartition.UnPatch()
+
+	testCases := []struct {
+		name    string
+		request proto.Message
+	}{
+		{"insert", &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "nopart"}},
+		{"delete", &milvuspb.DeleteRequest{DbName: "target", CollectionName: "collection", PartitionName: "nopart", Expr: "id == 1"}},
+		{"search", &milvuspb.SearchRequest{DbName: "target", CollectionName: "collection", PartitionNames: []string{"nopart"}, Nq: 1}},
+		{"query", &milvuspb.QueryRequest{DbName: "target", CollectionName: "collection", PartitionNames: []string{"nopart"}}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+			assert.NoError(t, err)
+			assert.Nil(t, resp)
+		})
+	}
+	assert.Zero(t, check.Times(), "the limiter must not be consulted when the request info cannot be resolved")
+	assert.EqualValues(t, len(testCases), getPartition.Times(), "the lookup failure must be the reason the limiter was skipped")
+}
+
 func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
 	originalValue := quotaConfig.GetValue()
