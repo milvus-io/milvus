@@ -8,6 +8,7 @@ use crate::error::TantivyBindingError;
 
 struct AnalyzerBuilder<'a> {
     filters: HashMap<String, SystemFilter>,
+    enforce_file_access: bool,
     params: &'a json::Map<String, json::Value>,
 }
 
@@ -15,6 +16,7 @@ impl AnalyzerBuilder<'_> {
     fn new(params: &json::Map<String, json::Value>) -> AnalyzerBuilder {
         AnalyzerBuilder {
             filters: HashMap::new(),
+            enforce_file_access: true,
             params: params,
         }
     }
@@ -163,7 +165,15 @@ impl AnalyzerBuilder<'_> {
 
         //build custom analyzer
         let tokenizer_params = self.get_tokenizer_params()?;
-        let mut builder = get_builder_with_tokenizer(&tokenizer_params, create_analyzer_by_json)?;
+        let mut builder = get_builder_with_tokenizer(
+            &tokenizer_params,
+            if self.enforce_file_access {
+                create_analyzer_by_json
+            } else {
+                restore_analyzer_by_json
+            },
+            self.enforce_file_access,
+        )?;
 
         // build and check other options
         builder = self.build_option(builder)?;
@@ -180,6 +190,24 @@ pub fn create_analyzer_by_json(
 
     let builder = AnalyzerBuilder::new(analyzer_params);
     builder.build()
+}
+
+fn restore_analyzer_by_json(params: &json::Map<String, json::Value>) -> Result<TextAnalyzer> {
+    if params.is_empty() {
+        return Ok(standard_analyzer(vec![]));
+    }
+    let mut builder = AnalyzerBuilder::new(params);
+    builder.enforce_file_access = false;
+    builder.build()
+}
+
+pub fn restore_analyzer(params: &str) -> Result<TextAnalyzer> {
+    if params.is_empty() {
+        return Ok(standard_analyzer(vec![]));
+    }
+    let params = json::from_str::<json::Map<String, json::Value>>(params)
+        .map_err(TantivyBindingError::JsonError)?;
+    restore_analyzer_by_json(&params)
 }
 
 pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {

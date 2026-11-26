@@ -16,3 +16,19 @@ confinement does not authorize endpoints or restrict which caller can select a
 credential. Existing server/internal TLS path settings are unchanged. This fix
 preserves custom CA and mTLS support using confined files; it does not introduce
 public CA roots. TLS-disabled builds continue to reject HTTPS endpoints.
+
+Directory and byte limits are admission rules: new or changed schema analyzers
+and every inline analyzer request are checked. Persisted definitions restore
+without applying the current operator directory or byte limit, including after
+restart and index rebuild. Errors remain redacted. New relative TLS paths are
+resolved to absolute paths before validation and schema WAL publication, so a
+later base change cannot retarget them. Existing definitions are unchanged;
+legacy relative paths retain their process-working-directory meaning. Altering
+unrelated fields does not revalidate existing analyzers.
+
+Admission does not freeze file contents. Operators must retain the admitted
+files and protect them from replacement; missing or invalid files can still
+fail recovery. CDC carries the resolved paths in the existing schema messages;
+corresponding paths and contents must be provisioned on each cluster. No public
+RPC or protobuf field is added. The 2.6 internal tokenizer C interface carries
+an explicit restoration flag because it has no resource-extra-info argument.

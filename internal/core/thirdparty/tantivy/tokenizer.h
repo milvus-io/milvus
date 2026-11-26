@@ -12,10 +12,11 @@ struct Tokenizer {
  public:
     NO_COPY_OR_ASSIGN(Tokenizer);
 
-    explicit Tokenizer(std::string&& params) {
+    explicit Tokenizer(std::string&& params,
+                       bool file_access_admitted = false) {
         auto shared_params = std::make_shared<std::string>(std::move(params));
-        auto res =
-            RustResultWrapper(tantivy_create_analyzer(shared_params->c_str()));
+        auto res = RustResultWrapper(tantivy_create_analyzer(
+            shared_params->c_str(), file_access_admitted));
         AssertInfo(res.result_->success,
                    "Tokenizer creation failed: {}",
                    res.result_->error);

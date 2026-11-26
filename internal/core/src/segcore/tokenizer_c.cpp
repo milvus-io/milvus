@@ -30,9 +30,12 @@ set_tokenizer_option(const char* params) {
 }
 
 CStatus
-create_tokenizer(const char* params, CTokenizer* tokenizer) {
+create_tokenizer(const char* params,
+                 CTokenizer* tokenizer,
+                 bool file_access_admitted) {
     try {
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
+        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(
+            params, file_access_admitted);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
