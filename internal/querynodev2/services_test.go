@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -481,12 +482,15 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 		IndexInfoList: indexInfos,
 	}
 
-	// test channel is unsubscribing
-	suite.node.unsubscribingChannels.Insert(suite.vchannel)
-	status, err := suite.node.WatchDmChannels(ctx, req)
+	// A canceled watch waiting behind an unsubscribe must leave no subscription.
+	release, err := suite.node.channelOperations.acquire(ctx, suite.vchannel)
+	suite.Require().NoError(err)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	status, err := suite.node.WatchDmChannels(canceled, req)
+	release()
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
-	suite.node.unsubscribingChannels.Remove(suite.vchannel)
+	suite.Equal(merr.CanceledCode, status.GetCode())
 
 	// load growing failed
 	badSegmentReq := typeutil.Clone(req)
@@ -3085,4 +3089,368 @@ func TestQueryNodeService(t *testing.T) {
 	defer streaming.RecoverWALForTest()
 
 	suite.Run(t, new(ServiceSuite))
+}
+
+// Reusing a channel after replica reassignment must acknowledge the new watch
+// generation without replacing its query view or recreating the delegator.
+func (suite *ServiceSuite) TestWatchDmChannelsUpdatesExistingVersion() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	sd, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	initialQueryView := sd.GetChannelQueryView()
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(full.GetChannels(), 1)
+	suite.Equal(int64(0), full.GetChannels()[0].GetVersion())
+	req := &querypb.WatchDmChannelsRequest{
+		CollectionID:  suite.collectionID,
+		ReplicaID:     9876, // A retained channel can legitimately move to another replica.
+		Version:       100,
+		Infos:         []*datapb.VchannelInfo{{CollectionID: suite.collectionID, ChannelName: suite.vchannel}},
+		IndexInfoList: []*indexpb.IndexInfo{{}},
+	}
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().True(merr.Ok(status))
+	suite.Equal(int64(100), sd.Version())
+	delta := suite.getDataDistributionWithDeltaSupport(ctx, full.GetLastModifyTs())
+	suite.Require().True(delta.GetIsDelta())
+	suite.Require().Len(delta.GetChannels(), 1)
+	suite.Equal(int64(100), delta.GetChannels()[0].GetVersion())
+	suite.Same(initialQueryView, sd.GetChannelQueryView())
+	for _, version := range []int64{100, 50, 0} {
+		req.Version = version
+		status, err = suite.node.WatchDmChannels(ctx, req)
+		suite.Require().NoError(err)
+		suite.Require().True(merr.Ok(status))
+		suite.Equal(int64(100), sd.Version())
+	}
+	req.Version = 200
+	// A queued watch applies its generation after the previous operation ends.
+	release, err := suite.node.channelOperations.acquire(ctx, suite.vchannel)
+	suite.Require().NoError(err)
+	release = sync.OnceFunc(release)
+	defer release()
+	done := make(chan error, 1)
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, req)
+		done <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	suite.Equal(int64(100), sd.Version())
+	release()
+	suite.requireChannelOperationDone(done)
+	suite.Equal(int64(200), sd.Version())
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	req.Version = 300
+	status, err = suite.node.WatchDmChannels(canceled, req)
+	suite.Require().NoError(err)
+	suite.False(merr.Ok(status))
+	suite.Equal(int64(200), sd.Version())
+	req.CollectionID++
+	req.Version = 300
+	status, err = suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrChannelReduplicate)
+	suite.Equal(int64(200), sd.Version())
+	reported := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(reported.GetChannels(), 1)
+	suite.Equal(int64(200), reported.GetChannels()[0].GetVersion())
+}
+
+// This wrapper pauses real delegator operations at deterministic points; it does
+// not replace the Watch/Unwatch handlers or their distribution bookkeeping.
+type gatedChannelDelegator struct {
+	delegator.ShardDelegator
+	beforeUpdate func()
+	beforeClose  func()
+}
+
+func (d *gatedChannelDelegator) UpdateVersion(version int64) bool {
+	if d.beforeUpdate != nil {
+		d.beforeUpdate()
+	}
+	return d.ShardDelegator.UpdateVersion(version)
+}
+
+func (d *gatedChannelDelegator) Close() {
+	if d.beforeClose != nil {
+		d.beforeClose()
+	}
+	d.ShardDelegator.Close()
+}
+
+func (suite *ServiceSuite) TestWatchBlocksConcurrentUnwatch() {
+	suite.testChannelOperationGate(true)
+}
+
+func (suite *ServiceSuite) TestUnwatchBlocksConcurrentWatch() {
+	suite.testChannelOperationGate(false)
+}
+
+func (suite *ServiceSuite) testChannelOperationGate(watchFirst bool) {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	original, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	pause := func() { close(entered); <-release }
+	wrapped := &gatedChannelDelegator{ShardDelegator: original}
+	if watchFirst {
+		wrapped.beforeUpdate = pause
+	} else {
+		wrapped.beforeClose = pause
+	}
+	suite.node.delegators.Insert(suite.vchannel, wrapped)
+	watch := &querypb.WatchDmChannelsRequest{
+		CollectionID: suite.collectionID, Version: 300,
+		Infos:         []*datapb.VchannelInfo{{CollectionID: suite.collectionID, ChannelName: suite.vchannel}},
+		IndexInfoList: []*indexpb.IndexInfo{{}},
+	}
+	unwatch := &querypb.UnsubDmChannelRequest{CollectionID: suite.collectionID, ChannelName: suite.vchannel}
+	done := make(chan error, 1)
+	go func() {
+		var status *commonpb.Status
+		var err error
+		if watchFirst {
+			status, err = suite.node.WatchDmChannels(ctx, watch)
+		} else {
+			status, err = suite.node.UnsubDmChannel(ctx, unwatch)
+		}
+		done <- merr.CheckRPCCall(status, err)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("channel operation did not reach the barrier")
+	}
+	secondDone := make(chan error, 1)
+	// A watch that follows unsubscribe needs a complete initialization request.
+	if !watchFirst {
+		watch = suite.channelWatchRequest(300)
+	}
+	go func() {
+		var status *commonpb.Status
+		var err error
+		if watchFirst {
+			status, err = suite.node.UnsubDmChannel(ctx, unwatch)
+		} else {
+			status, err = suite.node.WatchDmChannels(ctx, watch)
+		}
+		secondDone <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	select {
+	case err := <-secondDone:
+		suite.T().Fatalf("queued channel operation returned before its predecessor: %v", err)
+	default:
+	}
+	unblock()
+	suite.requireChannelOperationDone(done)
+	suite.requireChannelOperationDone(secondDone)
+	delta := suite.getDataDistributionWithDeltaSupport(ctx, full.GetLastModifyTs())
+	suite.Require().True(delta.GetIsDelta())
+	current, found := suite.node.delegators.Get(suite.vchannel)
+	if watchFirst {
+		suite.Equal(int64(300), original.Version())
+		// The later unsubscribe must retain its tombstone after the watch upsert.
+		suite.Contains(delta.GetRemovedChannelNames(), suite.vchannel)
+		suite.Empty(delta.GetChannels())
+		suite.False(found)
+	} else {
+		suite.Require().True(found)
+		suite.NotSame(original, current)
+		suite.Equal(int64(300), current.Version())
+		suite.True(current.Serviceable())
+		suite.NotContains(delta.GetRemovedChannelNames(), suite.vchannel)
+		suite.Require().Len(delta.GetChannels(), 1)
+		suite.Equal(int64(300), delta.GetChannels()[0].GetVersion())
+	}
+}
+
+// Wait until the second handler has actually entered the per-channel queue.
+func (suite *ServiceSuite) waitForChannelOperationWaiter() {
+	suite.Require().Eventually(func() bool {
+		operations := suite.node.channelOperations
+		operations.mu.Lock()
+		defer operations.mu.Unlock()
+		operation := operations.channels[suite.vchannel]
+		return operation != nil && operation.refs >= 2
+	}, 10*time.Second, time.Millisecond)
+}
+
+func (suite *ServiceSuite) requireChannelOperationDone(done <-chan error) {
+	select {
+	case err := <-done:
+		suite.Require().NoError(err)
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("channel operation did not finish")
+	}
+}
+
+func (suite *ServiceSuite) channelWatchRequest(version int64) *querypb.WatchDmChannelsRequest {
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	return &querypb.WatchDmChannelsRequest{
+		CollectionID: suite.collectionID,
+		PartitionIDs: suite.partitionIDs,
+		Version:      version,
+		Infos: []*datapb.VchannelInfo{{
+			CollectionID: suite.collectionID,
+			ChannelName:  suite.vchannel,
+			SeekPosition: suite.position,
+		}},
+		Schema: schema,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: suite.collectionID,
+			PartitionIDs: suite.partitionIDs,
+			MetricType:   defaultMetricType,
+		},
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
+	}
+}
+
+// Add runs after the initial delegator is visible in the map but before it is
+// serviceable, letting these tests exercise the real initialization/rollback.
+type gatedChannelPipelineManager struct {
+	pipeline.Manager
+	beforeAdd func() error
+}
+
+func (m *gatedChannelPipelineManager) Add(collectionID int64, channel string) (pipeline.Pipeline, error) {
+	if err := m.beforeAdd(); err != nil {
+		return nil, err
+	}
+	return m.Manager.Add(collectionID, channel)
+}
+
+func (suite *ServiceSuite) TestWatchWaitsForInitialWatchSuccess() {
+	suite.testWatchWaitsForInitialization(false)
+}
+
+func (suite *ServiceSuite) TestWatchWaitsForInitialWatchFailure() {
+	suite.testWatchWaitsForInitialization(true)
+}
+
+func (suite *ServiceSuite) testWatchWaitsForInitialization(failFirst bool) {
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var first sync.Once
+	suite.node.pipelineManager = &gatedChannelPipelineManager{
+		Manager: suite.node.pipelineManager,
+		beforeAdd: func() error {
+			var err error
+			first.Do(func() {
+				close(entered)
+				<-release
+				if failFirst {
+					err = errors.New("initial pipeline creation failed")
+				}
+			})
+			return err
+		},
+	}
+	firstReq, secondReq := suite.channelWatchRequest(100), suite.channelWatchRequest(200)
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, firstReq)
+		firstDone <- merr.CheckRPCCall(status, err)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("initial watch did not reach pipeline creation")
+	}
+	initial, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	suite.False(initial.Serviceable())
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, secondReq)
+		secondDone <- merr.CheckRPCCall(status, err)
+	}()
+	suite.waitForChannelOperationWaiter()
+	suite.Equal(int64(100), initial.Version())
+	select {
+	case err := <-secondDone:
+		suite.T().Fatalf("watch acknowledged an uninitialized subscription: %v", err)
+	default:
+	}
+	unblock()
+	select {
+	case err := <-firstDone:
+		if failFirst {
+			suite.Require().Error(err)
+		} else {
+			suite.Require().NoError(err)
+		}
+	case <-time.After(10 * time.Second):
+		suite.T().Fatal("initial watch did not finish")
+	}
+	suite.requireChannelOperationDone(secondDone)
+	current, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	suite.True(current.Serviceable())
+	suite.Equal(int64(200), current.Version())
+	if failFirst {
+		suite.NotSame(initial, current)
+	} else {
+		suite.Same(initial, current)
+	}
+	full := suite.getDataDistributionWithDeltaSupport(ctx, 0)
+	suite.Require().Len(full.GetChannels(), 1)
+	suite.Equal(int64(200), full.GetChannels()[0].GetVersion())
+}
+
+func (suite *ServiceSuite) TestChannelOperationWaitCancellation() {
+	suite.TestWatchDmChannelsInt64()
+	original, found := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(found)
+	for _, watch := range []bool{true, false} {
+		release, err := suite.node.channelOperations.acquire(context.Background(), suite.vchannel)
+		suite.Require().NoError(err)
+		release = sync.OnceFunc(release)
+		defer release()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			var status *commonpb.Status
+			var err error
+			if watch {
+				status, err = suite.node.WatchDmChannels(ctx, &querypb.WatchDmChannelsRequest{
+					CollectionID: suite.collectionID, Version: 300,
+					Infos:         []*datapb.VchannelInfo{{ChannelName: suite.vchannel}},
+					IndexInfoList: []*indexpb.IndexInfo{{}},
+				})
+			} else {
+				status, err = suite.node.UnsubDmChannel(ctx, &querypb.UnsubDmChannelRequest{
+					CollectionID: suite.collectionID, ChannelName: suite.vchannel,
+				})
+			}
+			done <- merr.CheckRPCCall(status, err)
+		}()
+		suite.waitForChannelOperationWaiter()
+		cancel()
+		select {
+		case err := <-done:
+			suite.Equal(merr.CanceledCode, merr.Code(err))
+		case <-time.After(10 * time.Second):
+			suite.T().Error("canceled operation did not stop waiting")
+		}
+		release()
+		current, found := suite.node.delegators.Get(suite.vchannel)
+		suite.Require().True(found)
+		suite.Same(original, current)
+		suite.Equal(int64(0), current.Version())
+		suite.True(current.Serviceable())
+	}
 }

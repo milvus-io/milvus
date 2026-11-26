@@ -40,10 +40,11 @@ func TestDropIndexTaskAdmissionAndCleanup(t *testing.T) {
 		t.Run(finish, func(t *testing.T) {
 			ctx := context.Background()
 			nodeMgr := session.NewNodeManager()
-			metadata := meta.NewMeta(nil, nil, nodeMgr)
+			metadata := meta.NewMeta(nil, versionProbeCatalog{}, nodeMgr)
 			scheduler := NewScheduler(ctx, metadata, meta.NewDistributionManager(nodeMgr), nil, nil, nil, nodeMgr)
 			t.Cleanup(scheduler.Stop)
 			replica := utils.CreateTestReplica(200, 1, []int64{1})
+			require.NoError(t, metadata.Put(ctx, replica))
 			newDrop := func() *DropIndexTask {
 				drop := NewDropIndexTask(ctx, utils.IndexChecker, 1, replica, 2,
 					NewDropIndexAction(1, ActionTypeDropIndex, "channel", []int64{1000}))
@@ -82,6 +83,10 @@ func TestDropIndexTaskAdmissionAndCleanup(t *testing.T) {
 			require.Zero(t, scheduler.segmentTasks.Len())
 			require.Zero(t, scheduler.tasks.Len())
 			retry := newDrop()
+			if finish == "stop" {
+				require.ErrorIs(t, scheduler.Add(retry), merr.ErrServiceUnavailable, "Stop closes admission permanently")
+				return
+			}
 			require.NoError(t, scheduler.Add(retry), "cleanup must allow a retry")
 			scheduler.remove(retry)
 			require.NoError(t, scheduler.Add(newLoad(2)), "cleanup must allow subsequent load")
@@ -129,9 +134,11 @@ func TestDropIndexRemovalPreservesReplacement(t *testing.T) {
 		t.Run(map[bool]string{true: "drop then load", false: "load then drop"}[oldIsDrop], func(t *testing.T) {
 			ctx := context.Background()
 			nodeMgr := session.NewNodeManager()
-			scheduler := NewScheduler(ctx, meta.NewMeta(nil, nil, nodeMgr), meta.NewDistributionManager(nodeMgr), nil, nil, nil, nodeMgr)
+			metadata := meta.NewMeta(nil, versionProbeCatalog{}, nodeMgr)
+			scheduler := NewScheduler(ctx, metadata, meta.NewDistributionManager(nodeMgr), nil, nil, nil, nodeMgr)
 			t.Cleanup(scheduler.Stop)
 			replica := utils.CreateTestReplica(200, 1, []int64{1})
+			require.NoError(t, metadata.Put(ctx, replica))
 			newDrop := func() *DropIndexTask {
 				return NewDropIndexTask(ctx, utils.IndexChecker, 1, replica, 2,
 					NewDropIndexAction(1, ActionTypeDropIndex, "channel", []int64{1000}))
@@ -201,4 +208,43 @@ func TestDropIndexRPCDeadlineAllowsRetry(t *testing.T) {
 		NewDropIndexAction(1, ActionTypeDropIndex, "channel", []int64{1000}))
 	retry.SetPriority(TaskPriorityLow)
 	require.NoError(t, scheduler.Add(retry))
+}
+
+// DropIndex shares the segment deduplication key, but has no counterpart on
+// master. It must participate in the same waiting/processing ownership checks.
+func TestSchedulerDropIndexOwnershipAcrossPromotion(t *testing.T) {
+	replica := membershipReplica([]int64{1}, nil, nil, nil)
+	scheduler := newChannelMembershipScheduler(t, replica)
+	old := NewDropIndexTask(context.Background(), WrapIDSource(1), membershipCollectionID, replica, 2,
+		NewDropIndexAction(1, ActionTypeDropIndex, membershipChannel, []int64{1000}))
+	old.SetPriority(TaskPriorityLow)
+	require.NoError(t, scheduler.Add(old))
+	require.True(t, scheduler.isCurrent(old, taskWaiting))
+	scheduler.tryPromoteAll()
+	require.True(t, scheduler.isCurrent(old, taskProcessing))
+	require.Empty(t, scheduler.waitQueue.Snapshot())
+	require.Len(t, scheduler.processQueue.SnapshotByNode(1), 1)
+
+	// Processing ownership cannot be preempted. Retire it explicitly before
+	// checking that an old processing snapshot cannot remove its successor.
+	retireOwnershipTask(scheduler, old)
+
+	replacement := NewDropIndexTask(context.Background(), WrapIDSource(1), membershipCollectionID, replica, 2,
+		NewDropIndexAction(1, ActionTypeDropIndex, membershipChannel, []int64{1000}))
+	replacement.SetPriority(TaskPriorityHigh)
+	require.NoError(t, scheduler.Add(replacement))
+	committed, removed := scheduler.processTask(old)
+	require.False(t, committed, "retired snapshot must not execute")
+	require.False(t, removed, "retired task must not be retired twice")
+	scheduler.remove(old)
+	require.True(t, scheduler.isCurrent(replacement, taskWaiting), "stale cleanup must preserve the new index owner")
+	scheduler.tryPromoteAll()
+	require.True(t, scheduler.isCurrent(replacement, taskProcessing))
+	replacement.Actions()[0].(*DropIndexAction).rpcReturned.Store(true)
+	committed, removed = scheduler.processTask(replacement)
+	require.False(t, committed)
+	require.True(t, removed)
+	require.Equal(t, TaskStatusSucceeded, replacement.Status())
+	require.Zero(t, scheduler.tasks.Len())
+	require.Zero(t, scheduler.segmentTasks.Len())
 }
