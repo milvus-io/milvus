@@ -107,9 +107,10 @@ type ProxyClientManagerInterface interface {
 const RunningRequestTimeout = 10 * time.Second
 
 type ProxyClientManager struct {
-	creator     ProxyCreator
-	proxyClient *typeutil.ConcurrentMap[int64, types.ProxyClient]
-	helper      ProxyClientManagerHelper
+	quotaSessions sync.Map // client instance -> last explicitly negotiated process session
+	creator       ProxyCreator
+	proxyClient   *typeutil.ConcurrentMap[int64, types.ProxyClient]
+	helper        ProxyClientManagerHelper
 }
 
 func NewProxyClientManager(creator ProxyCreator) *ProxyClientManager {
@@ -132,6 +133,7 @@ func (p *ProxyClientManager) SetProxyClients(sessions []*sessionutil.Session) {
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		if _, ok := aliveSessions[key]; !ok {
 			if cli, loaded := p.proxyClient.GetAndRemove(key); loaded {
+				p.quotaSessions.Delete(cli)
 				cli.Close()
 				mlog.Info(context.TODO(), "remove stale proxy client", mlog.Int64("serverID", key))
 			}
@@ -188,6 +190,7 @@ func (p *ProxyClientManager) connect(session *sessionutil.Session) {
 func (p *ProxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	cli, ok := p.proxyClient.GetAndRemove(s.GetServerID())
 	if ok {
+		p.quotaSessions.Delete(cli)
 		cli.Close()
 	}
 

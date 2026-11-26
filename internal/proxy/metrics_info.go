@@ -95,7 +95,7 @@ func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, n
 	}
 
 	return &milvuspb.GetMetricsResponse{
-		Status:        merr.Success(),
+		Status:        node.simpleLimiter.QuotaSyncStatus(),
 		Response:      resp,
 		ComponentName: proxyRoleName,
 	}, nil

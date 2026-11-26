@@ -200,9 +200,17 @@ func cloneSetRatesEnvelope(req *proxypb.SetRatesRequest) *proxypb.SetRatesReques
 		return nil
 	}
 	cloned := &proxypb.SetRatesRequest{
-		Base:        typeutil.Clone(req.GetBase()),
-		Rates:       req.GetRates(),
-		RootLimiter: req.GetRootLimiter(),
+		Base:          typeutil.Clone(req.GetBase()),
+		Rates:         req.GetRates(),
+		RootLimiter:   req.GetRootLimiter(),
+		QuotaProtocol: req.GetQuotaProtocol(),
+		QuotaMode:     req.GetQuotaMode(),
+		TargetVersion: req.GetTargetVersion(),
+		BaseVersion:   req.GetBaseVersion(),
+		Upserts:       req.GetUpserts(),
+		Deletes:       req.GetDeletes(),
+		ScopeDefaults: req.GetScopeDefaults(),
+		QuotaSession:  req.GetQuotaSession(),
 	}
 	cloned.ProtoReflect().SetUnknown(bytes.Clone(req.ProtoReflect().GetUnknown()))
 	return cloned

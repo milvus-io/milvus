@@ -25,11 +25,15 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/quotasync"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -351,4 +355,94 @@ func BenchmarkQuotaLocalIdle(b *testing.B) {
 			}
 		})
 	}
+}
+
+type quotaSyncTestClient struct {
+	types.ProxyClient
+	receiver *proxy.SimpleLimiter
+	sent     []*proxypb.SetRatesRequest
+}
+
+func (p *quotaSyncTestClient) GetProxyMetrics(context.Context, *milvuspb.GetMetricsRequest, ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	return &milvuspb.GetMetricsResponse{Status: p.receiver.QuotaSyncStatus()}, nil
+}
+
+func (p *quotaSyncTestClient) SetRates(_ context.Context, request *proxypb.SetRatesRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+	p.sent = append(p.sent, proto.Clone(request).(*proxypb.SetRatesRequest))
+	return p.receiver.ApplyQuotaRequest(request), nil
+}
+
+func TestQuotaLocalVersionedPublication(t *testing.T) {
+	setQuotaTestParam(t, &Params.QuotaConfig.QuotaAndLimitsEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.CollectionStatsCacheEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.LocalQuotaCalculationEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.VersionedRatesEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.IncrementalRatesEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.DiskProtectionEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.DiskQuotaPerCollection, "1")
+	setQuotaTestParam(t, &Params.QuotaConfig.TtProtectionEnabled, "false")
+
+	source := &localQuotaTestSource{
+		values:  make(map[int64]*metricsinfo.CollectionQuotaSnapshot),
+		changes: make(map[int64]*metricsinfo.CollectionQuotaSnapshot),
+	}
+	source.put(100, 100)
+	source.put(101, 100)
+	manager := proxyutil.NewProxyClientManager(nil)
+	client := &quotaSyncTestClient{receiver: proxy.NewSimpleLimiter(0, 0)}
+	manager.GetProxyClients().Insert(1, client)
+	allocator := newMockTsoAllocator()
+	allocator.GenerateTSOF = func(uint32) (uint64, error) { return 100, nil }
+	q := NewQuotaCenter(manager, source, allocator, quotaMetaForTest(2))
+	t.Cleanup(q.cancel)
+
+	calculate := func() error {
+		t.Helper()
+		q.prepareLocalQuota()
+		require.NoError(t, q.collectLocalQuotaData(context.Background(), typeutil.NewSet[int64](), nil, false))
+		return q.calculateRates()
+	}
+	round := func() {
+		t.Helper()
+		require.NoError(t, calculate())
+		require.NoError(t, q.sendRatesToProxy())
+	}
+	round()
+	require.Len(t, client.sent, 1)
+	require.Equal(t, proxypb.QuotaSyncMode_QUOTA_FULL, client.sent[0].GetQuotaMode())
+	require.EqualValues(t, quotasync.Protocol, client.sent[0].GetQuotaProtocol())
+	round()
+	require.Len(t, client.sent, 1)
+
+	source.put(100, 2*1024*1024)
+	round()
+	require.Len(t, client.sent, 2)
+	delta := client.sent[1]
+	require.Equal(t, proxypb.QuotaSyncMode_QUOTA_DELTA, delta.GetQuotaMode())
+	require.Len(t, delta.GetUpserts(), 1)
+	require.EqualValues(t, 100, delta.GetUpserts()[0].GetKey().GetCollectionId())
+	check := func(coll int64) error {
+		return client.receiver.Check(10, map[int64][]int64{coll: {coll * 10}}, internalpb.RateType_DMLInsert, 1)
+	}
+	require.ErrorContains(t, check(100), "disk quota exceeded")
+	require.NoError(t, check(101))
+
+	// A calculation failure after resetting the live tree must never publish
+	// that candidate. A restarted Proxy can still install the last complete
+	// policy, then receive the released limit after calculation recovers.
+	source.put(100, 100)
+	allocator.GenerateTSOF = func(uint32) (uint64, error) { return 0, merr.ErrServiceNotReady }
+	require.ErrorIs(t, calculate(), merr.ErrServiceNotReady)
+	client.receiver = proxy.NewSimpleLimiter(0, 0)
+	require.ErrorIs(t, check(100), merr.ErrServiceNotReady)
+	q.retryPublishedRates()
+	require.Len(t, client.sent, 3)
+	require.Equal(t, proxypb.QuotaSyncMode_QUOTA_FULL, client.sent[2].GetQuotaMode())
+	require.True(t, proto.Equal(delta.GetTargetVersion(), client.sent[2].GetTargetVersion()))
+	require.ErrorContains(t, check(100), "disk quota exceeded")
+	allocator.GenerateTSOF = func(uint32) (uint64, error) { return 100, nil }
+	round()
+	require.Len(t, client.sent, 4)
+	require.Equal(t, proxypb.QuotaSyncMode_QUOTA_DELTA, client.sent[3].GetQuotaMode())
+	require.NoError(t, check(100))
 }

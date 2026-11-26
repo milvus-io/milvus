@@ -45,6 +45,8 @@ type quotaConfig struct {
 	QuotaCenterCollectInterval   ParamItem `refreshable:"false"`
 	CollectionStatsCacheEnabled  ParamItem `refreshable:"true"`
 	LocalQuotaCalculationEnabled ParamItem `refreshable:"true"`
+	VersionedRatesEnabled        ParamItem `refreshable:"false"`
+	IncrementalRatesEnabled      ParamItem `refreshable:"true"`
 	FactorChangeThreshold        ParamItem `refreshable:"true"`
 	ForceDenyAllDDL              ParamItem `refreshable:"true"`
 	AllocRetryTimes              ParamItem `refreshable:"false"`
@@ -183,6 +185,12 @@ func (p *quotaConfig) init(base *BaseTable) {
 
 	p.LocalQuotaCalculationEnabled = ParamItem{Key: "quotaAndLimits.localQuotaCalculationEnabled", Version: "3.0.0", DefaultValue: "false", Doc: "MixCoord: recompute quota policies from changed local metadata and statistics. Requires collectionStatsCacheEnabled.", Export: true}
 	p.LocalQuotaCalculationEnabled.Init(base.mgr)
+
+	p.VersionedRatesEnabled = ParamItem{Key: "quotaAndLimits.versionedRatesEnabled", Version: "3.0.0", DefaultValue: "false", Doc: "Startup setting on coordinators and proxies: negotiate versioned quota snapshots and enforce their ordering. Enable everywhere before enabling deltas.", Export: true}
+	p.VersionedRatesEnabled.Init(base.mgr)
+
+	p.IncrementalRatesEnabled = ParamItem{Key: "quotaAndLimits.incrementalRatesEnabled", Version: "3.0.0", DefaultValue: "false", Doc: "Send the latest quota delta when a proxy is at its base version, otherwise a full snapshot. Validate full snapshot capacity first.", Export: true}
+	p.IncrementalRatesEnabled.Init(base.mgr)
 
 	const defaultInterval = "3.0"
 	p.QuotaCenterCollectInterval = ParamItem{

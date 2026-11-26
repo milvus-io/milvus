@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/quota"
+	"github.com/milvus-io/milvus/internal/util/quotasync"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -137,9 +138,11 @@ type LimiterRange struct {
 //
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
-	localQuota *localQuotaState
-	ctx        context.Context
-	cancel     context.CancelFunc
+	publishedRules quotasync.Publisher
+	versionedRates bool
+	localQuota     *localQuotaState
+	ctx            context.Context
+	cancel         context.CancelFunc
 
 	// clients
 	proxies  proxyutil.ProxyClientManagerInterface
@@ -190,6 +193,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 
 	q := &QuotaCenter{
 		ctx:                  ctx,
+		versionedRates:       Params.QuotaConfig.VersionedRatesEnabled.GetAsBool(),
 		cancel:               cancel,
 		proxies:              proxies,
 		lock:                 sync.RWMutex{},
@@ -352,11 +356,13 @@ func (q *QuotaCenter) run() {
 			err := q.collectMetrics()
 			if err != nil {
 				mlog.Warn(q.ctx, "quotaCenter collect metrics failed", mlog.Err(err))
+				q.retryPublishedRates()
 				break
 			}
 			err = q.calculateRates()
 			if err != nil {
 				mlog.Warn(q.ctx, "quotaCenter calculate rates failed", mlog.Err(err))
+				q.retryPublishedRates()
 				break
 			}
 			err = q.sendRatesToProxy()
@@ -1836,6 +1842,12 @@ func (q *QuotaCenter) toRatesRequestForProxyCount(proxyNum int) *proxypb.SetRate
 
 // sendRatesToProxy notifies Proxies to set rates for different rate types.
 func (q *QuotaCenter) sendRatesToProxy() error {
+	if q.versionedRates {
+		if err := q.publishQuotaRules(); err != nil {
+			return err
+		}
+		return q.reconcilePublishedRates()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), SetRatesTimeout)
 	defer cancel()
 	local := q.localQuota
@@ -1851,7 +1863,7 @@ func (q *QuotaCenter) sendRatesToProxy() error {
 	// another send, but does not invalidate completed calculations.
 	local.proxyCount = local.calculationProxyCount
 	local.dirty = make(map[int64]bool)
-	local.deleted = make(map[quotaNodeKey]bool)
+	local.deleted = make(map[quotasync.Key]bool)
 	return err
 }
 

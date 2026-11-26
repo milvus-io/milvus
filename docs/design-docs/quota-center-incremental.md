@@ -3,16 +3,20 @@
 Large catalogs can have many collections whose segment statistics and limits stay
 unchanged between quota rounds. DataCoord caches absolute statistics per
 collection. RootCoord uses those statistics and a small metadata snapshot to
-recalculate affected collections.
+recalculate affected collections. Versioned `SetRates` lets a Proxy keep its
+current policy when it is up to date and receive a delta when its version
+matches the coordinator's latest delta base.
 
 ## Configuration
 
-Both options under `quotaAndLimits` default to false.
+All options under `quotaAndLimits` default to false.
 
 | Option | Effect |
 | --- | --- |
 | `collectionStatsCacheEnabled` | Recompute statistics from segments of changed collections. |
 | `localQuotaCalculationEnabled` | Read statistics in process and recalculate affected collections. Requires the statistics cache and an in-process MixCoord source. |
+| `versionedRatesEnabled` | Startup setting for the coordinator and Proxies. Negotiate versioned snapshots and check their ordering. |
+| `incrementalRatesEnabled` | Send the latest delta when a Proxy is at its base version. Requires versioned synchronization. |
 
 The statistics cache can be enabled on its own. Disabling the cache restores
 DataCoord's full scans. Disabling local calculation restores RootCoord's full
@@ -58,10 +62,48 @@ Proxy-count changes revisit the full collection baseline.
 
 The calculation uses the existing rule order and rate-limiter tree. A candidate
 with a changed configuration, metadata generation or Proxy count is retried.
-Failed calculations retain dirty scopes for the next round. Proxy receives
-the full tree through the existing `SetRates` RPC. After a transport failure
-the next round sends the full tree again.
+Failed calculations retain dirty scopes for the next round. Versioned
+reconciliation can use the last complete publication while calculations
+are unavailable. With versioning disabled, RootCoord continues sending the
+full tree through the existing `SetRates` RPC.
 
-Work still scales with the reported node membership and the complete policy
-tree sent to Proxy. On an active collection, rebuilding statistics still
-reads that collection's segments.
+## Versioned SetRates
+
+The coordinator uses a timestamp allocator epoch and a sequence number that
+advances when policies or scope defaults change. The coordinator stores the
+current policy and the latest delta. A changed default or a new epoch starts
+a full baseline. A full tree is built on demand.
+
+The coordinator queries Proxy capability and applied version through a
+read-only metrics request. An older Proxy receives the legacy full tree
+after successful capability discovery. For a versioned Proxy the applied
+version determines what to send.
+
+| Proxy state | Reconciliation |
+| --- | --- |
+| Already at the published version | Send no policy payload. |
+| At the latest delta's base, with deltas enabled | Send complete policies for changed scopes and explicit deletions. |
+| Restarted, missing changes, or needs a baseline | Send the current full policy. |
+| Ahead of the publisher | Report the version conflict and keep the Proxy's policy. |
+
+The receiver verifies the Proxy process identity and the exact delta base
+version. It ignores duplicate and older updates and validates rates, state
+arrays, and scope hierarchy before applying a candidate. A full snapshot
+reuses existing token buckets where possible. A delta updates only the
+scopes carried in the request. Admission remains concurrent with updates.
+
+A lost reply is resolved by the Proxy's applied version in the next
+reconciliation. A missed update is repaired with the latest applicable
+delta or a full snapshot. A restart between sampling and applying returns
+the new process identity and requests a full baseline.
+
+Enable versioned full snapshots before enabling deltas. A version-enabled
+Proxy returns a retriable error for quota-checked requests until it has a
+baseline. After installing a versioned baseline, that Proxy ignores legacy
+policy updates. Rolling back to a legacy coordinator requires restarting the
+affected Proxy sessions. Measure the largest full snapshot during rollout,
+since every restarted or lagging Proxy must be able to receive one.
+
+Work still scales with the reported node membership. Rebuilding statistics
+for an active collection reads that collection's segments. A complete
+policy snapshot still traverses the policy tree when a Proxy needs it.

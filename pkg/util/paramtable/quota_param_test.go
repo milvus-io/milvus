@@ -55,6 +55,11 @@ func TestQuotaParam(t *testing.T) {
 	t.Run("test quota", func(t *testing.T) {
 		assert.True(t, qc.QuotaAndLimitsEnabled.GetAsBool())
 		assert.Equal(t, float64(3), qc.QuotaCenterCollectInterval.GetAsFloat())
+		// The incremental quota stages are opt-in.
+		assert.False(t, qc.CollectionStatsCacheEnabled.GetAsBool())
+		assert.False(t, qc.LocalQuotaCalculationEnabled.GetAsBool())
+		assert.False(t, qc.VersionedRatesEnabled.GetAsBool())
+		assert.False(t, qc.IncrementalRatesEnabled.GetAsBool())
 	})
 
 	t.Run("test ddl", func(t *testing.T) {

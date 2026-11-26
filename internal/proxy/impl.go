@@ -4494,6 +4494,10 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		}, nil
 	}
 
+	if metricType == "quota_sync" {
+		return &milvuspb.GetMetricsResponse{Status: node.simpleLimiter.QuotaSyncStatus()}, nil
+	}
+
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -5718,14 +5722,7 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		return resp, nil
 	}
 
-	err := node.simpleLimiter.SetRates(request.GetRootLimiter())
-	// TODO: set multiple rate limiter rates
-	if err != nil {
-		resp = merr.Status(err)
-		return resp, nil
-	}
-
-	return resp, nil
+	return node.simpleLimiter.ApplyQuotaRequest(request), nil
 }
 
 func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {

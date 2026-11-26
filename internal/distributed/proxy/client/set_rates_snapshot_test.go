@@ -57,6 +57,15 @@ func TestCloneSetRatesEnvelope(t *testing.T) {
 	require.Nil(t, cloneSetRatesEnvelope(nil))
 	require.Nil(t, cloneSetRatesEnvelope(&proxypb.SetRatesRequest{}).GetBase())
 	request := setRatesSnapshotForTest(2)
+	request.QuotaProtocol = 1
+	request.QuotaMode = proxypb.QuotaSyncMode_QUOTA_DELTA
+	request.TargetVersion = &proxypb.QuotaRuleVersion{Epoch: 100, Seq: 2}
+	request.BaseVersion = &proxypb.QuotaRuleVersion{Epoch: 100, Seq: 1}
+	request.QuotaSession = "process-1"
+	request.Upserts = []*proxypb.QuotaScopePolicy{{Key: &proxypb.QuotaScopeKey{Scope: internalpb.RateScope_Collection, DatabaseId: 1, CollectionId: 2}, Limiter: &proxypb.Limiter{}}}
+	request.Deletes = []*proxypb.QuotaScopeKey{{Scope: internalpb.RateScope_Collection, DatabaseId: 1, CollectionId: 3}}
+	request.ScopeDefaults = map[int32]*proxypb.Limiter{int32(internalpb.RateScope_Cluster): {}}
+
 	// Unknown fields must survive old clients without sharing mutable header bytes.
 	request.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
 	request.Base.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x02})
@@ -76,6 +85,14 @@ func TestCloneSetRatesEnvelope(t *testing.T) {
 func TestSetRatesConcurrentSnapshotAndRetries(t *testing.T) {
 	paramtable.Init()
 	request := setRatesSnapshotForTest(128)
+	request.QuotaProtocol = 1
+	request.TargetVersion = &proxypb.QuotaRuleVersion{Epoch: 100, Seq: 2}
+	request.QuotaSession = "process-1"
+	request.ScopeDefaults = map[int32]*proxypb.Limiter{
+		int32(internalpb.RateScope_Cluster): {
+			Rates: []*internalpb.Rate{{Rt: internalpb.RateType_DMLInsert, R: 1000}},
+		},
+	}
 	request.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
 	original := proto.Clone(request)
 	codec := encoding.GetCodecV2("proto")
@@ -93,6 +110,8 @@ func TestSetRatesConcurrentSnapshotAndRetries(t *testing.T) {
 			func(_ context.Context, sent *proxypb.SetRatesRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
 				calls++
 				assert.Same(t, request.RootLimiter, sent.RootLimiter)
+				assert.Same(t, request.TargetVersion, sent.TargetVersion)
+				assert.Same(t, request.ScopeDefaults[int32(internalpb.RateScope_Cluster)], sent.ScopeDefaults[int32(internalpb.RateScope_Cluster)])
 				assert.Equal(t, targetID, sent.GetBase().GetTargetID())
 				assert.Equal(t, request.GetBase().GetSourceID(), sent.GetBase().GetSourceID())
 				// Use the actual registered codec, including its size-cache path.

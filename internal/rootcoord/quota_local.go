@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/quota"
+	"github.com/milvus-io/milvus/internal/util/quotasync"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -42,25 +43,19 @@ type localQuotaMetadataSource interface {
 	quotaMetadataGeneration() uint64
 }
 
-// quotaNodeKey locates a node in the calculation tree and in its metrics index.
-type quotaNodeKey struct {
-	Scope                     internalpb.RateScope
-	DB, Collection, Partition int64
-}
-
 type localQuotaState struct {
 	proxyCount            int
 	calculationProxyCount int
 	metadata              map[int64]*quotaCollectionMetadata
 	rows                  map[int64]int64
 	dirty                 map[int64]bool
-	deleted               map[quotaNodeKey]bool
+	deleted               map[quotasync.Key]bool
 	dbBytes               map[int64]int64
 	dbCollections         map[int64]int
 	exceeded              map[int64]bool
 	exceededParts         map[int64][]int64
 	previousEffects       map[int64]bool
-	metricNodes           map[quotaNodeKey]*rlinternal.RateLimiterNode
+	metricNodes           map[quotasync.Key]*rlinternal.RateLimiterNode
 	config                map[string]string
 	generation            uint64
 	initialized           bool
@@ -76,7 +71,7 @@ func (q *QuotaCenter) prepareLocalQuota() {
 	}
 	first := q.localQuota == nil
 	if first {
-		q.localQuota = &localQuotaState{metadata: make(map[int64]*quotaCollectionMetadata), rows: make(map[int64]int64), dirty: make(map[int64]bool), deleted: make(map[quotaNodeKey]bool), dbBytes: make(map[int64]int64), dbCollections: make(map[int64]int), exceeded: make(map[int64]bool), exceededParts: make(map[int64][]int64), previousEffects: make(map[int64]bool), metricNodes: make(map[quotaNodeKey]*rlinternal.RateLimiterNode)}
+		q.localQuota = &localQuotaState{metadata: make(map[int64]*quotaCollectionMetadata), rows: make(map[int64]int64), dirty: make(map[int64]bool), deleted: make(map[quotasync.Key]bool), dbBytes: make(map[int64]int64), dbCollections: make(map[int64]int), exceeded: make(map[int64]bool), exceededParts: make(map[int64][]int64), previousEffects: make(map[int64]bool), metricNodes: make(map[quotasync.Key]*rlinternal.RateLimiterNode)}
 		q.collectionIDToDBID = typeutil.NewConcurrentMap[int64, int64]()
 		q.collections = typeutil.NewConcurrentMap[string, int64]()
 		q.collectionProps = make(map[int64]map[string]string)
@@ -88,7 +83,7 @@ func (q *QuotaCenter) prepareLocalQuota() {
 	if first {
 		q.rateLimiter.GetRootLimiters().GetChildren().Range(func(db int64, node *rlinternal.RateLimiterNode) bool {
 			node.GetChildren().Range(func(id int64, _ *rlinternal.RateLimiterNode) bool {
-				local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Collection, DB: db, Collection: id}] = true
+				local.deleted[quotasync.Key{Scope: internalpb.RateScope_Collection, DB: db, Collection: id}] = true
 				return true
 			})
 			return true
@@ -120,7 +115,7 @@ func (q *QuotaCenter) prepareLocalQuota() {
 				metrics.CleanupRootCoordCollectionMetrics(coll.DBName, coll.Name)
 			}
 			if value.Collection == nil || value.Collection.DBID != coll.DBID {
-				local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Collection, DB: coll.DBID, Collection: id}] = true
+				local.deleted[quotasync.Key{Scope: internalpb.RateScope_Collection, DB: coll.DBID, Collection: id}] = true
 			}
 		}
 		delete(q.collectionProps, id)
@@ -296,11 +291,11 @@ func (q *QuotaCenter) resetLocalQuotaRates() error {
 	}
 	root.GetChildren().Range(func(id int64, node *rlinternal.RateLimiterNode) bool {
 		if !liveDBs[id] {
-			local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Database, DB: id}] = true
+			local.deleted[quotasync.Key{Scope: internalpb.RateScope_Database, DB: id}] = true
 			node.GetChildren().Range(func(collection int64, child *rlinternal.RateLimiterNode) bool {
-				local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Collection, DB: id, Collection: collection}] = true
+				local.deleted[quotasync.Key{Scope: internalpb.RateScope_Collection, DB: id, Collection: collection}] = true
 				child.GetChildren().Range(func(part int64, _ *rlinternal.RateLimiterNode) bool {
-					local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Partition, DB: id, Collection: collection, Partition: part}] = true
+					local.deleted[quotasync.Key{Scope: internalpb.RateScope_Partition, DB: id, Collection: collection, Partition: part}] = true
 					return true
 				})
 				return true
@@ -314,7 +309,7 @@ func (q *QuotaCenter) resetLocalQuotaRates() error {
 			if db := q.rateLimiter.GetDatabaseLimiters(key.DB); db != nil {
 				if node := db.GetChild(key.Collection); node != nil {
 					node.GetChildren().Range(func(id int64, _ *rlinternal.RateLimiterNode) bool {
-						local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Partition, DB: key.DB, Collection: key.Collection, Partition: id}] = true
+						local.deleted[quotasync.Key{Scope: internalpb.RateScope_Partition, DB: key.DB, Collection: key.Collection, Partition: id}] = true
 						return true
 					})
 				}
@@ -358,7 +353,7 @@ func (q *QuotaCenter) resetLocalQuotaRates() error {
 		node.GetChildren().Range(func(part int64, _ *rlinternal.RateLimiterNode) bool {
 			if !parts[part] {
 				node.GetChildren().Remove(part)
-				local.deleted[quotaNodeKey{Scope: internalpb.RateScope_Partition, DB: coll.DBID, Collection: id, Partition: part}] = true
+				local.deleted[quotasync.Key{Scope: internalpb.RateScope_Partition, DB: coll.DBID, Collection: id, Partition: part}] = true
 			}
 			return true
 		})
@@ -461,7 +456,7 @@ func (q *QuotaCenter) finishLocalQuotaCalculation() error {
 	for key := range local.deleted {
 		delete(local.metricNodes, key)
 	}
-	q.visitLocalQuotaNodes(func(key quotaNodeKey, node *rlinternal.RateLimiterNode) {
+	q.visitLocalQuotaNodes(func(key quotasync.Key, node *rlinternal.RateLimiterNode) {
 		metrics.RootCoordQuotaCalculatedScopes.Inc()
 		if node.GetQuotaStates().Len() > 0 {
 			local.metricNodes[key] = node
@@ -470,7 +465,7 @@ func (q *QuotaCenter) finishLocalQuotaCalculation() error {
 		}
 	})
 	if len(local.metricNodes)*2 < previousMetricScopes {
-		remaining := make(map[quotaNodeKey]*rlinternal.RateLimiterNode, len(local.metricNodes))
+		remaining := make(map[quotasync.Key]*rlinternal.RateLimiterNode, len(local.metricNodes))
 		maps.Copy(remaining, local.metricNodes)
 		local.metricNodes = remaining
 	}
@@ -488,11 +483,11 @@ func (q *QuotaCenter) validateLocalQuotaInputs() error {
 	return nil
 }
 
-func (q *QuotaCenter) visitLocalQuotaNodes(visit func(quotaNodeKey, *rlinternal.RateLimiterNode)) {
+func (q *QuotaCenter) visitLocalQuotaNodes(visit func(quotasync.Key, *rlinternal.RateLimiterNode)) {
 	root := q.rateLimiter.GetRootLimiters()
-	visit(quotaNodeKey{Scope: internalpb.RateScope_Cluster}, root)
+	visit(quotasync.Key{Scope: internalpb.RateScope_Cluster}, root)
 	root.GetChildren().Range(func(db int64, node *rlinternal.RateLimiterNode) bool {
-		visit(quotaNodeKey{Scope: internalpb.RateScope_Database, DB: db}, node)
+		visit(quotasync.Key{Scope: internalpb.RateScope_Database, DB: db}, node)
 		return true
 	})
 	for id := range q.localQuota.dirty {
@@ -505,9 +500,9 @@ func (q *QuotaCenter) visitLocalQuotaNodes(visit func(quotaNodeKey, *rlinternal.
 		if node == nil {
 			continue
 		}
-		visit(quotaNodeKey{Scope: internalpb.RateScope_Collection, DB: db, Collection: id}, node)
+		visit(quotasync.Key{Scope: internalpb.RateScope_Collection, DB: db, Collection: id}, node)
 		node.GetChildren().Range(func(part int64, p *rlinternal.RateLimiterNode) bool {
-			visit(quotaNodeKey{Scope: internalpb.RateScope_Partition, DB: db, Collection: id, Partition: part}, p)
+			visit(quotasync.Key{Scope: internalpb.RateScope_Partition, DB: db, Collection: id, Partition: part}, p)
 			return true
 		})
 	}

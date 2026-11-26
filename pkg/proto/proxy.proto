@@ -113,6 +113,41 @@ message SetRatesRequest {
   // deprecated
   repeated CollectionRate rates = 2;
   LimiterNode rootLimiter = 3;
+  uint32 quota_protocol = 4;
+  QuotaSyncMode quota_mode = 5;
+  QuotaRuleVersion target_version = 6;
+  QuotaRuleVersion base_version = 7;
+  repeated QuotaScopePolicy upserts = 8;
+  repeated QuotaScopeKey deletes = 9;
+  // Complete defaults at each scope. Required for FULL; DELTA retains them.
+  map<int32, Limiter> scope_defaults = 10;
+  // Unique per Proxy process, independent of reusable node IDs.
+  string quota_session = 11;
+}
+
+enum QuotaSyncMode {
+  QUOTA_FULL = 0;
+  QUOTA_DELTA = 1;
+  // Read capability/applied version without applying a policy.
+  QUOTA_PROBE = 2;
+}
+
+message QuotaRuleVersion {
+  uint64 epoch = 1;
+  uint64 seq = 2;
+}
+
+message QuotaScopeKey {
+  internal.RateScope scope = 1;
+  int64 database_id = 2;
+  int64 collection_id = 3;
+  int64 partition_id = 4;
+}
+
+message QuotaScopePolicy {
+  QuotaScopeKey key = 1;
+  // Complete policy, interpreted over the version's scope defaults.
+  Limiter limiter = 2;
 }
 
 message ListClientInfosRequest {
