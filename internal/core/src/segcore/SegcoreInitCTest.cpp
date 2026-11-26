@@ -42,7 +42,7 @@ TEST(Init, KnowhereThreadPoolInit) {
 }
 
 TEST(Init, KnowhereGPUMemoryPoolInit) {
-#ifdef MILVUS_GPU_VERSION
+#ifdef MILVUS_WITH_CUVS
     ASSERT_NO_THROW(milvus::config::KnowhereInitGPUMemoryPool(0, 0));
 #endif
 }

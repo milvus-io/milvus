@@ -236,6 +236,8 @@ To build the Milvus project, run the following command:
 make
 ```
 
+When switching an existing GPU build to CPU, run `make clean` before rebuilding to remove cached CUDA and cuVS settings and previous build outputs.
+
 Milvus uses `conan` to manage 3rd-party dependencies. `conan` will check the consistency of these dependencies every time you run `make`. This process can take a considerable amount of time, especially if the network is poor. If you make sure that the 3rd-party dependencies are consistent, you can use the following command to skip this step:
 
 ```shell
@@ -550,7 +552,7 @@ ${CMAKE_EXTRA_ARGS} \
  -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
  -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
  -DBUILD_COVERAGE=${BUILD_COVERAGE} \
- -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+ -DWITH_GPU=${WITH_GPU} \
  -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
  -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
  -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \

@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -137,7 +138,9 @@ func initCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
 // All configuration fields are mapped to corresponding property key-value pairs,
 // with the local filesystem root normalized separately from the key prefix.
-func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
+// Optional stage bits select a private filesystem policy for that operation;
+// callers must not reuse manifest properties for data or index reads.
+func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string, talonStages ...uint32) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
@@ -254,9 +257,57 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	// Unscoped callers only enable Talon under the unrestricted policy.
+	var stage uint32
+	for _, requested := range talonStages {
+		stage |= requested
+	}
+	mask := storageConfig.GetTalonEnabledStages()
+	if mask == 0 {
+		mask = common.TalonStagesAll // Legacy StorageConfig without stage bits.
+	}
+	var talonMode uint32
+	if mask == common.TalonStagesAll || mask&stage != 0 {
+		talonMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "fs.talon.open_only")
+	values = append(values, strconv.FormatBool(talonMode != 0 && mask != common.TalonStagesAll && mask&stage&common.TalonStageLoadOpen != 0))
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = talonMode
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", talonMode},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
+	if namespace := storageConfig.GetTalonNamespace(); namespace != "" {
+		keys = append(keys, "fs.talon.namespace")
+		values = append(values, namespace)
+	}
 
 	if extraKVs[PropertyWriterEncEnable] == "true" {
 		extraKVs = maps.Clone(extraKVs)

@@ -27,7 +27,7 @@ repo_root="$test_root/source"
 fake_bin="$test_root/bin"
 runtime_dir="$test_root/runtime"
 mkdir -p "$repo_root/bin" "$repo_root/internal/core/output/lib/ossl-modules" \
-    "$repo_root/internal/core/output/lib64" \
+    "$repo_root/internal/core/output/lib64" "$repo_root/cmake_build" \
     "$fake_bin" "$runtime_dir"
 printf 'milvus fixture\n' > "$repo_root/bin/milvus"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_bin/ldd"
@@ -78,8 +78,27 @@ assert_install() {
         "$runtime_dir/ossl-modules/fips.so"
 }
 
+svs_dir="$repo_root/internal/core/output/lib64"
+create_library "$svs_dir" libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
 run_install
 assert_install
+assert_library libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
+
+# Stage only this build's SVS files, even when two native prefixes contain a runtime.
+manifest="$repo_root/cmake_build/install_manifest.txt"
+printf '%s\n' "$svs_dir"/libsvs_runtime.so* > "$manifest"
+touch "$repo_root/internal/core/output/lib/libsvs_runtime.so.obsolete"
+run_install
+test ! -e "$runtime_dir/libsvs_runtime.so.obsolete"
+assert_library libsvs_runtime.so libsvs_runtime.so.0 libsvs_runtime.so.0.5.1
+
+# Turning SVS off removes the prior library from image staging.
+printf '%s\n' "$repo_root/internal/core/output/lib/libdemo.so" > "$manifest"
+run_install
+if compgen -G "$runtime_dir/libsvs_runtime.so*" > /dev/null; then
+    echo "Disabled SVS files remained in the runtime directory" >&2
+    exit 1
+fi
 
 # Reinstall over aliases materialized by older versions of the installer.
 for alias in libdemo.so libdemo.so.1 libother.so libother.so.2 libdemo.dylib libdemo.1.dylib; do

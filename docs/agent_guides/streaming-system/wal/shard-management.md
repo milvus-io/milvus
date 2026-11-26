@@ -4,6 +4,11 @@ The Shard interceptor manages per-PChannel collection/partition/segment in-memor
 
 See [Collection Messages](../message/message-semantic-collection.md) for per-message semantics and the messages handled by this interceptor.
 
+The CreateSegment append interceptor sets the encoding SchemaVersion and applies
+the schema's storage format requirements while holding the VChannel lock.
+An asynchronous allocation started before a schema DDL therefore uses the
+schema in effect when its CreateSegment enters the WAL.
+
 ## Seal Policies
 
 Growing segments are sealed when any registered policy triggers. See `internal/streamingnode/server/wal/interceptors/shard/policy/seal_policy.go` for the full list of policies.

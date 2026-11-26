@@ -63,10 +63,6 @@
 #include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/tencent/TencentCloudCredentialsProvider.h"
 
-// Implemented by the immutable native Broker policy.
-bool
-IsCredentialBrokerEndpoint(const std::string& endpoint);
-
 namespace milvus::storage {
 
 enum class RemoteStorageType {
@@ -466,19 +462,8 @@ class TlsHttpClientFactory : public Aws::Http::HttpClientFactory {
 static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG =
     "GoogleHttpClientFactory";
 
-// Records a GCS endpoint that Milvus itself is configured to use.
-// GoogleHttpClientFactory sends GCP credentials only to these endpoints and to
-// Google's *.googleapis.com.
-void
-AddGcsEndpointForCredentials(const std::string& address, bool use_ssl);
-
-// Process-wide AWS SDK HTTP factory for GCP IAM. Only the first Aws::InitAPI
-// in a process takes effect, so it also serves milvus-storage. It
-// authenticates a request for Milvus' own GCS bucket with Milvus' IAM
-// provider, and any other GCS request with the provider milvus-storage's
-// GcpCredentialRegistry holds for its endpoint and bucket, as milvus-storage's
-// own GCP factory does. Every other request is left alone.
-// Allowed Broker requests carry no GCP credentials.
+// Process-wide HTTP transport factory for GCP. Each S3 client supplies its
+// own credentials through milvus-storage's request interceptor.
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
     explicit GoogleHttpClientFactory(const std::string& tls_min_version = "")

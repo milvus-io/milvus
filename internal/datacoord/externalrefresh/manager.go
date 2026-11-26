@@ -605,6 +605,12 @@ func (m *Manager) handleJobFinished(ctx context.Context, job *datapb.ExternalCol
 
 	// Get current collection info
 	collection, err := m.collectionGetter(ctx, job.GetCollectionId())
+	if job.GetState() == indexpb.JobState_JobStateFinished && errors.Is(err, merr.ErrCollectionNotFound) {
+		// Completed jobs survive collection deletion and coordinator restart.
+		// There is no schema left to publish; retain dedup until job GC.
+		published = true
+		return
+	}
 	if err != nil || collection == nil {
 		mlog.Warn(ctx, "failed to get collection for schema update after refresh, will retry on the next check",
 			mlog.FieldJobID(job.GetJobId()),
@@ -1218,7 +1224,7 @@ func validateMilvusTableRefreshSchema(job *datapb.ExternalCollectionRefreshJob, 
 	if typeutil.IsExternalCollection(sourceSchema) {
 		return merr.Wrap(errMilvusTableRefreshSchemaInvalid, "source snapshot is an external collection")
 	}
-	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema, true); err != nil {
+	if err := typeutil.ValidateMilvusTableSchemaIdentity(targetSchema, sourceSchema); err != nil {
 		return merr.Wrap(errMilvusTableRefreshSchemaInvalid,
 			"source schema does not match target collection schema: "+err.Error())
 	}

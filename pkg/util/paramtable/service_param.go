@@ -1352,7 +1352,7 @@ Valid values: [auto, enable, disable]`,
 		Key:          "woodpecker.storage.rootPath",
 		Version:      "2.6.0",
 		DefaultValue: "default",
-		Doc:          "The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.",
+		Doc:          "With 'default', the root is localStorage.path/wp. For embedded local storage, provision localStorage.path and Milvus creates its wp subdirectory. Provision an explicitly configured local root before startup.",
 		Export:       true,
 		Sensitivity:  Sensitive,
 	}
@@ -1856,6 +1856,7 @@ type MinioConfig struct {
 	UseVirtualHost     ParamItem `refreshable:"false"`
 	RequestTimeoutMs   ParamItem `refreshable:"false"`
 	MaxConnections     ParamItem `refreshable:"false"`
+	CRTQueueSizes      ParamItem `refreshable:"false"`
 	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 	UseCRC32C          ParamItem `refreshable:"false"`
 
@@ -2109,6 +2110,15 @@ Leave it empty if you want to use AWS default endpoint`,
 		Doc:          "Maximum concurrent HTTP connections to object storage",
 	}
 	p.MaxConnections.Init(base.mgr)
+
+	p.CRTQueueSizes = ParamItem{
+		Key:          "minio.crt_queue_sizes",
+		Version:      "3.0.0",
+		DefaultValue: "125",
+		Doc:          "S3 CRT queue sizes, converted to the SDK throughput target as value * 0.4 Gbps. Requires restart.",
+		Export:       true,
+	}
+	p.CRTQueueSizes.Init(base.mgr)
 
 	p.ListObjectsMaxKeys = ParamItem{
 		Key:          "minio.listObjectsMaxKeys",

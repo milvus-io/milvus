@@ -14,7 +14,7 @@ maps the source StorageV3 segment manifests into target external segments.
 Unlike Parquet external tables, a Milvus snapshot is not a set of independent
 data files. It contains Milvus collection schema, segment manifests, delta logs,
 and primary-key statistics. The target external collection therefore needs to
-preserve the source field identity for data fields while still exposing normal
+preserve source physical field identity in each manifest while exposing independent
 Milvus field names and `external_field` mappings to users.
 
 ## Implementation Overview
@@ -22,14 +22,13 @@ Milvus field names and `external_field` mappings to users.
 The implementation keeps the public API small and pushes Milvus-specific
 behavior into the existing external table lifecycle:
 
-- RootCoord reads snapshot metadata at create time, validates schema identity,
-  aligns target data-field IDs to source field IDs, and rejects external-table
-  chaining.
+- RootCoord reads snapshot metadata at create time, validates compatible field
+  mappings, allocates ordinary target IDs, and rejects external-table chaining.
 - DataCoord builds refresh jobs, pre-allocates ID ranges, and applies DataNode
   results as kept segments, new segments, or manifest-only updates to existing
   segments.
 - DataNode reads the Milvus snapshot explore manifest, creates target StorageV3
-  manifests, runs target functions, copies or translates delete logs, and
+  manifests, resolves source IDs once per task, references or translates delete logs, and
   samples fake-binlog memory size.
 - `storagev2/packed` parses snapshot metadata, resolves source-relative paths,
   imports source manifests through Loon FFI, and exposes Milvus-table manifest
@@ -42,8 +41,7 @@ behavior into the existing external table lifecycle:
 
 The main data path is zero-copy: target manifests point at source StorageV3
 column-group files after resolving them against `external_source`. Target-owned
-files are written only for generated function outputs and delta logs that must
-live in the target PK space.
+files are written only for delta logs that must live in the target PK space.
 
 ## Goals
 
@@ -51,8 +49,8 @@ live in the target PK space.
   table source.
 - Keep the public source contract minimal: `external_source` points to the
   snapshot metadata JSON file, and `external_spec.format` is `milvus-table`.
-- Preserve source field IDs for target data fields so StorageV3 physical column
-  names remain valid.
+- Keep source StorageV3 physical column names unchanged; bind target IDs to
+  source IDs in immutable target manifests.
 - Keep user-facing `external_field` as the source field name instead of storing
   source field IDs in the collection schema.
 - Support both real primary key and virtual primary key target collections.
@@ -66,12 +64,14 @@ live in the target PK space.
 - Supporting snapshots from non-StorageV3 source collections.
 - Reconstructing a snapshot path from `source_collection_id` and `snapshot_id`.
 - Making external tables writable.
-- Supporting schema evolution between refreshes.
+- Changing the definitions or field IDs of mapped source fields between refreshes.
+- Reading mapped columns that are physically absent from historical source segments.
 - Reusing source primary-key bloom filters for virtual primary key targets.
-- Supporting dynamic fields, struct fields, partition keys, clustering keys,
-  text match, or auto ID for external collections.
-- Reading target function output fields from external source data. Target
-  function outputs are target-owned fields and are regenerated during refresh.
+- Adding partition keys, clustering keys, text match, or auto ID through
+  external field additions.
+- Supporting target-side function output fields on `milvus-table` external
+  collections. Source function outputs may still be mapped as ordinary target
+  data fields.
 
 ## Public Contract
 
@@ -113,39 +113,103 @@ The target collection schema uses normal field names. For each user data field,
 target field name -> external_field source field name -> source field ID
 ```
 
-At create time, RootCoord reads the source snapshot metadata and copies the
-source field ID into the target field. The persisted target schema keeps
-`external_field` as the source field name, not as a numeric field ID string.
+At create time, RootCoord validates source names and field definitions. Target
+IDs are allocated normally; they need not match source IDs. The collection
+schema retains names in `external_field`, not numeric source IDs.
+Target-side function output fields (such as target-local BM25 or embedding
+outputs) are not supported on `milvus-table` external collections: every stored
+column group in a `milvus-table` manifest comes from the single source segment,
+eliminating physical numeric column-name collisions between source and local
+columns. Source function output columns may still be omitted or mapped by an
+ordinary target field. The resulting target schema is persisted and replayed
+with its assigned IDs.
 
-## Schema Alignment
+Every newly imported segment carries the refresh task's schema version.
 
-Milvus StorageV3 segment manifests store physical columns by field ID string.
-For example, source field ID `101` is stored as physical column `"101"`.
-If the target collection generated different field IDs, data reads would point
-to missing or incorrect columns.
+The target may omit ordinary non-key source fields and select a subset of a
+Struct's children. Struct parents map to source structs via `external_field`
+(supporting parent renaming), while selected children retain source child names
+and shape; each selected child has an independent target ID. Every mapped source
+column must physically exist in each live source segment. Adding an unmapped
+ordinary source field does not prevent refresh.
 
-RootCoord handles this at collection creation:
+## Manifest Field Binding
 
-1. Validate `external_source` and `external_spec`.
-2. Parse the snapshot metadata JSON.
-3. Validate target schema identity against the source snapshot schema.
-4. Build a source-field-name to source-field-schema map.
-5. For each target user data field, set `target.field_id` to the matching
-   source field ID found through `target.external_field`.
-6. Mark the create request with `preserve_field_ids=true`.
+DataNode reads the requested snapshot metadata once per refresh task and shares
+that parsed schema with virtual-PK delete translation. It validates the target
+schema, then resolves each `external_field` to a source numeric column. No map
+is added to the DataNode RPC or cached from source metadata in QueryNode.
 
-System fields and the target virtual primary key field are target-owned fields.
-They do not map to source data columns.
+Each imported target column-group file carries the reserved property:
 
-Target function output fields are also target-owned fields. They are not read
-from source data and are assigned target-only field IDs during creation. If the
-source normal Milvus snapshot already contains a function output field, a target
-ordinary field may still map to that stored source column through
-`external_field`; the target collection's own function outputs are recomputed.
+```json
+{"milvus_table.field_id_mapping": "{\"103\":\"101\"}"}
+```
 
-During DDL replay, RootCoord skips rereading the external snapshot when
-`preserve_field_ids` is already set. This keeps recovery independent from the
-source bucket and credentials after the schema has been persisted.
+The key is a target field ID and the value is the source physical column name.
+Only the group's projected columns are included. Every file in the group must
+carry the same map. Other source file properties are retained; a reserved map
+from a source file is replaced. Source data files and their column names are
+unchanged. Real-PK timestamp column `1` retains an identity binding. Bloom-filter
+metadata keys use the target PK ID; referenced bloom payloads remain unchanged.
+
+The native storage utility owns JSON decoding and canonical ID/uniqueness
+validation for both import parameters and persisted bindings. Import validates
+its requested projection; readers additionally validate coverage and agreement
+between files/groups. Invalid import parameters retain `LOON_INVALID_ARGS`
+(and the Go permanent-FFI-error sentinel), while invalid persisted bindings
+report `DataFormatBroken`. QueryNode loading and
+DataNode refresh share the legacy identity resolver, which validates every
+column name as a canonical nonnegative int64, including unrequested columns.
+Other external formats do not use this numeric legacy fallback.
+Explicit incomplete or malformed bindings fail;
+only manifests without any binding use the legacy identity rule. A schema-only
+addition does not extend that manifest's readable projection: fields without a
+binding remain unavailable until explicit refresh imports them. This applies to
+recovery as well as loaded schema changes, without synthesizing NULL values.
+Index reads of an unavailable mapped field return the retriable `FieldNotLoaded`
+error rather than synthesizing a NULL/default index. After explicit refresh,
+the existing index task retries against the latest segment manifest.
+Because `milvus-table` does not support target-local function output column
+groups, every column group in an explicitly mapped manifest must carry its
+`milvus_table.field_id_mapping` property. On subsequent refresh, DataNode checks
+existing target bindings before replacing or retaining segments: a mapped source
+ID change fails.
+
+QueryNode binds an immutable `SealedFieldLayout` to the specific loaded manifest
+revision. Load, Reopen, query/take, search output, sampling, and index readers
+use that binding. Old published views retain the previous manifest and layout
+during loaded refresh. Recovery reads the persisted binding again; it does not
+query the source collection or reconstruct IDs from current schema.
+
+## Online Field Addition
+
+`AddCollectionField` and ordinary/Struct-child additions through
+`AlterCollectionSchema` only validate, allocate, and publish the logical target
+schema through the existing ALTER path. They do not read source data, submit a
+refresh job, or prepare manifests. No preparation job ID or frozen projection is
+added to the ALTER message or refresh-job metadata.
+
+Because online `AddCollectionField` / `AlterCollectionSchema` requires newly
+added fields to be `nullable=true` and `milvus-table` refresh requires exact
+field-definition parity with the source snapshot, online field addition only
+supports mapping source columns that are already `nullable=true`. Pre-existing
+non-nullable source columns cannot be added to an external `milvus-table`
+collection online and must be included at collection creation time.
+
+After adding a mapping, explicitly call `RefreshExternalCollection` against a
+snapshot containing the mapped column in every live source segment. DataNode
+resolves the mapping and builds the expanded target manifest during that refresh.
+For an already loaded collection, wait for refresh completion and then call
+`LoadCollection` with `refresh=true` before reading the newly mapped field.
+Reading the new field before this sequence completes is not guaranteed.
+
+Add Field and refresh are separate operations: a failed refresh does not roll
+back the schema addition. If a source segment lacks the mapped column, complete
+source backfill, create a new snapshot, and retry refresh. Nullable/default
+declarations do not synthesize missing source data. Existing ALTER replay and
+ordinary refresh publication/recovery remain responsible for their own state;
+there is no cross-operation preparation ownership or orphan-job reconciliation.
 
 ## Refresh Flow
 
@@ -158,6 +222,24 @@ For `milvus-table`, DataCoord exploration reads the snapshot metadata JSON and
 requires `storagev2_manifest_list` to be present. If it is missing, refresh
 fails fast with an explicit error because the source snapshot was not created
 from a StorageV3 collection.
+
+DataNode validates required physical columns while reading each source data
+manifest. Manifest import checks the complete target projection before committing;
+the retained-segment path checks columns during its existing source-deltalog read,
+including no-op refreshes. Successful checks share the task's source-deltalog
+cache. DataCoord does not perform a separate scan of source data manifests.
+
+A missing mapped column fails the refresh even when it is nullable or has a
+default value. The error identifies the source manifest and field ID and asks
+the user to complete physical backfill on the source, create a new snapshot,
+and refresh from that snapshot. Backfill does not repair an already-created
+snapshot. A manifest read failure is reported as a read failure, not as evidence
+of a missing column.
+
+Tasks may already have written candidate manifests when a sibling task fails.
+Segment results are applied only after all tasks succeed, so a missing-column
+failure leaves the published target segments and collection source/spec unchanged.
+An already-loaded external collection continues serving its last successful snapshot.
 
 Each source StorageV3 segment manifest becomes one or more external fragments
 identified by:
@@ -213,12 +295,12 @@ a target segment manifest:
 | Format | Physical column name |
 |--------|----------------------|
 | Parquet, Lance, Vortex, Iceberg | `external_field` |
-| Milvus table | target field ID string, aligned to source field ID |
+| Milvus table | source field ID string resolved from the target manifest binding |
 
 For `milvus-table`, source data fields use numeric field ID strings because the
 source StorageV3 manifests were written by Milvus. Target-only fields, such as
-virtual PK and target function outputs, are not source data. Function outputs
-are stored under target numeric field IDs after refresh.
+virtual PK, are not source data. Target-side function output fields are not
+supported on `milvus-table`.
 
 This rule is applied at the actual physical access points:
 
@@ -315,7 +397,7 @@ segments with StorageV3 manifests.
 
 During load:
 
-- Physical column names are resolved through the schema.
+- Physical column names are resolved through the manifest-bound field layout.
 - Real primary key fields are loaded eagerly.
 - Real primary key `milvus-table` segments also load source timestamps eagerly.
 - Virtual primary key fields use the existing synthetic virtual-PK column.
@@ -326,8 +408,8 @@ During load:
 
 During search/query/retrieve/take:
 
-- Segcore requests physical columns using `Schema::GetPhysicalColumnName`.
-- For `milvus-table`, this returns the field ID string.
+- Segcore requests physical columns through `SealedFieldLayout`.
+- For `milvus-table`, this resolves the target ID to the source physical column.
 - For other external formats, this returns `external_field`.
 - Output field IDs and result IDs remain target Milvus field IDs and target PKs.
 
@@ -337,11 +419,14 @@ DataNode passes `external_source` and `external_spec` through
 `BuildIndexInfo`. The C++ index build path reads `external_spec` and resolves
 manifest columns with the same rule as the query path:
 
-- `milvus-table`: field ID string.
+- `milvus-table`: source physical column from the target manifest binding.
 - Other external formats: `external_field`.
 
 This keeps index build consistent with load/search/query/take and avoids a
 separate schema mutation path for indexes.
+A raw index read with no external binding or physical column fails instead of
+synthesizing NULL/default rows. The index task fails for that immutable manifest;
+the query-side field-not-loaded error remains retryable across replicas.
 
 ## Compatibility and Failure Behavior
 
@@ -354,8 +439,11 @@ separate schema mutation path for indexes.
   of writing an unstable target path.
 - If target schema does not match the source snapshot schema, create or refresh
   fails instead of reading data with mismatched field IDs.
-- If a later refresh points to a snapshot with a different schema, refresh
-  fails schema identity validation.
+- If a later snapshot changes a mapped field's definition or field ID, refresh
+  fails compatibility or persisted-binding validation. Additional unmapped ordinary fields are allowed.
+- If any source data segment lacks a mapped column, its DataNode task fails
+  before the job publishes segment results; nullable and default-value
+  declarations do not bypass this check.
 - Existing Parquet, Lance, Vortex, and Iceberg external tables keep their
   existing `external_field` physical-column behavior.
 
@@ -363,7 +451,7 @@ separate schema mutation path for indexes.
 
 The implementation adds coverage for:
 
-- RootCoord schema alignment tests.
+- RootCoord logical compatibility and independent target ID tests.
 - DataCoord refresh schema validation tests.
 - DataNode manifest creation, deltalog copy, and virtual-PK deltalog
   translation tests.

@@ -371,6 +371,12 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
 
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
+
 void
 IterateFieldDataFromManifest(
     const std::string& manifest_path,
@@ -612,12 +618,14 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       std::string_view physical_column_name = {});
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
-                             const FieldMeta& field_meta);
+                             const FieldMeta& field_meta,
+                             std::string_view physical_column_name = {});
 
 // Single source of truth for view/large-variant elimination.
 // STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,
@@ -626,6 +634,7 @@ NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
 // schemaless readers (vortex) should route arrays through this helper before
 // any type-id dispatch (refresh / load / sample / etc).
 std::shared_ptr<arrow::Array>
-CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array);
+CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array,
+                          bool discard_null_list_payload = false);
 
 }  // namespace milvus::storage

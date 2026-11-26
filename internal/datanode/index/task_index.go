@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,13 +53,16 @@ type indexBuildTask struct {
 	ctx    context.Context
 
 	cm             storage.ChunkManager
-	index          indexcgowrapper.CodecIndex
+	index          indexcgowrapper.PreparedIndex
 	req            *workerpb.CreateJobRequest
 	newTypeParams  map[string]string
 	newIndexParams map[string]string
 	tr             *timerecord.TimeRecorder
 	queueDur       time.Duration
+	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
+	info           *IndexTaskInfo
+	resource       taskcommon.Resource
 
 	pluginContext *indexcgopb.StoragePluginContext
 }
@@ -68,7 +72,9 @@ func NewIndexBuildTask(ctx context.Context,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	manager *TaskManager,
+	info *IndexTaskInfo,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *indexBuildTask {
 	t := &indexBuildTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetBuildID()),
@@ -78,7 +84,9 @@ func NewIndexBuildTask(ctx context.Context,
 		req:           req,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
+		info:          info,
 		pluginContext: pluginContext,
+		resource:      resource,
 	}
 
 	t.parseParams()
@@ -97,26 +105,14 @@ func (it *indexBuildTask) parseParams() {
 }
 
 func (it *indexBuildTask) Reset() {
-	// Reset runs from processTask's deferred cleanup on every exit path, including
-	// the canceled one where PostExecute -- the only other place that releases the
-	// index -- is skipped. Without this the native index built by Execute is never
-	// freed. Delete is idempotent, so releasing here after a normal PostExecute is
-	// a no-op.
+	// Keep task identity and result bookkeeping alive until the scheduler has
+	// published the final state and returned its slot reservation.
 	if it.index != nil {
 		if err := it.index.Delete(); err != nil {
 			mlog.Warn(it.ctx, "failed to release index object on task reset", mlog.Err(err))
 		}
 	}
-	it.ident = ""
-	it.cancel = nil
-	it.ctx = nil
-	it.cm = nil
 	it.index = nil
-	it.req = nil
-	it.newTypeParams = nil
-	it.newIndexParams = nil
-	it.tr = nil
-	it.manager = nil
 }
 
 // Ctx is the context of index tasks.
@@ -130,7 +126,7 @@ func (it *indexBuildTask) Name() string {
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
-	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -139,7 +135,7 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 // concurrent QueryTask can never observe a final cost paired with a stale
 // in-progress state.
 func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
-	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, endMs, costTimeMs, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -157,6 +153,7 @@ func (it *indexBuildTask) GetState() indexpb.JobState {
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 	it.queueDur = 0
+	it.prepareDur = 0
 	it.tr.RecordSpan()
 	mlog.Info(ctx, "IndexBuilderTask Enqueue", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.FieldSegmentID(it.req.GetSegmentID()))
@@ -167,12 +164,17 @@ func (it *indexBuildTask) GetSlot() int64 {
 	return it.req.GetTaskSlot()
 }
 
+func (it *indexBuildTask) GetResource() taskcommon.Resource {
+	return it.resource
+}
+
 func (it *indexBuildTask) IsVectorIndex() bool {
 	indexType := GetIndexType(it.req.GetIndexParams())
 	return vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 }
 
 func (it *indexBuildTask) PreExecute(ctx context.Context) error {
+	started := time.Now()
 	it.queueDur = it.tr.RecordSpan()
 	mlog.Info(ctx, "Begin to prepare indexBuildTask", mlog.FieldBuildID(it.req.GetBuildID()),
 		mlog.Int64("Collection", it.req.GetCollectionID()), mlog.Int64("SegmentID", it.req.GetSegmentID()))
@@ -246,6 +248,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		mlog.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		mlog.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
 	)
+	it.prepareDur = time.Since(started)
 	return nil
 }
 
@@ -268,7 +271,24 @@ func redactBuildIndexParamsForLog(params *indexcgopb.BuildIndexInfo) *indexcgopb
 	return redacted
 }
 
-func (it *indexBuildTask) Execute(ctx context.Context) error {
+func (it *indexBuildTask) LoadData(ctx context.Context) error {
+	started := time.Now()
+	if it.index == nil {
+		if err := it.createBuilder(ctx); err != nil {
+			return err
+		}
+	}
+	if err := it.index.LoadData(); err != nil {
+		return err
+	}
+	loadDuration := time.Since(started)
+	it.prepareDur += loadDuration
+	mlog.Info(ctx, "Successfully load index data", mlog.FieldBuildID(it.req.GetBuildID()), mlog.Duration("duration", loadDuration))
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) createBuilder(ctx context.Context) error {
 	log := mlog.With(
 		mlog.String("clusterID", it.req.GetClusterID()),
 		mlog.FieldBuildID(it.req.GetBuildID()),
@@ -305,24 +325,32 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	storageConfig := &indexcgopb.StorageConfig{
-		Address:           it.req.GetStorageConfig().GetAddress(),
-		AccessKeyID:       it.req.GetStorageConfig().GetAccessKeyID(),
-		SecretAccessKey:   it.req.GetStorageConfig().GetSecretAccessKey(),
-		UseSSL:            it.req.GetStorageConfig().GetUseSSL(),
-		BucketName:        it.req.GetStorageConfig().GetBucketName(),
-		RootPath:          it.req.GetStorageConfig().GetRootPath(),
-		UseIAM:            it.req.GetStorageConfig().GetUseIAM(),
-		IAMEndpoint:       it.req.GetStorageConfig().GetIAMEndpoint(),
-		StorageType:       it.req.GetStorageConfig().GetStorageType(),
-		UseVirtualHost:    it.req.GetStorageConfig().GetUseVirtualHost(),
-		Region:            it.req.GetStorageConfig().GetRegion(),
-		CloudProvider:     it.req.GetStorageConfig().GetCloudProvider(),
-		RequestTimeoutMs:  it.req.GetStorageConfig().GetRequestTimeoutMs(),
-		MaxConnections:    it.req.GetStorageConfig().GetMaxConnections(),
-		SslCACert:         it.req.GetStorageConfig().GetSslCACert(),
-		GcpCredentialJSON: it.req.GetStorageConfig().GetGcpCredentialJSON(),
-		SslTlsMinVersion:  it.req.GetStorageConfig().GetSslTlsMinVersion(),
-		UseCrc32CChecksum: it.req.GetStorageConfig().GetUseCrc32CChecksum(),
+		Address:                     it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:                 it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:             it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:                      it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:                  it.req.GetStorageConfig().GetBucketName(),
+		RootPath:                    it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:                      it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:                 it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:                 it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:              it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:                      it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:               it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs:            it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		MaxConnections:              it.req.GetStorageConfig().GetMaxConnections(),
+		SslCACert:                   it.req.GetStorageConfig().GetSslCACert(),
+		GcpCredentialJSON:           it.req.GetStorageConfig().GetGcpCredentialJSON(),
+		SslTlsMinVersion:            it.req.GetStorageConfig().GetSslTlsMinVersion(),
+		UseCrc32CChecksum:           it.req.GetStorageConfig().GetUseCrc32CChecksum(),
+		TalonMode:                   it.req.GetStorageConfig().GetTalonMode(),
+		TalonEnabledStages:          it.req.GetStorageConfig().GetTalonEnabledStages(),
+		TalonSmallReadThreshold:     it.req.GetStorageConfig().GetTalonSmallReadThreshold(),
+		TalonCoordinator:            it.req.GetStorageConfig().GetTalonCoordinator(),
+		TalonNamespace:              it.req.GetStorageConfig().GetTalonNamespace(),
+		TalonBlockSize:              it.req.GetStorageConfig().GetTalonBlockSize(),
+		TalonMaxIdlePerAddr:         it.req.GetStorageConfig().GetTalonMaxIdlePerAddr(),
+		TalonEnableForExternalTable: it.req.GetStorageConfig().GetTalonEnableForExternalTable(),
 	}
 
 	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
@@ -380,20 +408,31 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	var err error
-	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
+	it.index, err = indexcgowrapper.CreateIndexBuilder(ctx, buildIndexParams)
 	if err != nil {
-		if it.index != nil && it.index.CleanLocalData() != nil {
-			log.Warn(ctx, "failed to clean cached data on disk after build index failed")
-		}
-		log.Warn(ctx, "failed to build index", mlog.Err(err))
 		return err
 	}
-
-	buildIndexLatency := it.tr.RecordSpan()
-	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
-
-	log.Info(ctx, "Successfully build index")
 	return nil
+}
+
+func (it *indexBuildTask) Execute(ctx context.Context) error {
+	if it.index == nil {
+		return merr.WrapErrServiceInternalMsg("index input has not been prepared")
+	}
+	started := time.Now()
+	if err := it.index.BuildPrepared(); err != nil {
+		return err
+	}
+	buildDuration := time.Since(started)
+	buildIndexLatency := it.prepareDur + buildDuration
+	mlog.Info(ctx, "Successfully build index", mlog.FieldBuildID(it.req.GetBuildID()), mlog.Duration("duration", buildDuration))
+	metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(buildIndexLatency.Seconds())
+	it.tr.RecordSpan()
+	return nil
+}
+
+func (it *indexBuildTask) TryReserveBuild() (bool, error) {
+	return it.index.TryReserveBuild()
 }
 
 func (it *indexBuildTask) PostExecute(ctx context.Context) error {
@@ -431,6 +470,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),
 		it.req.GetBuildID(),
+		it.info,
 		saveFileKeys,
 		serializedSize,
 		uint64(indexStats.MemSize),

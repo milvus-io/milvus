@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -1893,6 +1894,107 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 	resp, err := server.GetShardLeaders(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestPromoteLoadConfigReplicasByResourceGroup() {
+	ctx := context.Background()
+	const nodeA, nodeB int64 = 1, 2
+
+	// Drive target and distribution updates explicitly between promotion checks.
+	suite.targetObserver.Stop()
+
+	for _, collection := range suite.collections {
+		partitions := lo.Map(suite.partitions[collection], func(id int64, _ int) *meta.Partition {
+			return utils.CreateTestPartition(collection, id)
+		})
+		suite.Require().NoError(suite.meta.PutCollection(ctx, utils.CreateTestCollection(collection, 2), partitions...))
+		suite.expectGetRecoverInfo(collection)
+		suite.Require().NoError(suite.targetMgr.UpdateCollectionNextTarget(ctx, collection))
+		suite.Require().True(suite.targetMgr.UpdateCollectionCurrentTarget(ctx, collection))
+
+		for node, group := range map[int64]string{nodeA: "A", nodeB: "B"} {
+			replica := meta.NewReplica(&querypb.Replica{
+				ID:            collection*10 + node,
+				CollectionID:  collection,
+				Nodes:         []int64{node},
+				ResourceGroup: group,
+			}).CopyForWrite()
+			replica.SetQueryInvisible(true)
+			suite.Require().NoError(suite.meta.Put(ctx, replica.IntoReplica()))
+		}
+	}
+
+	reportDistribution := func(node, missingSegment int64) {
+		var channels []*meta.DmChannel
+		for _, collection := range suite.collections {
+			for _, name := range suite.channels[collection] {
+				segments := make(map[int64]int64)
+				for id := range suite.targetMgr.GetSealedSegmentsByChannel(ctx, collection, name, meta.CurrentTarget) {
+					segments[id] = node
+				}
+				delete(segments, missingSegment)
+				channel := utils.CreateTestChannel(collection, node, 1, name)
+				channel.View = utils.CreateTestLeaderView(node, collection, name, segments, nil)
+				channel.View.Status = &querypb.LeaderViewStatus{Serviceable: true}
+				channels = append(channels, channel)
+			}
+		}
+		suite.dist.ChannelDistManager.Update(node, channels...)
+	}
+	assertLeaders := func(nodes ...int64) {
+		for _, collection := range suite.collections {
+			resp, err := suite.server.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+				CollectionID: collection, WithUnserviceableShards: true,
+			})
+			suite.Require().NoError(merr.CheckRPCCall(resp, err))
+			var channels []string
+			for _, shard := range resp.GetShards() {
+				channels = append(channels, shard.GetChannelName())
+				suite.ElementsMatch(nodes, shard.GetNodeIds(), shard.GetChannelName())
+			}
+			suite.ElementsMatch(suite.channels[collection], channels)
+		}
+	}
+
+	var invalidations [][]int64
+	suite.server.proxyClientManager = proxyutil.NewProxyClientManager(nil)
+	invalidate := mockey.Mock((*proxyutil.ProxyClientManager).InvalidateShardLeaderCache).To(
+		func(_ *proxyutil.ProxyClientManager, _ context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) error {
+			invalidations = append(invalidations, append([]int64(nil), req.GetCollectionIDs()...))
+			return nil
+		}).Build()
+	defer invalidate.UnPatch()
+
+	// A is ready for both collections. B lacks one segment in the second collection.
+	secondCollection := suite.collections[1]
+	missingSegment := suite.segments[secondCollection][suite.partitions[secondCollection][0]][0]
+	pending := suite.meta.GetQueryInvisibleReplicas(ctx)
+	reportDistribution(nodeA, 0)
+	reportDistribution(nodeB, missingSegment)
+	assertLeaders()
+	suite.server.tryPromoteReadyLoadConfigReplicas(ctx)
+	assertLeaders(nodeA)
+	suite.Require().Len(invalidations, 1)
+	suite.ElementsMatch(suite.collections, invalidations[0])
+
+	suite.server.tryPromoteReadyLoadConfigReplicas(ctx)
+	suite.Len(invalidations, 1)
+
+	reportDistribution(nodeB, 0)
+	suite.server.tryPromoteReadyLoadConfigReplicas(ctx)
+	assertLeaders(nodeA, nodeB)
+	suite.Require().Len(invalidations, 2)
+	suite.ElementsMatch(suite.collections, invalidations[1])
+
+	suite.server.tryPromoteReadyLoadConfigReplicas(ctx)
+	assertLeaders(nodeA, nodeB)
+	suite.Len(invalidations, 2)
+
+	// A check with an older snapshot must only invalidate collections it changed.
+	stale := mockey.Mock((*meta.ReplicaManager).GetQueryInvisibleReplicas).Return(pending).Build()
+	defer stale.UnPatch()
+	suite.server.tryPromoteReadyLoadConfigReplicas(ctx)
+	suite.Len(invalidations, 2)
 }
 
 func (suite *ServiceSuite) TestGetShardLeadersFailed() {

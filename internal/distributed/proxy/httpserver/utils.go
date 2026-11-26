@@ -506,6 +506,9 @@ func printStructArrayFieldsV2(structFields []*schemapb.StructArrayFieldSchema) [
 		if len(sf.GetTypeParams()) > 0 {
 			entry[Params] = sf.GetTypeParams()
 		}
+		if sf.GetExternalField() != "" {
+			entry["externalField"] = sf.GetExternalField()
+		}
 		res = append(res, entry)
 	}
 	return res

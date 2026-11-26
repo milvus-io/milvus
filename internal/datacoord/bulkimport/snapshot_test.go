@@ -791,7 +791,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				return nil
 			}).Build()
 			defer validate.UnPatch()
-			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig) ([]string, error) {
+			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(path string, cfg *indexpb.StorageConfig, _ ...uint32) ([]string, error) {
 				require.Same(t, foreignCfg, cfg)
 				return []string{"root/files/l0/delete"}, nil
 			}).Build()
@@ -1447,8 +1447,8 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	imp.Task.Store(&datapb.ImportTaskV2{JobID: 1, FileStats: stats})
 	// No worker/allocator is supplied: malformed immutable inventories must
 	// fail before dispatch/allocation, not keep the job retrying until timeout.
-	pre.CreateTaskOnWorker(1, nil)
-	imp.CreateTaskOnWorker(1, nil)
+	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())
+	imp.CreateTaskOnWorker(1, nil, imp.GetTaskResource())
 	require.Equal(t, 2, updates)
 	require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
 	require.Contains(t, job.GetReason(), "lost its shared L0 inventory")
@@ -1457,8 +1457,8 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	updateJob.UnPatch()
 	persistFailure := mockey.Mock((*failedSourceMeta).UpdateJob).Return(merr.ErrIoKeyNotFound).Build()
 	defer persistFailure.UnPatch()
-	pre.CreateTaskOnWorker(1, nil)
-	imp.CreateTaskOnWorker(1, nil)
+	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())
+	imp.CreateTaskOnWorker(1, nil, imp.GetTaskResource())
 	require.Zero(t, pre.retryTimes, "catalog write failures must not dispatch a malformed task")
 	require.Zero(t, imp.retryTimes)
 }
@@ -2541,7 +2541,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 				if tc.deletes {
 					paths = []string{"root/files/delta"}
 				}
-				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig) ([]string, error) {
+				delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(func(string, *indexpb.StorageConfig, ...uint32) ([]string, error) {
 					manifestChecks++
 					return paths, nil
 				}).Build()
@@ -2678,19 +2678,24 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						require.NoError(t, proto.Unmarshal(encoded, file))
 						reader, err := importutilv2.NewReader(ctx, cm, schema, file, options, 1024, cfg, 1024)
 						require.NoError(t, err)
-						batch, err := reader.Read()
-						require.NoError(t, err)
+						var got []int64
+						for {
+							batch, err := reader.Read()
+							if err == io.EOF {
+								break
+							}
+							require.NoError(t, err)
+							got = append(got, batch.Data[100].(*milvusstorage.Int64FieldData).Data...)
+						}
 						if tc.commit == 0 {
 							// Accepted historical loss: all deletes are newer than raw
 							// rowTs=100. The omitted commitTs=300 cannot be recovered,
 							// so rows 1/2 are filtered too, unlike a complete snapshot.
-							require.Zero(t, batch.GetRowNum())
+							require.Empty(t, got)
 						} else {
-							require.Equal(t, []int64{1, 2}, batch.Data[100].(*milvusstorage.Int64FieldData).Data,
+							require.Equal(t, []int64{1, 2}, got,
 								"keep pre-commit and equal-commit deletes; apply post-commit deletes in both phases")
 						}
-						_, err = reader.Read()
-						require.ErrorIs(t, err, io.EOF)
 						reader.Close()
 					}
 				})

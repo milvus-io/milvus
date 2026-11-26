@@ -3187,6 +3187,155 @@ MakeSchemaWithFieldIds(std::initializer_list<int64_t> field_ids) {
 
 }  // namespace
 
+TEST(SegmentLoadInfoManifestBindingTest,
+     ManifestBindingIsIndependentOfSchemaAndOldRevisions) {
+    auto schema = MakeSchemaWithFieldIds({101, 103});
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    auto groups =
+        MakeExternalColumnGroups({{{"101", "103"}, {"file.parquet"}}});
+    groups->front()->files.front().properties["milvus_table.field_id_mapping"] =
+        R"({"101":"103","103":"101"})";
+    SegmentLoadInfo first(
+        MakeManifestProto(R"({"base_path":"target","ver":1})"), schema);
+    first.SetColumnGroupsForTesting(groups);
+    first.BindManifestFields();
+    EXPECT_EQ(first.GetStorageColumnName(FieldId(101)), "103");
+    EXPECT_EQ(first.ResolveColumnFieldId("101"), FieldId(103));
+    EXPECT_EQ(first.GetStorageColumnName(FieldId(103)), "101");
+    EXPECT_EQ(schema->get_storage_column_name(FieldId(101)), "101");
+
+    SegmentLoadInfo recovered(first);
+    recovered.BindManifestFields();
+    EXPECT_EQ(recovered.GetStorageColumnName(FieldId(101)), "103");
+
+    auto next_groups =
+        MakeExternalColumnGroups({{{"101", "103"}, {"next.parquet"}}});
+    next_groups->front()
+        ->files.front()
+        .properties["milvus_table.field_id_mapping"] =
+        R"({"101":"101","103":"103"})";
+    SegmentLoadInfo next(MakeManifestProto(R"({"base_path":"target","ver":2})"),
+                         schema);
+    next.SetColumnGroupsForTesting(next_groups);
+    next.InheritCachedColumnGroupsFrom(first);
+    next.BindManifestFields();
+    EXPECT_EQ(next.GetStorageColumnName(FieldId(101)), "101");
+    EXPECT_EQ(first.GetStorageColumnName(FieldId(101)), "103");
+
+    auto expanded = MakeSchemaWithFieldIds({101, 103, 104});
+    expanded->set_external_source("s3://bucket/snapshot");
+    expanded->set_external_spec(R"({"format":"milvus-table"})");
+    SegmentLoadInfo before_refresh(first);
+    before_refresh.ReplaceSchemaForReopen(expanded);
+    before_refresh.BindManifestFields();
+    EXPECT_FALSE(before_refresh.HasFieldInLoadedManifest(FieldId(104)));
+    EXPECT_FALSE(before_refresh.HasManifestBinding(FieldId(104)));
+    EXPECT_THROW(before_refresh.GetStorageColumnName(FieldId(104)),
+                 SegcoreError);
+
+    auto refreshed_groups =
+        MakeExternalColumnGroups({{{"101", "103", "105"}, {"next.parquet"}}});
+    refreshed_groups->front()
+        ->files.front()
+        .properties["milvus_table.field_id_mapping"] =
+        R"({"101":"103","103":"101","104":"105"})";
+    SegmentLoadInfo refreshed(
+        MakeManifestProto(R"({"base_path":"target","ver":3})"), expanded);
+    refreshed.SetColumnGroupsForTesting(refreshed_groups);
+    refreshed.BindManifestFields();
+    EXPECT_TRUE(refreshed.HasFieldInLoadedManifest(FieldId(104)));
+    EXPECT_TRUE(refreshed.HasManifestBinding(FieldId(104)));
+    EXPECT_EQ(refreshed.GetStorageColumnName(FieldId(104)), "105");
+    EXPECT_FALSE(before_refresh.HasFieldInLoadedManifest(FieldId(104)));
+    EXPECT_EQ(first.GetStorageColumnName(FieldId(101)), "103");
+}
+
+TEST(SegmentLoadInfoManifestBindingTest,
+     LegacyManifestKeepsAddedFieldsUnavailable) {
+    auto schema = MakeSchemaWithFieldIds({101, 103, 104});
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    SegmentLoadInfo info(MakeManifestProto(R"({"base_path":"target","ver":1})"),
+                         schema);
+    info.SetColumnGroupsForTesting(MakeExternalColumnGroups(
+        {{{"101", "103", "0", "9223372036854775807"}, {"legacy.parquet"}}}));
+    info.BindManifestFields();
+    EXPECT_EQ(info.GetStorageColumnName(FieldId(101)), "101");
+    EXPECT_TRUE(info.HasFieldInLoadedManifest(FieldId(103)));
+    EXPECT_FALSE(info.HasFieldInLoadedManifest(FieldId(104)));
+    EXPECT_FALSE(info.HasManifestBinding(FieldId(104)));
+    EXPECT_THROW(info.GetStorageColumnName(FieldId(104)), SegcoreError);
+    for (const auto& invalid :
+         {"not-an-id", "01", "-1", "+101", "", "9223372036854775808"}) {
+        SegmentLoadInfo malformed(
+            MakeManifestProto(R"({"base_path":"target","ver":2})"), schema);
+        malformed.SetColumnGroupsForTesting(
+            MakeExternalColumnGroups({{{invalid}, {"legacy.parquet"}}}));
+        try {
+            malformed.BindManifestFields();
+            FAIL() << "accepted invalid legacy field ID " << invalid;
+        } catch (const SegcoreError& err) {
+            EXPECT_EQ(err.get_error_code(), DataFormatBroken);
+        }
+    }
+}
+
+TEST(SegmentLoadInfoManifestBindingTest,
+     NamedExternalColumnsDoNotUseLegacyIdentity) {
+    auto schema = MakeSchemaWithFieldIds({101});
+    schema->set_external_source("s3://bucket/data.parquet");
+    schema->set_external_spec(R"({"format":"parquet"})");
+    SegmentLoadInfo info(MakeManifestProto(R"({"base_path":"target","ver":1})"),
+                         schema);
+    info.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"named_column"}, {"data.parquet"}}}));
+    EXPECT_NO_THROW(info.BindManifestFields());
+    EXPECT_TRUE(info.HasManifestBinding(FieldId(101)));
+}
+
+TEST(SegmentLoadInfoManifestBindingTest,
+     BindManifestFieldsPrunesUnboundAndKeepsNewlyBoundFieldIndex) {
+    auto schema = MakeSchemaWithFieldIds({101, 104});
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    const FieldId added(104);
+
+    auto old_proto = MakeManifestProto(R"({"base_path":"target","ver":1})");
+    auto* old_index = old_proto.add_index_infos();
+    old_index->set_fieldid(added.get());
+    old_index->set_indexid(200);
+    old_index->add_index_file_paths("index/200");
+    auto* old_type = old_index->add_index_params();
+    old_type->set_key(milvus::index::INDEX_TYPE);
+    old_type->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo previous(old_proto, schema);
+    previous.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"101"}, {"old.parquet"}}}));
+    previous.BindManifestFields();
+    ASSERT_FALSE(previous.HasFieldInSchema(added));
+    EXPECT_TRUE(previous.GetFieldIndexInfos(added).empty());
+
+    auto next_proto = MakeManifestProto(R"({"base_path":"target","ver":2})");
+    auto* index = next_proto.add_index_infos();
+    index->set_fieldid(added.get());
+    index->set_indexid(201);
+    index->add_index_file_paths("index/201");
+    auto* type = index->add_index_params();
+    type->set_key(milvus::index::INDEX_TYPE);
+    type->set_value(milvus::index::ASCENDING_SORT);
+
+    SegmentLoadInfo prepared(next_proto, schema);
+    prepared.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"101", "104"}, {"new.parquet"}}}));
+    prepared.BindManifestFields();
+    EXPECT_TRUE(prepared.HasFieldInSchema(added));
+    auto indexes = prepared.GetFieldIndexInfos(added);
+    ASSERT_EQ(indexes.size(), 1);
+    EXPECT_EQ(indexes.front().index_id, 201);
+}
+
 TEST_F(SegmentLoadInfoTest, ConstructSkipsIndexInfoForDroppedField) {
     proto::segcore::SegmentLoadInfo p;
     p.set_segmentid(100);
@@ -3427,6 +3576,77 @@ TEST_F(SegmentLoadInfoTest, HasManifestColumnUsesManifestColumnNames) {
     EXPECT_TRUE(info.HasManifestColumn("tenant"));
     EXPECT_FALSE(info.HasManifestColumn("missing"));
     EXPECT_FALSE(info.HasManifestColumn("101"));
+}
+
+TEST_F(SegmentLoadInfoTest, MilvusTableMissingStructColumnsDoNotFillDefaults) {
+    proto::schema::CollectionSchema pb;
+    pb.set_external_source("s3://bucket/snapshot");
+    pb.set_external_spec(R"({"format":"milvus-table"})");
+    auto* pk = pb.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("id");
+    pk->set_data_type(proto::schema::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("id");
+    auto* parent = pb.add_struct_array_fields();
+    parent->set_fieldid(101);
+    parent->set_name("clips");
+    parent->set_nullable(true);
+    auto* capacity = parent->add_type_params();
+    capacity->set_key("max_capacity");
+    capacity->set_value("4");
+    for (int64_t id : {102, 103}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 102 ? "clips[base]" : "clips[note]");
+        child->set_external_field(child->name());
+        child->set_data_type(proto::schema::Array);
+        child->set_element_type(proto::schema::Int64);
+        child->set_nullable(true);
+        child->set_element_nullable(id == 103);
+        *child->add_type_params() = *capacity;
+    }
+    auto schema = Schema::ParseFrom(pb);
+    for (const bool has_sibling : {false, true}) {
+        SCOPED_TRACE(has_sibling);
+        auto groups =
+            MakeExternalColumnGroups({{{"100"}, {"/external/id.parquet"}}});
+        if (has_sibling) {
+            auto sibling = MakeExternalColumnGroups(
+                {{{"102"}, {"/external/base.parquet"}}});
+            groups->push_back(sibling->at(0));
+        }
+        auto load_proto = MakeManifestProto("/manifest/v1");
+        auto* fake = load_proto.add_binlog_paths();
+        fake->set_fieldid(100);
+        for (auto id : {100, 102, 103}) {
+            fake->add_child_fields(id);
+        }
+        SegmentLoadInfo info(load_proto, schema);
+        info.SetColumnGroupsForTesting(groups);
+        const auto diff = info.GetLoadDiff();
+        const std::set<FieldId> filled(diff.fields_to_fill_default.begin(),
+                                       diff.fields_to_fill_default.end());
+        const std::set<FieldId> expected;
+        EXPECT_TRUE(filled.empty());
+        EXPECT_TRUE(diff.load_external_manifest);
+        SegmentLoadInfo copied(info);
+        EXPECT_EQ(copied.GetDefaultFilledFieldsForNewInfo(info), expected);
+        auto repeated = copied.ComputeDiff(info);
+        EXPECT_TRUE(repeated.fields_to_fill_default.empty());
+        auto schema_copy = std::make_shared<Schema>(*schema);
+        Schema assigned;
+        assigned = *schema;
+        EXPECT_EQ(schema_copy->GetStructFieldId("clips"), FieldId(101));
+        EXPECT_EQ(assigned.GetStructFieldId("clips"), FieldId(101));
+        // A later physical column does not change the strict external policy.
+        auto newer =
+            MakeExternalColumnGroups({{{"104"}, {"/external/newer.parquet"}}});
+        groups->push_back(newer->at(0));
+        SegmentLoadInfo corrupt(load_proto, schema);
+        corrupt.SetColumnGroupsForTesting(groups);
+        EXPECT_TRUE(corrupt.GetLoadDiff().fields_to_fill_default.empty());
+    }
 }
 
 TEST_F(SegmentLoadInfoTest, CachedManifestColumnsCanBeInherited) {
@@ -3947,4 +4167,39 @@ TEST(IndexFactoryRawDataTest, CanUseIndexRawDataForFieldExcludesJsonAndArray) {
         DataType::INT64, false));
     EXPECT_FALSE(milvus::index::IndexFactory::CanUseIndexRawDataForField(
         DataType::JSON, false));
+}
+
+TEST(SchemaProjectionTest, OrdinaryStructProjectionRespectsSelectedFields) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("id_col");
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+    auto projection = schema->GetOrdinaryStructProjections({FieldId(202)});
+    ASSERT_EQ(projection.size(), 1);
+    EXPECT_EQ(projection.at("items").parent_field_id, FieldId(200));
+    EXPECT_EQ(projection.at("items").child_field_ids,
+              std::vector<FieldId>{FieldId(202)});
+    EXPECT_TRUE(schema->GetOrdinaryStructProjections({}).empty());
+    auto all_projection =
+        schema->GetOrdinaryStructProjections(schema->get_field_ids());
+    ASSERT_EQ(all_projection.size(), 1);
+    EXPECT_EQ(all_projection.at("items").child_field_ids,
+              (std::vector<FieldId>{FieldId(201), FieldId(202)}));
 }

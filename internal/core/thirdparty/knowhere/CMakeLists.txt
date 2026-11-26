@@ -14,7 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION v3.0.19 )
+set( KNOWHERE_VERSION v3.0.20 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
@@ -35,17 +35,20 @@ else ()
     set(WITH_CARDINAL OFF CACHE BOOL "" FORCE )
 endif()
 
-if ( MILVUS_GPU_VERSION STREQUAL "ON" )
-    set(WITH_CUVS ON CACHE BOOL "" FORCE )
+if ( WITH_GPU AND NOT WITH_CARDINAL )
     set(raft_DIR "${FETCHCONTENT_BASE_DIR}/raft-build" CACHE PATH "Path to raft build directory" FORCE)
     set(rmm_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" CACHE PATH "Path to rmm build directory" FORCE)
 endif ()
 
-if ( WITH_SVS STREQUAL "ON" )
-    set(WITH_SVS ON CACHE BOOL "" FORCE )
+# Resolve auto for the target without replacing the user's cached selection.
+if ( WITH_SVS STREQUAL "ON" OR
+     ( WITH_SVS STREQUAL "AUTO" AND NOT USE_TSAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$" ) )
+    set(WITH_SVS ON)
 else ()
-    set(WITH_SVS OFF CACHE BOOL "" FORCE )
+    set(WITH_SVS OFF)
 endif()
+message(STATUS "Knowhere SVS support: ${WITH_SVS}")
 
 # Conan 2.x: CMAKE_PREFIX_PATH is set by conan_toolchain.cmake
 FetchContent_Declare(
@@ -66,23 +69,21 @@ if ( NOT knowhere_POPULATED )
                       ${knowhere_BINARY_DIR} )
 endif()
 
-# Install the SVS runtime shared library alongside libknowhere.so so that
-# the Go linker (and the final binary at runtime) can find it.
-# svs_SOURCE_DIR is set inside knowhere's subdirectory scope and does not
-# propagate here, so we derive the path from FETCHCONTENT_BASE_DIR which
-# is in the CMake cache (set by internal/core/CMakeLists.txt).
-if ( WITH_SVS STREQUAL "ON" )
-    set( _SVS_LIB_DIR "${FETCHCONTENT_BASE_DIR}/svs-src/lib" )
-    if ( EXISTS "${_SVS_LIB_DIR}" )
-        install(DIRECTORY ${_SVS_LIB_DIR}/
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-                FILES_MATCHING PATTERN "libsvs_runtime.so*")
-    else()
-        message(WARNING "SVS enabled but ${_SVS_LIB_DIR} not found \u2014 libsvs_runtime.so will not be installed")
+if ( WITH_SVS )
+    # SVS bundles its own fmt headers. Prefer the headers of the fmt library linked by Milvus.
+    target_include_directories(faiss_svs SYSTEM BEFORE INTERFACE
+            "$<TARGET_PROPERTY:fmt::fmt,INTERFACE_INCLUDE_DIRECTORIES>")
+
+    # Both fetched and preinstalled packages provide their config under lib/cmake/svs_runtime.
+    get_directory_property(_SVS_CONFIG_DIR DIRECTORY "${knowhere_SOURCE_DIR}" DEFINITION svs_runtime_DIR)
+    file(GLOB _SVS_RUNTIME_LIBS "${_SVS_CONFIG_DIR}/../../libsvs_runtime.so*")
+    if ( NOT _SVS_RUNTIME_LIBS )
+        message(FATAL_ERROR "SVS runtime libraries not found for package config at ${_SVS_CONFIG_DIR}")
     endif()
+    install(FILES ${_SVS_RUNTIME_LIBS} DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
-if ( WITH_CUVS STREQUAL "ON" )
+if ( WITH_GPU AND NOT WITH_CARDINAL )
     set( _RMM_LIB_DIR "${FETCHCONTENT_BASE_DIR}/rmm-build" )
     if ( EXISTS "${_RMM_LIB_DIR}" )
         install(DIRECTORY ${_RMM_LIB_DIR}/

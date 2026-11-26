@@ -607,7 +607,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 	}, gotExtfs)
 }
 
-func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_MilvusTableRealPKAddsL0Deltalogs() {
+func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_MilvusTableRejected() {
 	ctx := context.Background()
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:   1000,
@@ -633,32 +633,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestWithFunctions_Mil
 	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
 
-	mockExec := mockey.Mock(ExecuteFunctionsForSegment).Return("manifest-path", nil).Build()
-	defer mockExec.UnPatch()
-	mockAdd := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).
-		To(func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
-			s.Equal("manifest-path", manifestPath)
-			s.Equal([]packed.DeltaLogEntry{{
-				Path:       "s3://source-bucket/files/insert_log/1/_delta/88",
-				NumEntries: 7,
-			}}, deltaLogs)
-			return "manifest-with-deltas", nil
-		}).Build()
-	defer mockAdd.UnPatch()
-
-	manifestPath, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{
-		FragmentID: 1,
-		Deltalogs: []*datapb.FieldBinlog{{
-			FieldID: 100,
-			Binlogs: []*datapb.Binlog{{
-				LogID:      88,
-				LogPath:    "s3://source-bucket/files/insert_log/1/_delta/88",
-				EntriesNum: 7,
-			}},
-		}},
-	}})
-	s.NoError(err)
-	s.Equal("manifest-with-deltas", manifestPath)
+	manifestPath, err := task.createManifestWithFunctions(ctx, 3000, []packed.Fragment{{FragmentID: 1}})
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "does not support function output fields")
+	s.Empty(manifestPath)
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestAddMilvusTableL0DeltalogsToManifest_RequiresAllocatedLogID() {

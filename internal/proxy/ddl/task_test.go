@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1745,6 +1746,52 @@ func TestCreateCollectionTask(t *testing.T) {
 	})
 }
 
+func TestCreateCollectionTaskMilvusTableStruct(t *testing.T) {
+	ctx := context.Background()
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_ArrayOfVector} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/element_nullable=%t", dataType, elementNullable), func(t *testing.T) {
+				elementType := schemapb.DataType_Int64
+				params := []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+				if dataType == schemapb.DataType_ArrayOfVector {
+					elementType = schemapb.DataType_FloatVector
+					params = append(params, &commonpb.KeyValuePair{Key: common.DimKey, Value: "8"})
+				}
+				schema := &schemapb.CollectionSchema{
+					Name: "milvus_table_struct", ExternalSource: "s3://bucket/snapshot.json",
+					ExternalSpec: `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+					Fields: []*schemapb.FieldSchema{
+						{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+						{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+					},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						Name: "items", ExternalField: "items", Nullable: true,
+						Fields: []*schemapb.FieldSchema{{
+							Name: "value", DataType: dataType, ElementType: elementType,
+							ElementNullable: elementNullable, TypeParams: params,
+						}},
+					}},
+				}
+				encoded, err := proto.Marshal(schema)
+				require.NoError(t, err)
+				task := &CreateCollectionTask{
+					ctx: ctx, Condition: NewTaskCondition(ctx),
+					CreateCollectionRequest: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name, Schema: encoded, ShardsNum: 1},
+				}
+				require.NoError(t, task.OnEnqueue())
+				require.NoError(t, task.PreExecute(ctx))
+				resolved := &schemapb.CollectionSchema{}
+				require.NoError(t, proto.Unmarshal(task.Schema, resolved))
+				child := resolved.StructArrayFields[0].Fields[0]
+				require.Equal(t, "items[value]", child.Name)
+				require.Equal(t, "items[value]", child.ExternalField)
+				require.Equal(t, elementNullable, child.ElementNullable)
+				require.True(t, child.Nullable)
+			})
+		}
+	}
+}
+
 func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 	mix := NewMixCoordMock()
 	ctx := context.Background()
@@ -1939,12 +1986,13 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("struct field forbidden", func(t *testing.T) {
+	t.Run("struct field supported", func(t *testing.T) {
 		schema := buildExternalSchema()
 		schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{
 			{
-				FieldID: 3,
-				Name:    "struct_array_field",
+				FieldID:       3,
+				Name:          "struct_array_field",
+				ExternalField: "struct_array_field",
 				Fields: []*schemapb.FieldSchema{
 					{
 						FieldID:     4,
@@ -1960,7 +2008,10 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		}
 		task.Schema = marshal(schema)
 		err := task.PreExecute(ctx)
-		assert.Error(t, err)
+		require.NoError(t, err)
+		resolved := &schemapb.CollectionSchema{}
+		require.NoError(t, proto.Unmarshal(task.Schema, resolved))
+		require.Equal(t, "struct_array_field[nested_array]", resolved.GetStructArrayFields()[0].GetFields()[0].GetExternalField())
 	})
 }
 
@@ -5930,6 +5981,253 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 	}
 }
 
+func TestCreateCollectionTaskRejectsStructSubFieldOriginMarker(t *testing.T) {
+	ctx := context.Background()
+	for _, preserve := range []bool{false, true} {
+		t.Run("preserve="+strconv.FormatBool(preserve), func(t *testing.T) {
+			mockCache := NewMockCache(t)
+			mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+			collectionName := "TestCreateCollectionTaskRejectsStructSubFieldOriginMarker" + funcutil.GenRandomStr()
+			schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+			schemautil.MarkAddedStructSubField(schema.StructArrayFields[0].Fields[0])
+			marshaledSchema, err := proto.Marshal(schema)
+			require.NoError(t, err)
+
+			var properties []*commonpb.KeyValuePair
+			if preserve {
+				properties = []*commonpb.KeyValuePair{{Key: util.PreserveFieldIdsKey, Value: "true"}}
+			}
+			task := &CreateCollectionTask{
+				Condition: NewTaskCondition(ctx),
+				CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+					CollectionName: collectionName,
+					Schema:         marshaledSchema,
+					ShardsNum:      common.DefaultShardsNum,
+					Properties:     properties,
+				},
+				ctx:      ctx,
+				mixCoord: NewMixCoordMock(),
+			}
+			task.MetaCache = mockCache
+			require.NoError(t, task.OnEnqueue())
+			err = task.PreExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "type param "+common.StructSubFieldAddedKey+" of field \"sub_text_array\" is reserved")
+		})
+	}
+}
+
+// TestCreateCollectionTaskPreserveFieldIDs pins the proxy side of the
+// preserve_field_ids contract: the dynamic and namespace fields must match
+// schema flags and carry source field IDs only under preserve_field_ids=true,
+// sub-fields use bare names, and text match on stored sub-fields is accepted
+// for a restore.
+func TestCreateCollectionTaskPreserveFieldIDs(t *testing.T) {
+	enableMaterializedView := &paramtable.Get().CommonCfg.EnableMaterializedView
+	previous := enableMaterializedView.SwapTempValue("true")
+	t.Cleanup(func() { enableMaterializedView.SwapTempValue(previous) })
+	ctx := context.Background()
+	preserve := []*commonpb.KeyValuePair{{Key: util.PreserveFieldIdsKey, Value: "true"}}
+	newTask := func(t *testing.T, schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) *CreateCollectionTask {
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+		marshaledSchema, err := proto.Marshal(schema)
+		require.NoError(t, err)
+		task := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				CollectionName: schema.GetName(),
+				Schema:         marshaledSchema,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties:     properties,
+			},
+			ctx:      ctx,
+			mixCoord: NewMixCoordMock(),
+		}
+		task.MetaCache = mockCache
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+	baseSchema := func() *schemapb.CollectionSchema {
+		schema := constructCollectionSchemaWithStructArrayField("TestCreateCollectionTaskPreserveFieldIDs"+funcutil.GenRandomStr(), testStructArrayField, false)
+		schema.EnableDynamicField = true
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 900, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true,
+		})
+		return schema
+	}
+
+	t.Run("dynamic field id is forwarded", func(t *testing.T) {
+		schema := baseSchema()
+		task := newTask(t, schema, preserve)
+		require.NoError(t, task.PreExecute(ctx))
+		forwarded := &schemapb.CollectionSchema{}
+		require.NoError(t, proto.Unmarshal(task.Schema, forwarded))
+		ids := make(map[string]int64)
+		for _, field := range forwarded.GetFields() {
+			ids[field.GetName()] = field.GetFieldID()
+		}
+		require.Equal(t, int64(900), ids[common.MetaFieldName])
+		for i, sub := range forwarded.GetStructArrayFields()[0].GetFields() {
+			source := schema.GetStructArrayFields()[0].GetFields()[i]
+			require.Equal(t, typeutil.ConcatStructFieldName(testStructArrayField, source.GetName()), sub.GetName())
+			require.Equal(t, source.GetFieldID(), sub.GetFieldID())
+		}
+	})
+
+	for _, mode := range []string{"", common.NamespaceModePartitionKey} {
+		for _, numPartitions := range []int64{0, 8} {
+			t.Run(fmt.Sprintf("namespace mode %q partitions %d", mode, numPartitions), func(t *testing.T) {
+				schema := baseSchema()
+				schema.EnableNamespace = true
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+				})
+				properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+					&commonpb.KeyValuePair{Key: common.PartitionKeyIsolationKey, Value: "true"},
+					&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: mode})
+				task := newTask(t, schema, properties)
+				task.NumPartitions = numPartitions
+				require.NoError(t, task.PreExecute(ctx))
+				if numPartitions == 0 {
+					require.Equal(t, common.DefaultPartitionsWithPartitionKey, task.NumPartitions)
+				} else {
+					require.Equal(t, numPartitions, task.NumPartitions)
+				}
+				forwarded := &schemapb.CollectionSchema{}
+				require.NoError(t, proto.Unmarshal(task.Schema, forwarded))
+				var forwardedNamespace *schemapb.FieldSchema
+				for _, field := range forwarded.GetFields() {
+					if field.GetName() == common.NamespaceFieldName {
+						forwardedNamespace = field
+					}
+				}
+				require.NotNil(t, forwardedNamespace)
+				require.Equal(t, int64(901), forwardedNamespace.GetFieldID())
+				require.True(t, forwardedNamespace.GetIsPartitionKey(),
+					"forwarded $namespace_id must carry IsPartitionKey=true so RootCoord preserves NumPartitions")
+			})
+		}
+	}
+
+	t.Run("system field stubs ignore extraneous caller role flags", func(t *testing.T) {
+		schema := baseSchema()
+		// A caller-supplied IsPartitionKey=true on $meta must not fool partition-key validation.
+		schema.Fields[len(schema.Fields)-1].IsPartitionKey = true
+		task := newTask(t, schema, preserve)
+		task.NumPartitions = 8
+		err := task.PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "num_partitions should only be specified with partition key field enabled")
+	})
+
+	for _, tc := range []struct {
+		name             string
+		enableNamespace  bool
+		omitNamespaceFld bool
+		mode             string
+		numPartitions    int64
+		userPartitionKey bool
+		wantError        string
+	}{
+		{name: "namespace disabled", wantError: "does not get a namespace field"},
+		{name: "partition namespace mode", enableNamespace: true, mode: common.NamespaceModePartition, wantError: "does not get a namespace field"},
+		{name: "missing namespace field in partition_key mode", enableNamespace: true, omitNamespaceFld: true, numPartitions: 8, wantError: "must include it: name $namespace_id"},
+		{name: "invalid namespace mode", enableNamespace: true, mode: "invalid", wantError: "invalid namespace.mode"},
+		{name: "negative partition count", enableNamespace: true, numPartitions: -1, wantError: "partitions should be greater than 0"},
+		{name: "excess partition count", enableNamespace: true, numPartitions: paramtable.Get().RootCoordCfg.MaxPartitionNum.GetAsInt64() + 1, wantError: "exceeds max configuration"},
+		{name: "explicit partition key conflicts", enableNamespace: true, userPartitionKey: true, wantError: "more than one partition key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := baseSchema()
+			schema.EnableNamespace = tc.enableNamespace
+			if !tc.omitNamespaceFld {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+				})
+			}
+			if tc.userPartitionKey {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 902, Name: "tenant", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
+				})
+			}
+			properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+				&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: tc.mode})
+			task := newTask(t, schema, properties)
+			task.NumPartitions = tc.numPartitions
+			err := task.PreExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantError)
+		})
+	}
+
+	for _, mode := range []string{"", common.NamespaceModePartition} {
+		t.Run("without hidden namespace field "+mode, func(t *testing.T) {
+			schema := baseSchema()
+			schema.EnableNamespace = mode == common.NamespaceModePartition
+			properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+				&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: mode})
+			require.NoError(t, newTask(t, schema, properties).PreExecute(ctx))
+			if !schema.EnableNamespace {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 902, Name: "tenant", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
+				})
+				properties = append(properties, &commonpb.KeyValuePair{Key: common.PartitionKeyIsolationKey, Value: "true"})
+				task := newTask(t, schema, properties)
+				task.NumPartitions = 8
+				require.NoError(t, task.PreExecute(ctx))
+			}
+		})
+	}
+
+	t.Run("dynamic field rejected without the property", func(t *testing.T) {
+		err := newTask(t, baseSchema(), nil).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "cannot explicitly set a field as a dynamic field")
+	})
+
+	t.Run("dynamic field missing when enabled", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields = schema.Fields[:len(schema.Fields)-1]
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "must include the dynamic field: name $meta")
+	})
+
+	t.Run("dynamic field unexpected when disabled", func(t *testing.T) {
+		schema := baseSchema()
+		schema.EnableDynamicField = false
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "does not enable the dynamic field")
+	})
+
+	t.Run("dynamic field must be dynamic JSON", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields[len(schema.Fields)-1].DataType = schemapb.DataType_VarChar
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "must have is_dynamic=true and data type JSON; only its field ID is used")
+	})
+
+	t.Run("stored sub-field name is rejected", func(t *testing.T) {
+		schema := baseSchema()
+		sub := schema.GetStructArrayFields()[0].GetFields()[0]
+		sub.Name = typeutil.ConcatStructFieldName(testStructArrayField, sub.GetName())
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrFieldInvalidName)
+	})
+
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key+" on a stored sub-field", func(t *testing.T) {
+			schema := baseSchema()
+			sub := schema.GetStructArrayFields()[0].GetFields()[0]
+			sub.TypeParams = append(sub.TypeParams, &commonpb.KeyValuePair{Key: key, Value: "true"})
+			require.NoError(t, newTask(t, schema, preserve).PreExecute(ctx))
+		})
+	}
+}
+
 // TestCreateCollectionTaskWithStructArrayField tests creating collections with StructArrayField
 func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
 	mix := NewMixCoordMock()
@@ -8052,6 +8350,23 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		assert.True(t, field.GetNullable())
 		assert.Equal(t, "profile[c]", field.GetName())
 	})
+	t.Run("milvus table explicit mapping", func(t *testing.T) {
+		schema := structSubFieldDDLTestSchema(true)
+		schema.ExternalSource = "s3://bucket/snapshot"
+		schema.ExternalSpec = `{"format":"milvus-table"}`
+		field := newField("profile[c]")
+		field.ExternalField = "profile[c]"
+		require.NoError(t, preExecute(schema, field, nil, ""))
+		assert.Equal(t, "profile[c]", field.GetExternalField())
+	})
+	t.Run("milvus table renamed child", func(t *testing.T) {
+		schema := structSubFieldDDLTestSchema(true)
+		schema.ExternalSource = "s3://bucket/snapshot"
+		schema.ExternalSpec = `{"format":"milvus-table"}`
+		field := newField("profile[c]")
+		field.ExternalField = "profile[other]"
+		require.ErrorContains(t, preExecute(schema, field, nil, ""), "must map to")
+	})
 	t.Run("non nullable parent", func(t *testing.T) {
 		field := newField("profile[c]")
 		require.NoError(t, preExecute(structSubFieldDDLTestSchema(false), field, nil, ""))
@@ -8372,4 +8687,41 @@ func TestValidateDropFunction(t *testing.T) {
 		err := validateDropFunction(schema, "bm25_func", true)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCreateCollectionTaskOrdinaryExternalStruct(t *testing.T) {
+	for _, mapping := range []string{"", "raw_items[other]"} {
+		t.Run(fmt.Sprintf("mapping=%s", mapping), func(t *testing.T) {
+			ctx := context.Background()
+			schema := &schemapb.CollectionSchema{
+				Name: "external_struct", ExternalSource: "s3://bucket/data",
+				ExternalSpec:      `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+				Fields:            []*schemapb.FieldSchema{{Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}}},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", Fields: []*schemapb.FieldSchema{{Name: "score", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ExternalField: mapping, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}}}}},
+			}
+			encoded, err := proto.Marshal(schema)
+			require.NoError(t, err)
+			task := &CreateCollectionTask{ctx: ctx, Condition: NewTaskCondition(ctx), CreateCollectionRequest: &milvuspb.CreateCollectionRequest{CollectionName: schema.Name, Schema: encoded, ShardsNum: 1}}
+			require.NoError(t, task.OnEnqueue())
+			err = task.PreExecute(ctx)
+			if mapping != "" {
+				require.ErrorContains(t, err, "must map to")
+				return
+			}
+			require.NoError(t, err)
+			resolved := &schemapb.CollectionSchema{}
+			require.NoError(t, proto.Unmarshal(task.Schema, resolved))
+			parent := resolved.GetStructArrayFields()[0]
+			child := parent.GetFields()[0]
+			require.True(t, parent.GetNullable())
+			require.True(t, child.GetNullable())
+			require.Equal(t, "raw_items", parent.GetExternalField())
+			require.Equal(t, "items[score]", child.GetName())
+			require.Equal(t, "raw_items[score]", child.GetExternalField())
+			pk, err := typeutil.GetPrimaryFieldSchema(resolved)
+			require.NoError(t, err)
+			require.Equal(t, common.VirtualPKFieldName, pk.GetName())
+			require.False(t, pk.GetNullable())
+		})
+	}
 }

@@ -229,7 +229,7 @@ func TestColumnGroupEntriesFromCValidatesNativeArrays(t *testing.T) {
 
 func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 	oldManifest := MarshalManifestPath("files/refresh_errors/seg1", 1)
-	for _, stage := range []string{"invalid path", "canceled", "columns", "stats", "transaction"} {
+	for _, stage := range []string{"invalid path", "canceled", "stats", "transaction"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -241,14 +241,8 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 				cancel()
 			}
 			failure := merr.WrapErrStorageMsg("injected %s failure", stage)
-			var columns []string
-			if stage == "columns" {
-				columns = []string{"101"}
-				patch := mockey.Mock(readManifestColumnGroupEntries).Return(nil, failure).Build()
-				defer patch.UnPatch()
-			}
 			readPatch := mockey.Mock(GetManifestStats).
-				To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+				To(func(_ string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 					if stage == "stats" {
 						return nil, failure
 					}
@@ -264,7 +258,7 @@ func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
 					return "", failure
 				}).Build()
 			defer commitPatch.UnPatch()
-			result, err := RefreshMilvusTableManifest(ctx, manifest, nil, nil, nil, ExternalSpecContext{}, columns, nil)
+			result, err := RefreshMilvusTableManifest(ctx, manifest, nil, nil, nil, ExternalSpecContext{}, nil)
 			switch stage {
 			case "invalid path":
 				require.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -317,7 +311,7 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				// refresh. Fail any read other than the old, retained snapshot.
 				reads := 0
 				readPatch := mockey.Mock(GetManifestStats).
-					To(func(manifest string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+					To(func(manifest string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 						reads++
 						require.Equal(t, oldManifest, manifest)
 						if manifest != oldManifest {
@@ -329,7 +323,7 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				newDelta := path.Join(base, "_delta/new")
 				result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, []string{"pk", "ts"},
 					[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg,
-					ExternalSpecContext{MilvusTablePKMode: mode}, nil, []DeltaLogEntry{{Path: newDelta, NumEntries: 3}})
+					ExternalSpecContext{MilvusTablePKMode: mode}, []DeltaLogEntry{{Path: newDelta, NumEntries: 3}})
 				require.NoError(t, err)
 				require.Equal(t, 1, reads)
 				readPatch.UnPatch()
@@ -414,14 +408,14 @@ func TestRefreshMilvusTableManifestPreparationFailureDoesNotCommit(t *testing.T)
 				stats, err := GetManifestStats(oldManifest, cfg)
 				require.NoError(t, err)
 				readPatch := mockey.Mock(GetManifestStats).
-					To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+					To(func(_ string, _ *indexpb.StorageConfig, _ ...uint32) (map[string]ManifestStat, error) {
 						cancel()
 						return stats, nil
 					}).Build()
 				defer readPatch.UnPatch()
 			}
 			result, err := RefreshMilvusTableManifest(ctx, oldManifest, []string{"pk", "ts"},
-				[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg, ExternalSpecContext{}, nil, nil)
+				[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg, ExternalSpecContext{}, nil)
 			require.Error(t, err)
 			require.Equal(t, MilvusTableRefreshResult{}, result)
 			_, oldVersion, err := UnmarshalManifestPath(oldManifest)

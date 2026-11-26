@@ -1043,11 +1043,12 @@ func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.St
 		typeParams[key] = param
 	}
 	return (&StructArrayFieldSchema{
-		FieldName:   field.FieldName,
-		Description: field.Description,
-		Fields:      field.Fields,
-		TypeParams:  typeParams,
-		Nullable:    field.Nullable,
+		FieldName:     field.FieldName,
+		Description:   field.Description,
+		ExternalField: field.ExternalField,
+		Fields:        field.Fields,
+		TypeParams:    typeParams,
+		Nullable:      field.Nullable,
 	}).GetProto(ctx)
 }
 
@@ -1057,11 +1058,12 @@ func (field *FieldSchema) GetStructArrayProto(ctx context.Context) (*schemapb.St
 // An Array<Array<T>> sub-field is an Array with elementDataType Array and a
 // typeSchema.
 type StructArrayFieldSchema struct {
-	FieldName   string                 `json:"fieldName" binding:"required"`
-	Description string                 `json:"description"`
-	Fields      []FieldSchema          `json:"fields" binding:"required"`
-	TypeParams  map[string]interface{} `json:"typeParams"`
-	Nullable    bool                   `json:"nullable"`
+	FieldName     string                 `json:"fieldName" binding:"required"`
+	Description   string                 `json:"description"`
+	ExternalField string                 `json:"externalField"`
+	Fields        []FieldSchema          `json:"fields" binding:"required"`
+	TypeParams    map[string]interface{} `json:"typeParams"`
+	Nullable      bool                   `json:"nullable"`
 }
 
 // GetProto converts the RESTful StructArrayFieldSchema to its proto counterpart.
@@ -1071,10 +1073,11 @@ func (sf *StructArrayFieldSchema) GetProto(ctx context.Context) (*schemapb.Struc
 		return nil, merr.WrapErrParameterInvalidMsg("struct field %s must contain at least one sub-field", sf.FieldName)
 	}
 	proto := &schemapb.StructArrayFieldSchema{
-		Name:        sf.FieldName,
-		Description: sf.Description,
-		TypeParams:  []*commonpb.KeyValuePair{},
-		Nullable:    sf.Nullable,
+		Name:          sf.FieldName,
+		Description:   sf.Description,
+		TypeParams:    []*commonpb.KeyValuePair{},
+		Nullable:      sf.Nullable,
+		ExternalField: sf.ExternalField,
 	}
 	parentTypeParams := make(map[string]string, len(sf.TypeParams))
 	for key, param := range sf.TypeParams {

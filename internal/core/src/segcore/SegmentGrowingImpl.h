@@ -310,7 +310,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     get_deleted_count() const override {
-        return deleted_record_.size();
+        return deleted_record_.deleted_row_count();
     }
 
     int64_t
@@ -910,7 +910,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::unordered_map<FieldId, std::vector<FieldDataPtr>>
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-        const std::shared_ptr<milvus_storage::api::Properties>& properties,
+        const std::shared_ptr<const milvus_storage::api::Properties>&
+            properties,
         int64_t index,
         int64_t row_limit);
 

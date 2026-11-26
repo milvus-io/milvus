@@ -43,10 +43,15 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Milvus Build Option")
 
-define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+define_option(WITH_GPU "Build with GPU support" OFF)
+define_option(USE_ASAN "Build C/C++ code with AddressSanitizer" OFF)
+define_option(USE_TSAN "Build C/C++ code with ThreadSanitizer" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
+
+define_option_string(WITH_SVS "Build Knowhere with SVS (AUTO enables it on Linux x86-64 without TSan)"
+        "AUTO" "AUTO" "ON" "OFF")
 
 set(MILVUS_DEPENDENCY_SOURCE_DEFAULT "BUNDLED")
 

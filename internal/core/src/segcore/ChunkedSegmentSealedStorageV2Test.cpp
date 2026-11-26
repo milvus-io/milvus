@@ -25,6 +25,7 @@
 #include <folly/ScopeGuard.h>
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include "storage/Util.h"
 #include "milvus-storage/common/extend_status.h"
 #include "common/Utils.h"
@@ -65,6 +66,7 @@
 #include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
+#include "common/VirtualPK.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
@@ -82,6 +84,7 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
+#include "milvus-storage/transaction/transaction.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -100,6 +103,7 @@
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -2481,6 +2485,214 @@ TEST_P(TestLazyManifest, LazyManifestDisabledKeepsEagerColumnGroup) {
     EXPECT_TRUE(lazy_column->IsLazy());
 }
 
+class MilvusTableManifestLoadTest : public testing::Test {
+ protected:
+    static constexpr int64_t kSegmentId = 3193;
+    const FieldId number_{100};
+    const FieldId extra_{101};
+
+    SchemaPtr
+    TargetSchema() {
+        auto schema = std::make_shared<Schema>();
+        schema->AddField(FieldMeta(FieldName("number"),
+                                   number_,
+                                   DataType::INT64,
+                                   false,
+                                   std::nullopt,
+                                   "number"));
+        schema->AddField(FieldMeta(FieldName("extra"),
+                                   extra_,
+                                   DataType::VARCHAR,
+                                   64,
+                                   true,
+                                   std::nullopt,
+                                   "extra"));
+        const FieldId pk(102);
+        schema->AddField(FieldName(VIRTUAL_PK_FIELD_NAME),
+                         pk,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("RowID"),
+                         RowFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("Timestamp"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->set_primary_field_id(pk);
+        schema->set_external_source("s3://test-bucket/snapshot");
+        schema->set_external_spec(R"({"format":"milvus-table"})");
+        return schema;
+    }
+
+    proto::segcore::SegmentLoadInfo
+    WriteManifest(const std::string& path, bool include_extra) {
+        auto source_schema = std::make_shared<Schema>();
+        source_schema->AddField(
+            FieldName("number"), number_, DataType::INT64, false, std::nullopt);
+        arrow::Int64Builder number;
+        EXPECT_TRUE(number.Append(42).ok());
+        std::vector<std::shared_ptr<arrow::Array>> columns{
+            number.Finish().ValueOrDie()};
+        if (include_extra) {
+            source_schema->AddField(FieldMeta(FieldName("extra"),
+                                              FieldId(110),
+                                              DataType::VARCHAR,
+                                              64,
+                                              true,
+                                              std::nullopt));
+            arrow::StringBuilder extra;
+            EXPECT_TRUE(extra.Append("refreshed").ok());
+            columns.push_back(extra.Finish().ValueOrDie());
+        }
+
+        const auto source_path = path + "/source";
+        const auto target_path = path + "/target";
+        auto batch = arrow::RecordBatch::Make(
+            source_schema->ConvertToLoonArrowSchema(), 1, std::move(columns));
+        const auto source_version = milvus::test::WriteRecordBatchesToV3(
+            source_schema,
+            source_path,
+            {batch},
+            include_extra ? "100|110" : "100");
+        auto properties =
+            storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+        auto source =
+            GetLoonManifest(nlohmann::json({{"base_path", source_path},
+                                            {"ver", source_version}})
+                                .dump(),
+                            properties);
+        auto groups = source->columnGroups();
+        for (auto& group : groups) {
+            group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+            for (auto& file : group->files) {
+                file.properties[kMilvusTableFieldIdMappingProperty] =
+                    include_extra ? R"({"100":"100","101":"110"})"
+                                  : R"({"100":"100"})";
+            }
+        }
+        auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                               GetDefaultArrowFileSystem(), target_path)
+                               .ValueOrDie();
+        transaction->AppendFiles(groups);
+        auto version = transaction->Commit().ValueOrDie();
+
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(kSegmentId);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(1);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(
+            nlohmann::json({{"base_path", target_path}, {"ver", version}})
+                .dump());
+        return info;
+    }
+};
+
+TEST_F(MilvusTableManifestLoadTest, LoadSkipsStatsForAnUnboundField) {
+    const auto path = UniqueManifestTestPath("milvus_table_load");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    ChunkedSegmentSealedImpl segment(
+        TargetSchema(), nullptr, SegcoreConfig::default_config(), kSegmentId);
+    auto info = WriteManifest(path, false);
+    auto& stale_stats = (*info.mutable_textstatslogs())[extra_.get()];
+    stale_stats.set_fieldid(extra_.get());
+    stale_stats.add_files("stale-text-index");
+    segment.SetLoadInfo(std::move(info));
+
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment.Load(trace_ctx, nullptr));
+    auto state = segment.TestGetPublishedStateSnapshot();
+    EXPECT_FALSE(state->load_info->HasFieldInLoadedManifest(extra_));
+    EXPECT_FALSE(state->load_info->HasFieldInSchema(extra_));
+    int64_t offset = 0;
+    auto values = segment.bulk_subscript(nullptr, number_, &offset, 1);
+    ASSERT_EQ(values->scalars().long_data().data_size(), 1);
+    EXPECT_EQ(values->scalars().long_data().data(0), 42);
+}
+
+TEST_F(MilvusTableManifestLoadTest, ReopenLoadsNewlyBoundField) {
+    const auto path = UniqueManifestTestPath("milvus_table_reopen");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    ChunkedSegmentSealedImpl segment(
+        TargetSchema(), nullptr, SegcoreConfig::default_config(), kSegmentId);
+    segment.SetLoadInfo(WriteManifest(path + "/old", false));
+    milvus::tracer::TraceContext trace_ctx;
+    segment.Load(trace_ctx, nullptr);
+    auto before = segment.TestGetPublishedStateSnapshot();
+    ASSERT_FALSE(before->load_info->HasFieldInLoadedManifest(extra_));
+
+    milvus::OpContext op_ctx;
+    segment.Reopen(&op_ctx, WriteManifest(path + "/new", true));
+
+    auto after = segment.TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->load_info->HasFieldInLoadedManifest(extra_));
+    EXPECT_FALSE(before->load_info->HasFieldInLoadedManifest(extra_));
+    ASSERT_TRUE(after->load_info->HasFieldInSchema(extra_));
+    int64_t offset = 0;
+    auto values = segment.bulk_subscript(nullptr, extra_, &offset, 1);
+    ASSERT_EQ(values->scalars().string_data().data_size(), 1);
+    EXPECT_EQ(values->scalars().string_data().data(0), "refreshed");
+}
+
+TEST(ExternalParquetManifestLoad, SchemaOnlyReopenReusesLoadedColumns) {
+    const FieldId number(100), extra(101), pk(102);
+    auto source_schema = std::make_shared<Schema>();
+    source_schema->AddField(FieldMeta(FieldName("number"),
+                                      number,
+                                      DataType::INT64,
+                                      false,
+                                      std::nullopt,
+                                      "number"));
+    source_schema->set_external_source("s3://test-bucket/data");
+    source_schema->set_external_spec(R"({"format":"parquet"})");
+    const auto path = UniqueManifestTestPath("external_parquet_schema_reopen");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    milvus::test::V3SegmentTestData data(
+        source_schema, 1, 8, 1, TestLocalPath, path, "number");
+
+    auto schema = std::make_shared<Schema>(*source_schema);
+    schema->AddField(
+        FieldName("virtual_pk"), pk, DataType::INT64, false, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->set_schema_version(1);
+    constexpr int64_t segment_id = 3194;
+    ChunkedSegmentSealedImpl segment(
+        schema, nullptr, SegcoreConfig::default_config(), segment_id);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(segment_id);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(8);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(data.ManifestPathJson());
+    segment.SetLoadInfo(info);
+    milvus::tracer::TraceContext trace_ctx;
+    segment.Load(trace_ctx, nullptr);
+    auto before = segment.TestGetPublishedStateSnapshot();
+    auto loaded_column = before->runtime->fields.at(number);
+
+    auto new_schema = std::make_shared<Schema>(*schema);
+    new_schema->AddField(FieldMeta(FieldName("extra"),
+                                   extra,
+                                   DataType::INT64,
+                                   true,
+                                   std::nullopt,
+                                   "extra"));
+    new_schema->set_schema_version(2);
+
+    ASSERT_NO_THROW(segment.Reopen(new_schema));
+    auto after = segment.TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->schema->has_field(extra));
+    EXPECT_FALSE(after->load_info->HasFieldInLoadedManifest(extra));
+    EXPECT_EQ(after->runtime->fields.at(number), loaded_column);
+}
+
 TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
     LazyColumnGroupGuard lazy_group_guard(true);
     auto policies =
@@ -3927,4 +4139,122 @@ TEST(ChunkedSegmentSealedStorageV2, PackedFooterFieldIDReadErrorsKeepClass) {
                     .ok());
     ASSERT_TRUE(sink->Close().ok());
     EXPECT_EQ(FooterReadErrorCode(fs, path), ErrorCode::DataFormatBroken);
+}
+
+TEST(LazyManifest, MilvusTableMappedRefreshUsesManifestLocalBindings) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto fs = GetDefaultArrowFileSystem();
+    auto root = UniqueManifestTestPath("mapped_refresh");
+    StorageV2TempDirGuard cleanup(fs, root);
+    auto source = std::make_shared<Schema>();
+    source->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    source->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder, second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto batch =
+        arrow::RecordBatch::Make(source->ConvertToLoonArrowSchema(),
+                                 2,
+                                 {first_builder.Finish().ValueOrDie(),
+                                  second_builder.Finish().ValueOrDie()});
+    auto source_path = root + "/source";
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        source, source_path, {batch}, "101,103");
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto make_manifest = [&](bool expanded) {
+        auto manifest = GetLoonManifest(
+            nlohmann::json({{"base_path", source_path}, {"ver", version}})
+                .dump(),
+            properties);
+        milvus_storage::api::ColumnGroups groups;
+        for (const auto& group : manifest->columnGroups()) {
+            if (!expanded && group->columns.front() != "103") {
+                continue;
+            }
+            EXPECT_EQ(group->columns.size(), 1);
+            for (auto& file : group->files) {
+                file.properties["milvus_table.field_id_mapping"] =
+                    group->columns.front() == "103" ? R"({"101":"103"})"
+                                                    : R"({"103":"101"})";
+            }
+            groups.push_back(group);
+        }
+        EXPECT_EQ(groups.size(), expanded ? 2 : 1);
+        auto path = root + (expanded ? "/new" : "/old");
+        auto transaction =
+            milvus_storage::api::transaction::Transaction::Open(fs, path)
+                .ValueOrDie();
+        transaction->AppendFiles(groups);
+        return nlohmann::json({{"base_path", path},
+                               {"ver", transaction->Commit().ValueOrDie()}})
+            .dump();
+    };
+    auto old_manifest = make_manifest(false),
+         new_manifest = make_manifest(true);
+    auto target = std::make_shared<Schema>(*source);
+    target->set_external_source("s3://bucket/snapshot");
+    target->set_external_spec(R"({"format":"milvus-table"})");
+    target->AddField(FieldName("__virtual_pk__"),
+                     FieldId(102),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    target->set_primary_field_id(FieldId(102));
+    target->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    target->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    for (bool lazy : {false, true}) {
+        SCOPED_TRACE(lazy);
+        auto policies =
+            cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+        policies.scalarFieldCacheWarmupPolicy =
+            lazy ? CacheWarmupPolicy::CacheWarmupPolicy_Disable
+                 : CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        CacheWarmupPolicyGuard warmup_guard(policies);
+        auto segment_id = lazy ? 9102 : 9101;
+        auto segment = CreateSealedSegment(target, nullptr, segment_id);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(segment_id);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(2);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(old_manifest);
+        segment->SetLoadInfo(info);
+        milvus::tracer::TraceContext trace;
+        ASSERT_NO_THROW(segment->Load(trace, nullptr));
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(101)));
+        // Physical column 103 belongs to target 101; target 103 is still unbound.
+        EXPECT_FALSE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        int64_t offsets[] = {0, 1};
+        auto old_values =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        ASSERT_EQ(old_values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(old_values->scalars().long_data().data(0), 31);
+        info.set_manifest_path(new_manifest);
+        milvus::OpContext ctx;
+        ASSERT_NO_THROW(sealed->Reopen(&ctx, info));
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        auto values =
+            segment->bulk_subscript(nullptr, FieldId(103), offsets, 2);
+        ASSERT_EQ(values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(values->scalars().long_data().data(0), 11);
+        EXPECT_EQ(values->scalars().long_data().data(1), 12);
+        auto retained =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        EXPECT_EQ(retained->scalars().long_data().data(0), 31);
+        EXPECT_EQ(retained->scalars().long_data().data(1), 32);
+    }
 }

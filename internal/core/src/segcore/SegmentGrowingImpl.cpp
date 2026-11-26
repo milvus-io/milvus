@@ -1573,7 +1573,7 @@ SegmentGrowingImpl::Delete(int64_t size,
     }
 
     // step 2: fill delete record
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(std::move(sort_pks), sort_timestamps.data());
 
     // step 3: update resource tracking
     UpdateResourceTracking();
@@ -1599,7 +1599,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_.LoadPush(std::move(pks), timestamps);
 }
 
 cachinglayer::PinWrapper<SpanBase>
@@ -2044,6 +2044,7 @@ SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
+// Reports a row's matches in input order; DeletedRecord relies on it.
 void
 SegmentGrowingImpl::search_batch_pks(
     const std::vector<PkType>& pks,
@@ -3435,8 +3436,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto schema = get_schema_snapshot();
     auto primary_field_id =
         schema->get_primary_field_id().value_or(FieldId(-1));
-    auto properties = milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-                          .GetProperties();
+    const auto& storage_properties =
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance();
+    auto properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageManifest});
     auto loon_manifest = GetLoonManifest(manifest_path, properties);
     auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
@@ -3447,6 +3450,8 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 
     auto arrow_schema =
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
+    properties = storage_properties.GetProperties(
+        {.talon_stage = milvus::storage::kTalonStageLoadOpen});
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
@@ -3564,7 +3569,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 std::unordered_map<FieldId, std::vector<FieldDataPtr>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     int64_t row_limit) {
     AssertInfo(index < column_groups->size(),

@@ -1,6 +1,7 @@
 package shards
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -15,6 +16,11 @@ type ShardManager interface {
 	CheckIfCollectionCanBeCreated(collectionID int64) error
 
 	CheckIfCollectionExists(collectionID int64) error
+
+	// GetCollectionSchemaSnapshot returns the current immutable schema, or nil
+	// when the collection or its schema is absent. Callers may retain the pointer
+	// across schema updates and collection removal, but must not mutate it.
+	GetCollectionSchemaSnapshot(collectionID int64) *schemapb.CollectionSchema
 
 	CreateCollection(msg message.ImmutableCreateCollectionMessageV1)
 

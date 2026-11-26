@@ -517,6 +517,36 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 	})
 }
 
+func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value string
+	}{
+		{key: "common.storage.talon.mode", value: "3"},
+		{key: "common.storage.talon.enabledStages", value: "unknown"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+			assert.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "1"))
+			assert.NoError(t, params.Save(tc.key, tc.value))
+			// Invalid values supplied by the caller must be rejected, even when the
+			// global configuration has a valid default. This fails before entering C++.
+			want := "invalid " + tc.key + ": " + strconv.Quote(tc.value)
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitStorageV2FileSystem(params)
+			})
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitRemoteArrowFileSystem(params)
+			})
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitRemoteChunkManager(params)
+			})
+		})
+	}
+}
+
 func TestInitStorageV2FileSystem(t *testing.T) {
 	// init local storage
 	paramtable.Init()

@@ -7,22 +7,24 @@ import (
 )
 
 type StructArrayField struct {
-	FieldID     int64
-	Name        string
-	Description string
-	Fields      []*Field
-	TypeParams  []*commonpb.KeyValuePair
-	Nullable    bool
+	FieldID       int64
+	Name          string
+	Description   string
+	Fields        []*Field
+	TypeParams    []*commonpb.KeyValuePair
+	Nullable      bool
+	ExternalField string
 }
 
 func (s *StructArrayField) Clone() *StructArrayField {
 	return &StructArrayField{
-		FieldID:     s.FieldID,
-		Name:        s.Name,
-		Description: s.Description,
-		Fields:      CloneFields(s.Fields),
-		TypeParams:  common.CloneKeyValuePairs(s.TypeParams),
-		Nullable:    s.Nullable,
+		FieldID:       s.FieldID,
+		Name:          s.Name,
+		Description:   s.Description,
+		Fields:        CloneFields(s.Fields),
+		TypeParams:    common.CloneKeyValuePairs(s.TypeParams),
+		Nullable:      s.Nullable,
+		ExternalField: s.ExternalField,
 	}
 }
 
@@ -41,7 +43,8 @@ func (s *StructArrayField) Equal(other StructArrayField) bool {
 		s.Description == other.Description &&
 		CheckFieldsEqual(s.Fields, other.Fields) &&
 		paramsA.Equal(other.TypeParams) &&
-		s.Nullable == other.Nullable
+		s.Nullable == other.Nullable &&
+		s.ExternalField == other.ExternalField
 }
 
 func CheckStructArrayFieldsEqual(structArrayFieldsA, structArrayFieldsB []*StructArrayField) bool {
@@ -68,12 +71,13 @@ func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.
 	}
 
 	return &schemapb.StructArrayFieldSchema{
-		FieldID:     structArrayField.FieldID,
-		Name:        structArrayField.Name,
-		Description: structArrayField.Description,
-		Fields:      MarshalFieldModels(structArrayField.Fields),
-		TypeParams:  structArrayField.TypeParams,
-		Nullable:    structArrayField.Nullable,
+		FieldID:       structArrayField.FieldID,
+		Name:          structArrayField.Name,
+		Description:   structArrayField.Description,
+		Fields:        MarshalFieldModels(structArrayField.Fields),
+		TypeParams:    structArrayField.TypeParams,
+		Nullable:      structArrayField.Nullable,
+		ExternalField: structArrayField.ExternalField,
 	}
 }
 
@@ -95,12 +99,13 @@ func UnmarshalStructArrayFieldModel(fieldSchema *schemapb.StructArrayFieldSchema
 	}
 
 	return &StructArrayField{
-		FieldID:     fieldSchema.FieldID,
-		Name:        fieldSchema.Name,
-		Description: fieldSchema.Description,
-		Fields:      UnmarshalFieldModels(fieldSchema.Fields),
-		TypeParams:  fieldSchema.TypeParams,
-		Nullable:    fieldSchema.Nullable,
+		FieldID:       fieldSchema.FieldID,
+		Name:          fieldSchema.Name,
+		Description:   fieldSchema.Description,
+		Fields:        UnmarshalFieldModels(fieldSchema.Fields),
+		TypeParams:    fieldSchema.TypeParams,
+		Nullable:      fieldSchema.Nullable,
+		ExternalField: fieldSchema.ExternalField,
 	}
 }
 

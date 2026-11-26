@@ -163,6 +163,7 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket. WARNING: For Aliyun OSS and Tencent COS, this parameter is useless and is set to true by default
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
+  crt_queue_sizes: 125 # S3 CRT queue sizes, converted to the SDK throughput target as value * 0.4 Gbps. Requires restart.
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
@@ -315,7 +316,7 @@ woodpecker:
       conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local, service]
-    rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
+    rootPath: default # With 'default', the root is localStorage.path/wp. For embedded local storage, provision localStorage.path and Milvus creates its wp subdirectory. Provision an explicitly configured local root before startup.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -420,6 +421,8 @@ proxy:
   exprParseCache:
     enabled: true # Enable caching expression parse trees and parsing errors. These settings apply to all components using the expression parser, not only Proxy; each process maintains its own cache. Captured on first expression parse; initialize paramtable with the intended configuration before parsing. Restart required; disabling the cache does not reject expressions.
     maxEntries: 1024 # Maximum number of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 1024. Entries retain the existing 10-minute TTL. Captured on first expression parse; initialize paramtable with the intended configuration before parsing. Restart required.
+    maxBytes: 67108864 # Maximum aggregate retained byte budget of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 67108864 (64 MiB). Entries retain the existing maxEntries and 10-minute TTL bounds. Restart required.
+    maxEntryBytes: 8388608 # Maximum estimated retained byte cost for a single expression parse cache entry. Non-positive or invalid values use 8388608 (8 MiB), clamped to proxy.exprParseCache.maxBytes. Larger expressions still parse normally without being cached. Restart required.
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -968,7 +971,7 @@ dataCoord:
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
-    enableImportV3: false # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
+    enableImportV3: auto # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. auto: switch on automatically once all online DataNodes, StreamingNodes, and DataCoords reach the gate version and the stability window elapses; false: keep disabled (safe while any older DataNode, StreamingNode, or potentially-active DataCoord is still online); true: force enable and bypass the version gate (safe only once all DataNodes, StreamingNodes, and DataCoords support Import V3, such as when upgrading from a release that already ships V3). The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     # Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
     # A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
@@ -988,7 +991,7 @@ dataCoord:
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     bumpSchemaVersionCompactionUsage: 1 # slot usage of schema bump compaction task.
-    indexTaskSlotUsage: 64 # slot usage of index task per 512mb
+    indexTaskSlotUsage: 64 # Deprecated: unused. Vector task slots are estimated from input, build workspace and output memory.
     scalarIndexTaskSlotUsage: 16 # slot usage of scalar index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
@@ -1204,6 +1207,10 @@ internaltls:
   sni: localhost # The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication
 
 common:
+  cloud:
+    clusterId:  # Cloud cluster ID. Leave empty to use Talon's default namespace. Otherwise Talon uses <clusterId>-<type>-<case-mode>, with all for enabledStages=all and meta for manifest, load_open, or both.
+    instanceType:  # Cloud instance type. VectorLake selects the VectorLake namespace type regardless of classType.
+    classType:  # Cloud class type. For non-VectorLake instances, Talon uses Tiered when classType is Tiered and others otherwise.
   defaultPartitionName: _default # Name of the default partition when a collection is created
   defaultIndexName: _default_idx # Name of the index when it is created with name unspecified
   indexSliceSize: 16 # Index slice size in MB
@@ -1254,6 +1261,14 @@ common:
       partialNullPolicy: error
     externalSparseVector:
       conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
+    talon:
+      mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open enables QueryNode milvus-storage reader-open metadata, including footers; manifest enables QueryNode segment-manifest reads during load. Combine load_open,manifest to enable both. Other reads use origin storage when stages are restricted. Cannot combine all with other stages. Requires a restart.
+      enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
+      smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
+      coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.
+      blockSize: 268435456 # Talon block size in bytes; must be greater than 0. Requires a restart.
+      maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

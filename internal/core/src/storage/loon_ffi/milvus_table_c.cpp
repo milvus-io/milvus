@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
@@ -27,9 +28,14 @@
 #include <nlohmann/json.hpp>
 
 #include "milvus-storage/ffi_c.h"
+#include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/ffi_internal/ffi_error_code.h"
 #include "milvus-storage/ffi_internal/result.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/loon_ffi/util.h"
+#include "storage/StatusToErrorCode.h"
+#include "common/CGoCatch.h"
+#include "common/EasyAssert.h"
 
 using json = nlohmann::json;
 
@@ -148,6 +154,56 @@ struct OwnedColumnGroups {
         FreeOwnedColumnGroups(groups);
     }
 };
+
+// Carries the ORIGINAL loon err_code alongside the classified segcore code.
+class LoonFFIError : public milvus::SegcoreError {
+ public:
+    LoonFFIError(int loon_code, milvus::ErrorCode code, const std::string& msg)
+        : milvus::SegcoreError(code, msg), loon_code_(loon_code) {
+    }
+
+    int
+    loon_code() const {
+        return loon_code_;
+    }
+
+ private:
+    int loon_code_;
+};
+
+// Empty input is the legacy physical-column contract. Bound imports validate
+// the complete mapping once and use the inverse for projection and stat keys.
+std::map<std::string, std::string>
+ParseFieldIDMapping(const char* encoded,
+                    const std::unordered_set<std::string>& source_columns) {
+    if (encoded == nullptr || encoded[0] == '\0') {
+        return {};
+    }
+    auto invalid = [](const std::string& message) {
+        throw LoonFFIError(LOON_INVALID_ARGS,
+                           milvus::ErrorCode::InvalidParameter,
+                           "milvus-table field ID mapping: " + message);
+    };
+    MilvusTableFieldIdMapping mapping;
+    try {
+        mapping = ParseMilvusTableFieldIdMapping(encoded);
+    } catch (const milvus::SegcoreError& error) {
+        if (error.get_error_code() != milvus::ErrorCode::DataFormatBroken) {
+            throw;
+        }
+        invalid(error.what());
+    }
+    std::map<std::string, std::string> physical_to_target;
+    for (const auto& [physical, target] : mapping.target_fields) {
+        physical_to_target.emplace(physical, std::to_string(target));
+    }
+    for (const auto& column : source_columns) {
+        if (physical_to_target.find(column) == physical_to_target.end()) {
+            invalid("missing source column " + column);
+        }
+    }
+    return physical_to_target;
+}
 
 void
 ThrowIfFFIError(LoonFFIResult result, const std::string& context) {
@@ -388,18 +444,25 @@ CopyProperties(const LoonColumnGroupFile& file) {
             throw std::runtime_error(
                 "column group file has null property entry");
         }
-        properties.emplace_back(file.property_keys[i], file.property_values[i]);
+        // A source file cannot supply a target collection's binding.
+        if (std::strcmp(file.property_keys[i],
+                        kMilvusTableFieldIdMappingProperty) != 0) {
+            properties.emplace_back(file.property_keys[i],
+                                    file.property_values[i]);
+        }
     }
     return properties;
 }
 
 std::vector<ColumnGroupData>
-BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
-                        const std::unordered_set<std::string>& target_columns,
-                        const std::string& source_manifest_path,
-                        int64_t source_row_count,
-                        const char* external_source,
-                        const LoonProperties* properties) {
+BuildTargetColumnGroups(
+    const LoonColumnGroups& source_groups,
+    const std::unordered_set<std::string>& target_columns,
+    const std::string& source_manifest_path,
+    int64_t source_row_count,
+    const std::map<std::string, std::string>& physical_to_target,
+    const char* external_source,
+    const LoonProperties* properties) {
     std::vector<ColumnGroupData> result;
     if (source_groups.num_of_column_groups == 0) {
         return result;
@@ -435,6 +498,15 @@ BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
             continue;
         }
 
+        std::string group_mapping;
+        if (!physical_to_target.empty()) {
+            auto projected = nlohmann::json::object();
+            for (const auto& column : target_group.columns) {
+                projected[physical_to_target.at(column)] = column;
+            }
+            group_mapping = projected.dump();
+        }
+
         if (source_group.format == nullptr) {
             throw std::runtime_error("source column group has null format");
         }
@@ -461,6 +533,11 @@ BuildTargetColumnGroups(const LoonColumnGroups& source_groups,
             SetProperty(target_file.properties,
                         kMilvusTableSourceRowCountProperty,
                         source_row_count_text);
+            if (!physical_to_target.empty()) {
+                SetProperty(target_file.properties,
+                            kMilvusTableFieldIdMappingProperty,
+                            group_mapping);
+            }
             target_group.files.push_back(std::move(target_file));
         }
 
@@ -623,11 +700,14 @@ ReadStatMetadata(const LoonStatsLog& stats, uint32_t index) {
 }
 
 void
-CollectBloomFilterStats(const LoonStatsLog& source_stats,
-                        const char* external_source,
-                        const LoonProperties* properties,
-                        std::unordered_set<std::string>& added_stat_paths,
-                        std::map<std::string, StatData>& imported_stats) {
+CollectBloomFilterStats(
+    const LoonStatsLog& source_stats,
+    const std::map<std::string, std::string>& physical_to_target,
+    const std::unordered_set<std::string>& source_columns,
+    const char* external_source,
+    const LoonProperties* properties,
+    std::unordered_set<std::string>& added_stat_paths,
+    std::map<std::string, StatData>& imported_stats) {
     if (source_stats.num_stats == 0) {
         return;
     }
@@ -646,6 +726,15 @@ CollectBloomFilterStats(const LoonStatsLog& source_stats,
         auto file_count = source_stats.stat_file_counts[i];
         if (!IsBloomFilterStatKey(key) || file_count == 0) {
             continue;
+        }
+        if (!physical_to_target.empty()) {
+            const auto source_id = key.substr(std::strlen("bloom_filter."));
+            auto binding = physical_to_target.find(source_id);
+            if (binding == physical_to_target.end() ||
+                source_columns.find(source_id) == source_columns.end()) {
+                continue;
+            }
+            key = "bloom_filter." + binding->second;
         }
         if (source_stats.stat_files[i] == nullptr) {
             throw std::runtime_error(
@@ -756,7 +845,8 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
                                           size_t num_target_columns,
                                           const char* external_source,
                                           const LoonProperties* properties,
-                                          int has_external_primary_key) {
+                                          int has_external_primary_key,
+                                          const char* field_id_mapping) {
     if (transaction == 0 || source_manifest_paths == nullptr ||
         source_row_counts == nullptr || num_source_manifests == 0 ||
         target_columns == nullptr || num_target_columns == 0) {
@@ -775,6 +865,9 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
             }
             target_column_set.emplace(target_columns[i]);
         }
+
+        const auto mapping =
+            ParseFieldIDMapping(field_id_mapping, target_column_set);
 
         std::unordered_set<std::string> added_delta_paths;
         std::unordered_set<std::string> added_stat_paths;
@@ -798,12 +891,32 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
                                         target_column_set,
                                         source_manifest_path,
                                         source_row_counts[i],
+                                        mapping,
                                         external_source,
                                         properties);
-            if (target_groups_data.empty()) {
-                RETURN_ERROR(LOON_ARROW_ERROR,
-                             "milvus-table source manifest does not contain "
-                             "any target external columns");
+            // Validate the complete projection from the manifest already read
+            // for import. A partial match must not produce an incomplete target.
+            std::unordered_set<std::string> imported_columns;
+            for (const auto& group : target_groups_data) {
+                imported_columns.insert(group.columns.begin(),
+                                        group.columns.end());
+            }
+            for (size_t j = 0; j < num_target_columns; ++j) {
+                if (imported_columns.find(target_columns[j]) ==
+                    imported_columns.end()) {
+                    RETURN_ERROR(
+                        LOON_NOT_SUPPORT,
+                        "cannot refresh milvus-table: source manifest " +
+                            source_manifest_path +
+                            " is missing required column field_id=" +
+                            target_columns[j] +
+                            "; historical missing columns are not supported, "
+                            "including nullable fields and fields with "
+                            "defaults. "
+                            "Complete physical backfill on the source "
+                            "collection, create a new snapshot, and refresh "
+                            "using that snapshot");
+                }
             }
 
             auto target_groups = MaterializeColumnGroups(target_groups_data);
@@ -818,6 +931,8 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
                                       properties,
                                       added_delta_paths);
                 CollectBloomFilterStats(source_manifest.manifest->stats,
+                                        mapping,
+                                        target_column_set,
                                         external_source,
                                         properties,
                                         added_stat_paths,
@@ -827,9 +942,42 @@ loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
 
         AppendImportedStats(transaction, imported_stats);
         RETURN_SUCCESS();
+    } catch (const LoonFFIError& e) {
+        RETURN_ERROR(e.loon_code(), e.what());
     } catch (const std::exception& e) {
         RETURN_EXCEPTION(e.what());
     }
 
     RETURN_UNREACHABLE();
+}
+
+// Share explicit-binding and legacy-identity validation with QueryNode.
+extern "C" CStatus
+ReadMilvusTableManifestFieldMapping(const LoonColumnGroups* groups,
+                                    char** output) {
+    if (output != nullptr) {
+        *output = nullptr;
+    }
+    if (groups == nullptr || output == nullptr) {
+        return milvus::FailureCStatus(
+            milvus::ErrorCode::UnexpectedError,
+            "ReadMilvusTableManifestFieldMapping: groups and output must not "
+            "be null");
+    }
+    try {
+        milvus_storage::api::ColumnGroups imported;
+        auto status = milvus_storage::column_groups_import(groups, &imported);
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
+        auto mapping = ResolveMilvusTableFieldIdMapping(imported);
+        nlohmann::json encoded = nlohmann::json::object();
+        for (const auto& [id, physical] : mapping->physical_columns) {
+            encoded[std::to_string(id)] = physical;
+        }
+        *output = DupString(encoded.dump());
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }

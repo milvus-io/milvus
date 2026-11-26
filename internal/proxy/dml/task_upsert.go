@@ -333,6 +333,7 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 	if !ok {
 		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")
 	}
+	qt.MarkInternal()
 	queryResult, storageCost, err := queryRunner.ExecuteQuery(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err

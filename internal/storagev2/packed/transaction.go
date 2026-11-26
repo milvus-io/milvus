@@ -25,6 +25,7 @@ import "C"
 import (
 	"context"
 	"math"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -163,8 +164,9 @@ func addDeltaLogsToManifest(
 func GetDeltaLogPathsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
+	talonStages ...uint32,
 ) ([]string, error) {
-	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+	deltaLogs, err := GetDeltaLogsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,17 +216,43 @@ func validateDeltaLogMetadata(manifestPath, logPath string, entriesNum int64) er
 // GetDeltaLogsFromManifestWithExtfs extracts delta log entries from a StorageV3
 // manifest. When extfs is present, returned paths are normalized to object keys
 // readable by the local chunk manager.
+// Zero-entry markers with nonempty paths retain their identity. Empty-path,
+// zero-entry records are omitted because they have neither deletes nor identity.
 func GetDeltaLogsFromManifestWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
+) ([]*datapb.FieldBinlog, error) {
+	return getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, nil, talonStages...)
+}
+
+// GetMilvusTableSourceDeltalogs validates the required physical columns and
+// extracts deletes from the same source manifest read. Kept segments use this
+// path even when no new target manifest is built. Other deltalog readers do not
+// impose a column contract.
+func GetMilvusTableSourceDeltalogs(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	columns []string,
+) ([]*datapb.FieldBinlog, error) {
+	return getDeltaLogsFromManifest(manifestPath, storageConfig, extfs, columns)
+}
+
+func getDeltaLogsFromManifest(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	requiredColumns []string,
+	talonStages ...uint32,
 ) ([]*datapb.FieldBinlog, error) {
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to create properties")
 	}
@@ -254,6 +282,23 @@ func GetDeltaLogsFromManifestWithExtfs(
 		return nil, merr.WrapErrStorage(err, "failed to get manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
+
+	if len(requiredColumns) > 0 {
+		fields, err := manifestFieldIDsFromColumnGroups(manifestPath, &cManifest.column_groups)
+		if err != nil {
+			return nil, err
+		}
+		columns := make(map[string]struct{}, len(fields))
+		for fieldID := range fields {
+			columns[strconv.FormatInt(fieldID, 10)] = struct{}{}
+		}
+		for _, column := range requiredColumns {
+			if _, ok := columns[column]; !ok {
+				return nil, merr.WrapErrOperationNotSupportedMsg(
+					"cannot refresh milvus-table: source manifest %s is missing required column field_id=%s; historical missing columns are not supported, including nullable fields and fields with defaults. Complete physical backfill on the source collection, create a new snapshot, and refresh using that snapshot", manifestPath, column)
+			}
+		}
+	}
 
 	numDeltaLogs := int(cManifest.delta_logs.num_delta_logs)
 	if numDeltaLogs == 0 {

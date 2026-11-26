@@ -35,6 +35,9 @@ CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
 CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes);
+
+CStatus
 InitMmapManager(CMmapConfig c_mmap_config);
 
 void
