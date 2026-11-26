@@ -601,6 +601,9 @@ func normalizeExternalRefreshUpdatedSegment(
 	insertChannel string,
 ) *datapb.SegmentInfo {
 	normalized := proto.Clone(incoming).(*datapb.SegmentInfo)
+	// Registration references external files. Fake binlogs and matching row
+	// counts do not prove the values of the registered field IDs.
+	meta.ClearFieldLogicalSizes(normalized)
 	normalized.CollectionID = collectionID
 	normalized.State = commonpb.SegmentState_Flushed
 	if normalized.InsertChannel == "" {
@@ -743,6 +746,9 @@ func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.Segmen
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
+	// Same-ID refresh patches carry a whole external manifest, not a list
+	// of unchanged insert columns. The old totals cannot follow that pointer.
+	meta.ClearFieldLogicalSizes(cloned.SegmentInfo)
 	// The incoming placeholders describe the stats carried by the incoming
 	// manifest. Apply both atomically so deltalog-only refreshes do not trigger
 	// redundant text or JSON stats rebuilds.

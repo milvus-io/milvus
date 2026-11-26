@@ -674,6 +674,10 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
 			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
+		var fieldSizes *datapb.FieldLogicalSizes
+		if !collInfo.IsExternal() {
+			fieldSizes = meta.SegmentFieldLogicalSizes(segInfo)
+		}
 		segDescList = append(segDescList, &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
 			SegmentLevel:      segInfo.GetLevel(),
@@ -694,6 +698,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
+			FieldLogicalSizes: fieldSizes,
 		})
 	}
 

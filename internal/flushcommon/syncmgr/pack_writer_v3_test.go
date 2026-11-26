@@ -22,6 +22,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -183,6 +184,56 @@ func (s *PackWriterV3Suite) TestPackWriterV3_Write() {
 	s.NoError(err)
 	s.Equal(basePath, writtenBasePath)
 	s.Greater(revision, int64(0))
+}
+
+func (s *PackWriterV3Suite) TestTextFieldLogicalSizesAcrossSegmentSplits() {
+	const collectionID, partitionID, pk, name, body int64 = 12, 34, 100, 104, 105
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+		{FieldID: pk, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: name, Name: "name", DataType: schemapb.DataType_VarChar, Nullable: true},
+		{FieldID: body, Name: "body", DataType: schemapb.DataType_Text},
+	}}
+	names := []any{"猫", "", nil, "ab"}
+	bodies := []string{"x", strings.Repeat("y", 65536), strings.Repeat("z", 90000), "expired"}
+	groups := []storagecommon.ColumnGroup{{GroupID: 0, Columns: []int{0, 1, 2, 3, 4}, Fields: []int64{common.RowIDField, common.TimeStampField, pk, name, body}, Format: "parquet"}}
+	flush := func(segmentID int64, start, end int) *datapb.FieldLogicalSizes {
+		data, err := storage.NewInsertData(schema)
+		s.Require().NoError(err)
+		for i := start; i < end; i++ {
+			id := int64(i + 1)
+			s.Require().NoError(data.Append(map[int64]any{common.RowIDField: id, common.TimeStampField: id, pk: id, name: names[i], body: bodies[i]}))
+		}
+		manifest := packed.MarshalManifestPath(storage.SegmentManifestBasePath(s.rootPath, collectionID, partitionID, segmentID), packed.ManifestEarliest)
+		segment := &datapb.SegmentInfo{ID: segmentID, CollectionID: collectionID, PartitionID: partitionID, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1, ManifestPath: manifest}
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: schema,
+			Vchan:  &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: "v1", UnflushedSegments: []*datapb.SegmentInfo{segment}},
+		}, func(*datapb.SegmentInfo) pkoracle.PkStat { return pkoracle.NewBloomFilterSet() }, metacache.NewBM25StatsFactory)
+		pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).
+			WithChannelName("v1").WithInsertData([]*storage.InsertData{data}).WithBatchRows(int64(end-start)).
+			WithTimeRange(uint64(start+1), uint64(end)).WithLevel(datapb.SegmentLevel_L1)
+		w := NewBulkPackWriterV3(cache, schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, s.storageConfig, groups, manifest)
+		_, _, _, _, committed, _, stats, err := w.Write(s.ctx, pack)
+		s.Require().NoError(err)
+		s.Require().NotEqual(manifest, committed)
+		sizes := stats.GetFieldLogicalSizes()
+		s.Require().True(storage.FieldLogicalSizesCover(sizes, int64(end-start)))
+		return sizes
+	}
+
+	whole := flush(1000, 0, 4)
+	s.Require().Equal(&datapb.FieldLogicalSize{PayloadBytes: 5, ValidityBits: 4}, whole.Fields[name])
+	s.Require().Equal(&datapb.FieldLogicalSize{PayloadBytes: 155544}, whole.Fields[body])
+	first, second := flush(2000, 0, 1), flush(2001, 1, 4)
+	for _, field := range schema.GetFields() {
+		id := field.GetFieldID()
+		s.Require().NotNil(first.Fields[id])
+		s.Require().NotNil(second.Fields[id])
+		s.Equal(whole.Fields[id].PayloadBytes, first.Fields[id].PayloadBytes+second.Fields[id].PayloadBytes)
+		s.Equal(whole.Fields[id].ValidityBits, first.Fields[id].ValidityBits+second.Fields[id].ValidityBits)
+	}
 }
 
 func (s *PackWriterV3Suite) TestPackWriterV3_UsesManifestFormatAfterConfigSwitch() {
@@ -1031,4 +1082,9 @@ func (s *PackWriterV3Suite) TestWriteRecordsElementNullableValidElementCountsAcr
 	s.Equal(int64(9), wantValidElements)
 	s.Equal(wantNulls, published.GetNullCounts()[fieldID])
 	s.Equal(map[int64]int64{fieldID: wantValidElements}, published.GetValidElementCounts())
+	sizes := published.GetFieldLogicalSizes()
+	s.EqualValues(10, sizes.GetRowCount())
+	s.EqualValues(72, sizes.GetFields()[fieldID].GetPayloadBytes()) // nine 2D float vectors
+	s.EqualValues(17, sizes.GetFields()[fieldID].GetValidityBits()) // seven then ten element positions
+	s.EqualValues(10, sizes.GetFields()[202].GetValidityBits())     // one shared parent bit per row
 }

@@ -2207,7 +2207,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationStatsDeltaIgno
 	// The builder takes no plan input at all, which is the property under test:
 	// there is no argument through which an empty or populated plan array could
 	// change the answer.
-	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, nil, 256)
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, nil, 256, nil)
 
 	s.EqualValues(4096, got.GetInsertBinlogSize())
 	s.EqualValues(1, got.GetInsertBinlogCount())

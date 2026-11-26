@@ -324,7 +324,7 @@ woodpecker:
       conditionWrite: auto
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local, service]
-    rootPath: default # The root path of the storage provider. If set to 'default', uses localStorage.path as base directory and creates a woodpecker subdirectory. Otherwise, specifies a custom woodpecker data storage directory.
+    rootPath: default # With 'default', the root is localStorage.path/wp. For embedded local storage, provision localStorage.path and Milvus creates its wp subdirectory. Provision an explicitly configured local root before startup.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -513,14 +513,14 @@ proxy:
       base:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [error_type: $error_type]"
       query:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params] [error_type: $error_type]"
-        methods: "Query, Delete, /query, /v2/vectordb/entities/query, /v2/vectordb/entities/get, /v2/vectordb/entities/delete"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params] [error_type: $error_type] [is_cold_search: $is_cold_search]"
+        methods: "Query, Delete, /query, /v1/vector/query, /v1/vector/get, /v2/vectordb/entities/query, /v2/vectordb/entities/get, /v2/vectordb/entities/delete"
       search:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params] [error_type: $error_type]"
-        methods: "HybridSearch, Search, /search, /v2/vectordb/entities/search, /v2/vectordb/entities/advanced_search, /v2/vectordb/entities/hybrid_search"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params] [error_type: $error_type] [is_cold_search: $is_cold_search]"
+        methods: "HybridSearch, Search, /search, /v1/vector/search, /v2/vectordb/entities/search, /v2/vectordb/entities/advanced_search, /v2/vectordb/entities/hybrid_search"
       upsert:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [partial_update: $partial_update] [error_type: $error_type]"
-        methods: Upsert
+        methods: "Upsert, /v2/vectordb/entities/upsert"
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
@@ -882,6 +882,15 @@ dataCoord:
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
+    # The maximum number of rows in a segment, for every collection. Segments are sized in bytes (maxSize), but a
+    # segment of maxSize bytes of narrow rows can hold tens of millions of rows, and per-segment work such as building a
+    # scalar index or replaying deletes at load grows with the row count. A segment is therefore sealed, compacted and
+    # imported at maxSize bytes or maxRows rows, whichever comes first. A collection is affected when maxRows of its rows
+    # take less than its byte limit: rows narrower than 268 bytes with the default maxSize of 1024 MB, 537 bytes for a
+    # collection that uses diskSegmentMaxSize. maxRows is an absolute number of rows and does not follow maxSize, so a
+    # deployment that raises maxSize should raise maxRows in proportion to keep the same collections unaffected.
+    # 0 disables the row limit.
+    maxRows: 4000000
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
@@ -1077,7 +1086,7 @@ dataCoord:
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
-    enableImportV3: false # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
+    enableImportV3: auto # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. auto: switch on automatically once all online DataNodes, StreamingNodes, and DataCoords reach the gate version and the stability window elapses; false: keep disabled (safe while any older DataNode, StreamingNode, or potentially-active DataCoord is still online); true: force enable and bypass the version gate (safe only once all DataNodes, StreamingNodes, and DataCoords support Import V3, such as when upgrading from a release that already ships V3). The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     # Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
     # A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
@@ -1463,6 +1472,15 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
+  # Whether a collection may have no vector field: CreateCollection accepts such a schema, and the last
+  # vector field of a collection may be dropped. Such a collection supports every operation except search;
+  # a nullable vector field can be added to it later, which makes it a vector collection.
+  # Turning it off rejects new requests to create such a collection, or to drop the last vector field of one,
+  # on this cluster. Collections that already exist keep working, and collections received through
+  # replication are not affected.
+  # It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
+  # is still running cannot be loaded or compacted until every role is upgraded.
+  enableCollectionWithoutVector: true
   traceLogMode: 0 # trace request info
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size
