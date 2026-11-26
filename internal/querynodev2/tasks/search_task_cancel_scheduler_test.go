@@ -146,3 +146,49 @@ func TestSchedulerMergedSearchOwnerCancellation(t *testing.T) {
 		})
 	}
 }
+
+// Keep queue admission, both pruning boundaries, and completion real. Replace
+// only execution preparation and the executors to observe which receiver the
+// scheduler dispatches without requiring loaded segments.
+func TestSchedulerPreservesStreamingSearchExecutor(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().QueryNodeCfg
+	for _, ratio := range []string{"0", "0.1"} {
+		t.Run("queue_wait_ratio_"+ratio, func(t *testing.T) {
+			require.NoError(t, paramtable.Get().Save(cfg.MaxQueueWaitRatio.Key, ratio))
+			require.NoError(t, paramtable.Get().Save(cfg.MaxQueueWait.Key, "1h"))
+			t.Cleanup(func() {
+				paramtable.Get().Reset(cfg.MaxQueueWaitRatio.Key)
+				paramtable.Get().Reset(cfg.MaxQueueWait.Key)
+			})
+			executed := make(chan scheduler.Task, 1)
+			gpu := mockey.Mock((*SearchTask).IsGpuIndex).Return(false).Build()
+			defer gpu.UnPatch()
+			prepare := mockey.Mock((*SearchTask).PreExecute).Return(nil).Build()
+			defer prepare.UnPatch()
+			stream := mockey.Mock((*StreamingSearchTask).Execute).To(func(task *StreamingSearchTask) error {
+				executed <- task
+				return nil
+			}).Build()
+			defer stream.UnPatch()
+			batch := mockey.Mock((*SearchTask).Execute).To(func(task *SearchTask) error {
+				executed <- task
+				return nil
+			}).Build()
+			defer batch.UnPatch()
+			sched := scheduler.NewScheduler("fifo")
+			sched.Start()
+			defer sched.Stop()
+			task := &StreamingSearchTask{SearchTask: *newGroupMember(context.Background(), 1)}
+			require.NoError(t, sched.Add(task))
+			require.NoError(t, waitResult(t, &task.SearchTask))
+			select {
+			case receiver := <-executed:
+				require.Same(t, task, receiver, "scheduler must dispatch the streaming executor")
+			default:
+				t.Fatal("task completed without reaching an executor")
+			}
+			assertNotNotified(t, &task.SearchTask)
+		})
+	}
+}

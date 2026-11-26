@@ -25,6 +25,9 @@ const (
 
 	readTaskQueueOutcomeScheduled = "scheduled"
 	readTaskQueueOutcomeExpired   = "expired"
+	// the task would wait, or has waited, in the queue for longer than it
+	// may, see maxQueueWait
+	readTaskQueueOutcomeOverloaded = "overloaded"
 )
 
 // newScheduler create a scheduler with given schedule policy.
@@ -34,7 +37,7 @@ func newScheduler(policy schedulePolicy) Scheduler {
 	return &scheduler{
 		policy:           policy,
 		receiveChan:      make(chan addTaskReq),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		pool:             conc.NewPool[any](maxReadConcurrency, conc.WithPreAlloc(true)),
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
@@ -51,7 +54,7 @@ type addTaskReq struct {
 type scheduler struct {
 	policy      schedulePolicy
 	receiveChan chan addTaskReq
-	execChan    chan Task
+	execChan    chan *queuedTask
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
 
@@ -59,6 +62,11 @@ type scheduler struct {
 	wg sync.WaitGroup
 	// lifetime controls scheduler State & make sure all requests accepted will be processed
 	lifetime lifetime.Lifetime[lifetime.State]
+
+	// head is the task that leaves the queue next: taken from the policy and
+	// waiting for a worker. Nil when no task waits. Owned by the schedule
+	// goroutine.
+	head *queuedTask
 
 	schedulerCounter
 }
@@ -127,22 +135,26 @@ func (s *scheduler) schedule() {
 	for {
 		s.setupReadyLenMetric()
 
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
+		var execTask *queuedTask
 		nq := int64(0)
 		now := time.Now()
 		task, nq, execChan = s.setupExecListener(task, now)
 		if task.valid() {
-			execTask = task.Task
+			execTask = task
 		}
 
 		select {
 		case req, ok := <-s.receiveChan:
+			// The select may have blocked for long, on an idle node until
+			// this request came in: take the time again, it is the time the
+			// task is queued at.
+			now = time.Now()
 			if !ok {
 				log.Info("receiveChan closed, processing remaining request")
 				// drain policy maintained task
 				for task.valid() {
-					execChan <- task.Task
+					execChan <- task
 					s.updateWaitingTaskCounter(-1, -nq)
 					task = s.produceExecChan(now)
 				}
@@ -157,8 +169,9 @@ func (s *scheduler) schedule() {
 			// Task sent, drop the ownership of sent task.
 			// Update waiting task counter.
 			s.updateWaitingTaskCounter(-1, -nq)
-			// And produce new task into execChan as much as possible.
-			task = s.produceExecChan(now)
+			// And produce new task into execChan as much as possible. The
+			// select may have blocked for long: take the time again.
+			task = s.produceExecChan(time.Now())
 		}
 	}
 }
@@ -203,9 +216,20 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 			fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.Key),
 		)
 		req.err <- err
+	} else if queued := newQueuedTask(req.task, now); queued.cleanupReady(now) {
+		// Its deadline passed, though its context does not say so yet: it is
+		// out of time, not refused for the load on this node.
+		s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeExpired)
+		req.err <- cleanupTaskError(queued)
+	} else if queued.mustWaitTooLong(s.head, now) {
+		// The task that leaves the queue next has waited so long that this
+		// one would wait for longer than it may. Refuse it now, while the
+		// request has all its time left, rather than when it has waited for
+		// nothing.
+		s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeOverloaded)
+		req.err <- overloadedError(queued, s.head.queueDuration(now))
 	} else {
 		// Push the task into the policy to schedule and update the counter of the ready queue.
-		queued := newQueuedTask(req.task, now)
 		nq := queued.NQ()
 		newTaskAdded, err := s.policy.Push(queued)
 		if err == nil {
@@ -222,12 +246,12 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 func (s *scheduler) produceExecChan(now time.Time) *queuedTask {
 	var task *queuedTask
 	for {
-		var execChan chan Task
-		var execTask Task
+		var execChan chan *queuedTask
+		var execTask *queuedTask
 		nq := int64(0)
 		task, nq, execChan = s.setupExecListener(task, now)
 		if task.valid() {
-			execTask = task.Task
+			execTask = task
 		}
 
 		select {
@@ -247,34 +271,49 @@ func (s *scheduler) exec() {
 	defer s.wg.Done()
 	log.Info("start execute loop")
 	for {
-		t, ok := <-s.execChan
+		queued, ok := <-s.execChan
 		if !ok {
 			log.Info("scheduler execChan closed, worker exit")
 			return
 		}
-		// Drop the task, or the canceled members of a merged group, if the
-		// cancellation happened between dequeue and execution. Members that
-		// are dropped here have already been completed with their own
-		// context error; the survivors keep running. The cause is logged
-		// because it is what tells a client that went away from a request
-		// that ran out of time.
-		survivor, dropped, cause := pruneCanceled(t)
-		if dropped > 0 {
-			if survivor == nil {
-				log.Ctx(t.Context()).Warn("task canceled before executing", zap.Error(cause))
-				continue
-			}
-			log.Ctx(t.Context()).Warn("canceled requests dropped from a search group before executing",
-				zap.Int("dropped", dropped), zap.Error(cause))
-		}
-		t = survivor
-		if err := t.PreExecute(); err != nil {
-			log.Warn("failed to pre-execute task", zap.Error(err))
-			t.Done(err)
-			continue
-		}
 
-		s.getPool(t).Submit(func() (any, error) {
+		s.getPool(queued.Task).Submit(func() (any, error) {
+			// Drop members canceled or past their individual deadline/queue budget
+			// between dequeue and execution. Members that
+			// are dropped here have already been completed with their own
+			// context error; the survivors keep running. The cause is logged
+			// because it is what tells a client that went away from a request
+			// that ran out of time.
+			now := time.Now()
+			survivor, dropped, cause := queued.prune(now)
+			if dropped > 0 {
+				if survivor == nil {
+					log.Ctx(queued.Context()).Warn("task discarded before executing", zap.Error(cause))
+					s.recordReadTaskQueueDuration(queued, time.Now(), prunedQueueOutcome(cause))
+					return nil, cause
+				}
+				log.Ctx(queued.Context()).Warn("requests dropped from a search group before executing",
+					zap.Int("dropped", dropped), zap.Error(cause))
+			}
+			queued.Task = survivor
+			t := survivor
+			if queued.cleanupReady(now) {
+				s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeExpired)
+				finishExpiredTask(queued)
+				return nil, nil
+			}
+			if queued.overloaded(now) {
+				s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeOverloaded)
+				finishUnrunTask(queued, overloadedError(queued, queued.queueDuration(now)))
+				return nil, nil
+			}
+			s.recordReadTaskQueueDuration(queued, now, readTaskQueueOutcomeScheduled)
+			if err := t.PreExecute(); err != nil {
+				log.Warn("failed to pre-execute task", zap.Error(err))
+				t.Done(err)
+				return nil, err
+			}
+
 			// Update concurrency metric and notify task done.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Inc()
 			collector.Counter.Inc(metricsinfo.ExecuteQueueType)
@@ -316,8 +355,8 @@ func readTaskExecuteOutcome(err error) string {
 }
 
 // setupExecListener setup the execChan and next task to run.
-func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
-	var execChan chan Task
+func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan *queuedTask) {
+	var execChan chan *queuedTask
 	nq := int64(0)
 	if !lastWaitingTask.valid() {
 		// No task is waiting to send to execChan, schedule a new one from queue.
@@ -329,39 +368,99 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			// Remember the NQ the counters were credited with before any
 			// member is pruned away.
 			lastWaitingTask.accountedNQ = lastWaitingTask.NQ()
-			// A canceled task is dropped; a merged group loses only its
-			// canceled members and goes on with the rest. Dropped members
-			// are completed with their own context error.
-			survivor, dropped, cause := pruneCanceled(lastWaitingTask.Task)
+			// A merged group loses only members canceled or past their individual
+			// deadline/queue budget. Dropped members receive their own error.
+			survivor, dropped, cause := lastWaitingTask.prune(now)
 			if dropped > 0 {
 				// Said here as well as before execution, so that a request
 				// whose client sees a cancellation can be found in the log
 				// whichever of the two points dropped it.
 				if survivor == nil {
-					log.Ctx(lastWaitingTask.Context()).Warn("task canceled before it left the queue", zap.Error(cause))
+					log.Ctx(lastWaitingTask.Context()).Warn("task discarded before it left the queue", zap.Error(cause))
 				} else {
-					log.Ctx(lastWaitingTask.Context()).Warn("canceled requests dropped from a search group as it left the queue",
+					log.Ctx(lastWaitingTask.Context()).Warn("requests dropped from a search group as it left the queue",
 						zap.Int("dropped", dropped), zap.Error(cause))
 				}
 			}
 			if survivor == nil {
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
-				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, prunedQueueOutcome(cause))
 				lastWaitingTask = nil
 				continue
 			}
 			lastWaitingTask.Task = survivor
-			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
+			if lastWaitingTask.cleanupReady(now) {
+				// Out of time even when its context does not say so yet, so
+				// that it does not count as refused for the load on this node.
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				finishExpiredTask(lastWaitingTask)
+				lastWaitingTask = nil
+				continue
+			}
+			if lastWaitingTask.overloaded(now) {
+				// The queue holds more than the node gets done in the time
+				// the task may wait. Executing it would make the tasks behind
+				// it wait as long: fail it now, so that the Proxy can turn to
+				// another replica while the request still has time.
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
+				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeOverloaded)
+				finishUnrunTask(lastWaitingTask, overloadedError(lastWaitingTask, lastWaitingTask.queueDuration(now)))
+				lastWaitingTask = nil
+				continue
+			}
 			break
 		}
 	}
+	s.head = nil
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
 		execChan = s.execChan
 		nq = lastWaitingTask.countedNQ()
+		s.head = lastWaitingTask
 	}
 
 	return lastWaitingTask, nq, execChan
+}
+
+func prunedQueueOutcome(cause error) string {
+	if errors.Is(cause, merr.ErrServiceTooManyRequests) {
+		return readTaskQueueOutcomeOverloaded
+	}
+	return readTaskQueueOutcomeExpired
+}
+
+func finishExpiredTask(task *queuedTask) {
+	if g, ok := task.Task.(ExpirableGroup); ok {
+		g.FinishExpired()
+		return
+	}
+	task.Done(cleanupTaskError(task))
+}
+
+func finishUnrunTask(task *queuedTask, err error) {
+	if u, ok := task.Task.(interface{ FinishUnrun(error) }); ok {
+		u.FinishUnrun(err)
+		return
+	}
+	task.Done(err)
+}
+
+// overloadedError is what a task fails with that would wait, or has waited,
+// for longer than it may. waited is how long the task that leaves the queue
+// next has waited: the refused task itself, or the one it would queue behind.
+func overloadedError(task *queuedTask, waited time.Duration) error {
+	return queueOverloadedError(task.maxWait, waited)
+}
+
+func queueOverloadedError(maxWait, waited time.Duration) error {
+	return merr.WrapErrTooManyRequests(
+		int32(maxWait.Milliseconds()),
+		fmt.Sprintf("read tasks wait %s in the queue, limit by %s and %s",
+			waited,
+			paramtable.Get().QueryNodeCfg.MaxQueueWaitRatio.Key,
+			paramtable.Get().QueryNodeCfg.MaxQueueWait.Key),
+	)
 }
 
 func (s *scheduler) cleanupExpiredTasks(now time.Time) {

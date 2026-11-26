@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
@@ -78,6 +79,9 @@ type queryTask struct {
 	channelsMvcc     map[string]Timestamp
 	preferredNodes   map[string]int64
 	fastSkip         bool
+	// resolvedConsistencyLevel is the level the request is served at, after
+	// the collection default is applied.
+	resolvedConsistencyLevel commonpb.ConsistencyLevel
 
 	reQuery              bool
 	allQueryCnt          int64
@@ -548,6 +552,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+	t.resolvedConsistencyLevel = consistencyLevel
 
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
@@ -601,7 +606,10 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		SkipChannel:    t.skipRequeryChannel,
 		PreferredNodes: t.preferredNodes,
+		StatsClass:     "query/" + t.resolvedConsistencyLevel.String(),
+		Hedgeable:      true,
 	})
 	if err != nil {
 		log.Warn("fail to execute query", zap.Error(err))
@@ -712,6 +720,11 @@ func (t *queryTask) IsSubTask() bool {
 	return t.reQuery
 }
 
+func (t *queryTask) skipRequeryChannel(channel string) bool {
+	_, present := t.channelsMvcc[channel]
+	return t.fastSkip && len(t.channelsMvcc) > 0 && !present
+}
+
 func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	needOverrideMvcc := false
@@ -744,7 +757,11 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode query return error", zap.Error(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		// Caller cancellation says nothing about the shard location. Deadlines
+		// and transport failures with an active caller retain cache refresh.
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
@@ -762,6 +779,10 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 
 	log.Debug("get query result")
+	// With hedging another attempt of this channel may have published already.
+	if !shardclient.CommitAttempt(ctx) {
+		return shardclient.ErrAttemptSuperseded
+	}
 	t.resultBuf.Insert(result)
 	t.lb.UpdateCostMetrics(nodeID, result.CostAggregation)
 	return nil
