@@ -44,11 +44,16 @@ decided by `messageutil.SplitShardRoleOf`.
   fence is an exclusive message, so the Lock interceptor ends every
   transaction of the VChannel once it is appended, while it still holds the
   VChannel lock; a Commit holds the shared lock through its append, so no
-  Commit of the VChannel is appended after the fence. A later body or Commit
-  of an ended transaction gets `STREAMING_CODE_SHARD_FENCED` (the redo
-  interceptor maps the missing session), and so does a BeginTxn on a fenced
-  VChannel, whose session is ended at once. The writer places the rows of
-  the whole transaction on the new shards. The registration is
+  Commit of the VChannel is appended after the fence. A later body of an
+  ended transaction gets `STREAMING_CODE_SHARD_FENCED`, and so does a
+  BeginTxn on a fenced VChannel, whose session is ended at once. A Commit
+  may reroute only while the transaction manager retains proof that this
+  source fence aborted it before Commit began. A missing Commit session
+  alone does not prove an abort: cleanup also removes committed sessions.
+  The redo interceptor therefore returns
+  `STREAMING_CODE_INVALID_TRANSACTION_STATE` with an unknown-outcome reason
+  for that case, preventing automatic replay. With a proven abort, the
+  writer places the whole transaction on the new shards. The registration is
   kept, so ManualFlush, AlterCollection, SchemaChange and Flush are still
   admitted. A second copy of the same split is appended and changes nothing. A
   copy of another split is refused.
