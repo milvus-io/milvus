@@ -2511,3 +2511,38 @@ func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testi
 	require.Equal(t, 1, describe.Times())
 	require.Equal(t, []int64{201}, droppedIndexIDs)
 }
+
+func TestDDLCallbacksOrdinaryExternalRejectsAddStructSubField(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	name := "externalStruct" + funcutil.RandomString(10)
+	status, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	profileStruct := newRootAddStructFieldSchema("profile")
+	profileStruct.ExternalField = "profile"
+	schema := &schemapb.CollectionSchema{
+		Name:           name,
+		ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{profileStruct},
+	}
+	for _, field := range schema.StructArrayFields[0].Fields {
+		field.Nullable = true
+	}
+	encoded, err := proto.Marshal(schema)
+	require.NoError(t, err)
+	status, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{DbName: dbName, CollectionName: name, Schema: encoded})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	before, err := core.meta.GetCollectionByName(ctx, dbName, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	beforeSchema := before.ToCollectionSchemaPB()
+	field := &schemapb.FieldSchema{
+		Name: "profile[new_scalar]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	response, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, name, field, false))
+	require.ErrorIs(t, merr.CheckRPCCall(response.GetAlterStatus(), err), merr.ErrParameterInvalid)
+	after, err := core.meta.GetCollectionByName(ctx, dbName, name, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(beforeSchema, after.ToCollectionSchemaPB()), "rejected child addition must not change collection metadata")
+}

@@ -88,6 +88,10 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	}
 	if plan.HasField() {
 		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+			schema := coll.ToCollectionSchemaPB()
+			if typeutil.IsExternalCollection(schema) && !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+				return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct sub-fields", coll.Name)
+			}
 			if err := prepareAlterSchemaAddStructSubField(coll, plan); err != nil {
 				return err
 			}
@@ -128,6 +132,13 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
 	if err != nil {
 		return err
+	}
+	if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+		if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+			return err
+		}
+		properties = updateMaxFieldIDProperty(properties, maxAssignedFieldIDFromSchema(schema))
+		schema.Properties = properties
 	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
@@ -360,7 +371,19 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if err := schemautil.FillAddedStructSubFieldMaxCapacity(model.MarshalStructArrayFieldModel(parent), field); err != nil {
 		return err
 	}
-	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
+	validationField := field
+	if typeutil.NewStorageColumnResolver(coll.ToCollectionSchemaPB()).IsMilvusTable() {
+		parentExt := parent.ExternalField
+		if parentExt == "" {
+			parentExt = parent.Name
+		}
+		if field.GetExternalField() == "" {
+			field.ExternalField = storedRootStructSubFieldName(parentExt, originalName)
+		}
+		validationField = typeutil.Clone(field)
+		validationField.ExternalField = ""
+	}
+	if err := validateAddedStructSubFieldProperties(originalName, validationField); err != nil {
 		return err
 	}
 	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {

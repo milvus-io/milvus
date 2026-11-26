@@ -18,6 +18,8 @@
 #include "milvus-storage/filesystem/fs.h"
 #include <algorithm>
 #include <arrow/array.h>
+#include <arrow/array/concatenate.h>
+#include <arrow/memory_pool.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
 #include <arrow/table.h>
@@ -1027,7 +1029,8 @@ BuildInternalSchemaWithTextAndDynamicFields() {
 
 std::shared_ptr<arrow::Table>
 BuildInternalTakeArrowTableWithTextAndDynamicFields(
-    const InternalSchemaWithTextAndDynamicFields& info) {
+    const InternalSchemaWithTextAndDynamicFields& info,
+    bool null_dynamic_row = false) {
     arrow::Int64Builder int64_b;
     arrow::BinaryBuilder text_b;
     arrow::BinaryBuilder dynamic_b;
@@ -1039,6 +1042,10 @@ BuildInternalTakeArrowTableWithTextAndDynamicFields(
                         .Append(encoded_text.data(),
                                 static_cast<int32_t>(encoded_text.size()))
                         .ok());
+        if (null_dynamic_row && i == 1) {
+            EXPECT_TRUE(dynamic_b.AppendNull().ok());
+            continue;
+        }
         auto dynamic = R"({"foo":)" + std::to_string(i) + R"(,"bar":true})";
         EXPECT_TRUE(
             dynamic_b
@@ -2508,6 +2515,67 @@ TEST(InternalTakeTest, TryTakeForSearch_ProjectsDynamicField) {
     ASSERT_EQ(dynamic_data->scalars().json_data().data_size(), 2);
     EXPECT_EQ(dynamic_data->scalars().json_data().data(0), R"({"foo":4})");
     EXPECT_EQ(dynamic_data->scalars().json_data().data(1), R"({"foo":0})");
+}
+
+TEST(InternalTakeTest, NullableDynamicProjectionPreservesRows) {
+    for (bool external : {false, true}) {
+        auto info = BuildInternalSchemaWithTextAndDynamicFields();
+        if (external) {
+            info.base.schema->set_external_source("s3://bucket/snapshot");
+            info.base.schema->set_external_spec(R"({"format":"milvus-table"})");
+        }
+        auto table =
+            BuildInternalTakeArrowTableWithTextAndDynamicFields(info, true);
+        SegmentSealedUPtr holder;
+        auto* segment = CreateExternalSegment(holder, info.base.schema);
+        segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+        segment->SetUseTakeForOutputForTesting(true);
+        // Include repeated and reordered null rows to exercise result_mapping.
+        std::vector<int64_t> offsets = {1, 3, 1, 0};
+        for (bool project : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "external=" << external << " project=" << project);
+            auto check = [&](const DataArray& data) {
+                ASSERT_EQ(data.scalars().json_data().data_size(), 4);
+                const auto& validity = GetFieldDataRowValidData(data);
+                ASSERT_EQ(validity.size(), 4);
+                EXPECT_FALSE(validity[0]);
+                EXPECT_TRUE(validity[1]);
+                EXPECT_FALSE(validity[2]);
+                EXPECT_TRUE(validity[3]);
+                EXPECT_TRUE(data.scalars().json_data().data(0).empty());
+                EXPECT_TRUE(data.scalars().json_data().data(2).empty());
+                EXPECT_EQ(data.scalars().json_data().data(1),
+                          project ? R"({"foo":3})" : R"({"foo":3,"bar":true})");
+                EXPECT_EQ(data.scalars().json_data().data(3),
+                          project ? R"({"foo":0})" : R"({"foo":0,"bar":true})");
+            };
+            auto retrieve =
+                std::make_unique<query::RetrievePlan>(info.base.schema);
+            retrieve->field_ids_ = {info.dynamic_id};
+            if (project) {
+                retrieve->target_dynamic_fields_ = {"foo"};
+            }
+            auto result = std::make_unique<proto::segcore::RetrieveResults>();
+            ASSERT_TRUE(segment->TryTakeForRetrieve(retrieve.get(),
+                                                    result,
+                                                    offsets.data(),
+                                                    offsets.size(),
+                                                    false,
+                                                    false));
+            ASSERT_EQ(result->fields_data_size(), 1);
+            check(result->fields_data(0));
+            auto search = std::make_unique<query::Plan>(info.base.schema);
+            search->target_entries_ = {info.dynamic_id};
+            if (project) {
+                search->target_dynamic_fields_ = {"foo"};
+            }
+            SearchResult search_result;
+            ASSERT_TRUE(segment->TestTryTakeForSearch(
+                search.get(), offsets.data(), offsets.size(), search_result));
+            check(*search_result.output_fields_data_.at(info.dynamic_id));
+        }
+    }
 }
 
 // ---------- TryTakeForRetrieve: error & edge-case paths ----------
@@ -5579,3 +5647,239 @@ TEST(InjectExtfsAllowlist, NonStringExtfsValueIsRejected) {
     EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.unknown_key"), 0u);
 }
+
+TEST(SchemaExternalColumns, OrdinaryStructChildrenSharePhysicalParent) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/data");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_name("pk");
+    pk->set_fieldid(100);
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_external_field("raw_items");
+    parent->set_fieldid(200);
+    for (int64_t i = 0; i < 2; ++i) {
+        auto* child = parent->add_fields();
+        child->set_name(i == 0 ? "items[a]" : "items[b]");
+        child->set_fieldid(101 + i);
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+        child->set_nullable(true);
+        child->set_external_field(i == 0 ? "raw_items[a]" : "raw_items[b]");
+    }
+    auto schema = Schema::ParseFrom(source);
+    EXPECT_EQ(*schema->GetExternalColumnNames(),
+              std::vector<std::string>{"raw_items"});
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(101)), "raw_items");
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(102)), "raw_items");
+    const auto projections =
+        schema->GetOrdinaryStructProjections(schema->get_field_ids());
+    ASSERT_EQ(projections.size(), 1);
+    EXPECT_EQ(projections.at("raw_items").parent_field_id, FieldId(200));
+    EXPECT_EQ(projections.at("raw_items").child_field_ids,
+              (std::vector<FieldId>{FieldId(101), FieldId(102)}));
+    milvus::proto::schema::FieldSchema field;
+    field.set_name("items[a]");
+    field.set_fieldid(101);
+    field.set_data_type(milvus::proto::schema::DataType::Array);
+    field.set_element_type(milvus::proto::schema::DataType::Int64);
+    field.set_external_field("raw_items[a]");
+    auto mapping = milvus::ResolvePhysicalColumnMapping(false, field);
+    EXPECT_EQ(mapping.schema_column_name, "items[a]");
+    EXPECT_EQ(mapping.storage_column_name, "raw_items");
+    EXPECT_TRUE(mapping.is_external_column);
+    EXPECT_EQ(
+        milvus::ResolvePhysicalColumnMapping(true, field).storage_column_name,
+        "101");
+}
+
+namespace {
+
+// Storage take can return separate chunks for rows read from different files.
+// Keep those chunks intact instead of letting compute::Take combine them.
+class ChunkedTakeResultReader : public MockTakeReader {
+ public:
+    using MockTakeReader::MockTakeReader;
+    size_t calls = 0;
+
+    arrow::Result<std::shared_ptr<arrow::Table>>
+    take(const std::vector<int64_t>& row_indices,
+         size_t,
+         const std::shared_ptr<std::vector<std::string>>&) override {
+        ++calls;
+        EXPECT_EQ(row_indices, (std::vector<int64_t>{0, 1, 2, 3}));
+        return table_;
+    }
+};
+
+class ExternalTakeStructParentTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(ExternalTakeStructParentTest, CombinesPhysicalParentOncePerRequest) {
+    proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/data");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_name("pk");
+    pk->set_fieldid(100);
+    pk->set_data_type(proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t i = 0; i < 2; ++i) {
+        auto* child = parent->add_fields();
+        child->set_name(i == 0 ? "items[a]" : "items[b]");
+        child->set_fieldid(101 + i);
+        child->set_data_type(proto::schema::DataType::Array);
+        child->set_element_type(proto::schema::DataType::Int64);
+        child->set_nullable(true);
+        child->set_external_field(child->name());
+    }
+    auto schema = Schema::ParseFrom(source);
+    auto* pool = arrow::default_memory_pool();
+    auto a = std::make_shared<arrow::Int64Builder>();
+    auto b = std::make_shared<arrow::Int64Builder>();
+    auto objects = std::make_shared<arrow::StructBuilder>(
+        arrow::struct_({arrow::field("a", arrow::int64()),
+                        arrow::field("b", arrow::int64())}),
+        pool,
+        std::vector<std::shared_ptr<arrow::ArrayBuilder>>{a, b});
+    arrow::ListBuilder lists(pool, objects);
+    ASSERT_TRUE(lists.Append().ok());
+    for (int64_t value : {10, 11}) {
+        ASSERT_TRUE(objects->Append().ok());
+        ASSERT_TRUE(a->Append(value).ok());
+        ASSERT_TRUE(b->Append(value + 100).ok());
+    }
+    ASSERT_TRUE(lists.AppendNull().ok());
+    auto first = lists.Finish().ValueOrDie();
+    ASSERT_TRUE(lists.Append().ok());  // Valid empty array.
+    ASSERT_TRUE(lists.Append().ok());
+    ASSERT_TRUE(objects->Append().ok());
+    ASSERT_TRUE(a->Append(30).ok());
+    ASSERT_TRUE(b->Append(130).ok());
+    auto second = lists.Finish().ValueOrDie();
+    arrow::ArrayVector chunks{first, second};
+    const auto before_concat = pool->total_bytes_allocated();
+    auto combined = arrow::Concatenate(chunks).ValueOrDie();
+    const auto concat_bytes = pool->total_bytes_allocated() - before_concat;
+    ASSERT_GT(concat_bytes, 0);
+    auto arrow_schema = arrow::schema({arrow::field("items", first->type())});
+    auto single_table = arrow::Table::Make(
+        arrow_schema, {std::make_shared<arrow::ChunkedArray>(combined)});
+    auto multi_table = arrow::Table::Make(
+        arrow_schema, {std::make_shared<arrow::ChunkedArray>(chunks)});
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<ChunkedTakeResultReader>(single_table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+    query::RetrievePlan retrieve(schema);
+    query::Plan search(schema);
+    // Deliberately reverse child order as well as row order.
+    retrieve.field_ids_ = {FieldId(102), FieldId(101)};
+    search.target_entries_ = retrieve.field_ids_;
+    const std::vector<int64_t> offsets{3, 0, 1, 2, 3};
+    auto verify = [&](const DataArray& data, int64_t field_id) {
+        EXPECT_EQ(data.field_id(), field_id);
+        const auto& valid_data = GetFieldDataRowValidData(data);
+        ASSERT_EQ(valid_data.size(), offsets.size());
+        const auto& arrays = data.scalars().array_data();
+        EXPECT_EQ(arrays.element_type(), proto::schema::DataType::Int64);
+        ASSERT_EQ(arrays.data_size(), offsets.size());
+        const int64_t delta = field_id == 102 ? 100 : 0;
+        const std::vector<std::vector<int64_t>> expected{
+            {30 + delta}, {10 + delta, 11 + delta}, {}, {}, {30 + delta}};
+        for (size_t row = 0; row < offsets.size(); ++row) {
+            EXPECT_EQ(valid_data[row], row != 2);
+            const auto& values = arrays.data(row).long_data().data();
+            EXPECT_EQ(std::vector<int64_t>(values.begin(), values.end()),
+                      expected[row]);
+        }
+    };
+    auto run = [&]() {
+        // All fixtures are prepared before measuring the synchronous take call.
+        auto result = std::make_unique<proto::segcore::RetrieveResults>();
+        SearchResult search_result;
+        const auto before = pool->total_bytes_allocated();
+        const bool ok =
+            GetParam()
+                ? segment->TestTryTakeForSearch(
+                      &search, offsets.data(), offsets.size(), search_result)
+                : segment->TryTakeForRetrieve(&retrieve,
+                                              result,
+                                              offsets.data(),
+                                              offsets.size(),
+                                              false,
+                                              false);
+        const auto bytes = pool->total_bytes_allocated() - before;
+        EXPECT_TRUE(ok);
+        if (GetParam()) {
+            EXPECT_EQ(search_result.output_fields_data_.size(), 2);
+            for (auto id : search.target_entries_) {
+                auto it = search_result.output_fields_data_.find(id);
+                EXPECT_NE(it, search_result.output_fields_data_.end());
+                if (it != search_result.output_fields_data_.end()) {
+                    verify(*it->second, id.get());
+                }
+            }
+        } else {
+            EXPECT_EQ(result->fields_data_size(), 2);
+            for (int i = 0; i < result->fields_data_size(); ++i) {
+                verify(result->fields_data(i), retrieve.field_ids_[i].get());
+            }
+        }
+        return bytes;
+    };
+    const auto single_bytes = run();
+    reader_ptr->table_ = multi_table;
+    EXPECT_EQ(run() - single_bytes, concat_bytes);
+    // A second request must combine again, rather than reuse stale parent data.
+    EXPECT_EQ(run() - single_bytes, concat_bytes);
+}
+
+TEST_P(ExternalTakeStructParentTest, EmptyPhysicalColumnFallsBack) {
+    auto info = BuildExternalSchema();
+    auto schema = info.schema;
+    auto field_id = info.int64_id;
+    auto empty = std::make_shared<arrow::ChunkedArray>(arrow::ArrayVector{},
+                                                       arrow::int64());
+    auto table = arrow::Table::Make(
+        arrow::schema({arrow::field("int64_col", arrow::int64())}), {empty});
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<ChunkedTakeResultReader>(table);
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+    query::RetrievePlan retrieve(schema);
+    query::Plan search(schema);
+    retrieve.field_ids_ = {field_id};
+    search.target_entries_ = {field_id};
+    const std::vector<int64_t> offsets{0, 1, 2, 3};
+    auto result = std::make_unique<proto::segcore::RetrieveResults>();
+    SearchResult search_result;
+    const bool ok =
+        GetParam() ? segment->TestTryTakeForSearch(
+                         &search, offsets.data(), offsets.size(), search_result)
+                   : segment->TryTakeForRetrieve(&retrieve,
+                                                 result,
+                                                 offsets.data(),
+                                                 offsets.size(),
+                                                 false,
+                                                 false);
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(reader_ptr->calls, 1);
+    EXPECT_TRUE(search_result.output_fields_data_.empty());
+    EXPECT_EQ(result->fields_data_size(), 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(RetrieveAndSearch,
+                         ExternalTakeStructParentTest,
+                         ::testing::Bool());
+
+}  // namespace

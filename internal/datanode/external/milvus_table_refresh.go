@@ -71,13 +71,13 @@ func (t *RefreshExternalCollectionTask) initializeMilvusTableFieldMapping() erro
 		return merr.Wrap(err, "resolve milvus-table source fields")
 	}
 	sourceFields := make(map[string]*schemapb.FieldSchema)
-	for _, field := range source.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(source) {
 		sourceFields[field.GetName()] = field
 	}
 	resolver := typeutil.NewStorageColumnResolver(target)
 	mapping := make(map[string]string)
 	columns := make([]string, 0, len(sourceFields))
-	for _, field := range target.GetFields() {
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
 		if !resolver.IsSourceDataField(field) {
 			continue
 		}
