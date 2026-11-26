@@ -73,10 +73,13 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.TotalLabel).Inc()
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
-	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
+	key := index.Key{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}
+	info := &index.IndexTaskInfo{
 		Cancel: taskCancel,
 		State:  commonpb.IndexState_InProgress,
-	}); oldInfo != nil {
+	}
+	if oldInfo := node.taskManager.LoadOrStoreIndexTask(key.ClusterID, key.TaskID, info); oldInfo != nil {
+		taskCancel()
 		// Node-internal dedup of a coordinator-dispatched build task: a duplicate
 		// is a scheduling race, not the user re-creating an index.
 		err := merr.WrapErrServiceInternalMsg("building index task existed, index=%s, buildID=%d", req.GetIndexName(), req.GetBuildID())
@@ -89,22 +92,25 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
-		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
+		taskCancel()
+		node.taskManager.RemoveIndexTask(key, info)
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
+		taskCancel()
+		node.taskManager.RemoveIndexTask(key, info)
 		return merr.Status(err), nil
 	}
 	// Reached only by a pre-CreateTask coordinator, which carries no resource
 	// estimate, so the task books zero.
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext, taskcommon.Resource{})
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, info, pluginContext, taskcommon.Resource{})
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		taskCancel()
 		task.Reset()
-		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
+		node.taskManager.RemoveIndexTask(key, info)
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
@@ -279,11 +285,14 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		req.TaskSlot = 64
 	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
-	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
+	key := index.Key{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}
+	info := &index.IndexTaskInfo{
 		Cancel:                taskCancel,
 		State:                 commonpb.IndexState_InProgress,
 		IndexStorePathVersion: req.GetIndexStorePathVersion(),
-	}); oldInfo != nil {
+	}
+	if oldInfo := node.taskManager.LoadOrStoreIndexTask(key.ClusterID, key.TaskID, info); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeIndexJob.String(),
 			fmt.Sprintf("building index task existed with %s-%d", req.GetClusterID(), req.GetBuildID()))
 		mlog.Warn(context.TODO(), "duplicated index build task", mlog.Err(err))
@@ -295,22 +304,25 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
-		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
+		taskCancel()
+		node.taskManager.RemoveIndexTask(key, info)
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
 
 	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetCollectionID())
 	if err != nil {
+		taskCancel()
+		node.taskManager.RemoveIndexTask(key, info)
 		return merr.Status(err), nil
 	}
 
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext, resource)
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, info, pluginContext, resource)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		taskCancel()
 		task.Reset()
-		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
+		node.taskManager.RemoveIndexTask(key, info)
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
@@ -349,21 +361,24 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
-	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
+	key := index.Key{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}
+	info := &index.AnalyzeTaskInfo{
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
-	}); oldInfo != nil {
+	}
+	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(key.ClusterID, key.TaskID, info); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeAnalyzeJob.String(),
 			fmt.Sprintf("analyze task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
 		mlog.Warn(context.TODO(), "duplicated analyze task", mlog.Err(err))
 		return merr.Status(err), nil
 	}
-	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager, pluginContext, resource)
+	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager, info, pluginContext, resource)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		taskCancel()
 		t.Reset()
-		node.taskManager.DeleteAnalyzeTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
+		node.taskManager.RemoveAnalyzeTask(key, info)
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil
@@ -397,10 +412,13 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
-	if oldInfo := node.taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &index.StatsTaskInfo{
+	key := index.Key{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}
+	info := &index.StatsTaskInfo{
 		Cancel: taskCancel,
 		State:  indexpb.JobState_JobStateInProgress,
-	}); oldInfo != nil {
+	}
+	if oldInfo := node.taskManager.LoadOrStoreStatsTask(key.ClusterID, key.TaskID, info); oldInfo != nil {
+		taskCancel()
 		err := merr.WrapErrTaskDuplicate(indexpb.JobType_JobTypeStatsJob.String(),
 			fmt.Sprintf("stats task already existed with %s-%d", req.GetClusterID(), req.GetTaskID()))
 		mlog.Warn(context.TODO(), "duplicated stats task", mlog.Err(err))
@@ -411,16 +429,17 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
-		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
+		taskCancel()
+		node.taskManager.RemoveStatsTask(key, info)
 		return merr.Status(err), nil
 	}
 
-	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm, pluginContext, resource)
+	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, info, cm, pluginContext, resource)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
 		taskCancel()
 		t.Reset()
-		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
+		node.taskManager.RemoveStatsTask(key, info)
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil

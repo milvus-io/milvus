@@ -1023,9 +1023,10 @@ PK; it cannot accept a read whose conflicting history was lost.
 TimeTick can reclaim idle-channel records without moving the boundary beyond the
 last actual forgotten write. Thus a Strong snapshot at the channel's last change
 remains valid after an arbitrarily long idle period, provided the independent WAL
-lifecycle and collection/transaction fences also permit it. TTL and the shared
-byte budget still bound retained PK memory; the boundary costs one uint64 per
-vchannel and is removed only with that channel's state.
+lifecycle and collection/transaction fences also permit it. When the last record
+expires, the index releases the maps and expiration heap. The next recorded write
+allocates storage on demand. The shared byte budget accounts for live entries, and
+the forgotten-write boundary is retained until the channel's state is removed.
 
 ### Recovery and term changes
 

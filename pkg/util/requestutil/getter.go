@@ -26,8 +26,10 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -300,4 +302,28 @@ func ParseMetricLabel(resp any, err error) (status string, cause string) {
 		}
 	}
 	return metrics.SuccessLabel, metrics.CauseNA
+}
+
+// SearchRequestNq returns the number of query rows of a search request as it
+// arrives. Nq is optional on the wire: the RESTful handlers and older clients
+// leave it 0 and the search task derives it later, so a request that does not
+// declare it is counted by what it carries: the rows of its placeholder group,
+// or its primary keys when it searches by primary key. Anything that reads the
+// count before the search task has run (the rate limiter, the running-request
+// registry, the access log of a request refused early) has to use this rather
+// than the field.
+//
+// A malformed placeholder group counts as 0 here; the search task rejects it.
+func SearchRequestNq(req *milvuspb.SearchRequest) int64 {
+	if nq := req.GetNq(); nq != 0 {
+		return nq
+	}
+	if ids := req.GetIds(); ids != nil {
+		return int64(typeutil.GetSizeOfIDs(ids))
+	}
+	rows, err := funcutil.CountPlaceholderGroupValues(req.GetPlaceholderGroup())
+	if err != nil {
+		return 0
+	}
+	return rows
 }

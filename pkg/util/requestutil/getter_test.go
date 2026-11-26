@@ -25,9 +25,11 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -742,4 +744,19 @@ func TestParseMetricLabelStatusDomainIsStable(t *testing.T) {
 			assert.Truef(t, knownCause.Contain(cause), "unknown cause %q", cause)
 		})
 	}
+}
+
+func TestSearchRequestNq(t *testing.T) {
+	group, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{
+		{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}},
+	}})
+	assert.NoError(t, err)
+
+	assert.EqualValues(t, 0, SearchRequestNq(nil))
+	assert.EqualValues(t, 7, SearchRequestNq(&milvuspb.SearchRequest{Nq: 7, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}}), "a declared nq is taken as is")
+	assert.EqualValues(t, 3, SearchRequestNq(&milvuspb.SearchRequest{SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}}))
+	assert.EqualValues(t, 2, SearchRequestNq(&milvuspb.SearchRequest{
+		SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}},
+	}))
+	assert.EqualValues(t, 0, SearchRequestNq(&milvuspb.SearchRequest{SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}}), "a malformed group counts as 0")
 }

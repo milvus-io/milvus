@@ -50,7 +50,7 @@ func GrpcAuthStreamInterceptor(authFunc grpc_auth.AuthFunc) grpc.StreamServerInt
 			newCtx, err = authFunc(ss.Context())
 		}
 		if err != nil {
-			hookutil.GetExtension().ReportAction(context.Background(), nil, &milvuspb.BoolResponse{
+			hookutil.GetExtension().ReportAction(ss.Context(), nil, &milvuspb.BoolResponse{
 				Status: merr.Status(err),
 			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return err
@@ -72,7 +72,7 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 			newCtx, err = authFunc(ctx)
 		}
 		if err != nil {
-			hookutil.GetExtension().ReportAction(context.Background(), req, &milvuspb.BoolResponse{
+			hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
 				Status: merr.Status(err),
 			}, err, info.FullMethod, hookutil.ActionAuthorize)
 			return nil, err

@@ -146,6 +146,28 @@ func NewRowParser(schema *schemapb.CollectionSchema, header []string, nullkey st
 				fmt.Sprintf("value of field is missed: '%s'", field.GetName()))
 		}
 	}
+
+	// A header that names no field of the collection cannot carry a row and is
+	// rejected up front instead of producing rows of nulls and defaults. A
+	// vector field used to make this impossible. Struct array columns count.
+	// With a dynamic field every column counts: Parse puts the columns that
+	// are not in the schema into the dynamic field, so they carry data, as
+	// the same keys do in a JSON row.
+	provided := 0
+	for _, name := range header {
+		if _, ok := name2Field[name]; ok {
+			provided++
+		} else if _, ok := name2StructField[name]; ok {
+			provided++
+		} else if dynamicField != nil {
+			provided++
+		} else if name == pkField.GetName() {
+			provided++
+		}
+	}
+	if provided == 0 {
+		return nil, merr.WrapErrImportFailed("the csv header provides no field of the collection")
+	}
 	return &rowParser{
 		nullkey:              nullkey,
 		name2Dim:             name2Dim,

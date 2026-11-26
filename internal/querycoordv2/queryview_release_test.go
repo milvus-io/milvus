@@ -292,17 +292,14 @@ func TestQueryViewRepeatedReleaseWaitsWithoutLoadConfig(t *testing.T) {
 	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100})
 	s.qviewsRuntime.loadConfigStore = &loadmgr.LoadConfigStore{}
 	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
-	for _, patch := range []*mockey.Mocker{
-		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build(),
-		mockey.Mock((*loadmgr.LoadConfigStore).Contains).Return(false).Build(),
-	} {
-		t.Cleanup(func() { patch.UnPatch() })
-	}
+	lock := mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build()
+	t.Cleanup(func() { lock.UnPatch() })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{CollectionID: 100})
+		_, err := s.broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{CollectionID: 100}, false)
+		done <- err
 	}()
 	select {
 	case err := <-done:

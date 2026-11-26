@@ -223,16 +223,21 @@ func createTestSnapshotData() *snapshotstorage.SnapshotData {
 
 func TestSnapshotCommitTimestampRoundTrip(t *testing.T) {
 	ctx := context.Background()
+	sizes := &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{100: {}, 101: {PayloadBytes: 42, ValidityBits: 3}}}
 	for _, commit := range []uint64{0, 300} {
 		for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
 			t.Run(fmt.Sprintf("%s/%d", layout, commit), func(t *testing.T) {
 				root := t.TempDir()
 				cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+				manifest := packed.MarshalManifestPath(path.Join(root, snapshotstorage.ExportedSnapshotFilesPath, "insert_log/2/10/20"), 1)
 				data := &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2},
 					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
 					Segments: []*datapb.SegmentDescription{
-						{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit},
+						{
+							SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit, NumOfRows: sizes.RowCount,
+							StorageVersion: storage.StorageV3, ManifestPath: manifest, FieldLogicalSizes: sizes,
+						},
 						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0},
 					},
 				}
@@ -243,6 +248,12 @@ func TestSnapshotCommitTimestampRoundTrip(t *testing.T) {
 				commits := make(map[int64]uint64)
 				for _, segment := range read.Segments {
 					commits[segment.SegmentId] = segment.CommitTimestamp
+					if segment.SegmentId == 20 {
+						require.True(t, proto.Equal(sizes, segment.GetFieldLogicalSizes()))
+						require.Equal(t, manifest, segment.GetManifestPath())
+					} else {
+						require.Nil(t, segment.GetFieldLogicalSizes())
+					}
 				}
 				require.Equal(t, map[int64]uint64{20: commit, 30: 0}, commits)
 			})

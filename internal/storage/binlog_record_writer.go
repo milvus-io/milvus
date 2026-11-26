@@ -468,6 +468,14 @@ type PackedManifestRecordWriter struct {
 	textRefsAsBinary bool
 }
 
+// GetFieldLogicalSizes reports only rows registered by a successful manifest commit.
+func (pw *PackedManifestRecordWriter) GetFieldLogicalSizes() *datapb.FieldLogicalSizes {
+	if pw.manifest == "" {
+		return nil
+	}
+	return pw.writer.GetFieldLogicalSizes()
+}
+
 func (pw *PackedManifestRecordWriter) Write(r Record) error {
 	if err := pw.initWriters(r); err != nil {
 		return err
@@ -702,6 +710,13 @@ type PackedTextManifestRecordWriter struct {
 	packedBinlogRecordWriterBase
 	writer            *packedTextBatchWriter
 	textColumnConfigs []packed.TextColumnConfig
+}
+
+func (pw *PackedTextManifestRecordWriter) GetFieldLogicalSizes() *datapb.FieldLogicalSizes {
+	if pw.manifest == "" {
+		return nil
+	}
+	return pw.writer.GetFieldLogicalSizes()
 }
 
 func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
