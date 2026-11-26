@@ -62,10 +62,12 @@ func IsDiskIndex(indexType IndexType) bool {
 }
 
 func IsScalarMmapIndex(indexType IndexType) bool {
-	return indexType == IndexINVERTED ||
+	return indexType == IndexSTLSORT ||
+		indexType == IndexINVERTED ||
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
+		indexType == IndexTRIE ||
 		indexType == IndexNGRAM
 }
 

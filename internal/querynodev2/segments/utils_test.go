@@ -153,22 +153,29 @@ func TestIsIndexMmapEnable(t *testing.T) {
 		assert.True(t, enable)
 	})
 
-	t.Run("mmap scalar index param not supported", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key, "true")
-		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key)
-		enable := isIndexMmapEnable(&schemapb.FieldSchema{
-			DataType: schemapb.DataType_String,
-		}, &querypb.FieldIndexInfo{
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.IndexTypeKey,
-					Value: "STL_SORT",
+	for _, tc := range []struct {
+		indexType string
+		dataType  schemapb.DataType
+		enabled   bool
+	}{
+		{"STL_SORT", schemapb.DataType_Int64, true},
+		{"TRIE", schemapb.DataType_VarChar, true},
+		{"RTREE", schemapb.DataType_Geometry, false},
+	} {
+		t.Run("mmap scalar index param "+tc.indexType, func(t *testing.T) {
+			paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key, "true")
+			defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarIndex.Key)
+			enable := isIndexMmapEnable(&schemapb.FieldSchema{
+				DataType: tc.dataType,
+			}, &querypb.FieldIndexInfo{
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: tc.indexType},
+					{Key: common.MmapEnabledKey, Value: "true"},
 				},
-				{Key: common.MmapEnabledKey, Value: "true"},
-			},
+			})
+			assert.Equal(t, tc.enabled, enable)
 		})
-		assert.False(t, enable)
-	})
+	}
 }
 
 func TestIsDataMmmapEnable(t *testing.T) {
