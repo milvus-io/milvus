@@ -592,6 +592,9 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
+		if field.GetElementNullable() {
+			return common.StructSubFieldRow(field, arr, 0)
+		}
 		maxCapacity, err := parameterutil.GetMaxCapacity(field)
 		if err != nil {
 			return nil, err
