@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1391,6 +1392,8 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             t.Nq,
 		Exec:           t.searchShard,
+		StatsClass:     "search/" + t.ConsistencyLevel.String(),
+		Hedgeable:      true,
 	}
 	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
@@ -1665,7 +1668,9 @@ func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
-		t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
+			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
@@ -1681,6 +1686,9 @@ func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
 		}
 		return errors.Wrapf(statusErr, "fail to search on QueryNode %d", nodeID)
+	}
+	if !shardclient.CommitAttempt(ctx) {
+		return shardclient.ErrAttemptSuperseded
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)

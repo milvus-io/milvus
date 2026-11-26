@@ -2700,7 +2700,11 @@ type proxyConfig struct {
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
-	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
+	ReplicaSelectionPolicy            ParamItem `refreshable:"true"`
+	LatencyWeightedDecay              ParamItem `refreshable:"true"`
+	LatencyWeightedMinShare           ParamItem `refreshable:"true"`
+	HedgingEnabled                    ParamItem `refreshable:"true"`
+	HedgingMinDelay                   ParamItem `refreshable:"true"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
 	CostMetricsExpireTime             ParamItem `refreshable:"false"`
 	CheckWorkloadRequestNum           ParamItem `refreshable:"false"`
@@ -3206,9 +3210,46 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.replicaSelectionPolicy",
 		Version:      "2.3.0",
 		DefaultValue: "look_aside",
-		Doc:          "replica selection policy in multiple replicas load balancing, support round_robin and look_aside",
+		Doc:          "Replica selection policy in multiple replicas load balancing: round_robin, look_aside, or latency_weighted. Live changes apply to new channel requests.",
+		Export:       true,
 	}
 	p.ReplicaSelectionPolicy.Init(base.mgr)
+
+	p.LatencyWeightedDecay = ParamItem{
+		Key:          "proxy.latencyWeighted.decay",
+		Version:      "3.0.0",
+		DefaultValue: "10s",
+		Doc:          "Time constant of the decay of the latency statistics kept per channel, request class and replica: a sample, and a failure penalty, weigh 1/e after this long.",
+		Export:       true,
+	}
+	p.LatencyWeightedDecay.Init(base.mgr)
+
+	p.LatencyWeightedMinShare = ParamItem{
+		Key:          "proxy.latencyWeighted.minShare",
+		Version:      "3.0.0",
+		DefaultValue: "0.001",
+		Doc:          "Minimum share among eligible replicas for a channel and request class, so that a slow or failing replica keeps being probed. Hedging may cover probes when another replica is eligible.",
+		Export:       true,
+	}
+	p.LatencyWeightedMinShare.Init(base.mgr)
+
+	p.HedgingEnabled = ParamItem{
+		Key:          "proxy.hedging.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per channel request across all retry rounds.",
+		Export:       true,
+	}
+	p.HedgingEnabled.Init(base.mgr)
+
+	p.HedgingMinDelay = ParamItem{
+		Key:          "proxy.hedging.minDelay",
+		Version:      "3.0.0",
+		DefaultValue: "200ms",
+		Doc:          "Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).",
+		Export:       true,
+	}
+	p.HedgingMinDelay.Init(base.mgr)
 
 	p.CheckQueryNodeHealthInterval = ParamItem{
 		Key:          "proxy.checkQueryNodeHealthInterval",
@@ -4454,6 +4495,8 @@ type queryNodeConfig struct {
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
+	MaxQueueWaitRatio     ParamItem `refreshable:"true"`
+	MaxQueueWait          ParamItem `refreshable:"true"`
 	MaxReadConcurrency    ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
 	MaxGroupNQ            ParamItem `refreshable:"true"`
@@ -5509,6 +5552,26 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	p.MaxQueueWaitRatio = ParamItem{
+		Key:          "queryNode.scheduler.maxQueueWaitRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0",
+		Doc: `The share of the time a read task has left when it is queued that it may wait in the queue.
+A task that would wait longer is refused as too many requests, so that the Proxy can turn to another replica.
+0 disables the limit: a task waits until it is executed or its deadline passes.`,
+		Export: true,
+	}
+	p.MaxQueueWaitRatio.Init(base.mgr)
+
+	p.MaxQueueWait = ParamItem{
+		Key:          "queryNode.scheduler.maxQueueWait",
+		Version:      "3.0.0",
+		DefaultValue: "1s",
+		Doc:          "The longest a read task may wait in the queue when maxQueueWaitRatio is positive, whatever its deadline, and what a task without a deadline may wait. It supports duration strings such as 500ms and 1s.",
+		Export:       true,
+	}
+	p.MaxQueueWait.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",

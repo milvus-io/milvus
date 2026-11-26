@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -47,6 +49,15 @@ type ChannelWorkload struct {
 	Nq              int64
 	Exec            ExecuteFunc
 	PreferredNodeID int64
+	// StatsClass separates latency observations by request kind and consistency.
+	StatsClass string
+	// Hedgeable allows a concurrent speculative attempt. Exec must publish
+	// through CommitAttempt. Hedging and overload failover share one extra slot.
+	Hedgeable bool
+	// OverloadRetryable allows one serial failover after an overload refusal,
+	// without allowing concurrent execution. Exec must not publish partial
+	// results or perform writes before returning an overload error.
+	OverloadRetryable bool
 	// ResourceGroup, when non-empty, restricts selectNode to the leaders whose
 	// replica lives in that resource group (NodeInfo.ResourceGroup). It scopes
 	// the candidates of this one channel only -- the channel itself is still
@@ -68,11 +79,16 @@ type ChannelWorkload struct {
 }
 
 type CollectionWorkLoad struct {
-	Db             string
-	CollectionName string
-	CollectionID   int64
-	Nq             int64
-	Exec           ExecuteFunc
+	// SkipChannel omits requery channels with no hits before replica selection.
+	SkipChannel       func(string) bool
+	Db                string
+	CollectionName    string
+	CollectionID      int64
+	Nq                int64
+	Exec              ExecuteFunc
+	StatsClass        string
+	Hedgeable         bool
+	OverloadRetryable bool
 	// ResourceGroup is copied onto every ChannelWorkload the fan-out creates,
 	// through ForChannel. The fan-out itself stays unscoped: every shard is
 	// visited, and a shard the group cannot serve fails its channel rather
@@ -89,14 +105,17 @@ type CollectionWorkLoad struct {
 // sources; the caller keeps whatever it did before.
 func (w CollectionWorkLoad) ForChannel(channel string, preferredNodeID int64) ChannelWorkload {
 	return ChannelWorkload{
-		Db:              w.Db,
-		CollectionName:  w.CollectionName,
-		CollectionID:    w.CollectionID,
-		Channel:         channel,
-		Nq:              w.Nq,
-		Exec:            w.Exec,
-		PreferredNodeID: preferredNodeID,
-		ResourceGroup:   w.ResourceGroup,
+		Db:                w.Db,
+		CollectionName:    w.CollectionName,
+		CollectionID:      w.CollectionID,
+		Channel:           channel,
+		Nq:                w.Nq,
+		Exec:              w.Exec,
+		PreferredNodeID:   preferredNodeID,
+		ResourceGroup:     w.ResourceGroup,
+		StatsClass:        w.StatsClass,
+		Hedgeable:         w.Hedgeable,
+		OverloadRetryable: w.OverloadRetryable,
 	}
 }
 
@@ -110,14 +129,16 @@ type LBPolicy interface {
 }
 
 const (
-	RoundRobin = "round_robin"
-	LookAside  = "look_aside"
+	RoundRobin      = "round_robin"
+	LookAside       = "look_aside"
+	LatencyWeighted = "latency_weighted"
 )
 
 type LBPolicyImpl struct {
 	getBalancer    func() LBBalancer
 	clientMgr      ShardClientMgr
 	balancerMap    map[string]LBBalancer
+	hedging        *hedgeTracker
 	retryOnReplica int
 	blacklist      *ChannelBlacklist
 }
@@ -126,9 +147,10 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 	balancerMap := make(map[string]LBBalancer)
 	balancerMap[LookAside] = NewLookAsideBalancer(clientMgr)
 	balancerMap[RoundRobin] = NewRoundRobinBalancer()
+	balancerMap[LatencyWeighted] = NewLatencyWeightedBalancer(clientMgr)
 
-	balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 	getBalancer := func() LBBalancer {
+		balancePolicy := params.Params.ProxyCfg.ReplicaSelectionPolicy.GetValue()
 		if _, ok := balancerMap[balancePolicy]; !ok {
 			return balancerMap[LookAside]
 		}
@@ -141,6 +163,7 @@ func NewLBPolicyImpl(clientMgr ShardClientMgr) *LBPolicyImpl {
 		getBalancer:    getBalancer,
 		clientMgr:      clientMgr,
 		balancerMap:    balancerMap,
+		hedging:        newHedgeTracker(),
 		retryOnReplica: retryOnReplica,
 		blacklist:      NewChannelBlacklist(),
 	}
@@ -150,6 +173,7 @@ func (lb *LBPolicyImpl) Start(ctx context.Context) {
 	for _, lb := range lb.balancerMap {
 		lb.Start(ctx)
 	}
+	lb.hedging.Start(ctx)
 	lb.blacklist.Start()
 }
 
@@ -351,6 +375,13 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	// stamped on here, at the load balancer's own entry, so that no call site
 	// can silently omit it. Empty with no provider installed.
 	workload = scopedChannelWorkload(ctx, workload)
+	// Under every policy, a replica that refuses the request as overloaded is
+	// not asked again by the RPC client, see isOverloadErr.
+	ctx = grpcclient.WithFailFastOnOverload(ctx)
+	balancer, lw := snapshotBalancer(lb.getBalancer())
+	if lw != nil {
+		return lb.executeWeightedWithRetry(ctx, workload, balancer, lw)
+	}
 	log := mlog.With(
 		mlog.Int64("collectionID", workload.CollectionID),
 		mlog.String("channelName", workload.Channel),
@@ -359,7 +390,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 	var err error
 	var shardLeaders []NodeInfo
 	requestExcludedNodes := typeutil.NewUniqueSet()
-	tryExecute := func() (bool, error) {
+	var overloadErr error
+	refused := false
+	extraUsed := false
+	tryOnce := func() (bool, error) {
+		refused = false
 		// Get fresh blacklist on each retry to include newly blacklisted nodes
 		blacklist := lb.blacklist.GetBlacklistedNodes(workload.Channel)
 		// The "every leader excluded" recovery is judged on the SCOPED leader
@@ -370,7 +405,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		// poll through a group coming up. shardLeaders itself stays unscoped
 		// (it is also the retry budget, see below).
 		scopedLeaders := FilterByResourceGroup(shardLeaders, workload.ResourceGroup)
-		if len(scopedLeaders) > 0 && requestExcludedNodes.Len() >= len(scopedLeaders) {
+		if overloadErr == nil && len(scopedLeaders) > 0 && requestExcludedNodes.Len() >= len(scopedLeaders) {
 			shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, false)
 			if err != nil {
 				log.Warn(ctx, "failed to refresh shard leaders", mlog.Err(err))
@@ -395,8 +430,17 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 		}
 		excludeNodes := typeutil.NewUniqueSet(blacklist...)
 		excludeNodes.Insert(requestExcludedNodes.Collect()...)
-		balancer := lb.getBalancer()
-		targetNode, selectedByBalancer, err := lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		var targetNode NodeInfo
+		var selectedByBalancer bool
+		if overloadErr != nil {
+			targetNode, selectedByBalancer, err = lb.selectAfterOverload(ctx, balancer, nil, workload, shardLeaders, &excludeNodes)
+			if err != nil {
+				return false, overloadErr
+			}
+			overloadErr = nil
+		} else {
+			targetNode, selectedByBalancer, err = lb.selectNode(ctx, balancer, workload, &excludeNodes)
+		}
 		if err != nil {
 			log.Warn(ctx, "failed to select node for shard",
 				mlog.Int64("nodeID", targetNode.NodeID),
@@ -434,6 +478,22 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			}
 			return true, err
 		}
+		start := time.Now()
+		if workload.Hedgeable && !extraUsed {
+			if delay, enabled := lb.hedging.HedgeDelay(hedgeStatsKey(workload)); enabled {
+				again, hedged, err := lb.executeHedged(ctx, workload, balancer, nil, targetNode, selectedByBalancer, start, delay, &requestExcludedNodes, &excludeNodes)
+				if hedged {
+					extraUsed = true
+				}
+				if err != nil {
+					lastErr = err
+					if isOverloadErr(err) {
+						overloadErr, refused = err, true
+					}
+				}
+				return again, err
+			}
+		}
 		// cancel work load which assign to the target node
 		if selectedByBalancer {
 			defer balancer.CancelWorkload(targetNode.NodeID, workload.Nq)
@@ -444,9 +504,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// Caller cancellation must not blacklist the node. Deadline expiry
-			// can indicate a stalled delegator and keeps the existing policy.
-			if errors.Is(ctx.Err(), context.Canceled) {
+			// A local expiry before dispatch says nothing about node health.
+			if ctx.Err() != nil {
 				return false, err
 			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
@@ -463,7 +522,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			// Check the caller context: a gRPC cancellation error does not
 			// unwrap to context.Canceled. Internal cancellation and deadline
 			// expiry keep the existing blacklist policy.
-			if errors.Is(ctx.Err(), context.Canceled) {
+			if errors.Is(ctx.Err(), context.Canceled) || grpcclient.IsRequestNotDispatched(err) {
 				return false, err
 			}
 			// An input error is the request's own fault: re-dispatching it to
@@ -479,11 +538,18 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				lb.blacklist.Add(workload.Channel, targetNode.NodeID)
 			}
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode.NodeID, workload.Channel)
+			if isOverloadErr(err) {
+				overloadErr, refused = lastErr, true
+			}
 			return true, lastErr
 		}
 
+		if workload.Hedgeable {
+			lb.hedging.ObserveRequest(hedgeStatsKey(workload), time.Since(start))
+		}
 		return true, nil
 	}
+	tryExecute := lb.executeOverloadAware(ctx, workload, &refused, &extraUsed, &overloadErr, tryOnce)
 
 	shardLeaders, err = lb.GetShard(ctx, workload.Db, workload.CollectionName, workload.CollectionID, workload.Channel, true)
 	if err != nil {
@@ -528,12 +594,20 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return merr.WrapErrCollectionNotLoaded(workload.CollectionID)
 	}
 
+	if workload.SkipChannel != nil {
+		channelList = lo.Filter(channelList, func(channel string, _ int) bool {
+			return !workload.SkipChannel(channel)
+		})
+	}
+
 	// Single channel fast path: skip errgroup/goroutine overhead
 	if len(channelList) == 1 {
 		return lb.ExecuteWithRetry(ctx, workload.ForChannel(channelList[0], preferredNodeID(workload, channelList[0])))
 	}
 
-	wg, _ := errgroup.WithContext(ctx)
+	// Keep dispatched RPCs on the caller context during mixed-version upgrades.
+	// Older QueryNodes share cancellation across merged Search requests.
+	var wg errgroup.Group
 	for _, channel := range channelList {
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, workload.ForChannel(channel, preferredNodeID(workload, channel)))
@@ -621,5 +695,6 @@ func (lb *LBPolicyImpl) Close() {
 	for _, lb := range lb.balancerMap {
 		lb.Close()
 	}
+	lb.hedging.Close()
 	lb.blacklist.Close()
 }

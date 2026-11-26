@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -83,7 +84,9 @@ type QueryTask struct {
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
 	preferredNodes     map[string]int64
 	fastSkip           bool
-	node               taskmodel.TaskNode
+	// The level after applying the collection default, used for latency statistics.
+	resolvedConsistencyLevel commonpb.ConsistencyLevel
+	node                     taskmodel.TaskNode
 
 	internalTask         bool
 	reQuery              bool
@@ -962,6 +965,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+	t.resolvedConsistencyLevel = consistencyLevel
 
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
@@ -1022,6 +1026,9 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		CollectionName: t.collectionName,
 		Nq:             1,
 		Exec:           t.queryShard,
+		SkipChannel:    t.skipRequeryChannel,
+		StatsClass:     "query/" + t.resolvedConsistencyLevel.String(),
+		Hedgeable:      true,
 		PreferredNodes: t.preferredNodes,
 	}
 	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
@@ -1188,6 +1195,11 @@ func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery
 }
 
+func (t *QueryTask) skipRequeryChannel(channel string) bool {
+	_, present := t.channelsMvcc[channel]
+	return t.fastSkip && len(t.channelsMvcc) > 0 && !present
+}
+
 func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
 	ctx = retry.WithMaxAttemptsContext(ctx, 1)
 	needOverrideMvcc := false
@@ -1220,7 +1232,9 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
@@ -1238,6 +1252,9 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 
 	log.Debug(ctx, "get query result")
+	if !shardclient.CommitAttempt(ctx) {
+		return shardclient.ErrAttemptSuperseded
+	}
 	t.resultBuf.Insert(result)
 	if t.actualChannelsMvcc != nil {
 		t.actualChannelsMvcc.Insert(channel, result.GetMvccTimestamp())
