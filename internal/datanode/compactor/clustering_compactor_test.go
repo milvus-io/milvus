@@ -111,7 +111,8 @@ func (s *ClusteringCompactionTaskSuite) setupTest() {
 	}
 
 	s.plan = &datapb.CompactionPlan{
-		PlanID: 999,
+		PlanID:    999,
+		StartTime: time.Now().Unix(),
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID:        CollectionID,
 			SegmentID:           100,
