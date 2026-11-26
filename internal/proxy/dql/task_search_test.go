@@ -169,7 +169,7 @@ func TestSearchStreamInitialCapacityAcrossNQ(t *testing.T) {
 	for _, tc := range []struct {
 		factor float64
 		want   int
-	}{{1, 1024}, {0.1, 800}} {
+	}{{1, 8000}, {0.5, 4000}, {0.1, 800}} {
 		stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{chunk}}
 		result, _, err := (&SearchTask{preAllocFactor: tc.factor}).consumeSearchResultStream(stream, request, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
 		require.NoError(t, err)

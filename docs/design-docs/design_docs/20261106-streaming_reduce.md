@@ -105,7 +105,7 @@ not resume from a partial position. See [Search](../../../internal/proxy/dql/tas
 The previous keys `proxy.queryView.enableReduceStream` and
 `proxy.queryView.reduceStreamChunkBytes` remain supported. The allocation factor
 controls only Proxy output capacity, not the result limit or output quota:
-reserve `min(1024, ceil(requestedRows * factor))` rows initially. For Search,
+reserve `ceil(requestedRows * factor)` rows initially. The default reserves the full requested page. For Search,
 the estimate covers all NQ combined; for unbounded Query, use the first nonempty
 Chunk's row count instead of a limit.
 

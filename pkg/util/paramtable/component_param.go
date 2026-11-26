@@ -3759,7 +3759,7 @@ Disabled if the value is less or equal to 0.`,
 		Key:          "proxy.queryView.reduceStream.preAllocFactor",
 		Version:      "3.1.0",
 		DefaultValue: "1",
-		Doc:          "Fraction of the requested rows to reserve for a streaming result, capped at 1024 rows. Use 0 for no initial reservation. Invalid values use 1.",
+		Doc:          "Fraction of the requested rows to reserve initially, rounded up. Use 0 for no initial reservation or 1 for the full page. Invalid values use 1.",
 		Export:       true,
 		Formatter: func(value string) string {
 			factor, err := strconv.ParseFloat(value, 64)

@@ -137,7 +137,9 @@ type fakeLegacyQueryRecv struct {
 func TestStreamResultPreallocation(t *testing.T) {
 	require.EqualValues(t, 0, initialStreamResultRows(16384, 0))
 	require.EqualValues(t, 3, initialStreamResultRows(10, 0.25))
-	require.EqualValues(t, 1024, initialStreamResultRows(16384, 1))
+	require.EqualValues(t, 1639, initialStreamResultRows(16384, 0.1))
+	require.EqualValues(t, 16384, initialStreamResultRows(16384, 1))
+	require.Equal(t, int64(1<<63-1), initialStreamResultRows(1<<63-1, 1))
 
 	field := testFloatVectorFieldData("v", []float32{1, 2}, 2)
 	fields := []*schemapb.FieldData{field}
@@ -172,10 +174,18 @@ func TestQueryStreamVectorPageGrowth(t *testing.T) {
 }
 
 func BenchmarkConsumeQueryResultStreamFloatVector(b *testing.B) {
+	for _, factor := range []float64{0, 0.0625, 0.1, 0.5, 1} {
+		b.Run(fmt.Sprintf("factor=%g", factor), func(b *testing.B) {
+			benchmarkQueryResultStreamFloatVector(b, factor)
+		})
+	}
+}
+
+func benchmarkQueryResultStreamFloatVector(b *testing.B, factor float64) {
 	const dim, chunkRows, limit = 1536, 42, 16384
-	for _, rows := range []int{1, 1024, 1025, limit} {
+	for _, rows := range []int{1, 1024, 1025, limit / 2, limit} {
 		b.Run(fmt.Sprintf("rows=%d", rows), func(b *testing.B) {
-			task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: limit}, preAllocFactor: 1}
+			task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: limit}, preAllocFactor: factor}
 			data := make([]float32, rows*dim)
 			for i := range data {
 				data[i] = float32(i % 8191)

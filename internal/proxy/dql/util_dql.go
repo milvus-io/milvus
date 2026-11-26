@@ -52,7 +52,10 @@ const (
 
 // The requested page is an upper bound, not an estimate of how many rows match.
 func initialStreamResultRows(rows int64, factor float64) int64 {
-	return int64(min(1024, math.Ceil(float64(rows)*factor)))
+	if factor == 1 { // Keep the exact limit rather than rounding it through float64.
+		return rows
+	}
+	return int64(math.Ceil(float64(rows) * factor))
 }
 
 // isAlpha returns true if the byte is an ASCII letter.
