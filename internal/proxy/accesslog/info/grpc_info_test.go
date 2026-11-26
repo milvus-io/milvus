@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -312,6 +313,20 @@ func (s *GrpcAccessInfoSuite) TestNQ() {
 		}},
 	}
 	s.Equal("[\"10\", \"10\"]", Get(s.info, "$nq")[0])
+
+	// A request that does not declare nq is counted by what it carries, so the
+	// line of a request refused before the search task still shows its rows.
+	group, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{
+		{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}},
+	}})
+	s.Require().NoError(err)
+	s.info.req = &milvuspb.SearchRequest{SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}}
+	s.Equal("3", Get(s.info, "$nq")[0])
+
+	s.info.req = &milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{{SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}}, {Nq: nq}},
+	}
+	s.Equal("[\"3\", \"10\"]", Get(s.info, "$nq")[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestSearchParams() {

@@ -3291,7 +3291,11 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 		StorageVersion:   storage.StorageV3,
 		ManifestPath:     manifestPath,
 		ManifestHasIndex: proto.Bool(false),
-		InsertBinlogs:    []*datapb.FieldBinlog{},
+		NumOfRows:        3,
+		FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{
+			100: {}, 101: {PayloadBytes: 9, ValidityBits: 3},
+		}},
+		InsertBinlogs: []*datapb.FieldBinlog{},
 	}
 
 	target := &datapb.CopySegmentTarget{
@@ -3317,9 +3321,11 @@ func TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs(t *testing.T) {
 		nil,
 	)
 
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, int64(0), result.ImportedRows)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 3, result.ImportedRows)
+	assert.True(t, proto.Equal(source.GetFieldLogicalSizes(), result.GetFieldLogicalSizes()))
+	assert.NotSame(t, source.FieldLogicalSizes.Fields[100], result.FieldLogicalSizes.Fields[100])
 	assert.Len(t, copiedFiles, 1)
 	assert.NotEmpty(t, result.ManifestPath)
 	assert.NotNil(t, result.ManifestIndexRewritten)

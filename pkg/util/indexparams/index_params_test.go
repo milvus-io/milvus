@@ -620,3 +620,104 @@ func TestAppendPrepareInfo_parse(t *testing.T) {
 		assert.Equal(t, indexParams["adapt_for_cpu"], "true")
 	})
 }
+
+func TestAppendPrepareLoadParamsOverride(t *testing.T) {
+	for _, index := range []struct {
+		name string
+		key  string
+	}{
+		{name: "GPU_CAGRA", key: "adapt_for_cpu"},
+		{name: "GPU_CUVS_CAGRA", key: "adapt_for_cpu"},
+		{name: "HNSW", key: "mmap.enabled"},
+	} {
+		for _, test := range []struct {
+			name     string
+			stored   string
+			load     string
+			expected string
+		}{
+			{name: "enable at load", stored: "false", load: "true", expected: "true"},
+			{name: "disable at load", stored: "true", load: "false", expected: "false"},
+			{name: "keep enabled", stored: "true", load: "true", expected: "true"},
+			{name: "keep disabled", stored: "false", load: "false", expected: "false"},
+			{name: "add load option", load: "true", expected: "true"},
+			{name: "no load override", stored: "true", expected: "true"},
+			{name: "no option"},
+		} {
+			t.Run(index.name+"/"+test.name, func(t *testing.T) {
+				var params paramtable.ComponentParam
+				params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+				params.Save(params.AutoIndexConfig.Enable.Key, "false")
+				loadKey := params.KnowhereConfig.IndexParam.KeyPrefix + index.name + ".load." + index.key
+				params.Remove(loadKey)
+				if test.load != "" {
+					params.Save(loadKey, test.load)
+				}
+				indexParams := map[string]string{common.IndexTypeKey: index.name, "dim": "32"}
+				if test.stored != "" {
+					indexParams[index.key] = test.stored
+				}
+				assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+				assert.Equal(t, test.expected, indexParams[index.key])
+				assert.Equal(t, "32", indexParams["dim"])
+				// Resource estimation and actual loading may prepare the same params again.
+				assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+				assert.Equal(t, test.expected, indexParams[index.key])
+			})
+		}
+	}
+}
+
+func TestAppendPrepareLoadParamsCloudPrecedence(t *testing.T) {
+	t.Run("auto index load configuration", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.KnowhereConfig.IndexParam.KeyPrefix+"GPU_CAGRA.load.adapt_for_cpu", "true")
+		for _, test := range []struct {
+			name     string
+			prepare  string
+			load     string
+			expected string
+		}{
+			{name: "load overrides prepare and Knowhere", prepare: `{"adapt_for_cpu":"true"}`, load: `{"adapt_for_cpu":"false"}`, expected: "false"},
+			{name: "prepare overrides Knowhere", prepare: `{"adapt_for_cpu":"false"}`, load: `{}`, expected: "false"},
+			{name: "cloud enables CPU load", prepare: `{}`, load: `{"adapt_for_cpu":"true"}`, expected: "true"},
+			{name: "Knowhere fallback", prepare: `{}`, load: `{}`, expected: "true"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				params.Save(params.AutoIndexConfig.PrepareParams.Key, test.prepare)
+				params.Save(params.AutoIndexConfig.LoadAdaptParams.Key, test.load)
+				for _, build := range []string{"false", "true"} {
+					indexParams := map[string]string{common.IndexTypeKey: "GPU_CAGRA", "adapt_for_cpu": build}
+					expected := test.expected
+					assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+					assert.Equal(t, expected, indexParams["adapt_for_cpu"])
+					assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+					assert.Equal(t, expected, indexParams["adapt_for_cpu"])
+				}
+			})
+		}
+	})
+
+	t.Run("load settings override stored parameters", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.AutoIndexConfig.PrepareParams.Key, `{"cloud_key":"prepare"}`)
+		params.Save(params.AutoIndexConfig.LoadAdaptParams.Key, `{"cloud_key":"load"}`)
+		prefix := params.KnowhereConfig.IndexParam.KeyPrefix + "HNSW.load."
+		params.Save(prefix+"cloud_key", "default")
+		params.Save(prefix+"explicit_key", "default")
+		params.Save(prefix+"missing_key", "default")
+		indexParams := map[string]string{
+			common.IndexTypeKey: "HNSW",
+			"cloud_key":         "index",
+			"explicit_key":      "index",
+		}
+		assert.NoError(t, AppendPrepareLoadParams(&params, indexParams))
+		assert.Equal(t, "load", indexParams["cloud_key"])
+		assert.Equal(t, "default", indexParams["explicit_key"])
+		assert.Equal(t, "default", indexParams["missing_key"])
+	})
+}
