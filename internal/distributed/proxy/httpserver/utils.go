@@ -5024,7 +5024,13 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	metaCache := getProxyMetaCache(pxy)
 	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
-		return nil, err
+		// Failing to resolve the names in the request is not a rate limit
+		// decision. Let the request through, as the gRPC rate limit
+		// interceptor does, so that the Proxy method reports the real error
+		// (for example partition not found) instead of the caller reporting
+		// a rate limit rejection.
+		mlog.Warn(ctx, "failed to get request info when check limiter", mlog.Err(err))
+		return nil, nil
 	}
 	if n == 0 {
 		return nil, nil
