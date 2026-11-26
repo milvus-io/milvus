@@ -157,23 +157,20 @@ func (p *FakeMetaStore) Put(key, value string) {
 	p.kv[key] = value
 }
 
-// PutPChannelMeta writes the streamingcoord pchannel meta of pchannel with term
-// and state, without a predicate.
-func (p *FakeMetaStore) PutPChannelMeta(pchannel string, term int64, state streamingpb.PChannelMetaState) {
-	b, err := proto.Marshal(&streamingpb.PChannelMeta{
-		Channel: &streamingpb.PChannelInfo{Name: pchannel, Term: term},
-		State:   state,
-	})
+func (p *FakeMetaStore) putTopology(topology *streamingpb.WALReplicaTopology) {
+	b, err := proto.Marshal(topology)
 	if err != nil {
 		panic(err)
 	}
-	p.Put(streamingcoord.BuildPChannelInfoPath(pchannel), string(b))
+	p.Put(streamingcoord.BuildPChannelInfoPath(topology.Pchannel), string(b))
 }
 
-// AssignPChannel writes the streamingcoord pchannel meta of pchannel in the
-// assigned state at term, without a predicate.
+// AssignPChannel stores a desired topology with one writer.
 func (p *FakeMetaStore) AssignPChannel(pchannel string, term int64) {
-	p.PutPChannelMeta(pchannel, term, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED)
+	p.putTopology(&streamingpb.WALReplicaTopology{
+		Pchannel: pchannel, Revision: term, WriterReplicaId: 1, WriterTerm: term,
+		Members: []*streamingpb.WALReplicaPlacement{{NodeId: 1, WalReplicaId: 1}},
+	})
 }
 
 // List returns all keys with prefix and their values.

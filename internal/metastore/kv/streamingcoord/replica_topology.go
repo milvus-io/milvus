@@ -74,3 +74,28 @@ func (c *ReplicaTopologyCatalog) Get(ctx context.Context, name string) (*streami
 	}
 	return t, nil
 }
+
+// LoadAssignedWriterTerm returns the desired writer term and a predicate for the
+// exact stored topology. A missing or closed topology grants no writer term.
+func LoadAssignedWriterTerm(ctx context.Context, name string, load func(context.Context, string) (string, bool, error)) (int64, predicates.Predicate, error) {
+	key := BuildPChannelInfoPath(name)
+	raw, found, err := load(ctx, key)
+	if err != nil || !found {
+		return 0, nil, err
+	}
+
+	var topology streamingpb.WALReplicaTopology
+	if err := proto.Unmarshal([]byte(raw), &topology); err != nil {
+		return 0, nil, merr.WrapErrDataIntegrity(err, "decode WAL replica topology for %s", name)
+	}
+	if topology.Pchannel != name || topology.Revision <= 0 {
+		return 0, nil, merr.WrapErrDataIntegrityMsg("invalid WAL replica topology for %s", name)
+	}
+	if topology.WriterReplicaId == 0 {
+		return 0, nil, nil
+	}
+	if topology.WriterTerm <= 0 {
+		return 0, nil, merr.WrapErrDataIntegrityMsg("invalid writer term %d for %s", topology.WriterTerm, name)
+	}
+	return topology.WriterTerm, predicates.ValueEqual(key, raw), nil
+}

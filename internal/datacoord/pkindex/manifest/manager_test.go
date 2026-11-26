@@ -169,16 +169,26 @@ func TestCheckPChannelTermPredicate(t *testing.T) {
 	key := streamingcoord.BuildPChannelInfoPath(pch)
 	raw, _, err := p.Load(ctx, key)
 	require.NoError(t, err)
+	// A repeated scalar decodes to its last value. Re-encoding the topology
+	// would lose the earlier revision and invalidate the transaction predicate.
+	earlierRevision, err := proto.Marshal(&streamingpb.WALReplicaTopology{Revision: 1})
+	require.NoError(t, err)
+	stored := string(earlierRevision) + raw
+	p.Put(key, stored)
 
 	pred, err := checkPChannelTerm(ctx, p, pch, 3)
 	require.NoError(t, err)
 	assert.Equal(t, key, pred.Key())
-	assert.True(t, pred.IsTrue(raw))
+	assert.True(t, pred.IsTrue(stored))
+	assert.False(t, pred.IsTrue(raw))
 
-	p.PutPChannelMeta(pch, 3, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE)
+	p.putTopology(&streamingpb.WALReplicaTopology{Pchannel: pch, Revision: 4, WriterTerm: 3})
 	changed, _, err := p.Load(ctx, key)
 	require.NoError(t, err)
 	assert.False(t, pred.IsTrue(changed))
+	guard, err := checkPChannelTerm(ctx, p, pch, 3)
+	require.ErrorIs(t, err, ErrTermNotAssigned)
+	require.Nil(t, guard)
 }
 
 // The pchannel meta does not decode, has term 0, or cannot be read.
@@ -190,7 +200,7 @@ func TestPChannelMetaLoadErrors(t *testing.T) {
 	_, err := m.CommitFlush(ctx, flush(3, 10))
 	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 
-	zeroTerm, err := proto.Marshal(&streamingpb.PChannelMeta{Channel: &streamingpb.PChannelInfo{Name: pch}})
+	zeroTerm, err := proto.Marshal(&streamingpb.WALReplicaTopology{Pchannel: pch, Revision: 1, WriterReplicaId: 1})
 	require.NoError(t, err)
 	for _, v := range []string{"\xff", "", string(zeroTerm)} {
 		p.Put(streamingcoord.BuildPChannelInfoPath(pch), v)
@@ -266,7 +276,10 @@ func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
 		require.NoError(t, err)
 
 		p.BeforeWrite = func() {
-			p.PutPChannelMeta(pch, 3, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE)
+			p.putTopology(&streamingpb.WALReplicaTopology{
+				Pchannel: pch, Revision: 4, WriterReplicaId: 1, WriterTerm: 3,
+				Members: []*streamingpb.WALReplicaPlacement{{NodeId: 1, WalReplicaId: 1}, {NodeId: 2, WalReplicaId: 2}},
+			})
 		}
 		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
 		assert.True(t, errors.Is(err, pkindex.ErrUnavailable), "%v", err)
