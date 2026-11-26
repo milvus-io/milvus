@@ -54,6 +54,12 @@ only deletes rows with `insert_ts < delete_ts`. A Delete at or before the
 earliest Insert cannot delete any row in that Segment. Transactions use their
 effective outer commit time. Imported rows use their per-VChannel commit time.
 
+The first data pack persists this logical cursor in SegmentInfo independently
+of accepting its physical StartPosition. An empty serialized seek ID does not
+invalidate the cursor: Woodpecker's valid `0/0` ID encodes as empty bytes. The
+catalog write must succeed before SN acknowledges that pack; retries preserve
+an already initialized cursor, including after recovery.
+
 External collections reject Insert/Delete/Upsert and WAL L1 Flush. Their persisted
 W therefore remains the business VChannel creation origin B across refreshes
 and recovery. New refresh broadcasts reach every target business VChannel and
