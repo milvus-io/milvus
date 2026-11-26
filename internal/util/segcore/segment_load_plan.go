@@ -53,6 +53,9 @@ func PrepareSegmentLoadPlan(ctx context.Context, segment CSegment, schema *schem
 	var loadPtr *C.uint8_t
 	var schemaPtr unsafe.Pointer
 	if !initial {
+		if info != nil {
+			info.EstimatedBytesPerRow = loadresource.EstimateBytesPerRow(schema, info)
+		}
 		converted, err := ConvertToSegcoreSegmentLoadInfo(info)
 		if err != nil {
 			return nil, err

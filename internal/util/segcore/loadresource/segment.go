@@ -161,6 +161,19 @@ func ResolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *que
 	return binlogs, deltalogs
 }
 
+// EstimateBytesPerRow resolves external sampled row sizes before native metadata
+// is captured. Keep the supplied value when no row-size sample is available.
+func EstimateBytesPerRow(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo) int64 {
+	if !typeutil.IsExternalCollection(schema) || info.GetNumOfRows() <= 0 || len(info.GetBinlogPaths()) == 0 {
+		return info.GetEstimatedBytesPerRow()
+	}
+	var bytes int64
+	for _, group := range info.GetBinlogPaths() {
+		bytes += loadingFieldBinlogMemorySize(group)
+	}
+	return bytes / info.GetNumOfRows()
+}
+
 func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentFinalEstimateOptions, runner Runner) (SegmentResourceUsage, error) {
 	options = options.normalized()
 	core, err := estimateCoreResources(ctx, []*schemapb.CollectionSchema{schema}, []*querypb.SegmentLoadInfo{loadInfo}, options.MmapVectorField, options.MmapScalarField, options.PreferFieldDataWhenIndexHasRawData, true, runner)
@@ -257,7 +270,6 @@ func estimateSegmentLoadingExtras(schema *schemapb.CollectionSchema, loadInfo *q
 		for _, fb := range binlogs {
 			fakeBinlogMemSize += loadingFieldBinlogMemorySize(fb)
 		}
-		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
 		if !externalRawDataLoadingCanBeSkipped(schema, loadInfo, options) && !options.TieredEvictionEnabled && options.ExternalRawDataFactor > 1 {
 			usage.MemoryBytes += uint64(float64(fakeBinlogMemSize) * (options.ExternalRawDataFactor - 1))
 		}

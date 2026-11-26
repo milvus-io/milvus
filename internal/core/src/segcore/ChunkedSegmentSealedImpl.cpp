@@ -8963,6 +8963,10 @@ ChunkedSegmentSealedImpl::PrepareLoadPlan(
                   "stale load plan schema for segment {}",
                   id_);
     }
+    if (fields && !fields->index_meta()) {
+        // Schema-only reopens inherit metadata from the captured generation.
+        fields = fields->WithIndexMeta(current_fields->index_meta());
+    }
     auto [next, layout] = SegmentLoadInfo::PrepareForLoad(
         target ? *target : current_info->GetProto(),
         fields ? std::move(fields) : current_fields,

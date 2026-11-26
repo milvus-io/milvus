@@ -403,7 +403,8 @@ func TestEstimateSegmentLoadingResourceKeepsMilvusTableRealPKEager(t *testing.T)
 	require.NoError(t, err)
 	require.EqualValues(t, 2000, usage.MemoryBytes)
 	require.Zero(t, usage.DiskBytes)
-	require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+	require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+	require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 }
 
 func TestGpuIndexRequiresGpuLoadOverride(t *testing.T) {
@@ -534,7 +535,8 @@ func TestEstimateSegmentLoadingResourceExternalVectorWarmup(t *testing.T) {
 			}
 			require.Equal(t, wantMemory, usage.MemoryBytes)
 			require.Zero(t, usage.DiskBytes)
-			require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+			require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+			require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 		})
 	}
 }
@@ -613,7 +615,8 @@ func TestEstimateSegmentLoadingResourceExternalMandatoryReads(t *testing.T) {
 				}
 				require.Equal(t, wantMemory, usage.MemoryBytes, "raw-data factor %v", factor)
 				require.Zero(t, usage.DiskBytes)
-				require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+				require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+				require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 			}
 		})
 	}
@@ -681,7 +684,8 @@ func TestEstimateSegmentLoadingResourceExternalInterimReads(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, tc.wantMemory, usage.MemoryBytes)
 				require.Zero(t, usage.DiskBytes)
-				require.EqualValues(t, 1000, loadInfo.GetEstimatedBytesPerRow())
+				require.EqualValues(t, 1000, EstimateBytesPerRow(schema, loadInfo))
+				require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 			})
 		}
 	}
@@ -799,4 +803,17 @@ func TestEstimateSegmentsLoadingResourceValidatesInput(t *testing.T) {
 func TestEstimateSegmentsLoadingResourcePropagatesRunnerFailure(t *testing.T) {
 	_, _, err := EstimateSegmentsLoadingResource(context.Background(), []*schemapb.CollectionSchema{{Name: "runner_failure"}}, []*querypb.SegmentLoadInfo{{}}, SegmentLoadingEstimateOptions{}, func(fn func() error) error { return context.Canceled })
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestEstimateBytesPerRowWithoutSample(t *testing.T) {
+	external := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, ExternalField: "value", DataType: schemapb.DataType_Int64}}}
+	info := &querypb.SegmentLoadInfo{NumOfRows: 10, EstimatedBytesPerRow: 73}
+	require.EqualValues(t, 73, EstimateBytesPerRow(external, info))
+	info.BinlogPaths = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 1000}}}}
+	require.EqualValues(t, 73, EstimateBytesPerRow(&schemapb.CollectionSchema{}, info))
+	info.NumOfRows = 0
+	require.EqualValues(t, 73, EstimateBytesPerRow(external, info))
+	info.NumOfRows = 10
+	require.EqualValues(t, 100, EstimateBytesPerRow(external, info))
+	require.EqualValues(t, 73, info.GetEstimatedBytesPerRow())
 }

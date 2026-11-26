@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -77,6 +78,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var status C.CStatus
 	var createTimer stage.Timer
 	if req.LoadInfo != nil {
+		req.LoadInfo.EstimatedBytesPerRow = loadresource.EstimateBytesPerRow(req.Collection.Schema(), req.LoadInfo)
 		convertTimer := segmentConvert.Begin()
 		segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, packed.ManifestReadCreate)
 		convertTimer.End(err)
@@ -398,6 +400,11 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
+	schema := req.Schema
+	if req.Collection != nil {
+		schema = req.Collection.Schema()
+	}
+	req.LoadInfo.EstimatedBytesPerRow = loadresource.EstimateBytesPerRow(schema, req.LoadInfo)
 	segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, packed.ManifestReadReopen)
 	if err != nil {
 		return merr.Wrap(err, "failed to convert reopen load info")
