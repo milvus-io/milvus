@@ -1,4 +1,4 @@
-use crate::analyzer::options::{read_resource_file, FileResourcePathHelper};
+use crate::analyzer::options::{with_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
@@ -227,24 +227,30 @@ impl SynonymFilter {
         }
 
         if let Some(file_params) = params.get("synonyms_file") {
-            let bytes = read_resource_file(helper, file_params, "synonyms dict file")?;
-            let reader = std::io::Cursor::new(bytes);
-            for (index, line) in reader.lines().enumerate() {
-                if let Ok(row_data) = line {
-                    builder.add_row(&row_data).map_err(|err| {
-                        TantivyBindingError::InvalidArgument(format!(
-                            "synonym dictionary line {}: {}",
-                            index + 1,
-                            err
-                        ))
-                    })?;
-                } else {
-                    return Err(TantivyBindingError::InternalError(format!(
-                        "read synonyms dict file failed, error: {}",
-                        line.unwrap_err().to_string()
-                    )));
+            with_resource_file(helper, file_params, "synonyms dict file", |reader| {
+                for (index, line) in reader.lines().enumerate() {
+                    if let Ok(row_data) = line {
+                        builder.add_row(&row_data).map_err(|err| {
+                            TantivyBindingError::InvalidArgument(format!(
+                                "synonym dictionary line {}: {}",
+                                index + 1,
+                                err
+                            ))
+                        })?;
+                    } else {
+                        let err = line.unwrap_err();
+                        return Err(if err.kind() == std::io::ErrorKind::InvalidData {
+                            TantivyBindingError::InternalError(format!(
+                                "read synonyms dict file failed, error: {}",
+                                err
+                            ))
+                        } else {
+                            err.into()
+                        });
+                    }
                 }
-            }
+                Ok(())
+            })?;
         }
 
         Ok(SynonymFilter {

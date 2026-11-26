@@ -321,7 +321,8 @@ An explicit absolute path overrides this default. Deployments using the former
 `/var/lib/milvus/analyzer` default must set that path explicitly or move their
 dictionaries, including any cached Lindera dictionaries, before upgrading.
 Reads reject traversal, symlinks and non-regular
-files, then take a bounded snapshot before parsing. `function.analyzer.max_dict_size`
+files. Text dictionaries stream through a bounded buffered reader; TLS and Lindera
+retain bounded byte snapshots for their parsers. `function.analyzer.max_dict_size`
 limits each local or downloaded dictionary to 64 MiB by default. Parser errors
 must not echo dictionary contents, and native errors must not append analyzer
 parameters. Lindera's CSV parser receives a private temporary snapshot; binary
