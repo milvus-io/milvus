@@ -21,6 +21,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -44,6 +45,9 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 		}
 		req, err := option.InsertRequest(collection)
 		if err != nil {
+			if errors.Is(err, errWriteConditionUnsupportedForDML) {
+				return collection.UpdateTimestamp, err
+			}
 			// return schema mismatch err to retry with newer schema
 			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
@@ -101,6 +105,9 @@ func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ..
 type UpsertResult struct {
 	UpsertCount int64
 	IDs         column.Column
+	// For conditional upserts, SuccIndex[i] is the zero-based input row index
+	// for IDs[i]. Skipped rows are omitted. For ordinary upserts it is nil.
+	SuccIndex []uint32
 }
 
 func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
@@ -123,6 +130,9 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 				return err
 			}
 			result.UpsertCount = resp.GetUpsertCnt()
+			if req.GetWriteCondition() != nil {
+				result.SuccIndex = resp.GetSuccIndex()
+			}
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {
 				return err
