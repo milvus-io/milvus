@@ -50,10 +50,26 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
+	schema := coll.ToCollectionSchemaPB()
+	isExternal := typeutil.IsExternalCollection(schema)
+	isMilvusTable := typeutil.NewStorageColumnResolver(schema).IsMilvusTable()
+	// Ordinary external Struct projection is supported at creation time only.
+	// Keep additive DDL restricted to snapshot-backed milvus-table schemas.
+	if isExternal && !isMilvusTable {
+		return merr.WrapErrParameterInvalidMsg("external collection %s does not support adding struct fields", coll.Name)
+	}
+
 	if req.GetStructArrayFieldSchema() == nil {
 		return merr.WrapErrParameterInvalidMsg("struct array field schema is nil")
 	}
 	structArrayField := proto.Clone(req.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
+	if isMilvusTable {
+		if structArrayField.GetExternalField() == "" {
+			return merr.WrapErrParameterInvalidMsg("struct field '%s' in external collection %s must have external_field mapping", structArrayField.GetName(), coll.Name)
+		}
+	} else if structArrayField.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("external_field is not supported for struct field in non-external collection %s", coll.Name)
+	}
 	if err := normalizeAndCheckAddedStructField(structArrayField); err != nil {
 		return err
 	}
@@ -75,7 +91,6 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		return err
 	}
 
-	schema := coll.ToCollectionSchemaPB()
 	fieldIDStart := maxAssignedFieldIDFromSchema(schema) + 1
 	structArrayField.FieldID = fieldIDStart
 	for i, field := range structArrayField.GetFields() {
@@ -84,6 +99,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 
 	schema.Version = coll.SchemaVersion + 1
 	schema.StructArrayFields = append(schema.StructArrayFields, structArrayField)
+	if err := alignMilvusTableAddedStructFields(ctx, coll, schema); err != nil {
+		return err
+	}
 	properties := updateMaxFieldIDProperty(coll.Properties, maxAssignedFieldIDFromSchema(schema))
 	schema.Properties = properties
 	if err := validateSchemaEvolution(coll, schema); err != nil {
@@ -149,6 +167,40 @@ func normalizeAndCheckAddedStructField(structArrayField *schemapb.StructArrayFie
 		field.Nullable = true
 		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
 			field.TypeSchema.Nullable = true
+		}
+	}
+	return nil
+}
+
+// alignMilvusTableAddedStructFields declares same-name Struct projections.
+// IDs belong to the target schema; refresh binds them to its selected snapshot.
+func alignMilvusTableAddedStructFields(ctx context.Context, coll *model.Collection, schema *schemapb.CollectionSchema) error {
+	if !typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	oldChildren := make(map[string]struct{})
+	for _, parent := range coll.StructArrayFields {
+		for _, child := range parent.Fields {
+			oldChildren[storedRootStructSubFieldName(parent.Name, child.Name)] = struct{}{}
+		}
+	}
+	for _, parent := range schema.GetStructArrayFields() {
+		parentExt := parent.GetExternalField()
+		if parentExt == "" {
+			parentExt = parent.GetName()
+		}
+		for _, child := range parent.GetFields() {
+			name := storedRootStructSubFieldName(parent.GetName(), child.GetName())
+			if _, exists := oldChildren[name]; !exists {
+				shortName, err := typeutil.ExtractStructFieldName(name)
+				if err != nil {
+					shortName = child.GetName()
+				}
+				child.ExternalField = storedRootStructSubFieldName(parentExt, shortName)
+			}
 		}
 	}
 	return nil

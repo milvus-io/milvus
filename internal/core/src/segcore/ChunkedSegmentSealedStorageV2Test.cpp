@@ -4140,3 +4140,121 @@ TEST(ChunkedSegmentSealedStorageV2, PackedFooterFieldIDReadErrorsKeepClass) {
     ASSERT_TRUE(sink->Close().ok());
     EXPECT_EQ(FooterReadErrorCode(fs, path), ErrorCode::DataFormatBroken);
 }
+
+TEST(LazyManifest, MilvusTableMappedRefreshUsesManifestLocalBindings) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto fs = GetDefaultArrowFileSystem();
+    auto root = UniqueManifestTestPath("mapped_refresh");
+    StorageV2TempDirGuard cleanup(fs, root);
+    auto source = std::make_shared<Schema>();
+    source->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    source->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder, second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto batch =
+        arrow::RecordBatch::Make(source->ConvertToLoonArrowSchema(),
+                                 2,
+                                 {first_builder.Finish().ValueOrDie(),
+                                  second_builder.Finish().ValueOrDie()});
+    auto source_path = root + "/source";
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        source, source_path, {batch}, "101,103");
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto make_manifest = [&](bool expanded) {
+        auto manifest = GetLoonManifest(
+            nlohmann::json({{"base_path", source_path}, {"ver", version}})
+                .dump(),
+            properties);
+        milvus_storage::api::ColumnGroups groups;
+        for (const auto& group : manifest->columnGroups()) {
+            if (!expanded && group->columns.front() != "103") {
+                continue;
+            }
+            EXPECT_EQ(group->columns.size(), 1);
+            for (auto& file : group->files) {
+                file.properties["milvus_table.field_id_mapping"] =
+                    group->columns.front() == "103" ? R"({"101":"103"})"
+                                                    : R"({"103":"101"})";
+            }
+            groups.push_back(group);
+        }
+        EXPECT_EQ(groups.size(), expanded ? 2 : 1);
+        auto path = root + (expanded ? "/new" : "/old");
+        auto transaction =
+            milvus_storage::api::transaction::Transaction::Open(fs, path)
+                .ValueOrDie();
+        transaction->AppendFiles(groups);
+        return nlohmann::json({{"base_path", path},
+                               {"ver", transaction->Commit().ValueOrDie()}})
+            .dump();
+    };
+    auto old_manifest = make_manifest(false),
+         new_manifest = make_manifest(true);
+    auto target = std::make_shared<Schema>(*source);
+    target->set_external_source("s3://bucket/snapshot");
+    target->set_external_spec(R"({"format":"milvus-table"})");
+    target->AddField(FieldName("__virtual_pk__"),
+                     FieldId(102),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    target->set_primary_field_id(FieldId(102));
+    target->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    target->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    for (bool lazy : {false, true}) {
+        SCOPED_TRACE(lazy);
+        auto policies =
+            cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+        policies.scalarFieldCacheWarmupPolicy =
+            lazy ? CacheWarmupPolicy::CacheWarmupPolicy_Disable
+                 : CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        CacheWarmupPolicyGuard warmup_guard(policies);
+        auto segment_id = lazy ? 9102 : 9101;
+        auto segment = CreateSealedSegment(target, nullptr, segment_id);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(segment_id);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(2);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(old_manifest);
+        segment->SetLoadInfo(info);
+        milvus::tracer::TraceContext trace;
+        ASSERT_NO_THROW(segment->Load(trace, nullptr));
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(101)));
+        // Physical column 103 belongs to target 101; target 103 is still unbound.
+        EXPECT_FALSE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        int64_t offsets[] = {0, 1};
+        auto old_values =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        ASSERT_EQ(old_values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(old_values->scalars().long_data().data(0), 31);
+        info.set_manifest_path(new_manifest);
+        milvus::OpContext ctx;
+        ASSERT_NO_THROW(sealed->Reopen(&ctx, info));
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        auto values =
+            segment->bulk_subscript(nullptr, FieldId(103), offsets, 2);
+        ASSERT_EQ(values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(values->scalars().long_data().data(0), 11);
+        EXPECT_EQ(values->scalars().long_data().data(1), 12);
+        auto retained =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        EXPECT_EQ(retained->scalars().long_data().data(0), 31);
+        EXPECT_EQ(retained->scalars().long_data().data(1), 32);
+    }
+}

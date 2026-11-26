@@ -153,6 +153,9 @@ func validateKeptEvolutionFields(oldFields, newFields *evolutionFieldMaps) error
 		if oldField.GetName() != newField.GetName() {
 			return merr.WrapErrParameterInvalidMsg("cannot rename struct field id %d from %q to %q", id, oldField.GetName(), newField.GetName())
 		}
+		if oldField.GetExternalField() != newField.GetExternalField() {
+			return merr.WrapErrParameterInvalidMsg("cannot change the external_field of struct field %q in place", oldField.GetName())
+		}
 		if oldField.GetNullable() != newField.GetNullable() {
 			return merr.WrapErrParameterInvalidMsg("cannot change the nullability of struct field %q in place", oldField.GetName())
 		}
@@ -255,7 +258,17 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		if _, isSubField := newFields.structSubFields[id]; isSubField {
 			parentID := newFields.structParents[id]
 			parent := newFields.structFields[parentID]
-			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || field.GetExternalField() != "" {
+			parentExt := parent.GetExternalField()
+			if parentExt == "" {
+				parentExt = parent.GetName()
+			}
+			shortName, err := typeutil.ExtractStructFieldName(field.GetName())
+			expectedExt := field.GetName()
+			if err == nil {
+				expectedExt = typeutil.ConcatStructFieldName(parentExt, shortName)
+			}
+			mappedStructChild := typeutil.NewStorageColumnResolver(newSchema).IsMilvusTable() && field.GetExternalField() == expectedExt
+			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || (field.GetExternalField() != "" && !mappedStructChild) {
 				return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
 			}
 			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {

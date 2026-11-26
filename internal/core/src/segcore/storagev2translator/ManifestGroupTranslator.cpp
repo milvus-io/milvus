@@ -27,6 +27,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -95,7 +96,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     MmapChunkWritebackMode writeback_mode,
-    std::unordered_map<std::string, FieldId> physical_column_to_field_id)
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id,
+    OrdinaryStructProjections struct_projections)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -108,6 +110,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              cache_key_suffix)),
       field_metas_(field_metas),
       physical_column_to_field_id_(std::move(physical_column_to_field_id)),
+      struct_projections_(std::move(struct_projections)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -150,6 +153,33 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                    })),
       writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
+    std::unordered_set<FieldId> projected_ids;
+    for (const auto& [parent, projection] : struct_projections_) {
+        AssertInfo(
+            !projection.child_field_ids.empty() &&
+                projected_ids.insert(projection.parent_field_id).second &&
+                field_metas_.count(projection.parent_field_id) == 0,
+            "invalid Struct projection parent {}",
+            parent);
+        for (const auto id : projection.child_field_ids) {
+            const auto it = field_metas_.find(id);
+            AssertInfo(
+                it != field_metas_.end() && projected_ids.insert(id).second,
+                "missing or duplicate Struct projection child {}",
+                id.get());
+            auto logical = ParseStructSubFieldPath(it->second.get_name().get());
+            auto external =
+                ParseStructSubFieldPath(it->second.get_external_field());
+            AssertInfo((it->second.get_data_type() == DataType::ARRAY ||
+                        it->second.get_data_type() == DataType::VECTOR_ARRAY) &&
+                           logical.has_value() && external.has_value() &&
+                           external->first == parent &&
+                           external->second == logical->second,
+                       "invalid Struct projection child {} for parent {}",
+                       id.get(),
+                       parent);
+        }
+    }
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -173,6 +203,35 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     bool projected_estimate_available = !projected_columns.empty();
     bool used_total_estimate = false;
     const bool full_projection = projected_columns == column_group_columns;
+    auto materialized_field_count = [&](const std::string& column_name) {
+        const auto it = struct_projections_.find(column_name);
+        return it == struct_projections_.end()
+                   ? size_t{1}
+                   : std::max<size_t>(1, it->second.child_field_ids.size());
+    };
+    size_t max_materialized_field_count = 1;
+    for (const auto& column_name : projected_columns) {
+        max_materialized_field_count =
+            std::max(max_materialized_field_count,
+                     materialized_field_count(column_name));
+    }
+    auto scale_total_estimates_for_struct = [&](std::vector<uint64_t>* sizes,
+                                                std::string* error) {
+        for (size_t i = 0; i < sizes->size(); ++i) {
+            if ((*sizes)[i] > std::numeric_limits<uint64_t>::max() /
+                                  max_materialized_field_count) {
+                *error = fmt::format(
+                    "Struct projection sizes exceed the uint64_t range at row "
+                    "group {}",
+                    i);
+                return false;
+            }
+        }
+        for (auto& size : *sizes) {
+            size *= max_materialized_field_count;
+        }
+        return true;
+    };
     if (!projected_estimate_available) {
         projected_estimate_error = "projection contains no columns";
     }
@@ -236,6 +295,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     selected_columns[column_index] = true;
 
                     const auto& column_sizes = all_column_sizes[column_index];
+                    const auto output_copies =
+                        materialized_field_count(column_name);
                     if (column_sizes.size() !=
                         projected_row_group_sizes.size()) {
                         projected_estimate_available = false;
@@ -249,9 +310,10 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     }
                     for (size_t i = 0; i < projected_row_group_sizes.size();
                          ++i) {
-                        if (column_sizes[i] >
+                        const auto remaining =
                             std::numeric_limits<uint64_t>::max() -
-                                projected_row_group_sizes[i]) {
+                            projected_row_group_sizes[i];
+                        if (column_sizes[i] > remaining / output_copies) {
                             projected_estimate_available = false;
                             projected_estimate_error = fmt::format(
                                 "projected column sizes exceed the uint64_t "
@@ -259,7 +321,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                 i);
                             break;
                         }
-                        projected_row_group_sizes[i] += column_sizes[i];
+                        projected_row_group_sizes[i] +=
+                            column_sizes[i] * output_copies;
                     }
                 }
             }
@@ -282,8 +345,12 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     total_sizes.size());
             } else {
                 projected_row_group_sizes = total_sizes;
-                projected_estimate_available = true;
-                used_total_estimate = true;
+                projected_estimate_available = scale_total_estimates_for_struct(
+                    &projected_row_group_sizes, &total_estimate_error);
+                used_total_estimate = projected_estimate_available;
+                if (!projected_estimate_available) {
+                    projected_row_group_sizes.assign(total_sizes.size(), 0);
+                }
             }
         }
     }
@@ -314,7 +381,14 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 row_group_sizes.size());
         }
     } else if (fallback_bytes_per_row > 0) {
-        const auto fallback = static_cast<uint64_t>(fallback_bytes_per_row);
+        const auto fallback_base =
+            static_cast<uint64_t>(fallback_bytes_per_row);
+        AssertInfo(fallback_base <= std::numeric_limits<uint64_t>::max() /
+                                        max_materialized_field_count,
+                   "fallback bytes per row {} overflows Struct multiplier {}",
+                   fallback_base,
+                   max_materialized_field_count);
+        const auto fallback = fallback_base * max_materialized_field_count;
         for (size_t i = 0; i < row_group_rows.size(); ++i) {
             if (row_group_rows[i] >
                 std::numeric_limits<uint64_t>::max() / fallback) {
@@ -322,7 +396,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                     "fallback row group size exceeds the uint64_t range, "
                     "rows {}, bytes per row {}",
                     row_group_rows[i],
-                    fallback_bytes_per_row));
+                    fallback));
             }
             row_group_sizes[i] = row_group_rows[i] * fallback;
         }
@@ -333,21 +407,27 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             "(bytes_per_row={}, row_groups={})",
             key_,
             projected_estimate_error,
-            fallback_bytes_per_row,
+            fallback,
             row_group_sizes.size());
     } else if (total_estimate_error.empty()) {
         auto total_size_result = chunk_reader_->get_chunk_estimated_size();
         if (total_size_result.ok() &&
             total_size_result.ValueOrDie().size() == row_group_sizes.size()) {
             row_group_sizes = total_size_result.ValueOrDie();
-            size_estimate_source = SizeEstimateSource::TOTAL_FALLBACK;
-            LOG_WARN(
-                "[StorageV2] translator {} cannot use projected column size "
-                "estimates ({}); using total chunk estimates "
-                "(row_groups={})",
-                key_,
-                projected_estimate_error,
-                row_group_sizes.size());
+            if (scale_total_estimates_for_struct(&row_group_sizes,
+                                                 &total_estimate_error)) {
+                size_estimate_source = SizeEstimateSource::TOTAL_FALLBACK;
+                LOG_WARN(
+                    "[StorageV2] translator {} cannot use projected column "
+                    "size estimates ({}); using total chunk estimates "
+                    "(row_groups={})",
+                    key_,
+                    projected_estimate_error,
+                    row_group_sizes.size());
+            } else {
+                size_estimate_source = SizeEstimateSource::LAST_RESORT;
+                row_group_sizes.assign(row_group_rows.size(), 0);
+            }
         } else {
             total_estimate_error =
                 total_size_result.ok()
@@ -370,10 +450,19 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     // cell from an unavailable size estimate and accepts zero for the former.
     constexpr uint64_t kEmptyRowGroupReservationBytes = 1;
     constexpr uint64_t kLastResortBytesPerRow = 4096;
-    const auto positive_fallback_bytes_per_row =
+    const auto positive_fallback_bytes_per_row_base =
         fallback_bytes_per_row > 0
             ? static_cast<uint64_t>(fallback_bytes_per_row)
             : kLastResortBytesPerRow;
+    AssertInfo(
+        positive_fallback_bytes_per_row_base <=
+            std::numeric_limits<uint64_t>::max() / max_materialized_field_count,
+        "positive fallback bytes per row {} overflows Struct "
+        "multiplier {}",
+        positive_fallback_bytes_per_row_base,
+        max_materialized_field_count);
+    const auto positive_fallback_bytes_per_row =
+        positive_fallback_bytes_per_row_base * max_materialized_field_count;
     size_t live_row_groups = 0;
     size_t positive_fallback_row_groups = 0;
     for (size_t i = 0; i < row_group_sizes.size(); ++i) {
@@ -428,6 +517,25 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     // Merge row groups into group chunks(cache cells). Derive row-groups-
     // per-cell from the runtime-configurable target byte size so avg cell
     // byte size ≈ target.
+    constexpr auto kMaxSignedSize =
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    uint64_t total_estimated_size = 0;
+    uint64_t total_rows = 0;
+    for (size_t i = 0; i < row_group_sizes.size(); ++i) {
+        if (row_group_sizes[i] > kMaxSignedSize - total_estimated_size) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "row group size estimates exceed int64 range at row "
+                      "group {}",
+                      i);
+        }
+        total_estimated_size += row_group_sizes[i];
+        if (row_group_rows[i] > kMaxSignedSize - total_rows) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "row counts exceed int64 range at row group {}",
+                      i);
+        }
+        total_rows += row_group_rows[i];
+    }
     const int64_t cell_target_size_bytes = GetCellTargetSizeBytes();
     size_t total_row_groups = row_group_sizes.size();
     meta_.total_row_groups_ = total_row_groups;
@@ -660,66 +768,65 @@ ManifestGroupTranslator::load_group_chunk(
     field_metas.reserve(schema->num_fields());
     std::vector<arrow::ArrayVector> array_vecs;
     array_vecs.reserve(schema->num_fields());
+    std::vector<std::string> physical_columns;
 
-    // Iterate through fields to get field_id and create chunk.
-    // Normal collections and Milvus-generated columns store field IDs as
-    // column names. Other external columns use external_field names.
+    // Only registered Struct parents expand to multiple child chunks.
+    // Other columns retain the numeric ID / single external-field path.
     for (int i = 0; i < schema->num_fields(); ++i) {
-        auto column_name = schema->field(i)->name();
-        int64_t field_id = -1;
-        if (auto mapped_it = physical_column_to_field_id_.find(column_name);
-            mapped_it != physical_column_to_field_id_.end()) {
-            field_id = mapped_it->second.get();
-        } else if (auto parsed_fid = ParseFieldIdColumnName(column_name);
-                   parsed_fid.has_value()) {
-            field_id = parsed_fid->get();
+        const auto column_name = schema->field(i)->name();
+        std::vector<FieldId> logical_field_ids;
+        const auto projection = struct_projections_.find(column_name);
+        if (projection != struct_projections_.end()) {
+            logical_field_ids = projection->second.child_field_ids;
+        } else if (physical_column_to_field_id_.count(column_name)) {
+            logical_field_ids.emplace_back(
+                physical_column_to_field_id_.at(column_name));
+        } else if (auto parsed = ParseFieldIdColumnName(column_name);
+                   parsed.has_value()) {
+            logical_field_ids.push_back(parsed.value());
         } else {
-            // External collection fallback: column_name is non-numeric, so it
-            // comes from an external manifest external_field mapping. Normal
-            // fields and function-output fields are stored by numeric field id
-            // and take the strict field-id path above.
-            for (const auto& [fid, meta] : field_metas_) {
+            for (const auto& [id, meta] : field_metas_) {
                 if (meta.is_external_field() &&
                     meta.get_external_field() == column_name) {
-                    field_id = fid.get();
+                    logical_field_ids.push_back(id);
                     break;
                 }
             }
         }
-        if (field_id < 0) {
-            AssertInfo(
-                false,
-                "[StorageV2] translator {} field {} not a numeric field ID "
-                "and not found as external field",
-                key_,
-                column_name);
-        }
-
-        auto fid = milvus::FieldId(field_id);
-        if (fid == RowFieldID) {
-            // ignore row id field
+        AssertInfo(!logical_field_ids.empty(),
+                   "[StorageV2] translator {} field {} not a numeric field ID "
+                   "and not found as external field or Struct parent",
+                   key_,
+                   column_name);
+        if (logical_field_ids.size() == 1 &&
+            logical_field_ids.front() == RowFieldID) {
             continue;
         }
-        auto it = field_metas_.find(fid);
-        AssertInfo(
-            it != field_metas_.end(),
-            "[StorageV2] translator {} field id {} not found in field_metas",
-            key_,
-            fid.get());
-        const auto& field_meta = it->second;
 
         // Merge arrays from all tables for this field
         // All tables in a cell come from the same column group with consistent schema
         arrow::ArrayVector merged_array_vec;
         for (const auto& table : tables) {
-            auto chunks = table->column(i)->chunks();
+            const auto& chunks = table->column(i)->chunks();
             merged_array_vec.insert(
                 merged_array_vec.end(), chunks.begin(), chunks.end());
         }
 
-        field_ids.push_back(fid);
-        field_metas.push_back(field_meta);
-        array_vecs.push_back(std::move(merged_array_vec));
+        for (const auto fid : logical_field_ids) {
+            if (fid == RowFieldID) {
+                continue;
+            }
+            const auto it = field_metas_.find(fid);
+            AssertInfo(it != field_metas_.end(),
+                       "[StorageV2] translator {} field id {} not found in "
+                       "field_metas",
+                       key_,
+                       fid.get());
+            field_ids.push_back(fid);
+            field_metas.push_back(it->second);
+            array_vecs.push_back(merged_array_vec);
+            physical_columns.push_back(column_name);
+        }
     }
 
     // Normalize all arrow arrays for ChunkWriter compatibility.
@@ -727,7 +834,7 @@ ManifestGroupTranslator::load_group_chunk(
     // arrays, vector arrays, JSON, geometry.
     for (size_t idx = 0; idx < field_ids.size(); ++idx) {
         array_vecs[idx] = storage::NormalizeArrowForChunkWriter(
-            array_vecs[idx], field_metas[idx]);
+            array_vecs[idx], field_metas[idx], physical_columns[idx]);
     }
 
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;

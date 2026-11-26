@@ -613,12 +613,14 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       std::string_view physical_column_name = {});
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
-                             const FieldMeta& field_meta);
+                             const FieldMeta& field_meta,
+                             std::string_view physical_column_name = {});
 
 // Single source of truth for view/large-variant elimination.
 // STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,
@@ -627,6 +629,7 @@ NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
 // schemaless readers (vortex) should route arrays through this helper before
 // any type-id dispatch (refresh / load / sample / etc).
 std::shared_ptr<arrow::Array>
-CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array);
+CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array,
+                          bool discard_null_list_payload = false);
 
 }  // namespace milvus::storage
