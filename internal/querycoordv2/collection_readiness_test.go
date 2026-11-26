@@ -57,6 +57,7 @@ import (
 )
 
 type readinessCatalog struct {
+	emptyServingCatalog
 	views []*viewpb.QueryViewOfShard
 }
 

@@ -24,6 +24,7 @@ import (
 
 // mockCatalog records all persist calls, tracking per-call batches.
 type mockCatalog struct {
+	generationTestCatalog
 	mu        sync.Mutex
 	saved     []*viewpb.QueryViewOfShard   // accumulated across all calls
 	saveCalls [][]*viewpb.QueryViewOfShard // per-call batches

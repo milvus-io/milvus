@@ -173,10 +173,8 @@ func (r *ShardViewRegistry) ServingTransitionComplete(collectionID int64, epoch 
 func (r *ShardViewRegistry) RemoveServingGeneration(ctx context.Context, id int64) error {
 	r.servingMu.Lock()
 	defer r.servingMu.Unlock()
-	if r.servingCatalog != nil {
-		if err := r.servingCatalog.RemoveServingGeneration(ctx, id); err != nil {
-			return err
-		}
+	if err := r.servingCatalog.RemoveServingGeneration(ctx, id); err != nil {
+		return err
 	}
 	delete(r.serving, id)
 	r.mu.Lock()

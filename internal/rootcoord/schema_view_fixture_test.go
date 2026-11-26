@@ -32,6 +32,16 @@ func (*emptySchemaViews) SaveQueryViews(context.Context, []*viewpb.QueryViewOfSh
 	return nil
 }
 
+func (*emptySchemaViews) ListServingGenerations(context.Context) ([]*viewpb.ServingGeneration, error) {
+	return nil, nil
+}
+
+func (*emptySchemaViews) SaveServingGeneration(context.Context, *viewpb.ServingGeneration) error {
+	return nil
+}
+
+func (*emptySchemaViews) RemoveServingGeneration(context.Context, int64) error { return nil }
+
 func (*emptySchemaViews) SyncViews(context.Context, syncer.SyncGroup) error { return nil }
 
 func (*emptySchemaViews) Close() error { return nil }

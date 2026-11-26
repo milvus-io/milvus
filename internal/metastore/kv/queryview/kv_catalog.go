@@ -18,6 +18,8 @@ const queryViewKeyPrefix = "qv/"
 // QueryViewCatalog provides ETCD persistence for Coord-owned query views.
 // StreamingNode persists WAL-bound query view meta through StreamingNodeCataLog.
 type QueryViewCatalog interface {
+	ServingGenerationCatalog
+
 	// ListQueryViews loads all persisted query views.
 	ListQueryViews(ctx context.Context) ([]*viewpb.QueryViewOfShard, error)
 

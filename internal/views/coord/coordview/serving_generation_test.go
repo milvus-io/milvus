@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -13,12 +14,13 @@ import (
 )
 
 type generationTestCatalog struct {
-	saved []*viewpb.ServingGeneration
-	err   error
+	saved   []*viewpb.ServingGeneration
+	err     error
+	listErr error
 }
 
 func (c *generationTestCatalog) ListServingGenerations(context.Context) ([]*viewpb.ServingGeneration, error) {
-	return c.saved, nil
+	return c.saved, c.listErr
 }
 
 func (c *generationTestCatalog) SaveServingGeneration(_ context.Context, g *viewpb.ServingGeneration) error {
@@ -271,4 +273,19 @@ func TestServingPublicationDropClearsSchemaOnlyAfterDurableRemoval(t *testing.T)
 			require.Equal(t, map[int64]int32{200: 9}, reg.publishedSchemas)
 		})
 	}
+}
+
+func TestServingPublicationRecoveryFailureReleasesAcquiredViews(t *testing.T) {
+	catalog := newMockCatalog()
+	catalog.listed = []*viewpb.QueryViewOfShard{buildTestViewWithVersion(1, 3, 1, 1)}
+	catalog.listErr = errors.New("serving catalog unavailable")
+	derefs := 0
+	patch := mockey.Mock(stubDataViewRef.Deref).To(func(stubDataViewRef) { derefs++ }).Build()
+	defer patch.UnPatch()
+	transport := newMockSyncer()
+	registry, err := RecoverShardViewRegistryWithDataViews(t.Context(), catalog, transport, stubDataViewRefProvider{})
+	require.ErrorIs(t, err, catalog.listErr)
+	require.Nil(t, registry, "partial serving recovery cannot start a registry")
+	require.Equal(t, 1, derefs, "failed serving recovery releases its already acquired DataView reference")
+	require.Zero(t, transport.numSyncCalls(), "recovered views cannot escape the held recovery batch")
 }

@@ -116,23 +116,20 @@ func recoverShardViewRegistry(ctx context.Context, catalog queryview.QueryViewCa
 		stats:            make(map[qviews.ShardID]*ShardStats, len(shards)),
 		collectionShards: make(map[int64]map[qviews.ShardID]struct{}),
 		publishedSchemas: make(map[int64]int32),
-		serving:          make(map[int64]*viewpb.ServingGeneration),
+		servingCatalog:   catalog,
 		nodeShards:       make(map[int64]map[qviews.ShardID]struct{}),
 	}
-	if catalog, ok := catalog.(queryview.ServingGenerationCatalog); ok {
-		recovered, err := catalog.ListServingGenerations(ctx)
-		if err != nil {
-			flushScheduler.Close()
-			for _, manager := range shards {
-				manager.abortRecovery()
-			}
-			return nil, err
+	recovered, err := catalog.ListServingGenerations(ctx)
+	if err != nil {
+		flushScheduler.Close()
+		for _, manager := range shards {
+			manager.abortRecovery()
 		}
-		registry.servingCatalog = catalog
-		registry.serving = make(map[int64]*viewpb.ServingGeneration, len(recovered))
-		for _, generation := range recovered {
-			registry.serving[generation.GetCollectionId()] = generation
-		}
+		return nil, err
+	}
+	registry.serving = make(map[int64]*viewpb.ServingGeneration, len(recovered))
+	for _, generation := range recovered {
+		registry.serving[generation.GetCollectionId()] = generation
 	}
 	if len(loadInfoRefs) > 0 {
 		registry.loadInfoRefs = loadInfoRefs[0]
