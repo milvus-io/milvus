@@ -500,5 +500,4 @@ func PreparedLoadingResource(schema *schemapb.CollectionSchema, info *querypb.Se
 	}
 	usage.MmapFieldCount = mmapCount
 	return usage
-
 }

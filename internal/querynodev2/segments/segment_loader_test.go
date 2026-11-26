@@ -3233,14 +3233,14 @@ func (suite *ExternalSegmentEstimateSuite) externalLoadInfo(numRows int64, memor
 	}
 }
 
-func (suite *ExternalSegmentEstimateSuite) TestEstimatedBytesPerRow() {
+func (suite *ExternalSegmentEstimateSuite) TestResourceEstimateDoesNotMutateRowSize() {
 	loadInfo := suite.externalLoadInfo(1000, 576000) // 576 bytes/row
 	factor := resourceEstimateFactor{externalRawDataFactor: 1.0}
 
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
 	suite.NotNil(usage)
-	suite.Equal(int64(576), loadInfo.EstimatedBytesPerRow)
+	suite.Zero(loadInfo.EstimatedBytesPerRow)
 }
 
 func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactor() {
@@ -3265,7 +3265,7 @@ func (suite *ExternalSegmentEstimateSuite) TestExternalRawDataFactorSkippedWithT
 
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.Equal(int64(100), loadInfo.EstimatedBytesPerRow)
+	suite.Zero(loadInfo.EstimatedBytesPerRow)
 
 	baselineLoadInfo := suite.externalLoadInfo(1000, 100000)
 	baselineFactor := resourceEstimateFactor{

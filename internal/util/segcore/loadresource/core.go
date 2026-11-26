@@ -43,12 +43,12 @@ import (
 // estimateCoreResources supplies metadata and resolved local index options to
 // segcore. All field/index size calculations stay on the loading implementation's side.
 func estimateCoreResources(ctx context.Context, schemas []*schemapb.CollectionSchema, loadInfos []*querypb.SegmentLoadInfo, mmapVector, mmapScalar, preferFieldData, finalOnly bool, runner Runner, loadingOptions ...SegmentLoadingEstimateOptions) (*cgopb.BatchLoadResourceResponse, error) {
-	if len(loadInfos) == 0 {
-		return &cgopb.BatchLoadResourceResponse{}, nil
-	}
 	serialized, err := MarshalResourceEstimateRequest(ctx, schemas, loadInfos, mmapVector, mmapScalar, preferFieldData, finalOnly, loadingOptions...)
 	if err != nil {
 		return nil, err
+	}
+	if len(loadInfos) == 0 {
+		return &cgopb.BatchLoadResourceResponse{}, nil
 	}
 	layout := C.CreateProtoLayout()
 	if layout == nil {

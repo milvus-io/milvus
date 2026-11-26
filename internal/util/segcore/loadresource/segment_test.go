@@ -643,8 +643,8 @@ func TestEstimateSegmentLoadingResourceExternalInterimReads(t *testing.T) {
 			{name: "growing_mmap_disables_interim", dataType: schemapb.DataType_FloatVector, nullable: true, growingMmap: true},
 			{name: "unsupported_binary", dataType: schemapb.DataType_BinaryVector},
 			{name: "unsupported_int8", dataType: schemapb.DataType_Int8Vector},
-			// The mixed fake group still gets PART 2's interim margin, but no raw warmup.
-			{name: "usable_index_keeps_field_disabled", dataType: schemapb.DataType_FloatVector, nullable: true, indexFiles: []string{"index"}, wantMemory: 1150},
+			// A usable index and disabled warmup require no raw or interim loading.
+			{name: "usable_index_keeps_field_disabled", dataType: schemapb.DataType_FloatVector, nullable: true, indexFiles: []string{"index"}, wantMemory: 0},
 		} {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
 				vector := &schemapb.FieldSchema{
@@ -732,12 +732,12 @@ func TestEstimateSegmentLoadingResourceExternalTextMatchReads(t *testing.T) {
 				for _, factor := range []float64{1, 2} {
 					usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{ExternalRawDataFactor: factor}, nil)
 					require.NoError(t, err)
-					// VarChar retains the existing double-memory charge; Text does not.
+					// VarChar needs the double-memory charge only when raw data is read.
 					var raw uint64 = 1000
 					if tc.dataType == schemapb.DataType_VarChar {
 						raw *= 2
 					}
-					want := raw - 1000
+					var want uint64
 					if tc.enableMatch && !tc.hasStats {
 						want = raw + uint64(1000*(factor-1))
 					}
