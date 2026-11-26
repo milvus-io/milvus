@@ -839,29 +839,43 @@ func TestCoordDown_Dropping_NoReport(t *testing.T) {
 	assertNoReport(t, sm)
 }
 
-func TestCoordDown_Preparing_ReReportsPreparing(t *testing.T) {
-	sm := newTestSM()
-	sm.ConsumeReport()
+func TestCoordDown_BeforeServing(t *testing.T) {
+	failedRecovery := newRecoveringSM()
+	failedRecovery.OnUnrecoverable()
+	for _, tc := range []struct {
+		name         string
+		sm           *snQueryViewStateMachine
+		expectDelete bool
+	}{
+		{"preparing", newTestSM(), false},
+		{"ready", newReadySM(), false},
+		{"failed preparation", newUnrecoverableSM(), true},
+		{"failed recovery", failedRecovery, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := tc.sm
+			sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
+			require.Equal(t, qviews.QueryViewStateDown, sm.State())
+			assertReportState(t, sm, qviews.QueryViewStateDown)
+			if tc.expectDelete {
+				assertPersistState(t, sm, qviews.QueryViewStateDown)
+			} else {
+				assertNoPersist(t, sm)
+			}
+			assert.False(t, sm.ConsumeRelease())
 
-	sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
-	assert.Equal(t, qviews.QueryViewStatePreparing, sm.State())
-	assertReportState(t, sm, qviews.QueryViewStatePreparing)
-}
+			sm.OnReady()
+			sm.OnRecoveringDone()
+			sm.OnCoordStateDelivered(qviews.QueryViewStateUp)
+			assertReportState(t, sm, qviews.QueryViewStateDown)
+			assertNoPersist(t, sm)
 
-func TestCoordDown_Ready_ReReportsReady(t *testing.T) {
-	sm := newReadySM()
-
-	sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
-	assert.Equal(t, qviews.QueryViewStateReady, sm.State())
-	assertReportState(t, sm, qviews.QueryViewStateReady)
-}
-
-func TestCoordDown_Unrecoverable_ReReportsUnrecoverable(t *testing.T) {
-	sm := newUnrecoverableSM()
-
-	sm.OnCoordStateDelivered(qviews.QueryViewStateDown)
-	assert.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
-	assertReportState(t, sm, qviews.QueryViewStateUnrecoverable)
+			sm.OnCoordStateDelivered(qviews.QueryViewStateDropped)
+			assertRelease(t, sm)
+			sm.OnDropped()
+			assertReportState(t, sm, qviews.QueryViewStateDropped)
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

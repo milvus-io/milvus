@@ -22,15 +22,15 @@
 
 SessionRaw.WALReplicas 保存本节点可服务实例的 WALAdvertisement 列表，地址、NodeID 和 lease 取自外层注册。每个 PChannel 在一个节点上最多一个可服务条目。[SessionRaw 定义](../../../../internal/util/sessionutil/session_util.go)
 
-**WALReplicas。** 初次注册时为空。实例开放本地准入后发布 RO 或 RW，关闭先停止准入再撤销。writer_term 存在且为正数表示 RW，可接受该任期的 Append 和 Strong 请求。RO 省略 writer_term。RO 订阅源的任期由 OpenWALReplicaWatch 标识，换源时 RO 公告可保持原值。读者可根据自己的 View/MVCC 能力服务已覆盖的数据。session 只在本地可服务状态变化时重写，全节点用一个串行发布入口与 GoingStop 共用，PUT 须校验注册身份、读取版本并保留原 lease。结果未知时重读后幂等重试，不得重新建立已失效的注册。
+**WALReplicas。** 初次注册时为空。实例开放本地准入后发布 RO 或 RW，关闭先停止准入再撤销。writer_term 存在且为正数表示 RW，可接受该任期的 Append 和 Strong 请求。RO 省略 writer_term。RO 订阅源的任期由 OpenWALReplicaWatch 标识，换源时 RO 公告可保持原值。RO 公告用于拓扑收敛与交接，所有 WAL 查询均由 RW 提供。session 只在本地可服务状态变化时重写，全节点用一个串行发布入口与 GoingStop 共用，PUT 须校验注册身份、读取版本并保留原 lease。结果未知时重读后幂等重试，不得重新建立已失效的注册。
 
 **CChannel。** Coord 在 SyncWALReplicasRequest 中传递已有的固定映射。只有映射指向的 PChannel 的可服务 RW 在自己的 WALAdvertisement 上设置 is_cchannel=true。RO 和其他 PChannel 的 RW 使用 false。StreamingClient 从该条目同时得到控制频道和可写端点。交接中旧条目撤下、新条目尚未发布时，客户端等待新的可写端点。
 
 **客户端。** 对 SN 注册前缀做一致的全量读取，再从下一 revision watch。PUT 替换该 SN 全表，DELETE、原 lease 失效或 Stopping 撤下对应路由。断线或 compaction 时重新对账。找不到唯一 RW 时等待刷新；旧客户端缓存打到已 Seal 的 A，由服务端拒绝。普通 session watcher 需区分新注册和同一次注册的内容更新。[现有 session resolver](../../../../internal/util/streamingutil/service/discoverer/session_discoverer.go)
 
-接入多副本后，AssignmentDiscover 只保留复制配置、StreamingVersion、控制版本及原有错误反馈用途。其响应字段 2 (assignments) 和 3 (cchannel) 退出客户端发现路径。现有 QueryView 端点发现仍使用 SubscribeReplicas，订阅当前 RW 上已 Up 的逻辑查询副本。对已替换实例的旧连接需按 ID 拒绝。
+接入多副本后，AssignmentDiscover 只保留复制配置、StreamingVersion、控制版本及原有错误反馈用途。其响应字段 2 (assignments) 和 3 (cchannel) 退出客户端发现路径。QueryView 目录的 SubscribeReplicas 必须携带当前 writer term，订阅 RW 上已 Up 的逻辑查询副本。对已替换实例的旧连接需按 ID 拒绝。
 
-Strong 由当前 RW 提供 MVCC，客户端携带 writer term。Bounded 也向 RW 取点，携带 WALReplicaID 并等待覆盖 GuaranteeTimestamp。RW Seal 时结束目录订阅，客户端在新主上重新订阅并取得首份快照。TODO：按所选物理副本订阅目录后接入 RO 查询。客户端把取点成功的 NodeID 和 WALReplicaID 与该分片的计划一起保留。Search、Retrieve、两阶段搜索和按主键回查中所有需要访问 WAL 的操作都发往这个实例，sealed 部分按计划发往相应 QN。SN 执行时校验实例身份、View 版本和 MVCC。来源失效时，客户端丢弃该分片本次的部分结果，重新取点和执行。已经依赖归并结果的回查失败则由外层重试整个操作。副本选择保存在调用方内存中，QueryView 和 WAL 同步协议无需增加字段。
+Strong 由当前 RW 提供 MVCC，客户端携带 writer term。Bounded、Session 和 Eventually 携带 WALReplicaID，由当前 RW 按已完成写入取点。Customized 携带有效时间戳 B 时走 barrier_mvcc，在 RW 上固定读 B。RW Seal 时结束目录订阅，客户端在新主上重新订阅并取得首份快照。TODO：按所选物理副本订阅目录后接入 RO 查询。客户端把取点成功的 NodeID 和 WALReplicaID 与该分片的计划一起保留。Search、Retrieve、两阶段搜索和按主键回查中所有需要访问 WAL 的操作都发往这个实例，sealed 部分按计划发往相应 QN。SN 执行时校验实例身份、View 版本和 MVCC。来源失效时，客户端丢弃该分片本次的部分结果，重新取点和执行。已经依赖归并结果的回查失败则由外层重试整个操作。副本选择保存在调用方内存中，QueryView 和 WAL 同步协议无需增加字段。
 
 旧升级用途的 access_mode、Assign/Remove 分配流程及其专用类型退出该设计。CollectStatus 的节点指标用途可继续沿用。
 
@@ -53,8 +53,14 @@ RO 从 SN catalog 恢复的 Up 走 UpRecovering；Preparing、Down 等在处理�
 
 1. RW 收到 Preparing，将其分发到已确认参与集合。每个副本在本地固定 Buffer 后缀和实时订阅，加载具体 View 的持久基线，核对 Schema、目标 DataVersion 的 growing/sealed 归属并赶上所需进度，才报告 Ready。RW 也执行本地准备，聚合 Ready 后回报 Coord，避免 Coord 与 RO 相互等待 Up。
 2. 收到 Coord 的 Up 目标且本轮参与者均已 Ready 后，RW 在当前写授权下持久化 Up。确认成功后才发 Up 给 RO 并向 Coord 报告。新加入或重启的 RO 收到已持久 Up，需要经过本地 UpRecovering 和同样的资源核对，不能直接开放查询。
-3. 对 Down，RW 先通知参与者，自己也走原有 Down/lease 流程。RO 在本地停止相应准入、满足已有租约和在途引用的排空条件后回报 Down（已经释放可报 Dropped）。RW 收齐 Down 或经 session 确认的安全退出证明后才删除 SN 的持久 Up、向 Coord 报告 Down。随后 Dropped 驱动最终资源释放。Preparing 取消和 Unrecoverable 沿用 QueryView 状态机。
+3. QueryCoord 的 Syncer 向当前 RW 发送 Down，RW 将同一目标同步给参与者。RW、RO 共用本地 QueryView 状态机。Up 等待服务租约和在途引用排空，Preparing、Ready、UpRecovering、Unrecoverable 收到 Down 可直接进入 Down，保留资源直到 Dropped。RO 只向 RW 回报本地 Down，已释放的版本可报 Dropped。RW 确认自身和当前成员均排空（退出成员由 session 确认安全退出）后，才删除 SN 的持久 Up 记录并向 QueryCoord 确认。RW 宕机后，Syncer 在新 RW 上补发尚待确认的目标。
 4. RO 用 WALQueryViewReport 回报逻辑 View 键与本地状态。RW 从当前 Watch 取得 WALReplicaID 和 writer term，按副本及 View 分别记录状态。只有符合当前状态机转换的报告才能推进确认。同一副本重复 Ready 只计一次；目标进入 Down 后，迟到的 Ready 无法满足排空条件。RO 的异步完成回调须仍属于当前资源引用，沿用现有本地准备检查。[现有回报匹配](../../../../internal/views/coord/coordview/syncer/pending_sync_query_views.go) · [资源准备检查](../../../../internal/streamingnode/server/wal/vchannel/queryresource/manager.go)
+
+对于同一 `(ShardID, QueryViewVersion)`，RO 一次加载失败后保持 Preparing，按退避策略重试当前版本。成功时通过当前 Watch 向 RW 报 Ready，无需 QueryCoord 重发命令。RW 即使已经在本地 Ready，仍须等当前参与成员全部就绪才能向 QueryCoord 报 Ready。只有 RW 自己在准备期间进入 Unrecoverable，它才通过 ViewSync 向 QueryCoord 报告该版本准备失败。已有的 Up 版本继续按原租约服务。
+
+角色交接保留正在准备的资源。RO 升为 RW 后，后续加载失败按 RW 的规则分类。旧 RW 降为 RO 后，如果新主仍要求准备一个在旧任期失败的版本，本地保留该版本的资源引用并重新发起准备，避免更高 DataVersion 抢先推进回收水位。旧准备任务的迟到回调无法推进新加载。健康版本及其租约继续使用。
+
+如果 RO 缺少该版本必需的历史基线，同一输入下重试仍无法达到 Ready。只要该 RO 仍是参与成员且该版本仍是目标，首次发布 Up 就要等待。基线恢复、目标版本更新或参与成员被替换后可继续推进。Down、Dropped 到达后以退休目标为准，迟到的加载完成不能重新激活该版本。已持久化 Up 的版本在新加入的 RO 上独立恢复，其他已就绪副本继续服务。
 
 参与集合从 A/B 扩到 A/B/C 时，保持原实例、原 Watch 且仍有效的 B 的 Ready 可以沿用，新增的 C 必须报告自己的状态。更换实例、断流重连或换主时丢弃被替换 Watch 的回报及缓存，并从新流收集当前状态。若同一 View 键在同一副本需要重新获取资源并使既有 Ready 失效，先替换该副本的 Watch 再参与确认，隔离原连接上已发出的 Ready。普通目标重推直接重报本地状态。缩容时按前述成员确认规则等待排空或安全退出。
 
@@ -100,6 +106,9 @@ A/7 正在向 B/8 交接时，若 B 的 SN session 已退出，Coord 重新选�
 | 指定 View 需要 checkpoint 之前的 Delete | 按目标版本从对象存储完成有界重放，查不到所需历史时不报 Ready。 |
 | DataView 已发布，SN 元数据尚未写回 | 按权威首次 sealed 绑定准备；旧 View 和新 View 各自不漏行、不重复。 |
 | 对同一 View 重报 Ready、目标进入 Down 后又收到 Ready、旧 Watch 被替换 | 重复报告只计一个副本；Ready 不能确认 Down；原 Watch 的报告无效。 |
+| RO 已 Ready 但跳过 Up，直接收到 Down | RO 回报本地 Down 并保留资源。RW 收齐确认后删除 SN 的持久 Up，Dropped 到达后各副本释放资源。 |
+| 同一 Shard 的 V1 已 Up，RO 准备 V2 时加载失败，RW 先到 Ready | V1 继续服务。RO 重试同一 V2 成功后报 Ready，RW 收齐当前参与者的 Ready 后推进 V2。 |
+| RO 仍在准备 V2，RW 本地准备 V2 进入 Unrecoverable | RW 立即向 QueryCoord 回报 V2 的失败，RO 随后按退休目标清理 V2。 |
 | 新增成员、原成员仍在排空、Up 写成功后 RW 宕机 | 新成员独立确认；仍存活的排空者不可跳过；新主从持久 Up 补报。 |
 | 交接期间执行普通查询与写入 | 已就绪的普通读保留原 runtime；A Seal 后拒绝旧 term，B 屏障就绪后才对外写；既有查询无重复 replay。 |
 | Prepare 后 B 退出；另一次在 Seal 后 B 退出且 Coord 重启 | Coord 按 session 重新分配更高任期并广播；所有 SN 幂等收敛到最新拓扑，旧任期的请求不再生效。 |

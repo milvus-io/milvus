@@ -64,15 +64,13 @@ unloaded case, but cannot prevent a subsequent concurrent release.
 unsubscribes and wakes waiters before the underlying handler clients shut down.
 TODO: reclaim idle route subscriptions together with Proxy metadata GC.
 
-With WAL replicas, Phase 1 routes Strong to the current writer and Bounded to a serving reader. The advertised maximum Up version
-is only a routing-change hint; SN selects the highest Up View matching the request
-schema within the requested replica. The returned plan supplies the exact version.
-Phase 1 preserves each requested consistency level. Strong waits for completed writes.
-Session requires a complete prefix covering the caller’s guarantee timestamp. Eventually
-reuses the current complete snapshot, and Bounded enforces its staleness bound. Customized
-preserves its guarantee as a logical snapshot lower bound, reusing the same
-complete-prefix optimization as BarrierMVCC and establishing a scoped barrier
-only when coverage is insufficient.
+Phase 1 resolves the current writer through StreamingNode session discovery.
+Strong, Bounded, Session and Eventually sample completed writes on that writer.
+Strong also validates the advertised writer term. Customized queries with an
+effective timestamp B use the same fixed `barrier_mvcc=B` input as iterator
+snapshots. The writer selects the highest Up View matching the request schema
+and returns its exact version. RO replicas prepare QueryView resources for
+promotion. Serving queries from RO is a TODO.
 
 Phase 2 sends `SearchOnView` or `QueryOnView` concurrently to every worker in the
 plan. The client retains the responding WAL replica with the shard plan. All SN

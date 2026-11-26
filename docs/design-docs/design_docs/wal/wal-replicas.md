@@ -1,6 +1,6 @@
 # WAL 多副本工作流
 
-同一 PChannel 的各副本独立读取共享 WAL。RW 负责 Append、Strong 查询和完整 RecoveryStorage 的持久化；RO 持有本地 WAL Buffer、scanner 及按需加载的 QueryRuntime。RW 仅把已发布的 WALCheckpoint 和 QueryView 信号发给 RO。两端共享恢复所需的 etcd、对象存储及 WAL。[副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [协议与时序](wal-replica-protocol.md) · [截断与加载的正确性条件](wal-replica-commit.md)
+同一 PChannel 的各副本独立读取共享 WAL。RW 负责 Append、WAL 侧查询和完整 RecoveryStorage 的持久化；RO 持有本地 WAL Buffer、scanner 及按需加载的 QueryRuntime。RW 仅把已发布的 WALCheckpoint 和 QueryView 信号发给 RO。两端共享恢复所需的 etcd、对象存储及 WAL。[副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [协议与时序](wal-replica-protocol.md) · [截断与加载的正确性条件](wal-replica-commit.md)
 
 | 流程 | 输入和完成条件 |
 | --- | --- |
@@ -29,7 +29,7 @@
 
 ## QueryView 多副本确认
 
-QueryView 的逻辑身份为 ShardID + QueryViewVersion。RW 从当前 Watch 取得报告者的 WALReplicaID，以 ShardID + QueryViewVersion 匹配本地状态；重复回报幂等。RW 协调当前参与集合的 Ready 和 Down；RO 使用同一查询状态机准备、服务、排空，只回报本地状态。RW 在收到 Coord 的 Up 目标且参与者均已 Ready 后，先持久发布 Up，再通知 RO 开放该版查询并上报 Coord。Down 时先分发排空意图，各参与者遵守已有租约及操作引用；收齐 Down 或安全退出证明后，RW 才删除持久 Up 并上报。Dropped 继续走原释放流程。重连或换主后从新流收集本地状态；成员变化时按新集合判断，新增成员单独确认。[QueryView 状态机](../qviews/query_view_state_machine.md) · [成员确认规则](wal-replica-protocol.md)
+QueryView 的逻辑身份为 ShardID + QueryViewVersion。RW 从当前 Watch 取得报告者的 WALReplicaID，以 ShardID + QueryViewVersion 匹配本地状态；重复回报幂等。RW 协调当前参与集合的 Ready 和 Down；RO 使用同一查询状态机准备和排空本地资源，回报本地状态。RW 在收到 Coord 的 Up 目标且参与者均已 Ready 后，先持久发布 Up，再同步该版本的 Up 状态并上报 Coord。Down 时先分发排空意图，各参与者遵守已有租约及操作引用；收齐 Down 或安全退出证明后，RW 才删除持久 Up 并上报。Dropped 继续走原释放流程。重连或换主后从新流收集本地状态；成员变化时按新集合判断，新增成员单独确认。[QueryView 状态机](../qviews/query_view_state_machine.md) · [成员确认规则](wal-replica-protocol.md)
 
 ## 运行代价
 

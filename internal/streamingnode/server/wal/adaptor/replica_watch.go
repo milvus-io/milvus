@@ -13,19 +13,8 @@ func (w *walAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (wal.Rep
 		return nil, status.NewOnShutdownError("replica directory WAL is unavailable")
 	}
 	defer w.lifetime.Done()
-	if w.queryViewHandler == nil || w.strongCtx.Err() != nil {
+	if w.queryViewHandler == nil || w.writerCtx.Err() != nil {
 		return nil, status.NewOnShutdownError("replica directory is unavailable")
 	}
-	return w.queryViewHandler.AcquireReplicaWatchStream(ctx, w.Channel().Name, w.strongCtx.Done()), nil
-}
-
-func (w *roWALAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (wal.ReplicaWatchStream, error) {
-	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, status.NewOnShutdownError("replica directory WAL is unavailable")
-	}
-	defer w.lifetime.Done()
-	if w.readViews == nil {
-		return nil, status.NewOnShutdownError("replica directory is unavailable")
-	}
-	return w.readViews.AcquireReplicaWatchStream(ctx, w.Channel().Name, w.Unavailable()), nil
+	return w.queryViewHandler.AcquireReplicaWatchStream(ctx, w.Channel().Name, w.writerCtx.Done()), nil
 }

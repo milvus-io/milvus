@@ -112,6 +112,10 @@ func (m *fakeViewQueryWALManager) GetAvailableWAL(channel types.PChannelInfo) (w
 	return m.wal, m.err
 }
 
+func (m *fakeViewQueryWALManager) GetAvailableRawWALByPChannel(string) (wal.WAL, error) {
+	return m.wal, m.err
+}
+
 type fakeViewQueryWAL struct {
 	viewquery.TaskProvider
 	wal.WAL

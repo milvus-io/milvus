@@ -252,6 +252,73 @@ func TestSNHandler_AcquireUnrecoverableReportsUnrecoverable(t *testing.T) {
 	assert.Equal(t, 0, cat.savedCount())
 }
 
+// The same physical resources survive the writer-to-reader handoff.
+type replicaTestResources struct {
+	*mockResourceManager
+	reader bool
+}
+
+func (r *replicaTestResources) RetryFailedPreparation() bool { return r.reader }
+
+func TestSNHandler_RearmFailedPreparationOnDemotion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		recovered bool
+		late      bool
+	}{
+		{"failed local preparation", false, false},
+		{"in-flight local failure", false, true},
+		{"in-flight recovery failure", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := &replicaTestResources{mockResourceManager: newMockResourceManager()}
+			view := newPreparingSNView(1)
+			key := view.QueryViewKey()
+			var durable []*viewpb.QueryViewOfShard
+			if tc.recovered {
+				durable = []*viewpb.QueryViewOfShard{newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp).IntoProto()}
+			}
+			h := recoverSNQueryViewHandler(t.Context(), testPChannel, nil, res, durable)
+			writer, reader := &reportCollector{}, &reportCollector{}
+			h.ApplyViews([]handler.ApplyView{{View: view, OnReport: writer.onReport}})
+			old, ok := res.getAcquired(key)
+			require.True(t, ok)
+			if !tc.late {
+				old.OnUnrecoverable()
+				require.Equal(t, qviews.QueryViewStateUnrecoverable, writer.last().State())
+			}
+
+			res.reader = true
+			command := []handler.ApplyView{{View: view, OnReport: reader.onReport}}
+			h.ApplyViews(command)
+			if tc.late {
+				old.OnUnrecoverable()
+			}
+			require.Equal(t, qviews.QueryViewStatePreparing, reader.last().State())
+			h.ApplyViews(command)
+			require.Len(t, res.acquiredKeys(), 2)
+			require.Zero(t, res.releasedCount())
+			old.OnReady()
+			old.OnUnrecoverable()
+			require.Equal(t, 1, reader.count())
+
+			current, ok := res.getAcquired(key)
+			require.True(t, ok)
+			require.True(t, current.Retry)
+			current.OnReady()
+			require.Equal(t, qviews.QueryViewStateReady, reader.last().State())
+			h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown), OnReport: reader.onReport}})
+			current.OnUnrecoverable()
+			require.Equal(t, qviews.QueryViewStateDown, reader.last().State())
+			require.Len(t, res.acquiredKeys(), 2)
+			h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDropped), OnReport: reader.onReport}})
+			res.invokeReleaseCallback(key)
+			require.Equal(t, qviews.QueryViewStateDropped, reader.last().State())
+			h.CloseForHandoff()
+		})
+	}
+}
+
 func TestSNHandler_ApplyViews_UnknownViewReportsUnrecoverable(t *testing.T) {
 	cat := newMockCatalog()
 	mgr := newMockResourceManager()

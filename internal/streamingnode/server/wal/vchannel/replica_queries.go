@@ -3,7 +3,9 @@ package vchannel
 import (
 	"context"
 	"math"
+	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 
@@ -26,6 +28,7 @@ import (
 // ReplicaQueries owns live read resources for the lifetime of the physical
 // replica. Only an actual View capture reads writer metadata and summary chunks.
 type ReplicaQueries struct {
+	writer   atomic.Bool
 	ctx      context.Context
 	channel  string
 	buffer   *replica.Buffer
@@ -36,13 +39,28 @@ type ReplicaQueries struct {
 	changed  chan struct{}
 }
 type queryChannel struct {
-	resources      *queryresource.Manager
-	refs           map[qviews.QueryViewKey]bool
+	resources *queryresource.Manager
+	// A non-nil request is waiting for an admissible DataVersion.
+	refs           map[qviews.QueryViewKey]*snview.AcquireResource
 	awaitingSealed map[int64]struct{}
 }
 
 func NewReplicaQueries(ctx context.Context, channel string, b *replica.Buffer, through uint64) *ReplicaQueries {
 	return &ReplicaQueries{ctx: ctx, channel: channel, buffer: b, through: through, dispatch: queryresource.NewConfiguredDispatcher(), active: make(map[string]*queryChannel), changed: make(chan struct{})}
+}
+
+// RetryFailedPreparation reports whether local failures should be retried for
+// the writer that supplied the current target.
+func (q *ReplicaQueries) RetryFailedPreparation() bool { return !q.writer.Load() }
+
+// SetWriter changes failure ownership without interrupting a running build.
+func (q *ReplicaQueries) SetWriter(writer bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.writer.Store(writer)
+	for _, ch := range q.active {
+		q.retryAdmissionLocked(ch)
+	}
 }
 
 func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
@@ -53,7 +71,8 @@ func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
 	if ch == nil {
 		r := resource.Resource()
 		cfg := queryresource.Config{
-			CaptureView: q.capture, Dispatcher: q.dispatch, ChunkManager: r.ChunkManager(),
+			RetryFailedPreparation: q.RetryFailedPreparation,
+			CaptureView:            q.capture, Dispatcher: q.dispatch, ChunkManager: r.ChunkManager(),
 			LoadInfoProvider: queryresource.NewFutureLoadInfoProvider(r.MixCoordClient()),
 			Builders: []queryresource.QueryRuntimeModuleBuilder{
 				queryresource.NewGrowingRuntimeModuleBuilder(nil),
@@ -63,13 +82,40 @@ func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
 		}
 		ch = &queryChannel{
 			resources:      queryresource.NewManager(cfg),
-			refs:           make(map[qviews.QueryViewKey]bool),
+			refs:           make(map[qviews.QueryViewKey]*snview.AcquireResource),
 			awaitingSealed: make(map[int64]struct{}),
 		}
 		q.active[vc] = ch
 	}
-	ch.refs[req.Key] = true
-	ch.resources.AcquireLocked(req, nil)
+	q.admitLocked(ch, &req)
+}
+
+func (q *ReplicaQueries) admitLocked(ch *queryChannel, req *snview.AcquireResource) {
+	if !ch.resources.TryAcquireLocked(*req, nil) {
+		if !q.writer.Load() {
+			ch.refs[req.Key] = req
+			return
+		}
+		ch.resources.Reject(*req)
+	}
+	ch.refs[req.Key] = nil
+}
+
+func (q *ReplicaQueries) retryAdmissionLocked(ch *queryChannel) {
+	var pending []*snview.AcquireResource
+	for _, req := range ch.refs {
+		if req != nil {
+			pending = append(pending, req)
+		}
+	}
+	// A fresh runtime must retain the oldest requested base before a newer
+	// admission advances its watermark.
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[j].Key.QueryViewVersion.GT(pending[i].Key.QueryViewVersion)
+	})
+	for _, req := range pending {
+		q.admitLocked(ch, req)
+	}
 }
 
 func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
@@ -97,6 +143,7 @@ func (q *ReplicaQueries) Release(req snview.ReleaseResource) {
 	// Serialize unregister/register of the same key. Release schedules cleanup
 	// and the callback outside the manager lock.
 	ch.resources.Release(req)
+	q.retryAdmissionLocked(ch)
 	q.mu.Unlock()
 }
 
@@ -399,22 +446,4 @@ func buildReplicaView(meta *viewpb.QueryViewMeta, vc *VChannelView, segments map
 		after = through
 	}
 	return walview.VChannelWALView{VChannel: meta.Vchannel, CollectionID: meta.CollectionId, BaseGrowingTimeTick: through, BaseTransformTimeTick: through, LoadInfoVersion: meta.LoadInfoVersion, Schema: schema.Schema, WriteSchema: state.Schema, SegmentSnapshot: snapshot, DeleteReplayStartAfterTimeTick: after}, nil
-}
-
-func (q *ReplicaQueries) Prefix(ctx context.Context, minimum uint64) (uint64, error) {
-	for {
-		q.mu.Lock()
-		through, changed := q.through, q.changed
-		q.mu.Unlock()
-		if through >= minimum {
-			return through, nil
-		}
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-q.ctx.Done():
-			return 0, q.ctx.Err()
-		case <-changed:
-		}
-	}
 }

@@ -207,9 +207,11 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	planClient := &fakeQueryPlanClient{plan: plan, source: source, clientOptimizeInfo: planResponse.ClientOptimizeInfo}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
+	request.ConsistencyLevel = commonpb.ConsistencyLevel_Customized
+	request.GuaranteeTimestamp = 123
 	streams, shardPlan, err := client.SearchStreams(context.Background(), &ShardSearchRequest{
 		VChannel: shardID.VChannel,
-		Req:      request, BarrierMVCC: 123,
+		Req:      request,
 	}, 20)
 
 	require.NoError(t, err)
@@ -282,9 +284,11 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 
 	chunkBytes := 2 * (8 + 8 + 8) // Two rows with int64 PK, value and timestamp.
 
+	request.ConsistencyLevel = commonpb.ConsistencyLevel_Customized
+	request.GuaranteeTimestamp = 123
 	stream, shardPlan, err := client.QueryStream(context.Background(), &ShardQueryRequest{
 		VChannel: shardID.VChannel,
-		Req:      request, BarrierMVCC: 123,
+		Req:      request,
 	}, chunkBytes)
 
 	require.NoError(t, err)

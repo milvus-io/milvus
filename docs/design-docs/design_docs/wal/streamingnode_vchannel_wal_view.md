@@ -209,14 +209,14 @@ Each failed attempt closes its partial modules and buffered events outside the
 owner/manager locks. The next attempt captures a fresh snapshot and installs a
 fresh QueryRuntime under the same VChannel lock. It never reuses partially
 prepared modules. A released/cancelled build cannot install a replacement or
-report Ready for a later acquisition. Explicit data-integrity failures report
-Unrecoverable; owner cancellation stops the build. An older TransformLog start
+report Ready for a later acquisition. The writer reports explicit data-integrity
+failures as Unrecoverable. Owner cancellation stops the build. An older TransformLog start
 is accepted under the lower-bound compatibility policy described above.
 
 ### Preparation failure ownership
 
-The intended contract assigns recovery to the component capable of resolving
-the failure:
+For a WAL writer preparing a QueryView, the intended contract assigns recovery
+to the component capable of resolving the failure.
 
 - **Worknode:** recoverable failures that can be resolved locally, such as
   temporary storage/network failures, incomplete segment commits and short-lived
@@ -248,8 +248,12 @@ classification must reflect whether this node can recover, rather than relying
 on a broad status code alone. This documentation update does not change the
 classifier.
 
-For Preparing, `OnUnrecoverable` reports the failure to Coord. SN recovery retains
-the existing UpRecovering exception: a local recovery failure preserves the Up
+For Preparing, a writer's `OnUnrecoverable` reports the failure to Coord. A WAL
+reader retries its current version after a local loading failure and reports
+Ready to the writer once its own preparation succeeds.
+[WAL replica preparation](wal-replica-protocol.md#4-up-和-down-的多副本确认)
+
+SN recovery retains the existing UpRecovering exception: a local recovery failure preserves the Up
 record and does not directly report Unrecoverable; the query error path is
 expected to trigger replacement. Full Coord/Proxy orchestration is outside this
 extraction, so this existing path is not evidence that the final recovery
@@ -347,9 +351,10 @@ rechecks the view reference and runtime identity before reporting Ready.
 The resource manager maintains two distinct version boundaries:
 
 - Admission uses the highest DataVersion already accepted during the current
-  runtime/reference lifetime. A lower new acquisition is rejected through
-  `OnUnrecoverable` unless another reference still retains the exact DataVersion,
-  SchemaVersion and LoadInfoVersion. Such cross-replica reuse does not rewind
+  runtime/reference lifetime. A lower new acquisition requires another
+  reference that retains the exact DataVersion, SchemaVersion and LoadInfoVersion.
+  If the base is unavailable, the writer reports Unrecoverable and a WAL reader
+  stays unready for this version. Such cross-replica reuse does not rewind
   reclamation. Equal versions and idempotent existing references remain valid.
   Removing the highest reference does not lower this boundary; already retained
   older views continue serving according to their lifecycle and leases. Once the

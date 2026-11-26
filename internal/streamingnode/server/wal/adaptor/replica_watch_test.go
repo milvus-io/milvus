@@ -22,7 +22,7 @@ func TestReplicaWatchWALAvailability(t *testing.T) {
 		defer cancel()
 		writerCtx, seal := context.WithCancel(ctx)
 		defer seal()
-		w := &walAdaptorImpl{strongCtx: writerCtx, readSide: &roWALAdaptorImpl{}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: ctx, lifetime: typeutil.NewLifetime()}}
+		w := &walAdaptorImpl{writerCtx: writerCtx, readSide: &roWALAdaptorImpl{}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: ctx, lifetime: typeutil.NewLifetime()}}
 		_, err := w.AcquireReplicaWatchStream(t.Context())
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
 		d := snview.NewReplicaDirectoryForTest()

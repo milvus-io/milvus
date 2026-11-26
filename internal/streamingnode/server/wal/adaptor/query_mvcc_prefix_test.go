@@ -124,7 +124,7 @@ func TestQueryMVCCPrefixWaitCancellation(t *testing.T) {
 
 func TestQueryMVCCConsistencySelectsCompleteSnapshots(t *testing.T) {
 	resource.InitForTest(t)
-	mockey.PatchConvey("weak reads reuse a prefix while Strong covers completed writes", t, func() {
+	mockey.PatchConvey("all consistency levels sample completed writes on the writer", t, func() {
 		manager := mvcc.NewMVCCManager(100)
 		manager.ApplyRecoveryBarrier("v", 100)
 		insert := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10), "_vc": "v"}).WithTimeTick(200)
@@ -135,28 +135,17 @@ func TestQueryMVCCConsistencySelectsCompleteSnapshots(t *testing.T) {
 			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
-		req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}}
-		got, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.NoError(t, err)
-		require.EqualValues(t, 100, got.GrowingTimetick)
-		require.Zero(t, syncs.Times())
-		req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Bounded}
-		req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{GuaranteeTimestamp: 90}}
-		got, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.NoError(t, err)
-		require.EqualValues(t, 100, got.GrowingTimetick)
-		require.Zero(t, syncs.Times())
-		req.GetLegacyRetrieveRequest().GuaranteeTimestamp = 150
-		got, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.NoError(t, err)
-		require.EqualValues(t, 200, got.GrowingTimetick)
-		require.EqualValues(t, 100, got.TransformingTimetick)
-		require.Equal(t, 1, syncs.Times())
-		req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}
-		got, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
-		require.NoError(t, err)
-		require.EqualValues(t, 200, got.GrowingTimetick)
-		require.Equal(t, 1, syncs.Times())
+		for _, level := range []commonpb.ConsistencyLevel{commonpb.ConsistencyLevel_Bounded, commonpb.ConsistencyLevel_Session, commonpb.ConsistencyLevel_Eventually, commonpb.ConsistencyLevel_Strong} {
+			req := &viewpb.GetQueryPlanRequest{
+				Mvcc:    &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: level},
+				Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{GuaranteeTimestamp: 300}},
+			}
+			got, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
+			require.NoError(t, err)
+			require.EqualValues(t, 200, got.GrowingTimetick)
+			require.EqualValues(t, 100, got.TransformingTimetick)
+			require.Equal(t, 1, syncs.Times())
+		}
 	})
 }
 
@@ -168,54 +157,4 @@ func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.Im
 			}
 		}
 	}
-}
-
-func TestCustomizedGuaranteeReusesCompletePrefix(t *testing.T) {
-	resource.InitForTest(t)
-	mockey.PatchConvey("customized reads preserve the caller lower bound and newer writes", t, func() {
-		manager := mvcc.NewMVCCManager(100)
-		manager.ApplyRecoveryBarrier("v", 100)
-		insert := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10), "_vc": "v"}).WithTimeTick(200)
-		tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(250)
-		manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
-		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
-		var target uint64
-		var barrierErr error
-		ensured := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "EnsureBarrier")).To(func(_ context.Context, _ types.PChannelInfo, channel string, ts uint64) error {
-			require.Equal(t, "v", channel)
-			target = ts
-			return barrierErr
-		}).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
-		for _, search := range []bool{false, true} {
-			for _, guarantee := range []uint64{90, 150, 225, 250, 300} {
-				req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Customized}}
-				if search {
-					req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{GuaranteeTimestamp: guarantee}}
-				} else {
-					req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{GuaranteeTimestamp: guarantee}}
-				}
-				before := ensured.Times()
-				got, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
-				require.NoError(t, err)
-				if guarantee <= 250 {
-					require.EqualValues(t, 200, got.GrowingTimetick)
-					require.EqualValues(t, 100, got.TransformingTimetick)
-					require.Equal(t, before, ensured.Times())
-				} else {
-					require.Equal(t, max(guarantee, uint64(200)), target)
-					require.Equal(t, target, got.GrowingTimetick)
-					require.Equal(t, target, got.TransformingTimetick)
-					require.Equal(t, before+1, ensured.Times())
-				}
-			}
-		}
-		barrierErr = context.Canceled
-		got, err := w.resolveQueryPlanMVCC(t.Context(), &viewpb.GetQueryPlanRequest{
-			Mvcc:    &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Customized},
-			Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{GuaranteeTimestamp: 300}},
-		}, "v")
-		require.ErrorIs(t, err, context.Canceled)
-		require.Nil(t, got)
-	})
 }

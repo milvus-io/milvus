@@ -217,8 +217,7 @@ func TestQueryPlanReplicaTermAdmission(t *testing.T) {
 	for _, level := range []commonpb.ConsistencyLevel{commonpb.ConsistencyLevel_Session, commonpb.ConsistencyLevel_Eventually, commonpb.ConsistencyLevel_Bounded, commonpb.ConsistencyLevel_Customized} {
 		req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: level}
 		_, err := server.GetQueryPlan(ctx, req)
-		require.NoError(t, err)
-		require.Equal(t, route, manager.channel)
+		require.True(t, viewerror.AsViewError(err).IsNotPrimary())
 	}
 	req.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}
 	_, err := server.GetQueryPlan(ctx, req)

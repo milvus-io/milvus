@@ -85,7 +85,7 @@ func adaptImplsToRWWAL(
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
-	wal.strongCtx, wal.stopStrong = context.WithCancel(roWAL.availableCtx)
+	wal.writerCtx, wal.cancelWriter = context.WithCancel(roWAL.availableCtx)
 	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
 	wal.RegisterMemoryObserver()
@@ -96,8 +96,8 @@ func adaptImplsToRWWAL(
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
 	readSide            *roWALAdaptorImpl
-	strongCtx           context.Context
-	stopStrong          context.CancelFunc
+	writerCtx           context.Context
+	cancelWriter        context.CancelFunc
 	writeAdmission      replica.Admission
 	queryViewHandler    *snview.SNQueryViewHandler
 	viewResourceManager *vchannel.PChannelRecoveryManager
@@ -123,7 +123,7 @@ func (w *walAdaptorImpl) PrepareHandoff(ctx context.Context) error {
 }
 
 func (w *walAdaptorImpl) SealHandoff(ctx context.Context) error {
-	w.stopStrong()
+	w.cancelWriter()
 	if err := w.writeAdmission.Drain(ctx); err != nil {
 		return err
 	}
@@ -443,8 +443,7 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
 	if w.readSide != nil {
-		// Full retirement also cancels queries using the shared reader. A
-		// demotion closes only the writer and keeps those queries running.
+		// Full retirement also stops the replica scanner and its runtime.
 		w.readSide.availableCancel()
 	}
 	w.closeWriter()
@@ -454,6 +453,7 @@ func (w *walAdaptorImpl) Close() {
 }
 
 func (w *walAdaptorImpl) closeWriter() {
+	w.cancelWriter()
 	if w.replicaViews != nil {
 		w.replicaViews.Stop()
 	}

@@ -3,12 +3,18 @@ package vchannel
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 // The first sealed version switches ownership of the rows. A new RO can
@@ -43,20 +49,64 @@ func TestReplicaViewFirstSealedVersion(t *testing.T) {
 }
 
 func TestReplicaQueryPrefixIsMonotonic(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	q := NewReplicaQueries(ctx, "p", replica.NewBuffer(10), 10)
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
 	defer q.Close()
 	q.Observe(nil, 15)
 	q.Observe(nil, 12)
-	through, err := q.Prefix(ctx, 14)
-	require.NoError(t, err)
-	require.EqualValues(t, 15, through)
-	stopped, stop := context.WithCancel(ctx)
-	stop()
-	_, err = q.Prefix(stopped, 16)
-	require.ErrorIs(t, err, context.Canceled)
-	cancel()
-	_, err = q.Prefix(t.Context(), 16)
-	require.ErrorIs(t, err, context.Canceled)
+	require.EqualValues(t, 15, q.through)
+}
+
+func TestReplicaQueryAdmissionDuringForwardRecovery(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
+	defer q.Close()
+	ch := &queryChannel{
+		refs: make(map[qviews.QueryViewKey]*snview.AcquireResource),
+		resources: queryresource.NewManager(queryresource.Config{
+			Scheduler: scheduler, Dispatcher: q.dispatch,
+			Builders: []queryresource.QueryRuntimeModuleBuilder{nil},
+			CaptureView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) error {
+				install(walview.VChannelWALView{})
+				return nil
+			},
+		}),
+	}
+	q.active["v1"] = ch
+	acquire := func(version int64) (qviews.QueryViewKey, <-chan bool) {
+		meta := &viewpb.QueryViewMeta{
+			Vchannel: "v1", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: version}},
+		}
+		key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.Version)}
+		outcome := make(chan bool, 1)
+		q.Acquire(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { outcome <- true }, OnUnrecoverable: func() { outcome <- false }})
+		return key, outcome
+	}
+	expect := func(result <-chan bool, ready bool) {
+		t.Helper()
+		select {
+		case got := <-result:
+			require.Equal(t, ready, got)
+		case <-time.After(5 * time.Second):
+			t.Fatal("query resource preparation did not report")
+		}
+	}
+
+	high, first := acquire(8)
+	expect(first, true)
+	expired, obsolete := acquire(2)
+	_, third := acquire(3)
+	_, fourth := acquire(4)
+	q.Release(snview.ReleaseResource{Key: expired})
+	q.Release(snview.ReleaseResource{Key: high})
+	expect(third, true)
+	expect(fourth, true)
+	select {
+	case <-obsolete:
+		t.Fatal("a dropped pending acquisition was revived")
+	default:
+	}
+	_, waiting := acquire(1)
+	q.SetWriter(true)
+	expect(waiting, false)
 }

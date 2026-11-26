@@ -381,6 +381,7 @@ func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls,
 	wal.viewResourceManager = rs.VChannelManager()
 	if readSide != nil {
 		readSide.stopFollowing()
+		readSide.readQueries.SetWriter(true)
 		wal.queryViewHandler = readSide.readViews
 		wal.replicaViews = newWriterViewControl(roWAL.availableCtx, readSide, roWAL.replicaPublisher, persistedViews)
 	}

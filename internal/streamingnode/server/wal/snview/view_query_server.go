@@ -3,13 +3,12 @@ package snview
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan/provider"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
-	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 var _ viewpb.ViewQueryServiceServer = (*PChannelViewQueryServer)(nil)
@@ -17,11 +16,11 @@ var _ viewpb.ViewQueryServiceServer = (*PChannelViewQueryServer)(nil)
 type PChannelViewQueryServer struct {
 	viewpb.UnimplementedViewQueryServiceServer
 
-	walManager pchannelWALProvider
+	walManager provider.WALManager
 	scheduler  viewquery.Scheduler
 }
 
-func NewPChannelViewQueryServer(walManager pchannelWALProvider, scheduler viewquery.Scheduler) *PChannelViewQueryServer {
+func NewPChannelViewQueryServer(walManager provider.WALManager, scheduler viewquery.Scheduler) *PChannelViewQueryServer {
 	return &PChannelViewQueryServer{
 		walManager: walManager,
 		scheduler:  scheduler,
@@ -94,22 +93,11 @@ func (s *PChannelViewQueryServer) taskProviderForVChannel(ctx context.Context, v
 	if s == nil || s.walManager == nil {
 		return nil, viewerror.NewOnShutdownError("view query service is unavailable")
 	}
-	if vchannel == "" {
-		return nil, viewerror.NewUnknownError("empty vchannel")
-	}
-	pchannel, err := worknodehandler.DecodeQueryViewPChannelFromIncomingContext(ctx)
+	writer, err := provider.QueryWriter(ctx, s.walManager, vchannel, false)
 	if err != nil {
-		return nil, viewerror.NewUnknownError("%s", err.Error())
+		return nil, err
 	}
-	expectedPChannel := funcutil.ToPhysicalChannel(vchannel)
-	if pchannel.Name != expectedPChannel {
-		return nil, viewerror.NewUnknownError("query view pchannel metadata mismatch, expected %s, got %s", expectedPChannel, pchannel.Name)
-	}
-	rawWAL, err := s.walManager.GetAvailableWAL(pchannel)
-	if err != nil {
-		return nil, viewerror.NewOnShutdownError("local WAL for vchannel %s is unavailable: %s", vchannel, err.Error())
-	}
-	provider, ok := wal.Unwrap(rawWAL).(viewquery.TaskProvider)
+	provider, ok := writer.(viewquery.TaskProvider)
 	if !ok {
 		return nil, viewerror.NewUnknownError("local WAL for vchannel %s does not implement view query task provider", vchannel)
 	}

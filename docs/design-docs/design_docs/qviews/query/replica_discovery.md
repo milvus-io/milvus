@@ -13,7 +13,7 @@ StreamingClient obtains the current writer for each PChannel from StreamingNode 
 
 TODO: Add RO query routing with directory subscriptions scoped to the selected WAL replica. [WAL session discovery protocol](../../wal/wal-replica-protocol.md#2-sn-session-发布-wal-路由)
 
-A Ready report for a logical View is scoped to the WAL replica on its active watch. The RW matches the shard and QueryView version; the RO opens query admission only after its own resources are ready and the View has been durably published Up. On process restart, a persisted Up resumes as UpRecovering without an inherited serving lease. [WAL replica confirmations](../../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
+A Ready report for a logical View is scoped to the WAL replica on its active watch. The RW matches the shard and QueryView version; the RO keeps prepared resources for promotion and serves queries once it becomes the writer. On process restart, a persisted Up resumes as UpRecovering without an inherited serving lease. [WAL replica confirmations](../../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
 
 ## Integration with the query client
 

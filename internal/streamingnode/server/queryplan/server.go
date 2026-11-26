@@ -7,33 +7,24 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan/provider"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
-	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type walManager interface {
-	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
-	GetAvailableRawWALByPChannel(string) (wal.WAL, error)
-}
-
 type Server struct {
 	viewpb.UnimplementedQueryPlanServiceServer
-	walManager walManager
+	walManager provider.WALManager
 }
 
-func NewServer(walManager walManager) *Server {
+func NewServer(walManager provider.WALManager) *Server {
 	return &Server{walManager: walManager}
 }
 
 func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	level, selectsMVCC := req.GetMvcc().(*viewpb.GetQueryPlanRequest_ConsistencyLevel)
 	strong := selectsMVCC && level.ConsistencyLevel == commonpb.ConsistencyLevel_Strong
-	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel(), strong, req.GetBarrierMvcc() != 0)
+	p, err := s.providerForVChannel(ctx, req.GetShardId().GetVchannel(), strong)
 	if err != nil {
 		return nil, normalizeQueryPlanError(err)
 	}
@@ -45,7 +36,7 @@ func (s *Server) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanReque
 }
 
 func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
-	p, err := s.providerForVChannel(ctx, req.GetVchannel(), true, false)
+	p, err := s.providerForVChannel(ctx, req.GetVchannel(), true)
 	if err != nil {
 		return nil, normalizeQueryPlanError(err)
 	}
@@ -56,42 +47,15 @@ func (s *Server) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimest
 	return resp, nil
 }
 
-func (s *Server) providerForVChannel(ctx context.Context, vchannel string, strong, activeBarrier bool) (provider.QueryPlanProvider, error) {
+func (s *Server) providerForVChannel(ctx context.Context, vchannel string, strong bool) (provider.QueryPlanProvider, error) {
 	if s == nil || s.walManager == nil {
 		return nil, viewerror.NewOnShutdownError("query plan service is unavailable")
 	}
-	if vchannel == "" {
-		return nil, viewerror.NewUnknownError("empty vchannel")
-	}
-	pchannel, err := worknodehandler.DecodeQueryViewPChannelFromIncomingContext(ctx)
+	writer, err := provider.QueryWriter(ctx, s.walManager, vchannel, strong)
 	if err != nil {
-		return nil, viewerror.NewUnknownError("%s", err.Error())
+		return nil, err
 	}
-	expectedPChannel := funcutil.ToPhysicalChannel(vchannel)
-	if pchannel.Name != expectedPChannel {
-		return nil, viewerror.NewUnknownError("query view pchannel metadata mismatch, expected %s, got %s", expectedPChannel, pchannel.Name)
-	}
-	if strong && (pchannel.Term <= 0 || pchannel.AccessMode != types.AccessModeRW) {
-		return nil, viewerror.NewNotPrimaryError("strong read requires a writer term for %s", expectedPChannel)
-	}
-	var rawWAL wal.WAL
-	if activeBarrier {
-		// A supplied barrier can require appending to the WAL. Match the advertised
-		// writer instance without requiring a term from the query client.
-		rawWAL, err = s.walManager.GetAvailableRawWALByPChannel(expectedPChannel)
-		if err == nil {
-			owner := rawWAL.Channel()
-			if pchannel.AccessMode != types.AccessModeRW || owner.AccessMode != types.AccessModeRW || owner.WALReplicaID != pchannel.WALReplicaID {
-				return nil, viewerror.NewNotPrimaryError("barrier requires the serving writer for %s", expectedPChannel)
-			}
-		}
-	} else {
-		rawWAL, err = s.walManager.GetAvailableWAL(pchannel)
-	}
-	if err != nil {
-		return nil, viewerror.NewOnShutdownError("local WAL for vchannel %s is unavailable: %s", vchannel, err.Error())
-	}
-	p, ok := wal.Unwrap(rawWAL).(provider.QueryPlanProvider)
+	p, ok := writer.(provider.QueryPlanProvider)
 	if !ok {
 		return nil, viewerror.NewUnknownError("local WAL for vchannel %s does not implement query plan provider", vchannel)
 	}

@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -71,7 +72,7 @@ func (f *replicaFollower) apply(ctx context.Context, state *streamingpb.WALRepli
 			}
 		}
 	}
-	var batch []handler.ApplyView
+	var preparing, retiring []handler.ApplyView
 	for key, target := range targets {
 		def := byKey[key]
 		if def == nil {
@@ -97,10 +98,24 @@ func (f *replicaFollower) apply(ctx context.Context, state *streamingpb.WALRepli
 		if target == viewpb.QueryViewState_QueryViewStateDropped {
 			first = viewpb.QueryViewState_QueryViewStateDown
 		}
-		batch = append(batch, f.command(ctx, key, cmd, first))
+		command := f.command(ctx, key, cmd, first)
+		if first == viewpb.QueryViewState_QueryViewStatePreparing {
+			preparing = append(preparing, command)
+		} else {
+			retiring = append(retiring, command)
+		}
 	}
 	f.mu.Unlock()
-	f.handler.ApplyViews(batch)
+	// Shards on the same vchannel share a resource manager and its DataVersion
+	// watermark. Register older bases first, before retiring their holders.
+	sort.Slice(preparing, func(i, j int) bool {
+		return preparing[j].View.QueryViewKey().QueryViewVersion.GT(preparing[i].View.QueryViewKey().QueryViewVersion)
+	})
+	for i := range preparing {
+		// A multi-shard batch is grouped by ShardID inside the handler.
+		f.handler.ApplyViews(preparing[i : i+1])
+	}
+	f.handler.ApplyViews(retiring)
 	return nil
 }
 

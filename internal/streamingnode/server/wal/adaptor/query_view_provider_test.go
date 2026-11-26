@@ -9,9 +9,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 func TestQueryViewProviderForwardsSelection(t *testing.T) {
@@ -47,4 +49,28 @@ func TestQueryViewProviderForwardsSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, queryTasks, gotQuery)
 	gotQuery.Release()
+}
+
+func TestQueryExecutionRequiresServingWriter(t *testing.T) {
+	ctx, seal := context.WithCancel(t.Context())
+	defer seal()
+	writer := &walAdaptorImpl{
+		writerCtx:        ctx,
+		roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context()},
+	}
+	channel := mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{Name: "p", Term: 7}).Build()
+	defer channel.UnPatch()
+	shard := qviews.ShardID{VChannel: "p_1v0"}
+	_, err := writer.queryViewTaskHandler(shard)
+	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
+	writer.queryViewHandler = &snview.SNQueryViewHandler{}
+	handler, err := writer.queryViewTaskHandler(shard)
+	require.NoError(t, err)
+	require.Same(t, writer.queryViewHandler, handler)
+	_, err = writer.queryViewTaskHandler(qviews.ShardID{VChannel: "other_1v0"})
+	require.True(t, viewerror.AsViewError(err).IsViewNotFound())
+
+	seal()
+	_, err = writer.queryViewTaskHandler(shard)
+	require.True(t, viewerror.AsViewError(err).IsOnShutdown())
 }

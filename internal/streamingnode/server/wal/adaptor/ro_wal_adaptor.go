@@ -242,6 +242,7 @@ func (w *roWALAdaptorImpl) startFollowing() {
 	if w.stopFollow != nil {
 		return
 	}
+	w.readQueries.SetWriter(false)
 	ctx, cancel := context.WithCancel(w.availableCtx)
 	w.stopFollow = cancel
 	w.followDone = make(chan struct{})

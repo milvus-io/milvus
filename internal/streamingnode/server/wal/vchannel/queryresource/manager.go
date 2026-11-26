@@ -26,19 +26,22 @@ type ViewBuilder func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool
 type CaptureView func(context.Context, *viewpb.QueryViewMeta, func(walview.VChannelWALView)) error
 
 type Config struct {
-	CaptureView      CaptureView
-	ChunkManager     storage.ChunkManager
-	Builders         []QueryRuntimeModuleBuilder
-	Scheduler        nodescheduler.Scheduler
-	Dispatcher       *Dispatcher
-	LoadInfoProvider LoadInfoProvider
+	// RetryFailedPreparation keeps replica-local failures pending while following a writer.
+	RetryFailedPreparation func() bool
+	CaptureView            CaptureView
+	ChunkManager           storage.ChunkManager
+	Builders               []QueryRuntimeModuleBuilder
+	Scheduler              nodescheduler.Scheduler
+	Dispatcher             *Dispatcher
+	LoadInfoProvider       LoadInfoProvider
 }
 
 type Manager struct {
-	captureView    CaptureView
-	chunkManager   storage.ChunkManager
-	partitionStats map[partitionStatsKey]*partitionStatsResource
-	mu             sync.Mutex
+	retryFailedPreparation func() bool
+	captureView            CaptureView
+	chunkManager           storage.ChunkManager
+	partitionStats         map[partitionStatsKey]*partitionStatsResource
+	mu                     sync.Mutex
 	// Detached builds must stop before their resources can be closed.
 	releasing sync.WaitGroup
 
@@ -69,12 +72,13 @@ type queryViewRef struct {
 
 func NewManager(config Config) *Manager {
 	return &Manager{
-		captureView:      config.CaptureView,
-		chunkManager:     config.ChunkManager,
-		builders:         defaultQueryRuntimeModuleBuilders(config.Builders),
-		scheduler:        config.Scheduler,
-		dispatcher:       config.Dispatcher,
-		loadInfoProvider: config.LoadInfoProvider,
+		retryFailedPreparation: config.RetryFailedPreparation,
+		captureView:            config.CaptureView,
+		chunkManager:           config.ChunkManager,
+		builders:               defaultQueryRuntimeModuleBuilders(config.Builders),
+		scheduler:              config.Scheduler,
+		dispatcher:             config.Dispatcher,
+		loadInfoProvider:       config.LoadInfoProvider,
 	}
 }
 
@@ -82,6 +86,15 @@ func NewManager(config Config) *Manager {
 // when needed. The caller should hold the owning VChannel state lock so build
 // observes a consistent DataView snapshot.
 func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
+	if !m.TryAcquireLocked(req, build) {
+		m.Reject(req)
+	}
+}
+
+// TryAcquireLocked returns false without registering or notifying when the
+// retained runtime cannot admit this version. A follower can reconsider it
+// after the conflicting references have been released.
+func (m *Manager) TryAcquireLocked(req snview.AcquireResource, build ViewBuilder) bool {
 	if req.Meta == nil || req.Meta.GetVersion() == nil || req.Meta.GetVersion().GetDataVersion() == nil {
 		panic("query view meta version is nil")
 	}
@@ -90,36 +103,44 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 		m.mu.Unlock()
 		panic("vchannel query resource is closed")
 	}
-	if _, ok := m.refs[req.Key]; !ok {
+	ref, exists := m.refs[req.Key]
+	if !exists {
 		version := req.Key.QueryViewVersion.DataVersion
-		if m.err != nil || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
+		if (m.err != nil && !m.retriesLocalFailures()) || (len(m.refs) != 0 && m.latestDataVersion.GT(version) && !m.retainsReadBaseLocked(req.Meta)) {
 			m.mu.Unlock()
-			m.Reject(req)
-			return
+			return false
 		}
-		if version.GT(m.latestDataVersion) {
+		if len(m.refs) == 0 || version.GT(m.latestDataVersion) {
 			m.latestDataVersion = version
 		}
 		if m.refs == nil {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
-		m.refs[req.Key] = queryViewRef{
-			statsResources:  m.acquirePartitionStatsLocked(snviewAcquireStats{req.Meta.GetCollectionId(), req.Meta.GetVchannel(), req.PartitionStats}),
-			meta:            proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
-			onReady:         req.OnReady,
-			onUnrecoverable: req.OnUnrecoverable,
-		}
+		ref.meta = req.Meta
+		ref.statsResources = m.acquirePartitionStatsLocked(snviewAcquireStats{req.Meta.GetCollectionId(), req.Meta.GetVchannel(), req.PartitionStats})
+	}
+	if !exists || req.Retry {
+		// Each attempt owns a distinct metadata pointer so an old readiness
+		// task cannot complete the new registration. A retry retains the
+		// original read base, resources, priority and reclamation watermark.
+		ref.meta = proto.CloneOf(ref.meta)
+		ref.onReady = req.OnReady
+		ref.onUnrecoverable = req.OnUnrecoverable
+		ref.prepared = false
+		m.refs[req.Key] = ref
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
 		} else if m.runtime != nil && m.task == nil && m.err == nil {
-			ref := m.refs[req.Key]
-			ref.resources = m.runtime.bindView(ref.meta)
-			m.refs[req.Key] = ref
+			if ref.resources == nil {
+				ref.resources = m.runtime.bindView(ref.meta)
+				m.refs[req.Key] = ref
+			}
 			m.submitReadyLocked(req.Key, ref)
 		}
 	}
 	m.updateBuildPriorityLocked()
 	m.mu.Unlock()
+	return true
 }
 
 // A published-schema placement repair may arrive after a newer schema. Its
@@ -394,7 +415,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if !retryablePreparationError(err) {
+		if !m.retriesLocalFailures() && !retryablePreparationError(err) {
 			return nil, err
 		}
 		mlog.Warn(ctx, "retry query runtime preparation", mlog.FieldVChannel(view.VChannel), mlog.Err(err))
@@ -557,9 +578,9 @@ func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, r
 			if obsolete {
 				return nil
 			}
-			return err
+			return errors.Mark(err, nodescheduler.ErrDelay)
 		}
-		if !retryablePreparationError(err) {
+		if !m.retriesLocalFailures() && !retryablePreparationError(err) {
 			m.mu.Lock()
 			currentRef, ok := m.refs[key]
 			current := ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
@@ -592,12 +613,16 @@ func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, r
 	return nil
 }
 
+func (m *Manager) retriesLocalFailures() bool {
+	return m.retryFailedPreparation != nil && m.retryFailedPreparation()
+}
+
 func retryablePreparationError(err error) bool {
-	if errors.Is(err, nodescheduler.ErrDelay) || merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, nodescheduler.ErrDelay) || merr.IsRetryableErr(err) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 	switch status.Code(err) {
-	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+	case codes.Canceled, codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
 		return true
 	}
 	return false

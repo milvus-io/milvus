@@ -10,6 +10,10 @@ import (
 
 // AcquireResource describes a resource acquisition request for a new Preparing view.
 type AcquireResource struct {
+	// Retry rebinds callbacks for a failed acquisition while retaining its read
+	// base. A role change may require the same version to prepare again.
+	Retry bool
+
 	// Key identifies the query view.
 	Key qviews.QueryViewKey
 

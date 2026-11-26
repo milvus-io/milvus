@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -27,39 +26,48 @@ import (
 )
 
 func (w *walAdaptorImpl) GetLatestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
-	return w.getQueryPlanMVCC(ctx, vchannel, true, 0)
-}
-
-func (w *walAdaptorImpl) getQueryPlanMVCC(ctx context.Context, vchannel string, strong bool, minimum uint64) (*viewpb.QueryPlanMVCC, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
-	if strong {
-		if !w.writeAdmission.Enter() {
-			return nil, viewerror.NewNotPrimaryError("WAL writer was sealed")
-		}
-		defer w.writeAdmission.Leave()
-		if w.strongCtx != nil {
-			var cancel context.CancelFunc
-			ctx, cancel = contextutil.MergeContext(ctx, w.strongCtx)
-			defer cancel()
-		}
-	}
 	callerCtx := ctx
-	ctx, cancel := contextutil.MergeContext(ctx, w.availableCtx)
-	defer cancel()
+	ctx, done, err := w.admitQuery(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	mvcc, err := w.latestQueryPlanMVCC(ctx, vchannel)
+	if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && ctx.Err() != nil {
+		return nil, viewerror.NewOnShutdownError("query mvcc WAL is unavailable")
+	}
+	return mvcc, err
+}
+
+// Seal cancels waits on this writer before draining admission for handoff.
+func (w *walAdaptorImpl) admitQuery(ctx context.Context) (context.Context, func(), error) {
+	if !w.writeAdmission.Enter() {
+		return nil, nil, viewerror.NewNotPrimaryError("WAL writer was sealed")
+	}
+	owner := w.writerCtx
+	if owner == nil {
+		owner = w.availableCtx
+	}
+	ctx, cancel := contextutil.MergeContext(ctx, owner)
+	return ctx, func() {
+		cancel()
+		w.writeAdmission.Leave()
+	}, nil
+}
+
+func (w *walAdaptorImpl) latestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
 	manager := w.param.MVCCManager.QueryMVCC()
-	minimum = max(minimum, manager.Minimum(vchannel, strong))
+	minimum := manager.Minimum(vchannel, true)
 	currentMVCC, ready := manager.Snapshot(vchannel, minimum)
 	if !ready {
 		resource.Resource().TimeTickInspector().TriggerSync(w.Channel(), w.readSide != nil)
 		var err error
 		currentMVCC, err = manager.WaitSnapshot(ctx, vchannel, minimum)
 		if err != nil {
-			if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && w.availableCtx.Err() != nil {
-				return nil, viewerror.NewOnShutdownError("query mvcc WAL is unavailable")
-			}
 			if errors.Is(err, merr.ErrChannelNotFound) {
 				return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
 			}
@@ -82,48 +90,6 @@ func (w *walAdaptorImpl) getQueryPlanMVCC(ctx context.Context, vchannel string, 
 }
 
 func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (response *viewpb.GetQueryPlanResponse, err error) {
-	if w.readSide != nil {
-		return w.readSide.getQueryPlan(ctx, req, w.queryViewHandler, w.readSide.readQueries, w.resolveQueryPlanMVCC)
-	}
-	var resources queryReadResources
-	if w.viewResourceManager != nil {
-		resources = w.viewResourceManager
-	}
-	return w.getQueryPlan(ctx, req, w.queryViewHandler, resources, w.resolveQueryPlanMVCC)
-}
-
-type queryReadResources interface {
-	GetQueryReadRuntime(qviews.QueryViewKey) (*queryresource.ReadRuntime, bool)
-}
-
-func (w *roWALAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	return w.getQueryPlan(ctx, req, w.readViews, w.readQueries, w.resolveReadMVCC)
-}
-
-func (w *roWALAdaptorImpl) resolveReadMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
-	switch m := req.GetMvcc().(type) {
-	case *viewpb.GetQueryPlanRequest_QueryPlanMvcc:
-		return m.QueryPlanMvcc, nil
-	case *viewpb.GetQueryPlanRequest_ConsistencyLevel:
-		if m.ConsistencyLevel == commonpb.ConsistencyLevel_Strong {
-			return nil, viewerror.NewNotPrimaryError("strong MVCC requires the writer")
-		}
-		minimum := max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
-		through, err := w.readQueries.Prefix(ctx, minimum)
-		if err != nil {
-			return nil, err
-		}
-		return &viewpb.QueryPlanMVCC{GrowingTimetick: through, TransformingTimetick: through}, nil
-	default:
-		return nil, viewerror.NewNotPrimaryError("MVCC barrier requires the writer")
-	}
-}
-
-func (w *roWALAdaptorImpl) GetMVCCTimestamp(context.Context, *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
-	return nil, viewerror.NewNotPrimaryError("strong MVCC requires the writer")
-}
-
-func (w *roWALAdaptorImpl) getQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest, views *snview.SNQueryViewHandler, resources queryReadResources, resolveMVCC func(context.Context, *viewpb.GetQueryPlanRequest, string) (*viewpb.QueryPlanMVCC, error)) (response *viewpb.GetQueryPlanResponse, err error) {
 	totalTimer := planTotal.Begin()
 	defer totalTimer.EndError(&err)
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -134,13 +100,16 @@ func (w *roWALAdaptorImpl) getQueryPlan(ctx context.Context, req *viewpb.GetQuer
 	// A pending barrier must not hold WAL shutdown waiting for progress from
 	// the owner that is being fenced or replaced.
 	callerCtx := ctx
-	ctx, cancel := contextutil.MergeContext(ctx, w.availableCtx)
-	defer cancel()
+	ctx, done, err := w.admitQuery(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	defer func() {
 		// Retiring a WAL cancels its pending waits, not the caller's request.
 		// Preserve caller cancellation; otherwise let the client replan on
 		// the replacement owner through the existing shutdown retry path.
-		if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && w.availableCtx.Err() != nil {
+		if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && ctx.Err() != nil {
 			response = nil
 			err = viewerror.NewOnShutdownError("query plan WAL is unavailable")
 		}
@@ -149,6 +118,7 @@ func (w *roWALAdaptorImpl) getQueryPlan(ctx context.Context, req *viewpb.GetQuer
 	if req == nil || req.GetShardId() == nil {
 		return nil, viewerror.NewUnknownError("query plan request misses shard id")
 	}
+	views := w.queryViewHandler
 	if views == nil {
 		return nil, viewerror.NewViewNotFound("query view handler is unavailable")
 	}
@@ -187,18 +157,18 @@ func (w *roWALAdaptorImpl) getQueryPlan(ctx context.Context, req *viewpb.GetQuer
 	views.RecordShardAccess(viewShardID)
 
 	mvccTimer := planMVCC.Begin()
-	mvcc, err := resolveMVCC(ctx, req, shardID.VChannel)
+	mvcc, err := w.resolveQueryPlanMVCC(ctx, req, shardID.VChannel)
 	mvccTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
 
 	var readRuntime *queryresource.ReadRuntime
-	if resources != nil {
-		readRuntime, _ = resources.GetQueryReadRuntime(qviews.QueryViewKey{
-			ShardID:          viewShardID,
-			QueryViewVersion: lease.Version,
-		})
+	key := qviews.QueryViewKey{ShardID: viewShardID, QueryViewVersion: lease.Version}
+	if w.readSide != nil {
+		readRuntime, _ = w.readSide.readQueries.GetQueryReadRuntime(key)
+	} else if w.viewResourceManager != nil {
+		readRuntime, _ = w.viewResourceManager.GetQueryReadRuntime(key)
 	}
 	if readRuntime == nil {
 		return nil, viewerror.NewViewNotFound("query view read resources are unavailable")
@@ -380,23 +350,7 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		if w.Channel().AccessMode != types.AccessModeRW {
 			return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
 		}
-		strong := mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Strong
-		var minimum uint64
-		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded || mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Session {
-			// Proxy resolves both bounded staleness and the session read-your-writes floor.
-			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
-		}
-		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Customized {
-			// A customized guarantee is a lower bound, not an exact historical
-			// snapshot. Preserve newer visible writes when advancing to it.
-			current, err := w.getQueryPlanMVCC(ctx, vchannel, false, 0)
-			if err != nil {
-				return nil, err
-			}
-			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
-			return w.resolveBarrierMVCC(ctx, vchannel, max(minimum, current.GrowingTimetick, current.TransformingTimetick))
-		}
-		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
+		return w.latestQueryPlanMVCC(ctx, vchannel)
 	default:
 		return nil, viewerror.NewUnknownError("query plan request misses mvcc source")
 	}

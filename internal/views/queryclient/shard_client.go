@@ -823,12 +823,18 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 	if params.mvcc != nil && params.barrierMVCC != 0 {
 		return nil, nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
 	}
-	if params.barrierMVCC != 0 {
-		planReq.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: params.barrierMVCC}
-	} else if params.mvcc != nil {
+	if params.mvcc != nil {
 		planReq.Mvcc = &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: proto.Clone(params.mvcc).(*viewpb.QueryPlanMVCC)}
 	} else {
-		planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: params.consistencyLevel}
+		barrier := params.barrierMVCC
+		if barrier == 0 && params.consistencyLevel == commonpb.ConsistencyLevel_Customized {
+			barrier = max(planReq.GetLegacySearchRequest().GetGuaranteeTimestamp(), planReq.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
+		}
+		if barrier != 0 {
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: barrier}
+		} else {
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: params.consistencyLevel}
+		}
 	}
 	return s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)
 }

@@ -240,9 +240,11 @@ complete `QueryViewOfShard` received from Coord, including both
 `QueryViewOfStreamingNode` and `QueryViewOfQueryNode`, so recovery retains the
 complete shard topology without depending on a separate metadata source.
 
-Persisted states: **Up** recovery info only. Every version that has reached Up
-is persisted independently until that view receives Down or Dropped, so
-multiple Up recovery records may coexist.
+Each Up version has its own recovery record. With WAL replicas, Coord sends
+ViewSync commands to the RW, which replicates the target to the ROs. All use
+the same local state machine. The RW owns the recovery records and the
+acknowledgements to Coord. Each RO reports its local transitions to the RW.
+[WAL replica protocol](../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
 
 StreamingNode resource acquisition exposes both successful and unrecoverable
 callbacks. The handler wires them to `OnReady` and `OnUnrecoverable`, including
@@ -267,30 +269,31 @@ the crash-recovery path.
    [WAL input view readiness](../wal/streamingnode_vchannel_wal_view.md#9-queryview-readiness-and-version-ordering)
    and [IDF refresh](snview/idf_oracle_runtime.md#refresh-and-handoff).
 
-Locally recoverable preparation failures should remain Preparing and retry on
-the Worknode. Failures requiring a different view or node/resource assignment
-belong to Coord and make the current view Unrecoverable. This includes resource
-requirements the node cannot satisfy, not every temporary admission delay.
-The [failure ownership contract](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
-records the current classifier gaps; the intended policy is not fully realized
-by today's error allowlist.
+A writer retries locally recoverable failures. If it cannot prepare this version
+with the assigned resources, it reports its local Unrecoverable state to Coord.
+With WAL replicas, each RO stays Preparing and retries the current version after
+a local loading failure. The RW waits for every participating RO before reporting
+Ready. An older Up version can continue serving throughout preparation.
+[Preparation failure ownership](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
 
-New acquisitions must not regress below the shared VChannel resource manager's
-highest accepted DataVersion, including across replicas. Such acquisitions report
-Unrecoverable so Coord can replace them with a newer DataView. Equal DataVersions
-and already retained older views are allowed; this policy does not invalidate
-their existing Up leases.
+New acquisitions at or above the VChannel resource manager's highest accepted
+DataVersion are eligible. An older acquisition requires a retained read base.
+If a participating RO lacks that base, the first Up must wait for the base to
+become available, a new target, or a change in membership. Existing Up leases
+retain their resources.
 
 **Transitions:**
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | Preparation classified as unrecoverable; see the failure-ownership policy and classifier gaps above | Report Unrecoverable to Coord |
+| Ready | Local resource preparation succeeded | An RO reports Ready to the RW. The RW reports Ready to Coord once all participants are ready. |
+| Unrecoverable | Writer's local preparation classified as unrecoverable | The writer reports Unrecoverable to Coord. |
+| Down | Received Down before preparation finished | Enter Down immediately. Ignore late preparation callbacks for this version. |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Preparing → SN continues preparing; normal scenario.
+- Coord pushes Down → SN enters Down with no serving lease to drain.
 - Coord pushes Dropped → SN transitions to Dropped (Coord has abandoned this view).
 - Other signals → SN ignores (invalid transition).
 
@@ -305,7 +308,8 @@ their existing Up leases.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Up | Received Up push from Coord | Persist recovery info; activate view |
+| Up | Received Up after preparation | Activate the view once its recovery record is durable. |
+| Down | Received Down before local activation | Enter Down immediately and retain prepared resources until Dropped. |
 | Dropped | Received Dropped push from Coord | Release resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -319,8 +323,8 @@ their existing Up leases.
 - Received Up push from Coord.
 
 **Automatic Behavior:**
-1. Persist this view's recovery info under its full QueryView version. Recovery
-   records for other Up versions are retained independently.
+1. The writer persists this view's recovery info under its full QueryView
+   version. Recovery records for other Up versions are retained independently.
 2. Activate the view for query plan generation.
 3. Report Up to Coord.
 
@@ -328,7 +332,7 @@ their existing Up leases.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Received Down push and serving lease expired with no active query references | Delete persisted recovery info; stop accepting new query plans or execution tasks; tasks that already acquired segment handles may finish |
+| Down | Received Down push and serving lease expired with no active query references | Stop accepting new queries. Tasks that already acquired segment handles may finish. |
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Up / Down → SN does nothing; normal.
@@ -362,7 +366,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Up | WAL consumption catches up to current position | Begin serving queries |
-| Down | Received Down push from Coord | Delete recovery info; abandon WAL catch-up |
+| Down | Received Down during recovery | Enter Down immediately. A late recovery callback cannot activate this view. |
 | Unrecoverable | local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord; retain persisted Up recovery info, and let the query path trigger replacement |
 
 **Possible Coord States (and this node's reaction):**
@@ -376,12 +380,12 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ### 2.5 Down
 
 **Entry Conditions:**
-- Received Down push from Coord; the serving lease has expired and active query references are zero.
+- Received Down while Preparing, Ready, UpRecovering or Unrecoverable. These states hold no serving lease or active query references.
+- Received Down while Up and completed local lease and query-reference drain.
 
 **Automatic Behavior:**
-1. Delete persisted recovery info.
-2. Stop accepting new query plans or execution tasks. A Phase 2 request arriving after the actual Down transition must replan; tasks that already hold handles may finish. Before that transition, pending Down views remain Up and successful access renews the lease.
-3. Report Down to Coord.
+1. Close query admission for this version. A Phase 2 request arriving after the transition must replan. Retain resources until Dropped.
+2. Each RO reports its local Down to the RW. Once the RW has drained its own view and confirmed the participating replicas, it deletes any persisted Up record and reports Down to Coord. This includes a record retained after UpRecovering failed. A writer without WAL replicas removes any such record after local drain.
 
 **Transitions:**
 
@@ -411,11 +415,11 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
+| Down | Received Down after the view failed | Enter Down immediately and retain resources until Dropped. |
 | Dropped | Received Dropped push from Coord | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
-- Entered from Preparing: Coord may be in Preparing / Unrecoverable / Dropping;
-  SN waits for Dropped.
+- Entered from Preparing: SN waits for a retirement command after reporting the failure.
 - Entered from UpRecovering: Coord still considers the view Up until the query
   path triggers replacement.
 - Coord pushes Dropped → SN transitions to Dropped.
@@ -423,11 +427,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ### 2.7 Dropped
 
 **Entry Conditions:**
-- Received Dropped push from Coord (from Down / Unrecoverable / Preparing).
+- Received Dropped and completed resource release in the local Dropping state.
 
 **Automatic Behavior:**
-1. Release all view-related resources.
-2. Report Dropped to Coord.
+Report Dropped to confirm resource release.
 
 **Transitions:** None (terminal state; state machine instance destroyed).
 
