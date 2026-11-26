@@ -140,4 +140,39 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 			}
 		})
 	}
+	// Older definitions could omit an unusable client identity on a server-auth connection.
+	serverOnlyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	serverOnly := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+		MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair},
+	})))
+	t.Cleanup(serverOnly.Stop)
+	go func() { _ = serverOnly.Serve(serverOnlyListener) }()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "empty.pem"), nil, 0o600))
+	for name, identity := range map[string]map[string]any{
+		"cert_only":  {"client_cert": filepath.Join(root, "missing.pem")},
+		"key_only":   {"client_key": filepath.Join(root, "missing.key")},
+		"non_string": {"client_cert": 42, "client_key": filepath.Join(root, "client.key")},
+		"unreadable": {"client_cert": filepath.Join(root, "missing.pem"), "client_key": filepath.Join(root, "client.key")},
+		"empty":      {"client_cert": filepath.Join(root, "empty.pem"), "client_key": filepath.Join(root, "client.key")},
+	} {
+		t.Run("restore_legacy_identity_"+name, func(t *testing.T) {
+			identity["ca_cert"] = filepath.Join(root, "ca.pem")
+			params, err := json.Marshal(map[string]any{"tokenizer": map[string]any{
+				"type": "grpc", "endpoint": "https://" + serverOnlyListener.Addr().String(), "tls": identity,
+			}})
+			require.NoError(t, err)
+			restored, err := RestoreAnalyzer(string(params))
+			if err != nil && strings.Contains(err.Error(), "analyzer-remote-tls feature") {
+				t.Skip("TLS support disabled in this build")
+			}
+			require.NoError(t, err)
+			restored.Destroy()
+			_, err = NewAnalyzer(string(params))
+			require.Error(t, err)
+			err = ValidateAnalyzer(string(params))
+			require.Error(t, err)
+		})
+	}
+
 }

@@ -277,10 +277,15 @@ fn build_tls_config(
     let Some(tls) = tls else {
         return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
     };
-    let tls = tls.as_object().ok_or_else(|| {
-        TantivyBindingError::InvalidArgument("grpc tokenizer tls must be an object".into())
-    })?;
-    if tls.contains_key("client_cert") != tls.contains_key("client_key") {
+    let Some(tls) = tls.as_object() else {
+        if !enforce_file_access {
+            return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
+        }
+        return Err(TantivyBindingError::InvalidArgument(
+            "grpc tokenizer tls must be an object".into(),
+        ));
+    };
+    if enforce_file_access && tls.contains_key("client_cert") != tls.contains_key("client_key") {
         return Err(TantivyBindingError::InvalidArgument(
             "grpc tokenizer TLS client_cert and client_key must be supplied together".into(),
         ));
@@ -289,17 +294,17 @@ fn build_tls_config(
         let Some(value) = tls.get(key) else {
             return Ok(None);
         };
+        // Persisted definitions retain the old optional TLS file selection.
+        if !enforce_file_access {
+            return Ok(value.as_str().and_then(|path| std::fs::read(path).ok()));
+        }
         let path = value.as_str().filter(|p| !p.is_empty()).ok_or_else(|| {
             TantivyBindingError::InvalidArgument(
                 "grpc tokenizer TLS file path must be a non-empty string".into(),
             )
         })?;
-        if enforce_file_access {
-            crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
-                .map(Some)
-        } else {
-            Ok(Some(std::fs::read(path)?))
-        }
+        crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
+            .map(Some)
     };
     let domain = tls
         .get("domain")
@@ -309,8 +314,21 @@ fn build_tls_config(
     if let Some(ca) = read("ca_cert")? {
         config = config.ca_certificate(Certificate::from_pem(ca));
     }
-    if let (Some(cert), Some(key)) = (read("client_cert")?, read("client_key")?) {
-        config = config.identity(Identity::from_pem(cert, key));
+    if enforce_file_access
+        || (tls
+            .get("client_cert")
+            .and_then(json::Value::as_str)
+            .is_some()
+            && tls
+                .get("client_key")
+                .and_then(json::Value::as_str)
+                .is_some())
+    {
+        if let (Some(cert), Some(key)) = (read("client_cert")?, read("client_key")?) {
+            if enforce_file_access || (!cert.is_empty() && !key.is_empty()) {
+                config = config.identity(Identity::from_pem(cert, key));
+            }
+        }
     }
     Ok(config)
 }
@@ -319,6 +337,16 @@ fn build_tls_config(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(feature = "analyzer-remote-tls")]
+    #[test]
+    fn restore_ignores_legacy_optional_tls_settings() {
+        let root = tempfile::tempdir().unwrap();
+        for tls in [json!(null), json!(42), json!({"ca_cert": false})] {
+            assert!(build_tls_config(Some(&tls), "localhost".into(), root.path(), false).is_ok());
+            assert!(build_tls_config(Some(&tls), "localhost".into(), root.path(), true).is_err());
+        }
+    }
 
     #[test]
     fn test_grpc_tokenizer_from_json_success() {
