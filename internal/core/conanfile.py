@@ -33,7 +33,7 @@ class MilvusConan(ConanFile):
         "prometheus-cpp/1.2.4#0918d66c13f97acb7809759f9de49b3f",
         "google-cloud-cpp/2.28.0@milvus/dev#468918b43cec43624531a0340398cf43",
         "opentelemetry-cpp/1.23.0@milvus/dev#11bc565ec6e82910ae8f7471da756720",
-        "librdkafka/2.6.1@milvus/dev#a15d9fefad917290d59fa3fcbc144888",
+        "librdkafka/2.6.1@milvus/dev#124f531c8be5e7c414e4c7273011c3e1",
         "roaring/3.0.0#25a703f80eda0764a31ef939229e202d",
         "crc32c/1.1.2",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
@@ -120,6 +120,12 @@ class MilvusConan(ConanFile):
             # Use OpenSSL for libcurl on macOS
             self.options["libcurl"].with_ssl = "openssl"
         self.options["arrow"].with_azure = True
+        # Set by scripts/3rdparty_build.sh for MILVUS_FIPS_STRICT=ON builds.
+        # Build librdkafka with SASL but without Cyrus SASL, so libsasl2 is not
+        # linked. SASL/PLAIN, SCRAM and OAUTHBEARER stay available; only
+        # GSSAPI/Kerberos is not.
+        if self.conf.get("user.milvus:fips_strict", default=False, check_type=bool):
+            self.options["librdkafka"].sasl_cyrus = False
 
     def requirements(self):
         # Public necessary-literal API; Arrow and gRPC must use the same RE2.
