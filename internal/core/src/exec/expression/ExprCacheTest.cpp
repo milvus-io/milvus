@@ -3977,7 +3977,7 @@ TEST_F(DiskCacheRegistrationTest, WriteFailureRemovesNewFileAndRegistration) {
     ExpectRetryEvictsResident();
 }
 
-TEST_F(DiskCacheRegistrationTest, EvictedOffsetReaderKeepsDiskReservation) {
+TEST_F(DiskCacheRegistrationTest, PinnedOffsetReaderPreservesLookupAndBudget) {
     auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
         milvus::cachinglayer::CellDataType::OTHER,
         milvus::cachinglayer::StorageType::DISK);
@@ -3993,11 +3993,14 @@ TEST_F(DiskCacheRegistrationTest, EvictedOffsetReaderKeepsDiskReservation) {
     for (int attempt = 0; attempt < 8; ++attempt) {
         SCOPED_TRACE(attempt);
         manager.Put(milvus::test::ExprCacheKey{600 + attempt, "churn"}, value);
-        EXPECT_EQ(manager.GetEntryCount(), 0u);
+        EXPECT_EQ(manager.GetEntryCount(), 1u);
         EXPECT_EQ(manager.GetCurrentBytes(), charge);
         EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base + charge);
         EXPECT_TRUE(std::filesystem::exists(path));
-        // This models later offset batches after the file leaves disk_files_.
+        // A failed admission must preserve discoverability for new queries,
+        // not merely keep an old reader's file alive for later offset batches.
+        ExpectHit(resident);
+        Peer::AssertDiskState(manager, 1);
         const std::vector<int32_t> positions{1023, 0, 17, 17};
         const std::span<const int32_t> offsets(positions);
         ExprResCacheManager::Value got;
@@ -4008,12 +4011,152 @@ TEST_F(DiskCacheRegistrationTest, EvictedOffsetReaderKeepsDiskReservation) {
     }
     reader = {};
     EXPECT_EQ(manager.GetCurrentBytes(), charge);
-    second_reader = {};
-    EXPECT_EQ(manager.GetCurrentBytes(), 0u);
-    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base);
-    EXPECT_FALSE(std::filesystem::exists(path));
     manager.Put(candidate, value);
+    ExpectHit(resident);
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
+    second_reader = {};
+    // Releasing the last reader makes the file eligible for eviction; the
+    // directory still owns it until a subsequent admission needs the space.
+    EXPECT_EQ(manager.GetCurrentBytes(), charge);
+    ExpectRetryEvictsResident();
+    EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base + charge);
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(DiskCacheRegistrationTest, AllPinnedFilesSurviveFailedAdmission) {
+    config.disk_max_bytes = 3 * 345;
+    ASSERT_TRUE(manager.SetConfig(config));
+    const std::vector<milvus::test::ExprCacheKey> keys{
+        resident, {532, "second"}, {533, "third"}};
+    std::vector<ExprResCacheManager::ReadHandle> readers;
+    for (const auto& key : keys) {
+        manager.Put(key, value);
+        readers.push_back(manager.Lookup(key, value.active_count));
+        ASSERT_TRUE(readers.back());
+    }
+    ASSERT_EQ(manager.GetCurrentBytes(), config.disk_max_bytes);
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        SCOPED_TRACE(attempt);
+        manager.Put(candidate, value);
+        EXPECT_EQ(manager.GetCurrentBytes(), config.disk_max_bytes);
+        EXPECT_EQ(manager.GetEntryCount(), keys.size());
+        Peer::AssertDiskState(manager, keys.size());
+        EXPECT_FALSE(manager.Lookup(candidate, value.active_count));
+        for (const auto& key : keys) {
+            ExpectHit(key);
+        }
+    }
+    readers[1] = {};
+    manager.Put(candidate, value);
+    EXPECT_FALSE(manager.Lookup(keys[1], value.active_count));
+    ExpectHit(keys[0]);
+    ExpectHit(keys[2]);
     ExpectHit(candidate);
+    EXPECT_EQ(manager.GetCurrentBytes(), config.disk_max_bytes);
+    Peer::AssertDiskState(manager, keys.size());
+}
+
+TEST_F(DiskCacheRegistrationTest, EvictionSkipsPinnedFileForIdleVictim) {
+    config.disk_max_bytes = 2 * 345;
+    ASSERT_TRUE(manager.SetConfig(config));
+    const milvus::test::ExprCacheKey idle{532, "idle"};
+    manager.Put(resident, value);
+    manager.Put(idle, value);
+    auto reader = manager.Lookup(resident, value.active_count);
+    ASSERT_TRUE(reader);
+    manager.Put(candidate, value);
+    ExpectHit(resident);
+    ExpectHit(candidate);
+    EXPECT_FALSE(manager.Lookup(idle, value.active_count));
+    EXPECT_EQ(manager.GetEntryCount(), 2u);
+    EXPECT_EQ(manager.GetCurrentBytes(), config.disk_max_bytes);
+    Peer::AssertDiskState(manager, 2);
+}
+
+class DiskCachePinnedWriterTest
+    : public DiskCacheRegistrationTest,
+      public ::testing::WithParamInterface<
+          milvus::exec::ExprCacheTestPeer::DiskPutStage> {};
+
+TEST_P(DiskCachePinnedWriterTest, FailedAdmissionPreservesInFlightWriter) {
+    config.disk_max_bytes = 345;
+    ASSERT_TRUE(manager.SetConfig(config));
+    std::promise<void> entered, resume;
+    auto ready = entered.get_future();
+    auto resumed = resume.get_future().share();
+    std::future<bool> writer;
+    std::future<void> contender;
+    // Release a blocked writer before joining futures, even on assertion failure.
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    writer = std::async(std::launch::async, [&] {
+        return Peer::Put(manager, resident, value, [&](Stage stage) {
+            if (stage == GetParam()) {
+                entered.set_value();
+                resumed.wait();
+            }
+        });
+    });
+    ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    const auto charge = manager.GetCurrentBytes();
+    EXPECT_EQ(charge, GetParam() == Stage::SlotWrite ? 64u : 345u);
+    contender =
+        std::async(std::launch::async, [&] { manager.Put(candidate, value); });
+    EXPECT_EQ(contender.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_TRUE(Peer::IsDiskSegmentRegistered(manager, resident.segment_id));
+    EXPECT_EQ(manager.GetCurrentBytes(), charge);
+    resume.set_value();
+    release.dismiss();
+    contender.get();
+    EXPECT_TRUE(writer.get());
+    ExpectHit(resident);
+    EXPECT_FALSE(manager.Lookup(candidate, value.active_count));
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+    Peer::AssertDiskState(manager, 1);
+    // The completed writer no longer pins the resident file.
+    ExpectRetryEvictsResident();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DiskPutStages,
+    DiskCachePinnedWriterTest,
+    ::testing::Values(
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::SlotWrite,
+        milvus::exec::ExprCacheTestPeer::DiskPutStage::SlotWritten));
+
+TEST_F(DiskCacheRegistrationTest, FailedAdmissionDoesNotWaitForDiskRead) {
+    manager.Put(resident, value);
+    std::promise<void> entered, resume;
+    auto ready = entered.get_future();
+    auto resumed = resume.get_future().share();
+    std::future<bool> reader;
+    std::future<void> writer;
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    reader = std::async(std::launch::async, [&] {
+        ExprResCacheManager::Value got;
+        got.active_count = value.active_count;
+        const auto status = Peer::Get(manager, resident, got, [&] {
+            entered.set_value();
+            resumed.wait();
+        });
+        return status == ExprResCacheManager::LookupResult::Hit &&
+               got.result->all() && got.valid_result->all();
+    });
+    ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    writer =
+        std::async(std::launch::async, [&] { manager.Put(candidate, value); });
+    EXPECT_EQ(writer.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    resume.set_value();
+    release.dismiss();
+    writer.get();
+    EXPECT_TRUE(reader.get());
+    ExpectHit(resident);
+    EXPECT_FALSE(manager.Lookup(candidate, value.active_count));
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+    Peer::AssertDiskState(manager, 1);
 }
 
 class DiskCacheDetachedReservationTest
@@ -4104,12 +4247,12 @@ TEST_F(DiskCacheRegistrationTest, ConcurrentWritersCannotSpendPinnedBytes) {
     release.dismiss();
     EXPECT_TRUE(first.get());
     EXPECT_TRUE(second.get());
-    EXPECT_EQ(manager.GetEntryCount(), 0u);
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
     EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+    ExpectHit(resident);
     reader = {};
-    EXPECT_EQ(manager.GetCurrentBytes(), 0u);
-    manager.Put(candidate, value);
-    ExpectHit(candidate);
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+    ExpectRetryEvictsResident();
 }
 
 TEST_F(DiskCacheRegistrationTest, RecycledStagingSlotsStayCharged) {

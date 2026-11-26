@@ -57,11 +57,17 @@ insufficient collection of candidates.
 Disk admission reserves file headers and new slot extents before writing.
 Staged, failed and recycled slots stay conservatively charged until file cleanup,
 because removing a slot index entry does not free its blocks. When full, Clock
-detaches candidate files and retries only after releasing those owners outside
-manager locks. If readers still hold the victims, admission is rejected instead
-of overcommitting. Clear, retirement, rebuild, shrinking and backend switches
-reuse the same disk budget; gauges follow reservation lifetime. Accounting uses
-logical header/slot bytes, not filesystem block rounding or sparse file capacity.
+skips files retained by readers or writers and detaches only directory-owned
+files. Ownership is checked without copying the shared pointer, under the same
+exclusive directory lock used for detachment; all production acquisitions from
+the directory also take that lock, and there are no weak file owners. The scan
+remains bounded when every file is pinned. Admission retries only after releasing
+victims outside manager locks, and is rejected when no reclaimable victim exists.
+This does not make admission transactional: an unpinned victim may be reclaimed
+before a later reservation or write fails. Clear, retirement, rebuild, shrinking
+and backend switches reuse the same disk budget; gauges follow reservation
+lifetime. Accounting uses logical header/slot bytes, not filesystem block
+rounding or sparse file capacity.
 
 ### Sealed-only leaf caching
 
@@ -336,6 +342,31 @@ The PR also reports successful default E2E and Go SDK checks for that commit.
 These Jenkins results do not validate the subsequent test correction and are
 distinct from the Dev CLI runs listed above.
 
+
+### Pinned-file eviction regression validation
+
+On top of PR head `8dfe75f525`, Dev CLI cloud task
+`cpp-ut-local-lu-zhang-fix-expr-8dfe75f-b55a492119a35845-u59677`
+ran the new assertions against the original implementation: 6 passed and
+6 failed out of 12 tests. Failures reproduce loss of fresh lookup hits under
+reader-held churn, multiple pinned files, a paused disk read, concurrent
+admissions, and writers paused before or after slot publication.
+
+The corrected source was uploaded with `-b master --allow-dirty` as task
+`cpp-ut-local-lu-zhang-fix-expr-8dfe75f-e27796e72375276a-u59677`.
+The task succeeded with 190 passed, 3 skipped and 0 failed out of
+193 tests across 22 suites. All six failing regression cases now pass.
+The scope includes expression caches, EntryPool, DiskSlotFile, disk admission
+and CacheCompressor. The three skips are memory parameterizations of disk-only
+concurrency cases; the corresponding disk cases pass. Additional checks cover
+evicting idle files while readers retain other files, eviction after the final
+owner releases, and existing retirement/configuration/budget behavior.
+
+The ownership audit covers directory acquisitions in Lookup and PutInternal,
+ReadHandle copies, writer-local owners, explicit generation retirement and
+backend cleanup. No weak DiskSlotFile acquisition path exists. The change adds
+no file lock; detached files still release outside manager locks. These results
+are Dev CLI cloud tests, not PR Jenkins, sanitizer or performance results.
 
 ## Separately audited observations (outside these follow-ups)
 

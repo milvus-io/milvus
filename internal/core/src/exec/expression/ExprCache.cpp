@@ -894,8 +894,8 @@ ExprResCacheManager::TryAcquireDiskBytes(
         bool found = false;
         {
             std::lock_guard clock_lock(disk_clock_mutex_);
-            // Each entry has at most five references; one extra pass selects
-            // a victim. Bounded even if concurrent readers keep touching keys.
+            // Each entry has at most five Clock usage credits; one extra pass
+            // selects a victim. Also bounded when every file is pinned.
             const auto scan_limit = disk_clock_segments_.size() * 6;
             for (size_t scanned = 0; scanned < scan_limit; ++scanned) {
                 if (disk_clock_hand_ >= disk_clock_segments_.size()) {
@@ -903,6 +903,15 @@ ExprResCacheManager::TryAcquireDiskBytes(
                 }
                 const auto segment = disk_clock_segments_[disk_clock_hand_++];
                 if (segment == protected_segment_id) {
+                    continue;
+                }
+                const auto it = disk_files_.find(segment);
+                // Lookup and PutInternal acquire owners under this directory
+                // lock. With no weak owners, a directory-only reference cannot
+                // gain another owner before removal under the same lock.
+                // Check the stored pointer without copying it or taking a file
+                // lock: a writer may be holding that lock while reserving space.
+                if (it == disk_files_.end() || it->second.use_count() != 1) {
                     continue;
                 }
                 auto usage = disk_segment_usage_.find(segment);
@@ -919,8 +928,8 @@ ExprResCacheManager::TryAcquireDiskBytes(
             return false;
         }
         RemoveDiskSegmentFile(victim, detached);
-        // Recheck actual reservations on the next iteration. A reader-held
-        // victim remains charged, so eviction may free no space at all.
+        // Release the directory's last owner after unlocking, then recheck
+        // reservations: another writer may acquire the reclaimed space first.
     }
 }
 
