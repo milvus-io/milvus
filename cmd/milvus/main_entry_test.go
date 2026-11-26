@@ -105,7 +105,7 @@ func TestMainSubprocessReturnsAndPreservesArgs(t *testing.T) {
 
 func TestSupervisedRunPropagatesStartupFailureAfterCleanup(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "milvus")
-	require.NoError(t, os.WriteFile(child, []byte("#!/bin/sh\nexit 1\n"), 0o700))
+	require.NoError(t, os.WriteFile(child, []byte("#!/bin/sh\nexit 1\n"), 0o700)) // #nosec G306 -- The temporary test child must be executable.
 	// A failed startup has not registered a session yet.
 	sessions := mockey.Mock(sessionutil.GetSessions).Return([]string(nil)).Build()
 	defer sessions.UnPatch()
