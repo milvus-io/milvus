@@ -61,7 +61,7 @@ func resolveSchemaAnalyzerPaths(schema, previous *schemapb.CollectionSchema) err
 		if sameAnalyzerParams(value, before) {
 			return value, nil
 		}
-		return analyzer.ResolveLocalPaths(value, cfg.FunctionCfg.LocalResourcePath.GetValue(), cfg.TLSAllowedPath.GetValue())
+		return analyzer.ResolveLocalPaths(value, cfg.TLSAllowedPath.GetValue())
 	}
 	for _, field := range schema.GetFields() {
 		if !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
@@ -69,7 +69,8 @@ func resolveSchemaAnalyzerPaths(schema, previous *schemapb.CollectionSchema) err
 		}
 		oldParams := make(map[string]string)
 		old := oldFields[field.GetName()]
-		if old != nil && (typeutil.CreateFieldSchemaHelper(old).EnableAnalyzer()) {
+		if old != nil && typeutil.CreateFieldSchemaHelper(old).EnableAnalyzer() &&
+			!analyzerConsumerActivated(schema, field, previous, old) {
 			for _, kv := range old.GetTypeParams() {
 				oldParams[kv.Key] = kv.Value
 			}
@@ -117,17 +118,49 @@ func (c *Core) validateChangedAnalyzers(ctx context.Context, schema, previous *s
 		return err
 	}
 	old := make(map[[2]string]string)
-	var infos []*querypb.AnalyzerInfo
+	oldFields := make(map[string]*schemapb.FieldSchema)
 	for _, field := range previous.GetFields() {
-		if err := validateAnalyzer(previous, field, &infos); err != nil {
-			return err
+		oldFields[field.GetName()] = field
+		if !typeutil.CreateFieldSchemaHelper(field).EnableAnalyzer() {
+			continue
+		}
+		params := analyzerDefinitionParams(field)
+		if multi, ok := params["multi_analyzer_params"]; ok && typeutil.IsBm25FunctionInputField(previous, field) {
+			var stored struct {
+				Analyzers map[string]json.RawMessage `json:"analyzers"`
+			}
+			if json.Unmarshal([]byte(multi), &stored) == nil {
+				for name, value := range stored.Analyzers {
+					old[[2]string{field.GetName(), name}] = string(value)
+				}
+			}
+		} else if value, ok := params["analyzer_params"]; ok {
+			old[[2]string{field.GetName(), ""}] = value
 		}
 	}
-	for _, info := range infos {
-		old[[2]string{info.Field, info.Name}] = info.Params
-	}
-	infos = nil
+	var infos []*querypb.AnalyzerInfo
+	newConsumers := make(map[string]bool)
 	for _, field := range schema.GetFields() {
+		before := oldFields[field.GetName()]
+		newConsumers[field.GetName()] = analyzerConsumerActivated(schema, field, previous, before)
+		h, oldHelper := typeutil.CreateFieldSchemaHelper(field), typeutil.CreateFieldSchemaHelper(before)
+		unchanged := before != nil && h.EnableAnalyzer() == oldHelper.EnableAnalyzer() &&
+			h.EnableMatch() == oldHelper.EnableMatch() &&
+			typeutil.IsBm25FunctionInputField(schema, field) == typeutil.IsBm25FunctionInputField(previous, before)
+		params, oldParams := analyzerDefinitionParams(field), analyzerDefinitionParams(before)
+		if len(params) != len(oldParams) {
+			unchanged = false
+		}
+		for key, value := range params {
+			oldValue, exists := oldParams[key]
+			if !exists || !sameAnalyzerParams(value, oldValue) {
+				unchanged = false
+			}
+		}
+		// Older versions allowed ignored options on fields without match/BM25.
+		if unchanged {
+			continue
+		}
 		if err := validateAnalyzer(schema, field, &infos); err != nil {
 			return err
 		}
@@ -135,7 +168,7 @@ func (c *Core) validateChangedAnalyzers(ctx context.Context, schema, previous *s
 	changed := make([]*querypb.AnalyzerInfo, 0, len(infos))
 	for _, info := range infos {
 		before, exists := old[[2]string{info.Field, info.Name}]
-		if !exists || !sameAnalyzerParams(before, info.Params) {
+		if newConsumers[info.Field] || !exists || !sameAnalyzerParams(before, info.Params) {
 			changed = append(changed, info)
 		}
 	}
@@ -144,4 +177,23 @@ func (c *Core) validateChangedAnalyzers(ctx context.Context, schema, previous *s
 	}
 	response, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{AnalyzerInfos: changed})
 	return merr.CheckRPCCall(response, err)
+}
+
+func analyzerDefinitionParams(field *schemapb.FieldSchema) map[string]string {
+	params := make(map[string]string)
+	for _, kv := range field.GetTypeParams() {
+		if kv.Key == "analyzer_params" || kv.Key == "multi_analyzer_params" {
+			params[kv.Key] = kv.Value
+		}
+	}
+	return params
+}
+
+func analyzerConsumerActivated(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema, previous *schemapb.CollectionSchema, before *schemapb.FieldSchema) bool {
+	if before == nil {
+		return true
+	}
+	h, old := typeutil.CreateFieldSchemaHelper(field), typeutil.CreateFieldSchemaHelper(before)
+	return (h.EnableAnalyzer() && !old.EnableAnalyzer()) || (h.EnableMatch() && !old.EnableMatch()) ||
+		(typeutil.IsBm25FunctionInputField(schema, field) && !typeutil.IsBm25FunctionInputField(previous, before))
 }

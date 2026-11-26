@@ -26,23 +26,27 @@ import (
 
 func TestResolveLocalPaths(t *testing.T) {
 	params := `{"tokenizer":{"type":"language_identifier","analyzers":{"default":{"tokenizer":{"type":"grpc","endpoint":"https://host","tls":{"ca_cert":"ca.pem","client_cert":"/old/client.pem","client_key":"key.pem"}}}}},"filter":[{"type":"stop","stop_words_file":{"type":"local","path":"nested/stop.txt"}}],"large_integer":9007199254740993}`
-	resolved, err := ResolveLocalPaths(params, "/dictionary", "/credentials")
+	resolved, err := ResolveLocalPaths(params, "/credentials")
 	require.NoError(t, err)
-	require.Contains(t, resolved, `"path":"/dictionary/nested/stop.txt"`)
+	require.Contains(t, resolved, `"path":"nested/stop.txt"`)
 	require.Contains(t, resolved, `"ca_cert":"/credentials/ca.pem"`)
 	require.Contains(t, resolved, `"client_cert":"/old/client.pem"`)
 	require.Contains(t, resolved, `"client_key":"/credentials/key.pem"`)
 	require.Contains(t, resolved, `9007199254740993`)
-	again, err := ResolveLocalPaths(resolved, "/new-dictionary", "/new-credentials")
+	again, err := ResolveLocalPaths(resolved, "/new-credentials")
 	require.NoError(t, err)
 	require.JSONEq(t, resolved, again)
-	_, err = ResolveLocalPaths(`{"filter":[{"stop_words_file":{"type":"local","path":"../secret"}}]}`, "/dictionary", "/credentials")
+	ignored := `{"tokenizer":"standard","unused":{"type":"local","path":"../metadata"}}`
+	resolved, err = ResolveLocalPaths(ignored, "/credentials")
+	require.NoError(t, err)
+	require.Equal(t, ignored, resolved)
+	_, err = ResolveLocalPaths(`{"tokenizer":{"type":"grpc","tls":{"ca_cert":"../secret"}}}`, "/credentials")
 	require.Error(t, err)
 }
 
 func TestResolveLocalPathsPreservesNestedUnchangedInput(t *testing.T) {
 	params := strings.Repeat(`{"unused":`, 512) + `"` + strings.Repeat("x", 1<<20) + `"` + strings.Repeat("}", 512)
-	resolved, err := ResolveLocalPaths(params, "/dictionary", "/credentials")
+	resolved, err := ResolveLocalPaths(params, "/credentials")
 	require.NoError(t, err)
 	require.Equal(t, params, resolved)
 }
@@ -54,7 +58,7 @@ func BenchmarkResolveLocalPathsNested(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := ResolveLocalPaths(params, "/dictionary", "/credentials"); err != nil {
+				if _, err := ResolveLocalPaths(params, "/credentials"); err != nil {
 					b.Fatal(err)
 				}
 			}

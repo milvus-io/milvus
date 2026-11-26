@@ -24,9 +24,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-// ResolveLocalPaths pins relative dictionary and TLS paths before schema admission.
+// ResolveLocalPaths pins relative TLS paths before schema admission.
 // Persist the result so changing operator base directories cannot retarget old schemas.
-func ResolveLocalPaths(params, dictionaryRoot, tlsRoot string) (string, error) {
+func ResolveLocalPaths(params, tlsRoot string) (string, error) {
 	if params == "" {
 		return params, nil
 	}
@@ -65,9 +65,6 @@ func ResolveLocalPaths(params, dictionaryRoot, tlsRoot string) (string, error) {
 				if err := visit(child); err != nil {
 					return err
 				}
-			}
-			if object["type"] == "local" {
-				return resolve(object, "path", dictionaryRoot)
 			}
 			if object["type"] == "grpc" {
 				if tls, ok := object["tls"].(map[string]any); ok {
