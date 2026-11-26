@@ -121,7 +121,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Sensitivity: Sensitive,
 	}
 	p.IPItem.Init(base.mgr)
-	p.IP = funcutil.GetIP(p.IPItem.GetValue())
+	base.mgr.OnStartupSnapshot(func() { p.IP = funcutil.GetIP(p.IPItem.GetValue()) })
 
 	p.Port = ParamItem{
 		Key:          p.Domain + ".port",

@@ -149,7 +149,7 @@ func cleanLocalDir(path string) {
 	}
 }
 
-func runComponent[T component](ctx context.Context,
+func runComponent[T component](ctx context.Context, shutdown <-chan struct{},
 	localMsg bool,
 	creator func(context.Context, dependency.Factory) (T, error),
 	metricRegister func(*prometheus.Registry),
@@ -185,7 +185,12 @@ func runComponent[T component](ctx context.Context,
 		return role, nil
 	})
 
-	<-sign
+	// A creator may still be waiting for etcd. Let the readiness wait cancel
+	// incomplete startup even if the synchronous preparation has not returned.
+	select {
+	case <-sign:
+	case <-shutdown:
+	}
 	return future
 }
 
@@ -227,11 +232,11 @@ func (mr *MilvusRoles) printLDPreLoad() {
 }
 
 func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *conc.Future[component] {
-	return runComponent(ctx, localMsg, components.NewProxy, metrics.RegisterProxy)
+	return runComponent(ctx, mr.closed, localMsg, components.NewProxy, metrics.RegisterProxy)
 }
 
 func (mr *MilvusRoles) runMixCoord(ctx context.Context, localMsg bool) *conc.Future[component] {
-	return runComponent(ctx, localMsg, components.NewMixCoord, metrics.RegisterMixCoord)
+	return runComponent(ctx, mr.closed, localMsg, components.NewMixCoord, metrics.RegisterMixCoord)
 }
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *conc.Future[component] {
@@ -242,19 +247,19 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *conc.Fu
 		// under posix mode, this clean task will be done by mixcoord
 		cleanLocalDir(queryDataLocalPath)
 	}
-	return runComponent(ctx, localMsg, components.NewQueryNode, metrics.RegisterQueryNode)
+	return runComponent(ctx, mr.closed, localMsg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
 
 func (mr *MilvusRoles) runStreamingNode(ctx context.Context, localMsg bool) *conc.Future[component] {
-	return runComponent(ctx, localMsg, components.NewStreamingNode, metrics.RegisterStreamingNode)
+	return runComponent(ctx, mr.closed, localMsg, components.NewStreamingNode, metrics.RegisterStreamingNode)
 }
 
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *conc.Future[component] {
-	return runComponent(ctx, localMsg, components.NewDataNode, metrics.RegisterDataNode)
+	return runComponent(ctx, mr.closed, localMsg, components.NewDataNode, metrics.RegisterDataNode)
 }
 
 func (mr *MilvusRoles) runCDC(ctx context.Context, localMsg bool) *conc.Future[component] {
-	return runComponent(ctx, localMsg, components.NewCDC, metrics.RegisterCDC)
+	return runComponent(ctx, mr.closed, localMsg, components.NewCDC, metrics.RegisterCDC)
 }
 
 func (mr *MilvusRoles) resolveFileResourceMode() fileresource.Mode {
@@ -294,33 +299,30 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 		}
 	}
 	componentMap := make(map[string]component, len(componentFutureMap))
-	readyCount := 0
-	for {
+	for len(componentMap) < len(futures) {
 		index, _, _ := reflect.Select(selectCases)
 		if index == 0 {
-			cancel()
-			mlog.Warn(context.TODO(), "components are not ready before closing, wait for the start of components to be canceled...")
-			return nil, context.Canceled
-		} else {
-			role := roles[index-1]
-			component, err := futures[index-1].Await()
-			readyCount++
-			if err != nil {
-				cancel()
-				mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
-				return nil, err
-			} else {
-				componentMap[role] = &stopOnceComponent{component: component}
-				mlog.Info(context.TODO(), "component is ready", mlog.String("role", role))
+			for _, future := range futures {
+				if !future.Done() {
+					cancel()
+					return nil, context.Canceled
+				}
 			}
+			// All roles finished before we observed shutdown. Collect their
+			// results with the component context intact for ordered Stop.
+			selectCases[0].Chan = reflect.Value{}
+			continue
 		}
-		selectCases[index] = reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(nil),
+		role := roles[index-1]
+		component, err := futures[index-1].Await()
+		if err != nil {
+			cancel()
+			mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
+			return nil, err
 		}
-		if readyCount == len(componentFutureMap) {
-			break
-		}
+		componentMap[role] = &stopOnceComponent{component: component}
+		mlog.Info(context.TODO(), "component is ready", mlog.String("role", role))
+		selectCases[index].Chan = reflect.Value{}
 	}
 	return componentMap, nil
 }
@@ -389,7 +391,7 @@ func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
 	})
 }
 
-func (mr *MilvusRoles) handleSignals() func() {
+func (mr *MilvusRoles) handleSignals(cancelStartup context.CancelFunc) func() {
 	sign := make(chan struct{})
 	done := make(chan struct{})
 
@@ -410,6 +412,7 @@ func (mr *MilvusRoles) handleSignals() func() {
 			case sig := <-sc:
 				mlog.Warn(context.TODO(), "Get signal to exit", mlog.String("signal", sig.String()))
 				mr.once.Do(func() {
+					cancelStartup()
 					close(mr.closed)
 					// reset other signals, only handle SIGINT from now
 					signal.Reset(syscall.SIGQUIT, syscall.SIGHUP, syscall.SIGTERM)
@@ -437,13 +440,18 @@ func (mr *MilvusRoles) componentNum() int {
 
 // Run Milvus components.
 func (mr *MilvusRoles) Run() {
-	// start signal handler, defer close func
-	closeFn := mr.handleSignals()
-	defer closeFn()
-
-	mlog.Info(context.TODO(), "starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// During startup SIGTERM must interrupt synchronous etcd calls too. Once
+	// serving, keep component contexts alive for the ordered graceful shutdown.
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	stopStartupCancellation := context.AfterFunc(shutdownCtx, cancel)
+	defer stopStartupCancellation()
+	closeFn := mr.handleSignals(shutdown)
+	defer closeFn()
+
+	mlog.Info(ctx, "starting running Milvus components")
 
 	mr.printLDPreLoad()
 
@@ -452,19 +460,25 @@ func (mr *MilvusRoles) Run() {
 	thw.Start()
 	defer thw.Stop()
 
-	// only standalone enable localMsg
+	mode := metricsinfo.ClusterDeployMode
 	if mr.Local {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
+		mode = metricsinfo.StandaloneDeployMode
+	}
+	if err := os.Setenv(metricsinfo.DeployModeEnvKey, mode); err != nil {
+		mlog.Error(ctx, "failed to set deploy mode", mlog.Err(err))
+	}
+	if mr.Embedded {
+		paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.Files([]string{"embedded-milvus.yaml"})))
+	} else {
+		paramtable.Init()
+	}
+	if err := paramtable.GetBaseTable().WaitForRemoteConfig(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
 		}
-
-		if mr.Embedded {
-			// setup config for embedded milvus
-			paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.Files([]string{"embedded-milvus.yaml"})))
-		} else {
-			paramtable.Init()
-		}
-
+		mlog.Fatal(ctx, "failed to initialize etcd configuration", mlog.String("errorCategory", etcd.StartupErrorCategory(err)))
+	}
+	if mr.Local {
 		params := paramtable.Get()
 		// Recover visible legacy local files before etcd and components start.
 		if !mr.migrateLocalStorageLayoutOrDie(ctx, params) {
@@ -489,16 +503,19 @@ func (mr *MilvusRoles) Run() {
 		paramtable.SetRole(typeutil.StandaloneRole)
 		defer stopRocksmqIfUsed()
 	} else {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
-			mlog.Error(context.TODO(), "Failed to set deploy mode: ", mlog.Err(err))
-		}
-		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
 	metrics.SetCollectionLevelMetricsMode(paramtable.Get().CommonCfg.CollectionLevelMetricsMode.GetValue())
 	mlog.Info(context.TODO(), "configured collection and VChannel metrics",
 		mlog.String("mode", metrics.CollectionLevelMetricsMode()))
 
+	if err := kvfactory.InitEtcdClient(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		mlog.Fatal(ctx, "failed to initialize shared etcd client", mlog.String("errorCategory", etcd.StartupErrorCategory(err)))
+	}
+	defer kvfactory.CloseEtcdClient()
 	// Persist immutable configurations at startup, such as mqType paramItem
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
 		// Resolve the actual walName instead of default
@@ -576,6 +593,11 @@ func (mr *MilvusRoles) Run() {
 	fileresource.SetLocalMode(effectiveFileResourceMode)
 	mlog.Info(ctx, "resolved process file resource mode", mlog.String("mode", effectiveFileResourceMode.String()))
 
+	// From here the readiness wait owns cancellation. A signal after the last
+	// role becomes ready must leave its context usable for graceful Stop.
+	if !stopStartupCancellation() || shutdownCtx.Err() != nil {
+		return
+	}
 	local := mr.Local
 	componentFutureMap := make(map[string]*conc.Future[component])
 
@@ -725,9 +747,6 @@ func (mr *MilvusRoles) Run() {
 		proxy.Stop()
 		mlog.Info(context.TODO(), "proxy stopped!")
 	}
-
-	// close reused etcd client
-	kvfactory.CloseEtcdClient()
 
 	mlog.Info(context.TODO(), "Milvus components graceful stop done")
 }

@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -118,7 +119,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
-	p.ProfileCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
+	p.ProfileCfg.init(bt, &p.LocalStorageCfg)
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -458,6 +459,26 @@ func (p *EtcdConfig) GetAll() map[string]string {
 	}
 }
 
+// NewClient opens a client owned by the caller. For remote etcd, ctx bounds the client's lifetime.
+func (p *EtcdConfig) NewClient(ctx context.Context) (*clientv3.Client, error) {
+	opts := append(p.ClientOptions(), func(cfg *clientv3.Config) { cfg.Context = ctx })
+	return etcd.CreateEtcdClient(p.UseEmbedEtcd.GetAsBool(), p.EtcdEnableAuth.GetAsBool(),
+		p.EtcdAuthUserName.GetValue(), p.EtcdAuthPassword.GetValue(), p.EtcdUseSSL.GetAsBool(),
+		p.Endpoints.GetAsStrings(), p.EtcdTLSCert.GetValue(), p.EtcdTLSKey.GetValue(),
+		p.EtcdTLSCACert.GetValue(), p.EtcdTLSMinVersion.GetValue(), opts...)
+}
+
+// NewClientAtStartup retries temporary dial and authentication-service failures.
+func (p *EtcdConfig) NewClientAtStartup(ctx context.Context) (*clientv3.Client, error) {
+	var client *clientv3.Client
+	err := etcd.RetryAtStartup(ctx, func() error {
+		var err error
+		client, err = p.NewClient(ctx)
+		return err
+	})
+	return client, err
+}
+
 func (p *EtcdConfig) ClientOptions() []etcd.ClientOption {
 	dialTimeout := p.DialTimeout.GetAsDuration(time.Millisecond)
 	dialKeepAliveTime := p.DialKeepAliveTime.GetAsDuration(time.Millisecond)
@@ -657,6 +678,12 @@ It is recommended to change this parameter before starting Milvus for the first 
 		Export:    true,
 	}
 	p.Path.Init(base.mgr)
+}
+
+// startupPath is the canonical root shared by all derived storage paths.
+// Runtime overrides of other settings cannot move existing local files.
+func (p *LocalStorageConfig) startupPath() string {
+	return *p.Path.frozenValue.Load()
 }
 
 func formatLocalStoragePath(value string) string {
@@ -2376,10 +2403,12 @@ type ProfileConfig struct {
 }
 
 func (p *ProfileConfig) Init(base *BaseTable) {
-	p.init(base, formatLocalStoragePath(base.GetWithDefault("localStorage.path", defaultLocalStoragePath)))
+	var storage LocalStorageConfig
+	storage.Init(base)
+	p.init(base, &storage)
 }
 
-func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
+func (p *ProfileConfig) init(base *BaseTable, storage *LocalStorageConfig) {
 	p.PprofPath = ParamItem{
 		Key:          "profile.pprof.path",
 		Version:      "2.5.5",
@@ -2387,7 +2416,7 @@ func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				return path.Join(localStoragePath, "pprof")
+				return path.Join(storage.startupPath(), "pprof")
 			}
 			return v
 		},

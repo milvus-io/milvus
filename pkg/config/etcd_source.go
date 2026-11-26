@@ -85,7 +85,7 @@ func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, e
 		mlog.Int("endpointCount", len(etcdInfo.Endpoints)))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
-		ctx:            context.Background(),
+		ctx:            etcdCli.Ctx(),
 		currentConfigs: make(map[string]string),
 		keyPrefix:      etcdInfo.KeyPrefix,
 	}
@@ -168,7 +168,7 @@ func (es *EtcdSource) UpdateOptions(opts Options) {
 // answer from its own applied state without a ReadIndex round-trip to the leader —
 // acceptable for an async poll where sub-ms staleness is harmless (see #23907).
 func (es *EtcdSource) refreshConfigurations() error {
-	return es.refreshConfigurationsWithOpts(clientv3.WithSerializable())
+	return es.refreshConfigurationsWithOpts(es.ctx, clientv3.WithSerializable())
 }
 
 // RefreshConfigurationsLinearizable is the linearizable-read variant for
@@ -178,15 +178,15 @@ func (es *EtcdSource) refreshConfigurations() error {
 // Without this, the follower the client is connected to can legitimately return
 // the pre-write value because apply is not synchronized with commit.
 func (es *EtcdSource) RefreshConfigurationsLinearizable() error {
-	return es.refreshConfigurationsWithOpts()
+	return es.refreshConfigurationsWithOpts(es.ctx)
 }
 
-func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOption) error {
+func (es *EtcdSource) refreshConfigurationsWithOpts(ctx context.Context, extraOpts ...clientv3.OpOption) error {
 	es.RLock()
 	prefix := path.Join(es.keyPrefix, "config")
 	es.RUnlock()
 
-	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
+	ctx, cancel := context.WithTimeout(ctx, ReadConfigTimeout)
 	defer cancel()
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)

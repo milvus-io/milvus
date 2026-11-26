@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 
@@ -68,6 +70,26 @@ func TestMixCoordLegacySessionsBlockTakeover(t *testing.T) {
 		t.Cleanup(func() { s.updateStandby(false) })
 		return s
 	}
+
+	expired := newMixCoord(ctx, 5)
+	_, err = cli.Revoke(ctx, *expired.LeaseID)
+	require.NoError(t, err)
+	require.ErrorIs(t, expired.ProcessActiveStandBy(nil), rpctypes.ErrLeaseNotFound)
+
+	// A foreign active key also blocks promotion when no legacy key exists.
+	owner := newMixCoord(ctx, 6)
+	_, err = cli.Put(ctx, activeKey, "owner", clientv3.WithLease(*owner.LeaseID))
+	require.NoError(t, err)
+	waitCtx, stopWaiting := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer stopWaiting()
+	standby := newMixCoord(waitCtx, 7)
+	require.ErrorIs(t, standby.ProcessActiveStandBy(nil), context.DeadlineExceeded)
+	resp, err := cli.Get(ctx, activeKey)
+	require.NoError(t, err)
+	require.Len(t, resp.Kvs, 1)
+	require.EqualValues(t, *owner.LeaseID, resp.Kvs[0].Lease)
+	_, err = cli.Revoke(ctx, *owner.LeaseID)
+	require.NoError(t, err)
 
 	old := newMixCoord(ctx, 1)
 	require.NoError(t, old.ProcessActiveStandBy(nil))
