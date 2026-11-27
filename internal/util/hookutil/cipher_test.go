@@ -85,6 +85,9 @@ func TestWriterPluginContext(t *testing.T) {
 					} else {
 						require.Nil(t, context)
 						require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+						if tc.missingPlugin {
+							require.ErrorIs(t, err, errCipherPluginMissing)
+						}
 						require.True(t, merr.IsRetryableErr(err))
 						require.NotEqual(t, "true", merr.Status(err).GetExtraInfo()["is_input_error"])
 					}
@@ -134,6 +137,13 @@ func (s *CipherSuite) TestGetTestCipher() {
 	s.NoError(err)
 	s.NotNil(decryptor)
 	gotPlainText, err := decryptor.Decrypt(cipherText)
+	s.NoError(err)
+	s.Equal(plainText, gotPlainText)
+
+	statelessDecryptor, err := cipher.(testCipher).GetDecryptorForKeyset(ezID, collectionID, []byte("keyset"), safeKey)
+	s.NoError(err)
+	s.NotNil(statelessDecryptor)
+	gotPlainText, err = statelessDecryptor.Decrypt(cipherText)
 	s.NoError(err)
 	s.Equal(plainText, gotPlainText)
 
@@ -673,6 +683,9 @@ func TestCollectionWriterContextUsesTargetIdentity(t *testing.T) {
 			} else {
 				require.Nil(t, ctx)
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				if tc.missingPlugin {
+					require.ErrorIs(t, err, errCipherPluginMissing)
+				}
 				require.True(t, merr.IsRetryableErr(err))
 				require.NotEqual(t, "true", merr.Status(err).GetExtraInfo()["is_input_error"])
 			}
@@ -704,6 +717,7 @@ func TestExplicitTaskContextCannotBecomePlaintext(t *testing.T) {
 	t.Run("registration requires a receiver plugin", func(t *testing.T) {
 		err := RegisterEZsFromPluginContext(taskContext)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
 		require.True(t, merr.IsRetryableErr(err))
 		require.NoError(t, RegisterEZsFromPluginContext(nil))
 	})

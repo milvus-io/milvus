@@ -60,6 +60,8 @@ func (s *SyncTaskSuite) TestImportWriterUsesTaskKeyset() {
 }
 
 func (s *SyncTaskSuite) TestBulkPackWriterV2RetriesTransientKeyLookup() {
+	s.T().Cleanup(hookutil.SetTestCipher(hookutil.GetCipher()))
+	hookutil.InitTestCipher()
 	schema := s.schema
 	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	defer func() { schema.Properties = nil }()
@@ -101,6 +103,8 @@ func (s *SyncTaskSuite) TestBulkPackWriterV2RetriesTransientKeyLookup() {
 }
 
 func (s *SyncTaskSuite) TestBulkPackWriterV3RetriesTransientKeyLookup() {
+	s.T().Cleanup(hookutil.SetTestCipher(hookutil.GetCipher()))
+	hookutil.InitTestCipher()
 	schema := s.schema
 	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	defer func() { schema.Properties = nil }()

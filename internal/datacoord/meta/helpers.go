@@ -294,8 +294,6 @@ func WrapImportPluginContext(collectionID int64, properties, options []*commonpb
 		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *datapb.ReshardTaskRequest:
 		msg.PluginContext = append(msg.PluginContext, pluginContext...)
-	case *datapb.ImportTaskV3Request:
-		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	}
 	return nil
 }

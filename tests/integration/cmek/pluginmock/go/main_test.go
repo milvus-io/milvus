@@ -53,21 +53,33 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(17), zone)
 	require.Equal(t, payload.Key, key)
-	require.NoError(t, receiver.Init(map[string]string{importEZKey: "17", unsafeEZK: base64.StdEncoding.EncodeToString(key)}))
-	_, edek, err := sender.GetEncryptor(17, 42)
+
+	encryptor, edek, err := sender.GetEncryptor(17, 42)
 	require.NoError(t, err)
+	ciphertext, err := encryptor.Encrypt([]byte("stateless backup payload"))
+	require.NoError(t, err)
+
+	// Stateless decryption works without registering or mutating the zone cache.
+	decryptor, err := receiver.GetDecryptorForKeyset(17, 42, key, edek)
+	require.NoError(t, err)
+	plaintext, err := decryptor.Decrypt(ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, []byte("stateless backup payload"), plaintext)
+
 	_, err = receiver.GetDecryptor(17, 42, edek)
-	require.NoError(t, err)
+	require.Error(t, err)
 	_, _, err = receiver.GetEncryptor(17, 42)
 	require.Error(t, err)
 	require.Empty(t, receiver.GetUnsafeKey(17, 0))
-	require.NoError(t, receiver.Init(map[string]string{importEZKey: backup}))
-	require.Equal(t, payload.Key, receiver.GetUnsafeKey(17, 0))
 	require.Empty(t, receiver.GetUnsafeKey(18, 0))
+
 	payload.Key[0] ^= 1
+	_, err = receiver.GetDecryptorForKeyset(17, 42, payload.Key, edek)
+	require.Error(t, err)
 	invalid, err := json.Marshal(payload)
 	require.NoError(t, err)
-	require.Error(t, receiver.Init(map[string]string{importEZKey: base64.StdEncoding.EncodeToString(invalid)}))
+	_, _, err = receiver.ResolveImportEZ(base64.StdEncoding.EncodeToString(invalid))
+	require.Error(t, err)
 }
 
 func TestFixtureDataNodeRequiresReceivedKey(t *testing.T) {

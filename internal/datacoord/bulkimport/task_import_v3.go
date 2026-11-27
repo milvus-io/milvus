@@ -45,14 +45,13 @@ import (
 )
 
 type importTaskV3 struct {
-	task                 atomic.Pointer[datapb.ImportTaskV3]
-	importMeta           ImportMeta
-	meta                 *meta.Meta
-	alloc                allocator.Allocator
-	tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	metrics              importTaskMetrics
-	nonRetryableFailures int64
+	task       atomic.Pointer[datapb.ImportTaskV3]
+	importMeta ImportMeta
+	meta       *meta.Meta
+	alloc      allocator.Allocator
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	metrics    importTaskMetrics
 }
 
 func NewImportTaskV3(p *datapb.ImportTaskV3, importMeta ImportMeta, mt *meta.Meta, alloc allocator.Allocator) *importTaskV3 {
@@ -166,17 +165,17 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		t.Fail(err.Error())
 		return
 	}
-	// Resolve source and target encryption contexts before dropping superseded
-	// segments or creating the new segment record so dispatch retries never mutate
-	// segment metadata.
+	// Resolve target encryption context before dropping superseded segments or
+	// creating the new segment record so dispatch retries never mutate segment
+	// metadata.
 	req := &datapb.ImportTaskV3Request{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
 		LogRange: p.GetLogRange(), Slot: slot,
 		StorageConfig: meta.CreateStorageConfig(),
 		Plan:          plan,
 	}
-	if err := meta.WrapImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions(), req); err != nil {
-		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
+	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
 	// Drop the segments a superseded run used to own but this run no longer

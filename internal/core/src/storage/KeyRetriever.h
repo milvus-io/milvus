@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <string>
 #include <utility>
 
 #include "common/type_c.h"
@@ -21,12 +23,16 @@ namespace milvus::storage {
 
 class KeyRetriever : public parquet::DecryptionKeyRetriever {
  public:
+    explicit KeyRetriever(const CPluginContext* context = nullptr);
+
     std::string
     GetKey(const std::string& key_metadata) override;
-};
 
-void
-RegisterReaderKeys(const CPluginContext* context);
+ private:
+    bool has_keyset_{false};
+    int64_t bound_ez_id_{0};
+    std::string bound_keyset_;
+};
 
 // Raw Parquet DEK and footer metadata. Import writers request a fresh DEK
 // from the supplied target keyset without changing the ordinary primary.
@@ -34,7 +40,7 @@ std::pair<std::string, std::string>
 GetWriterEncryptionParams(const CPluginContext* context);
 
 parquet::ReaderProperties
-GetReaderProperties();
+GetReaderProperties(const CPluginContext* context = nullptr);
 
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();

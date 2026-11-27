@@ -36,7 +36,7 @@ import (
 )
 
 // newDeltalogOneFieldReader creates a reader for the old single-field deltalog format
-func newDeltalogOneFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*DeserializeReaderImpl[*DeleteLog], error) {
+func newDeltalogOneFieldReader(blobs []*Blob) (*DeserializeReaderImpl[*DeleteLog], error) {
 	reader := newIterativeCompositeBinlogRecordReader(
 		&schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
@@ -46,7 +46,7 @@ func newDeltalogOneFieldReader(blobs []*Blob, opts ...BinlogReaderOption) (*Dese
 			},
 		},
 		nil,
-		MakeBlobsReader(blobs), opts...)
+		MakeBlobsReader(blobs))
 	return NewDeserializeReader(reader, func(r Record, v []*DeleteLog) error {
 		for i := 0; i < r.Len(); i++ {
 			if v[i] == nil {
@@ -185,7 +185,6 @@ var _ RecordReader = (*simpleArrowRecordReader)(nil)
 // simpleArrowRecordReader reads simple arrow records from blobs
 type simpleArrowRecordReader struct {
 	blobs []*Blob
-	opts  []BinlogReaderOption
 
 	blobPos int
 	rr      array.RecordReader
@@ -203,7 +202,7 @@ func (crr *simpleArrowRecordReader) iterateNextBatch() error {
 		return io.EOF
 	}
 
-	reader, err := NewBinlogReader(crr.blobs[crr.blobPos].Value, crr.opts...)
+	reader, err := NewBinlogReader(crr.blobs[crr.blobPos].Value)
 	if err != nil {
 		return err
 	}
@@ -277,9 +276,9 @@ func (crr *simpleArrowRecordReader) Close() error {
 	return nil
 }
 
-func newSimpleArrowRecordReader(blobs []*Blob, opts ...BinlogReaderOption) (*simpleArrowRecordReader, error) {
+func newSimpleArrowRecordReader(blobs []*Blob) (*simpleArrowRecordReader, error) {
 	return &simpleArrowRecordReader{
-		blobs: blobs, opts: opts,
+		blobs: blobs,
 	}, nil
 }
 
@@ -697,7 +696,7 @@ func (r *deleteLogToRecordReader) Close() error {
 	return r.reader.Close()
 }
 
-func NewLegacyDeltalogReader(ctx context.Context, pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string, opts ...BinlogReaderOption) (RecordReader, error) {
+func NewLegacyDeltalogReader(ctx context.Context, pkField *schemapb.FieldSchema, downloader downloaderFn, paths []string) (RecordReader, error) {
 	if len(paths) == 0 {
 		return newSimpleArrowRecordReader(nil)
 	}
@@ -715,11 +714,11 @@ func NewLegacyDeltalogReader(ctx context.Context, pkField *schemapb.FieldSchema,
 
 	// Check if this is the multi-field format (parquet with pk+ts columns)
 	if supportMultiFieldFormat(blobs) {
-		return newSimpleArrowRecordReader(blobs, opts...)
+		return newSimpleArrowRecordReader(blobs)
 	}
 
 	// JSON format: use DeserializeReader and wrap it to produce pk/ts records
-	deserializeReader, err := newDeltalogOneFieldReader(blobs, opts...)
+	deserializeReader, err := newDeltalogOneFieldReader(blobs)
 	if err != nil {
 		return nil, err
 	}

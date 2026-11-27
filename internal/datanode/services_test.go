@@ -810,7 +810,7 @@ func (s *DataNodeServicesSuite) TestImportRejectsIncompleteCipherContext() {
 	}
 }
 
-func (s *DataNodeServicesSuite) TestImportRegistersTargetBeforeSourceReadOnly() {
+func (s *DataNodeServicesSuite) TestImportRegistersTargetOnly() {
 	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	options := []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
 	entries := []*commonpb.KeyValuePair{
@@ -842,7 +842,6 @@ func (s *DataNodeServicesSuite) TestImportRegistersTargetBeforeSourceReadOnly() 
 			s.True(merr.Ok(status), status.GetReason())
 			s.Equal([]map[string]string{
 				{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "dGFyZ2V0"},
-				{hookutil.CipherConfigImportEZ: "17", hookutil.CipherConfigUnsafeEZK: "c291cmNl"},
 			}, cipher.calls)
 		})
 	}

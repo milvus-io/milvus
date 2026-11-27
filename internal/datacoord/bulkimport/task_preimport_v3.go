@@ -48,11 +48,10 @@ var _ ImportTask = (*preImportV3Task)(nil)
 type preImportV3Task struct {
 	task atomic.Pointer[datapb.PreImportTaskV3]
 
-	importMeta           ImportMeta
-	tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	retryTimes           int64
-	nonRetryableFailures int64
+	importMeta ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func newPreImportTaskV3(p *datapb.PreImportTaskV3, importMeta ImportMeta) *preImportV3Task {
@@ -186,7 +185,8 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
-		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
+		mlog.Warn(context.TODO(), "assemble preimport v3 request failed", WrapTaskLog(p, mlog.Err(err))...)
+		p.retryTimes++
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)

@@ -32,7 +32,6 @@ import (
 
 const (
 	// Used in Plugins
-	CipherConfigImportEZ       = "cipher.ez.import"
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
@@ -107,21 +106,13 @@ func CreateEZ(ezID int64, kmsKeyArn string) error {
 }
 
 func CreateLocalEZ(ezID int64, encryptionKey string) error {
-	return registerLocalEZ(CipherConfigCreateEZ, ezID, encryptionKey)
-}
-
-func RegisterLocalImportEZ(ezID int64, encryptionKey string) error {
-	return registerLocalEZ(CipherConfigImportEZ, ezID, encryptionKey)
-}
-
-func registerLocalEZ(configKey string, ezID int64, encryptionKey string) error {
 	cipher := GetCipher()
 	if cipher == nil {
 		return nil
 	}
 
 	config := map[string]string{
-		configKey:             strconv.FormatInt(ezID, 10),
+		CipherConfigCreateEZ:  strconv.FormatInt(ezID, 10),
 		CipherConfigUnsafeEZK: encryptionKey,
 	}
 
@@ -174,7 +165,7 @@ func BackupEZ(ezID int64) (string, error) {
 func requiredEZKey(ezID, collectionID int64) ([]byte, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
@@ -229,7 +220,7 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	}
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted backup")
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted backup")
 	}
 	resolver, ok := cipher.(EZBackupCipher)
 	if !ok {

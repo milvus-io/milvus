@@ -45,6 +45,10 @@ func (c *metaTestBackupCipher) ResolveImportEZ(string) (int64, []byte, error) {
 	return 17, c.sourceKey, c.sourceErr
 }
 
+func (c *metaTestBackupCipher) GetDecryptorForKeyset(int64, int64, []byte, []byte) (hook.Decryptor, error) {
+	panic("dispatch does not decrypt binlogs")
+}
+
 func TestWrapPluginContextImportV2AndV3(t *testing.T) {
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17}`))
 	options := []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: artifact}}
@@ -60,6 +64,9 @@ func TestWrapPluginContextImportV2AndV3(t *testing.T) {
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:" + base64.StdEncoding.EncodeToString([]byte("source"))},
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:" + base64.StdEncoding.EncodeToString([]byte("target"))},
 	}
+	wantTargetOnly := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:" + base64.StdEncoding.EncodeToString([]byte("target"))},
+	}
 
 	preReq := &datapb.PreImportRequest{Options: options}
 	require.NoError(t, WrapPluginContext(23, props, preReq))
@@ -73,9 +80,10 @@ func TestWrapPluginContextImportV2AndV3(t *testing.T) {
 	require.NoError(t, WrapPluginContext(23, props, reshardReq))
 	require.Equal(t, want, reshardReq.GetPluginContext())
 
+	// Import V3 final merge only writes target segments; reshard already decrypted the backup source.
 	impV3Req := &datapb.ImportTaskV3Request{}
-	require.NoError(t, WrapImportPluginContext(23, props, options, impV3Req))
-	require.Equal(t, want, impV3Req.GetPluginContext())
+	require.NoError(t, WrapPluginContext(23, props, impV3Req))
+	require.Equal(t, wantTargetOnly, impV3Req.GetPluginContext())
 
 	// Missing target key must propagate retryable ErrServiceUnavailable.
 	cipher.targetKey = nil

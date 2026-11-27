@@ -97,8 +97,8 @@ NewPackedReaderWithStorageConfig(char** paths,
                 schema_result.status().ToString());
         }
         auto trueSchema = schema_result.ValueUnsafe();
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-        auto reader_properties = milvus::storage::GetReaderProperties();
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -151,8 +151,8 @@ NewPackedReaderWithProperties(char** paths,
                 schema_result.status().ToString());
         }
         auto trueSchema = schema_result.ValueUnsafe();
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-        auto reader_properties = milvus::storage::GetReaderProperties();
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -196,8 +196,8 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = schema_result.ValueUnsafe();
 
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-        auto reader_properties = milvus::storage::GetReaderProperties();
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
@@ -281,8 +281,8 @@ GetPackedFileFieldIDs(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-        auto reader_properties = milvus::storage::GetReaderProperties();
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(c_plugin_context);
 
         std::vector<int64_t> ids;
         std::vector<int64_t> counts;

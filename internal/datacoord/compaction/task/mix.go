@@ -117,9 +117,6 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to build compaction request", mlog.Err(err))
-		if merr.IsRetryableErr(err) {
-			return
-		}
 		err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
@@ -545,6 +542,10 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segments = append(segments, segInfo)
 	}
 
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan); err != nil {
+		return nil, err
+	}
+
 	logIDRange, err := PreAllocateBinlogIDs(t.Allocator, segments, taskSchema)
 	if err != nil {
 		return nil, err
@@ -552,10 +553,6 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	plan.PreAllocatedLogIDs = logIDRange
 	// BeginLogID is deprecated, but still assign it for compatibility.
 	plan.BeginLogID = logIDRange.Begin
-
-	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan); err != nil {
-		return nil, err
-	}
 
 	mlog.Info(context.TODO(), "Compaction handler refreshed mix compaction plan", mlog.Int64("maxSize", plan.GetMaxSize()),
 		mlog.Any("PreAllocatedLogIDs", logIDRange), mlog.Any("segID2DeltaLogs", segIDMap))

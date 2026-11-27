@@ -250,6 +250,18 @@ func (f propagationFixture) assertNativeCipherOperation(t *testing.T, nodeID, ez
 	t.Logf("operation=%s node=%d pid=%d ez=%d collection=%d", operation, nodeID, cppPID, ezID, collectionID)
 }
 
+func (f propagationFixture) assertCppCipherOperation(t *testing.T, nodeID, ezID, collectionID int64, operation string) {
+	t.Helper()
+	var cppPID int
+	for _, event := range f.observations(t, "cpp") {
+		if event.NodeID == nodeID && event.EZID == ezID && event.CollectionID == collectionID && event.Operation == operation {
+			cppPID = event.PID
+		}
+	}
+	require.Positive(t, cppPID, "C++ %s did not run on DataNode %d for EZ %d collection %d", operation, nodeID, ezID, collectionID)
+	t.Logf("operation=%s node=%d pid=%d ez=%d collection=%d", operation, nodeID, cppPID, ezID, collectionID)
+}
+
 func (f propagationFixture) assertNotRegistered(t *testing.T, nodeID, ezID int64) {
 	t.Helper()
 	for _, event := range f.observations(t, "go") {

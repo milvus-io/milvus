@@ -50,13 +50,12 @@ var _ ImportTask = (*Task)(nil)
 type Task struct {
 	Task atomic.Pointer[datapb.ImportTaskV2]
 
-	alloc                allocator.Allocator
-	meta                 *meta.Meta
-	ImportMeta           ImportMeta
-	Tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	retryTimes           int64
-	nonRetryableFailures int64
+	alloc      allocator.Allocator
+	meta       *meta.Meta
+	ImportMeta ImportMeta
+	Tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func (t *Task) GetJobID() int64 {
@@ -202,20 +201,32 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 	}
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
-		if errors.IsAny(err, importid.ErrIDRangeTooSmall, errSnapshotTaskSource) {
-			// Persist the deterministic source or ID-reservation rejection before the job
-			// times out and loses the cause. The checker fails its tasks on the next tick.
-			mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-			failImportDispatch(t, t.ImportMeta, err)
+		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
+		if errors.Is(err, importid.ErrIDRangeTooSmall) || errors.Is(err, errSnapshotTaskSource) {
+			// Immutable source mismatches and insufficient reservations cannot
+			// be repaired by retrying. Neither the source nor the per-file range
+			// and row count changes by rescheduling, so fail the job now
+			// and keep the precise reason -- otherwise the job stays Importing
+			// (checkImportingJob only advances once every task is Completed) until
+			// tryTimeoutJob overwrites the reason with a generic timeout message.
+			//
+			// Only the job is updated, as in preimport: the checker's tryFailingTasks
+			// marks this task Failed on the next tick.
+			if updateErr := t.ImportMeta.UpdateJob(context.TODO(), t.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed),
+				UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+					WrapTaskLog(t, mlog.Err(updateErr))...)
+			}
 			return
 		}
-		handleImportDispatchError(t, t.ImportMeta, &t.nonRetryableFailures, err)
+		t.retryTimes++
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
+		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++
-		handleImportDispatchError(t, t.ImportMeta, &t.nonRetryableFailures, err)
 		return
 	}
 	err = t.ImportMeta.UpdateTask(context.TODO(), t.GetTaskID(),

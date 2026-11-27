@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -209,6 +210,11 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
+	if pack.pluginContext == nil {
+		if ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID); ez != nil && !hookutil.IsClusterEncryptionEnabled() {
+			return nil, "", merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+		}
+	}
 
 	var (
 		pluginContextPtr      *indexcgopb.StoragePluginContext
@@ -260,9 +266,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
-// allocInsertLogPaths reserves exactly one logID per column group for the whole write. It
-// is deliberately called outside retry.Do: a retried storage write must reuse the same
-// paths instead of consuming a fresh logID on every attempt.
+// allocInsertLogPaths reserves exactly one logID per column group for the whole write.
+// Callers reserve paths once after resolving the encryption context and reuse them
+// across storage write retries instead of consuming a fresh logID on every attempt.
 func (bw *BulkPackWriterV2) allocInsertLogPaths(pack *SyncPack) ([]string, error) {
 	paths := make([]string, 0, len(bw.columnGroups))
 	for _, columnGroup := range bw.columnGroups {

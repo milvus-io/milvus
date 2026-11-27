@@ -87,5 +87,4 @@ message ImportTaskPlan {
   // already carry every function output column; ordinary fragments carry them
   // because Reshard computed them.
   bool backup = 12;
-  int64 source_ez_id = 13;
 }

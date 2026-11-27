@@ -53,9 +53,8 @@ GetWriterEncryptionParams(const CPluginContext* context) {
             context->ez_id, context->collection_id, std::move(result.second))};
 }
 
-void
-RegisterReaderKeys(const CPluginContext* context) {
-    if (!context) {
+KeyRetriever::KeyRetriever(const CPluginContext* context) {
+    if (context == nullptr) {
         return;
     }
     if (!context->key || !*context->key) {
@@ -65,8 +64,9 @@ RegisterReaderKeys(const CPluginContext* context) {
     if (!cipher) {
         ThrowInfo(ErrorCode::Unsupported, "missing cipher plugin");
     }
-    cipher->RegisterReadKeyset(
-        context->ez_id, context->collection_id, context->key);
+    has_keyset_ = true;
+    bound_ez_id_ = context->ez_id;
+    bound_keyset_ = context->key;
 }
 
 std::string
@@ -77,8 +77,15 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
     }
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     AssertInfo(plugin != nullptr, "cipher plugin not found");
-    auto decryptor = plugin->GetDecryptor(
-        context->ez_id, context->collection_id, std::string(context->key));
+    auto decryptor =
+        (has_keyset_ && context->ez_id == bound_ez_id_)
+            ? plugin->GetDecryptorForKeyset(context->ez_id,
+                                            context->collection_id,
+                                            bound_keyset_,
+                                            std::string(context->key))
+            : plugin->GetDecryptor(context->ez_id,
+                                   context->collection_id,
+                                   std::string(context->key));
     if (!decryptor) {
         ThrowInfo(ErrorCode::Unsupported,
                   "cipher plugin returned no decryptor");
@@ -87,12 +94,12 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
 }
 
 parquet::ReaderProperties
-GetReaderProperties() {
+GetReaderProperties(const CPluginContext* context) {
     parquet::ReaderProperties reader_properties =
         parquet::default_reader_properties();
     parquet::FileDecryptionProperties::Builder builder;
     reader_properties.file_decryption_properties(
-        builder.key_retriever(std::make_shared<KeyRetriever>())
+        builder.key_retriever(std::make_shared<KeyRetriever>(context))
             ->plaintext_files_allowed()
             ->build());
     return reader_properties;

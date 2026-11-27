@@ -31,16 +31,11 @@ type ImportCipherContext struct {
 	Target *indexcgopb.StoragePluginContext
 }
 
-func registerImportContext(context *indexcgopb.StoragePluginContext, readOnly bool) error {
+func registerTargetImportContext(context *indexcgopb.StoragePluginContext) error {
 	if context == nil {
 		return nil
 	}
-	var err error
-	if readOnly {
-		err = RegisterLocalImportEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
-	} else {
-		err = CreateLocalEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
-	}
+	err := CreateLocalEZ(context.GetEncryptionZoneId(), context.GetEncryptionKey())
 	if err != nil && !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
 		err = merr.Combine(err, merr.ErrImportSysFailed)
 	}
@@ -49,7 +44,8 @@ func registerImportContext(context *indexcgopb.StoragePluginContext, readOnly bo
 
 // PrepareImportCipher validates the entire ordered wire context before making
 // any keys visible. Source files carry their own collection ID in the EDEK
-// metadata. The destination collection ID belongs only to the writer.
+// metadata and are decrypted statelessly via GetDecryptorForKeyset; only the
+// authoritative target zone is registered locally.
 func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
 	var sourceEZ int64
 	if artifact != "" {
@@ -62,10 +58,7 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 			return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("invalid backup encryption zone")
 		}
 	}
-	return PrepareImportCipherForZone(sourceEZ, properties, entries, collectionID)
-}
 
-func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
 	var cipherEntries []*commonpb.KeyValuePair
 	for _, entry := range entries {
 		if entry.GetKey() == CipherConfigUnsafeEZK {
@@ -111,13 +104,10 @@ func PrepareImportCipherForZone(sourceEZ int64, properties, entries []*commonpb.
 		return ImportCipherContext{}, merr.WrapErrImportSysFailedMsg("import task has unexpected cipher.ezk entries")
 	}
 	if (result.Source != nil || result.Target != nil) && !IsClusterEncryptionEnabled() {
-		return ImportCipherContext{}, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
+		return ImportCipherContext{}, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted import")
 	}
-	// Register the authoritative target before registering a same-zone source read-only.
-	if err := registerImportContext(result.Target, false); err != nil {
-		return ImportCipherContext{}, err
-	}
-	if err := registerImportContext(result.Source, true); err != nil {
+	// Only register the authoritative target zone; source decryption is stateless via GetDecryptorForKeyset.
+	if err := registerTargetImportContext(result.Target); err != nil {
 		return ImportCipherContext{}, err
 	}
 	return result, nil

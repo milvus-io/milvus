@@ -69,8 +69,6 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 				{SegmentInfo: &datapb.SegmentInfo{ID: 32, CollectionID: 23, Level: datapb.SegmentLevel_L1}},
 			}).Maybe()
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Maybe()
-			alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Maybe()
 			taskProto := &datapb.CompactionTask{
 				PlanID: 1, CollectionID: 23, Type: kind,
 				State:         datapb.CompactionTaskState_pipelining,
@@ -92,18 +90,10 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 			require.Nil(t, plan)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 			require.True(t, merr.IsRetryableErr(err))
-			cluster := session.NewMockCluster(t)
-			// Retryable key errors must keep the compaction task pipelining instead
-			// of marking it failed, while preventing worker dispatch.
-			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
-			require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-			catalog.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
-			cluster.AssertNotCalled(t, "CreateCompaction", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+			alloc.AssertNotCalled(t, "AllocID", mock.Anything)
 
-			// Non-retryable encryption property errors must still fail the task.
-			taskProto.Schema.Properties = []*commonpb.KeyValuePair{
-				{Key: common.EncryptionEzIDKey, Value: "invalid"},
-			}
+			cluster := session.NewMockCluster(t)
 			catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, saved *datapb.CompactionTask) error {
 					require.Equal(t, datapb.CompactionTaskState_failed, saved.GetState())
@@ -111,6 +101,34 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 				}).Once()
 			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 			require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+			alloc.AssertNotCalled(t, "AllocID", mock.Anything)
+			cluster.AssertNotCalled(t, "CreateCompaction", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 		})
 	}
+
+	t.Run(datapb.CompactionType_ClusteringCompaction.String(), func(t *testing.T) {
+		cipher.key = nil
+		mt := NewDefaultMockCompactionMeta(t)
+		mt.EXPECT().CompactionStorageRoot().Return("/tmp").Maybe()
+		mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{ID: 31, CollectionID: 23, Level: datapb.SegmentLevel_L1},
+		}).Maybe()
+		alloc := allocator.NewMockAllocator(t)
+		taskProto := &datapb.CompactionTask{
+			PlanID: 1, CollectionID: 23, Type: datapb.CompactionType_ClusteringCompaction,
+			State:              datapb.CompactionTaskState_pipelining,
+			InputSegments:      []int64{31},
+			ClusteringKeyField: &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64},
+			Schema: &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{
+				{Key: common.EncryptionEzIDKey, Value: "17"},
+			}},
+		}
+		task := NewClusteringCompactionTask(taskProto, alloc, mt, nil, nil, nil, nil, nil, nil, nil, index.NewTestVersionManager())
+		plan, err := task.BuildCompactionRequest()
+		require.Nil(t, plan)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+		alloc.AssertNotCalled(t, "AllocID", mock.Anything)
+	})
 }

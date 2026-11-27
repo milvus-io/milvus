@@ -56,8 +56,6 @@ import (
 // An immutable job/task source mismatch cannot be repaired by rescheduling.
 var errSnapshotTaskSource = errors.New("invalid snapshot task source")
 
-// Mark source resolution separately from target and inventory failures.
-
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -412,27 +410,6 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 			return file, ok
 		})
 	return assemblePreImportRequest(task, job, importFiles)
-}
-
-const maxImportDispatchRetries = 3
-
-func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
-	mlog.Warn(context.TODO(), "failed to dispatch import task", WrapTaskLog(task, mlog.Err(cause))...)
-	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) {
-		return
-	}
-	*nonRetryableFailures++
-	if *nonRetryableFailures < maxImportDispatchRetries {
-		return
-	}
-	failImportDispatch(task, im, cause)
-}
-
-func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
-	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
-		UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
-		mlog.Warn(context.TODO(), "failed to persist import dispatch failure", WrapTaskLog(task, mlog.Err(err))...)
-	}
 }
 
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {

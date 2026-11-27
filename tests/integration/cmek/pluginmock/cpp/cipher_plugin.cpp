@@ -29,7 +29,6 @@
 #include <iomanip>
 #include <map>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -288,13 +287,6 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         if (root_key.empty()) {
             std::lock_guard<std::mutex> lock(context_mutex_);
             contexts_.erase({ez_id, coll_id});
-            auto readers = import_readers_.find(ez_id);
-            if (readers != import_readers_.end()) {
-                readers->second.erase(coll_id);
-                if (readers->second.empty()) {
-                    import_readers_.erase(readers);
-                }
-            }
             record(ez_id, coll_id, "release");
             return;
         }
@@ -308,16 +300,6 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
         return makeEncryptor(
             registeredKey(ez_id, coll_id, false), ez_id, coll_id);
-    }
-
-    void
-    RegisterReadKeyset(int64_t ez_id,
-                       int64_t coll_id,
-                       const std::string& key) override {
-        checkedEZKey(ez_id, key);
-        std::lock_guard<std::mutex> lock(context_mutex_);
-        import_readers_[ez_id].insert(coll_id);
-        record(ez_id, coll_id, "register");
     }
 
     std::pair<std::shared_ptr<IEncryptor>, std::string>
@@ -334,17 +316,20 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
                  const std::string& safe_key) const override {
-        auto ezk = registeredKey(ez_id, coll_id, true);
-        auto decoded = decodeEDEK(safe_key);
-        auto expected_tag = deriveEDEKTag(ezk, decoded.nonce, ez_id, coll_id);
-        if (!constantTimeEqual(decoded.tag, expected_tag)) {
-            throw std::runtime_error(
-                "fixture cipher EDEK authentication failed for EZ " +
-                std::to_string(ez_id) + " and collection " +
-                std::to_string(coll_id));
-        }
-        auto dek = deriveDataKey(ezk, decoded.nonce, ez_id, coll_id);
-        return std::make_shared<FixtureDecryptor>(std::move(dek));
+        return makeDecryptor(
+            registeredKey(ez_id, coll_id, true), ez_id, coll_id, safe_key);
+    }
+
+    std::shared_ptr<IDecryptor>
+    GetDecryptorForKeyset(int64_t ez_id,
+                          int64_t coll_id,
+                          const std::string& key,
+                          const std::string& safe_key) const override {
+        auto decryptor =
+            makeDecryptor(checkedEZKey(ez_id, key), ez_id, coll_id, safe_key);
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        record(ez_id, coll_id, "read_keyset");
+        return decryptor;
     }
 
  private:
@@ -370,12 +355,26 @@ class FixtureCipherPlugin final : public ICipherPlugin {
                 std::move(edek)};
     }
 
+    static std::shared_ptr<IDecryptor>
+    makeDecryptor(const std::string& ezk,
+                  int64_t ez_id,
+                  int64_t coll_id,
+                  const std::string& safe_key) {
+        auto decoded = decodeEDEK(safe_key);
+        auto expected_tag = deriveEDEKTag(ezk, decoded.nonce, ez_id, coll_id);
+        if (!constantTimeEqual(decoded.tag, expected_tag)) {
+            throw std::runtime_error(
+                "fixture cipher EDEK authentication failed for EZ " +
+                std::to_string(ez_id) + " and collection " +
+                std::to_string(coll_id));
+        }
+        auto dek = deriveDataKey(ezk, decoded.nonce, ez_id, coll_id);
+        return std::make_shared<FixtureDecryptor>(std::move(dek));
+    }
+
     std::string
     registeredKey(int64_t ez_id, int64_t coll_id, bool read) const {
         std::lock_guard<std::mutex> lock(context_mutex_);
-        if (read && import_readers_.count(ez_id) != 0) {
-            return deriveEZKey(ez_id);
-        }
         auto it = contexts_.find({ez_id, coll_id});
         // Import registers the source EZ with collection ID 0. The source
         // file's authenticated metadata supplies its original collection ID.
@@ -413,7 +412,6 @@ class FixtureCipherPlugin final : public ICipherPlugin {
 
     mutable std::mutex context_mutex_;
     std::map<std::pair<int64_t, int64_t>, std::string> contexts_;
-    std::map<int64_t, std::set<int64_t>> import_readers_;
 };
 
 }  // namespace

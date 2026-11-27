@@ -247,13 +247,6 @@ func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption 
 	}
 }
 
-func (o *rwOptions) binlogReaderOptions() []BinlogReaderOption {
-	if !o.pluginContextSet {
-		return nil
-	}
-	return []BinlogReaderOption{decryptBinlogFromHeader}
-}
-
 // WithTextColumnConfigs sets TEXT column configurations for REWRITE_ALL mode during compaction.
 // when TEXT columns need to be rewritten (hole ratio >= threshold), this option enables
 // the writer to expand TEXT LOB references and write to new LOB files.
@@ -606,7 +599,7 @@ func filterSchemaToPresentFields(schema *schemapb.CollectionSchema, present map[
 // the V1 blob reader options and the plugin context of the packed readers.
 func binlogReaderEncryption(schema *schemapb.CollectionSchema, rwOptions *rwOptions) ([]BinlogReaderOption, *indexcgopb.StoragePluginContext) {
 	if rwOptions.pluginContextSet {
-		return rwOptions.binlogReaderOptions(), rwOptions.pluginContext
+		return nil, rwOptions.pluginContext
 	}
 	if !hookutil.IsClusterEncryptionEnabled() {
 		return nil, nil
@@ -869,7 +862,7 @@ func NewDeltalogReader(
 
 	switch rwOptions.version {
 	case StorageV1:
-		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths, rwOptions.binlogReaderOptions()...)
+		return NewLegacyDeltalogReader(ctx, pkField, rwOptions.downloader, paths)
 	case StorageV2, StorageV3:
 		pathPos := 0
 		schema := &schemapb.CollectionSchema{

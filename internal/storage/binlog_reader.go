@@ -22,8 +22,6 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -114,35 +112,6 @@ func (reader *BinlogReader) Close() {
 
 type BinlogReaderOption func(base *BinlogReader) error
 
-type importBinlogDecryptionError struct{ error }
-
-func (e *importBinlogDecryptionError) Unwrap() error { return e.error }
-
-// IsImportBinlogDecryptionError identifies a recognized legacy file. Its key
-// failure must reach the task even when mixed-format deltalogs are being probed.
-func IsImportBinlogDecryptionError(err error) bool {
-	var failure *importBinlogDecryptionError
-	return errors.As(err, &failure)
-}
-
-func decryptBinlogFromHeader(file *BinlogReader) error {
-	edek, hasEDEK := file.GetEdek()
-	_, hasZone := file.Extras[ezIDKey]
-	if !hasEDEK && !hasZone {
-		return nil
-	}
-	zone, ok := file.GetEzID()
-	if edek == "" || !ok || zone <= 0 {
-		return &importBinlogDecryptionError{merr.WrapErrDataIntegrityMsg("backup binlog has invalid encryption metadata")}
-	}
-	// The source collection and EDEK are recorded in the file. The
-	// collection in the task request belongs to the destination.
-	if err := WithReaderDecryptionContext(zone, file.CollectionID)(file); err != nil {
-		return &importBinlogDecryptionError{err}
-	}
-	return nil
-}
-
 func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {
 		edek, ok := base.GetEdek()
@@ -150,11 +119,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 			return nil
 		}
 
-		cipher := hookutil.GetCipher()
-		if cipher == nil {
-			return merr.Wrap(merr.ErrServiceUnavailable, "encrypted binlog requires the cipher plugin")
-		}
-		decryptor, err := cipher.GetDecryptor(ezID, collectionID, []byte(edek))
+		decryptor, err := hookutil.GetCipher().GetDecryptor(ezID, collectionID, []byte(edek))
 		if err != nil {
 			mlog.Error(context.TODO(), "failed to get decryptor", mlog.Int64("ezID", ezID), mlog.Int64("collectionID", collectionID), mlog.Err(err))
 			return err

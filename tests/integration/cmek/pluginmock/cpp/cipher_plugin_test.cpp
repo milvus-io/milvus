@@ -178,17 +178,34 @@ main() {
         require(source_writer_rejected,
                 "import source context authorized a target writer");
         auto imported = newPlugin();
-        imported->RegisterReadKeyset(17, 23, expected_ezk);
-        require(hexEncode(imported->GetDecryptor(17, 23, edek)->GetKey()) ==
-                    expected_dek,
-                "import read keyset did not open the historical EDEK");
+        require(hexEncode(imported
+                              ->GetDecryptorForKeyset(17, 23, expected_ezk, edek)
+                              ->GetKey()) == expected_dek,
+                "stateless import keyset did not open the historical EDEK");
+        bool stateless_read = false;
+        try {
+            static_cast<void>(imported->GetDecryptor(17, 23, edek));
+        } catch (const std::exception&) {
+            stateless_read = true;
+        }
+        require(stateless_read,
+                "GetDecryptorForKeyset mutated ordinary decryptor state");
         bool read_only = false;
         try {
             static_cast<void>(imported->GetEncryptor(17, 23));
         } catch (const std::exception&) {
             read_only = true;
         }
-        require(read_only, "import read keyset enabled ordinary writes");
+        require(read_only, "GetDecryptorForKeyset enabled ordinary writes");
+        bool wrong_keyset_rejected = false;
+        try {
+            static_cast<void>(
+                imported->GetDecryptorForKeyset(17, 23, "wrong-key", edek));
+        } catch (const std::exception&) {
+            wrong_keyset_rejected = true;
+        }
+        require(wrong_keyset_rejected,
+                "GetDecryptorForKeyset accepted wrong keyset");
         auto [pinned_writer, pinned_edek] =
             imported->GetEncryptorForKeyset(17, 23, expected_ezk);
         require(pinned_writer->GetKey() ==

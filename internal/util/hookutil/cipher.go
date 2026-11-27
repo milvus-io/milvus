@@ -54,6 +54,9 @@ var (
 type EZBackupCipher interface {
 	Backup(ezID int64) (string, error)
 	ResolveImportEZ(artifact string) (int64, []byte, error)
+	// GetDecryptorForKeyset creates a decryptor using an explicit raw keyset
+	// without reading from or mutating the ordinary zone cache.
+	GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error)
 }
 
 // GetCipher returns singleton hook.Cipher instance.
@@ -367,7 +370,7 @@ func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
 	for _, value := range context {
 		if value.GetKey() == CipherConfigUnsafeEZK {
 			if GetCipher() == nil {
-				return merr.Wrap(merr.ErrServiceUnavailable, "cannot register task encryption context without a cipher plugin")
+				return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register task encryption context without a cipher plugin")
 			}
 			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
 			if err != nil {
@@ -565,6 +568,10 @@ func (d testCipher) GetEncryptor(ezID, collectionID int64) (encryptor hook.Encry
 }
 
 func (d testCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
+	return createTestCryptoImpl(ezID, collectionID), nil
+}
+
+func (d testCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
 	return createTestCryptoImpl(ezID, collectionID), nil
 }
 
