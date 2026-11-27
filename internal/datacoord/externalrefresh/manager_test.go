@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -1037,6 +1038,119 @@ func TestExploreExternalFiles_UsesUniqueAttemptDirectories(t *testing.T) {
 	}, baseDirs)
 }
 
+// Refresh revalidates the job's source and spec before exploring. A spec that
+// sets one key twice fails with an error naming the keys; a lone other
+// spelling of a key is still accepted.
+func TestExploreExternalFiles_RejectsCollidingSpecKeys(t *testing.T) {
+	paramtable.Init()
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&meta.CollectionInfo{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID:       100,
+			Name:          "id",
+			ExternalField: "id",
+		}}},
+	})
+	mgr := &Manager{
+		mt:        &meta.Meta{MetaStore: ms},
+		allocator: &stubAllocator{nextID: 300},
+	}
+	explored := 0
+	mockExplore := mockey.Mock(packed.ExploreFilesReturnManifestPath).
+		To(func(_ []string, _ string, _, _ string, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) ([]packed.FileInfo, string, error) {
+			explored++
+			return []packed.FileInfo{{FilePath: "f.parquet", NumRows: 1}}, "manifest", nil
+		}).Build()
+	defer mockExplore.UnPatch()
+
+	newJob := func(spec string) *datapb.ExternalCollectionRefreshJob {
+		return &datapb.ExternalCollectionRefreshJob{
+			JobId:          42,
+			CollectionId:   100,
+			ExternalSource: "s3://bucket/path",
+			ExternalSpec:   spec,
+		}
+	}
+	const extfs = `{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}`
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"format":"parquet","extfs":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"format":"parquet","Format":"vortex","extfs":` + extfs + `}`, `external spec keys "format" and "Format" differ only in case`},
+		{`{"format":"parquet","extfs":` + extfs + `,"extfs":` + extfs + `}`, `external spec key "extfs" appears more than once`},
+		{`{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk","Region":"eu-west-1"}}`, `extfs keys "region" and "Region" differ only in case`},
+	} {
+		_, _, err := mgr.exploreExternalFiles(context.Background(), newJob(tc.spec))
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, "external source/spec failed revalidation", tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+	}
+	require.Zero(t, explored)
+
+	for _, spec := range []string{
+		`{"format":"parquet","extfs":` + extfs + `}`,
+		`{"Format":"parquet","EXTFS":` + extfs + `}`,
+	} {
+		_, _, err := mgr.exploreExternalFiles(context.Background(), newJob(spec))
+		require.NoError(t, err, spec)
+	}
+	require.Equal(t, 2, explored)
+}
+
+// When the collection already has segments, refresh parses the collection's
+// persisted spec to read the baseline manifests. That parse is strict, so a
+// persisted spec that sets one key twice fails every refresh.
+func TestCreateTasksForJob_CollidingBaselineSpecKeys(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(100)
+	jobID := int64(1001)
+
+	for _, tc := range []struct{ baselineSpec, wantErr string }{
+		{`{"format":"parquet","extfs":{"region":"us-west-2"},"Extfs":{"use_ssl":"true"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		// A lone other spelling parses, so planning gets as far as reading
+		// the baseline manifests.
+		{`{"Format":"parquet","EXTFS":{"region":"us-west-2"}}`, "read external refresh baseline manifests"},
+	} {
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&meta.CollectionInfo{ID: collectionID, Schema: &schemapb.CollectionSchema{ExternalSpec: tc.baselineSpec}})
+		segments := meta.NewSegmentsInfo(ms)
+		segments.SetSegment(10, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           10,
+			CollectionID: collectionID,
+			State:        commonpb.SegmentState_Flushed,
+			ManifestPath: "baseline-manifest",
+		}})
+		mt := &meta.Meta{MetaStore: ms, Segments: segments}
+		refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
+		mgr := NewExternalCollectionRefreshManager(
+			ctx, mt, nil, newStubScheduler(), &stubAllocator{nextID: 2000},
+			refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*Manager)
+
+		mockExplore := mockey.Mock((*Manager).exploreExternalFiles).
+			Return([]packed.FileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+			Build()
+		mockRead := mockey.Mock(packed.ReadFragmentsFromManifest).
+			Return(nil, errors.New("manifest read failed")).
+			Build()
+
+		job := &datapb.ExternalCollectionRefreshJob{
+			JobId:        jobID,
+			CollectionId: collectionID,
+			State:        indexpb.JobState_JobStateInit,
+			ExternalSpec: `{"format":"parquet"}`,
+		}
+		require.NoError(t, refreshMeta.AddJob(job))
+		tasks, err := mgr.createTasksForJob(ctx, job)
+		mockRead.UnPatch()
+		mockExplore.UnPatch()
+		require.ErrorContains(t, err, tc.wantErr, tc.baselineSpec)
+		require.Empty(t, tasks)
+		if strings.Contains(tc.wantErr, "differ only in case") {
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "parse external refresh baseline spec")
+		}
+	}
+}
+
 func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(100)
@@ -1710,6 +1824,109 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "without persisted refresh result")
 	assert.Equal(t, 0, updateCalls)
+}
+
+func TestRefreshMilvusTableStructMismatchPreservesSegments(t *testing.T) {
+	ctx := context.Background()
+	refreshMeta := createTestRefreshMeta(t)
+	scheduler := newStubScheduler()
+	schema := testMilvusTableTargetRefreshSchema()
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[renamed]", ExternalField: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
+	source := testMilvusTableRefreshSchema(false)
+	source.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(schema.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+	schema.StructArrayFields[0].ExternalField = "items"
+	source.StructArrayFields[0].Fields[0].Name = "items[value]"
+	source.StructArrayFields[0].Fields[0].ExternalField = ""
+	data, err := protojson.Marshal(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}})
+	require.NoError(t, err)
+	mockRefreshSnapshotReads(t, func() ([]byte, error) { return data, nil })
+	previousSchema := proto.Clone(schema)
+	ms := metacache.NewMetaStore(nil)
+	mt := &meta.Meta{MetaStore: ms, Segments: meta.NewSegmentsInfo(ms)}
+	mt.AddCollection(&meta.CollectionInfo{ID: 100, Schema: schema})
+	segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 32, State: commonpb.SegmentState_Flushed})
+	previousSegment := proto.Clone(segment.SegmentInfo)
+	mt.Segments.SetSegment(10, segment)
+	var schemaUpdates atomic.Int32
+	manager := NewExternalCollectionRefreshManager(ctx, mt, nil, scheduler, &stubAllocator{nextID: 1000}, refreshMeta, nil, testCollectionGetter(mt), func(context.Context, int64, string, string) error { schemaUpdates.Add(1); return nil }, nil, nil).(*Manager)
+	defer manager.Stop()
+	jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(), "s3://bucket/snapshots/2/metadata/20.json", schema.GetExternalSpec())
+	require.NoError(t, err)
+	manager.wg.Wait()
+	job, err := manager.GetJobProgress(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
+	require.Contains(t, job.GetFailReason(), `struct child "items[renamed]" must map to "items[renamed]"; external_field="items[value]"`)
+	require.Empty(t, job.GetTaskIds())
+	require.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	require.Zero(t, scheduler.GetEnqueueCount())
+	require.True(t, proto.Equal(previousSchema, mt.GetCollection(100).Schema))
+	require.True(t, proto.Equal(previousSegment, mt.Segments.GetSegment(10).SegmentInfo))
+	require.Zero(t, schemaUpdates.Load())
+}
+
+func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
+	for _, change := range []string{"none", "rename", "type", "missing", "added", "parent_added", "parent_added_to_scalar_projection", "parent_missing", "mapping_missing", "unselected_changed", "unselected_removed", "nullable", "field_id"} {
+		t.Run(change, func(t *testing.T) {
+			source := testMilvusTableRefreshSchema(false)
+			source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
+			target := testMilvusTableTargetRefreshSchema()
+			target.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(source.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+			target.StructArrayFields[0].ExternalField = "items"
+			target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
+			source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[ignored]", FieldID: 113, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64})
+			// Snapshot metadata retains provenance that the public target schema omits.
+			source.StructArrayFields[0].Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}}
+			switch change {
+			case "rename":
+				target.StructArrayFields[0].Fields[0].Name = "items[renamed]"
+			case "type":
+				source.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
+			case "missing":
+				source.StructArrayFields[0].Fields = nil
+			case "added":
+				source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[extra]", FieldID: 112, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64})
+			case "parent_added", "parent_added_to_scalar_projection":
+				source.StructArrayFields = append(source.StructArrayFields, &schemapb.StructArrayFieldSchema{
+					Name:    "refresh_meta",
+					FieldID: 114,
+					Fields: []*schemapb.FieldSchema{
+						{Name: "refresh_meta[note]", FieldID: 115, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+					},
+				})
+				if change == "parent_added_to_scalar_projection" {
+					target.StructArrayFields = nil
+				}
+			case "mapping_missing":
+				target.StructArrayFields[0].ExternalField = ""
+			case "parent_missing":
+				source.StructArrayFields = nil
+			case "unselected_changed":
+				source.StructArrayFields[0].Fields[1].ElementType = schemapb.DataType_Double
+			case "unselected_removed":
+				source.StructArrayFields[0].Fields = source.StructArrayFields[0].Fields[:1]
+			case "nullable":
+				source.StructArrayFields[0].Nullable = true
+			case "field_id":
+				source.StructArrayFields[0].Fields[0].FieldID++
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+			defer read.UnPatch()
+			err := validateMilvusTableRefreshSchema(&datapb.ExternalCollectionRefreshJob{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: target.ExternalSpec}, target)
+			switch change {
+			case "none", "added", "parent_added", "parent_added_to_scalar_projection", "unselected_changed", "unselected_removed", "field_id":
+				require.NoError(t, err)
+			case "mapping_missing":
+				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+				require.ErrorContains(t, err, `target struct "items" must set external_field mapping`)
+			case "parent_missing":
+				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+				require.ErrorContains(t, err, `target struct "items" (external_field="items") is missing from the source snapshot`)
+			default:
+				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+			}
+		})
+	}
 }
 
 // Physical column checks belong to the DataNode manifest readers, not planning.
@@ -3351,6 +3568,41 @@ func TestExternalCollectionRefreshManager_RejectsEmptyPaimonExplore(t *testing.T
 			require.ErrorAs(t, err, &terminal)
 			require.ErrorContains(t, err, "no files found")
 			require.Nil(t, tasks)
+		})
+	}
+}
+
+func TestHandleJobFinished_DroppedCollection(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		finished  bool
+		lookupErr error
+		wantCalls int
+	}{
+		{"finished_missing", true, merr.WrapErrCollectionNotFound(200), 1},
+		{"active_missing", false, merr.WrapErrCollectionNotFound(200), 2},
+		{"finished_unavailable", true, merr.WrapErrServiceUnavailable("rootcoord unavailable"), 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newManagerForPublish(t, "", func(context.Context, int64, string, string) error {
+				t.Fatal("must not publish without a collection")
+				return nil
+			})
+			calls := 0
+			mgr.collectionGetter = func(context.Context, int64) (*meta.CollectionInfo, error) {
+				calls++
+				return nil, merr.Wrap(tc.lookupErr, "collection lookup")
+			}
+			job := publishJob()
+			if tc.finished {
+				job.State = indexpb.JobState_JobStateFinished
+			}
+			mgr.handleJobFinished(context.Background(), job)
+			mgr.handleJobFinished(context.Background(), job)
+			assert.Equal(t, tc.wantCalls, calls)
+			_, notified := mgr.notifiedJobs[job.GetJobId()]
+			assert.Equal(t, tc.wantCalls == 1, notified)
+			assert.Equal(t, tc.finished, job.GetState() == indexpb.JobState_JobStateFinished)
 		})
 	}
 }

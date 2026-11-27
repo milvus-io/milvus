@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestParseExternalSpec(t *testing.T) {
@@ -148,18 +150,118 @@ func TestParseExternalSpec(t *testing.T) {
 				for _, field := range []string{
 					`"SNAPSHOT_ID":1`, `"Snapshot_Id":"1"`,
 					`"ſnapshot_id":1`,
-					`"FORMAT":"paimon-table"`, `"COLUMNS":["pk"]`,
+					`"COLUMNS":["pk"]`,
 					`"EXTFS":{"anonymous":"true"}`,
-					`"snapshot_id":1,"SNAPSHOT_ID":2`,
 				} {
 					_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,%s}`, format, field))
 					require.NoError(t, err, field)
 				}
-				_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"CUSTOM_OPTION":"unchanged"}`, format))
+				spec, err := ParseExternalSpec(fmt.Sprintf(`{"FORMAT":%q}`, format))
+				require.NoError(t, err)
+				require.Equal(t, format, spec.Format)
+				_, err = ParseExternalSpec(fmt.Sprintf(`{"format":%q,"CUSTOM_OPTION":"unchanged"}`, format))
 				require.NoError(t, err)
 			})
 		}
 	})
+
+	t.Run("two spellings of one key rejected", func(t *testing.T) {
+		for format := range supportedFormats {
+			t.Run(format, func(t *testing.T) {
+				for _, field := range []string{
+					`"FORMAT":"paimon-table"`,
+					`"snapshot_id":1,"SNAPSHOT_ID":2`,
+				} {
+					_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,%s}`, format, field))
+					require.ErrorIs(t, err, merr.ErrParameterInvalid, field)
+					require.ErrorContains(t, err, "differ only in case", field)
+				}
+			})
+		}
+	})
+}
+
+// collidingKeySpecs set one key more than once. Each would pass the other
+// ParseExternalSpec checks if the second of the two keys were removed. The
+// first ten are the inputs that TestNormalizeExternalSpec merged before
+// collisions were rejected.
+var collidingKeySpecs = []struct {
+	name, spec, wantErr string
+}{
+	{"format then FORMAT", `{"format":"parquet","FORMAT":"vortex"}`, `external spec keys "format" and "FORMAT" differ only in case`},
+	{"FORMAT then format", `{"FORMAT":"vortex","format":"parquet"}`, `external spec keys "FORMAT" and "format" differ only in case`},
+	{"repeated format", `{"format":"vortex","format":"parquet"}`, `external spec key "format" appears more than once`},
+	{"format then FORMAT null", `{"format":"vortex","FORMAT":null}`, `external spec keys "format" and "FORMAT" differ only in case`},
+	{"snapshot_id then SNAPSHOT_ID null", `{"snapshot_id":7,"SNAPSHOT_ID":null}`, `external spec keys "snapshot_id" and "SNAPSHOT_ID" differ only in case`},
+	{"extfs then EXTFS", `{"extfs":{"region":"us-east-1"},"EXTFS":{"use_ssl":"true"}}`, `external spec keys "extfs" and "EXTFS" differ only in case`},
+	{"extfs then EXTFS null", `{"extfs":{"region":"us-east-1"},"EXTFS":null}`, `external spec keys "extfs" and "EXTFS" differ only in case`},
+	{"columns then COLUMNS", `{"columns":["a"],"COLUMNS":["b"]}`, `external spec keys "columns" and "COLUMNS" differ only in case`},
+	{"columns then COLUMNS null", `{"columns":["a"],"COLUMNS":null}`, `external spec keys "columns" and "COLUMNS" differ only in case`},
+	{"SCAN_MODE then scan_mode", `{"Format":"paimon-table","SCAN_MODE":"data-split","scan_mode":"direct-file"}`, `external spec keys "SCAN_MODE" and "scan_mode" differ only in case`},
+	{"Extfs then extfs", `{"Extfs":{"use_ssl":"true"},"extfs":{"region":"us-east-1"}}`, `external spec keys "Extfs" and "extfs" differ only in case`},
+	{"EXTFS then Extfs", `{"EXTFS":{"region":"us-east-1"},"Extfs":{"use_ssl":"true"}}`, `external spec keys "EXTFS" and "Extfs" differ only in case`},
+	{"extfs null then Extfs", `{"extfs":null,"Extfs":{"use_ssl":"true"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+	{"Format then format", `{"Format":"vortex","format":"parquet"}`, `external spec keys "Format" and "format" differ only in case`},
+	{"scan_mode then Unicode fold", `{"format":"paimon-table","scan_mode":"direct-file","ſcan_mode":"data-split"}`, `external spec keys "scan_mode" and "ſcan_mode" differ only in case`},
+	{"cloud_extra then Cloud_Extra", `{"cloud_extra":{"volume_id":"v"},"Cloud_Extra":{"volume_id":"w"}}`, `external spec keys "cloud_extra" and "Cloud_Extra" differ only in case`},
+	{"repeated extfs", `{"extfs":{"region":"us-east-1"},"extfs":{"use_ssl":"true"}}`, `external spec key "extfs" appears more than once`},
+	{"repeated extfs via escape", `{"extfs":{"region":"us-east-1"},"\u0065xtfs":null}`, `external spec key "extfs" appears more than once`},
+	{"repeated unknown key", `{"custom":1,"custom":2}`, `external spec key "custom" appears more than once`},
+	{"repeated extfs key", `{"extfs":{"region":"us-east-1","region":"eu-west-1"}}`, `extfs key "region" appears more than once`},
+	{"extfs keys region then Region", `{"extfs":{"region":"us-east-1","Region":"eu-west-1"}}`, `extfs keys "region" and "Region" differ only in case`},
+	{"extfs keys in a lone EXTFS", `{"EXTFS":{"use_iam":"true","USE_IAM":"false"}}`, `extfs keys "use_iam" and "USE_IAM" differ only in case`},
+	{
+		// A layer in front of Milvus that replaces only the exact "extfs" key
+		// leaves the caller's "Extfs" in place; encoding/json would merge its
+		// keys into extfs.
+		"caller Extfs beside replaced extfs",
+		`{"Extfs":{"gcp_target_service_account":"other@project.iam.gserviceaccount.com"},"cloud_extra":{"volume_id":"v"},"extfs":{"cloud_provider":"gcp","use_iam":"true"}}`,
+		`external spec keys "Extfs" and "extfs" differ only in case`,
+	},
+}
+
+func TestParseExternalSpecRejectsCollidingKeys(t *testing.T) {
+	for _, tc := range collidingKeySpecs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseExternalSpec(tc.spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantErr)
+			err = ValidateExternalSpecKeys(tc.spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestValidateExternalSpecKeysAcceptsOneSpellingPerKey(t *testing.T) {
+	for _, spec := range []string{
+		"", "null", "{}",
+		`{"format":"paimon-table","columns":["a"],"snapshot_id":"7","scan_mode":"data-split","extfs":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"},"cloud_extra":{"volume_id":"v"}}`,
+		// A lone other spelling of a known key is folded by encoding/json.
+		`{"Format":"paimon-table","COLUMNS":["a"],"Snapshot_Id":7,"ſcan_mode":"data-split","EXTFS":{"region":"us-east-1"},"Cloud_Extra":{}}`,
+		`{"format":"parquet","extfs":null}`,
+		// encoding/json does not fold unknown keys.
+		`{"CUSTOM":1,"custom":2}`,
+		// Nested values are not top-level keys.
+		`{"cloud_extra":{"Format":"x","format":"y","extfs":{},"Extfs":{}}}`,
+		// Other extfs keys are left to the extfs allowlist.
+		`{"extfs":{"credential_json":"{}","shell_command":"x"}}`,
+	} {
+		require.NoError(t, ValidateExternalSpecKeys(spec), spec)
+	}
+	for _, spec := range []string{"{", `{"format":"parquet"} {}`, " "} {
+		require.ErrorIs(t, ValidateExternalSpecKeys(spec), merr.ErrParameterInvalid, spec)
+	}
+}
+
+func TestCanonicalSpecKey(t *testing.T) {
+	for key, want := range map[string]string{
+		"format": "format", "Format": "format", "EXTFS": "extfs",
+		"ſnapshot_id": "snapshot_id", "Cloud_Extra": "cloud_extra",
+		"custom": "custom", "Custom": "Custom",
+	} {
+		require.Equal(t, want, CanonicalSpecKey(key), key)
+	}
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {

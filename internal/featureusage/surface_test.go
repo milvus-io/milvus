@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var updateSurface = flag.Bool("update-surface", false, "rewrite testdata/report_surface.golden from the current code")
+var updateSurface = flag.Bool("update-surface", false, "rewrite the testdata/*.golden surface files from the current code")
 
 const surfaceFile = "testdata/report_surface.golden"
 

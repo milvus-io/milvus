@@ -292,12 +292,17 @@ func (i *RestfulInfo) AnnsField() string {
 }
 
 func (i *RestfulInfo) NQ() string {
+	// Not req.GetNq(): a request that does not declare nq only gets the field
+	// filled by the search task, so the line of a request refused before the
+	// task (rate limit, privilege, unknown collection) would show 0.
 	if req, ok := i.req.(*milvuspb.SearchRequest); ok {
-		return fmt.Sprint(req.GetNq())
+		return fmt.Sprint(requestutil.SearchRequestNq(req))
 	}
 
 	if req, ok := i.req.(*milvuspb.HybridSearchRequest); ok {
-		return listToString(lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string { return fmt.Sprint(req.GetNq()) }))
+		return listToString(lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string {
+			return fmt.Sprint(requestutil.SearchRequestNq(req))
+		}))
 	}
 	return Unknown
 }

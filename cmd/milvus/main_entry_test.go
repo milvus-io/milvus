@@ -19,6 +19,7 @@ package milvus
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -100,4 +101,22 @@ func TestMainSubprocessReturnsAndPreservesArgs(t *testing.T) {
 			assert.Equal(t, want, args)
 		})
 	}
+}
+
+func TestSupervisedRunPropagatesStartupFailureAfterCleanup(t *testing.T) {
+	child := filepath.Join(t.TempDir(), "milvus")
+	require.NoError(t, os.WriteFile(child, []byte("#!/bin/sh\nexit 1\n"), 0o700)) // #nosec G306 -- The temporary test child must be executable.
+	// A failed startup has not registered a session yet.
+	sessions := mockey.Mock(sessionutil.GetSessions).Return([]string(nil)).Build()
+	defer sessions.UnPatch()
+	cleaned := false
+	cleanup := mockey.Mock(CleanSession).To(func(_ string, _ []string, suffixes []string) error {
+		assert.Empty(t, suffixes)
+		cleaned = true
+		return nil
+	}).Build()
+	defer cleanup.UnPatch()
+
+	assert.Equal(t, 1, runMain([]string{child, "run", "standalone", "--run-with-subprocess"}))
+	assert.True(t, cleaned)
 }

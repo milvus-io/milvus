@@ -463,6 +463,15 @@ func collectQueryIteratorFeature(isIterator bool, set *featureusage.FeatureSet) 
 	}
 }
 
+// collectQueryFunctionChainFeature marks a query that carries function_chains.
+// It is read from the request before the chains are validated, so a chain the
+// server then rejects still counts as asked for.
+func collectQueryFunctionChainFeature(chains []*schemapb.FunctionChain, set *featureusage.FeatureSet) {
+	if len(chains) > 0 && set != nil {
+		set.Set(featureusage.FeatureQueryFunctionChains)
+	}
+}
+
 // ExprFeatureObserver and RecordExprTemplateFeatures are the expression hooks
 // for the dml package, whose delete path parses a plan outside the dql tasks
 // and counts in one place: the observer marks into the set while the parser

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
@@ -36,7 +37,11 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	runtimeDir := createRuntimeDir(serverType)
 	filename := getPidFileName(serverType, roles.Alias)
 
-	maybeEnableOpenSSLFIPS()
+	// A MILVUS_FIPS_ENABLED=ON build must not run outside FIPS 140-3 mode.
+	if err := fips.Require(); err != nil {
+		fmt.Fprintln(os.Stderr, "Milvus cannot start:", err)
+		os.Exit(1)
+	}
 	c.printBanner(flags.Output())
 	c.injectVariablesToEnv()
 	c.printHardwareInfo(flags.Output())
@@ -60,7 +65,7 @@ func (c *run) printBanner(w io.Writer) {
 	fmt.Fprintln(w, "Built:     "+BuildTime)
 	fmt.Fprintln(w, "GitCommit: "+GitCommit)
 	fmt.Fprintln(w, "GoVersion: "+GoVersion)
-	fmt.Fprintf(w, "Milvus FIPS in Go: BoringCrypto %v\n", boringEnabled())
+	fmt.Fprintln(w, "FIPS:      "+fips.Status())
 	fmt.Fprintln(w)
 	metrics.BuildInfo.WithLabelValues(getEffectiveVersion(), BuildTime, GitCommit).Set(1)
 }

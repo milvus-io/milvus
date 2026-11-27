@@ -599,6 +599,8 @@ github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030070734-84b82513689e h
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261030070734-84b82513689e/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6 h1:cce6z1kO4+Nn2GhbAKBDIt7+eqzmBtcOG+qnHfx62ig=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261105020509-3c2afcbf9ce6/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261123113001-86488f2f6240 h1:PgzeXw5KQWbmokYfDKFoQpb1bYE0memlC/6k8tYgRfA=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261123113001-86488f2f6240/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/minio/md5-simd v1.1.2 h1:Gdi1DZK69+ZVMoNHRXJyNcxrMA4dSxoYHZSQbirFg34=
 github.com/minio/md5-simd v1.1.2/go.mod h1:MzdKDxYpY2BT9XQFocsiZf/NKVtR7nkE4RoEpN+20RM=
 github.com/minio/minio-go/v7 v7.0.73 h1:qr2vi96Qm7kZ4v7LLebjte+MQh621fFWnv93p12htEo=
@@ -881,10 +883,8 @@ github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-github.com/zilliztech/woodpecker v0.1.46 h1:Rmivs4GA6yj3zpNI1aXyEr8AweeQcgoW0ftINSUE27c=
-github.com/zilliztech/woodpecker v0.1.46/go.mod h1:VJ9NgTpLId/mnVyFrOKXlpHmptmTbQBvXZUMncZ6b2k=
-github.com/zilliztech/woodpecker v0.1.48-0.20261027025505-685bea18c19c h1:/KgX0YX4iO1Kw1Dz5kMbLH42+Dg/q4XKHIX0mu2RMH8=
-github.com/zilliztech/woodpecker v0.1.48-0.20261027025505-685bea18c19c/go.mod h1:RVxCdyqeWCKZF5c1luPhjpBazgKgF9BiXegYcLV0wDE=
+github.com/zilliztech/woodpecker v0.1.49 h1:d5KCO7QG1zFzCquf1QqtgKftd50BmP2/wOFGj9EjP2g=
+github.com/zilliztech/woodpecker v0.1.49/go.mod h1:e+qtqOZsfw33pGjxGU0qy2onyL6Weq1bWleRxyIBs8I=
 go.etcd.io/bbolt v1.5.0 h1:S7GAl7Fxv12yohbwFfIbQCGDWbQbtDGPET4P/bD4lxU=
 go.etcd.io/bbolt v1.5.0/go.mod h1:mkltfYE5aUHQxUct9N9V+Kp7aSjFqjgrhcXIS70Lrdk=
 go.etcd.io/etcd/api/v3 v3.7.1 h1:KJG0/DcWGfe3Y1otDf/fsBf0TSSgpxZ5RO/L8SFt73E=

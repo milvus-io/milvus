@@ -243,10 +243,11 @@ func TestStructArrayField_Equal(t *testing.T) {
 
 func TestStructArrayField_NullableMarshalRoundTrip(t *testing.T) {
 	model := &StructArrayField{
-		FieldID:     100,
-		Name:        "nullable_struct",
-		Description: "test",
-		Nullable:    true,
+		FieldID:       100,
+		Name:          "nullable_struct",
+		Description:   "test",
+		Nullable:      true,
+		ExternalField: "raw_struct",
 		Fields: []*Field{
 			{
 				FieldID:  101,
@@ -259,10 +260,17 @@ func TestStructArrayField_NullableMarshalRoundTrip(t *testing.T) {
 	// Marshal → Unmarshal round-trip
 	pb := MarshalStructArrayFieldModel(model)
 	assert.True(t, pb.GetNullable())
+	assert.Equal(t, "raw_struct", pb.GetExternalField())
 
 	roundTripped := UnmarshalStructArrayFieldModel(pb)
 	assert.True(t, roundTripped.Nullable)
+	assert.Equal(t, "raw_struct", roundTripped.ExternalField)
 	assert.True(t, model.Equal(*roundTripped))
+
+	cloned := model.Clone()
+	assert.Equal(t, "raw_struct", cloned.ExternalField)
+	cloned.ExternalField = "other"
+	assert.False(t, model.Equal(*cloned))
 }
 
 func TestStructArrayField_NullableClone(t *testing.T) {

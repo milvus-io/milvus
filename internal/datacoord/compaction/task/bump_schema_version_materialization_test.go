@@ -258,7 +258,7 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorApplies(t *testing.T) {
 
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, &datapb.Statistics{InsertBinlogSize: 100},
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, &datapb.CompactionSegment{InsertLogs: newGroups, Stats: &datapb.Statistics{InsertBinlogSize: 100}},
 	))
 	require.NoError(t, err)
 
@@ -280,7 +280,7 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorNeverRegressesSchemaVersi
 	addMaterializationSegment(t, mt, packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/500", 5), 9)
 
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, nil, nil,
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, nil,
 	))
 	require.NoError(t, err)
 	assert.EqualValues(t, 9, mt.GetSegment(context.Background(), materializationSegmentID).GetSchemaVersion())
@@ -299,7 +299,7 @@ func TestUpdateBumpSchemaVersionMaterializationOperatorRejectsDroppedGroups(t *t
 	// rather than silently orphan a pre-existing group's data.
 	newGroups := []*datapb.FieldBinlog{{FieldID: materializationOutputFID, ChildFields: []int64{materializationOutputFID}, Binlogs: []*datapb.Binlog{{LogID: 9001}}}}
 	err = mt.UpdateSegmentsInfo(context.Background(), meta.UpdateBumpSchemaVersionMaterializationOperator(
-		materializationSegmentID, 7, newGroups, nil,
+		materializationSegmentID, &schemapb.CollectionSchema{Version: 7}, &datapb.CompactionSegment{InsertLogs: newGroups},
 	))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)

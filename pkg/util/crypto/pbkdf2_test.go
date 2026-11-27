@@ -94,21 +94,9 @@ func TestPBKDF2SHA512KnownAnswers(t *testing.T) {
 			"afe6c5530785b6cc6b1c6453384731bd5ee432ee549fd42fb6695779ad8a1c5bf59de69c48f774efc4007d5298f9033c0241d5ab69305e7b64eceeb8d834cfec6afdec3c1c23982a121f2d4be008889378a49a0dfb104f0d2856e38f44271cdaf6de4341",
 		},
 	} {
-		derived := pbkdf2SHA512([]byte(test.password), []byte(test.salt), test.iterations, test.keyBytes)
+		derived, err := pbkdf2SHA512(test.password, []byte(test.salt), test.iterations, test.keyBytes)
+		require.NoError(t, err)
 		assert.Equal(t, test.expected, hex.EncodeToString(derived), "%q %q %d", test.password, test.salt, test.iterations)
-	}
-}
-
-func TestPBKDF2SHA512MatchesStandardLibrary(t *testing.T) {
-	for _, password := range []string{"", "x", "a-password", strings.Repeat("long", 100)} {
-		for _, keyBytes := range []int{1, 20, 63, 64, 65, 128, 200} {
-			for _, iterations := range []int{1, 2, 3, 1000} {
-				salt := []byte("0123456789abcdef")
-				expected, err := pbkdf2.Key(sha512.New, password, salt, iterations, keyBytes)
-				require.NoError(t, err)
-				assert.Equal(t, expected, pbkdf2SHA512([]byte(password), salt, iterations, keyBytes))
-			}
-		}
 	}
 }
 
@@ -279,7 +267,10 @@ func TestVerifyStoredPasswordWarnsOnLegacyBcrypt(t *testing.T) {
 }
 
 func BenchmarkVerifyStoredPasswordPBKDF2SHA512(b *testing.B) {
-	key := pbkdf2SHA512([]byte("benchmark-password"), []byte("0123456789abcdef"), pbkdf2SHA512Iterations, pbkdf2SHA512KeyBytes)
+	key, err := pbkdf2SHA512("benchmark-password", []byte("0123456789abcdef"), pbkdf2SHA512Iterations, pbkdf2SHA512KeyBytes)
+	if err != nil {
+		b.Fatal(err)
+	}
 	stored := fmt.Sprintf("%si=%d$%s$%s", pbkdf2SHA512Prefix, pbkdf2SHA512Iterations,
 		pbkdf2Encoding.EncodeToString([]byte("0123456789abcdef")), pbkdf2Encoding.EncodeToString(key))
 	b.ResetTimer()

@@ -1267,7 +1267,8 @@ InjectExternalSpecProperties(
 
     // Target impersonation and Broker tokens have the same endpoint contract
     // in Go admission and native readers, including persisted specs. Plain IAM
-    // retains GcpCredentialRegistry's operator-trusted endpoint delivery policy.
+    // keeps milvus-storage's Bearer delivery policy: HTTPS *.googleapis.com,
+    // or an endpoint the operator's primary GCP filesystem trusts.
     if (spec_cloud_provider == "gcp" &&
         (has_target || !broker_endpoint.empty())) {
         arrow::util::Uri endpoint;
