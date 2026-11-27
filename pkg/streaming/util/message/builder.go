@@ -551,11 +551,6 @@ func newImmutableTxnMesasgeFromWAL(
 	body []ImmutableMessage,
 	commit ImmutableCommitTxnMessageV2,
 ) (ImmutableTxnMessage, error) {
-	// The persisted transaction body ordinal is uint32. Reject a transaction
-	// that cannot be represented before it reaches any observing consumer.
-	if uint64(len(body)) > uint64(math.MaxUint32)+1 {
-		return nil, merr.WrapErrDataIntegrityMsg("WAL transaction exceeds uint32 body ordinal range")
-	}
 	// combine begin and commit messages into one.
 	msg, err := newMutableMessageBuilder[*TxnMessageHeader, *TxnMessageBody]().
 		WithHeader(&TxnMessageHeader{}).

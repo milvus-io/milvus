@@ -42,11 +42,10 @@ const (
 
 // Row carries shared assignments once, irrespective of the number of keys.
 type Row struct {
-	TimeTick      uint64
-	SourceOrdinal uint32
-	Operation     Operation
-	PrimaryKeys   *schemapb.IDs
-	Assignments   []*messagespb.UpdateAssignment
+	TimeTick    uint64
+	Operation   Operation
+	PrimaryKeys *schemapb.IDs
+	Assignments []*messagespb.UpdateAssignment
 }
 
 type Field struct {
@@ -115,7 +114,7 @@ func (l Layout) Schema() (*arrow.Schema, error) {
 	pk, _, _ := physical(l.PKType)
 	fields := []arrow.Field{
 		deltaField("mutation_ts", 0, arrow.PrimitiveTypes.Uint64, false), deltaField("op_type", 1, arrow.PrimitiveTypes.Uint8, false),
-		deltaField("primary_keys", 2, arrow.ListOfNonNullable(pk), false), deltaField("source_ordinal", 3, arrow.PrimitiveTypes.Uint32, false),
+		deltaField("primary_keys", 2, arrow.ListOfNonNullable(pk), false),
 	}
 	seen := map[int64]bool{}
 	for _, f := range l.Fields {
@@ -171,13 +170,12 @@ func Encode(l Layout, rows []Row) (arrow.Record, error) {
 			}
 			keys.ValueBuilder().(*array.StringBuilder).AppendValues(data, nil)
 		}
-		b.Field(3).(*array.Uint32Builder).Append(r.SourceOrdinal)
 		for _, a := range r.Assignments {
 			i, ok := index[a.GetFieldId()]
 			if !ok {
 				return nil, merr.WrapErrDataIntegrityMsg("unknown delta field %d", a.GetFieldId())
 			}
-			parent := b.Field(i + 4).(*array.StructBuilder)
+			parent := b.Field(i + 3).(*array.StructBuilder)
 			if parent.Len() == keys.Len() {
 				return nil, merr.WrapErrDataIntegrityMsg("repeated delta field %d", a.GetFieldId())
 			}
@@ -187,7 +185,7 @@ func Encode(l Layout, rows []Row) (arrow.Record, error) {
 			}
 		}
 		for i := range l.Fields {
-			parent := b.Field(i + 4)
+			parent := b.Field(i + 3)
 			if parent.Len() < keys.Len() {
 				parent.AppendNull()
 			}

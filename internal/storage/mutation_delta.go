@@ -32,8 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// MutationDelta is a single schema and partition scope. Fragments retain
-// their WAL identity when callers cut a group into smaller files.
+// MutationDelta holds rows for one schema version and partition scope.
 type MutationDelta struct {
 	Layout deltacodec.Layout
 	Rows   []deltacodec.Row

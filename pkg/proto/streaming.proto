@@ -605,7 +605,6 @@ message CloseConsumerResponse {}
 message TransformDeleteBlock {
     int64 partition_id = 1;
     schema.IDs primary_keys = 2;
-    uint32 source_ordinal = 3;
 }
 
 message TransformDeleteEntry {
@@ -1293,10 +1292,8 @@ message HighlightResult {
     repeated HighlightRowResult results = 1;
 }
 
-// A transaction's bodies share the commit TimeTick. Their original indices
-// survive projection, partition grouping, file splitting and replay.
 message TransformMutationBlock {
-    uint32 source_ordinal = 1;
+    reserved 1;
     oneof mutation {
         TransformDeleteBlock delete = 2;
         messages.UpdateMessageBody update = 3;

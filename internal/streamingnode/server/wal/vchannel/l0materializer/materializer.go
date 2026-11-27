@@ -296,15 +296,13 @@ func splitMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 			g.keys += uint64(count)
 			return nil
 		}
-		addDelete := func(block *streamingpb.TransformDeleteBlock, index uint32) error {
-			return add(block.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: index, Operation: deltacodec.Delete, PrimaryKeys: block.GetPrimaryKeys()}, proto.Size(block))
-		}
 		for begin < len(req.Entries) && req.Entries[begin].GetTimeTick() == tt {
 			e := req.Entries[begin]
 			begin++
 			for _, b := range e.GetMutations().GetBlocks() {
-				if b.GetDelete() != nil {
-					if err := addDelete(b.GetDelete(), b.GetSourceOrdinal()); err != nil {
+				if d := b.GetDelete(); d != nil {
+					row := deltacodec.Row{TimeTick: tt, Operation: deltacodec.Delete, PrimaryKeys: d.GetPrimaryKeys()}
+					if err := add(d.GetPartitionId(), row, proto.Size(d)); err != nil {
 						return nil, err
 					}
 					continue
@@ -316,7 +314,7 @@ func splitMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 				if u == nil || len(u.GetAssignments()) == 0 || b.SchemaVersion == nil || b.GetSchemaVersion() != schema.GetVersion() {
 					return nil, merr.WrapErrDataIntegrityMsg("invalid delta payload or schema version at %d", tt)
 				}
-				if err := add(b.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: b.GetSourceOrdinal(), Operation: deltacodec.Update, PrimaryKeys: u.GetPrimaryKeys(), Assignments: u.GetAssignments()}, proto.Size(b)); err != nil {
+				if err := add(b.GetPartitionId(), deltacodec.Row{TimeTick: tt, Operation: deltacodec.Update, PrimaryKeys: u.GetPrimaryKeys(), Assignments: u.GetAssignments()}, proto.Size(b)); err != nil {
 					return nil, err
 				}
 			}

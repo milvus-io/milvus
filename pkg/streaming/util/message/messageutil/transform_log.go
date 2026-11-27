@@ -101,12 +101,8 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 		return entry
 	}
 	var mutations streamingpb.TransformMutationEntry
-	var ordinal uint64
 	appendBody := func(body message.ImmutableMessage) error {
-		// Transaction assembly validates that every body index fits uint32.
-		index := uint32(ordinal)
-		ordinal++
-		block := &streamingpb.TransformMutationBlock{SourceOrdinal: index}
+		block := &streamingpb.TransformMutationBlock{}
 		switch body.MessageType() {
 		case message.MessageTypeDelete:
 			request := message.MustAsImmutableDeleteMessageV1(body).MustBody()
@@ -147,8 +143,7 @@ func MutationsFromLegacyDeletes(deletes *streamingpb.TransformDeleteEntry) *stre
 	blocks := make([]*streamingpb.TransformMutationBlock, 0, len(deletes.GetBlocks()))
 	for _, d := range deletes.GetBlocks() {
 		blocks = append(blocks, &streamingpb.TransformMutationBlock{
-			SourceOrdinal: d.GetSourceOrdinal(),
-			Mutation:      &streamingpb.TransformMutationBlock_Delete{Delete: d},
+			Mutation: &streamingpb.TransformMutationBlock_Delete{Delete: d},
 		})
 	}
 	return &streamingpb.TransformMutationEntry{Blocks: blocks}
