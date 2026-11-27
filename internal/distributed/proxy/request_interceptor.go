@@ -60,30 +60,7 @@ func UnaryRequestStatsInterceptor(ctx context.Context, req any, rpcInfo *grpc.Un
 
 	start := time.Now()
 	resp, err := handler(ctx, req)
-	label, cause := requestutil.ParseMetricLabel(resp, err)
-
-	resourceGroup := requestMetrics.ResourceGroup()
-	// Attribute total and outcome together, after the hook has selected an RG.
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		methodTag,
-		metrics.TotalLabel,
-		metrics.CauseNA,
-		dbName,
-		collectionName,
-		resourceGroup,
-	).Inc()
-
-	// set metrics for state code
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		methodTag,
-		label,
-		cause,
-		dbName,
-		collectionName,
-		resourceGroup,
-	).Inc()
+	label, cause := requestMetrics.Record(methodTag, dbName, collectionName, resp, err)
 
 	// Mirror the metric's cause into the logs so a failed request can be
 	// filtered by error_type the same way the metric is. System failures are

@@ -75,6 +75,12 @@ func attachStats(ctx context.Context, stats *RPCStats) context.Context {
 	return context.WithValue(ctx, milvusStatsKey{}, stats)
 }
 
+// WithIndependentRPCStats starts a logical request without inheriting its
+// parent's mutable stats or transport payload size.
+func WithIndependentRPCStats(ctx context.Context) context.Context {
+	return attachStats(ctx, &RPCStats{})
+}
+
 func GetStats(ctx context.Context) *RPCStats {
 	stats, ok := ctx.Value(milvusStatsKey{}).(*RPCStats)
 	if !ok {

@@ -434,6 +434,38 @@ var (
 			Help:      "counter of retry search which does not have enough results",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	ProxyExecuteDQLBatchesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "execute_dql_batches_total",
+			Help:      "number of ExecuteDQL batches by result",
+		}, []string{nodeIDLabelName, "result"})
+
+	ProxyExecuteDQLSubrequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "execute_dql_subrequests_total",
+			Help:      "number of ExecuteDQL subrequests by terminal result",
+		}, []string{nodeIDLabelName, "result"})
+
+	ProxyExecuteDQLAttemptsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "execute_dql_attempts_total",
+			Help:      "number of ExecuteDQL subrequest attempts started",
+		}, []string{nodeIDLabelName})
+
+	ProxyExecuteDQLRetriesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "execute_dql_retries_total",
+			Help:      "number of additional ExecuteDQL attempts by retry reason",
+		}, []string{nodeIDLabelName, "reason"})
+
 	// ProxyRecallSearchCount records the counter that users issue recall evaluation requests, which are cpu-intensive
 	ProxyRecallSearchCount = newCollectionCounterVec(
 		prometheus.CounterOpts{
@@ -564,6 +596,10 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
+	registry.MustRegister(ProxyExecuteDQLBatchesTotal)
+	registry.MustRegister(ProxyExecuteDQLSubrequestsTotal)
+	registry.MustRegister(ProxyExecuteDQLAttemptsTotal)
+	registry.MustRegister(ProxyExecuteDQLRetriesTotal)
 	registry.MustRegister(ProxyMaterializeFallbackTotal)
 	registry.MustRegister(ProxyMaterializeShardTotal)
 	registry.MustRegister(ProxyQueryExecuteLatency)

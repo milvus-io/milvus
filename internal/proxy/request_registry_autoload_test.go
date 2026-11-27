@@ -115,3 +115,61 @@ func TestOperatorCancelWhileWaitingForAutoLoad(t *testing.T) {
 		})
 	}
 }
+
+// A completed child must not finish the parent's registry entry. Exercise
+// public Search, including its registration and deferred response finalizer.
+func TestExecuteDQLChildCompletionKeepsParentCancelable(t *testing.T) {
+	enableAutoLoad(t)
+	oldRateCol := rateCol
+	t.Cleanup(func() { rateCol = oldRateCol })
+	search := mockey.Mock((*Proxy).search).To(func(*Proxy, context.Context, *milvuspb.SearchRequest, bool, bool, bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		return &milvuspb.SearchResults{Status: merr.Status(merr.ErrCollectionNotLoaded)}, false, false, false, nil
+	}).Build()
+	t.Cleanup(func() { search.UnPatch() })
+	p := NewExecuteDQLTestProxy(t, 1, 1)
+	p.setMetaCache(&executeDQLTestCache{Cache: mockSearchCollectionMeta(t, 100, []string{"v0"})})
+	require.NoError(t, p.initRateCollector())
+	coord := mocks.NewMockMixCoordClient(t)
+	p.mixCoord = coord
+	coord.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).
+		Return(merr.Status(merr.ErrParameterInvalid), nil).Once()
+	waiting := make(chan struct{})
+	stopped := make(chan error, 1)
+	coord.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+			close(waiting)
+			<-ctx.Done()
+			stopped <- context.Cause(ctx)
+			return nil, ctx.Err()
+		}).Once()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	prepare := func(context.Context) (*milvuspb.SearchRequest, error) {
+		return &milvuspb.SearchRequest{DbName: "db", CollectionName: "collection", Nq: 1}, nil
+	}
+	go func() {
+		results, err := p.RunExecuteDQL(ctx, ExecuteDQLOptions{MaxConcurrency: 1},
+			[]ExecuteDQLPrepare{prepare, prepare, prepare}, p.Search)
+		if len(results) != 0 {
+			t.Error("operator cancellation returned completed child results")
+		}
+		done <- err
+	}()
+	awaitAutoLoadSchedulerResult(t, waiting)
+	listed, err := p.ListLocalRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	require.Len(t, listed.GetRequests(), 1, "children share the batch's registration")
+	batch := listed.Requests[0]
+	require.Equal(t, reqregistry.TypeExecuteDQL, batch.GetType())
+	require.True(t, batch.GetCancellable())
+	canceled, err := p.CancelLocalRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{batch.GetRequestId()}})
+	require.NoError(t, err)
+	require.Len(t, canceled.GetCanceled(), 1, "the first child's completion did not finish the parent")
+	require.ErrorIs(t, awaitAutoLoadSchedulerResult(t, done), merr.ErrRequestCanceled)
+	require.ErrorIs(t, awaitAutoLoadSchedulerResult(t, stopped), merr.ErrRequestCanceled)
+	require.NoError(t, ctx.Err())
+	listed, err = p.ListLocalRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
+	require.NoError(t, err)
+	require.Empty(t, listed.GetRequests())
+}

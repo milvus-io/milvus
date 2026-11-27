@@ -29,7 +29,8 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 }
 
 // HookInterceptor does not count the request in ProxyFunctionCall: on gRPC
-// UnaryRequestStatsInterceptor, and on REST v2 wrapperPost, wrap it and count
+// UnaryRequestStatsInterceptor, and on REST v2 wrapperPost or the ExecuteDQL
+// attempt callback, wrap it and count
 // every request once from the result the client gets, so counting here as well
 // would double the total and, for a successful Mock answer, record a fail next
 // to the success they record. CreateReplicateStream and DumpMessages, the

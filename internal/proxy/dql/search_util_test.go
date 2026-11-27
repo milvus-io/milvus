@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
@@ -146,6 +147,97 @@ func TestSearchTaskCheckNqMismatch(t *testing.T) {
 	nq, err := resolveNq(4, nil, "unused")
 	require.NoError(t, err)
 	assert.Equal(t, int64(4), nq)
+}
+
+func TestNormalizeExecuteDQLNQ(t *testing.T) {
+	limit := &paramtable.Get().QuotaConfig.NQLimit
+	previous := limit.SwapTempValue("2")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
+
+	placeholderInput := func(values ...[]byte) *milvuspb.SearchRequest_PlaceholderGroup {
+		group, err := proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{
+				{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: values},
+			},
+		})
+		require.NoError(t, err)
+		return &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: group}
+	}
+	idInput := func(ids ...int64) *milvuspb.SearchRequest_Ids {
+		return &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}},
+		}}
+	}
+
+	row := []byte{0, 0, 0, 0}
+	twoRows := placeholderInput(row, row)
+	malformed := &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}}
+	for _, tc := range []struct {
+		name      string
+		request   *milvuspb.SearchRequest
+		wantNq    int64
+		wantError string
+		wantCause error
+	}{
+		{name: "infer nq", request: &milvuspb.SearchRequest{SearchInput: twoRows}, wantNq: 2},
+		{name: "matching nq", request: &milvuspb.SearchRequest{Nq: 2, SearchInput: twoRows}, wantNq: 2},
+		{
+			name: "mismatched nq", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: twoRows},
+			wantError: "nq 1 does not match the 2 query rows in the placeholder group",
+		},
+		{name: "negative nq", request: &milvuspb.SearchRequest{Nq: -1, SearchInput: twoRows}, wantError: "nq must be nonnegative"},
+		{name: "hybrid", request: &milvuspb.SearchRequest{
+			SearchInput: twoRows, SubReqs: []*milvuspb.SubSearchRequest{{PlaceholderGroup: twoRows.PlaceholderGroup}},
+		}, wantError: "ExecuteDQL supports only ordinary Search requests"},
+		{name: "empty input", request: &milvuspb.SearchRequest{}, wantError: "should be in range [1, 2], but got 0"},
+		{name: "empty group with declared nq", request: &milvuspb.SearchRequest{
+			Nq: 1, SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{},
+		}, wantError: "should be in range [1, 2], but got 0"},
+		{
+			name: "placeholder without rows", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: placeholderInput()},
+			wantError: "should be in range [1, 2], but got 0",
+		},
+		{
+			name: "malformed group", request: &milvuspb.SearchRequest{SearchInput: malformed},
+			wantError: "failed to unmarshal placeholder group", wantCause: proto.Error,
+		},
+		{
+			name: "malformed group with declared nq", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: malformed},
+			wantError: "failed to unmarshal placeholder group", wantCause: proto.Error,
+		},
+		{
+			name: "too many rows", request: &milvuspb.SearchRequest{SearchInput: placeholderInput(row, row, row)},
+			wantError: "should be in range [1, 2], but got 3",
+		},
+		{name: "charge by integer ID count", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput(10, 20)}, wantNq: 2},
+		{name: "charge by string ID count", request: &milvuspb.SearchRequest{SearchInput: &milvuspb.SearchRequest_Ids{
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b"}}}},
+		}}, wantNq: 2},
+		{
+			name: "empty IDs", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput()},
+			wantError: "search by primary key requires at least one ID",
+		},
+		{
+			name: "too many IDs", request: &milvuspb.SearchRequest{Nq: 1, SearchInput: idInput(10, 20, 30)},
+			wantError: "should be in range [1, 2], but got 3",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			declared := tc.request.GetNq()
+			err := NormalizeExecuteDQLNQ(tc.request)
+			if tc.wantError == "" {
+				require.NoError(t, err)
+				require.Equal(t, tc.wantNq, tc.request.GetNq())
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantError)
+			if tc.wantCause != nil {
+				require.ErrorIs(t, err, tc.wantCause)
+			}
+			require.Equal(t, declared, tc.request.GetNq())
+		})
+	}
 }
 
 func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {

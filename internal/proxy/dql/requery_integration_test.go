@@ -121,6 +121,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			queryChannelsNode:      typeutil.NewConcurrentMap[string, int64](),
 		}
 		qt.queryChannelsNode.Insert("mock_qn", 1)
+		require.False(t, qt.IsSubTask())
 
 		// The requery query task is executed on the host node's QueryRunner.
 		// Return a result carrying pk + vec fields.
@@ -128,6 +129,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			queryTask := qt.(*QueryTask)
 			require.Equal(t, metrics.ReQueryLabel, queryTask.GetQueryLabel())
 			require.True(t, queryTask.ReQuery())
+			require.True(t, queryTask.IsSubTask())
 			require.Equal(t, canonicalDB, queryTask.Request().GetDbName())
 			require.Equal(t, collection, queryTask.Request().GetCollectionName())
 			pinnedID, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, queryTask.Request().GetQueryParams())

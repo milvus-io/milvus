@@ -120,6 +120,9 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	if !l.enable.Load() {
+		return false
+	}
 
 	method := info.MethodNameForFormatter()
 	formatter, ok := l.formatters.GetByMethod(method)
@@ -132,6 +135,13 @@ func (l *AccessLogger) Write(info info.AccessInfo) bool {
 		return false
 	}
 	return true
+}
+
+// Write writes a completed request to the global access logger, when initialized.
+func Write(accessInfo info.AccessInfo) {
+	if _globalL != nil {
+		_globalL.Write(accessInfo)
+	}
 }
 
 func InitAccessLogger(params *paramtable.ComponentParam) {

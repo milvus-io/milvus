@@ -29,7 +29,8 @@ its own package without dragging every task implementation along.
 3. **`BaseTask`** — embedded by concrete tasks to provide the shared meta-cache
    accessor and queue/execute timing fields.
 4. **`Condition` / `TaskCondition`** — the notification primitive tasks embed to
-   implement `WaitToFinish`/`Notify`/`Ctx`.
+   implement `WaitToFinish`/`Notify`/`Ctx`. DQL and ExecuteDQL queues register
+   `SetOnContextDone` to remove a canceled task that is still waiting.
 5. **`TsoAllocator`** — the timestamp-allocation interface implemented by the
    proxy's timestamp allocator and consumed by the scheduler.
 6. **Value types** — `UniqueID`, `Timestamp`, `VChan`, `PChan`,
@@ -69,6 +70,7 @@ type Task interface {
     PostExecute(ctx context.Context) error
     WaitToFinish() error
     Notify(err error)
+    SetOnContextDone(handler func())
     CanSkipAllocTimestamp() bool
     GetMetaCache() metacache.Cache
     SetOnEnqueueTime()
@@ -102,6 +104,7 @@ without introducing an import cycle.
   `DMLTask` / `TsoAllocator`.
 - **proxy root** (`internal/proxy/`): keeps the ~30 concrete task structs,
   which embed `BaseTask` and `Condition` and return the shared task-name
-  constants.
+  constants. `ExecuteDQLTask` uses the same lifecycle and notification model
+  for batch orchestration, with ID allocation that skips TSO.
 - **metacache** (`internal/proxy/metacache/`): provides the `Cache` interface
   exposed through `Task.GetMetaCache()`.

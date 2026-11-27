@@ -11,7 +11,7 @@
 
 Add two cluster-scoped RPCs:
 
-- `ListRunningRequests` returns the Search, HybridSearch and Query requests
+- `ListRunningRequests` returns the Search, HybridSearch, Query and ExecuteDQL requests
   currently executing on every proxy, with optional filters on database,
   collection, user and minimum elapsed time.
 - `CancelRequests` cancels the requests identified by request id. Canceling a
@@ -122,7 +122,7 @@ message ListRunningRequestsRequest {
 message RunningRequestInfo {
   string request_id = 1;       // "<proxy id>-<proxy start>-<sequence>", see Request id
   int64 proxy_id = 2;
-  string type = 3;             // Search | HybridSearch | Query
+  string type = 3;             // Search | HybridSearch | Query | ExecuteDQL
   string db_name = 4;
   string collection_name = 5;
   string user = 6;
@@ -136,7 +136,7 @@ message RunningRequestInfo {
   string state = 14;           // Queued | Running | Canceling
   repeated int64 task_ids = 15;
   string trace_id = 16;
-  bool cancellable = 17;       // always true for the three registered types
+  bool cancellable = 17;       // always true for the registered types
 }
 
 message RunningRequestNodeResult {
@@ -282,10 +282,18 @@ caller's whole deadline.
 
 The two RPCs are defined over "requests registered on the proxy". The names do
 not restrict the request type; the `type` field says what each row is.
-Currently only Search, HybridSearch and Query are registered, and all are
+Currently Search, HybridSearch, Query and ExecuteDQL are registered, and all are
 cancellable. Covering another type later only requires registering it in its
 gRPC method; the interface does not change. A non-cancellable type would be
 listed with `cancellable = false`.
+
+[ExecuteDQL](20261112-multisearch.md#list-and-cancel) registers one batch in
+`Proxy.RunExecuteDQL`, before entering its orchestration queue. Its child
+Searches share the registration and cannot independently finish or remove it.
+The ID spans preparation, execution and retries. The batch leaves single-target
+fields empty; list it without database/collection filters, optionally selecting
+its owner or elapsed time. Canceling it returns 3002 for the whole batch, without
+a partial result list.
 
 Not registered now, and why:
 
@@ -351,7 +359,7 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
 | Item | Decision |
 |---|---|
 | Unit | One client RPC. Not one task: a request owns several tasks, the tasks have no ctx of their own, and cancellation can only stop the whole tree. |
-| Where | The first line of `Proxy.Search`, `Proxy.HybridSearch` and `Proxy.Query`, above the retry loop that waits for an automatic load or a view refresh, so a request is listable and cancelable while it waits there. Not in `node.search` or `node.query`: the former is called repeatedly by the retry wrapper, the latter is shared by Query, requery and search by primary key; registering there would register one request several times. |
+| Where | The first line of `Proxy.Search`, `Proxy.HybridSearch` and `Proxy.Query`, above the retry loop that waits for an automatic load or a view refresh, so a request is listable and cancelable while it waits there. Not in `node.search` or `node.query`: the former is called repeatedly by the retry wrapper, the latter is shared by Query, requery and search by primary key; registering there would register one request several times. `Proxy.RunExecuteDQL` registers the whole batch before enqueueing; its child Search calls reuse that entry without finishing or removing it. |
 | Cancel handle | `ctx, cancel := context.WithCancelCause(ctx)`; `cancel` is stored in the record. The cause is `merr.ErrRequestCanceled` carrying the operator's user name and the reason. |
 | Request id | `<proxy id>-<proxy start>-<sequence>`, for example `25-to03zu-rs`: the proxy's node id in decimal, the Unix second the proxy process set its identity (after its session has a node id) in base 36, and a per-process atomic counter in base 36. Generated locally, with no RPC and no allocator: the node id separates proxies, the start second separates two processes that reuse a node id (a fixed test node id, or a wiped etcd), and the counter separates requests within a process. The registry keys its map by the counter and builds the string only when it reports a row; a cancel strips this proxy's prefix and parses the rest, and any other prefix is not this proxy's. The id is opaque to clients: they pass back what `List` returned. |
 | Fields | request id, proxy id, type, db, collection, user, client address (gRPC peer), nq, topk, first 256 bytes of expr, start time, queue time of the first task, state (Queued / Running / Canceling), task ids, trace id. Elapsed time is computed at list time. |
@@ -379,7 +387,8 @@ the general range in `pkg/util/merr/errors.go`; 3000 and 3001 are taken.
   id was in none of the answer's lists; now every requested id is in exactly
   one of `canceled`, `not_found` and `undetermined`.
 
-- Before returning, each of the three gRPC methods checks `ctx.Err() != nil`
+- Before returning, the Search, HybridSearch and Query gRPC methods and the shared
+  ExecuteDQL runner check `ctx.Err() != nil`
   and then `context.Cause(ctx)`. If the cause is `ErrRequestCanceled` it is
   returned to the client; otherwise the existing client-timeout behaviour is
   unchanged. Inner code (`WaitToFinish`, `retry.Handle`, `Enqueue`) keeps

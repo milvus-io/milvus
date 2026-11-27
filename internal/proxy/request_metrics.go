@@ -21,6 +21,9 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/extension"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 type requestMetricsKey struct{}
@@ -42,6 +45,16 @@ func WithRequestMetrics(ctx context.Context) (context.Context, *RequestMetrics) 
 // ResourceGroup returns the admitted query's group, or empty for unscoped requests.
 func (m *RequestMetrics) ResourceGroup() string {
 	return m.resourceGroup.Load().(string)
+}
+
+// Record counts one returned request or attempt. Capture db and collection
+// before execution, and call Record after the hook has selected its group.
+func (m *RequestMetrics) Record(method, db, collection string, resp any, err error) (label, cause string) {
+	label, cause = requestutil.ParseMetricLabel(resp, err)
+	nodeID, resourceGroup := paramtable.GetStringNodeID(), m.ResourceGroup()
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, metrics.CauseNA, db, collection, resourceGroup).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, label, cause, db, collection, resourceGroup).Inc()
+	return label, cause
 }
 
 func setRequestResourceGroup(ctx, admitted context.Context) {

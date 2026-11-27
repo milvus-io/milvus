@@ -106,6 +106,7 @@ type Server struct {
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
 	listenerManager    *listenerManager
+	executeDQLExecute  proxy.ExecuteDQLExecute
 
 	serverID atomic.Int64
 
@@ -355,20 +356,9 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 	var unaryServerOption grpc.ServerOption
 	var streamServerOption grpc.ServerOption
 	if enableCustomInterceptor {
-		unaryServerOption = grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			streaming.ForwardLegacyProxyUnaryServerInterceptor(),
-			proxy.DatabaseInterceptor(),
-			UnaryRequestStatsInterceptor,
-			accesslog.UnaryAccessLogInterceptor,
-			proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache)),
-			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache)),
-			proxy.UnaryServerHookInterceptor(),
-			mlog.UnaryServerInterceptor(typeutil.ProxyRole),
-			proxy.RateLimitInterceptorWithMetaCache(getMetaCache, limiter),
-			accesslog.UnaryUpdateAccessInfoInterceptor,
-			proxy.TraceLogInterceptor,
-			connection.KeepActiveInterceptor,
-		))
+		interceptor, execute := newExternalUnaryInterceptor(s.proxy, getMetaCache, limiter)
+		s.executeDQLExecute = execute
+		unaryServerOption = grpc.UnaryInterceptor(interceptor)
 		// Streaming RPCs (e.g. CreateReplicateStream, DumpMessages) bypass the
 		// unary chain, so they must be authenticated and authorized through a
 		// dedicated stream interceptor chain. Without this the external server
@@ -464,6 +454,54 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 		return
 	}
 	mlog.Info(context.TODO(), "Proxy external grpc server exited")
+}
+
+func newExternalUnaryInterceptor(component types.ProxyComponent, getMetaCache func() proxy.Cache, limiter types.Limiter) (grpc.UnaryServerInterceptor, proxy.ExecuteDQLExecute) {
+	authenticate := proxy.GrpcAuthInterceptor(proxy.AuthenticationInterceptorWithMetaCache(getMetaCache))
+	authorize := proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptorWithMetaCache(getMetaCache))
+	hook := proxy.UnaryServerHookInterceptor()
+	logFields := mlog.UnaryServerInterceptor(typeutil.ProxyRole)
+	rateLimit := proxy.RateLimitInterceptorWithMetaCache(getMetaCache, limiter)
+	ordinary := grpc_middleware.ChainUnaryServer(
+		streaming.ForwardLegacyProxyUnaryServerInterceptor(),
+		proxy.DatabaseInterceptor(),
+		UnaryRequestStatsInterceptor,
+		accesslog.UnaryAccessLogInterceptor,
+		authenticate,
+		authorize,
+		hook,
+		logFields,
+		rateLimit,
+		accesslog.UnaryUpdateAccessInfoInterceptor,
+		proxy.TraceLogInterceptor,
+		connection.KeepActiveInterceptor,
+	)
+	// Authenticate the caller once. Each search uses its own authorization,
+	// quota, hook and access-log state.
+	batch := grpc_middleware.ChainUnaryServer(
+		UnaryRequestStatsInterceptor,
+		accesslog.UnaryAccessLogInterceptor,
+		authenticate,
+		logFields,
+		accesslog.UnaryUpdateAccessInfoInterceptor,
+		connection.KeepActiveInterceptor,
+	)
+	search := grpc_middleware.ChainUnaryServer(
+		UnaryRequestStatsInterceptor,
+		accesslog.UnaryAccessLogInterceptor,
+		authorize,
+		hook,
+		proxy.ExecuteDQLRateLimitInterceptor(getMetaCache, limiter),
+		accesslog.UnaryUpdateAccessInfoInterceptor,
+		proxy.TraceLogInterceptor,
+	)
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if info.FullMethod == milvuspb.MilvusService_ExecuteDQL_FullMethodName {
+			ctx = context.WithValue(ctx, executeDQLReceivedAtKey{}, time.Now())
+			return batch(ctx, req, info, handler)
+		}
+		return ordinary(ctx, req, info, handler)
+	}, newExecuteDQLExecutor(component, search)
 }
 
 // newStreamInterceptorOption builds the security-critical stream interceptor

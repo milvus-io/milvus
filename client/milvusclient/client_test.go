@@ -4,9 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type ClientSuite struct {
@@ -40,4 +45,16 @@ func (s *ClientSuite) TestNewClient() {
 
 func TestClient(t *testing.T) {
 	suite.Run(t, new(ClientSuite))
+}
+
+func (s *ClientSuite) TestExecuteDQLDoesNotRetryParameterTooLarge() {
+	const parameterTooLarge = 1102
+	s.mock.EXPECT().ExecuteDQL(mock.Anything, mock.Anything).Return(&milvuspb.ExecuteDQLResponse{
+		Status: &commonpb.Status{Code: parameterTooLarge, Reason: "ExecuteDQL response exceeds maxResultBytes"},
+	}, nil).Once()
+	response, err := s.client.GetService().ExecuteDQL(s.T().Context(), &milvuspb.ExecuteDQLRequest{})
+	s.Require().NoError(err)
+	s.EqualValues(parameterTooLarge, merr.Code(merr.CheckRPCCall(response, err)))
+	s.Empty(response.GetResults())
+	s.mock.AssertNumberOfCalls(s.T(), "ExecuteDQL", 1)
 }

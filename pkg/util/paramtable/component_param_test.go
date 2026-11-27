@@ -375,6 +375,31 @@ func TestExprCacheConfig(t *testing.T) {
 	}
 }
 
+func TestExecuteDQLLimitsConfig(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	t.Cleanup(base.mgr.Close)
+	params := proxyConfig{}
+	params.init(base)
+
+	for _, tc := range []struct {
+		item     *ParamItem
+		fallback int64
+	}{
+		{&params.ExecuteDQLMaxBatchSize, 256},
+		{&params.ExecuteDQLMaxResultBytes, 64 * 1024 * 1024},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			require.Equal(t, tc.fallback, tc.item.GetAsInt64())
+			require.NoError(t, base.Save(tc.item.Key, "1"))
+			require.EqualValues(t, 1, tc.item.GetAsInt64())
+			for _, invalid := range []string{"0", "-1", "invalid", "1.5", "9223372036854775808"} {
+				require.NoError(t, base.Save(tc.item.Key, invalid))
+				require.Equal(t, tc.fallback, tc.item.GetAsInt64(), invalid)
+			}
+		})
+	}
+}
+
 func TestMembershipFilterConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true))
 	params := proxyConfig{}

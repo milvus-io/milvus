@@ -2894,6 +2894,9 @@ type proxyConfig struct {
 	EnableAutoLoad                    ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
+	ExecuteDQLMaxConcurrency          ParamItem `refreshable:"true"`
+	ExecuteDQLMaxBatchSize            ParamItem `refreshable:"true"`
+	ExecuteDQLMaxResultBytes          ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
 	ReplicaSelectionPolicy            ParamItem `refreshable:"false"`
 	CheckQueryNodeHealthInterval      ParamItem `refreshable:"false"`
@@ -3238,6 +3241,35 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.DCLConcurrency.Init(base.mgr)
+
+	p.ExecuteDQLMaxConcurrency = ParamItem{
+		Key:          "proxy.executeDQL.maxConcurrency",
+		Version:      "3.0.1",
+		DefaultValue: "16",
+		Doc:          "Maximum number of active Search items per ExecuteDQL batch. Values below 1 use 1.",
+		Export:       true,
+	}
+	p.ExecuteDQLMaxConcurrency.Init(base.mgr)
+
+	p.ExecuteDQLMaxBatchSize = ParamItem{
+		Key:          "proxy.executeDQL.maxBatchSize",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Doc:          "Maximum number of Search items per ExecuteDQL batch. Non-positive or invalid values use 256.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("256"),
+	}
+	p.ExecuteDQLMaxBatchSize.Init(base.mgr)
+
+	p.ExecuteDQLMaxResultBytes = ParamItem{
+		Key:          "proxy.executeDQL.maxResultBytes",
+		Version:      "3.0.1",
+		DefaultValue: "67108864",
+		Doc:          "Maximum uncompressed protobuf response size in bytes per ExecuteDQL batch on both gRPC and REST. Non-positive or invalid values use 64 MiB.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.ExecuteDQLMaxResultBytes.Init(base.mgr)
 
 	p.GinLogging = ParamItem{
 		Key:          "proxy.ginLogging",
