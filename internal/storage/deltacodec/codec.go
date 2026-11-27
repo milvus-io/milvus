@@ -54,7 +54,7 @@ type Field struct {
 	ID              int64
 	Type            schemapb.DataType
 	Element         schemapb.DataType
-	ElementNullable *bool `json:",omitempty"`
+	ElementNullable *bool
 }
 
 type Layout struct {
@@ -66,7 +66,7 @@ type Layout struct {
 	Fields        []Field
 }
 
-// ValidateIdentity checks the scope that a typed file persists in its footer.
+// ValidateIdentity checks the scope supplied by the materialization task.
 func (l Layout) ValidateIdentity() error {
 	if l.CollectionID <= 0 {
 		return merr.WrapErrDataIntegrityMsg("invalid delta collection ID %d", l.CollectionID)
@@ -133,11 +133,76 @@ func (l Layout) Schema() (*arrow.Schema, error) {
 			return nil, err
 		}
 		if f.Type == schemapb.DataType_Array {
-			dt = arrow.ListOf(dt)
+			dt = arrow.ListOfField(arrow.Field{Name: "item", Type: dt, Nullable: f.ElementNullable == nil || *f.ElementNullable})
 		}
 		fields = append(fields, deltaField("field_"+strconv.FormatInt(f.ID, 10), f.ID, arrow.StructOf(arrow.Field{Name: "value", Type: dt, Nullable: true}), true))
 	}
 	return arrow.NewSchema(fields, nil), nil
+}
+
+// WithSchema reads the persisted fields while retaining the caller's scope,
+// schema version and expected PK type. No file-level identity metadata is used.
+func (l Layout) WithSchema(schema *arrow.Schema) (Layout, error) {
+	if schema.NumFields() < 4 {
+		return l, merr.WrapErrDataIntegrityMsg("delta schema is missing common columns")
+	}
+	l.Fields = make([]Field, 0, schema.NumFields()-4)
+	for _, column := range schema.Fields()[4:] {
+		id, _ := column.Metadata.GetValue("PARQUET:field_id")
+		fieldID, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return l, merr.WrapErrDataIntegrityMsg("invalid delta field ID on %s", column.Name)
+		}
+		parent, ok := column.Type.(*arrow.StructType)
+		if !ok || parent.NumFields() != 1 {
+			return l, merr.WrapErrDataIntegrityMsg("invalid delta assignment column %s", column.Name)
+		}
+		valueType := parent.Field(0).Type
+		f := Field{ID: fieldID}
+		if list, ok := valueType.(*arrow.ListType); ok {
+			f.Type = schemapb.DataType_Array
+			nullable := list.ElemField().Nullable
+			f.ElementNullable = &nullable
+			valueType = list.Elem()
+		}
+		value, err := logical(valueType)
+		if err != nil {
+			return l, err
+		}
+		if f.Type == schemapb.DataType_Array {
+			f.Element = value
+		} else {
+			f.Type = value
+		}
+		l.Fields = append(l.Fields, f)
+	}
+	expected, err := l.Schema()
+	if err != nil {
+		return l, err
+	}
+	for i, field := range expected.Fields() {
+		stored := schema.Field(i)
+		id, _ := field.Metadata.GetValue("PARQUET:field_id")
+		storedID, _ := stored.Metadata.GetValue("PARQUET:field_id")
+		if id != storedID || field.Name != stored.Name || field.Nullable != stored.Nullable || !arrow.TypeEqual(field.Type, stored.Type) {
+			return l, merr.WrapErrDataIntegrityMsg("invalid delta Parquet column %s", stored.Name)
+		}
+	}
+	return l, nil
+}
+
+func logical(dt arrow.DataType) (schemapb.DataType, error) {
+	for _, t := range []schemapb.DataType{
+		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
+		schemapb.DataType_Double, schemapb.DataType_VarChar, schemapb.DataType_Timestamptz,
+	} {
+		physicalType, _, _ := physical(t)
+		if arrow.TypeEqual(dt, physicalType) {
+			return t, nil
+		}
+	}
+	return schemapb.DataType_None, merr.WrapErrDataIntegrityMsg("unsupported delta Arrow type %s", dt)
 }
 
 // Project keeps common columns for every operation. A nil selection loads all

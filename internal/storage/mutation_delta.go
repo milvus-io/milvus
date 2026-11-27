@@ -18,10 +18,8 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -74,14 +72,7 @@ func WriteMutationDelta(ctx context.Context, path string, d MutationDelta, cfg *
 	if err != nil {
 		return 0, err
 	}
-	fields, err := json.Marshal(d.Layout.Fields)
-	if err != nil {
-		return 0, merr.Wrap(err, "marshal delta fields")
-	}
-	metadata := arrow.MetadataFrom(map[string]string{
-		"delta_format_version": "1", "schema_version": strconv.Itoa(int(d.Layout.SchemaVersion)), "collection_id": strconv.FormatInt(d.Layout.CollectionID, 10),
-		"vchannel": d.Layout.VChannel, "partition_scope": strconv.FormatInt(d.Layout.PartitionID, 10), "pk_type": d.Layout.PKType.String(), "update_fields": string(fields),
-	})
+	metadata := arrow.MetadataFrom(map[string]string{"delta_format_version": "1"})
 	schema = arrow.NewSchema(schema.Fields(), &metadata)
 	columns := make([]int, schema.NumFields())
 	for i := range columns {
@@ -138,9 +129,9 @@ func deltaBatchEnd(rows []deltacodec.Row, begin, fieldCount, limit int) int {
 // ReadMutationDelta opens one complete object. A nil projection requests all
 // fields; an empty projection still delivers deletes and mutation identities.
 // The callback owns its sparse rows and can retain them after the next read.
-// Typed layouts carry file scope and schema identity for comparison against
-// task metadata. Legacy files supply only the PK type from the caller.
-func ReadMutationDelta(ctx context.Context, cm ChunkManager, binlog *datapb.Binlog, version int64, pkType schemapb.DataType, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
+// The caller supplies scope, schema version and expected PK type in layout.
+// Updated fields and their types are discovered from the file schema.
+func ReadMutationDelta(ctx context.Context, cm ChunkManager, binlog *datapb.Binlog, version int64, layout deltacodec.Layout, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -155,34 +146,34 @@ func ReadMutationDelta(ctx context.Context, cm ChunkManager, binlog *datapb.Binl
 	if err != nil {
 		return merr.Wrap(err, "read delta file signature")
 	}
-	return readMutationDelta(ctx, string(magic[:]), cm.MultiRead, binlog, version, pkType, nullableArrays, fields, cfg, plugin, visit)
+	return readMutationDelta(ctx, string(magic[:]), cm.MultiRead, binlog, version, layout, nullableArrays, fields, cfg, plugin, visit)
 }
 
 // ReadDownloadedMutationDelta uses an already downloaded complete object. Old
 // non-manifest segment logs are read through the worker's binlog I/O pool.
-func ReadDownloadedMutationDelta(ctx context.Context, data []byte, binlog *datapb.Binlog, version int64, pkType schemapb.DataType, nullableArrays map[int64]bool, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
+func ReadDownloadedMutationDelta(ctx context.Context, data []byte, binlog *datapb.Binlog, version int64, layout deltacodec.Layout, nullableArrays map[int64]bool, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if len(data) < 4 {
 		return merr.WrapErrDataIntegrityMsg("truncated mutation delta")
 	}
-	return readMutationDelta(ctx, string(data[:4]), func(context.Context, []string) ([][]byte, error) { return [][]byte{data}, nil }, binlog, version, pkType, nullableArrays, nil, cfg, plugin, visit)
+	return readMutationDelta(ctx, string(data[:4]), func(context.Context, []string) ([][]byte, error) { return [][]byte{data}, nil }, binlog, version, layout, nullableArrays, nil, cfg, plugin, visit)
 }
 
-func readMutationDelta(ctx context.Context, magic string, download func(context.Context, []string) ([][]byte, error), binlog *datapb.Binlog, version int64, pkType schemapb.DataType, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
+func readMutationDelta(ctx context.Context, magic string, download func(context.Context, []string) ([][]byte, error), binlog *datapb.Binlog, version int64, layout deltacodec.Layout, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
 	if magic != "PAR1" && magic != "PARE" {
 		if binlog.GetMutationCounts() != nil {
 			return merr.WrapErrDataIntegrityMsg("invalid typed delta signature")
 		}
-		return readLegacyMutationDelta(ctx, download, binlog, StorageV1, pkType, cfg, plugin, visit)
+		return readLegacyMutationDelta(ctx, download, binlog, StorageV1, layout, cfg, plugin, visit)
 	}
-	return ReadPackedMutationDelta(ctx, binlog, pkType, nullableArrays, fields, cfg, plugin, visit)
+	return ReadPackedMutationDelta(ctx, binlog, layout, nullableArrays, fields, cfg, plugin, visit)
 }
 
 // ReadPackedMutationDelta reads a manifest-declared Parquet delta directly
 // through the configured native filesystem, including encrypted footer discovery.
-func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, pkType schemapb.DataType, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
+func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, layout deltacodec.Layout, nullableArrays map[int64]bool, fields []int64, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -194,63 +185,23 @@ func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, pkType 
 	if err != nil {
 		return err
 	}
-	metadata := actual.Metadata().ToMap()
-	format, typed := metadata["delta_format_version"]
+	format, typed := actual.Metadata().GetValue("delta_format_version")
 	if !typed {
 		if binlog.GetMutationCounts() != nil || !isLegacyDeltaSchema(actual) {
 			return merr.WrapErrDataIntegrityMsg("missing delta format version on a non-legacy file")
 		}
-		return readLegacyMutationDelta(ctx, nil, binlog, StorageV2, pkType, cfg, plugin, visit)
+		return readLegacyMutationDelta(ctx, nil, binlog, StorageV2, layout, cfg, plugin, visit)
 	}
 	if format != "1" {
 		return merr.WrapErrDataIntegrityMsg("unsupported delta format %q", format)
 	}
-	l := deltacodec.Layout{VChannel: metadata["vchannel"], PKType: pkType}
-	if metadata["pk_type"] != pkType.String() {
-		return merr.WrapErrDataIntegrityMsg("invalid delta primary-key type")
-	}
-	l.CollectionID, err = strconv.ParseInt(metadata["collection_id"], 10, 64)
-	if err != nil {
-		return merr.WrapErrDataIntegrityMsg("invalid delta collection ID")
-	}
-	l.PartitionID, err = strconv.ParseInt(metadata["partition_scope"], 10, 64)
-	if err != nil {
-		return merr.WrapErrDataIntegrityMsg("invalid delta partition scope")
-	}
-	if err := l.ValidateIdentity(); err != nil {
-		return err
-	}
-	schemaVersion, err := strconv.ParseInt(metadata["schema_version"], 10, 32)
-	if err != nil {
-		return merr.WrapErrDataIntegrityMsg("invalid delta schema version")
-	}
-	l.SchemaVersion = int32(schemaVersion)
-	if err := json.Unmarshal([]byte(metadata["update_fields"]), &l.Fields); err != nil {
-		return merr.WrapErrDataIntegrityMsg("invalid delta field metadata")
-	}
-	// Early typed v1 files did not record ARRAY element nullability. Their
-	// list values still preserve every element and NULL position.
-	for i, f := range l.Fields {
-		if nullable, ok := nullableArrays[f.ID]; ok && f.Type == schemapb.DataType_Array {
-			if f.ElementNullable != nil && nullable != *f.ElementNullable {
-				return merr.WrapErrDataIntegrityMsg("delta field %d element nullability differs from destination schema", f.ID)
-			}
-			l.Fields[i].ElementNullable = &nullable
-		}
-	}
-	schema, err := l.Schema()
+	l, err := layout.WithSchema(actual)
 	if err != nil {
 		return err
 	}
-	if actual.NumFields() != schema.NumFields() {
-		return merr.WrapErrDataIntegrityMsg("delta footer column count differs from field metadata")
-	}
-	for i, f := range schema.Fields() {
-		onDisk := actual.Field(i)
-		id, _ := f.Metadata.GetValue("PARQUET:field_id")
-		storedID, ok := onDisk.Metadata.GetValue("PARQUET:field_id")
-		if !ok || id != storedID || f.Name != onDisk.Name || f.Nullable != onDisk.Nullable || !arrow.TypeEqual(f.Type, onDisk.Type) {
-			return merr.WrapErrDataIntegrityMsg("delta field %s does not match its Parquet schema", f.Name)
+	for _, f := range l.Fields {
+		if nullable, ok := nullableArrays[f.ID]; ok && f.Type == schemapb.DataType_Array && nullable != *f.ElementNullable {
+			return merr.WrapErrDataIntegrityMsg("delta field %d element nullability differs from destination schema", f.ID)
 		}
 	}
 	r, selected, err := openProjectedMutationFile(path, count, l, fields, cfg, plugin)
@@ -293,29 +244,19 @@ func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, pkType 
 }
 
 func isLegacyDeltaSchema(schema *arrow.Schema) bool {
-	if schema.NumFields() != 2 {
-		return false
-	}
-	metadata := schema.Metadata()
-	// Native storage metadata is also present on legacy Parquet files.
-	for _, key := range []string{"delta_format_version", "schema_version", "collection_id", "vchannel", "partition_scope", "pk_type", "update_fields"} {
-		if metadata.FindKey(key) >= 0 {
-			return false
-		}
-	}
-	return true
+	return schema.NumFields() == 2 && schema.Metadata().FindKey("delta_format_version") < 0
 }
 
-func readLegacyMutationDelta(ctx context.Context, download func(context.Context, []string) ([][]byte, error), binlog *datapb.Binlog, version int64, pkType schemapb.DataType, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
+func readLegacyMutationDelta(ctx context.Context, download func(context.Context, []string) ([][]byte, error), binlog *datapb.Binlog, version int64, layout deltacodec.Layout, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {
 	var r RecordReader
 	var err error
 	if version == StorageV1 {
-		r, err = NewDeltalogReaderFromBinlogs(ctx, pkType, []*datapb.Binlog{binlog}, WithVersion(version), WithDownloader(download))
+		r, err = NewDeltalogReaderFromBinlogs(ctx, layout.PKType, []*datapb.Binlog{binlog}, WithVersion(version), WithDownloader(download))
 	} else {
 		// Both StorageV2 segment deltas and V3 manifest delta objects were
 		// written by the packed writer. Its field-ID mapping also works for
 		// historical files whose physical field names are empty or noncanonical.
-		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 0, IsPrimaryKey: true, DataType: pkType}, {FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64}}}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 0, IsPrimaryKey: true, DataType: layout.PKType}, {FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64}}}
 		r, err = newPackedRecordReader([]string{binlog.GetLogPath()}, schema, deltaReadWindow, cfg, plugin, packed.ExternalReaderContext{})
 	}
 
@@ -348,7 +289,7 @@ func readLegacyMutationDelta(ctx context.Context, download func(context.Context,
 				return merr.WrapErrDataIntegrityMsg("invalid legacy delta key type %T", col)
 			}
 		}
-		if err := visit(deltacodec.Layout{PKType: pkType}, rows); err != nil {
+		if err := visit(layout.Project([]int64{}), rows); err != nil {
 			return err
 		}
 	}

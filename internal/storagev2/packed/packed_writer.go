@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// NewPackedWriter copies schema-level metadata to each physical file's footer.
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
