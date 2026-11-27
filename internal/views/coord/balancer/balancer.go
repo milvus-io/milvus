@@ -15,6 +15,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
+)
+
+var (
+	triggerWait       = stage.New("coord", "reconcile", "trigger_wait")
+	reconcileTotal    = stage.New("coord", "reconcile", "total")
+	reconcileSnapshot = stage.New("coord", "reconcile", "snapshot")
+	reconcilePlan     = stage.New("coord", "reconcile", "plan")
+	reconcileApply    = stage.New("coord", "reconcile", "apply")
 )
 
 // Balancer is the scheduling controller that reconciles dirty shards into
@@ -38,6 +47,7 @@ type DefaultBalancer struct {
 	work          chan struct{}
 	submitMu      sync.Mutex
 	ready         shardQueue
+	readyWait     stage.Timer // guarded by submitMu, one timer per coalesced wakeup
 	scoreRevision atomic.Uint64
 	configChanged chan struct{}
 
@@ -174,6 +184,9 @@ func (b *DefaultBalancer) submitShards(ids []qviews.ShardID) {
 		return
 	}
 	b.submitMu.Lock()
+	if len(b.ready.heap) == 0 {
+		b.readyWait = triggerWait.Begin()
+	}
 	b.ready.submit(scored, revision)
 	b.submitMu.Unlock()
 	wakeBalancer(b.work)
@@ -238,18 +251,21 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 
 // Reconcile waits for cache readiness and runs one priority batch. Before
 // Start, synchronous callers also drive discovery.
-func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
+func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
 	if err := b.cache.WaitForReady(ctx); err != nil {
 		return err
 	}
+	timer := reconcileTotal.Begin()
+	defer timer.EndError(&retErr)
 	b.reconcileMu.Lock()
 	defer b.reconcileMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	snapshotStartedAt := time.Now()
 	// Synchronous callers drive the same producer without starting background loops.
 	if !b.running.Load() {
 		for remaining := discoveryShardLimit; remaining > 0; {
@@ -261,13 +277,18 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 		}
 	}
 	b.submitMu.Lock()
+	b.readyWait.End(nil)
 	dirty := b.ready.take(int(b.cache.GetBalanceConfig().ShardBatchSize))
 	more := len(b.ready.heap) > 0
+	if more {
+		b.readyWait = triggerWait.Begin()
+	}
 	b.submitMu.Unlock()
 	if more {
 		wakeBalancer(b.work)
 	}
 	if len(dirty) == 0 {
+		reconcileSnapshot.Observe(time.Since(snapshotStartedAt), stage.Success)
 		return nil
 	}
 	// A different producer may admit a shard before its node walk reaches it.
@@ -281,11 +302,17 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	reader := newPlanningContext(b.cache)
 	reader.deferOptimization = updating
 	reader.boundedBatch = true
+	reconcileSnapshot.Observe(time.Since(snapshotStartedAt), stage.Success)
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
+	planStartedAt := time.Now()
 	plan := b.policy.Plan(reader, dirty)
+	reconcilePlan.Observe(time.Since(planStartedAt), stage.Outcome(err))
+	applyStartedAt := time.Now()
 	applyErr := b.apply(ctx, reader, plan, dirty)
 	recoveryErr := b.recoverPublishedSchemas(ctx, reader, dirty)
-	return errors.CombineErrors(err, errors.CombineErrors(applyErr, recoveryErr))
+	applyErr = errors.CombineErrors(applyErr, recoveryErr)
+	reconcileApply.Observe(time.Since(applyStartedAt), stage.Outcome(applyErr))
+	return errors.CombineErrors(err, applyErr)
 }
 
 func (b *DefaultBalancer) apply(ctx context.Context, reader *planningContext, plan *BalancePlan, dirty []qviews.ShardID) error {
