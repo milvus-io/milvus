@@ -17,9 +17,11 @@
 package compactor
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // buildCompactionOutputStats produces the Statistics that ships on a
@@ -27,23 +29,48 @@ import (
 // SegmentInfo.Stats — it does NOT recompute — so this is the authoritative
 // place to populate aggregate metrics for compaction outputs.
 //
-// statsBlobSize is the cumulative bloom-filter + BM25 blob memory size the
-// writer observed while emitting stats. Both V2 and V3 writers track it on
-// BinlogRecordWriter.GetStatsBlobSize: V2's value is the sum of
-// statslog/bm25 FieldBinlog MemorySize fields; V3's value is the sum of
-// raw blob lengths committed into the manifest. Passing it through this
-// helper avoids the trap of trying to recompute from FieldBinlog arrays —
-// V3 writers deliberately leave the statslog and bm25 FieldBinlogs nil
-// because stats are embedded in the manifest, so an array-based recompute
-// would silently report zero.
-//
-// deltalogs is normally nil for insert-side compactors (mix / sort /
-// bump-schema produce fresh segments without deltas) and non-nil only for
-// L0 compaction outputs, which carry only deltas and no inserts.
-func buildCompactionOutputStats(insertLogs, deltalogs []*datapb.FieldBinlog, statsBlobSize int64) *datapb.Statistics {
+// The closed insert writer supplies both the stats-blob footprint (V3 embeds
+// those files in the manifest, not in FieldBinlogs) and, on V3, the logical
+// sizes of the actual rows written to this output. L0 has no insert writer.
+func buildCompactionOutputStats(insertLogs, deltalogs []*datapb.FieldBinlog, writer storage.BinlogRecordWriter, rows int64) *datapb.Statistics {
 	s := storage.BuildStatsFromFieldBinlogs(insertLogs, nil, nil, deltalogs)
-	s.StatsBinlogSize = statsBlobSize
+	if writer != nil {
+		s.StatsBinlogSize = writer.GetStatsBlobSize()
+		s.FieldLogicalSizes = writerFieldLogicalSizes(writer, rows)
+	}
 	return s
+}
+
+// Partial column-group writers and full manifest writers expose the same
+// optional snapshot. Never publish a field total covering only part of a segment.
+func writerFieldLogicalSizes(writer any, rows int64) *datapb.FieldLogicalSizes {
+	if provider, ok := writer.(interface {
+		GetFieldLogicalSizes() *datapb.FieldLogicalSizes
+	}); ok && rows > 0 {
+		if sizes := provider.GetFieldLogicalSizes(); storage.FieldLogicalSizesCover(sizes, rows) {
+			return sizes
+		}
+	}
+	return nil
+}
+
+// Every physically written leaf is touched, even when its byte count is
+// unknown. Writing a struct child also materializes its parent's shared row
+// validity, but does not touch the other children used to read that shape.
+func materializationLogicalFieldIDs(schema *schemapb.CollectionSchema, outputIDs []int64) []int64 {
+	if len(schema.GetStructArrayFields()) == 0 {
+		return outputIDs
+	}
+	selected := typeutil.NewSet(outputIDs...)
+	for _, parent := range schema.GetStructArrayFields() {
+		for _, child := range parent.GetFields() {
+			if selected.Contain(child.GetFieldID()) {
+				outputIDs = append(outputIDs, parent.GetFieldID())
+				break
+			}
+		}
+	}
+	return outputIDs
 }
 
 // buildMaterializationStatsDelta produces the Statistics INCREMENT that ships
@@ -54,7 +81,9 @@ func buildCompactionOutputStats(insertLogs, deltalogs []*datapb.FieldBinlog, sta
 // Materialization appends function-output columns to an existing segment: it
 // writes no rows, no deletes and no new timestamps, so only the additive
 // fields are populated. Everything else is deliberately left zero, which is
-// what tells the receiver to leave those aggregates alone.
+// what tells the receiver to leave those aggregates alone. Logical field sizes
+// are the exception: each measured output column covers the whole segment and
+// replaces the old entry for its ID, rather than adding to it.
 //
 // memorySizes and nullCounts are keyed by output field ID, which equals
 // ColumnGroup.GroupID for the one-field-per-group layout setupWriter builds.
@@ -72,10 +101,12 @@ func buildMaterializationStatsDelta(
 	nullCounts map[int64]int64,
 	validElementCounts map[int64]int64,
 	statsBlobSize int64,
+	sizes *datapb.FieldLogicalSizes,
 ) *datapb.Statistics {
 	s := &datapb.Statistics{
-		StatsBinlogSize: statsBlobSize,
-		NullCounts:      make(map[int64]int64, len(columnGroups)),
+		StatsBinlogSize:   statsBlobSize,
+		FieldLogicalSizes: sizes,
+		NullCounts:        make(map[int64]int64, len(columnGroups)),
 	}
 	for _, group := range columnGroups {
 		s.InsertBinlogSize += int64(memorySizes[group.GroupID])

@@ -32,12 +32,9 @@ import (
 )
 
 // Main is the process entry point, exported so a distribution can build its own
-// main package around it instead of duplicating the startup preamble. The body
-// is the former cmd/main.go moved unchanged apart from three adaptations: it
-// reads args instead of the os.Args global (with the inner slice renamed to
-// subArgs), the original if/else became an if block that always returns
-// followed by an unconditional tail call, and the subprocess marker is
-// stripped into a copy of args rather than in place.
+// main package around it instead of duplicating the startup preamble.
+// When supervising a service, it propagates a nonzero exit status from the child
+// after session cleanup has finished.
 //
 // args is the full argument vector, program name first, as os.Args is. Main
 // does not modify the caller's slice: the subprocess branch deletes an element,
@@ -48,11 +45,17 @@ import (
 // (pkg/extension) before calling Main; nothing runs earlier than the first
 // line here except package initialization.
 func Main(args []string) {
+	if code := runMain(args); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func runMain(args []string) int {
 	defer asan.LsanDoLeakCheck()
 	args, profileEnv, err := prepareNativeProfile(args, os.Environ())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
@@ -107,15 +110,21 @@ func Main(args []string) {
 
 				if err != nil {
 					log.Println("subprocess exit, ", err.Error())
+					// A run child can reject startup before creating any sessions,
+					// including when its FIPS checks fail. Report its status to the caller.
+					if code := cmd.ProcessState.ExitCode(); code > 0 && len(subArgs) > 1 && subArgs[1] == RunCmd {
+						return code
+					}
 				} else {
 					log.Println("exit code:", cmd.ProcessState.ExitCode())
 				}
-				return
+				return 0
 			}
 		}
 	}
 
 	RunMilvus(args)
+	return 0
 }
 
 // subprocessArgs returns args with the --run-with-subprocess marker removed,

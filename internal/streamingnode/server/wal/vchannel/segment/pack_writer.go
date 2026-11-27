@@ -110,7 +110,7 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		}
 		metaCache.UpdateSegments(metacache.MergeSegmentAction(
 			metacache.UpdateCurrentSplit(currentSplit),
-			metacache.SetStatistics(metacache.NewSegmentStatsFromStats(normalized, int64(pack.Meta.GetStat().GetModifiedRows()))),
+			metacache.SetStatistics(metacache.NewSegmentStatsFromStats(normalized, int64(pack.PreviousRows))),
 		), metacache.WithSegmentIDs(pack.SegmentID))
 	}
 	syncPack := new(syncmgr.SyncPack).

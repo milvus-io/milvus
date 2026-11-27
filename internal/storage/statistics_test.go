@@ -38,6 +38,48 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestStatisticsCollector_FieldSizesAcrossCheckpoints(t *testing.T) {
+	batch := &datapb.FieldLogicalSizes{Version: 1, RowCount: 2, Fields: map[int64]*datapb.FieldLogicalSize{
+		100: {PayloadBytes: 16}, 101: {ValidityBits: 2}, 102: {},
+	}}
+	base := NewStatisticsCollector()
+	base.DigestWithFieldSizes(nil, nil, 0, 2, 1, 2, batch)
+	first := base.Publish()
+	require.True(t, proto.Equal(batch, first.GetFieldLogicalSizes()))
+	restored := NewStatisticsCollectorFromStats(first, 2)
+	prepared := restored.Clone()
+	prepared.DigestWithFieldSizes(nil, nil, 0, 2, 3, 4, batch)
+	second := prepared.Publish()
+	require.Equal(t, int64(4), second.GetFieldLogicalSizes().GetRowCount())
+	require.Equal(t, uint64(4), second.FieldLogicalSizes.Fields[101].ValidityBits)
+	require.NotNil(t, second.FieldLogicalSizes.Fields[102])
+	first.FieldLogicalSizes.Fields[100].PayloadBytes = 0
+	second.FieldLogicalSizes.Fields[100].PayloadBytes = 0
+	require.Equal(t, uint64(16), base.Publish().FieldLogicalSizes.Fields[100].PayloadBytes)
+	require.Equal(t, uint64(16), restored.Publish().FieldLogicalSizes.Fields[100].PayloadBytes)
+	require.Equal(t, uint64(32), prepared.Publish().FieldLogicalSizes.Fields[100].PayloadBytes)
+	prepared.Digest(nil, nil, 8, 0, 0, 0)
+	require.Equal(t, int64(4), prepared.Publish().FieldLogicalSizes.RowCount)
+	prepared.Digest(nil, nil, 0, 1, 5, 5)
+	require.Nil(t, prepared.Publish().FieldLogicalSizes)
+	prepared.DigestWithFieldSizes(nil, nil, 0, 2, 6, 7, batch)
+	require.Nil(t, prepared.Publish().FieldLogicalSizes)
+
+	for _, old := range []*datapb.Statistics{nil, {}, {FieldLogicalSizes: batch}} {
+		legacy := NewStatisticsCollectorFromStats(old, 100)
+		legacy.DigestWithFieldSizes(nil, nil, 0, 2, 3, 4, batch)
+		require.Nil(t, legacy.Publish().FieldLogicalSizes)
+	}
+	historical := NewStatisticsCollectorFromStats(nil, 100)
+	require.Nil(t, historical.Publish())
+	historical.DigestWithFieldSizes(nil, nil, 0, 2, 3, 4, batch)
+	historical.DigestWithFieldSizes(nil, nil, 0, 2, 5, 6, batch)
+	require.Equal(t, []int64{4, 4, 4, 6, 6}, historical.Publish().GetTimestampQuantiles())
+	require.Nil(t, historical.Publish().GetFieldLogicalSizes())
+	zero := &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, Fields: map[int64]*datapb.FieldLogicalSize{102: {}}}}
+	require.True(t, proto.Equal(zero, NewStatisticsCollectorFromStats(zero, 0).Publish()))
+}
+
 func TestBuildStatsFromFieldBinlogs_Empty(t *testing.T) {
 	s := BuildStatsFromFieldBinlogs(nil, nil, nil, nil)
 	require.NotNil(t, s)
