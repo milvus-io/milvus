@@ -4785,12 +4785,8 @@ TEST(InjectExtfsAllowlist, BrokerFormatCompatibility) {
                         milvus_storage::FilesystemCache::resolve_config(
                             props, "s3://" + address + "/bucket/path");
                     ASSERT_TRUE(config.ok()) << config.status();
-                    const bool talon_supported =
-                        iam || std::string_view(cloud) == "aws";
                     EXPECT_EQ(config->talon_mode,
-                              talon_supported
-                                  ? milvus_storage::TalonMode::Full
-                                  : milvus_storage::TalonMode::Disabled);
+                              milvus_storage::TalonMode::Full);
                 }
                 spec["extfs"].erase("credential_endpoint");
                 milvus_storage::api::Properties props;
@@ -5436,9 +5432,7 @@ TEST(InjectExtfsAllowlist, S3BrokerTargetRoleAcrossClouds) {
             EXPECT_EQ(config->access_key_id, "");
             EXPECT_EQ(config->access_key_value, "");
             EXPECT_EQ(config->talon_mode,
-                      std::string_view(cloud) == "aws"
-                          ? milvus_storage::TalonMode::SmallReads
-                          : milvus_storage::TalonMode::Disabled);
+                      milvus_storage::TalonMode::SmallReads);
         }
         // A target role and the Broker's own identity are different modes.
         auto spec = valid;

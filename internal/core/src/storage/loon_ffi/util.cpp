@@ -1471,13 +1471,7 @@ InjectExternalSpecProperties(
         ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
     }
 
-    // Talon's S3 broker supports target roles only for AWS. Aliyun and
-    // Tencent target roles are handled by the native filesystem in 3.0.
-    const bool native_target_role =
-        !broker_endpoint.empty() && !use_iam &&
-        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent");
-    const bool origin_only =
-        native_target_role || value("storage_type") == "local";
+    const bool origin_only = value("storage_type") == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
