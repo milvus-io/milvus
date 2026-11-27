@@ -158,7 +158,14 @@ func TestRejectedCopyCleanupNeverCreatedManifestBase(t *testing.T) {
 				default:
 					failureErr = merr.ErrServiceUnavailable
 				}
-				patch := mockey.Mock((*storage.LocalChunkManager).RemoveWithPrefix).Return(failureErr).Build()
+				patch := mockey.Mock((*storage.LocalChunkManager).MultiRemoveWithPrefix).To(
+					func(_ *storage.LocalChunkManager, _ context.Context, prefixes []string) []storage.RemovePrefixResult {
+						results := make([]storage.RemovePrefixResult, len(prefixes))
+						for i, prefix := range prefixes {
+							results[i] = storage.RemovePrefixResult{Prefix: prefix, Err: failureErr}
+						}
+						return results
+					}).Build()
 				gc.RecycleDroppedSegments(ctx, nil)
 				require.NotNil(t, m.GetSegment(ctx, 2001), "failed walks must preserve the GC marker")
 				require.NoError(t, copysegment.CleanupRejectedCopy(ctx, task, m, copies))

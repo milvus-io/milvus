@@ -1159,6 +1159,45 @@ func TestCatalog_DropIndex(t *testing.T) {
 	})
 }
 
+func TestCatalog_DropIndexes(t *testing.T) {
+	oldLimit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.SwapTempValue(oldLimit)
+	})
+
+	indexes := []*model.Index{
+		{CollectionID: 1, IndexID: 10},
+		{CollectionID: 2, IndexID: 20},
+		{CollectionID: 3, IndexID: 30},
+	}
+
+	t.Run("bounded exact keys", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		var calls [][]string
+		metakv.EXPECT().MultiRemove(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, keys []string) error {
+				calls = append(calls, append([]string(nil), keys...))
+				return nil
+			}).Times(2)
+		catalog := &Catalog{MetaKv: metakv}
+
+		err := catalog.DropIndexes(context.Background(), indexes)
+
+		require.NoError(t, err)
+		require.Len(t, calls, 2)
+		assert.Equal(t, []string{BuildIndexKey(1, 10), BuildIndexKey(2, 20)}, calls[0])
+		assert.Equal(t, []string{BuildIndexKey(3, 30)}, calls[1])
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("batch remove failed")).Once()
+		catalog := &Catalog{MetaKv: metakv}
+
+		assert.Error(t, catalog.DropIndexes(context.Background(), indexes))
+	})
+}
+
 func TestCatalog_CreateSegmentIndex(t *testing.T) {
 	segIdx := &model.SegmentIndex{
 		SegmentID:           1,
@@ -1310,6 +1349,48 @@ func TestCatalog_DropSegmentIndex(t *testing.T) {
 
 		err := catalog.DropSegmentIndex(context.Background(), 0, 0, 0, 0)
 		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_DropSegmentIndexes(t *testing.T) {
+	oldLimit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.SwapTempValue(oldLimit)
+	})
+
+	indexes := []*model.SegmentIndex{
+		{CollectionID: 1, PartitionID: 10, SegmentID: 100, BuildID: 1000},
+		{CollectionID: 2, PartitionID: 20, SegmentID: 200, BuildID: 2000},
+		{CollectionID: 3, PartitionID: 30, SegmentID: 300, BuildID: 3000},
+	}
+
+	t.Run("bounded exact keys", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		var calls [][]string
+		metakv.EXPECT().MultiRemove(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, keys []string) error {
+				calls = append(calls, append([]string(nil), keys...))
+				return nil
+			}).Times(2)
+		catalog := &Catalog{MetaKv: metakv}
+
+		err := catalog.DropSegmentIndexes(context.Background(), indexes)
+
+		require.NoError(t, err)
+		require.Len(t, calls, 2)
+		assert.Equal(t, []string{
+			BuildSegmentIndexKey(1, 10, 100, 1000),
+			BuildSegmentIndexKey(2, 20, 200, 2000),
+		}, calls[0])
+		assert.Equal(t, []string{BuildSegmentIndexKey(3, 30, 300, 3000)}, calls[1])
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiRemove(mock.Anything, mock.Anything).Return(errors.New("batch remove failed")).Once()
+		catalog := &Catalog{MetaKv: metakv}
+
+		assert.Error(t, catalog.DropSegmentIndexes(context.Background(), indexes))
 	})
 }
 

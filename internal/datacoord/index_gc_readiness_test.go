@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"testing"
 
@@ -30,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
@@ -42,12 +41,12 @@ import (
 // operations exercised here. Every persisted task is cloned, including reloads.
 type indexGCReadinessCatalog struct {
 	metastore.DataCoordCatalog
-	mu           sync.Mutex
-	indexes      []*model.Index
-	stored       map[int64]*model.SegmentIndex
-	events       []string
-	alterFailure int64
-	dropFailure  bool
+	mu               sync.Mutex
+	indexes          []*model.Index
+	stored           map[int64]*model.SegmentIndex
+	events           []string
+	failSecondMarker bool
+	dropFailure      bool
 }
 
 func (c *indexGCReadinessCatalog) ListIndexes(context.Context) ([]*model.Index, error) {
@@ -77,7 +76,7 @@ func (c *indexGCReadinessCatalog) AlterSegmentIndexes(_ context.Context, indexes
 	defer c.mu.Unlock()
 	for _, idx := range indexes {
 		c.events = append(c.events, fmt.Sprintf("mark:%d", idx.IndexID))
-		if c.alterFailure == idx.IndexID {
+		if c.failSecondMarker && len(c.events) == 2 {
 			return errors.New("persist deletion marker failed")
 		}
 	}
@@ -98,6 +97,21 @@ func (c *indexGCReadinessCatalog) DropSegmentIndex(_ context.Context, _, _, _, b
 	return nil
 }
 
+func (c *indexGCReadinessCatalog) DropSegmentIndexes(_ context.Context, indexes []*model.SegmentIndex) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, index := range indexes {
+		c.events = append(c.events, fmt.Sprintf("drop:%d", index.BuildID))
+	}
+	if c.dropFailure {
+		return errors.New("drop segment-index metadata failed")
+	}
+	for _, index := range indexes {
+		delete(c.stored, index.BuildID)
+	}
+	return nil
+}
+
 func newIndexGCReadinessServer(t *testing.T, secondIndex bool) (*Server, *model.Index, *indexGCReadinessCatalog) {
 	t.Helper()
 	s, idx := newIndexReadinessTestServer([]*datapb.SegmentInfo{
@@ -112,6 +126,7 @@ func newIndexGCReadinessServer(t *testing.T, secondIndex bool) (*Server, *model.
 		task, _ := indexes.Get(10)
 		task.BuildID = id*100 + 10
 		task.PartitionID = 1
+		task.IndexFileKeys = []string{"index-artifact"}
 		catalog.stored[task.BuildID] = model.CloneSegmentIndex(task)
 	}
 	if secondIndex {
@@ -125,25 +140,23 @@ func newIndexGCReadinessServer(t *testing.T, secondIndex bool) (*Server, *model.
 	return s, idx, catalog
 }
 
-func patchIndexGCReadinessExternalIO(t *testing.T, s *Server, catalog *indexGCReadinessCatalog, fileFailure bool) {
+func patchIndexGCReadinessExternalIO(t *testing.T, catalog *indexGCReadinessCatalog, fileFailure bool) {
 	t.Helper()
-	// Keep the real collector and real index metadata methods. Only storage
-	// discovery/removal is substituted so failures are deterministic.
-	discovery := mockey.Mock((*gc.GarbageCollector).GetDroppedSegmentIndexFiles).To(func(_ *gc.GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, gc.GcBlockReason) {
-		indexes := s.indexMeta.GetAllSegmentIndexSummaries(segmentID)
-		sort.Slice(indexes, func(i, j int) bool { return indexes[i].IndexID < indexes[j].IndexID })
-		return indexes, map[string]struct{}{"index-artifact": {}}, gc.GcNotBlocked
-	}).Build()
-	files := mockey.Mock((*gc.GarbageCollector).RemoveDroppedSegmentFiles).To(func(_ *gc.GarbageCollector, _ context.Context, _ *meta.SegmentInfo, _ map[string]struct{}) error {
+	// Exercise real discovery and metadata writes, substituting only object deletion.
+	files := mockey.Mock(gc.RemoveObjectFilesWithResultMethodForTest()).To(func(_ *gc.GarbageCollector, _ context.Context, paths []string) []storage.RemoveResult {
 		catalog.mu.Lock()
 		catalog.events = append(catalog.events, "files")
 		catalog.mu.Unlock()
-		if fileFailure {
-			return errors.New("remove files failed")
+		results := make([]storage.RemoveResult, len(paths))
+		for i, filePath := range paths {
+			results[i].Path = filePath
+			if fileFailure {
+				results[i].Err = errors.New("remove files failed")
+			}
 		}
-		return nil
+		return results
 	}).Build()
-	t.Cleanup(func() { files.UnPatch(); discovery.UnPatch() })
+	t.Cleanup(func() { files.UnPatch() })
 }
 
 func assertIndexGCReadinessInvalidated(t *testing.T, s *Server, idx *model.Index) {
@@ -164,21 +177,23 @@ func assertIndexGCReadinessInvalidated(t *testing.T, s *Server, idx *model.Index
 
 func TestIndexGCReadinessMarkerFailurePreventsFiles(t *testing.T) {
 	s, _, catalog := newIndexGCReadinessServer(t, true)
-	catalog.alterFailure = 20
-	patchIndexGCReadinessExternalIO(t, s, catalog, false)
-	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
+	catalog.failSecondMarker = true
+	patchIndexGCReadinessExternalIO(t, catalog, false)
+	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{Cli: storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())), IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
 	gcx.RecycleDroppedSegment(context.Background(), gc.NewGCManifestReadIO(t), 1)
-	require.Equal(t, []string{"mark:10", "mark:20"}, catalog.events, "every marker must persist before any file deletion")
-	require.True(t, catalog.stored[110].IsDeleted)
-	require.False(t, catalog.stored[120].IsDeleted, "failed persistence must not mutate the live task")
+	require.ElementsMatch(t, []string{"mark:10", "mark:20"}, catalog.events, "both markers are attempted before any file deletion")
+	for _, buildID := range []int64{110, 120} {
+		record := catalog.stored[buildID]
+		require.Equal(t, catalog.events[0] == fmt.Sprintf("mark:%d", record.IndexID), record.IsDeleted, "only the first marker was persisted")
+	}
 	require.NotNil(t, s.meta.Segments.GetSegment(1))
 	require.Len(t, s.indexMeta.GetAllSegmentIndexSummaries(1), 2)
 }
 
 func TestIndexGCReadinessFileFailureLeavesMarkedRecord(t *testing.T) {
 	s, idx, catalog := newIndexGCReadinessServer(t, false)
-	patchIndexGCReadinessExternalIO(t, s, catalog, true)
-	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
+	patchIndexGCReadinessExternalIO(t, catalog, true)
+	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{Cli: storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())), IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
 	gcx.RecycleDroppedSegment(context.Background(), gc.NewGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "files"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
@@ -188,8 +203,8 @@ func TestIndexGCReadinessFileFailureLeavesMarkedRecord(t *testing.T) {
 func TestIndexGCReadinessMetaFailureSurvivesRestart(t *testing.T) {
 	s, idx, catalog := newIndexGCReadinessServer(t, false)
 	catalog.dropFailure = true
-	patchIndexGCReadinessExternalIO(t, s, catalog, false)
-	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
+	patchIndexGCReadinessExternalIO(t, catalog, false)
+	gcx := &gc.GarbageCollector{Meta: s.meta, Option: gc.GcOption{Cli: storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())), IndexMeta: s.indexMeta, SnapshotMeta: s.snapshotMeta}}
 	gcx.RecycleDroppedSegment(context.Background(), gc.NewGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "files", "drop:110"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
