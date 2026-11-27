@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -284,6 +285,74 @@ func TestReplicaQueryCaptureReleasesPinOnShutdown(t *testing.T) {
 			expectReplicaAdmission(t, released, true)
 			buffer.Close()
 			require.ErrorIs(t, q.capture(captureCtx, meta, nil), io.EOF)
+		})
+	}
+}
+
+func TestReplicaViewReplaysRestoreSnapshot(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v1", SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{}}}
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		101: {SegmentId: 101, PartitionId: 10},
+		201: {SegmentId: 201, PartitionId: 20},
+	}
+	creation := &message.RestoreSnapshotMessageBody{
+		CollectionHeader: &message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{20}},
+		Collection: &message.CreateCollectionRequest{
+			CollectionID:     1,
+			PartitionIDs:     []int64{20},
+			CollectionSchema: &schemapb.CollectionSchema{Name: "restored", Version: 1},
+		},
+	}
+	restore := func(vchannel string, body *message.RestoreSnapshotMessageBody) message.ImmutableMessage {
+		return message.NewRestoreSnapshotMessageBuilderV2().WithVChannel(vchannel).
+			WithHeader(&message.RestoreSnapshotMessageHeader{CollectionId: 1}).WithBody(body).MustBuildMutable().
+			WithTimeTick(10).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(2))
+	}
+	insert := message.NewInsertMessageBuilderV1().WithVChannel(meta.Vchannel).
+		WithHeader(&message.InsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{
+			{PartitionId: 20, Rows: 1, SegmentAssignment: &message.SegmentAssignment{SegmentId: 201}},
+		}}).WithBody(&message.InsertRequest{CollectionID: 1, PartitionID: 20, NumRows: 1}).
+		MustBuildMutable().WithTimeTick(11).IntoImmutableMessage(walimplstest.NewTestMessageID(3))
+	tail := []message.ImmutableMessage{restore(meta.Vchannel, creation), insert}
+	for _, tc := range []struct {
+		name string
+		base *VChannelView
+	}{
+		{"creation only in WAL", nil},
+		{"creation after a catalog tombstone", NewVChannelViewFromMeta(&streamingpb.VChannelMeta{
+			Vchannel: meta.Vchannel, State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, CheckpointTimeTick: 5,
+		})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view, err := buildReplicaView(meta, tc.base, segments, tail, 30)
+			require.NoError(t, err)
+			require.Equal(t, "restored", view.Schema.GetName())
+			require.Equal(t, "restored", view.WriteSchema.GetName())
+			require.Len(t, view.SegmentSnapshot.Segments, 1)
+			growing := view.SegmentSnapshot.Segments[0]
+			require.EqualValues(t, 201, growing.SegmentID)
+			require.Equal(t, []message.ImmutableMessage{insert}, growing.Data.InsertMessages)
+		})
+	}
+	t.Run("creation belongs to another shard", func(t *testing.T) {
+		_, err := buildReplicaView(meta, nil, segments, []message.ImmutableMessage{restore("v2", creation)}, 30)
+		require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+	for _, tc := range []struct {
+		name string
+		body *message.RestoreSnapshotMessageBody
+	}{
+		{"creation already covered by catalog", creation},
+		{"restore into an existing collection", &message.RestoreSnapshotMessageBody{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The newer catalog baseline has a different schema and partition membership.
+			baseline := restoreSchemaTestMeta()
+			view, err := buildReplicaView(meta, NewVChannelViewFromMeta(baseline), segments, []message.ImmutableMessage{restore(meta.Vchannel, tc.body)}, 30)
+			require.NoError(t, err)
+			require.Equal(t, baseline.CollectionInfo.Schemas[1].Schema.Fields, view.Schema.Fields)
+			require.Len(t, view.SegmentSnapshot.Segments, 1)
+			require.EqualValues(t, 101, view.SegmentSnapshot.Segments[0].SegmentID)
 		})
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -444,6 +445,12 @@ func buildReplicaView(meta *viewpb.QueryViewMeta, vc *VChannelView, segments map
 			continue
 		}
 		switch msg.MessageType() {
+		case message.MessageTypeRestoreSnapshot:
+			msg = messageutil.RestoreCollectionMessage(msg)
+			if msg == nil {
+				continue // Restore into an existing collection.
+			}
+			fallthrough
 		case message.MessageTypeCreateCollection:
 			create := message.MustAsImmutableCreateCollectionMessageV1(msg)
 			if vc == nil {
