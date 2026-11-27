@@ -82,6 +82,15 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 			gain, _ := ctx.evaluate([]*SegmentDataView{segment}, node)
 			if gain > bestGain+scoreEpsilon {
 				best, bestGain = node, gain
+			} else if gain >= bestGain-scoreEpsilon {
+				// Gain ties within epsilon (common for tiny shards that stay inside
+				// the tolerance band). Prefer the node that hosted fewer shards
+				// planned earlier in this round, then the smaller ID, so a burst of
+				// small collections does not repeatedly concentrate on one node.
+				if p.nodeShardCount[best] > p.nodeShardCount[node] ||
+					(p.nodeShardCount[best] == p.nodeShardCount[node] && node < best) {
+					best = node
+				}
 			}
 		}
 		ctx.assign([]*SegmentDataView{segment}, best)

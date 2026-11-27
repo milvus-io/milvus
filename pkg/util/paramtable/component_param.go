@@ -9982,6 +9982,7 @@ type streamingConfig struct {
 	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
 	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
 	WALBalancerExpectedInitialStreamingNodeNum          ParamItem `refreshable:"true"`
+	WALBalancerExpectedStreamingNodeNumPerRG            ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio       ParamItem `refreshable:"false"`
@@ -10299,6 +10300,20 @@ then open the streaming service to continue the upgrade process.`,
 		Export:       false,
 	}
 	p.WALBalancerExpectedInitialStreamingNodeNum.Init(base.mgr)
+
+	p.WALBalancerExpectedStreamingNodeNumPerRG = ParamItem{
+		Key:     "streaming.walBalancer.expectedStreamingNodeNumPerRG",
+		Version: "3.1.0",
+		Doc: `The expected available streaming node number per resource group, 0 by default, means no expected number (disabled).
+When set to N (> 0), the WAL balancer suspends the automatic rebalance until every resource group that owns
+read-write pchannels has at least N available streaming nodes. Intended for blue-green rolling upgrades: keep newly
+added streaming nodes from absorbing channels until each resource group (one resource group equals one replica under
+strictResourceGroupIsolation) has its full streaming node quota. New WAL assignment, failure recovery, frozen-node
+evacuation and manual transfer are not affected.`,
+		DefaultValue: "0",
+		Export:       false,
+	}
+	p.WALBalancerExpectedStreamingNodeNumPerRG.Init(base.mgr)
 
 	p.WALBroadcasterConcurrencyRatio = ParamItem{
 		Key:          "streaming.walBroadcaster.concurrencyRatio",
