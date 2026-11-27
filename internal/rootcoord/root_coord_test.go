@@ -1950,7 +1950,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("storage check error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, errors.New("storage error"))
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), errors.New("storage error"))
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
@@ -1965,7 +1965,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("file not exist", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), merr.WrapErrIoKeyNotFound("file resource"))
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
@@ -1983,7 +1983,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2008,7 +2007,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(100), nil)
 
 		tsoAllocator := newMockTsoAllocator()
@@ -2035,7 +2033,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2109,7 +2106,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		sizeErr := merr.WrapErrIoFailedReason("size error")
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2130,7 +2126,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2148,7 +2143,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("tso allocator error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2168,7 +2162,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("meta add file resource error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2191,7 +2184,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {

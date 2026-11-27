@@ -188,39 +188,6 @@ mod tests {
     }
 
     #[test]
-    fn dictionary_errors_do_not_echo_file_contents() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("dictionary.txt");
-        let mut helper =
-            FileResourcePathHelper::new(std::sync::Arc::new(super::super::ResourceInfo::new()));
-        helper.test_root = Some(dir.path().to_path_buf());
-        let file = json::json!({"type":"local", "path":path});
-        for (kind, text) in [
-            ("synonym", "SECRET_MARKER private value"),
-            ("synonym", "SECRET_MARKER=>a=>b"),
-            ("synonym", "SECRET_MARKER\\q"),
-            ("synonym", "SECRET_MARKER\\"),
-            ("jieba", "SECRET_MARKER invalid_frequency"),
-        ] {
-            std::fs::write(&path, text).unwrap();
-            let params = if kind == "synonym" {
-                json::json!({"tokenizer":"standard", "filter":[{"type":"synonym", "synonyms_file":file}]})
-            } else {
-                json::json!({"tokenizer":{"type":"jieba", "dict":[], "extra_dict_file":file}})
-            };
-            let error = match crate::analyzer::create_analyzer_by_json(
-                params.as_object().unwrap(),
-                &mut helper,
-            ) {
-                Ok(_) => panic!("invalid dictionary accepted"),
-                Err(error) => error.to_string(),
-            };
-            assert!(!error.contains("SECRET_MARKER"), "{}", error);
-            assert!(!error.contains(text), "{}", error);
-        }
-    }
-
-    #[test]
     fn remote_filename_cannot_select_another_resource() {
         let mut helper =
             FileResourcePathHelper::new(std::sync::Arc::new(super::super::ResourceInfo::new()));

@@ -111,7 +111,7 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 				"tls": map[string]any{"ca_cert": tc.ca, "client_cert": tc.cert, "client_key": tc.key},
 			}})
 			require.NoError(t, err)
-			analyzer, err := NewAnalyzer(string(params), "")
+			analyzer, err := NewAnalyzer(string(params), `{"check_file_access":true}`)
 			if err != nil && strings.Contains(err.Error(), "analyzer-remote-tls feature") {
 				t.Skip("TLS support disabled in this build")
 			}
@@ -123,10 +123,10 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 				if tc.name == "absolute" {
 					setting.SwapTempValue(t.TempDir())
 					require.NoError(t, updateParams())
-					restored, err := RestoreAnalyzer(string(params), "")
+					restored, err := NewAnalyzer(string(params), "")
 					require.NoError(t, err)
 					restored.Destroy()
-					_, err = NewAnalyzer(string(params), "")
+					_, err = NewAnalyzer(string(params), `{"check_file_access":true}`)
 					require.ErrorContains(t, err, "outside the configured directory")
 					setting.SwapTempValue(root)
 					require.NoError(t, updateParams())
@@ -162,13 +162,13 @@ func TestAnalyzerTLSFiles(t *testing.T) {
 				"type": "grpc", "endpoint": "https://" + serverOnlyListener.Addr().String(), "tls": identity,
 			}})
 			require.NoError(t, err)
-			restored, err := RestoreAnalyzer(string(params), "")
+			restored, err := NewAnalyzer(string(params), "")
 			if err != nil && strings.Contains(err.Error(), "analyzer-remote-tls feature") {
 				t.Skip("TLS support disabled in this build")
 			}
 			require.NoError(t, err)
 			restored.Destroy()
-			_, err = NewAnalyzer(string(params), "")
+			_, err = NewAnalyzer(string(params), `{"check_file_access":true}`)
 			require.Error(t, err)
 			_, err = ValidateAnalyzer(string(params), "")
 			require.Error(t, err)

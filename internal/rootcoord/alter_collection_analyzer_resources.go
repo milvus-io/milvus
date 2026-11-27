@@ -107,7 +107,7 @@ func resolveSchemaAnalyzerPaths(schema, previous *schemapb.CollectionSchema) err
 				continue
 			}
 			if kv.Key == "analyzer_params" {
-				value, err := resolve(kv.Value, oldParams[kv.Key])
+				value, err := analyzer.ResolveLocalPaths(kv.Value, cfg.FunctionCfg.LocalResourcePath.GetValue(), cfg.TLSAllowedPath.GetValue())
 				if err != nil {
 					return err
 				}

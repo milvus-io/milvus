@@ -44,17 +44,15 @@ func setSourceRoot(t *testing.T, root string) {
 
 func TestFileResourceSourceRejectsBeforeProbing(t *testing.T) {
 	cm := mocks.NewChunkManager(t) // No backend calls are permitted.
-	source := &restrictedSource{ChunkManager: cm, root: "resources"}
+	source := &restrictedSource{cm: cm, root: "resources"}
 	for _, key := range []string{"other/secret", "resources2/file", "/resources/file", "resources/../secret", "resources/", "resources/./file", "resources/a\\b", "resources/a\x00b"} {
-		_, err := source.Exist(context.Background(), key)
-		require.Error(t, err, key)
-		_, err = source.Size(context.Background(), key)
+		_, err := source.Size(context.Background(), key)
 		require.Error(t, err, key)
 		_, err = source.Reader(context.Background(), key)
 		require.Error(t, err, key)
 	}
 	source.root = ""
-	_, err := source.Exist(context.Background(), "secret")
+	_, err := source.Size(context.Background(), "secret")
 	require.Error(t, err)
 }
 
@@ -66,11 +64,8 @@ func TestFileResourceLocalSourceIsConfined(t *testing.T) {
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
 	require.NoError(t, os.Symlink(filepath.Join(outside, "secret"), filepath.Join(root, "file_link")))
 	require.NoError(t, unix.Mkfifo(filepath.Join(root, "fifo"), 0o600))
-	source := &restrictedSource{ChunkManager: storage.NewLocalChunkManager(), root: root}
+	source := &restrictedSource{cm: storage.NewLocalChunkManager(), root: root}
 	for _, key := range []string{"dict", filepath.Join(root, "dict")} {
-		exists, err := source.Exist(context.Background(), key)
-		require.NoError(t, err)
-		require.True(t, exists)
 		size, err := source.Size(context.Background(), key)
 		require.NoError(t, err)
 		require.EqualValues(t, 2, size)
@@ -111,10 +106,6 @@ func TestFileResourceLocalDefaultDirectory(t *testing.T) {
 }
 
 func TestFileResourceDownloadEnforcesActualReadLimit(t *testing.T) {
-	setSourceRoot(t, "resources")
-	cfg := &paramtable.Get().CommonCfg.FileResourceMaxFileSize
-	old := cfg.SwapTempValue("4")
-	t.Cleanup(func() { cfg.SwapTempValue(old) })
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().Size(mock.Anything, "resources/dict").Return(int64(2), nil)
 	reader := newMockReader("SECRET_MARKER")
@@ -148,12 +139,8 @@ func TestFileResourceRemoteDefaultPrefix(t *testing.T) {
 			}
 			source := RestrictSource(cm)
 			key := tc.prefix + "/dict.txt"
-			cm.EXPECT().Exist(mock.Anything, key).Return(true, nil).Once()
 			cm.EXPECT().Size(mock.Anything, key).Return(int64(2), nil).Once()
 			cm.EXPECT().Reader(mock.Anything, key).Return(newMockReader("ok"), nil).Once()
-			exists, err := source.Exist(context.Background(), key)
-			require.NoError(t, err)
-			require.True(t, exists)
 			size, err := source.Size(context.Background(), key)
 			require.NoError(t, err)
 			require.EqualValues(t, 2, size)
@@ -161,9 +148,7 @@ func TestFileResourceRemoteDefaultPrefix(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, reader.Close())
 			for _, invalid := range []string{"dict.txt", "/" + key, tc.prefix + "2/dict.txt", tc.prefix + "/../secret"} {
-				_, err := source.Exist(context.Background(), invalid)
-				require.Error(t, err)
-				_, err = source.Size(context.Background(), invalid)
+				_, err := source.Size(context.Background(), invalid)
 				require.Error(t, err)
 				_, err = source.Reader(context.Background(), invalid)
 				require.Error(t, err)

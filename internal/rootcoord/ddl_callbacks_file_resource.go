@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -71,16 +72,14 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 				broadcaster.Close()
 				broadcaster = nil
 				source := fileresource.RestrictSource(c.storage)
-				if exist, err := source.Exist(ctx, req.GetPath()); err != nil {
-					return err
-				} else if !exist {
+				size, err = source.Size(ctx, req.GetPath())
+				if errors.Is(err, merr.ErrIoKeyNotFound) {
 					return merr.WrapErrParameterInvalidMsg("file resource path not exist")
 				}
+				if err != nil {
+					return err
+				}
 				if maxFileSize > 0 {
-					size, err = source.Size(ctx, req.GetPath())
-					if err != nil {
-						return err
-					}
 					if size >= 0 && size <= maxFileSize {
 						if maxFileSize == math.MaxInt64 {
 							return merr.WrapErrServiceInternalMsg("file resource read limit is too large")

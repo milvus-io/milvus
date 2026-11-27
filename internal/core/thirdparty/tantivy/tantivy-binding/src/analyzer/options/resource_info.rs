@@ -186,11 +186,7 @@ impl FileResourcePathHelper {
         Ok(Self {
             builder,
             ids: HashSet::new(),
-            // Only server-built extra info can restore an admitted schema.
-            enforce_file_access: !value
-                .get("file_access_admitted")
-                .and_then(json::Value::as_bool)
-                .unwrap_or(false),
+            enforce_file_access: true,
             #[cfg(test)]
             test_root: None,
         })

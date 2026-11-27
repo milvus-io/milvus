@@ -31,11 +31,6 @@ func NewAnalyzer(param string, extraInfo string) (Analyzer, error) {
 	return canalyzer.NewAnalyzer(param, extraInfo)
 }
 
-// RestoreAnalyzer accepts only analyzer parameters from a persisted schema.
-func RestoreAnalyzer(param string, extraInfo string) (Analyzer, error) {
-	return canalyzer.RestoreAnalyzer(param, extraInfo)
-}
-
 func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
 	return canalyzer.ValidateAnalyzer(param, extraInfo)
 }

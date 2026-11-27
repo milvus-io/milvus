@@ -191,7 +191,6 @@ func TestFileResourceSyncFailureAfterBroadcast(t *testing.T) {
 	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(nil).Once()
 	catalog.EXPECT().RemoveFileResource(mock.Anything, int64(123), uint64(2)).Return(nil).Once()
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, "dict/custom.txt").Return(true, nil)
 	tso := newMockTsoAllocator()
 	tso.GenerateTSOF = func(uint32) (uint64, error) { return 123, nil }
 	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage), withTsoAllocator(tso))
@@ -228,7 +227,6 @@ func TestFileResourceRemoveChecksReferencesBeforeBroadcast(t *testing.T) {
 func TestFileResourceAddKeepsMetadataUnchangedBeforeBroadcast(t *testing.T) {
 	meta, _ := fileResourceTestMeta(t)
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, "dict/custom.txt").Return(true, nil)
 	tso := newMockTsoAllocator()
 	tso.GenerateTSOF = func(uint32) (uint64, error) { return 123, nil }
 	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage), withTsoAllocator(tso))
@@ -265,7 +263,6 @@ func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T)
 	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
 	guardHeld := false
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, resource.Path).Return(true, nil).Once()
 	storage.EXPECT().Size(mock.Anything, resource.Path).
 		RunAndReturn(func(ctx context.Context, _ string) (int64, error) {
 			require.False(t, guardHeld, "storage I/O must not hold the cluster DDL guard")
@@ -310,7 +307,6 @@ func TestFileResourceAdmissionChecksActualBytes(t *testing.T) {
 	old := Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("4")
 	t.Cleanup(func() { Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(old) })
 	cm := mock_storage.NewMockChunkManager(t)
-	cm.EXPECT().Exist(mock.Anything, "dict/large.txt").Return(true, nil)
 	cm.EXPECT().Size(mock.Anything, "dict/large.txt").Return(int64(1), nil)
 	cm.EXPECT().Reader(mock.Anything, "dict/large.txt").Return(&admissionFileReader{strings.NewReader("SECRET_MARKER")}, nil).Once()
 	core := newTestCore(withStorage(cm))

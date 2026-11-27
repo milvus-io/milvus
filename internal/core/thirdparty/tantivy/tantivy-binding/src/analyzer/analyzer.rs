@@ -170,26 +170,25 @@ pub fn create_analyzer_by_json(
     builder.build()
 }
 
-pub fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
-    if extra_info.is_empty() {
-        return Ok(get_global_file_resource_helper());
-    }
-    let value =
-        json::from_str::<json::Value>(extra_info).map_err(TantivyBindingError::JsonError)?;
-    if value
-        .get("use_global_resources")
-        .and_then(json::Value::as_bool)
-        == Some(true)
-    {
-        let mut helper = get_global_file_resource_helper();
-        helper.enforce_file_access = value
-            .get("file_access_admitted")
-            .and_then(json::Value::as_bool)
-            != Some(true);
-        Ok(helper)
+// Extra info carries server-owned runtime options, independently of resource bindings.
+fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
+    let extra: json::Map<String, json::Value> = if extra_info.is_empty() {
+        json::Map::new()
     } else {
-        FileResourcePathHelper::from_json(&value)
-    }
+        json::from_str(extra_info).map_err(TantivyBindingError::JsonError)?
+    };
+    let check_file_access = extra
+        .get("check_file_access")
+        .and_then(json::Value::as_bool)
+        == Some(true);
+    let mut helper = if extra.contains_key("resource_map") {
+        FileResourcePathHelper::from_json(&json::Value::Object(extra))?
+    } else {
+        get_global_file_resource_helper()
+    };
+    // Persisted definitions remain usable after operator policy changes.
+    helper.enforce_file_access = check_file_access;
+    Ok(helper)
 }
 
 pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
@@ -202,18 +201,6 @@ pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
 
     let mut helper = create_helper(extra_info)?;
     create_analyzer_by_json(json_params, &mut helper)
-}
-
-// Index readers/writers receive analyzer definitions from persisted schemas.
-pub fn restore_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
-    if params.is_empty() {
-        return Ok(standard_analyzer(vec![]));
-    }
-    let json_params = json::from_str::<json::Map<String, json::Value>>(params)
-        .map_err(TantivyBindingError::JsonError)?;
-    let mut helper = create_helper(extra_info)?;
-    helper.enforce_file_access = false;
-    create_analyzer_by_json(&json_params, &mut helper)
 }
 
 pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
