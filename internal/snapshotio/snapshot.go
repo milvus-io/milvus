@@ -84,7 +84,8 @@ func ManifestSchema() (avro.Schema, error) {
 		schema := strings.Replace(AvroSchemaV4(),
 			`{"name": "index_store_path_version", "type": "int", "default": 0}`,
 			`{"name": "index_store_path_version", "type": "int", "default": 0},
-			{"name": "index_type", "type": "string", "default": ""}`, 1)
+			{"name": "index_type", "type": "string", "default": ""},
+			{"name": "encryption_state", "type": "int", "default": 0}`, 1)
 		manifestSchema, manifestSchemaErr = avro.Parse(schema)
 	})
 	return manifestSchema, manifestSchemaErr
@@ -215,6 +216,7 @@ type AvroBinlog struct {
 
 // AvroIndexFilePathInfo represents indexpb.IndexFilePathInfo in Avro-compatible format.
 type AvroIndexFilePathInfo struct {
+	EncryptionState           int32              `avro:"encryption_state"`
 	IndexType                 string             `avro:"index_type"`
 	SegmentID                 int64              `avro:"segment_id"`
 	FieldID                   int64              `avro:"field_id"`
@@ -517,6 +519,7 @@ func IndexFilePathInfoToAvro(info *indexpb.IndexFilePathInfo) AvroIndexFilePathI
 		NumRows:                   info.GetNumRows(),
 		CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 		CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
+		EncryptionState:           int32(info.GetEncryptionState()),
 		MemSize:                   int64(info.GetMemSize()),
 		IndexStorePathVersion:     int32(info.GetIndexStorePathVersion()),
 		IndexParams:               make([]AvroKeyValuePair, len(info.GetIndexParams())),
@@ -545,6 +548,7 @@ func AvroToIndexFilePathInfo(avroInfo AvroIndexFilePathInfo) *indexpb.IndexFileP
 		NumRows:                   avroInfo.NumRows,
 		CurrentIndexVersion:       avroInfo.CurrentIndexVersion,
 		CurrentScalarIndexVersion: avroInfo.CurrentScalarIndexVersion,
+		EncryptionState:           indexpb.IndexEncryptionState(avroInfo.EncryptionState),
 		MemSize:                   uint64(avroInfo.MemSize),
 		IndexStorePathVersion:     indexpb.IndexStorePathVersion(avroInfo.IndexStorePathVersion),
 	}

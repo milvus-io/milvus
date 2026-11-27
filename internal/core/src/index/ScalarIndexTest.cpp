@@ -274,6 +274,8 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         scalar_index->Build(nb, arr.data());
 
         auto create_index_result = index->UploadUnified({});
+        ASSERT_EQ(create_index_result->IsEncrypted(),
+                  std::optional<bool>(false));
         auto index_files = create_index_result->GetIndexFiles();
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(

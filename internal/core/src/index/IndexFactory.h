@@ -61,7 +61,8 @@ class IndexFactory {
                       const std::map<std::string, std::string>& index_params,
                       bool mmap_enable,
                       int64_t num_rows,
-                      int64_t dim);
+                      int64_t dim,
+                      std::optional<bool> encrypted = std::nullopt);
 
     LoadResourceRequest
     IndexLoadResource(
@@ -95,7 +96,8 @@ class IndexFactory {
         uint64_t index_size_in_bytes,
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
-        int64_t num_rows);
+        int64_t num_rows,
+        std::optional<bool> encrypted = std::nullopt);
 
     LoadResourceRequest
     ScalarIndexLoadResource(
@@ -199,7 +201,8 @@ class IndexFactory {
         const std::map<std::string, std::string>& index_params,
         bool mmap_enable,
         int64_t num_rows,
-        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info);
+        const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
+        std::optional<bool> encrypted = std::nullopt);
 
     template <typename T>
     ScalarIndexPtr<T>

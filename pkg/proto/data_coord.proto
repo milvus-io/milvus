@@ -1264,6 +1264,7 @@ message VectorScalarIndexInfo {
   string index_name = 9;                   // Index name for multi-index-per-field lookup
   index.IndexStorePathVersion index_store_path_version = 10;
   string index_type = 11;
+  index.IndexEncryptionState encryption_state = 13;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation

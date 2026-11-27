@@ -148,6 +148,7 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 	info := &IndexTaskInfo{
 		State:                 commonpb.IndexState_Finished,
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		EncryptionState:       indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN,
 	}
 
 	s.Equal(
@@ -155,7 +156,9 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 		info.ToIndexTaskInfo(100).GetIndexStorePathVersion(),
 	)
 
+	s.Equal(indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, info.ToIndexTaskInfo(100).GetEncryptionState())
 	cloned := info.Clone()
+	s.Equal(indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, cloned.EncryptionState)
 	s.Equal(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, cloned.IndexStorePathVersion)
 }
 
@@ -205,7 +208,7 @@ func TestReplacementTaskIgnoresOldAttempt(t *testing.T) {
 		before := manager.GetIndexTaskInfo(cluster, id)
 
 		manager.StoreIndexTaskExecutionStart(cluster, id, old, 100, 2)
-		manager.StoreIndexFilesAndStatistic(cluster, id, old, []string{"old"}, 10, 20, 1, 1, 0)
+		manager.StoreIndexFilesAndStatistic(cluster, id, old, []string{"old"}, 10, 20, 1, 1, 0, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN)
 		manager.StoreIndexTaskState(cluster, id, old, commonpb.IndexState_Failed, "old")
 		manager.StoreIndexTaskExecutionEndWithState(cluster, id, old, 110, 10, commonpb.IndexState_Retry, "canceled")
 		require.Equal(t, before, manager.GetIndexTaskInfo(cluster, id))

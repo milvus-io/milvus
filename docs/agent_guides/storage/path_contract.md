@@ -35,6 +35,14 @@ Explore is a separate layout: local temporary manifests live under
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
 
+## Index encryption metadata
+
+New packed scalar index builds record the concrete writer encryption mode in
+index task results and catalog metadata. Load admission uses that persisted fact
+without reading index files. Snapshots and copy/restore preserve the state.
+Historical, non-packed and empty builds retain unknown state and the existing
+plugin-based fallback; file-aware loading still uses the actual file marker.
+
 ## Ordinary import source overrides
 
 Ordinary imports with `storage.*` options use an independent S3-compatible

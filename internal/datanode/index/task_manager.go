@@ -35,6 +35,7 @@ import (
 )
 
 type IndexTaskInfo struct {
+	EncryptionState           indexpb.IndexEncryptionState
 	Cancel                    context.CancelFunc
 	State                     commonpb.IndexState
 	FileKeys                  []string
@@ -64,6 +65,7 @@ func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		EncryptionState:           i.EncryptionState,
 		ExecStartMs:               i.ExecStartMs,
 		ExecEndMs:                 i.ExecEndMs,
 		CostTimeMs:                i.CostTimeMs,
@@ -83,6 +85,7 @@ func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
 		CurrentIndexVersion:       i.CurrentIndexVersion,
 		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     i.IndexStorePathVersion,
+		EncryptionState:           i.EncryptionState,
 	}
 }
 
@@ -197,6 +200,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	currentIndexVersion int32,
 	currentScalarIndexVersion int32,
 	indexStorePathVersion indexpb.IndexStorePathVersion,
+	encryptionState indexpb.IndexEncryptionState,
 ) {
 	key := Key{ClusterID: ClusterID, TaskID: buildID}
 	m.stateLock.Lock()
@@ -204,6 +208,7 @@ func (m *TaskManager) StoreIndexFilesAndStatistic(
 	if info, ok := m.indexTasks[key]; ok && info == expected {
 		info.FileKeys = common.CloneStringList(fileKeys)
 		info.SerializedSize = serializedSize
+		info.EncryptionState = encryptionState
 		info.MemSize = memSize
 		info.CurrentIndexVersion = currentIndexVersion
 		info.CurrentScalarIndexVersion = currentScalarIndexVersion

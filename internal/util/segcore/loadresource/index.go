@@ -155,6 +155,7 @@ func buildCLoadIndexInfo(field *schemapb.FieldSchema, segment *querypb.SegmentLo
 		IndexFileSize:             index.GetIndexSize(),
 		NumRows:                   index.GetNumRows(),
 		CurrentScalarIndexVersion: index.GetCurrentScalarIndexVersion(),
+		EncryptionState:           index.GetEncryptionState(),
 		IndexStorePathVersion:     index.GetIndexStorePathVersion(),
 	}, nil
 }
