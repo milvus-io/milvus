@@ -703,6 +703,12 @@ func WrapErrCollectionSchemaVersionNotReady(collection any, consistentSegments, 
 	)
 }
 
+// WrapErrCollectionMutationIncompleteErr preserves the reason a mutation stopped
+// under a public code that is safe to return after a partial or uncertain append.
+func WrapErrCollectionMutationIncompleteErr(err error) error {
+	return wrapInner(ErrCollectionMutationIncomplete, "whole-request replay is unsafe", err)
+}
+
 // WrapErrCollectionPartialUpdateConflictErr relabels a CAS rejection as a
 // non-retriable client result while preserving the original error chain.
 func WrapErrCollectionPartialUpdateConflictErr(err error, format string, args ...any) error {

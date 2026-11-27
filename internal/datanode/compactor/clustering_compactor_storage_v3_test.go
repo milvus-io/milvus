@@ -659,7 +659,6 @@ func TestCompactionRewrittenTextSizesAfterDeleteTTLAndSplit(t *testing.T) {
 			var err error
 			if kind == datapb.CompactionType_ClusteringCompaction {
 				task := newClusteringTextTask(fix)
-				task.currentTime = now
 				result, err = task.Compact()
 				require.NoError(t, err)
 				require.Len(t, task.clusterBuffers, 1, "both segments must come from the same bucket")
@@ -669,7 +668,6 @@ func TestCompactionRewrittenTextSizesAfterDeleteTTLAndSplit(t *testing.T) {
 				plan.Type, params.UseMergeSort, params.MaxSegmentMergeSort = kind, true, 16
 				fix.segment.IsSorted = true
 				task := NewMixCompactionTask(context.Background(), binlogio.NewBinlogIO(fix.task.chunkManager), fix.task.chunkManager, plan, params, []int64{bumpFxPKField})
-				task.currentTime = now
 				result, err = task.Compact()
 				require.NoError(t, err)
 				require.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(bodyID))

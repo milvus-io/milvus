@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -158,9 +159,22 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
+			// A disconnected reply stream leaves an autocommit mutation's
+			// outcome unknown. Even retrying on the same shard can apply it
+			// twice, or turn it into a fence rejection eligible for rerouting.
+			if sErr.Code == streamingpb.StreamingCode_STREAMING_CODE_UNKNOWN && msg.MessageType().IsDMLMessageType() &&
+				msg.TxnContext() == nil && msg.ReplicateHeader() == nil && len(message.IdempotencyKeyOf(msg)) == 0 {
+				return nil, sErr
+			}
 			if sErr.IsPartialUpdateRetryableCAS() {
 				// Proxy must re-query and rebuild the row instead of retrying the
 				// transaction with stale merged fields.
+				return nil, err
+			}
+			if sErr.IsShardFenced() {
+				// The vchannel is the source of a shard split. Appending to it
+				// again never succeeds, so the error goes back to the caller,
+				// which refreshes its routing and retries on the new shards.
 				return nil, err
 			}
 			// if the error is txn unavailable or unrecoverable error,

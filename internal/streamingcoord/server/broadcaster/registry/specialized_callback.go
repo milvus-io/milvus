@@ -85,6 +85,9 @@ var (
 
 	// Update import (two-phase ID range assignment)
 	RegisterUpdateImportV2AckCallback = registerMessageAckCallback[*message.UpdateImportMessageHeader, *message.UpdateImportMessageBody]
+
+	// Shard split
+	RegisterSplitShardV2AckCallback = registerMessageAckCallback[*message.SplitShardMessageHeader, *message.SplitShardMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -162,5 +165,8 @@ func resetMessageAckCallbacks() {
 
 		// Update import (two-phase ID range assignment)
 		message.MessageTypeUpdateImportV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// Shard split
+		message.MessageTypeSplitShardV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

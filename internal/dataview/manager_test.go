@@ -76,7 +76,7 @@ func (c *fakeDataViewCatalog) ListAllDataViews(_ context.Context) ([]*viewpb.Dat
 	return views, nil
 }
 
-func (c *fakeDataViewCatalog) DropDataView(_ context.Context, collectionID int64, version *viewpb.DataVersion) error {
+func (c *fakeDataViewCatalog) DropDataView(_ context.Context, dropped *viewpb.DataViewOfCollection) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.dropHook != nil {
@@ -87,7 +87,7 @@ func (c *fakeDataViewCatalog) DropDataView(_ context.Context, collectionID int64
 	}
 	kept := c.views[:0]
 	for _, view := range c.views {
-		if view.GetCollectionId() == collectionID && dataVersionKey(view.GetDataVersion()) == dataVersionKey(version) {
+		if view.GetCollectionId() == dropped.GetCollectionId() && dataVersionKey(view.GetDataVersion()) == dataVersionKey(dropped.GetDataVersion()) {
 			continue
 		}
 		kept = append(kept, view)

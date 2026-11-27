@@ -92,6 +92,9 @@ type CompactionMeta interface {
 var _ CompactionMeta = (*Meta)(nil)
 
 type Meta struct {
+	// splitAdoptionInputs is protected by groupMu and fences an active prepare/commit attempt.
+	splitAdoptionInputs map[int64]struct{}
+
 	Ctx     context.Context
 	Catalog metastore.DataCoordCatalog
 
@@ -101,6 +104,16 @@ type Meta struct {
 	// Installed by Coordinator before background planning starts. Standalone
 	// metadata users can continue using their supplied collection snapshots.
 	PreparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
+	// L0CompactionSuspended reports whether L0 compaction on a vchannel is
+	// suspended. The shard split manager sets it: the L0 segments of a split
+	// target are kept until the segments of the source are adopted. Nil means
+	// that no vchannel is suspended.
+	L0CompactionSuspended func(vchannel string) bool
+	// SplitSource protects the frozen source from ordinary compactions.
+	SplitSource func(vchannel string) bool
+	// SourceSplitRewrite supplies the frozen source's routing and TTL cutoff
+	// at dispatch, including for tasks queued before the split was recorded.
+	SourceSplitRewrite func(vchannel string) *datapb.SplitShardRewritePlan
 
 	Segments *SegmentsInfo // segment id to segment info
 	// segmentLocks are the segment writer locks (see segment_locks.go). The
@@ -186,6 +199,11 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// its IDs (Dropping included) drive per-collection loading in both
 	// MetaStore.LoadFromCatalog and indexMeta.
 	collectionIDs := metaStore.GetCollectionIDs()
+	if adoptions, ok := catalog.(model.SplitAdoptionCatalog); ok {
+		if err := adoptions.FencePreparedSplitAdoptions(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	var (
 		indexCatalog SegmentIndexCatalog
@@ -195,6 +213,7 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// Construct meta struct first. MetaStore.LoadFromCatalog runs in parallel with domain meta loading.
 	commitConcurrency := paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.GetAsInt()
 	mt := &Meta{
+		splitAdoptionInputs:      make(map[int64]struct{}),
 		ManifestCommitExecutor:   NewManifestCommitExecutor(commitConcurrency),
 		Ctx:                      ctx,
 		Catalog:                  catalog,
@@ -2386,6 +2405,12 @@ func (m *Meta) BatchSaveDropSegments(ctx context.Context, channel string, modSeg
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
+// IsL0CompactionSuspended reports whether the L0 segments of a vchannel must
+// not be compacted now, see L0CompactionSuspended.
+func (m *Meta) IsL0CompactionSuspended(vchannel string) bool {
+	return m.L0CompactionSuspended != nil && m.L0CompactionSuspended(vchannel)
+}
+
 func (m *Meta) GetSegmentsByChannel(channel string) []*SegmentInfo {
 	return m.SelectSegments(m.Ctx, SegmentFilterFunc(IsSegmentHealthy), WithChannel(channel))
 }
@@ -2528,7 +2553,7 @@ func (m *Meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 	for _, segmentID := range segmentIDs {
 		seg := m.Segments.GetSegment(segmentID)
 		if seg != nil {
-			if seg.IsCompacting || excluded.Contain(segmentID) {
+			if seg.IsCompacting || excluded.Contain(segmentID) || m.splitAdoptionInputProtected(segmentID) {
 				hasCompacting = true
 			}
 		} else {
@@ -2770,12 +2795,29 @@ func (m *Meta) completeMixCompactionMutation(
 	t *datapb.CompactionTask,
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, error) {
+	if t.GetType() == datapb.CompactionType_SplitShardRewriteCompaction {
+		if len(t.GetInputSegments()) != 1 || t.GetSplitRewrite() == nil {
+			return nil, merr.WrapErrServiceInternalMsg("split rewrite needs one input and routing")
+		}
+		allowed := make(map[string]bool)
+		for _, target := range t.GetSplitRewrite().GetTargets() {
+			allowed[target.GetVchannel()] = true
+		}
+		for _, output := range result.GetSegments() {
+			if !allowed[output.GetSplitTarget()] {
+				return nil, merr.WrapErrServiceInternalMsg("rewrite output %d carries an unknown target label %q", output.GetSegmentID(), output.GetSplitTarget())
+			}
+		}
+	}
 	var compactFromSegIDs []int64
 	var compactFromSegInfos []*SegmentInfo
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.Segments.GetSegment(segmentID)
 		if segment == nil {
 			return nil, merr.WrapErrSegmentNotFound(segmentID)
+		}
+		if segment.GetSplitTarget() != "" && t.GetType() != datapb.CompactionType_SplitShardRewriteCompaction {
+			return nil, merr.WrapErrServiceNotReadyMsg("cannot merge labeled split segment %d", segmentID)
 		}
 
 		// Re-validate segment health to prevent race condition with drop collection
@@ -2816,6 +2858,7 @@ func (m *Meta) completeMixCompactionMutation(
 		startPos, dmlPos := RecalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		compactToProto := &datapb.SegmentInfo{
 			ID:                          compactToSegment.GetSegmentID(),
+			SplitTarget:                 compactToSegment.GetSplitTarget(),
 			CollectionID:                compactFromSegInfos[0].CollectionID,
 			PartitionID:                 compactFromSegInfos[0].PartitionID,
 			InsertChannel:               t.GetChannel(),
@@ -2956,6 +2999,16 @@ func (m *Meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 		}
 	}
 
+	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction && m.IsL0CompactionSuspended(t.GetChannel()) {
+		return merr.WrapErrServiceNotReadyMsg("L0 compaction on split target %s is suspended", t.GetChannel())
+	}
+	if m.SplitSource != nil && m.SplitSource(t.GetChannel()) {
+		switch t.GetType() {
+		case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		default:
+			return merr.WrapErrServiceNotReadyMsg("ordinary compaction of split source %s is suspended", t.GetChannel())
+		}
+	}
 	mutationApplied := m.compactionMutationAppliedLocked(t.GetInputSegments())
 	for _, segmentID := range t.GetInputSegments() {
 		segment := m.Segments.GetSegment(segmentID)
@@ -2997,7 +3050,7 @@ func (m *Meta) appliedCompactionResultLocked(
 	result *datapb.CompactionPlanResult,
 ) ([]*SegmentInfo, bool, error) {
 	switch task.GetType() {
-	case datapb.CompactionType_MixCompaction,
+	case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_MixCompaction,
 		datapb.CompactionType_SortCompaction,
 		datapb.CompactionType_BumpSchemaVersionCompaction:
 	default:
@@ -3066,7 +3119,7 @@ func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		retErr = appliedErr
 	} else {
 		switch t.GetType() {
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_SplitShardRewriteCompaction, datapb.CompactionType_MixCompaction:
 			newSegments, retErr = m.completeMixCompactionMutation(t, result)
 		case datapb.CompactionType_ClusteringCompaction:
 			newSegments, retErr = m.completeClusterCompactionMutation(t, result)
@@ -3275,8 +3328,16 @@ func (m *Meta) GetEarliestStartPositionOfGrowingSegments(collectionID, partition
 
 	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {
-		if earliest.GetTimestamp() == math.MaxUint64 || earliest.GetTimestamp() > seg.GetStartPosition().GetTimestamp() {
-			earliest = seg.GetStartPosition()
+		position := seg.GetStartPosition()
+		if position.GetTimestamp() == 0 && seg.GetIsCreatedByStreaming() {
+			// Before the first persisted data pack, a WAL base may have no
+			// StartPosition. Its explicit Transform cursor certifies that no
+			// earlier Delete is still needed by this base. An unknown cursor
+			// stays zero and continues to block L0 reclamation conservatively.
+			position = &msgpb.MsgPosition{ChannelName: channel, Timestamp: seg.GetTransformStartAfterTimetick()}
+		}
+		if earliest.GetTimestamp() == math.MaxUint64 || earliest.GetTimestamp() > position.GetTimestamp() {
+			earliest = position
 		}
 	}
 	return earliest
@@ -3359,6 +3420,7 @@ func (m *Meta) CompleteSortCompactionMutation(
 		CollectionID:                oldSegment.GetCollectionID(),
 		PartitionID:                 oldSegment.GetPartitionID(),
 		InsertChannel:               oldSegment.GetInsertChannel(),
+		SplitTarget:                 oldSegment.GetSplitTarget(),
 		MaxRowNum:                   oldSegment.GetMaxRowNum(),
 		LastExpireTime:              oldSegment.GetLastExpireTime(),
 		StartPosition:               startPos,
@@ -3640,6 +3702,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		CollectionID:                oldSegment.GetCollectionID(),
 		PartitionID:                 oldSegment.GetPartitionID(),
 		InsertChannel:               oldSegment.GetInsertChannel(),
+		SplitTarget:                 oldSegment.GetSplitTarget(),
 		MaxRowNum:                   oldSegment.GetMaxRowNum(),
 		LastExpireTime:              oldSegment.GetLastExpireTime(),
 		StartPosition:               startPos,

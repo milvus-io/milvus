@@ -49,6 +49,7 @@ func newDDLCallbacks(s *Server) *ddl.Callbacks {
 		Broker:                           s.broker,
 		NotifyIndexChan:                  s.notifyIndexChan,
 		CreateImportJobFromAck:           s.createImportJobFromAck,
+		CheckSplitWindow:                 s.checkSplitWindow,
 		StageImportChange:                s.stageImportChangeFromSource,
 	}}
 }

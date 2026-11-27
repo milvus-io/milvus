@@ -109,6 +109,9 @@ func (kc *Catalog) ListSegments(ctx context.Context, collectionID int64) ([]*dat
 	if err != nil {
 		return nil, err
 	}
+	if err := kc.applyCommittedAdoptions(ctx, collectionID, segments); err != nil {
+		return nil, err
+	}
 	return segments, nil
 }
 
@@ -548,16 +551,11 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 }
 
 func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
-	key := buildDataViewVersionKey(
-		dataView.GetCollectionId(),
-		dataView.GetDataVersion().GetStreamingVersion(),
-		dataView.GetDataVersion().GetCompactVersion(),
-	)
-	value, err := proto.Marshal(dataView)
+	key, value, err := kc.prepareDataView(ctx, dataView)
 	if err != nil {
 		return err
 	}
-	return kc.MetaKv.Save(ctx, key, string(value))
+	return kc.MetaKv.Save(ctx, key, value)
 }
 
 func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
@@ -572,7 +570,11 @@ func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) (
 	dataViews := make([]*viewpb.DataViewOfCollection, 0)
 	applyFn := func(key []byte, value []byte) error {
 		dataView := &viewpb.DataViewOfCollection{}
-		if err := proto.Unmarshal(value, dataView); err != nil {
+		decoded, err := kc.readPagedValue(ctx, string(value))
+		if err != nil {
+			return err
+		}
+		if err := proto.Unmarshal(decoded, dataView); err != nil {
 			// Skip one corrupt value instead of aborting the whole walk: a
 			// single unmarshalable key would otherwise fail ListAllDataViews
 			// on every attempt and block Coordinator startup (the manager's
@@ -592,16 +594,26 @@ func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) (
 	return dataViews, nil
 }
 
-func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
-	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(
-		collectionID,
-		dataVersion.GetStreamingVersion(),
-		dataVersion.GetCompactVersion(),
-	))
+func (kc *Catalog) DropDataView(ctx context.Context, view *viewpb.DataViewOfCollection) error {
+	version := view.GetDataVersion()
+	key := buildDataViewVersionKey(view.GetCollectionId(), version.GetStreamingVersion(), version.GetCompactVersion())
+	if view.GetShardSetEpoch() < 2 {
+		return kc.MetaKv.Remove(ctx, key)
+	}
+	return kc.MetaKv.MultiSaveAndRemoveWithPrefix(ctx, nil, []string{key + "/", dataViewPagesPrefix(view.GetCollectionId(), version)})
 }
 
 func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {
-	return kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+	if err := kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID)); err != nil {
+		return err
+	}
+	if err := kc.MetaKv.RemoveWithPrefix(ctx, fmt.Sprintf("datacoord-meta/split-history/%d/", collectionID)); err != nil {
+		return err
+	}
+	if err := kc.MetaKv.RemoveWithPrefix(ctx, adoptionPrefix(collectionID)); err != nil {
+		return err
+	}
+	return kc.MetaKv.RemoveWithPrefix(ctx, fmt.Sprintf("datacoord-meta/pages/%d/", collectionID))
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
@@ -1190,6 +1202,46 @@ func (kc *Catalog) SaveCompactionTask(ctx context.Context, coll *datapb.Compacti
 func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
 	key := buildCompactionTaskPath(task)
 	return kc.MetaKv.Remove(ctx, key)
+}
+
+// ListSplitShardTask returns the record of every shard split.
+func (kc *Catalog) ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error) {
+	tasks := make([]*datapb.SplitShardTask, 0)
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.SplitShardTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return merr.WrapErrSerializationFailed(err, "unmarshal SplitShardTask at %s", string(key))
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SplitShardTaskPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// SaveSplitShardTask writes the record of one shard split.
+func (kc *Catalog) SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	if task == nil {
+		return nil
+	}
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal SplitShardTask %d of collection %d", task.GetTaskId(), task.GetCollectionId())
+	}
+	return kc.MetaKv.Save(ctx, buildSplitShardTaskPath(task), string(value))
+}
+
+// DropSplitShardTask removes the record of one shard split.
+func (kc *Catalog) DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	if err := kc.DropSplitHistoryBoundaries(ctx, task); err != nil {
+		return err
+	}
+	if err := kc.MetaKv.Remove(ctx, adoptionKey(task.GetCollectionId(), task.GetTaskId())); err != nil {
+		return err
+	}
+	return kc.MetaKv.Remove(ctx, buildSplitShardTaskPath(task))
 }
 
 func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {

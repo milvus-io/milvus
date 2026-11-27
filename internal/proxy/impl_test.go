@@ -4445,3 +4445,16 @@ func TestRegisterRestRouterOnlyPublishesConsolePaths(t *testing.T) {
 			route.Method, route.Path)
 	}
 }
+
+func TestGetSplitRetirementReachesDataCoord(t *testing.T) {
+	paramtable.Init()
+	mix := mocks.NewMockMixCoordClient(t)
+	node := &Proxy{mixCoord: mix}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req := &milvuspb.GetMetricsRequest{Request: `{"metric_type":"shard_split_retirement","task_id":123}`}
+	want := &milvuspb.GetMetricsResponse{Status: merr.Success(), Response: "task progress"}
+	mix.EXPECT().GetMetrics(mock.Anything, req).Return(want, nil).Once()
+	got, err := node.GetMetrics(context.Background(), req)
+	require.NoError(t, err)
+	require.Same(t, want, got)
+}

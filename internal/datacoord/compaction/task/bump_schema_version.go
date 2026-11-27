@@ -124,6 +124,7 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		PlanID:                    taskProto.GetPlanID(),
 		StartTime:                 taskProto.GetStartTime(),
 		Type:                      taskProto.GetType(),
+		SplitRewrite:              sourceSplitRewrite(t.meta, taskProto),
 		Channel:                   taskProto.GetChannel(),
 		CollectionTtl:             taskProto.GetCollectionTtl(),
 		TotalRows:                 taskProto.GetTotalRows(),

@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
@@ -49,8 +50,39 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 			}
 			continue
 		}
-		return msgID, err
+		return msgID, r.asShardFencedIfTxnOnSplitSource(msg, err)
 	}
+}
+
+// asShardFencedIfTxnOnSplitSource reroutes an expired transaction body, but
+// never authorizes replay of an unknown Commit outcome. The producer waits for
+// every body response before sending Commit, so an expired body cannot have
+// committed. A missing Commit session proves less: both the split fence and
+// ordinary time tick cleanup remove committed sessions as well as aborted ones.
+func (r *redoAppendInterceptor) asShardFencedIfTxnOnSplitSource(msg message.MutableMessage, err error) error {
+	if err == nil || msg.TxnContext() == nil {
+		return err
+	}
+	switch msg.MessageType() {
+	case message.MessageTypeBeginTxn, message.MessageTypeRollbackTxn:
+		// A Begin is refused with the fence error by the shard interceptor; a
+		// rollback of a transaction that is gone has nothing to retry.
+		return err
+	}
+	if !status.AsStreamingError(err).IsTxnExpired() {
+		return err
+	}
+	if !shards.IsSplitFenced(r.shardManager, msg.VChannel()) {
+		return err
+	}
+	if msg.MessageType() == message.MessageTypeCommitTxn {
+		// Expired triggers whole-transaction replay in the producer, and fence
+		// triggers rerouting in Proxy. Neither is safe without a commit outcome.
+		return status.New(streamingpb.StreamingCode_STREAMING_CODE_INVALID_TRANSACTION_STATE,
+			"transaction %d commit outcome is unknown on split source %s; it may have committed before the fence; automatic replay is unsafe",
+			msg.TxnContext().TxnID, msg.VChannel())
+	}
+	return status.NewShardFenced(msg.VChannel())
 }
 
 type callerContextKey struct{}
@@ -93,6 +125,11 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
+				if errors.Is(err, shards.ErrShardFenced) {
+					// The vchannel became the source of a shard split while
+					// this insert was waiting. The rows belong to the new shards.
+					return status.NewShardFenced(msg.VChannel())
+				}
 				if errors.IsAny(err, shards.ErrCollectionNotFound, shards.ErrPartitionNotFound) {
 					return status.NewUnrecoverableError("fail to wait growing segment ready, %s", err.Error())
 				}

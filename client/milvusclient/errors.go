@@ -24,10 +24,11 @@ type RPCError = merr.RPCError
 // Client-side error sentinels. Errors returned from RPCs with the same Milvus
 // code match these values through errors.Is.
 var (
-	ErrServiceNotReady          = merr.ErrServiceNotReady
-	ErrCollectionNotFound       = merr.ErrCollectionNotFound
-	ErrCollectionSchemaMismatch = merr.ErrCollectionSchemaMismatch
-	ErrIndexNotFound            = merr.ErrIndexNotFound
+	ErrServiceNotReady              = merr.ErrServiceNotReady
+	ErrCollectionNotFound           = merr.ErrCollectionNotFound
+	ErrCollectionSchemaMismatch     = merr.ErrCollectionSchemaMismatch
+	ErrCollectionMutationIncomplete = merr.ErrCollectionMutationIncomplete
+	ErrIndexNotFound                = merr.ErrIndexNotFound
 )
 
 // ErrorCode returns the Milvus numeric error code carried by err.

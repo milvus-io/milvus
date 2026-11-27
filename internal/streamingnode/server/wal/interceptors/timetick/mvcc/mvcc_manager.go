@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -83,6 +84,14 @@ func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
 	// PChannel/control operations do not change this VChannel's visible data.
 	// Query-plan transform barriers are handled independently by cm.query above.
 	if vchannel == "" || msg.IsPChannelLevel() || funcutil.IsControlChannel(vchannel) {
+		return
+	}
+	if messageutil.IsSplitShardGenesis(msg) {
+		// The copy of a SplitShard message on a target vchannel is the first
+		// message of that vchannel. It registers the shard as live, the way
+		// CreateCollection does. The copy on the source vchannel is an ordinary
+		// message of a live shard and takes the default branch below.
+		cm.vchannelMVCCTimestamps[vchannel] = max(cm.vchannelMVCCTimestamps[vchannel], tt)
 		return
 	}
 	switch msgType {

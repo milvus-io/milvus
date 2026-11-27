@@ -125,6 +125,20 @@ func TestBroadcaster(t *testing.T) {
 		return appended.Load() == 9 && len(done.Collect()) == 6
 	}, 30*time.Second, 10*time.Millisecond)
 
+	// A consumer ack observer sees every acknowledgement of a task that is not
+	// a tombstone, and an observer that fails leaves the copy unacknowledged:
+	// the first acknowledgement below is sent twice.
+	var observed atomic.Int32
+	registry.ResetConsumerAckObservers(message.MessageTypeDropCollection)
+	t.Cleanup(func() { registry.ResetConsumerAckObservers() })
+	registry.RegisterConsumerAckObserver(message.MessageTypeDropCollection, func(_ context.Context, msg message.ImmutableMessage) error {
+		assert.Equal(t, uint64(7), msg.BroadcastHeader().BroadcastID)
+		if observed.Add(1) == 1 {
+			return errors.New("observer is not ready")
+		}
+		return nil
+	})
+
 	// only task 7 is not done.
 	ack(t, bc, 7, "v1")
 	ack(t, bc, 7, "v1") // test already acked, make the idempotent.
@@ -137,6 +151,11 @@ func TestBroadcaster(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return appended.Load() == 9 && len(done.Collect()) == 7
 	}, 30*time.Second, 10*time.Millisecond)
+	assert.EqualValues(t, 7, observed.Load())
+	// The acknowledgement of a tombstone is ignored, by the observer as well.
+	ack(t, bc, 7, "v1")
+	assert.EqualValues(t, 7, observed.Load())
+	registry.ResetConsumerAckObservers()
 
 	// Test broadcast here.
 	broadcastWithSameRK := func() {

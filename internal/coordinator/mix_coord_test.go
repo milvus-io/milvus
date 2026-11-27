@@ -916,3 +916,21 @@ func TestMixCoord_SharedMetaStoreIsInjected(t *testing.T) {
 	_, ok = view.GetSegment(42)
 	assert.False(t, ok, "a removal on the write side must be visible on the read side")
 }
+
+func TestMixCoordForwardsSplitRetirementToDataCoord(t *testing.T) {
+	ctx := t.Context()
+	dc := &datacoord.Server{}
+	mix := &mixCoordImpl{datacoordServer: dc}
+	req := &milvuspb.GetMetricsRequest{Request: `{"metric_type":"shard_split_retirement","task_id":123}`}
+	want := &milvuspb.GetMetricsResponse{Status: merr.Success(), Response: "retirement progress"}
+	patch := mockey.Mock((*datacoord.Server).GetMetrics).To(func(server *datacoord.Server, actualCtx context.Context, actualReq *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+		require.Same(t, dc, server)
+		require.Equal(t, ctx, actualCtx)
+		require.Same(t, req, actualReq)
+		return want, nil
+	}).Build()
+	defer patch.UnPatch()
+	resp, err := mix.GetMetrics(ctx, req)
+	require.NoError(t, err)
+	require.Same(t, want, resp)
+}
