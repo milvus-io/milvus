@@ -6,6 +6,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
+// SkippedIndexBuildReason is the persisted completion reason for a build that
+// DataCoord deliberately skipped before dispatch.
+const SkippedIndexBuildReason = "fake finished index success"
+
 type SegmentIndex struct {
 	// ArtifactPresent is set on transient projections of SegmentInfo summaries.
 	ArtifactPresent bool
@@ -46,6 +50,13 @@ type SegmentIndex struct {
 	// keep it even after their entry leaves the current manifest. The zero value
 	// conservatively treats a record as catalog-backed. It is not serialized.
 	ManifestPublished bool
+}
+
+// IsSkippedBuild distinguishes an explicit no-file completion from an
+// incomplete or malformed artifact record.
+func (index *SegmentIndex) IsSkippedBuild() bool {
+	return index.IndexState == commonpb.IndexState_Finished &&
+		index.FailReason == SkippedIndexBuildReason && len(index.IndexFileKeys) == 0
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {

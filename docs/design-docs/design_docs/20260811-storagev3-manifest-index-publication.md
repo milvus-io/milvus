@@ -9,20 +9,21 @@
 
 ## Summary
 
-A completed StorageV3 index artifact is recorded in the segment's manifest.
+A completed StorageV3 index build can be recorded in the segment's manifest,
+including an explicit skipped completion with no artifact files.
 Every such manifest revision is created by DataCoord inside
 `meta.CommitSegmentManifest`, in the same segment-scoped critical section that
 advances `SegmentInfo.manifest_path` and persists the index task metadata.
 
-Publication is opt-in and exclusive with the etcd `SegmentIndex` row, behind
-`dataCoord.index.writeSegmentIndexToManifest` (default off), captured when a build
-task is created. Off is the pure legacy path: every task state goes to etcd and
+Publication is exclusive with the etcd `SegmentIndex` row. The task captures
+`dataCoord.index.writeSegmentIndexToManifest` (default on) when it is created.
+Off is the pure legacy path: every task state goes to etcd and
 no manifest index entry is
-produced. On changes only the terminal artifact placement: Unissued,
-InProgress, Failed, and fake-Finished records still persist to etcd; a Finished
-StorageV3 build with files is published to the manifest, and that publication
-deletes its etcd task row in the same catalog transaction. StorageV1/V2 always
-remain etcd-backed. There is no durable dual-write mode.
+produced. Unissued, InProgress, and Failed tasks still persist to etcd. In the
+default metadata mode, successful and explicitly skipped manifest-mode builds
+publish to the manifest and retire their etcd task row in the same transaction.
+The new-cluster summary mode retains its summary-only path for completions
+without files. StorageV1/V2 always remain etcd-backed.
 
 The same switch may be changed in either direction. A
 `SegmentInfo.manifest_has_index` marker conservatively records whether the
@@ -37,8 +38,12 @@ all-etcd cluster has no marked segments and performs no manifest index reads.
 Historical eligible artifacts may be moved from etcd-only to manifest-only
 placement by the optional
 [manifest index backfill](20260901-storagev3-manifest-index-backfill.md). It
-uses this same publication transaction to add the entry and retire the row;
-there is no dual-write interval or separate index-prune phase.
+uses this same publication transaction to add the entry and retire the row.
+The backfill inspector includes catalog-backed skipped completions only with a
+separate opt-in. Direct publication of a newly skipped build does not depend
+on backfill. Both paths use a zero-file entry with a reserved skip property.
+Recovery restores Finished for these entries. File readers receive only actual
+artifact paths.
 
 Index workers keep their existing responsibility — build the index and upload
 its files — and keep their existing result contract. They do not open a
@@ -264,9 +269,9 @@ made complete at startup and publication updates it atomically:
   for query fallback and orphan-GC protection. If a failed read is followed by a
   successful existence check proving a Dropped segment's manifest is absent,
   startup leaves its marker unchanged and lets pending GC remove the catalog row.
-- a finished record with no `index_file_keys` has no manifest entry either: the
-  only build that records no files is a fake-finished one (a segment too small
-  to train), which `publishIndexToManifest` skips.
+- a fake-finished build has no `index_file_keys`. A manifest-mode task publishes
+  the explicit skip property during completion. Opt-in backfill can also move
+  existing catalog-backed skipped completions to the manifest.
 
 This matters for cost as well as clarity: `GetIndexInfos` is driven by
 QueryCoord's index checker every `checkIndexInterval` for exactly the segments

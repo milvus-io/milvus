@@ -49,10 +49,13 @@ func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
 	return relative, nil
 }
 
-// ManifestIndexInfo identifies a completed index artifact registered in a
-// StorageV3 manifest. Path is the artifact root, IndexFileKeys are relative to
-// it. Properties preserves optional storage metadata from older manifests;
-// Milvus publishers leave it empty rather than copying collection parameters.
+// ManifestIndexSkippedProperty marks a completed index build with no artifact.
+const ManifestIndexSkippedProperty = "milvus.index.skipped"
+
+// ManifestIndexInfo identifies a completed index in a StorageV3 manifest.
+// Path is the artifact root, and IndexFileKeys are relative to it. For a
+// skipped build, Path identifies the canonical build directory and there
+// are no file keys. Properties holds entry metadata, such as the skip marker.
 //
 // The index bytes must already exist before this metadata is published. A
 // manifest transaction only makes the metadata visible atomically with a new
@@ -80,6 +83,11 @@ type ManifestIndexInfo struct {
 	Properties                map[string]string
 }
 
+// IsSkippedBuild reports whether the entry explicitly records a skipped build.
+func (index ManifestIndexInfo) IsSkippedBuild() bool {
+	return index.Properties[ManifestIndexSkippedProperty] == "true"
+}
+
 // DropIndexEntry removes one index's metadata from a manifest revision.
 //
 // milvus-storage drops every entry whose index_id matches, so a drop issued
@@ -92,7 +100,7 @@ type DropIndexEntry struct {
 	ExpectedBuildID int64
 }
 
-// GetManifestIndexInfos returns all completed index artifacts recorded in a
+// GetManifestIndexInfos returns all completed index entries recorded in a
 // StorageV3 manifest.
 func GetManifestIndexInfos(
 	manifestPath string,
@@ -182,7 +190,7 @@ func manifestIndexInfos(cManifest *C.LoonManifest, manifestPath string) ([]Manif
 	return indexes, nil
 }
 
-// stageIndexInfo stages one completed index artifact onto a loon transaction.
+// stageIndexInfo stages one completed index entry onto a loon transaction.
 // Every C allocation is released when this function returns, which is why the
 // per-index staging lives in its own function instead of a loop body.
 func stageIndexInfo(handle C.LoonTransactionHandle, index ManifestIndexInfo) error {

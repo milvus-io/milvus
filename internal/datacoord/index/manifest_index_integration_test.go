@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -42,9 +43,89 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestCoordinatorSkippedIndexManifestPublication(t *testing.T) {
+	for _, publish := range []bool{true, false} {
+		t.Run(fmt.Sprintf("manifest_writes=%t", publish), func(t *testing.T) {
+			ctx := context.Background()
+			meta.WithSegmentIndexManifestWrites(t, publish)
+			WithManifestIndexBackfillEnabled(t, false)
+			for item, value := range map[*paramtable.ParamItem]string{
+				&Params.DataCoordCfg.ManifestIndexBackfillIncludeSkipped: "false",
+				&Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex:      "1001",
+			} {
+				previous := item.GetValue()
+				Params.Save(item.Key, value)
+				t.Cleanup(func() { Params.Save(item.Key, previous) })
+			}
+
+			store := meta.NewFakeManifestStore(t)
+			kv := &FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
+			catalog := datacoord.NewCatalog(kv, "", "")
+			m, domains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+			im := domains.IndexMeta
+			SeedRestartTask(t, m, im)
+			collection := &meta.CollectionInfo{ID: meta.RestartCollID, Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{FieldID: meta.RestartFieldID, Name: "vec", DataType: schemapb.DataType_FloatVector}},
+			}}
+			m.AddCollection(collection)
+			handler := meta.NewNMockHandler(t)
+			handler.EXPECT().GetCollection(ctx, meta.RestartCollID).Return(collection, nil).Maybe()
+			job, ok := im.GetIndexJob(meta.RestartBuildID)
+			require.True(t, ok)
+			task := NewIndexBuildTask(model.CloneSegmentIndex(job), 1, m, im, handler, nil, nil)
+			require.True(t, task.CanCompleteOnCoordinator())
+			original := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+
+			if publish {
+				// A failed catalog commit must neither expose the new revision nor
+				// silently finish the task in etcd. The coordinator retries it.
+				kv.FailAtomicUpdate = true
+				require.Equal(t, globalTask.LocalRetry, task.CompleteOnCoordinator(ctx))
+				require.Equal(t, original, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+				require.False(t, m.GetSegment(ctx, meta.RestartSegID).GetManifestHasIndex())
+				rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+				require.NoError(t, err)
+				require.Len(t, rows, 1)
+				require.Equal(t, job.IndexState, rows[0].IndexState)
+				kv.FailAtomicUpdate = false
+			}
+			require.Equal(t, globalTask.LocalCompleted, task.CompleteOnCoordinator(ctx))
+			require.Equal(t, taskcommon.Finished, task.GetTaskState())
+			require.True(t, task.IsSkippedBuild())
+
+			segment := m.GetSegment(ctx, meta.RestartSegID)
+			rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
+			require.NoError(t, err)
+			require.Equal(t, publish, segment.GetManifestHasIndex())
+			if publish {
+				require.NotEqual(t, original, segment.GetManifestPath())
+				entries := store.BackfillEntriesAt(segment.GetManifestPath())
+				require.Len(t, entries, 1)
+				require.Equal(t, meta.RestartBuildID, entries[0].BuildID)
+				require.True(t, entries[0].IsSkippedBuild())
+				require.Empty(t, entries[0].IndexFileKeys)
+				require.Empty(t, rows)
+			} else {
+				require.Equal(t, original, segment.GetManifestPath())
+				require.Zero(t, store.CommitCount)
+				require.Len(t, rows, 1)
+				require.True(t, rows[0].IsSkippedBuild())
+			}
+
+			_, restarted := BootMetaForRestart(t, catalog, meta.RestartCollID)
+			recovered, ok := restarted.IndexMeta.GetIndexJob(meta.RestartBuildID)
+			require.True(t, ok)
+			require.True(t, recovered.IsSkippedBuild())
+			require.Equal(t, publish, recovered.ManifestPublished)
+		})
+	}
+}
 
 // TestBuildManifestIndexInfoFromDataCoordMetadata proves the manifest entry is
 // assembled entirely from DataCoord state - no worker-supplied manifest input -
@@ -617,7 +698,7 @@ func TestPublishIndexToManifestDeclinesDroppedIndexDefinition(t *testing.T) {
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}
 
-	published, err := it.publishIndexToManifest(result)
+	published, err := it.publishIndexToManifest(ctx, result)
 	require.NoError(t, err)
 	require.False(t, published, "a build whose index definition was dropped must not take ownership of the result")
 	assert.Empty(t, store.Revisions, "no manifest commit may be issued for a dropped index")
@@ -650,7 +731,7 @@ func TestPublishIndexToManifestRejectsUnusableEntry(t *testing.T) {
 	require.True(t, ok)
 	it := NewIndexBuildTask(segIdx, 1, m, mDomains.IndexMeta, nil, nil, nil)
 
-	published, err := it.publishIndexToManifest(&workerpb.IndexTaskInfo{
+	published, err := it.publishIndexToManifest(context.Background(), &workerpb.IndexTaskInfo{
 		BuildID:               meta.RestartBuildID,
 		State:                 commonpb.IndexState_Finished,
 		IndexFileKeys:         []string{"0", "1"},
@@ -685,7 +766,7 @@ func TestPublishIndexToManifestDeclinedForOffModeTask(t *testing.T) {
 		IndexStorePathVersion: segIdx.IndexStorePathVersion,
 	}
 
-	published, err := it.publishIndexToManifest(result)
+	published, err := it.publishIndexToManifest(ctx, result)
 	require.NoError(t, err)
 	require.False(t, published)
 	require.NoError(t, it.SetJobInfo(result))

@@ -75,8 +75,10 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 	if segIdx.IndexType != "" {
 		indexType = segIdx.IndexType
 	}
-	// Collection parameters describe the current definition, not this build.
-	// Leave Properties empty rather than persisting them as artifact metadata.
+	var properties map[string]string
+	if segIdx.IsSkippedBuild() {
+		properties = map[string]string{packed.ManifestIndexSkippedProperty: "true"}
+	}
 
 	fieldID := m.IndexCatalog.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
@@ -95,6 +97,7 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 		IndexFileKeys:             common.CloneStringList(segIdx.IndexFileKeys),
+		Properties:                properties,
 	}, nil
 }
 
@@ -134,13 +137,20 @@ func SegmentIndexFilePaths(rootPath string, segIdx *model.SegmentIndex, segment 
 }
 
 // manifestIndexFilePathInfo projects one manifest index entry into the load
-// metadata QueryNode consumes. It returns false for an entry that cannot
-// produce a safe file list, which the caller treats as "no manifest artifact".
+// metadata QueryNode consumes. A valid skipped build returns nil with ok
+// set, while a malformed entry returns nil with ok clear.
 func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestIndexInfo) (*indexpb.IndexFilePathInfo, bool) {
 	if manifestIndex.Path == "" || manifestIndex.IndexName == "" || manifestIndex.IndexType == "" ||
 		manifestIndex.IndexStorePathVersion < indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED ||
-		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 ||
-		len(manifestIndex.IndexFileKeys) == 0 {
+		manifestIndex.NumRows < 0 || manifestIndex.SerializedSize < 0 || manifestIndex.MemSize < 0 {
+		return nil, false
+	}
+	if manifestIndex.IsSkippedBuild() {
+		return nil, manifestIndex.IndexID > 0 && manifestIndex.BuildID > 0 &&
+			manifestIndex.ColumnName != "" && metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) &&
+			len(manifestIndex.IndexFileKeys) == 0 && manifestIndex.SerializedSize == 0 && manifestIndex.MemSize == 0
+	}
+	if len(manifestIndex.IndexFileKeys) == 0 {
 		return nil, false
 	}
 
@@ -381,14 +391,10 @@ func (m *Meta) recoverManifestIndexes(ctx context.Context, segment *SegmentInfo,
 // segmentIndexFromManifest projects a manifest index entry back into the
 // SegmentIndex record the catalog would have held.
 //
-// The entry carries every field that describes a finished artifact. What it
-// cannot carry is the build task's own history - the assigned node, the
-// failure reason, and the create/finish timestamps - because a manifest
-// records the artifact, not the build that produced it. Those are left zero:
-// the state is Finished by construction, so the only consumer of the
-// timestamps is the human-readable projection in DescribeIndex.
+// The entry records index identity and artifact details or a skipped build.
+// Task history such as the assigned node and timestamps is left zero.
 func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.ManifestIndexInfo) *model.SegmentIndex {
-	return &model.SegmentIndex{
+	record := &model.SegmentIndex{
 		SegmentID:                 segment.GetID(),
 		CollectionID:              segment.GetCollectionID(),
 		PartitionID:               segment.GetPartitionID(),
@@ -406,4 +412,8 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
 		ManifestPublished:         true,
 	}
+	if manifestIndex.IsSkippedBuild() {
+		record.FailReason = model.SkippedIndexBuildReason
+	}
+	return record
 }

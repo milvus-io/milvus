@@ -1534,8 +1534,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		// The catalog row is the migration marker in the exclusive-placement
 		// design. Once it is absent, this build is already manifest-resident and
 		// republishing it would create a new revision on every inspector tick.
-		if previous.ManifestPublished || previous.IsDeleted ||
-			previous.IndexState != commonpb.IndexState_Finished || len(previous.IndexFileKeys) == 0 {
+		if !segmentIndexNeedsManifestBackfill(previous) {
 			return staged, meta.ErrSegmentIndexBackfillSkipped
 		}
 		if !m.IsIndexExist(previous.CollectionID, previous.IndexID) {
