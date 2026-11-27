@@ -24,6 +24,7 @@ type flushPack struct {
 	FromTimeTick uint64
 	ToTimeTick   uint64
 	Schema       *schemapb.CollectionSchema
+	PreviousRows uint64 // Rows at the checkpoint that supplied Meta.PersistedStorage.
 	Rows         uint64
 	BinarySize   uint64
 	Inserts      []message.ImmutableMessage

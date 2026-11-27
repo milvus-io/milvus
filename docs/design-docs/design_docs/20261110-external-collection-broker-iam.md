@@ -189,6 +189,9 @@ fallback. Server tests
 verify vendor AssumeRole requests with temporary source credentials and
 sanitized failures.
 
-The one-GCP-identity-per-(endpoint,bucket) registry restriction and mixed
-GCP/S3 HTTP-factory initialization limitation remain. Mocked tests and source
-inspection do not establish production deployment or live five-cloud E2E.
+milvus-storage f9138562 (milvus-storage#837) removes the process-wide GCP
+credential registry and the separate GCP HTTP-factory initialization. The
+credential provider is bound to each S3 client, so several GCP identities can
+share an endpoint and bucket, and GCP and S3-compatible filesystems initialize
+together in one process. Mocked tests and source inspection do not establish
+production deployment or live five-cloud E2E.

@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestNormalizeExternalSpec(t *testing.T) {
@@ -32,18 +34,13 @@ func TestNormalizeExternalSpec(t *testing.T) {
 		{"extfs", `{"EXTFS":{"region":"US-East-1"}}`, `{"extfs":{"region":"US-East-1"}}`},
 		{"snapshot precision", `{"Snapshot_Id":5320540205222981137}`, `{"snapshot_id":"5320540205222981137"}`},
 		{"unicode fold", `{"Format":"paimon-table","ſnapshot_id":"7","ſcan_mode":"data-split"}`, `{"format":"paimon-table","snapshot_id":"7","scan_mode":"data-split"}`},
-		{"last variant", `{"format":"parquet","FORMAT":"vortex"}`, `{"format":"vortex"}`},
-		{"last canonical", `{"FORMAT":"vortex","format":"parquet"}`, `{"format":"parquet"}`},
-		{"identical keys", `{"format":"vortex","format":"parquet"}`, `{"format":"parquet"}`},
-		{"null string keeps value", `{"format":"vortex","FORMAT":null}`, `{"format":"vortex"}`},
-		{"null snapshot clears value", `{"snapshot_id":7,"SNAPSHOT_ID":null}`, `{"snapshot_id":null}`},
-		{"duplicate maps merge", `{"extfs":{"region":"us-east-1"},"EXTFS":{"use_ssl":"true"}}`, `{"extfs":{"region":"us-east-1","use_ssl":"true"}}`},
-		{"null map clears value", `{"extfs":{"region":"us-east-1"},"EXTFS":null}`, `{"extfs":null}`},
-		{"duplicate arrays replace", `{"columns":["a"],"COLUMNS":["b"]}`, `{"columns":["b"]}`},
-		{"null array clears value", `{"columns":["a"],"COLUMNS":null}`, `{"columns":null}`},
+		{"null string", `{"FORMAT":null}`, `{"format":""}`},
+		{"null snapshot", `{"SNAPSHOT_ID":null}`, `{"snapshot_id":null}`},
+		{"null map", `{"EXTFS":null}`, `{"extfs":null}`},
+		{"null array", `{"COLUMNS":null}`, `{"columns":null}`},
+		{"escaped key names", `{"form\u0061t":"paimon-table","\u0045XTFS":{"r\u0065gion":"us-east-1"}}`, `{"format":"paimon-table","extfs":{"region":"us-east-1"}}`},
 		{"scan mode missing", `{"Format":"paimon-table"}`, `{"format":"paimon-table"}`},
 		{"scan mode null", `{"Format":"paimon-table","Scan_Mode":null}`, `{"format":"paimon-table","scan_mode":""}`},
-		{"scan mode duplicate", `{"Format":"paimon-table","SCAN_MODE":"data-split","scan_mode":"direct-file"}`, `{"format":"paimon-table","scan_mode":"direct-file"}`},
 		{"unknown values", `{"Format":"parquet","CUSTOM":{"Format":"untouched","n":9007199254740993,"f":1.2300},"custom":null}`, `{"format":"parquet","CUSTOM":{"Format":"untouched","n":9007199254740993,"f":1.2300},"custom":null}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,5 +75,18 @@ func TestNormalizeExternalSpecInvalidTypes(t *testing.T) {
 		got, err := NormalizeExternalSpec(input)
 		require.NoError(t, err)
 		require.Equal(t, input, got)
+	}
+}
+
+// NormalizeExternalSpec is the last Go step before native readers, so a
+// persisted spec that sets one key twice fails here instead of reaching native
+// code as a merge of both values.
+func TestNormalizeExternalSpecRejectsCollidingKeys(t *testing.T) {
+	for _, tc := range collidingKeySpecs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NormalizeExternalSpec(tc.spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
 	}
 }

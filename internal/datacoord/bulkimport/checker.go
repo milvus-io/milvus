@@ -472,7 +472,9 @@ func (c *Checker) createImportTasks(job ImportJob, preimports []ImportTask, upda
 		return
 	}
 
-	segmentMaxSize := GetSegmentMaxSize(job, c.IndexMeta)
+	segmentMaxSize := int(CapSegmentMaxSizeByRows(job, int64(GetSegmentMaxSize(job, c.IndexMeta)),
+		lo.SumBy(lacks, func(stat *datapb.ImportFileStats) int64 { return stat.GetTotalMemorySize() }),
+		lo.SumBy(lacks, func(stat *datapb.ImportFileStats) int64 { return stat.GetTotalRows() })))
 	groups := RegroupImportFiles(job, lacks, segmentMaxSize)
 	newTasks, err := NewImportTasks(groups, job, c.alloc, c.Meta, c.ImportMeta, segmentMaxSize)
 	if err != nil {

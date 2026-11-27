@@ -144,15 +144,14 @@ class TestCollectionDropField(TestBase):
         "field_name,expected_message",
         [
             ("id", "cannot drop primary key field"),
-            ("dense", "cannot drop the last vector field"),
             ("missing_field", "field not found"),
         ],
-        ids=["primary-key", "last-vector", "unknown-field"],
+        ids=["primary-key", "unknown-field"],
     )
     def test_drop_field_rejects_protected_or_unknown_field(self, field_name, expected_message):
         """
         target: verify REST surfaces server-side field drop validation
-        method: request a primary-key, last-vector, or unknown field drop by name
+        method: request a primary-key or unknown field drop by name
         expected: each request fails without removing any schema field
         """
         collection_name = self._create_collection()
@@ -173,6 +172,41 @@ class TestCollectionDropField(TestBase):
             expected_indexes=["dense_idx"],
         )
         assert after_state == before_state
+
+    def test_drop_last_vector_field(self):
+        """
+        target: verify REST can drop the only vector field of a collection
+        method: drop the vector field by name
+        expected: the request succeeds and the collection is left with no vector field and no vector index;
+                  search and hybrid search then return the error of a collection without a vector field
+        """
+        collection_name = self._create_collection()
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "dense", "tag"],
+            expected_indexes=["dense_idx"],
+        )
+
+        rsp = self.collection_client.drop_field(collection_name, field_name="dense")
+        assert rsp["code"] == 0, rsp
+        self._assert_collection_state(collection_name, expected_fields=["id", "tag"], expected_indexes=[])
+
+        # Search and hybrid search return the error the gRPC API returns for a
+        # collection without a vector field, not a request body error.
+        no_vector = f"collection {collection_name} has no vector field, search is not supported"
+        rsp = self.vector_client.vector_search(
+            {"collectionName": collection_name, "data": [[0.1, 0.2, 0.3, 0.4]], "annsField": "dense", "limit": 3}
+        )
+        assert rsp["code"] == 1100 and no_vector in rsp["message"], rsp
+        rsp = self.vector_client.vector_advanced_search(
+            {
+                "collectionName": collection_name,
+                "search": [{"data": [[0.1, 0.2, 0.3, 0.4]], "annsField": "dense", "limit": 3}],
+                "rerank": {"strategy": "rrf", "params": {"k": 10}},
+                "limit": 3,
+            }
+        )
+        assert rsp["code"] == 1100 and no_vector in rsp["message"], rsp
 
     def test_drop_field_second_request_is_rejected(self):
         """

@@ -53,6 +53,12 @@ func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
 	_, err = MarshalCollectionSchema(schema)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 
+	// A persisted spec that sets one key twice is not sent to native code.
+	schema.ExternalSpec = `{"format":"paimon-table","Format":"parquet"}`
+	_, err = MarshalCollectionSchema(schema)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `external spec keys "format" and "Format" differ only in case`)
+
 	schema.ExternalSpec = ""
 	blob, err = MarshalCollectionSchema(schema)
 	require.NoError(t, err)
@@ -63,6 +69,26 @@ func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
 func TestValidateSourceAndSpecLegacyKeys(t *testing.T) {
 	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table",
 		`{"Format":"paimon-table","SNAPSHOT_ID":"7","Scan_Mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`))
+}
+
+// Create in Proxy and RootCoord, Proxy refresh and DataCoord refresh
+// revalidation all call ValidateSourceAndSpec.
+func TestValidateSourceAndSpecRejectsCollidingKeys(t *testing.T) {
+	const extfs = `{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}`
+	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table", `{"format":"parquet","extfs":`+extfs+`}`))
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"extfs":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"EXTFS":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "EXTFS" and "Extfs" differ only in case`},
+		{`{"format":"parquet","Format":"vortex","extfs":` + extfs + `}`, `external spec keys "format" and "Format" differ only in case`},
+		{`{"cloud_extra":{},"Cloud_Extra":{},"extfs":` + extfs + `}`, `external spec keys "cloud_extra" and "Cloud_Extra" differ only in case`},
+		{`{"extfs":` + extfs + `,"extfs":` + extfs + `}`, `external spec key "extfs" appears more than once`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true","Region":"eu-west-1"}}`, `extfs keys "region" and "Region" differ only in case`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true","region":"eu-west-1"}}`, `extfs key "region" appears more than once`},
+	} {
+		err := ValidateSourceAndSpec("s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+	}
 }
 
 func TestParseExternalSpec_Empty(t *testing.T) {
@@ -638,6 +664,22 @@ func TestRedactExternalSpec(t *testing.T) {
 	t.Run("invalid_snapshot_id_returns_placeholder", func(t *testing.T) {
 		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`))
 		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":{}}`))
+	})
+
+	t.Run("lone_key_spelling_redacted_under_canonical_name", func(t *testing.T) {
+		out := RedactExternalSpec(`{"Format":"parquet","EXTFS":{"region":"us-east-1","access_key_value":"SEC"},"Snapshot_Id":7}`)
+		assert.NotContains(t, out, "SEC")
+		assert.JSONEq(t, `{"format":"parquet","extfs":{"region":"us-east-1","access_key_value":"***"},"snapshot_id":"7"}`, out)
+	})
+
+	t.Run("key_set_twice_returns_placeholder", func(t *testing.T) {
+		for _, spec := range []string{
+			`{"format":"parquet","extfs":{"access_key_value":"SEC"},"Extfs":{"access_key_value":"SEC2"}}`,
+			`{"format":"parquet","extfs":{"access_key_value":"SEC"},"extfs":{}}`,
+			`{"format":"parquet","extfs":{"access_key_value":"SEC","Access_Key_Value":"SEC2"}}`,
+		} {
+			assert.Equal(t, "<invalid spec>", RedactExternalSpec(spec), spec)
+		}
 	})
 
 	t.Run("preserves_unknown_top_level_fields", func(t *testing.T) {

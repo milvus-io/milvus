@@ -751,9 +751,15 @@ func (st *StatsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		}
 		var updateErr error
 		if st.shouldPublishPreparedManifest(ctx, segID, result) {
+			var catalogMutation meta.SegmentCatalogMutation
+			if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+				// A legacy sort rewrites insert files and filters deletes and TTL.
+				catalogMutation.Operators = []meta.UpdateOperator{meta.InvalidateReplacedManifestFieldSizes(segID, manifest)}
+			}
 			updateErr = classifyStatsManifestCommitError(st.Meta.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
 				SegmentID:        segID,
 				ExpectedManifest: result.GetBaseManifest(),
+				CatalogMutation:  catalogMutation,
 				Mutation: meta.ManifestMutation{
 					Type:         meta.ManifestMutationNoop,
 					ManifestPath: manifest,

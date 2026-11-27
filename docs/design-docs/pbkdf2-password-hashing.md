@@ -27,9 +27,9 @@ Salt and key use unpadded base64. New hashes use a 16-byte random salt, a 64-byt
 
 A rate-limited warning is logged when a bcrypt hash verifies while `pbkdf2-sha512` is configured.
 
-## Why not `crypto/pbkdf2`
+## Key derivation
 
-In Go 1.26, `crypto/pbkdf2` uses Go's native FIPS module and bypasses BoringCrypto, which `MILVUS_FIPS_ENABLED=ON` builds use. `crypto/hmac` and `crypto/sha512` route to BoringCrypto under `GOEXPERIMENT=boringcrypto`, so PBKDF2 is built on those.
+PBKDF2 comes from `crypto/pbkdf2`. A `MILVUS_FIPS_ENABLED=ON` build links the FIPS 140-3 Go Cryptographic Module, so the derivation runs inside the validated module, whose approved algorithms include PBKDF. An earlier version built PBKDF2 on `crypto/hmac` because FIPS builds used BoringCrypto, which `crypto/pbkdf2` bypasses; see `20261123-fips-go-cryptographic-module.md`.
 
 ## Password length
 

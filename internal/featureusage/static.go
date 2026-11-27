@@ -39,10 +39,16 @@ const (
 	DeclaredEnableDynamicField = "enable_dynamic_field"
 	DeclaredEnableNamespace    = "enable_namespace"
 	DeclaredNullable           = "nullable"
-	DeclaredDefaultValue       = "default_value"
-	DeclaredAutoID             = "auto_id"
-	DeclaredMultiVectorField   = "multi_vector_field"
-	DeclaredStructArrayFields  = "struct_array"
+	// DeclaredNullableVector: at least one nullable vector field. nullable
+	// alone does not say which kind of field it is.
+	DeclaredNullableVector = "nullable_vector"
+	// DeclaredElementNullable: at least one struct array sub-field whose
+	// elements may be null (FieldSchema.element_nullable).
+	DeclaredElementNullable   = "element_nullable"
+	DeclaredDefaultValue      = "default_value"
+	DeclaredAutoID            = "auto_id"
+	DeclaredMultiVectorField  = "multi_vector_field"
+	DeclaredStructArrayFields = "struct_array"
 	// DeclaredExternalCollection: the collection reads an external source
 	// (collection.external_source); the source itself is stored outside the
 	// properties and is never named.
@@ -171,7 +177,8 @@ func ComputeCollectionEntries(in CollectionInput) []*internalpb.FeatureEntry {
 	}
 	for _, name := range []string{
 		DeclaredPartitionKey, DeclaredClusteringKey, DeclaredEnableDynamicField,
-		DeclaredEnableNamespace, DeclaredNullable, DeclaredDefaultValue, DeclaredAutoID,
+		DeclaredEnableNamespace, DeclaredNullable, DeclaredNullableVector, DeclaredElementNullable,
+		DeclaredDefaultValue, DeclaredAutoID,
 		DeclaredMultiVectorField, DeclaredStructArrayFields, DeclaredExternalCollection,
 	} {
 		c.ensure(GroupDeclared, name, "")
@@ -211,6 +218,7 @@ func computeOneCollection(c *collector, col *model.Collection, db *model.Databas
 	vectorFields := 0
 	var maxDim, maxLength, maxCapacity int64 = -1, -1, -1
 	hasNullable, hasDefault, hasAutoID := false, false, col.AutoID
+	hasNullableVector, hasElementNullable := false, false
 	hasPartitionKey, hasClusteringKey := false, false
 
 	for _, f := range fields {
@@ -236,6 +244,8 @@ func computeOneCollection(c *collector, col *model.Collection, db *model.Databas
 			maxCapacity = cap
 		}
 		hasNullable = hasNullable || f.Nullable
+		hasNullableVector = hasNullableVector || (f.Nullable && typeutil.IsVectorType(f.DataType))
+		hasElementNullable = hasElementNullable || f.ElementNullable
 		hasDefault = hasDefault || f.DefaultValue != nil
 		hasAutoID = hasAutoID || (f.IsPrimaryKey && f.AutoID)
 		hasPartitionKey = hasPartitionKey || f.IsPartitionKey
@@ -277,6 +287,12 @@ func computeOneCollection(c *collector, col *model.Collection, db *model.Databas
 	}
 	if hasNullable {
 		c.addOnce(seen, GroupDeclared, DeclaredNullable, "")
+	}
+	if hasNullableVector {
+		c.addOnce(seen, GroupDeclared, DeclaredNullableVector, "")
+	}
+	if hasElementNullable {
+		c.addOnce(seen, GroupDeclared, DeclaredElementNullable, "")
 	}
 	if hasDefault {
 		c.addOnce(seen, GroupDeclared, DeclaredDefaultValue, "")

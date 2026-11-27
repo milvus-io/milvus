@@ -704,3 +704,27 @@ func TestSetSegmentNormalizesRowCount(t *testing.T) {
 		})
 	}
 }
+
+// WithMinRowSize makes a copy charge at least that many bytes per row, which is
+// how a compaction planner applies a row cap through its byte based packing.
+// The segment it was copied from keeps reporting its stored bytes.
+func TestSegmentInfoMinRowSize(t *testing.T) {
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID:        1,
+		NumOfRows: 1000,
+		Stats:     &datapb.Statistics{InsertBinlogSize: 12000, DeleteNumRows: 250},
+	})
+	assert.Equal(t, int64(12000), segment.GetSegmentSize())
+	assert.Equal(t, int64(9000), segment.GetResidualSegmentSize())
+
+	charged := segment.ShadowClone(WithMinRowSize(268.5))
+	assert.Equal(t, int64(268500), charged.GetSegmentSize())
+	assert.Equal(t, int64(201375), charged.GetResidualSegmentSize())
+	// copies of the copy keep the minimum
+	assert.Equal(t, int64(268500), charged.ShadowClone().GetSegmentSize())
+	assert.Equal(t, int64(268500), charged.Clone().GetSegmentSize())
+	// rows wider than the minimum keep their bytes
+	assert.Equal(t, int64(12000), segment.ShadowClone(WithMinRowSize(8)).GetSegmentSize())
+	// the source is untouched
+	assert.Equal(t, int64(12000), segment.GetSegmentSize())
+}

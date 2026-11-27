@@ -2034,6 +2034,100 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_add_bm25_function_field_to_collection_without_vector(self):
+        """
+        target: add a BM25 function field to a collection that has no vector field
+        method: load the collection with no index at all, write sealed, deleted and growing rows,
+                add the BM25 function field while loaded, write rows after the add, search without
+                reload, then drop the function field
+        expected: the output field is the first vector field of the collection; the collection stays
+                  loaded; a word in every row returns exactly the live rows, old sealed and growing rows
+                  included and deleted rows excluded; after the drop the collection has no vector field
+                  again, search returns that error and it loads with no index
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # Step 1: Create a collection without a vector field and load it with no index at all.
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("text", DataType.VARCHAR, max_length=1024, enable_analyzer=True)
+        client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+
+        def rows(ids):
+            return [{"id": i, "text": f"common row{i} document"} for i in ids]
+
+        client.insert(collection_name, rows(range(0, 100)))
+        client.flush(collection_name)
+        client.insert(collection_name, rows(range(100, 200)))
+        client.flush(collection_name)
+        client.delete(collection_name, ids=list(range(0, 10)))
+        client.insert(collection_name, rows(range(200, 250)))  # left growing
+        client.load_collection(collection_name)
+
+        # Step 2: Add the BM25 function field with its bound index while the collection is loaded.
+        sparse_field = FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        bm25_function = Function(
+            name="bm25_fn",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+        )
+        bound_index_params = client.prepare_index_params()
+        bound_index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.add_function_field(collection_name, sparse_field, bm25_function, index_params=bound_index_params)
+
+        desc = client.describe_collection(collection_name)
+        vector_fields = [f["name"] for f in desc["fields"] if "VECTOR" in DataType(f["type"]).name]
+        assert vector_fields == ["sparse"]
+        assert "bm25_fn" in [func["name"] for func in desc.get("functions", [])]
+        assert self.wait_for_index_ready(client, collection_name, index_name="sparse", timeout=180)
+
+        # Step 3: Rows written after the add get their output at write time.
+        client.insert(collection_name, rows(range(250, 300)))
+        live_ids = list(range(10, 300))
+
+        # Step 4: Without reload, the word in every row returns exactly the live rows.
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=["common"],
+            anns_field="sparse",
+            expected_id=None,
+            label="BM25 added to a collection without a vector field",
+            search_params={"metric_type": "BM25"},
+            limit=len(live_ids) + 10,
+            expected_ids=set(live_ids),
+            expected_count=len(live_ids),
+            timeout=60,
+        )
+        assert str(self.get_load_state(client, collection_name)[0]["state"]) == "Loaded"
+        hits = client.search(
+            collection_name, data=["row5"], anns_field="sparse", limit=3, search_params={"metric_type": "BM25"}
+        )
+        assert [hit["id"] for hit in hits[0]] == [], "a deleted row was returned"
+
+        # Step 5: Drop the function field: the collection has no vector field again.
+        client.drop_function_field(collection_name, "bm25_fn")
+        desc = client.describe_collection(collection_name)
+        assert [f["name"] for f in desc["fields"] if "VECTOR" in DataType(f["type"]).name] == []
+        self.search(
+            client,
+            collection_name,
+            data=["common"],
+            anns_field="sparse",
+            limit=3,
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "has no vector field, search is not supported"},
+        )
+        client.release_collection(collection_name)
+        client.load_collection(collection_name)
+        res = client.query(collection_name, filter="", output_fields=["count(*)"])
+        assert res[0]["count(*)"] == len(live_ids)
+
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_add_function_field_matches_existing_bm25_and_minhash_output(self):
         """

@@ -135,7 +135,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDro
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
 		Name:     "text_input",
@@ -164,7 +164,7 @@ func TestDDLCallbacksSchemaEvolutionRejectsGraphBreakingAlterCollectionSchemaDro
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
-	assertFieldExists(t, ctx, core, dbName, collectionName, "text_input", 101)
+	assertFieldExists(t, ctx, core, dbName, collectionName, "text_input", 102)
 }
 
 func TestDDLCallbacksSchemaEvolutionRejectsUnsafeDynamicEnable(t *testing.T) {
@@ -294,7 +294,7 @@ func TestMappedFieldAdditionAdmission(t *testing.T) {
 	}
 }
 
-func TestMilvusTableRejectsStructDDL(t *testing.T) {
+func TestMilvusTableAdmitsStructDDL(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
 		name          string
@@ -311,6 +311,12 @@ func TestMilvusTableRejectsStructDDL(t *testing.T) {
 			coll.ExternalSpec = `{"format":"milvus-table"}`
 			for _, field := range coll.Fields {
 				field.ExternalField = field.Name
+			}
+			for _, sf := range coll.StructArrayFields {
+				sf.ExternalField = sf.Name
+				for _, child := range sf.Fields {
+					child.ExternalField = child.Name
+				}
 			}
 			before := proto.Clone(coll.ToCollectionSchemaPB())
 			meta := &MetaTable{}
@@ -337,7 +343,7 @@ func TestMilvusTableRejectsStructDDL(t *testing.T) {
 				err = core.broadcastAlterCollectionForAddStructField(context.Background(), &milvuspb.AddCollectionStructFieldRequest{
 					DbName: "db", CollectionName: coll.Name,
 					StructArrayFieldSchema: &schemapb.StructArrayFieldSchema{
-						Name: "added", Nullable: true,
+						Name: "added", ExternalField: "added", Nullable: true,
 						Fields: []*schemapb.FieldSchema{{
 							Name: "value", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
 							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
@@ -351,8 +357,8 @@ func TestMilvusTableRejectsStructDDL(t *testing.T) {
 				}
 				err = core.broadcastAlterCollectionSchema(context.Background(), buildAlterSchemaAddFieldSchemaReq("db", coll.Name, field, false))
 			}
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			require.Zero(t, cacheCalls, "unsupported Struct DDL must fail before publication")
+			require.ErrorIs(t, err, boundary)
+			require.Equal(t, 1, cacheCalls, "supported Struct DDL must reach publication preparation")
 			require.True(t, proto.Equal(before, coll.ToCollectionSchemaPB()))
 		})
 	}
