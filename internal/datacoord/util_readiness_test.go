@@ -89,6 +89,13 @@ func TestFilterInIndexedSegmentsWithoutVectorField(t *testing.T) {
 	})
 
 	t.Run("no vector field with a scalar index in progress: nothing to wait for", func(t *testing.T) {
+		// Pinned to forceAllIndexReady=false: with no vector field the scalar
+		// index is not a target, so flushed segments return regardless of index.
+		// With forceAllIndexReady=true the scalar index becomes a target and only
+		// the segments with it Finished are returned (see the next subtest).
+		key := paramtable.Get().DataCoordCfg.DVForceAllIndexReady.Key
+		require.NoError(t, paramtable.Get().Save(key, "false"))
+		t.Cleanup(func() { paramtable.Get().Reset(key) })
 		s := newServer(scalarOnly)
 		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished})
 		require.ElementsMatch(t, []int64{1, 2}, ids(index.FilterInIndexedSegments(ctx, s.handler, s.indexMeta, false, allSegments(s)...)))
@@ -111,6 +118,13 @@ func TestFilterInIndexedSegmentsWithoutVectorField(t *testing.T) {
 	})
 
 	t.Run("vector index built, scalar index in progress: ready", func(t *testing.T) {
+		// Pinned to forceAllIndexReady=false: only vector indexes gate the
+		// filter, so an in-progress scalar index does not exclude the segment.
+		// With forceAllIndexReady=true the scalar index is a target too and the
+		// segment would be excluded until it is Finished.
+		key := paramtable.Get().DataCoordCfg.DVForceAllIndexReady.Key
+		require.NoError(t, paramtable.Get().Save(key, "false"))
+		t.Cleanup(func() { paramtable.Get().Reset(key) })
 		s := newServer(withVector)
 		setIndex(s, vectorField, vectorIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_Finished})
 		setIndex(s, scalarField, scalarIndex, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 2: commonpb.IndexState_InProgress})

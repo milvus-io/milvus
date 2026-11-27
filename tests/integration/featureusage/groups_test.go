@@ -607,3 +607,35 @@ func (s *Suite) TestProvidersAndCustomResourceGroup() {
 		return true
 	}, 60*timeUnit, timeUnit, "QueryCoord should remove the stopped QueryNode %d", qn.GetNodeID())
 }
+
+// TestNullableKindsAreDeclared creates one collection with a nullable vector
+// field and a struct array sub-field whose elements may be null, and requires
+// each to show up under its own declared entry, next to the plain nullable.
+func (s *Suite) TestNullableKindsAreDeclared() {
+	ctx := context.Background()
+	name := "fu_nullable_" + funcutil.GenRandomStr()
+	dim := 8
+
+	schema := integration.ConstructSchemaOfVecDataTypeWithStruct(name, dim, true)
+	schema.Name = name
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name: "optional_vec", DataType: schemapb.DataType_FloatVector, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprint(dim)}},
+	})
+	schema.StructArrayFields[0].Fields[0].ElementNullable = true
+	marshaled, err := proto.Marshal(schema)
+	s.Require().NoError(err)
+
+	before := entries(s.report(ctx), typeutil.MixCoordRole, featureusage.GroupDeclared)
+	status, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		CollectionName: name, Schema: marshaled, ShardsNum: 1,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, status.GetErrorCode(), status.GetReason())
+	defer s.Cluster.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{CollectionName: name})
+
+	declared := entries(s.report(ctx), typeutil.MixCoordRole, featureusage.GroupDeclared)
+	s.Equal(before["nullable"]+1, declared["nullable"])
+	s.Equal(before["nullable_vector"]+1, declared["nullable_vector"])
+	s.Equal(before["element_nullable"]+1, declared["element_nullable"])
+}

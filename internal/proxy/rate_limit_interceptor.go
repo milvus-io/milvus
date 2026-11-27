@@ -24,7 +24,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -183,20 +182,16 @@ func getCollectionAndPartitionID(ctx context.Context, metaCache Cache, r reqPart
 	return db.DBID, map[int64][]int64{collectionID: {part.PartitionID}}, nil
 }
 
-func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPartNames) (int64, map[int64][]int64, error) {
-	return resolveQuotaPartitions(ctx, metaCache, r, false)
-}
-
 // GetExecuteDQLQuotaInfo resolves the scope and quota cost of a prepared Search item.
 func GetExecuteDQLQuotaInfo(ctx context.Context, metaCache Cache, request *milvuspb.SearchRequest) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	if metaCache == nil {
 		return GetRequestInfo(ctx, metaCache, request)
 	}
-	dbID, parts, err := resolveQuotaPartitions(ctx, metaCache, request, paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool())
+	dbID, parts, err := getCollectionAndPartitionIDs(ctx, metaCache, request)
 	return dbID, parts, internalpb.RateType_DQLSearch, int(searchRequestNq(request)), err
 }
 
-func resolveQuotaPartitions(ctx context.Context, metaCache Cache, r reqPartNames, matchPartitionPatterns bool) (int64, map[int64][]int64, error) {
+func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPartNames) (int64, map[int64][]int64, error) {
 	db, err := metaCache.GetDatabaseInfo(ctx, r.GetDbName())
 	if err != nil {
 		return 0, nil, err
@@ -217,8 +212,10 @@ func resolveQuotaPartitions(ctx context.Context, metaCache Cache, r reqPartNames
 		}
 	}
 
-	if matchPartitionPatterns && len(partitionNames) > 0 {
-		parts, err := dql.GetPartitionIDs(ctx, metaCache, r.GetDbName(), r.GetCollectionName(), partitionNames)
+	// Resolve regex selectors the same way as the DQL task so the limiter
+	// receives the matched partition IDs instead of a failed literal lookup.
+	if len(partitionNames) > 0 && paramtable.Get().ProxyCfg.PartitionNameRegexp.GetAsBool() {
+		parts, err := GetPartitionIDs(ctx, metaCache, r.GetDbName(), r.GetCollectionName(), partitionNames)
 		if err != nil {
 			return 0, nil, err
 		}

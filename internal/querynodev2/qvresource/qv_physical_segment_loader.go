@@ -3,6 +3,7 @@ package qvresource
 import (
 	"context"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -29,7 +31,13 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 		return nil, err
 	}
 
+	timing := segments.PhysicalLoadTimingFromContext(ctx)
+	startedAt := time.Now()
 	loaded, err := l.loader.NewSegment(ctx, collection, info)
+	physicalnewsegmentStage.Observe(time.Since(startedAt), stage.Outcome(err))
+	if timing != nil {
+		timing.NewSegment = time.Since(startedAt)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -44,13 +52,31 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 	// failure cancels the other branch.
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return l.loader.LoadPKCandidate(gctx, loaded, info)
+		startedAt := time.Now()
+		err := l.loader.LoadPKCandidate(gctx, loaded, info)
+		physicalpkStage.Observe(time.Since(startedAt), stage.Outcome(err))
+		if timing != nil {
+			timing.PKCandidate = time.Since(startedAt)
+		}
+		return err
 	})
 	g.Go(func() error {
-		if err := l.loader.LoadSegment(gctx, loaded, info); err != nil {
+		startedAt := time.Now()
+		err := l.loader.LoadSegment(gctx, loaded, info)
+		physicalloadsegmentStage.Observe(time.Since(startedAt), stage.Outcome(err))
+		if timing != nil {
+			timing.LoadSegment = time.Since(startedAt)
+		}
+		if err != nil {
 			return err
 		}
-		return l.loader.LoadDeltaLogs(gctx, loaded, info)
+		startedAt = time.Now()
+		err = l.loader.LoadDeltaLogs(gctx, loaded, info)
+		physicaldeltaStage.Observe(time.Since(startedAt), stage.Outcome(err))
+		if timing != nil {
+			timing.DeltaLogs = time.Since(startedAt)
+		}
+		return err
 	})
 	if err := g.Wait(); err != nil {
 		return nil, err
@@ -237,3 +263,10 @@ func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.Transform
 	transform := qnview.UnwrapTransformSegment(segment).(*queryViewTransformSegment)
 	return transform.QuerySegment().(*segments.LocalSegment).AdoptReadState(read)
 }
+
+var (
+	physicalnewsegmentStage  = stage.New("queryNode", "physical_load", "new_segment")
+	physicalloadsegmentStage = stage.New("queryNode", "physical_load", "load_segment")
+	physicaldeltaStage       = stage.New("queryNode", "physical_load", "delta")
+	physicalpkStage          = stage.New("queryNode", "physical_load", "pk")
+)

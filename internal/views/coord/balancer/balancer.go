@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -171,6 +172,13 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 	}
 }
 
+var (
+	reconcileTotal    = stage.New("coord", "reconcile", "total")
+	reconcileSnapshot = stage.New("coord", "reconcile", "snapshot")
+	reconcilePlan     = stage.New("coord", "reconcile", "plan")
+	reconcileApply    = stage.New("coord", "reconcile", "apply")
+)
+
 // Reconcile handles queued local work or one collection scan batch. A single
 // call does not drain a full scan. It is exported primarily for tests and for
 // callers that want a synchronous controller pass during startup.
@@ -182,6 +190,9 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if err := b.cache.WaitForReady(ctx); err != nil {
 		return err
 	}
+	// Exclude the startup cache-readiness wait from reconcile latency.
+	timer := reconcileTotal.Begin()
+	defer timer.EndError(&retErr)
 	b.reconcileMu.Lock()
 	var pending triggerBatch
 	defer func() {
@@ -205,6 +216,7 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 			b.queue.wake()
 		}
 	}()
+	snapshotStartedAt := time.Now()
 	reader := newPlanningContext(b.cache)
 	b.pruneLayouts(reader, pending.dirtyColls)
 	var dirty []qviews.ShardID
@@ -216,10 +228,13 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 		}
 		dirty = b.scanBatch(reader)
 	}
+	snapshotDuration := time.Since(snapshotStartedAt)
+	reconcileSnapshot.Observe(snapshotDuration, stage.Success)
 	if len(dirty) == 0 {
 		return nil
 	}
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
+	planStartedAt := time.Now()
 	plan := b.policy.Plan(reader, dirty)
 	if plan != nil {
 		// A suspended replica may shed serving capacity, but must retain the
@@ -231,9 +246,16 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.targetSchemaVersion(cfg.CollectionID)) != nil
 		})
 	}
+	planDuration := time.Since(planStartedAt)
+	reconcilePlan.Observe(planDuration, stage.Outcome(err))
+	applyStartedAt := time.Now()
 	applyErr := b.apply(ctx, plan)
 	recoveryErr := b.recoverPublishedSchemas(ctx, reader, dirty)
-	return errors.CombineErrors(err, errors.CombineErrors(applyErr, recoveryErr))
+	applyDuration := time.Since(applyStartedAt)
+	applyErr = errors.CombineErrors(applyErr, recoveryErr)
+	reconcileApply.Observe(applyDuration, stage.Outcome(applyErr))
+	err = errors.CombineErrors(err, applyErr)
+	return err
 }
 
 const (

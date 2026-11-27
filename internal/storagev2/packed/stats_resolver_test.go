@@ -42,16 +42,17 @@ func TestStatsResolverManifestStage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			patch := mockey.Mock(GetManifestStats).To(func(path string, config *indexpb.StorageConfig, stages ...uint32) (map[string]ManifestStat, error) {
+			patch := mockey.Mock(getManifestStats).To(func(path string, config *indexpb.StorageConfig, origin ManifestReadOrigin, stages ...uint32) (map[string]ManifestStat, error) {
 				calls++
 				assert.Equal(t, manifest, path)
 				assert.NotNil(t, config)
 				assert.Equal(t, []uint32{tc.stage}, stages)
+				assert.Equal(t, ManifestReadPreload, origin)
 				return map[string]ManifestStat{"bloom_filter.100": {Paths: []string{"files/segment/_stats/pk/2"}}}, nil
 			}).Build()
 			defer patch.UnPatch()
 			for range 2 {
-				paths, err := tc.resolver.BloomFilterPaths(100)
+				paths, err := tc.resolver.WithManifestReadOrigin(ManifestReadPreload).BloomFilterPaths(100)
 				require.NoError(t, err)
 				assert.Equal(t, []string{"files/segment/_stats/pk/2"}, paths)
 			}

@@ -52,6 +52,7 @@
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_reference.h"
+#include "milvus-storage/filesystem/gcp/gcp_broker_credential_provider.h"
 #include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -4376,6 +4377,8 @@ TEST(InjectExtfsAllowlist, TableSnapshotID) {
             R"({"format":"lance-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
+            R"({"format":"deltalake-table","snapshot_id":"5320540205222981137"})",
+            R"({"snapshot_id":5320540205222981137,"format":"deltalake-table"})",
         }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;
@@ -4403,6 +4406,8 @@ TEST(InjectExtfsAllowlist, TableSnapshotIDCAbiRoundTrip) {
             R"({"format":"lance-table","snapshot_id":5320540205222981137})",
             R"({"snapshot_id":"5320540205222981137","format":"lance-table"})",
             R"({"snapshot_id":5320540205222981137,"format":"lance-table"})",
+            R"({"format":"deltalake-table","snapshot_id":"5320540205222981137"})",
+            R"({"snapshot_id":5320540205222981137,"format":"deltalake-table"})",
         }) {
         SCOPED_TRACE(spec);
         LoonProperties properties{};
@@ -4444,6 +4449,8 @@ TEST(InjectExtfsAllowlist, InvalidTableSnapshotIDIsRejected) {
              R"({"format":"lance-table","snapshot_id":"-2"})",
              R"({"snapshot_id":-2,"format":"lance-table"})",
              R"({"snapshot_id":"-2","format":"lance-table"})",
+             R"({"format":"deltalake-table","snapshot_id":-2})",
+             R"({"snapshot_id":"-2","format":"deltalake-table"})",
          }) {
         SCOPED_TRACE(spec);
         milvus_storage::api::Properties props;
@@ -4861,12 +4868,8 @@ TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
                 EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
                 EXPECT_EQ(config->credential_endpoint, endpoint);
                 EXPECT_FALSE(config->s3_use_crt);
-                const bool supports_talon =
-                    iam || std::string_view(cloud) == "aws";
-                EXPECT_EQ(static_cast<uint32_t>(config->talon_mode),
-                          supports_talon ? mode : 0u);
-                EXPECT_EQ(config->talon_coordinator,
-                          supports_talon ? "talon:1234" : "");
+                EXPECT_EQ(static_cast<uint32_t>(config->talon_mode), mode);
+                EXPECT_EQ(config->talon_coordinator, "talon:1234");
                 spec["extfs"]["credential_endpoint"] = endpoint + "/other";
                 EXPECT_ANY_THROW(InjectExternalSpecProperties(
                     props, 42, "s3://bucket/path", spec.dump()));
@@ -4978,13 +4981,19 @@ TEST(InjectExtfsAllowlist, GcpBrokerTargetAndEndpoint) {
     ASSERT_TRUE(config.ok()) << config.status();
     EXPECT_EQ(config->gcp_target_service_account, target);
     EXPECT_EQ(config->credential_endpoint, endpoint);
+    // use_iam would make the Broker mint tokens for its own identity instead
+    // of the target.
+    EXPECT_FALSE(config->use_iam);
     EXPECT_EQ(config->access_key_id, "");
     EXPECT_EQ(config->access_key_value, "");
     EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
     auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
     ASSERT_TRUE(provider.ok()) << provider.status();
-    EXPECT_TRUE((*provider)->IssuesBearerToken());
-    EXPECT_EQ((*provider)->Identity().find("broker:"), 0u);
+    // The Broker provider, sending Bearer tokens (HMAC returns its key pair).
+    EXPECT_NE(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  provider->get()),
+              nullptr);
+    EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
 
     auto reject = [&](const nlohmann::json& spec) {
         milvus_storage::api::Properties denied;
@@ -5067,13 +5076,25 @@ TEST(InjectExtfsAllowlist, GcpTargetServiceAccountWithOptionalIam) {
             std::make_shared<const milvus_storage::api::Properties>(props),
             "gs://storage.googleapis.com/bucket/path");
         ASSERT_TRUE(config.ok()) << config.status();
+        EXPECT_EQ(config->gcp_target_service_account, target);
+        EXPECT_TRUE(config->credential_endpoint.empty());
         EXPECT_EQ(config->access_key_id, "");
         EXPECT_EQ(config->access_key_value, "");
         EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
         auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
         ASSERT_TRUE(provider.ok()) << provider.status();
-        EXPECT_TRUE((*provider)->IssuesBearerToken());
-        EXPECT_EQ((*provider)->Identity(), "impersonate:" + target);
+        // A Bearer provider outside the Broker: node IAM or impersonation.
+        EXPECT_EQ(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                      provider->get()),
+                  nullptr);
+        EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
+        // Node IAM takes no token lifetime; impersonation rejects one above
+        // GCP's 3600 s cap.
+        auto unbounded = *config;
+        unbounded.load_frequency = 7200;
+        EXPECT_TRUE(milvus_storage::BuildGcpProviderFromConfig(unbounded)
+                        .status()
+                        .IsInvalid());
     }
 }
 
@@ -5182,8 +5203,9 @@ TEST(InjectExtfsAllowlist, S3CloudEndpointsResolveWithExplicitPort) {
 }
 
 TEST(InjectExtfsAllowlist, GcpPlainIamKeepsTrustedEndpointPolicy) {
-    // Injection must preserve plain IAM's existing endpoint policy. Actual
-    // Bearer delivery still depends on the operator-trusted registry entry.
+    // Injection must preserve plain IAM's existing endpoint policy.
+    // milvus-storage still sends the Bearer token to these custom endpoints
+    // only after the operator's primary GCP filesystem trusts them.
     ASSERT_TRUE(
         InitCredentialBrokerPolicy(
             std::string(
@@ -5251,8 +5273,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
     EXPECT_EQ(config->talon_mode, milvus_storage::TalonMode::Disabled);
     auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
     ASSERT_TRUE(provider.ok()) << provider.status();
-    EXPECT_TRUE((*provider)->IssuesBearerToken());
-    EXPECT_EQ((*provider)->Identity(), "broker-iam:" + endpoint);
+    EXPECT_NE(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  provider->get()),
+              nullptr);
+    EXPECT_TRUE((*provider)->GetAWSCredentials().IsEmpty());
 
     // Without a Broker endpoint the same IAM flag still selects node IAM.
     auto node_config = *config;
@@ -5260,7 +5284,10 @@ TEST(InjectExtfsAllowlist, GcpBrokerIamProviderAndValidation) {
     auto node_provider =
         milvus_storage::BuildGcpProviderFromConfig(node_config);
     ASSERT_TRUE(node_provider.ok()) << node_provider.status();
-    EXPECT_EQ((*node_provider)->Identity(), "iam");
+    EXPECT_EQ(dynamic_cast<milvus_storage::GcpBrokerCredentialProvider*>(
+                  node_provider->get()),
+              nullptr);
+    EXPECT_TRUE((*node_provider)->GetAWSCredentials().IsEmpty());
 
     auto reject = [&](const nlohmann::json& spec) {
         milvus_storage::api::Properties denied;
@@ -5528,8 +5555,7 @@ TEST(InjectExtfsAllowlist, S3BrokerTargetRoleAcrossClouds) {
             EXPECT_EQ(config->access_key_id, "");
             EXPECT_EQ(config->access_key_value, "");
             EXPECT_EQ(config->talon_mode,
-                      cloud == "aws" ? milvus_storage::TalonMode::SmallReads
-                                     : milvus_storage::TalonMode::Disabled);
+                      milvus_storage::TalonMode::SmallReads);
         }
         // A target role and the Broker's own identity are different modes.
         auto spec = valid;

@@ -43,6 +43,7 @@ var readyPercentLeBounds = []string{
 }
 
 type MetricsObserver struct {
+	lifecycles      map[metricViewKey]*viewLifecycle
 	mu              sync.Mutex
 	now             func() time.Time
 	topN            int
@@ -119,6 +120,7 @@ func NewMetricsObserver() *MetricsObserver {
 
 func newMetricsObserverWithNow(now func() time.Time) *MetricsObserver {
 	observer := &MetricsObserver{
+		lifecycles:      make(map[metricViewKey]*viewLifecycle),
 		now:             now,
 		topN:            defaultViewStateMaxAgeTopN,
 		states:          make(map[metricViewKey]metricViewState),
@@ -164,7 +166,8 @@ func (o *MetricsObserver) collectViewStateMaxAge() []metrics.QVViewStateMaxAgeMe
 	return result
 }
 
-func (o *MetricsObserver) Observe(_ context.Context, event Event) {
+func (o *MetricsObserver) Observe(ctx context.Context, event Event) {
+	o.observeLifecycle(event)
 	component := event.ComponentInfo()
 	if component == "" {
 		return

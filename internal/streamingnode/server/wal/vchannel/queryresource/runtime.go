@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 const defaultLiveEventBufferSize = 1024
@@ -80,7 +81,9 @@ func newQueryRuntime(dispatcher *Dispatcher, modules ...QueryRuntimeModule) *Que
 	return runtime
 }
 
-func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALView) error {
+func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALView) (retErr error) {
+	timer := runtimeInitialize.Begin()
+	defer timer.EndError(&retErr)
 	if r == nil {
 		return nil
 	}
@@ -187,7 +190,9 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 }
 
 // PrepareQueryView fences sealed handoffs before View resources are prepared.
-func (r *QueryRuntime) PrepareQueryView(ctx context.Context) error {
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context) (retErr error) {
+	timer := runtimePrepareVersion.Begin()
+	defer timer.EndError(&retErr)
 	if r == nil {
 		return nil
 	}
@@ -459,3 +464,8 @@ func (r *QueryRuntime) CheckWriteSchemaVersion(version int32) error {
 	})
 	return err
 }
+
+var (
+	runtimePrepareVersion = stage.New("streamingNode", "prepare", "data_version")
+	runtimeInitialize     = stage.New("streamingNode", "prepare", "runtime_initialize")
+)

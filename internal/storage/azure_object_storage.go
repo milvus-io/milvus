@@ -213,6 +213,9 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 				return mapObjectStorageError(prefix, err)
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
+				if azureZeroByteBlob(blob) {
+					continue
+				}
 				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
 					return nil
 				}

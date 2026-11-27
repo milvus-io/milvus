@@ -37,12 +37,13 @@ var azureAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
 const (
-	FormatParquet      = specutil.FormatParquet
-	FormatLanceTable   = specutil.FormatLanceTable
-	FormatVortex       = specutil.FormatVortex
-	FormatIcebergTable = specutil.FormatIcebergTable
-	FormatPaimonTable  = specutil.FormatPaimonTable
-	FormatMilvusTable  = specutil.FormatMilvusTable
+	FormatParquet        = specutil.FormatParquet
+	FormatLanceTable     = specutil.FormatLanceTable
+	FormatVortex         = specutil.FormatVortex
+	FormatIcebergTable   = specutil.FormatIcebergTable
+	FormatPaimonTable    = specutil.FormatPaimonTable
+	FormatMilvusTable    = specutil.FormatMilvusTable
+	FormatDeltaLakeTable = specutil.FormatDeltaLakeTable
 )
 
 // ExtfsKey* are the canonical spec.extfs key names. Use these instead of
@@ -920,14 +921,27 @@ var awsFamilyScheme = map[string]bool{
 // are preserved as extension metadata. Because unknown pre-validation fields
 // may themselves be sensitive, external-collection request logging uses
 // RedactExternalSpecForLog. On parse failure this returns "<invalid spec>"
-// rather than the raw input.
+// rather than the raw input, as it does for a spec that sets a key twice (see
+// specutil.ValidateExternalSpecKeys). A lone other spelling of a known key,
+// such as "EXTFS", is read under its canonical name, as Go and native readers
+// read it.
 func RedactExternalSpec(specStr string) string {
 	if specStr == "" {
 		return ""
 	}
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+	if specutil.ValidateExternalSpecKeys(specStr) != nil {
 		return "<invalid spec>"
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &raw); err != nil {
+		return "<invalid spec>"
+	}
+	var spec map[string]json.RawMessage
+	if raw != nil {
+		spec = make(map[string]json.RawMessage, len(raw))
+		for key, value := range raw {
+			spec[specutil.CanonicalSpecKey(key)] = value
+		}
 	}
 	if err := normalizeInt64Field(spec, "snapshot_id"); err != nil {
 		return "<invalid spec>"

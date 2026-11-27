@@ -1267,7 +1267,8 @@ InjectExternalSpecProperties(
 
     // Target impersonation and Broker tokens have the same endpoint contract
     // in Go admission and native readers, including persisted specs. Plain IAM
-    // retains GcpCredentialRegistry's operator-trusted endpoint delivery policy.
+    // keeps milvus-storage's Bearer delivery policy: HTTPS *.googleapis.com,
+    // or an endpoint the operator's primary GCP filesystem trusts.
     if (spec_cloud_provider == "gcp" &&
         (has_target || !broker_endpoint.empty())) {
         arrow::util::Uri endpoint;
@@ -1283,14 +1284,7 @@ InjectExternalSpecProperties(
         ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
     }
 
-    // Talon's S3 broker accepts target roles only for AWS. Preserve native
-    // routing for Aliyun and Tencent target roles.
-    const bool native_target_role =
-        !broker_endpoint.empty() &&
-        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent") &&
-        !use_iam;
-    const bool origin_only =
-        native_target_role || value("storage_type") == "local";
+    const bool origin_only = value("storage_type") == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
@@ -1310,7 +1304,7 @@ InjectExternalSpecProperties(
         }
     }
     // Format-layer: emit per-format properties derived from spec.format.
-    // Lance, Iceberg, and Paimon use reader.exttable.snapshot_id.
+    // Lance, Iceberg, Paimon, and Delta Lake use reader.exttable.snapshot_id.
     if (external_spec.empty()) {
         return arrow::Status::OK();
     }
@@ -1323,7 +1317,7 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "lance-table" || format == "iceberg-table" ||
-                format == "paimon-table") {
+                format == "paimon-table" || format == "deltalake-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;

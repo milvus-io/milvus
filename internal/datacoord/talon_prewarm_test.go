@@ -39,17 +39,23 @@ func TestManifestPrewarmURI(t *testing.T) {
 	const basePath = "files//literal/../insert_log/1/2/3/"
 	descriptor := packed.MarshalManifestPath(basePath, 17)
 	sized := packed.CommittedManifestPath(basePath, 17, 4096, "remote")
-	for _, provider := range []string{"aws", "aliyun", "tencent", "huawei", "gcp", "azure"} {
-		t.Run(provider, func(t *testing.T) {
-			scheme := "s3"
-			if provider == "azure" {
-				scheme = "az"
-			}
-			resolve, err := manifestPrewarmResolver(provider, "bucket///")
+	for _, tc := range []struct {
+		provider string
+		scheme   string
+	}{
+		{"aws", "s3"},
+		{"aliyun", "ali"},
+		{"tencent", "tc"},
+		{"huawei", "s3"},
+		{"gcp", "gcs"},
+		{"azure", "az"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			resolve, err := manifestPrewarmResolver(tc.provider, "bucket///")
 			require.NoError(t, err)
 			uri, size, err := resolve(descriptor)
 			require.NoError(t, err)
-			require.Equal(t, scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
+			require.Equal(t, tc.scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
 			require.Zero(t, size)
 			// A committed revision records its manifest size, which is not part of the URI.
 			sizedURI, size, err := resolve(sized)
