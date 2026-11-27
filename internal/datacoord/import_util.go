@@ -81,6 +81,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format("2006-01-02T15:04:05Z07:00"),
@@ -272,7 +273,7 @@ func AllocImportSegment(ctx context.Context,
 	return segment, nil
 }
 
-func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportRequest {
+func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImportRequest, error) {
 	importFiles := lo.Map(task.(*preImportTask).GetFileStats(),
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
@@ -289,10 +290,11 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Options:       job.GetOptions(),
 		TaskSlot:      task.GetTaskSlot(),
 		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
 	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
-	return req
+	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc allocator.Allocator) (*datapb.ImportRequest, error) {
@@ -308,6 +310,30 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 			Vchannel:    segment.GetInsertChannel(),
 		})
 	}
+	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+		return fileStat.GetImportFile()
+	})
+
+	req := &datapb.ImportRequest{
+		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:           task.GetJobID(),
+		TaskID:          task.GetTaskID(),
+		CollectionID:    task.GetCollectionID(),
+		PartitionIDs:    job.GetPartitionIDs(),
+		Vchannels:       job.GetVchannels(),
+		Schema:          job.GetSchema(),
+		Files:           importFiles,
+		Options:         job.GetOptions(),
+		RequestSegments: requestSegments,
+		StorageConfig:   createStorageConfig(),
+		TaskSlot:        task.GetTaskSlot(),
+		StorageVersion:  storage.StorageV2,
+	}
+	// Resolve and validate cipher contexts before allocating timestamps/IDs so retries do not waste ranges.
+	if err := WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ts := job.GetDataTs()
@@ -315,7 +341,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
-			return nil, err
+			if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, merr.ErrParameterInvalid) {
+				return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import timestamp")
+			}
+			return nil, merr.Wrap(err, "allocate import timestamp")
 		}
 	}
 
@@ -334,7 +364,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return ids, ide, e
 	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, merr.ErrParameterInvalid) &&
+			!merr.IsRetryableErr(err) &&
+			!errors.Is(err, context.Canceled) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import auto IDs")
+		}
+		return nil, merr.Wrap(err, "allocate import auto IDs")
 	}
 
 	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,
@@ -345,29 +380,8 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		zap.Uint64("ts", ts))...,
 	)
 
-	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-		return fileStat.GetImportFile()
-	})
-
-	req := &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    job.GetPartitionIDs(),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storage.StorageV2,
-		PluginContext:   GetReadPluginContext(job.GetOptions()),
-	}
-	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	req.Ts = ts
+	req.IDRange = &datapb.IDRange{Begin: idBegin, End: idEnd}
 	return req, nil
 }
 

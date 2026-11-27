@@ -56,6 +56,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	cMultiPartUploadSize := C.int64_t(multiPartUploadSize)
 
 	cColumnGroups := C.NewCColumnGroups()
+	defer C.FreeCColumnGroups(cColumnGroups)
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {

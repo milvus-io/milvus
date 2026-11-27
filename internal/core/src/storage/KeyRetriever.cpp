@@ -17,29 +17,82 @@ parquet::ArrowReaderProperties arrow_reader_properties =
     parquet::default_arrow_reader_properties();
 }  // namespace
 
+KeyRetriever::KeyRetriever(const CPluginContext* context) {
+    if (context == nullptr) {
+        return;
+    }
+    if (!context->key || !*context->key) {
+        ThrowInfo(InvalidParameter, "missing reader keyset");
+    }
+    auto cipher = PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(Unsupported, "missing cipher plugin");
+    }
+    has_keyset_ = true;
+    bound_ez_id_ = context->ez_id;
+    bound_keyset_ = context->key;
+}
+
 std::string
 KeyRetriever::GetKey(const std::string& key_metadata) {
     auto plugin = PluginLoader::GetInstance().getCipherPlugin();
     AssertInfo(plugin != nullptr, "cipher plugin not found");
     auto context = DecodeKeyMetadata(key_metadata);
-    AssertInfo(context != nullptr, "invalid key metadata: {}", key_metadata);
-    auto decryptor = plugin->GetDecryptor(
-        context->ez_id, context->collection_id, std::string(context->key));
+    AssertInfo(context != nullptr, "invalid encryption metadata");
+    auto decryptor =
+        (has_keyset_ && context->ez_id == bound_ez_id_)
+            ? plugin->GetDecryptorForKeyset(context->ez_id,
+                                            context->collection_id,
+                                            bound_keyset_,
+                                            std::string(context->key))
+            : plugin->GetDecryptor(
+                  context->ez_id, context->collection_id, context->key);
+    AssertInfo(decryptor != nullptr, "cipher plugin returned no decryptor");
     return decryptor->GetKey();
 }
 
 parquet::ReaderProperties
-GetReaderProperties() {
+GetReaderProperties(const CPluginContext* context) {
     parquet::ReaderProperties reader_properties =
         parquet::default_reader_properties();
     std::shared_ptr<milvus::storage::KeyRetriever> key_retriever =
-        std::make_shared<milvus::storage::KeyRetriever>();
+        std::make_shared<milvus::storage::KeyRetriever>(context);
     parquet::FileDecryptionProperties::Builder builder;
     reader_properties.file_decryption_properties(
         builder.key_retriever(key_retriever)
             ->plaintext_files_allowed()
             ->build());
     return reader_properties;
+}
+
+std::pair<std::string, std::string>
+GetWriterEncryptionParams(const CPluginContext* context) {
+    if (context == nullptr) {
+        ThrowInfo(InvalidParameter, "c_plugin_context is nullptr");
+    }
+    if (!context->key || !*context->key) {
+        ThrowInfo(InvalidParameter, "missing writer keyset");
+    }
+    auto cipher = PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipher) {
+        ThrowInfo(Unsupported, "missing cipher plugin");
+    }
+
+    auto keys = cipher->GetEncryptorForKeyset(
+        context->ez_id, context->collection_id, context->key);
+    if (!keys.first) {
+        ThrowInfo(InvalidParameter, "cipher plugin returned no encryptor");
+    }
+    auto footer_key = keys.first->GetKey();
+    auto length = footer_key.size();
+    if (keys.second.empty() || keys.second.find('\0') != std::string::npos ||
+        (length != 16 && length != 24 && length != 32)) {
+        ThrowInfo(InvalidParameter,
+                  "cipher plugin returned unusable encryption parameters");
+    }
+    auto metadata =
+        EncodeKeyMetadata(context->ez_id, context->collection_id, keys.second);
+    return {std::move(footer_key), std::move(metadata)};
 }
 
 parquet::ArrowReaderProperties
@@ -77,7 +130,11 @@ EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) {
 
 std::shared_ptr<CPluginContext>
 DecodeKeyMetadata(const std::string& key_metadata) {
-    auto context = std::make_shared<CPluginContext>();
+    // Keep the wrapped key alive for as long as its C context is used.
+    struct OwnedContext : CPluginContext {
+        std::string wrapped_key;
+    };
+    auto context = std::make_shared<OwnedContext>();
     try {
         auto first_pos = key_metadata.find("_");
         if (first_pos == std::string::npos) {
@@ -92,7 +149,8 @@ DecodeKeyMetadata(const std::string& key_metadata) {
         context->ez_id = std::stoll(key_metadata.substr(0, first_pos));
         context->collection_id = std::stoll(
             key_metadata.substr(first_pos + 1, second_pos - (first_pos + 1)));
-        context->key = key_metadata.substr(second_pos + 1).c_str();
+        context->wrapped_key = key_metadata.substr(second_pos + 1);
+        context->key = context->wrapped_key.c_str();
     } catch (const std::exception& e) {
         LOG_WARN("failed to decode key metadata, reason: {}", e.what());
         return nullptr;

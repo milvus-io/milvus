@@ -18,19 +18,25 @@ package importutilv2
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestImportNewReader(t *testing.T) {
@@ -51,7 +57,7 @@ func TestImportNewReader(t *testing.T) {
 	}
 
 	checkFunc := func(name string, req *internalpb.ImportFile, options []*commonpb.KeyValuePair) {
-		_, err := NewReader(ctx, cm, schema, req, options, 1024, &indexpb.StorageConfig{})
+		_, err := NewReader(ctx, cm, schema, req, options, 1024, &indexpb.StorageConfig{}, nil)
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), name))
 	}
@@ -164,4 +170,34 @@ func TestImportNewReader(t *testing.T) {
 		Paths: []string{"1.txt"},
 	}
 	checkFunc("unexpected file type", req, options)
+}
+
+func TestPackedBackupReaderPassesSourceContext(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	root := t.TempDir()
+	prefix := filepath.Join(root, "insert_log")
+	cm := storage.NewLocalChunkManager()
+	require.NoError(t, cm.Write(ctx, filepath.Join(prefix, "0", "1"), []byte("placeholder")))
+
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+	}}
+	file := &internalpb.ImportFile{Paths: []string{prefix}}
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17}`))
+	options := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: StorageVersion, Value: "2"},
+		{Key: EZK, Value: artifact},
+	}
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	pluginContext := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:c291cmNl"},
+	}
+
+	reader, err := NewReader(ctx, cm, schema, file, options, 1024, config, pluginContext)
+	require.NoError(t, err)
+	defer reader.Close()
+	_, err = reader.Read()
+	require.ErrorIs(t, err, merr.ErrSegcoreUnsupported)
 }

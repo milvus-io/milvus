@@ -16,6 +16,7 @@ package packed
 
 import (
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -183,4 +186,28 @@ func (suite *PackedTestSuite) TestCloseIsIdempotent() {
 	suite.NoError(err)
 	err = pw.Close()
 	suite.NoError(err)
+}
+
+func (suite *PackedTestSuite) TestImportWriterRequiresImportCipher() {
+	root := suite.T().TempDir()
+	path := filepath.Join(root, "encrypted.parquet")
+	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23, EncryptionKey: "dGFyZ2V0"}
+	writer, err := NewPackedWriter([]string{path}, suite.schema, 1<<20, 0, groups, nil, target)
+	suite.Require().ErrorIs(err, merr.ErrSegcoreUnsupported)
+	suite.Nil(writer)
+	suite.NoFileExists(path)
+}
+
+func (suite *PackedTestSuite) TestImportWriterRejectsEmptyKeyset() {
+	path := filepath.Join(suite.T().TempDir(), "encrypted.parquet")
+	groups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
+	target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 17, CollectionId: 23}
+
+	writer, err := NewPackedWriter([]string{path}, suite.schema, 1<<20, 0, groups, nil, target)
+	suite.Require().ErrorContains(err, "missing writer keyset")
+	suite.ErrorIs(err, merr.ErrSegcore)
+	suite.Equal(merr.InputError, merr.GetErrorType(err))
+	suite.Nil(writer)
+	suite.NoFileExists(path)
 }

@@ -308,6 +308,11 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+func registerImportCipherContexts(options, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) error {
+	artifact, _ := importutilv2.GetEZK(options)
+	return hookutil.RegisterImportCipherContexts(artifact, properties, pluginContext, collectionID)
+}
+
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
@@ -549,7 +554,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+		if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
@@ -558,7 +563,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+		if err := registerImportCipherContexts(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)

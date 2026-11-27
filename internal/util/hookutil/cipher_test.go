@@ -24,10 +24,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -267,13 +270,17 @@ func (s *CipherSuite) TestAsMessageConfig() {
 }
 
 func (s *CipherSuite) TestGetStoragePluginContext() {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
 	storeCipher(nil)
-	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}, 2)
+	result, err := GetStoragePluginContext(properties, 2)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
 	s.Nil(result)
 
 	InitTestCipher()
-	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
-	result = GetStoragePluginContext(properties, 2)
+	result, err = GetStoragePluginContext(properties, 2)
+	s.Require().NoError(err)
 	s.NotNil(result)
 	s.Equal(1, len(result))
 	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
@@ -283,7 +290,8 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	s.Equal("1", parts[0])
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
 
-	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
+	result, err = GetStoragePluginContext(nil, 2)
+	s.NoError(err)
 	s.Nil(result)
 }
 
@@ -503,6 +511,27 @@ func (s *CipherSuite) TestBackupEZ() {
 	_, err = BackupEZ(123)
 	s.Error(err)
 	s.Contains(err.Error(), "does not support backup operation")
+
+	storeCipher(backupOnlyCipher{backup: func(ezID int64) (string, error) {
+		return fmt.Sprintf("backup-%d", ezID), nil
+	}})
+	backup, err := BackupEZ(123)
+	s.NoError(err)
+	s.Equal("backup-123", backup)
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	ctx, err := ResolveImportEZ(artifact)
+	s.Nil(ctx)
+	s.ErrorIs(err, merr.ErrServiceUnimplemented)
+	s.False(merr.IsRetryableErr(err))
+
+	storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+		return 123, []byte("key"), nil
+	}})
+	_, err = BackupEZ(123)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	ctx, err = ResolveImportEZ(artifact)
+	s.NoError(err)
+	s.Len(ctx, 1)
 }
 
 func (s *CipherSuite) TestBackupEZKFromDBProperties() {
@@ -531,39 +560,193 @@ func (s *CipherSuite) TestBackupEZKFromDBProperties() {
 	s.Contains(err.Error(), "no ezID found")
 }
 
+type importResolverCipher struct {
+	testCipher
+	resolve func(string) (int64, []byte, error)
+}
+
+func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
+	return c.resolve(artifact)
+}
+
+func (importResolverCipher) GetUnsafeKey(int64, int64) []byte { return nil }
+
+type backupOnlyCipher struct {
+	testCipher
+	backup func(int64) (string, error)
+}
+
+func (c backupOnlyCipher) Backup(ezID int64) (string, error) {
+	return c.backup(ezID)
+}
+
+type temporaryError struct {
+	msg       string
+	temporary bool
+}
+
+func (e temporaryError) Error() string   { return e.msg }
+func (e temporaryError) Temporary() bool { return e.temporary }
+
 func (s *CipherSuite) TestImportEZ() {
-	storeCipher(nil)
-	result, err := ImportEZ("")
+	result, err := ResolveImportEZ("")
 	s.NoError(err)
 	s.Nil(result)
 
-	result, err = ImportEZ("some-base64-string")
-	s.NoError(err)
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	InitTestCipher() // Represents an older plugin without ResolveImportEZ.
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnimplemented)
+	s.ErrorContains(err, "ResolveImportEZ")
+	s.False(merr.IsRetryableErr(err))
+	s.False(merr.IsCanceledOrTimeout(err))
+	s.Nil(result)
+
+	denied := errors.New("source KMS denied Decrypt")
+	rotated := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123,"version":2}`))
+	var resolveErr error
+	var calls []string
+	storeCipher(importResolverCipher{resolve: func(backup string) (int64, []byte, error) {
+		calls = append(calls, backup)
+		if backup == rotated {
+			return 123, []byte("new"), nil
+		}
+		return 123, []byte{0xfb, 0xff}, resolveErr
+	}})
+	for _, invalid := range []string{"%%", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":0}`))} {
+		_, err = ResolveImportEZ(invalid)
+		s.Error(err)
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.False(merr.IsRetryableErr(err))
+	}
+	s.Empty(calls)
+	result, err = ResolveImportEZ(artifact)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal(CipherConfigUnsafeEZK, result[0].GetKey())
+	s.Equal("123:+/8=", result[0].GetValue())
+
+	result, err = ResolveImportEZ(rotated)
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	s.Equal("123:bmV3", result[0].GetValue())
+
+	resolveErr = denied
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, denied)
+	s.False(merr.IsRetryableErr(err))
+	s.False(merr.IsCanceledOrTimeout(err))
+	s.Nil(result)
+
+	transient := temporaryError{msg: "source KMS throttled", temporary: true}
+	resolveErr = errors.Wrap(transient, "kms call failed")
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorIs(err, transient)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	nonTransient := temporaryError{msg: "permanent error", temporary: false}
+	resolveErr = nonTransient
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, nonTransient)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.False(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	rateLimit := merr.WrapErrTooManyRequests(10)
+	resolveErr = rateLimit
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceTooManyRequests)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	resolveErr = fmt.Errorf("rpc call: %w", context.DeadlineExceeded)
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorIs(err, context.DeadlineExceeded)
+	s.True(merr.IsRetryableErr(err))
+	s.True(merr.IsCanceledOrTimeout(err))
+	s.Nil(result)
+
+	resolveErr = context.Canceled
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, context.Canceled)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.False(merr.IsRetryableErr(err))
+	s.True(merr.IsCanceledOrTimeout(err))
+	s.Nil(result)
+
+	s.Equal([]string{artifact, rotated, artifact, artifact, artifact, artifact, artifact, artifact}, calls)
+}
+
+func (s *CipherSuite) TestImportTargetEZKRequired() {
+	target := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "123"}}
+	result, err := GetImportStoragePluginContext("", target, 7)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+		return 123, []byte("source"), nil
+	}})
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	result, err = GetImportStoragePluginContext(artifact, target, 7)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorContains(err, "target EZK")
+	s.Nil(result)
+
+	target[0].Value = "9223372036854775808"
+	result, err = GetImportStoragePluginContext(artifact, target, 7)
+	s.ErrorContains(err, "invalid target")
 	s.Nil(result)
 
 	InitTestCipher()
-	result, err = ImportEZ("invalid-base64")
-	s.Error(err)
+	target[0].Value = "123"
+	target = append(target, &commonpb.KeyValuePair{Key: common.EncryptionEzIDKey, Value: "456"})
+	result, err = GetImportStoragePluginContext("", target, 7)
+	s.ErrorContains(err, "duplicate")
 	s.Nil(result)
-	s.Contains(err.Error(), "failed to decode EZK")
+}
 
-	result, err = ImportEZ(base64.StdEncoding.EncodeToString([]byte("not-json")))
+func (s *CipherSuite) TestImportEZRejectsInvalidResolverResult() {
+	InitOnceCipher()
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	for _, tc := range []struct {
+		id  int64
+		key []byte
+	}{
+		{123, nil},
+		{0, []byte("key")},
+		{456, []byte("another EZ's keyset")},
+	} {
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return tc.id, tc.key, nil
+		}})
+		result, err := ResolveImportEZ(artifact)
+		s.Error(err)
+		s.Nil(result)
+	}
+}
+
+func (s *CipherSuite) TestGetEzIDByImportEzk() {
+	for _, payload := range []string{`{}`, `null`, `{"ez_id":0}`, `{"ez_id":-1}`, `{"ez_id":"invalid"}`, `not-json`} {
+		_, err := GetEzIDByImportEzk(base64.StdEncoding.EncodeToString([]byte(payload)))
+		s.Error(err, "payload %q", payload)
+	}
+	_, err := GetEzIDByImportEzk("invalid-base64")
 	s.Error(err)
-	s.Nil(result)
-	s.Contains(err.Error(), "failed to unmarshal EZK")
-
-	ezkJSON := `{"ez_id":123}`
-	ezkBase64 := base64.StdEncoding.EncodeToString([]byte(ezkJSON))
-	result, err = ImportEZ(ezkBase64)
+	id, err := GetEzIDByImportEzk(base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`)))
 	s.NoError(err)
-	s.NotNil(result)
-	s.Equal(1, len(result))
-	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
-	// Verify encoded format: "123:base64Key"
-	s.Contains(result[0].Value, ":")
-	parts := strings.Split(result[0].Value, ":")
-	s.Equal("123", parts[0])
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+	s.Equal(int64(123), id)
 }
 
 func (s *CipherSuite) TestIsEncryptionEnabled() {
@@ -630,7 +813,15 @@ func (s *CipherSuite) TestRemoveEZ() {
 func (s *CipherSuite) TestGetPluginContext() {
 	storeCipher(nil)
 	result, err := GetPluginContext(123, 456)
-	s.NoError(err)
+	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
+	s.Nil(result)
+
+	storeCipher(importResolverCipher{})
+	result, err = GetPluginContext(123, 456)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.ErrorContains(err, "ezID=123, collectionID=456")
 	s.Nil(result)
 
 	InitTestCipher()
@@ -644,4 +835,141 @@ func (s *CipherSuite) TestGetPluginContext() {
 	parts := strings.Split(result[0].Value, ":")
 	s.Equal("123", parts[0])
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+}
+
+type importReadCipher struct {
+	testCipher
+	calls []map[string]string
+	err   error
+}
+
+func (c *importReadCipher) Init(cfg map[string]string) error {
+	c.calls = append(c.calls, cfg)
+	return c.err
+}
+
+func (c *importReadCipher) GetUnsafeKey(int64, int64) []byte {
+	panic("import must use key material from the request")
+}
+
+func TestMalformedEZContextDoesNotEchoInput(t *testing.T) {
+	for _, wire := range []string{"private-context", "private-context:key"} {
+		_, _, err := decodeEZContext(wire)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "private-context")
+	}
+}
+
+func TestRegisterImportCipherContexts(t *testing.T) {
+	paramtable.Init()
+	const collectionID = 35
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))
+	schema := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "7"}}
+	source := &commonpb.KeyValuePair{Key: CipherConfigUnsafeEZK, Value: "7:b2xk"}
+	target := &commonpb.KeyValuePair{Key: CipherConfigUnsafeEZK, Value: "7:bmV3"}
+	other := &commonpb.KeyValuePair{Key: "other.plugin", Value: "context"}
+
+	for _, tc := range []struct {
+		name                   string
+		artifact               string
+		props                  []*commonpb.KeyValuePair
+		wire                   []*commonpb.KeyValuePair
+		wantSource, wantTarget bool
+	}{
+		{"plaintext", "", nil, []*commonpb.KeyValuePair{other}, false, false},
+		{"encrypted source", artifact, nil, []*commonpb.KeyValuePair{other, source}, true, false},
+		{"encrypted target", "", schema, []*commonpb.KeyValuePair{target, other}, false, true},
+		{"same zone on both sides", artifact, schema, []*commonpb.KeyValuePair{source, other, target}, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &importReadCipher{}
+			t.Cleanup(SetTestCipher(c))
+			source, target, err := ParseImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
+			require.NoError(t, err)
+			gotSource, err := GetImportSourcePluginContext(tc.artifact, tc.wire)
+			require.NoError(t, err)
+			require.Equal(t, source, gotSource)
+			var want []map[string]string
+			if tc.wantSource {
+				require.Equal(t, "b2xk", source.GetEncryptionKey())
+			} else {
+				require.Nil(t, source)
+			}
+			if tc.wantTarget {
+				want = append(want, map[string]string{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "bmV3"})
+				require.EqualValues(t, 7, target.GetEncryptionZoneId())
+				require.EqualValues(t, collectionID, target.GetCollectionId())
+				require.Equal(t, "bmV3", target.GetEncryptionKey())
+			} else {
+				require.Nil(t, target)
+			}
+			require.Empty(t, c.calls)
+			err = RegisterImportCipherContexts(tc.artifact, tc.props, tc.wire, collectionID)
+			require.NoError(t, err)
+			require.Equal(t, want, c.calls)
+		})
+	}
+}
+
+func TestRegisterImportCipherContextsRejectsInvalidRequest(t *testing.T) {
+	paramtable.Init()
+	const collectionID = 35
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":7}`))
+	missingID := base64.StdEncoding.EncodeToString([]byte(`{}`))
+	zone := func(s string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: s}}
+	}
+	wire := func(values ...string) []*commonpb.KeyValuePair {
+		var kvs []*commonpb.KeyValuePair
+		for _, v := range values {
+			kvs = append(kvs, &commonpb.KeyValuePair{Key: CipherConfigUnsafeEZK, Value: v})
+		}
+		return kvs
+	}
+	for _, tc := range []struct {
+		name, artifact string
+		props, entries []*commonpb.KeyValuePair
+	}{
+		{"missing source", artifact, nil, nil},
+		{"missing target", "", zone("8"), nil},
+		{"too few entries for equal IDs", artifact, zone("7"), wire("7:b2xk")},
+		{"extra entry", "", nil, wire("7:b2xk")},
+		{"reversed roles", artifact, zone("8"), wire("8:bmV3", "7:b2xk")},
+		{"wrong target", artifact, zone("8"), wire("7:b2xk", "7:bmV3")},
+		{"invalid schema zone", "", zone("abc"), nil},
+		{"duplicate schema zone", "", append(zone("8"), zone("8")...), wire("8:bmV3", "8:bmV3")},
+		{"invalid artifact", "%%", nil, nil},
+		{"missing artifact ID", missingID, nil, wire("0:b2xk")},
+		{"invalid wire format", artifact, nil, wire("7:b2xk:secret")},
+		{"invalid target encoding", artifact, zone("8"), wire("7:b2xk", "8:secret!")},
+		{"empty keyset", artifact, nil, wire("7:")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &importReadCipher{}
+			t.Cleanup(SetTestCipher(c))
+			err := RegisterImportCipherContexts(tc.artifact, tc.props, tc.entries, collectionID)
+			require.ErrorIs(t, err, merr.ErrImportFailed)
+			require.NotContains(t, err.Error(), "secret")
+			require.Empty(t, c.calls)
+		})
+	}
+	t.Run("disabled cipher", func(t *testing.T) {
+		t.Cleanup(SetTestCipher(nil))
+		err := RegisterImportCipherContexts(artifact, nil, wire("7:b2xk"), collectionID)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
+		err = RegisterImportCipherContexts("", zone("8"), wire("8:bmV3"), collectionID)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
+		err = RegisterImportCipherContexts("", nil, nil, collectionID)
+		require.NoError(t, err)
+	})
+	t.Run("target registration failure", func(t *testing.T) {
+		targetErr := merr.WrapErrServiceUnavailable("target key cache unavailable")
+		c := &importReadCipher{err: targetErr}
+		t.Cleanup(SetTestCipher(c))
+		err := RegisterImportCipherContexts(artifact, zone("7"), wire("7:b2xk", "7:bmV3"), collectionID)
+		require.ErrorIs(t, err, targetErr)
+		require.Equal(t, []map[string]string{{CipherConfigCreateEZ: "7", CipherConfigUnsafeEZK: "bmV3"}}, c.calls)
+	})
 }

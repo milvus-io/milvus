@@ -15,7 +15,6 @@
 #include "segcore/packed_reader_c.h"
 #include "milvus-storage/packed/reader.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
 #include "storage/StorageV2FSCache.h"
 
@@ -71,20 +70,13 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-        }
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetReaderProperties(c_plugin_context),
             milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -113,20 +105,12 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            plugin_ptr->Update(c_plugin_context->ez_id,
-                               c_plugin_context->collection_id,
-                               std::string(c_plugin_context->key));
-        }
-
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetReaderProperties(c_plugin_context),
             milvus::storage::GetArrowReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();

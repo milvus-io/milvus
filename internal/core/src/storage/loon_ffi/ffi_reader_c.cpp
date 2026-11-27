@@ -19,7 +19,6 @@
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/reader.h"
 #include "storage/loon_ffi/util.h"
-#include "storage/PluginLoader.h"
 #include "storage/KeyRetriever.h"
 #include "monitor/scope_metric.h"
 
@@ -62,13 +61,8 @@ GetLoonReader(
 
     // Configure CMEK decryption if plugin context is provided
     if (c_plugin_context != nullptr) {
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(plugin_ptr != nullptr, "cipher plugin is nullptr");
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
-        auto key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
+        auto key_retriever =
+            std::make_shared<milvus::storage::KeyRetriever>(c_plugin_context);
         reader->set_keyretriever(
             [key_retriever](const std::string& metadata) -> std::string {
                 return key_retriever->GetKey(metadata);

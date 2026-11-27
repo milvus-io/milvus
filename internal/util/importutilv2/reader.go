@@ -19,8 +19,10 @@ package importutilv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
@@ -52,6 +54,7 @@ func NewReader(ctx context.Context,
 	options Options,
 	bufferSize int,
 	storageConfig *indexpb.StorageConfig,
+	pluginContext []*commonpb.KeyValuePair,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
@@ -64,7 +67,11 @@ func NewReader(ctx context.Context,
 			return nil, err
 		}
 		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
+		source, err := hookutil.GetImportSourcePluginContext(importEz, pluginContext)
+		if err != nil {
+			return nil, err
+		}
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, source)
 	}
 
 	fileType, err := GetFileType(importFile)

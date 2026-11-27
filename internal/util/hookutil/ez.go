@@ -17,14 +17,18 @@
 package hookutil
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -32,25 +36,27 @@ const (
 	// Used in Plugins
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
-	CipherConfigImportEZ       = "cipher.ez.import"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
 	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
 
-func encodeEZContext(ezID int64, key []byte) string {
-	return fmt.Sprintf("%d:%s", ezID, base64.StdEncoding.EncodeToString(key))
+func encodeEZContext(ezID int64, key []byte) *commonpb.KeyValuePair {
+	return &commonpb.KeyValuePair{
+		Key:   CipherConfigUnsafeEZK,
+		Value: fmt.Sprintf("%d:%s", ezID, base64.StdEncoding.EncodeToString(key)),
+	}
 }
 
 func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 	parts := strings.Split(encoded, ":")
 	if len(parts) != 2 {
-		return 0, "", merr.WrapErrParameterInvalidMsg("invalid EZ context format: %s", encoded)
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid EZ context format")
 	}
 
 	ezID, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, "", merr.Wrap(err, "invalid ezID in context")
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid ezID in context")
 	}
 
 	return ezID, parts[1], nil
@@ -58,8 +64,8 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 
 func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) {
 	for _, property := range properties {
-		if property.Key == common.EncryptionEzIDKey {
-			ezID, err := strconv.ParseInt(property.Value, 10, 64)
+		if property.GetKey() == common.EncryptionEzIDKey {
+			ezID, err := strconv.ParseInt(property.GetValue(), 10, 64)
 			if err != nil {
 				return 0, false
 			}
@@ -67,6 +73,27 @@ func ParseEzIDFromProperties(properties []*commonpb.KeyValuePair) (int64, bool) 
 		}
 	}
 	return 0, false
+}
+
+// parseTargetEzID requires at most one positive encryption zone ID on the target schema.
+func parseTargetEzID(properties []*commonpb.KeyValuePair) (int64, bool, error) {
+	var id int64
+	var found bool
+	for _, property := range properties {
+		if property.GetKey() != common.EncryptionEzIDKey {
+			continue
+		}
+		if found {
+			return 0, false, merr.WrapErrParameterInvalidMsg("duplicate target %s", common.EncryptionEzIDKey)
+		}
+		parsed, err := strconv.ParseInt(property.GetValue(), 10, 64)
+		if err != nil || parsed <= 0 {
+			return 0, false, merr.WrapErrParameterInvalidMsg("invalid target %s", common.EncryptionEzIDKey)
+		}
+		id = parsed
+		found = true
+	}
+	return id, found, nil
 }
 
 func CreateEZ(ezID int64, kmsKeyArn string) error {
@@ -127,44 +154,80 @@ func BackupEZ(ezID int64) (string, error) {
 func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, nil
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
 	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID))
 	}
 
-	return []*commonpb.KeyValuePair{{
-		Key:   CipherConfigUnsafeEZK,
-		Value: encodeEZContext(ezID, key),
-	}}, nil
+	return []*commonpb.KeyValuePair{encodeEZContext(ezID, key)}, nil
 }
 
-func ImportEZ(importEzk string) ([]*commonpb.KeyValuePair, error) {
-	cipher := GetCipher()
-	if cipher == nil || importEzk == "" {
+func isTemporaryError(err error) bool {
+	for err != nil {
+		if tmp, ok := err.(interface{ Temporary() bool }); ok && tmp.Temporary() {
+			return true
+		}
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, cause := range joined.Unwrap() {
+				if isTemporaryError(cause) {
+					return true
+				}
+			}
+			return false
+		}
+		if next := errors.Unwrap(err); next != nil {
+			err = next
+			continue
+		}
+		if causer, ok := err.(interface{ Cause() error }); ok {
+			err = causer.Cause()
+			continue
+		}
+		break
+	}
+	return false
+}
+
+func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
+	if artifact == "" {
 		return nil, nil
 	}
-
-	config := map[string]string{
-		CipherConfigImportEZ: importEzk,
-	}
-	if err := cipher.Init(config); err != nil {
-		return nil, merr.Wrap(err, "failed to import EZK")
-	}
-
-	ezID, err := GetEzIDByImportEzk(importEzk)
+	sourceID, err := GetEzIDByImportEzk(artifact)
 	if err != nil {
 		return nil, err
 	}
-	return GetPluginContext(ezID, 0)
+	cipher := GetCipher()
+	if cipher == nil {
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted backup")
+	}
+	resolver, ok := cipher.(ImportEZResolver)
+	if !ok {
+		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support ResolveImportEZ")
+	}
+	ezID, key, err := resolver.ResolveImportEZ(artifact)
+	if err != nil {
+		if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+			(errors.Is(err, context.DeadlineExceeded) || isTemporaryError(err)) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "failed to resolve source EZK")
+		}
+		return nil, merr.Wrap(err, "failed to resolve source EZK")
+	}
+	if ezID <= 0 || len(key) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("cipher plugin returned an invalid source EZK")
+	}
+	if ezID != sourceID {
+		return nil, merr.WrapErrServiceInternalMsg("cipher plugin resolved source ezID %d, expected %d", ezID, sourceID)
+	}
+	return []*commonpb.KeyValuePair{encodeEZContext(ezID, key)}, nil
 }
 
 func GetEzIDByImportEzk(importEzk string) (int64, error) {
 	ezkBytes, err := base64.StdEncoding.DecodeString(importEzk)
 	if err != nil {
-		return 0, merr.Wrap(err, "failed to decode EZK")
+		return 0, merr.WrapErrParameterInvalidMsg("failed to decode EZK: %v", err)
 	}
 
 	type EZKData struct {
@@ -172,7 +235,103 @@ func GetEzIDByImportEzk(importEzk string) (int64, error) {
 	}
 	var ezkData EZKData
 	if err := json.Unmarshal(ezkBytes, &ezkData); err != nil {
-		return 0, merr.Wrap(err, "failed to unmarshal EZK")
+		return 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal backup EZK")
+	}
+	if ezkData.EzID <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("backup EZK must include a positive ez_id")
 	}
 	return ezkData.EzID, nil
+}
+
+// GetImportSourcePluginContext extracts the backup source cipher context from the
+// request's plugin context. When present, the source entry always precedes the target.
+func GetImportSourcePluginContext(artifact string, pluginContext []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
+	if artifact == "" {
+		return nil, nil
+	}
+	id, err := GetEzIDByImportEzk(artifact)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(err.Error())
+	}
+	for _, entry := range pluginContext {
+		if entry.GetKey() == CipherConfigUnsafeEZK {
+			return importCipherEntry(entry, "source", id, 0)
+		}
+	}
+	return nil, merr.WrapErrImportFailed("missing source import cipher context")
+}
+
+// ParseImportCipherContexts reads the ordered source and target snapshots without
+// consulting or updating the worker's keys. A plaintext side has no wire entry.
+func ParseImportCipherContexts(artifact string, properties, pluginContext []*commonpb.KeyValuePair, collectionID int64) (source, target *indexcgopb.StoragePluginContext, err error) {
+	next := func() *commonpb.KeyValuePair {
+		for len(pluginContext) > 0 {
+			entry := pluginContext[0]
+			pluginContext = pluginContext[1:]
+			if entry.GetKey() == CipherConfigUnsafeEZK {
+				return entry
+			}
+		}
+		return nil
+	}
+	if artifact != "" {
+		id, err := GetEzIDByImportEzk(artifact)
+		if err != nil {
+			return nil, nil, merr.WrapErrImportFailed(err.Error())
+		}
+		// The wire context contains the source zone, but no source collection ID.
+		source, err = importCipherEntry(next(), "source", id, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	targetID, hasTarget, err := parseTargetEzID(properties)
+	if err != nil {
+		return nil, nil, merr.WrapErrImportFailed(err.Error())
+	}
+	if hasTarget {
+		target, err = importCipherEntry(next(), "target", targetID, collectionID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if next() != nil {
+		return nil, nil, merr.WrapErrImportFailed("unexpected import cipher context")
+	}
+	return source, target, nil
+}
+
+func RegisterImportCipherContexts(
+	artifact string,
+	properties, pluginContext []*commonpb.KeyValuePair,
+	collectionID int64,
+) error {
+	source, target, err := ParseImportCipherContexts(artifact, properties, pluginContext, collectionID)
+	if err != nil {
+		return err
+	}
+	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
+		return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register import cipher contexts")
+	}
+	// Only register the authoritative target zone; source decryption is stateless in C++ using the bound source keyset.
+	if target != nil {
+		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func importCipherEntry(entry *commonpb.KeyValuePair, role string, expectedID, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	if entry == nil {
+		return nil, merr.WrapErrImportFailedMsg("missing %s import cipher context", role)
+	}
+	id, key, err := decodeEZContext(entry.GetValue())
+	if err != nil || id != expectedID {
+		return nil, merr.WrapErrImportFailedMsg("invalid %s import cipher context for zone %d", role, expectedID)
+	}
+	if raw, err := base64.StdEncoding.DecodeString(key); err != nil || len(raw) == 0 {
+		return nil, merr.WrapErrImportFailedMsg("invalid %s import keyset for zone %d", role, expectedID)
+	}
+	return &indexcgopb.StoragePluginContext{EncryptionZoneId: id, CollectionId: collectionID, EncryptionKey: key}, nil
 }

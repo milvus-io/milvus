@@ -35,9 +35,12 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -283,6 +286,38 @@ func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 	}
 	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.Error(err)
+}
+
+func (s *PackedBinlogRecordSuite) TestWriterRequiresEncryptionKey() {
+	const ezID int64 = 17
+	s.collectionID = 23
+	s.schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: strconv.FormatInt(ezID, 10)}}
+
+	s.Run("missing_cipher_plugin", func() {
+		s.T().Cleanup(hookutil.SetTestCipher(nil))
+		writer, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+			WithVersion(StorageV2),
+			WithStorageConfig(s.storageConfig),
+			WithUploader(s.mockBinlogIO.Upload),
+		)
+		s.ErrorIs(err, merr.ErrServiceUnavailable)
+		s.Nil(writer)
+	})
+
+	s.Run("empty_unsafe_key", func() {
+		cipher := mock_hook.NewMockCipher(s.T())
+		s.T().Cleanup(hookutil.SetTestCipher(cipher))
+		cipher.EXPECT().GetUnsafeKey(ezID, s.collectionID).Return(nil).Once()
+
+		writer, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum,
+			WithVersion(StorageV2),
+			WithStorageConfig(s.storageConfig),
+			WithUploader(s.mockBinlogIO.Upload),
+		)
+		s.ErrorIs(err, merr.ErrServiceUnavailable)
+		s.ErrorContains(err, "ezID=17, collectionID=23")
+		s.Nil(writer)
+	})
 }
 
 func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {

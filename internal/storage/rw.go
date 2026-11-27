@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	sio "io"
 	"path"
 	"sort"
@@ -252,22 +253,19 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 
 	binlogReaderOpts := []BinlogReaderOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
-			pluginContext = rwOptions.pluginContext
-		} else {
-			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
-			if ez != nil {
-				binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+	if rwOptions.pluginContext != nil {
+		pluginContext = rwOptions.pluginContext
+	} else if hookutil.IsClusterEncryptionEnabled() {
+		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
+		if ez != nil {
+			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
 
-				unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-				if len(unsafe) > 0 {
-					pluginContext = &indexcgopb.StoragePluginContext{
-						EncryptionZoneId: ez.EzID,
-						CollectionId:     ez.CollectionID,
-						EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-					}
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 				}
 			}
 		}
@@ -368,22 +366,26 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 	opts := []StreamWriterOption{}
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
-		if ez != nil {
+	if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID); ez != nil {
+		if !hookutil.IsClusterEncryptionEnabled() {
+			return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+		}
+		switch rwOptions.version {
+		case StorageV1:
 			encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
 			if err != nil {
 				return nil, err
 			}
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
-
+		case StorageV2:
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-				}
+			if len(unsafe) == 0 {
+				return nil, merr.WrapErrServiceUnavailable(fmt.Sprintf("cannot get encryption key for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+			}
+			pluginContext = &indexcgopb.StoragePluginContext{
+				EncryptionZoneId: ez.EzID,
+				CollectionId:     ez.CollectionID,
+				EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
 			}
 		}
 	}

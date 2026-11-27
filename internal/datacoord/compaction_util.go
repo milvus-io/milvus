@@ -51,40 +51,41 @@ func PreAllocateBinlogIDs(allocator allocator.Allocator, segmentInfos []*Segment
 	return &datapb.IDRange{Begin: begin, End: end}, err
 }
 
-// Return None nil slice
-func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	importEzk, _ := importutilv2.GetEZK(options)
-	return hookutil.GetReadStoragePluginContext(importEzk)
-}
-
-func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
-	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
-	if pluginContext == nil {
-		return
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		artifact, _ := importutilv2.GetEZK(msg.GetOptions())
+		pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
+		if err != nil {
+			return err
+		}
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+		return nil
+	case *datapb.PreImportRequest:
+		artifact, _ := importutilv2.GetEZK(msg.GetOptions())
+		pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
+		if err != nil {
+			return err
+		}
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+		return nil
 	}
 
+	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
+	if err != nil {
+		return err
+	}
 	switch msg := msg.(type) {
 	case *datapb.CompactionPlan:
-		plan := msg
-		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateJobRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.AnalyzeRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	default:
-		return
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	}
+	return nil
 }
 
 func isNormalManualCompactionCandidate(segment *SegmentInfo) bool {

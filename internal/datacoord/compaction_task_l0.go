@@ -384,6 +384,10 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		return plan, nil
 	}
 
+	if err := WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
+
 	segments = append(segments, flushedSegments...)
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments)
 	if err != nil {
@@ -399,7 +403,6 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		zap.Any("target segments count", len(flushedSegBinlogs)),
 		zap.Any("PreAllocatedLogIDs", logIDRange))
 
-	WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
 	return plan, nil
 }
 
