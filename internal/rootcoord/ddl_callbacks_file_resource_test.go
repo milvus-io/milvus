@@ -308,7 +308,9 @@ func TestFileResourceAdmissionChecksActualBytes(t *testing.T) {
 	t.Cleanup(func() { Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(old) })
 	cm := mock_storage.NewMockChunkManager(t)
 	cm.EXPECT().Size(mock.Anything, "dict/large.txt").Return(int64(1), nil)
-	cm.EXPECT().Reader(mock.Anything, "dict/large.txt").Return(&admissionFileReader{strings.NewReader("SECRET_MARKER")}, nil).Once()
+	cm.EXPECT().Reader(mock.Anything, "dict/large.txt").Run(func(context.Context, string) {
+		Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("8")
+	}).Return(&admissionFileReader{strings.NewReader("SECRET_MARKER")}, nil).Once()
 	core := newTestCore(withStorage(cm))
 	api := mockFileResourceBroadcast(t, core)
 	err := core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{Name: "large", Path: "dict/large.txt"})
