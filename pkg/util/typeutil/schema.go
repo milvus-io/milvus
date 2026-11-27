@@ -3638,6 +3638,11 @@ func NewStorageColumnResolver(schema *schemapb.CollectionSchema, opts ...Storage
 	}
 }
 
+// isMilvusTableStorageSpec treats a spec that does not parse as not
+// milvus-table. That includes a persisted spec that sets a key twice (see
+// specutil.ValidateExternalSpecKeys). Reading such a collection's data still
+// fails, because specutil.NormalizeExternalSpec rejects the same spec before
+// it is passed to native code.
 func isMilvusTableStorageSpec(externalSpec string) bool {
 	spec, err := specutil.ParseExternalSpec(externalSpec)
 	return err == nil && spec.Format == specutil.FormatMilvusTable

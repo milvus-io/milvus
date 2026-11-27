@@ -1792,11 +1792,35 @@ func TestInjectExternalSpecProperties_LegacyKeys(t *testing.T) {
 	props, err := MakePropertiesFromStorageConfig(config, nil)
 	require.NoError(t, err)
 	defer FreeProperties(props)
-	const spec = `{"FORMAT":"paimon-table","Snapshot_Id":9007199254740993,"SCAN_MODE":"auto","scan_mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}}`
+	const spec = `{"FORMAT":"paimon-table","Snapshot_Id":9007199254740993,"SCAN_MODE":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}}`
 	require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/table", spec))
 	require.Equal(t, "data-split", loonPropertyString(props, "paimon.scan_mode"))
 	require.Equal(t, "9007199254740993", loonPropertyString(props, "reader.exttable.snapshot_id"))
 	require.Equal(t, "us-east-1", loonPropertyString(props, ExtfsPrefixForCollection(42)+"region"))
+}
+
+// A persisted spec that sets one key twice stops at the Go boundary instead of
+// reaching native code as a merge of both values.
+func TestInjectExternalSpecProperties_RejectsCollidingKeys(t *testing.T) {
+	paramtable.Init()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"FORMAT":"paimon-table","SCAN_MODE":"auto","scan_mode":"data-split"}`, `external spec keys "SCAN_MODE" and "scan_mode" differ only in case`},
+		{`{"extfs":{"cloud_provider":"gcp","use_iam":"true"},"Extfs":{"gcp_target_service_account":"other@project.iam.gserviceaccount.com"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","region":"eu-west-1"}}`, `extfs key "region" appears more than once`},
+	} {
+		err := injectExternalSpecProperties(props, 42, "s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+		source, cSpec, cleanup, err := newCExternalContext("s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.Nil(t, source)
+		require.Nil(t, cSpec)
+		require.Nil(t, cleanup)
+	}
 }
 
 func TestNewCExternalContextRejectsMalformedSpec(t *testing.T) {
