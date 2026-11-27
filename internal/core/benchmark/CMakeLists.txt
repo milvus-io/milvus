@@ -66,7 +66,7 @@ target_link_libraries(bit_sliced_index_benchmark PRIVATE
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        milvus-common
+        "$<TARGET_FILE:milvus-common>"
         gRPC::grpc++
         Boost::filesystem
         glog::glog

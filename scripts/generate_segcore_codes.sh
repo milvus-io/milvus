@@ -56,18 +56,20 @@ find_build_tree_header() {
 }
 
 # Shallow-clone the pinned commit so gates that run before a core build (e.g.
-# the code-checker job) still read exactly the pinned revision.
+# the code-checker job) still read exactly the pinned revision. Returns 1 when
+# the pinned header cannot be obtained so callers can fail loudly instead of
+# silently falling back to an older build's leftover header.
 fetch_pinned_header() {
   local pin="$1" repo="$2" dir
-  [[ -n "$pin" && -n "$repo" ]] || return 0
+  [[ -n "$pin" && -n "$repo" ]] || return 1
   dir="${TMPDIR:-/tmp}/milvus-common-segcoregen/$pin"
   if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
     rm -rf "$dir"
     mkdir -p "$dir"
-    git init -q "$dir" || return 0
-    git -C "$dir" remote add origin "$repo" || return 0
-    git -C "$dir" fetch -q --depth 1 origin "$pin" || { rm -rf "$dir"; return 0; }
-    git -C "$dir" checkout -q FETCH_HEAD || { rm -rf "$dir"; return 0; }
+    git init -q "$dir" || return 1
+    git -C "$dir" remote add origin "$repo" || return 1
+    git -C "$dir" fetch -q --depth 1 origin "$pin" || { rm -rf "$dir"; return 1; }
+    git -C "$dir" checkout -q FETCH_HEAD || { rm -rf "$dir"; return 1; }
   fi
   printf '%s\n' "$dir/include/common/EasyAssert.h"
 }
@@ -80,7 +82,14 @@ if [[ -z "$header" ]]; then
   header="$(fetch_pinned_header "$pin" "$repo")"
 fi
 
+# A leftover header from a previous core build is usable only when the pinned
+# source could not be obtained at all; flag it so a stale header cannot pass
+# the drift gate silently.
 if [[ -z "$header" || ! -f "$header" ]]; then
+  if [[ -n "$pin" ]]; then
+    echo "segcoregen: warning: no milvus-common source at pin ${pin}; " >&2
+    echo "  falling back to a possibly stale header from a previous build." >&2
+  fi
   header="$ROOT/internal/core/output/include/common/EasyAssert.h"
 fi
 

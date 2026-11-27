@@ -265,7 +265,7 @@ target_link_libraries(
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        milvus-common
+        "$<TARGET_FILE:milvus-common>"
         gRPC::grpc++
         Boost::filesystem
         glog::glog
@@ -290,7 +290,7 @@ target_link_libraries(index_runtime_acceptance_test
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        milvus-common
+        "$<TARGET_FILE:milvus-common>"
         gRPC::grpc++
         Boost::filesystem
         glog::glog
