@@ -4492,3 +4492,39 @@ func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizesOrdinaryStructProj
 	}
 	s.Equal(int64(48), sumFieldSizes(map[string]int64{"raw_items[a]": 16, "raw_items[b]": 32, "raw_items[ignored]": 100}, schema))
 }
+
+// A DV update can replace visible rows without changing the path or row count.
+// Segment reuse must consume the persisted snapshot-sensitive fragment identity.
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_DeltaSnapshotChange() {
+	ctx := context.Background()
+	old := packed.Fragment{
+		FilePath: "s3://bucket/table/data.parquet", EndRow: 10, RowCount: 10,
+		Properties: map[string]string{"metadata": `{"version":1,"table_uri":"s3://bucket/table/","snapshot_version":0}`, "file_size": "123"},
+	}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID, TaskID: s.taskID,
+		ExternalSpec:    `{"format":"deltalake-table"}`,
+		CurrentSegments: []*datapb.SegmentInfo{{ID: 1, CollectionID: s.collectionID, NumOfRows: 10}},
+	}
+	task := s.newTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatDeltaLakeTable}
+	current := packed.SegmentFragments{1: []packed.Fragment{old}}
+	_, err := task.organizeSegments(ctx, current, []packed.Fragment{old})
+	s.NoError(err)
+	s.Equal([]int64{1}, task.GetKeptSegmentIDs())
+	next := old
+	next.Properties = map[string]string{"metadata": `{"version":1,"table_uri":"s3://bucket/table/","snapshot_version":1}`, "file_size": "123"}
+	rebuilt := false
+	patch := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).To(func(ctx context.Context, fragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+		rebuilt = true
+		s.Equal([]packed.Fragment{next}, fragments)
+		return []*datapb.SegmentInfo{{ID: 2, CollectionID: s.collectionID, NumOfRows: 10}}, nil
+	}).Build()
+	defer patch.UnPatch()
+	result, err := task.organizeSegments(ctx, current, []packed.Fragment{next})
+	s.NoError(err)
+	s.True(rebuilt)
+	s.Empty(task.GetKeptSegmentIDs())
+	s.Len(result, 1)
+	s.Equal(int64(2), result[0].GetID())
+}

@@ -33,12 +33,13 @@ import (
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer -- keep the two in sync.
 const (
-	FormatParquet      = "parquet"
-	FormatLanceTable   = "lance-table"
-	FormatVortex       = "vortex"
-	FormatIcebergTable = "iceberg-table"
-	FormatPaimonTable  = "paimon-table"
-	FormatMilvusTable  = "milvus-table"
+	FormatParquet        = "parquet"
+	FormatLanceTable     = "lance-table"
+	FormatVortex         = "vortex"
+	FormatIcebergTable   = "iceberg-table"
+	FormatPaimonTable    = "paimon-table"
+	FormatMilvusTable    = "milvus-table"
+	FormatDeltaLakeTable = "deltalake-table"
 )
 
 // ExtfsKey* are the canonical spec.extfs key names. Use these instead of
@@ -139,12 +140,13 @@ func (s ExternalSpec) MarshalJSON() ([]byte, error) {
 
 // supportedFormats lists the file formats supported for external collections.
 var supportedFormats = map[string]bool{
-	FormatParquet:      true,
-	FormatLanceTable:   true,
-	FormatVortex:       true,
-	FormatIcebergTable: true,
-	FormatPaimonTable:  true,
-	FormatMilvusTable:  true,
+	FormatParquet:        true,
+	FormatLanceTable:     true,
+	FormatVortex:         true,
+	FormatIcebergTable:   true,
+	FormatPaimonTable:    true,
+	FormatMilvusTable:    true,
+	FormatDeltaLakeTable: true,
 }
 
 // allowedExtfsKeys gates keys permitted in ExternalSpec.extfs. Persisted in

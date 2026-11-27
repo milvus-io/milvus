@@ -1311,7 +1311,7 @@ InjectExternalSpecProperties(
         }
     }
     // Format-layer: emit per-format properties derived from spec.format.
-    // Lance, Iceberg, and Paimon use reader.exttable.snapshot_id.
+    // Lance, Iceberg, Paimon, and Delta Lake use reader.exttable.snapshot_id.
     if (external_spec.empty()) {
         return arrow::Status::OK();
     }
@@ -1324,7 +1324,7 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "lance-table" || format == "iceberg-table" ||
-                format == "paimon-table") {
+                format == "paimon-table" || format == "deltalake-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;

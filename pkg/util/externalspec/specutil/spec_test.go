@@ -350,3 +350,36 @@ func TestBrokerQuerySyntaxAndExactIdentity(t *testing.T) {
 		require.Error(t, err, query)
 	}
 }
+
+func TestDeltaLakeSnapshotSelection(t *testing.T) {
+	for _, test := range []struct {
+		selector string
+		want     int64
+	}{
+		{"-1", -1},
+		{"0", 0},
+		{"42", 42},
+		{`"0"`, 0},
+		{`"9223372036854775807"`, 9223372036854775807},
+	} {
+		raw := `{"format":"deltalake-table","snapshot_id":` + test.selector + `}`
+		spec, err := ParseExternalSpec(raw)
+		require.NoError(t, err)
+		require.NotNil(t, spec.SnapshotID, test.selector)
+		require.Equal(t, test.want, *spec.SnapshotID, test.selector)
+		normalized, err := NormalizeExternalSpec(raw)
+		require.NoError(t, err)
+		roundTrip, err := ParseExternalSpec(normalized)
+		require.NoError(t, err)
+		require.Equal(t, spec, roundTrip)
+	}
+	for _, selector := range []string{"1.5", "9223372036854775808", `"1garbage"`, "true", "{}"} {
+		_, err := ParseExternalSpec(`{"format":"deltalake-table","snapshot_id":` + selector + `}`)
+		require.Error(t, err, selector)
+	}
+	for _, raw := range []string{`{"format":"deltalake-table"}`, `{"format":"deltalake-table","snapshot_id":null}`} {
+		spec, err := ParseExternalSpec(raw)
+		require.NoError(t, err)
+		require.Nil(t, spec.SnapshotID)
+	}
+}
