@@ -27,6 +27,7 @@
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
+#include "arrow/util/key_value_metadata.h"
 #include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
@@ -48,6 +49,20 @@
 #include "storage/loon_ffi/util.h"
 #include "storage/plugin/PluginInterface.h"
 #include "storage/StatusToErrorCode.h"
+
+namespace {
+arrow::Status
+AddSchemaMetadata(const arrow::Schema& schema,
+                  milvus_storage::PackedRecordBatchWriter& writer) {
+    if (auto metadata = schema.metadata()) {
+        for (int64_t i = 0; i < metadata->size(); ++i) {
+            ARROW_RETURN_NOT_OK(
+                writer.AddUserMetadata(metadata->key(i), metadata->value(i)));
+        }
+    }
+    return arrow::Status::OK();
+}
+}  // namespace
 
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
@@ -126,6 +141,11 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             return milvus::FailureCStatus(&error);
         }
         auto writer = result.ValueOrDie();
+        auto status = AddSchemaMetadata(*trueSchema, *writer);
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
@@ -209,6 +229,11 @@ NewPackedWriter(struct ArrowSchema* schema,
             return milvus::FailureCStatus(&error);
         }
         auto writer = result.ValueOrDie();
+        auto status = AddSchemaMetadata(*trueSchema, *writer);
+        if (!status.ok()) {
+            auto error = milvus_storage::ToSegcoreError(status);
+            return milvus::FailureCStatus(&error);
+        }
         *c_packed_writer =
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
@@ -258,23 +283,6 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             arrow_schema, all_arrays[0]->length(), all_arrays);
 
         auto status = packed_writer->Write(record_batch);
-        if (!status.ok()) {
-            auto error = milvus_storage::ToSegcoreError(status);
-            return milvus::FailureCStatus(&error);
-        }
-        return milvus::SuccessCStatus();
-    }
-    CGO_CATCH_AND_RETURN_CSTATUS
-}
-
-CStatus
-AddPackedWriterMetadata(CPackedWriter handle,
-                        const char* key,
-                        const char* value) {
-    try {
-        auto writer = static_cast<
-            std::shared_ptr<milvus_storage::PackedRecordBatchWriter>*>(handle);
-        auto status = (*writer)->AddUserMetadata(key, value);
         if (!status.ok()) {
             auto error = milvus_storage::ToSegcoreError(status);
             return milvus::FailureCStatus(&error);

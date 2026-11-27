@@ -59,11 +59,6 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowSchema* schema);
 
 CStatus
-AddPackedWriterMetadata(CPackedWriter writer,
-                        const char* key,
-                        const char* value);
-
-CStatus
 CloseWriter(CPackedWriter c_packed_writer);
 
 CStatus

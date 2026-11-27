@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// NewPackedWriter copies schema-level metadata to each physical file's footer.
 func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
@@ -176,18 +177,6 @@ func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
 	}
 
 	return nil
-}
-
-// AddMetadata attaches a footer key to each physical column group.
-func (pw *PackedWriter) AddMetadata(key, value string) error {
-	if pw.cPackedWriter == nil {
-		return merr.WrapErrStorageMsg("packed writer is closed")
-	}
-	k, v := C.CString(key), C.CString(value)
-	defer C.free(unsafe.Pointer(k))
-	defer C.free(unsafe.Pointer(v))
-	status := C.AddPackedWriterMetadata(pw.cPackedWriter, k, v)
-	return ConsumeCStatusIntoError(&status)
 }
 
 func (pw *PackedWriter) Close() error {

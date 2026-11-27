@@ -74,6 +74,15 @@ func WriteMutationDelta(ctx context.Context, path string, d MutationDelta, cfg *
 	if err != nil {
 		return 0, err
 	}
+	fields, err := json.Marshal(d.Layout.Fields)
+	if err != nil {
+		return 0, merr.Wrap(err, "marshal delta fields")
+	}
+	metadata := arrow.MetadataFrom(map[string]string{
+		"delta_format_version": "1", "schema_version": strconv.Itoa(int(d.Layout.SchemaVersion)), "collection_id": strconv.FormatInt(d.Layout.CollectionID, 10),
+		"vchannel": d.Layout.VChannel, "partition_scope": strconv.FormatInt(d.Layout.PartitionID, 10), "pk_type": d.Layout.PKType.String(), "update_fields": string(fields),
+	})
+	schema = arrow.NewSchema(schema.Fields(), &metadata)
 	columns := make([]int, schema.NumFields())
 	for i := range columns {
 		columns[i] = i
@@ -83,18 +92,6 @@ func WriteMutationDelta(ctx context.Context, path string, d MutationDelta, cfg *
 		return 0, err
 	}
 	defer w.Close()
-	fields, err := json.Marshal(d.Layout.Fields)
-	if err != nil {
-		return 0, merr.Wrap(err, "marshal delta fields")
-	}
-	for k, v := range map[string]string{
-		"delta_format_version": "1", "schema_version": strconv.Itoa(int(d.Layout.SchemaVersion)), "collection_id": strconv.FormatInt(d.Layout.CollectionID, 10),
-		"vchannel": d.Layout.VChannel, "partition_scope": strconv.FormatInt(d.Layout.PartitionID, 10), "pk_type": d.Layout.PKType.String(), "update_fields": string(fields),
-	} {
-		if err := w.AddMetadata(k, v); err != nil {
-			return 0, err
-		}
-	}
 	for begin := 0; begin < len(d.Rows); {
 		if err := ctx.Err(); err != nil {
 			return 0, err
