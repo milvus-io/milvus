@@ -1112,9 +1112,17 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			}
 		}()
 		if plan != nil {
+			startedAt := time.Now()
 			err = plan.Execute(ctx)
+			if physicalLoadTiming != nil {
+				physicalLoadTiming.CSegmentLoad = time.Since(startedAt)
+			}
 			if err == nil {
+				startedAt = time.Now()
 				segment.syncFieldJSONStatsFromLoadInfo(ctx, loadInfo)
+				if physicalLoadTiming != nil {
+					physicalLoadTiming.SyncJSONStats = time.Since(startedAt)
+				}
 			}
 		} else {
 			err = segment.Load(ctx)

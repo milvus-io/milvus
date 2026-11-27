@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -56,7 +57,7 @@ func PrepareSegmentLoadPlan(ctx context.Context, segment CSegment, schema *schem
 		if info != nil {
 			info.EstimatedBytesPerRow = loadresource.EstimateBytesPerRow(schema, info)
 		}
-		converted, err := ConvertToSegcoreSegmentLoadInfo(info)
+		converted, err := convertToSegcoreSegmentLoadInfo(info, packed.ManifestReadReopen)
 		if err != nil {
 			return nil, err
 		}

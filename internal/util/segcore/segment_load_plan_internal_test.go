@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -41,9 +42,14 @@ func TestExternalRowEstimateBeforeNativeConversion(t *testing.T) {
 			}
 			stop := errors.New("stop before native call")
 			called := false
-			patch := mockey.Mock(ConvertToSegcoreSegmentLoadInfo).To(func(input *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
+			patch := mockey.Mock(convertToSegcoreSegmentLoadInfo).To(func(input *querypb.SegmentLoadInfo, origin packed.ManifestReadOrigin) (*segcorepb.SegmentLoadInfo, error) {
 				called = true
 				require.EqualValues(t, 100, input.GetEstimatedBytesPerRow())
+				if operation == "create" {
+					require.Equal(t, packed.ManifestReadCreate, origin)
+				} else {
+					require.Equal(t, packed.ManifestReadReopen, origin)
+				}
 				return nil, stop
 			}).Build()
 			defer patch.UnPatch()

@@ -9010,16 +9010,20 @@ ChunkedSegmentSealedImpl::PrepareLoadPlan(
 bool
 ChunkedSegmentSealedImpl::ExecuteLoadPlan(milvus::OpContext* op_ctx,
                                           PreparedLoadPlan& plan) {
+    milvus::monitor::SegmentLoadTiming timing;
     std::lock_guard<std::mutex> guard(reopen_mutex_);
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        &timing, milvus::monitor::SegmentLoadPhase::Prepare);
     AssertInfo(plan.owner == this, "load plan belongs to another segment");
     AssertInfo(!plan.consumed, "load plan has already been consumed");
     plan.consumed = true;
     CheckCancellation(op_ctx, id_, "ExecuteLoadPlan");
     const auto current = CapturePublishedState();
     if (plan.base.lock() != current) {
+        timing.End(true);
         return false;
     }
-    ApplyLoadDiff(op_ctx, plan.load_info, plan.diff, plan.fields);
+    ApplyLoadDiff(op_ctx, plan.load_info, plan.diff, plan.fields, &timing);
     return true;
 }
 

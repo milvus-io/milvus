@@ -48,15 +48,22 @@ preparation attempts are different populations, especially on failures or retrie
 
 `internal_core_segment_load_duration_seconds{stage,result}` records one sample
 for each of 14 phases and `total` per invocation of
-`ChunkedSegmentSealedImpl::Load`. These phases partition native Load wall time,
+`ChunkedSegmentSealedImpl::Load` or `ExecuteLoadPlan`. These phases partition
+native execution wall time,
 share its final success/error outcome, and include time up to an exceptional
 exit. Phases not reached are zero. Empty diff phases still include their checks.
 Native cancellation is included in `error`, matching the native stage family.
 
+For prepared plans, `prepare` measures execution-time validation of the captured
+state; a stale plan is recorded as an error. Earlier `PrepareLoadPlan` metadata
+I/O, resource estimation and Go admission are outside this native execution
+timer. The Go `csegment_load` stage covers plan execution and `sync_json_stats`
+covers the subsequent stats synchronization, as on the legacy Load path.
+
 | Phase, in execution order | Boundary |
 |---|---|
 | `lock_wait` | Existing reopen mutex acquisition. |
-| `prepare` | Published snapshot, mutable load-info copy, GetLoadDiff. |
+| `prepare` | Legacy Load: published snapshot, mutable load-info copy, GetLoadDiff. Prepared execution: validate the captured state. |
 | `clone_state` | Clone runtime/published state, construct staged committer. |
 | `indexes` | Load and replace index batches, including all worker waits. |
 | `reload_columns` | Reload existing columns. |
