@@ -75,6 +75,9 @@ type Manager interface {
 	api.DataViewPublisher
 	OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	OnBootstrapCollection(ctx context.Context, event BootstrapCollectionDataViewEvent) (*viewpb.DataVersion, error)
+	// DeclareShards adds empty shards to a collection that already has a
+	// DataView (see declare_shards.go). Idempotent.
+	DeclareShards(ctx context.Context, event DeclareShardsDataViewEvent) (*viewpb.DataVersion, error)
 	// PrepareFlush builds the post-flush snapshot under the Collection lock
 	// for the flush atomic txn (see implementation comment for the
 	// commit/abort contract).

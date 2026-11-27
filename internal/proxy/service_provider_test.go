@@ -90,6 +90,41 @@ func TestCachedProxyServiceProvider_DescribeCollection_IgnoresLegacyDoPhysicalBa
 	assert.False(t, resp.GetSchema().GetDoPhysicalBackfill())
 }
 
+func TestCachedProxyServiceProvider_DescribeCollection_ReturnsShardRouting(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1000)
+	schema := &schemapb.CollectionSchema{
+		Name: "c",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      common.StartOfUserFieldID,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	}
+	shardInfos := []*schemapb.CollectionShardInfo{
+		{VchannelName: "p1_1v1", Routing: &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{0}}}},
+		{VchannelName: "p2_1v2", Routing: &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{1}}}},
+	}
+	mockCache := &MockCache{}
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, "", "", collectionID).Return(&collectionInfo{
+		CollID:         collectionID,
+		Schema:         mustNewSchemaInfo(schema),
+		ShardsNum:      2,
+		VChannels:      []string{"p1_1v1", "p2_1v2"},
+		ShardInfos:     shardInfos,
+		RoutingModulus: 2,
+		ShardBy:        "hash(id)",
+	}, nil)
+	provider := &CachedProxyServiceProvider{Proxy: &Proxy{metaCache: mockCache}}
+	resp, err := provider.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionID: collectionID})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, shardInfos, resp.GetShardInfos())
+	assert.Equal(t, uint64(2), resp.GetRoutingModulus())
+	assert.Equal(t, "hash(id)", resp.GetShardBy())
+}
+
 func TestCachedProxyServiceProvider_DescribeCollection_ByIDFillsNameAndUsesRequestID(t *testing.T) {
 	ctx := context.Background()
 

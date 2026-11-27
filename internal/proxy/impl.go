@@ -2374,7 +2374,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success && len(it.Result().GetErrIndex()) == 0 {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
@@ -4445,6 +4445,9 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
+	if metricType == metricsinfo.SplitRetirementKey {
+		return node.mixCoord.GetMetrics(ctx, req)
+	}
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := node.metricsCacheManager.GetSystemInfoMetrics()
 		if err != nil {

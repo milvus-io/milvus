@@ -184,19 +184,27 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 		return
 	}
 	current, live := cm.frontiers[channel]
-	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot {
+	// A vchannel comes into existence by a CreateCollection or RestoreSnapshot
+	// message, or as the target of a shard split. Nothing else opens a frontier.
+	splitGenesis := messageutil.IsSplitShardGenesis(msg)
+	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot && !splitGenesis {
 		return
 	}
 	if kind == message.MessageTypeCommitTxn && insertOnly {
 		kind = message.MessageTypeInsert
 	}
-	switch kind {
-	case message.MessageTypeCreateCollection, message.MessageTypeRestoreSnapshot:
+	switch {
+	case kind == message.MessageTypeCreateCollection, kind == message.MessageTypeRestoreSnapshot, splitGenesis && !live:
 		current.GrowingTimetick = tick
 		current.TransformingTimetick = tick
-	case message.MessageTypeInsert:
+	case splitGenesis:
+		// The genesis of a target that is appended again, on a vchannel that
+		// may already hold data. It must not move a frontier backwards.
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
-	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
+		current.TransformingTimetick = max(current.TransformingTimetick, tick)
+	case kind == message.MessageTypeInsert:
+		current.GrowingTimetick = max(current.GrowingTimetick, tick)
+	case kind == message.MessageTypeDelete, kind == message.MessageTypeCommitTxn:
 		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:

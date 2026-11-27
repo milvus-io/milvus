@@ -136,6 +136,11 @@ func (policy *L0CompactionPolicy) TriggerOneCollection(ctx context.Context, coll
 func (policy *L0CompactionPolicy) GroupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*view.SegmentView, triggerID UniqueID) []view.CompactionView {
 	partChanView := make(map[string]*view.LevelZeroCompactionView) // "part-chan" as key
 	for _, segView := range levelZeroSegments {
+		if policy.Meta.IsL0CompactionSuspended(segView.Label.Channel) {
+			// A target of a shard split that is not adopted yet: its L0
+			// segments are still needed by the segments of the source.
+			continue
+		}
 		key := segView.Label.Key()
 		if _, ok := partChanView[key]; !ok {
 			earliestGrowingStartPos := policy.Meta.GetEarliestStartPositionOfGrowingSegments(segView.Label.CollectionID, segView.Label.PartitionID, segView.Label.Channel)

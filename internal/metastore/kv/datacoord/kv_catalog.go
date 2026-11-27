@@ -1192,6 +1192,40 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+// ListSplitShardTask returns the record of every shard split.
+func (kc *Catalog) ListSplitShardTask(ctx context.Context) ([]*datapb.SplitShardTask, error) {
+	tasks := make([]*datapb.SplitShardTask, 0)
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.SplitShardTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return merr.WrapErrSerializationFailed(err, "unmarshal SplitShardTask at %s", string(key))
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SplitShardTaskPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// SaveSplitShardTask writes the record of one shard split.
+func (kc *Catalog) SaveSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	if task == nil {
+		return nil
+	}
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return merr.WrapErrSerializationFailed(err, "marshal SplitShardTask %d of collection %d", task.GetTaskId(), task.GetCollectionId())
+	}
+	return kc.MetaKv.Save(ctx, buildSplitShardTaskPath(task), string(value))
+}
+
+// DropSplitShardTask removes the record of one shard split.
+func (kc *Catalog) DropSplitShardTask(ctx context.Context, task *datapb.SplitShardTask) error {
+	return kc.MetaKv.Remove(ctx, buildSplitShardTaskPath(task))
+}
+
 func (kc *Catalog) ListCompactionTargets(ctx context.Context) ([]*datapb.CompactionTarget, error) {
 	records := make([]*datapb.CompactionTarget, 0)
 

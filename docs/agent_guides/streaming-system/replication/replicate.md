@@ -17,6 +17,26 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 2. **ChannelReplicator** → **Secondary Proxy** via `CreateReplicateStream` gRPC bidirectional stream: sends each message with its original `MessageID`, `Properties`, and `Payload`, along with the `SourceClusterID`.
 3. **Secondary Proxy** → **Secondary WAL**: the Proxy remaps VChannel names and appends to the local WAL. The **Replicate Interceptor** validates the incoming message (cluster ID match, TimeTick deduplication) and tracks checkpoint.
 
+## Shard Split
+
+`SplitShard` is replicated. The secondary Proxy renames every VChannel the
+message names (source and targets in the header, the shards of the routing in
+the body, and the append-first VChannel of the broadcast header). The message
+carries no segment ID or other value local to the primary. The same consumers then
+run on the secondary: the fence on the source, the genesis of the targets, and
+the ack callback.
+
+The barrier TimeTick a primary broadcaster puts on a message is dropped when
+the message is replicated. The secondary keeps the order of the primary
+itself: the Proxy does not append the genesis of a target until the copy on
+the source is appended on the secondary (its replicate stream reports the
+local TimeTick to StreamingCoord; without the report, until the copy is
+acknowledged), and then appends it with the local TimeTick of that copy as
+its barrier. Everything behind the genesis on
+the same PChannel stream waits with it. On every cluster the genesis of a
+target is therefore above the local switch TimeTick of the source. See
+[Append-First Copy](../coordination/broadcaster.md#append-first-copy).
+
 ## Message-Level Replication Skip
 
 Some DDL/control messages cannot be safely replayed on a SECONDARY until their replay contract is deterministic across clusters. Producers mark those concrete WAL messages with the `Unreplicable` (`_ur`) message property. The CDC sender treats them like ignored messages and advances replication progress without sending them. The SECONDARY replicate interceptor also ignores replicated messages that carry `_ur`, which protects mixed-version or already-forwarded traffic.
