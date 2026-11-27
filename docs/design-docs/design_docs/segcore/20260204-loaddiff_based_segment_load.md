@@ -401,6 +401,7 @@ Load phase timing counts the overlapping preparation tree once as
 `parallel_prepare`; existing batch and worker metrics retain their own timings.
 Default filling, Text creation, finalization and publication remain sequential
 phase intervals.
+Test-only index loading accessors block directly on the coroutine implementations.
 
 Preparation failures are collected only after every started task finishes.
 Submission failures also drain work already submitted by that batch. Awaiting

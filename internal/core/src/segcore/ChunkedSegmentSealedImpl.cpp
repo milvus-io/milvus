@@ -10282,21 +10282,6 @@ ChunkedSegmentSealedImpl::ReloadColumnsAsync(
 
     co_await JoinLoadTasksAsync(std::move(reload_tasks));
 }
-void
-ChunkedSegmentSealedImpl::LoadBatchTextIndexes(
-    milvus::OpContext* op_ctx,
-    std::unordered_map<FieldId,
-                       std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
-        text_indexes_to_load,
-    const SealedFieldLayoutPtr& schema_snapshot,
-    const SegmentLoadInfo& segment_load_info,
-    StagedStateCommitter& committer) {
-    folly::coro::blockingWait(LoadBatchTextIndexesAsync(op_ctx,
-                                                        text_indexes_to_load,
-                                                        schema_snapshot,
-                                                        segment_load_info,
-                                                        committer));
-}
 
 folly::coro::Task<void>
 ChunkedSegmentSealedImpl::LoadBatchTextIndexesAsync(
@@ -10346,23 +10331,6 @@ ChunkedSegmentSealedImpl::LoadBatchTextIndexesAsync(
     }
 
     co_await JoinLoadTasksAsync(std::move(index_tasks));
-}
-
-void
-ChunkedSegmentSealedImpl::LoadBatchIndexes(
-    milvus::tracer::TraceContext& trace_ctx,
-    std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
-        field_id_to_index_info,
-    const SealedFieldLayoutPtr& schema_snapshot,
-    milvus::OpContext* op_ctx,
-    bool is_replace,
-    StagedStateCommitter& committer) {
-    folly::coro::blockingWait(LoadBatchIndexesAsync(trace_ctx,
-                                                    field_id_to_index_info,
-                                                    schema_snapshot,
-                                                    op_ctx,
-                                                    is_replace,
-                                                    committer));
 }
 
 folly::coro::Task<void>

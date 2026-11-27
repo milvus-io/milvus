@@ -13,6 +13,10 @@
 
 #include <folly/coro/Task.h>
 
+#ifdef MILVUS_UNIT_TEST
+#include <folly/coro/BlockingWait.h>
+#endif
+
 #include <folly/ExceptionWrapper.h>
 #include <stdint.h>
 #include <any>
@@ -2075,15 +2079,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                     bool is_replace,
                                     StagedStateCommitter& committer);
 
-    void
-    LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
-                     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
-                         field_id_to_index_info,
-                     const SealedFieldLayoutPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx,
-                     bool is_replace,
-                     StagedStateCommitter& committer);
-
     // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
     folly::coro::Task<void>
     LoadBatchIndexesAsync(
@@ -2214,16 +2209,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     ReloadColumnsAsync(const std::vector<FieldId>& field_ids_to_reload,
                        milvus::OpContext* op_ctx,
                        std::shared_ptr<const PublishedSegmentState> current);
-
-    void
-    LoadBatchTextIndexes(
-        milvus::OpContext* op_ctx,
-        std::unordered_map<FieldId,
-                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
-            text_indexes_to_load,
-        const SealedFieldLayoutPtr& schema_snapshot,
-        const SegmentLoadInfo& segment_load_info,
-        StagedStateCommitter& committer);
 
     // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
     folly::coro::Task<void>
@@ -2480,8 +2465,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         staged->runtime = runtime;
         StagedStateCommitter committer(*this, runtime.get(), staged.get());
         milvus::tracer::TraceContext trace_ctx{};
-        LoadBatchIndexes(
-            trace_ctx, indexes, current->fields, op_ctx, is_replace, committer);
+        folly::coro::blockingWait(LoadBatchIndexesAsync(trace_ctx,
+                                                        indexes,
+                                                        current->fields,
+                                                        op_ctx,
+                                                        is_replace,
+                                                        committer));
         auto delta = MakeStateDelta(current->fields,
                                     current->load_info,
                                     ToConstRuntimeState(std::move(runtime)),
@@ -2508,8 +2497,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId,
                            std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
             indexes{{FieldId(info->fieldid()), info}};
-        LoadBatchTextIndexes(
-            op_ctx, indexes, current->fields, *current->load_info, committer);
+        folly::coro::blockingWait(LoadBatchTextIndexesAsync(
+            op_ctx, indexes, current->fields, *current->load_info, committer));
         auto delta = MakeStateDelta(current->fields,
                                     current->load_info,
                                     ToConstRuntimeState(std::move(runtime)),
