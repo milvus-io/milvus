@@ -77,17 +77,20 @@ AppendJsonElementToBson(simdjson::dom::element elem,
             break;
         case element_type::OBJECT: {
             bson_t child;
-            bson_append_document_begin(out, key, key_len, &child);
+            AssertInfo(bson_append_document_begin(out, key, key_len, &child),
+                       "Failed to begin BSON document");
             for (auto [k, v] : elem.get_object()) {
                 AppendJsonElementToBson(
                     v, &child, k.data(), static_cast<int>(k.size()));
             }
-            bson_append_document_end(out, &child);
+            AssertInfo(bson_append_document_end(out, &child),
+                       "Failed to finish BSON document");
             break;
         }
         case element_type::ARRAY: {
             bson_t child;
-            bson_append_array_begin(out, key, key_len, &child);
+            AssertInfo(bson_append_array_begin(out, key, key_len, &child),
+                       "Failed to begin BSON array");
             uint32_t i = 0;
             char buf[16];
             const char* idx_key = nullptr;
@@ -98,7 +101,8 @@ AppendJsonElementToBson(simdjson::dom::element elem,
                     v, &child, idx_key, static_cast<int>(klen));
                 i++;
             }
-            bson_append_array_end(out, &child);
+            AssertInfo(bson_append_array_end(out, &child),
+                       "Failed to finish BSON array");
             break;
         }
         default:
@@ -127,21 +131,17 @@ BuildBsonArrayBytesFromJsonString(const std::string& json_array) {
                       json_array);
         }
 
-        bson_t arr;
-        bson_init(&arr);
+        BsonDocument arr;
         uint32_t i = 0;
         char buf[16];
         const char* idx_key = nullptr;
         for (simdjson::dom::element elem : root.get_array()) {
             size_t klen = bson_uint32_to_string(i, &idx_key, buf, sizeof(buf));
             AppendJsonElementToBson(
-                elem, &arr, idx_key, static_cast<int>(klen));
+                elem, arr.get(), idx_key, static_cast<int>(klen));
             i++;
         }
-        std::vector<uint8_t> out(bson_get_data(&arr),
-                                 bson_get_data(&arr) + arr.len);
-        bson_destroy(&arr);
-        return out;
+        return std::vector<uint8_t>(arr.data(), arr.data() + arr.length());
     } catch (const SegcoreError&) {
         // Already classified above; SegcoreError derives from std::runtime_error
         // and would otherwise be swallowed by a generic handler.
@@ -291,9 +291,12 @@ BsonBuilder::ConvertDomToBson(const DomNode& node, bson_t* builder) {
             }
             case DomNode::Type::DOCUMENT: {
                 bson_t child_doc;
-                bson_append_document_begin(builder, k, klen, &child_doc);
+                AssertInfo(
+                    bson_append_document_begin(builder, k, klen, &child_doc),
+                    "Failed to begin BSON document");
                 ConvertDomToBson(child, &child_doc);
-                bson_append_document_end(builder, &child_doc);
+                AssertInfo(bson_append_document_end(builder, &child_doc),
+                           "Failed to finish BSON document");
                 break;
             }
             default: {
