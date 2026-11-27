@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
@@ -47,6 +48,7 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 	require.Contains(t, summaries, int64(10))
 	require.EqualValues(t, 20, summaries[10].BuildID)
 	require.True(t, summaries[10].HasArtifact)
+	require.Equal(t, commonpb.IndexState_Finished, dm.IndexMeta.GetSegmentIndexState(1, 3, 10).GetState())
 	require.Empty(t, dm.IndexMeta.GetSegmentIndexTasks(1, 3))
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))
 	require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
@@ -185,4 +187,44 @@ func TestSummaryModeReaderDuringTaskRetirement(t *testing.T) {
 	require.Contains(t, <-result, int64(10))
 	require.NoError(t, <-finished)
 	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexSummaries(1, 3)[10].IndexState)
+}
+
+func BenchmarkLegacyIndexLookup(b *testing.B) {
+	const segmentCount, indexCount = 1024, 8
+	im := &IndexMeta{
+		Indexes:        map[int64]map[int64]*model.Index{1: {}},
+		SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
+	}
+	for indexID := int64(1); indexID <= indexCount; indexID++ {
+		im.Indexes[1][indexID] = &model.Index{CollectionID: 1, IndexID: indexID}
+	}
+	segmentIDs := make([]int64, segmentCount)
+	for i := range segmentIDs {
+		segmentID := int64(i + 1)
+		segmentIDs[i] = segmentID
+		tasks := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+		for indexID := range im.Indexes[1] {
+			tasks.Insert(indexID, &model.SegmentIndex{
+				CollectionID: 1, SegmentID: segmentID, IndexID: indexID, IndexState: commonpb.IndexState_Finished,
+			})
+		}
+		im.SegmentIndexes.Insert(segmentID, tasks)
+	}
+
+	b.Run("Reconcile1024Segments", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if len(im.GetUnIndexedSegmentIDsForIndexTask(1, segmentIDs)) != 0 {
+				b.Fatal("expected every segment to be indexed")
+			}
+		}
+	})
+	b.Run("SingleIndexState", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if im.GetSegmentIndexState(1, segmentIDs[0], indexCount).GetState() != commonpb.IndexState_Finished {
+				b.Fatal("expected a finished index")
+			}
+		}
+	})
 }

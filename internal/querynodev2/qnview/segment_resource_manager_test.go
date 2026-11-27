@@ -2,6 +2,7 @@ package qnview
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -661,5 +662,109 @@ func TestSegmentResourceClosesManifestOnRejectedReservation(t *testing.T) {
 			require.Same(t, opened[attempt-1], admissionManifest)
 			require.Nil(t, admissionManifest.Native())
 		}
+	})
+}
+
+func TestSegmentResourceRetriesWithCurrentManifestAfterArtifactRemoval(t *testing.T) {
+	mockey.PatchConvey("an unprepared ordinary binding retries with the current revision", t, func() {
+		root := t.TempDir()
+		base := filepath.Join(root, "segment")
+		cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+		manifest, err := packed.CreateManifestForSegment(base, []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: filepath.Join(base, "old.parquet"), EndRow: 10}}, cfg)
+		require.NoError(t, err)
+		artifact := packed.ManifestIndexInfo{
+			FieldID: 100, ColumnName: "100", IndexID: 5, IndexName: "idx", IndexType: "HNSW",
+			BuildID: 30, IndexVersion: 1, Path: "30/1", IndexFileKeys: []string{"index.bin"},
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		}
+		old, err := packed.CommitManifestUpdates(manifest, cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{artifact}})
+		require.NoError(t, err)
+		_, oldVersion, err := packed.UnmarshalManifestPath(old)
+		require.NoError(t, err)
+		file := filepath.Join(base, "_index/30/1/index.bin")
+		require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+		require.NoError(t, os.WriteFile(file, []byte("artifact"), 0o600))
+
+		f := setupResourceTest(t, nil)
+		defer f.manager.Close()
+		f.manager.openManifest = func(ctx context.Context, manifest string, _ *indexpb.StorageConfig) (*packed.LoadManifest, error) {
+			return packed.OpenLoadManifest(ctx, manifest, cfg)
+		}
+		f.dependencyMock.To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			version := view.IntoProto().Meta.SchemaVersion
+			return &fakeCollectionRuntimeGuard{
+				schemaVersion: int64(version), schema: &schemapb.CollectionSchema{Version: version},
+				updatedIndexes: []*indexpb.IndexInfo{{IndexID: 5, FieldID: 100}},
+			}, false, nil
+		})
+		f.getMock.To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
+			snapshot := resourceSnapshot(collectionID, segmentID, oldVersion)
+			snapshot.ManifestIndexes = &querypb.QueryViewManifestIndexes{}
+			if f.gets.Add(1) == 1 {
+				snapshot.LoadInfo.ManifestPath = old
+				snapshot.ManifestIndexes.Summaries = []*datapb.SegmentIndexSummary{{
+					IndexId: 5, FieldId: 100, BuildId: 30, IndexVersion: 1, HasArtifact: true,
+				}}
+			} else {
+				snapshot.LoadInfo.ManifestPath = manifest
+				snapshot.LoadInfo.TransformStartAfterTimetick = 55
+			}
+			return snapshot, nil
+		})
+		started := make(chan *querypb.SegmentLoadInfo, 1)
+		resume := make(chan struct{})
+		retried := make(chan *querypb.SegmentLoadInfo, 1)
+		missing := make(chan error, 1)
+		f.loadMock.To(func(_ *resourceTestLoader, ctx context.Context, info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
+			if f.loads.Add(1) == 1 {
+				started <- info
+				select {
+				case <-resume:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			if info.GetManifestPath() == old {
+				_, err := os.ReadFile(file)
+				select {
+				case missing <- err:
+				default:
+				}
+				return nil, err
+			}
+			retried <- info
+			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
+		})
+
+		req := f.request(1, 1, 1)
+		req.View.Partitions[0].SegmentManifestVersions = []int64{oldVersion}
+		f.manager.Acquire(req)
+		select {
+		case info := <-started:
+			require.Equal(t, old, info.GetManifestPath())
+			require.Equal(t, []string{file}, info.GetIndexInfos()[0].GetIndexFilePaths())
+		case <-time.After(5 * time.Second):
+			t.Fatal("load did not receive the original manifest")
+		}
+
+		// The GC test exercises this removal through the real orphan scan.
+		manifest, err = packed.CommitManifestUpdates(old, cfg, &packed.ManifestUpdates{
+			DropColumns: []string{"100"},
+			ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{
+				Path: filepath.Join(base, "new.parquet"), StartIndex: 0, EndIndex: 10,
+			}}}},
+		})
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(file))
+		close(resume)
+		f.await(t, 1)
+		require.ErrorIs(t, <-missing, os.ErrNotExist)
+		info := <-retried
+		require.Equal(t, manifest, info.GetManifestPath())
+		require.Empty(t, info.GetIndexInfos(), "the definition stays live, but the retracted build is absent")
+		require.EqualValues(t, 55, info.GetTransformStartAfterTimetick())
+		require.EqualValues(t, 2, f.gets.Load())
+		f.drop(t, req)
 	})
 }

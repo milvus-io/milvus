@@ -806,38 +806,37 @@ func (m *IndexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	m.fieldIndexLock.RLock()
-	fieldIndexesMap, ok := m.Indexes[collID]
+	indexes, ok := m.Indexes[collID]
+	index := indexes[indexID]
+	m.fieldIndexLock.RUnlock()
 	if !ok {
 		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
-		m.fieldIndexLock.RUnlock()
-		return state
-	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
-	}
-	m.fieldIndexLock.RUnlock()
-
-	summaries := m.segmentIndexSummaries(segmentID)
-	if len(summaries) == 0 {
-		state.State = commonpb.IndexState_Unissued
-		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
 		return state
 	}
 
-	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if summary := summaries[indexID]; summary != nil && !summary.IsDeleted {
-			state.IndexName = index.IndexName
-			state.State = summary.IndexState
-			state.FailReason = summary.FailReason
-			return state
+	m.readSegmentIndexRecords(segmentID, func(records segmentIndexRecords) {
+		if (records.tasks == nil || records.tasks.Len() == 0) && len(records.segment.GetIndexSummaries()) == 0 {
+			state.State = commonpb.IndexState_Unissued
+			state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
+			return
 		}
-		state.State = commonpb.IndexState_Unissued
-		return state
-	}
-
-	state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+		if index == nil || index.IsDeleted {
+			state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+			return
+		}
+		task, completed := records.lookup(indexID)
+		switch {
+		case task != nil && !task.IsDeleted:
+			state.IndexName = index.IndexName
+			state.State = task.IndexState
+			state.FailReason = task.FailReason
+		case completed != nil:
+			state.IndexName = index.IndexName
+			state.State = commonpb.IndexState_Finished
+		default:
+			state.State = commonpb.IndexState_Unissued
+		}
+	})
 	return state
 }
 
@@ -1041,19 +1040,15 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 	}
 
 	for _, segID := range segIDs {
-		// the segment should be unindexed status if the fieldIndexes is not nil
-		summaries := m.segmentIndexSummaries(segID)
-		if len(summaries) == 0 {
-			unindexed.Insert(segID)
-			continue
-		}
-		for _, indexID := range activeIndexIDs {
-			if _, ok := summaries[indexID]; !ok {
-				// the segment should be unindexed status if the segment index is not found within field indexes
-				unindexed.Insert(segID)
-				break
+		m.readSegmentIndexRecords(segID, func(records segmentIndexRecords) {
+			for _, indexID := range activeIndexIDs {
+				task, completed := records.lookup(indexID)
+				if task == nil && completed == nil {
+					unindexed.Insert(segID)
+					return
+				}
 			}
-		}
+		})
 	}
 
 	return unindexed

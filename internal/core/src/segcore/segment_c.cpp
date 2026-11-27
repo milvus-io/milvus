@@ -226,8 +226,28 @@ NewSealedSegmentWithCollection(CCollection collection,
                                const uint8_t* load_blob,
                                int64_t load_length,
                                const int64_t* load_fields,
-                               int64_t field_count,
-                               const void* manifest) {
+                               int64_t field_count) {
+    return NewSealedSegmentWithManifest(collection,
+                                        segment_id,
+                                        output,
+                                        sorted,
+                                        load_blob,
+                                        load_length,
+                                        load_fields,
+                                        field_count,
+                                        nullptr);
+}
+
+CStatus
+NewSealedSegmentWithManifest(CCollection collection,
+                             int64_t segment_id,
+                             CSegmentInterface* output,
+                             bool sorted,
+                             const uint8_t* load_blob,
+                             int64_t load_length,
+                             const int64_t* load_fields,
+                             int64_t field_count,
+                             const void* manifest) {
     SCOPE_CGO_CALL_METRIC();
     try {
         auto* col = static_cast<milvus::segcore::Collection*>(collection);
@@ -289,8 +309,26 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        const uint8_t* load_blob,
                                        int64_t load_length,
                                        const int64_t* load_fields,
-                                       int64_t load_field_count,
-                                       const void* manifest) {
+                                       int64_t load_field_count) {
+    return AsyncReopenSealedSegmentWithManifest(trace,
+                                                c_segment,
+                                                c_collection,
+                                                load_blob,
+                                                load_length,
+                                                load_fields,
+                                                load_field_count,
+                                                nullptr);
+}
+
+CFuture*
+AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
+                                     CSegmentInterface c_segment,
+                                     CCollection c_collection,
+                                     const uint8_t* load_blob,
+                                     int64_t load_length,
+                                     const int64_t* load_fields,
+                                     int64_t load_field_count,
+                                     const void* manifest) {
     try {
         auto* collection =
             static_cast<milvus::segcore::Collection*>(c_collection);

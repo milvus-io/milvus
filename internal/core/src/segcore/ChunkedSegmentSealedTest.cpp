@@ -1756,8 +1756,7 @@ TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
             reinterpret_cast<const uint8_t*>(blob.data()),
             blob.size(),
             fields.data(),
-            fields.size(),
-            nullptr);
+            fields.size());
         ASSERT_EQ(status.error_code, 0);
         std::unique_ptr<segcore::SegmentInterface> segment(
             static_cast<segcore::SegmentInterface*>(raw));
@@ -1793,7 +1792,7 @@ TEST(test_chunk_segment, ReopenSharesCachedColumnGroupsForSameManifest) {
                       const LoonManifest& manifest) {
         const auto blob = info.SerializeAsString();
         const int64_t field = pk.get();
-        auto* future = AsyncReopenSealedSegmentWithCollection(
+        auto* future = AsyncReopenSealedSegmentWithManifest(
             {},
             &read,
             &collection,

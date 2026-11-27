@@ -89,6 +89,9 @@ Complete load metadata remains available for older consumers, external
 collections and StorageV2. In summary mode, segment diagnostics use the
 selected segment's summaries and finished tasks directly. Full metadata batches
 use the shared manifest I/O limit and return per-segment errors.
+A QueryView load does not pin index files in DataCoord GC. If preparation
+fails after a newer revision retracts an index, an ordinary StorageV3 binding
+retries with current metadata and accepts a revision at or above its minimum.
 
 Manifest reuse also applies to ordinary non-L0 StorageV3 QueryView loads when
 summary mode is off. The default `common.storage.useLoonFFI=true` allows

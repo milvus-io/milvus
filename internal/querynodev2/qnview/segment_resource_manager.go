@@ -426,8 +426,12 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		m.mu.Lock()
 		b.view.operationRefs--
 		if err != nil {
-			// A missing V2 artifact may have appeared since this attempt.
+			// A preparation retry needs current metadata: a committed revision
+			// may have removed artifacts referenced by the failed load.
 			b.snapshot = nil
+			if b.manifest != 0 && !typeutil.IsExternalCollection(collection.Schema()) {
+				r.snapshot = nil
+			}
 			b.backoffLocked()
 		} else {
 			if b.manifest == 0 {

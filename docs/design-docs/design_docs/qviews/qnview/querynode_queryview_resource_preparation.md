@@ -481,8 +481,10 @@ concurrent resource tasks, and the RPC has a timeout. The QN metadata adapter
 coalesces pending requests for the same Collection for up to 1 ms or 128 callers,
 deduplicates Segment IDs, then distributes individual results back to their
 resource owners. Different Collections never share a batch. A failed request retries
-only while a live unmet requirement needs it; physical load retries retain their
-accepted metadata rather than repeatedly calling the coordinator.
+only while a live unmet requirement needs it. A failed ordinary StorageV3
+preparation refreshes the accepted metadata on retry. A newer committed
+revision can retract artifacts referenced by the failed load. External
+preparation retains its exact-revision requirement.
 
 Successful preparation freezes the binding's ReadState. There is no metadata
 polling or same-View index-refresh subscription. Manifest publication requests

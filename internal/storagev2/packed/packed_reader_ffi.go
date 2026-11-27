@@ -441,11 +441,21 @@ func GetManifestHandleWithExtfs(
 	extfs ExternalSpecContext,
 	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
+	return getManifestHandle(context.Background(), manifestPath, storageConfig, extfs, talonStages...)
+}
+
+func getManifestHandle(
+	ctx context.Context,
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+	talonStages ...uint32,
+) (*C.LoonManifest, error) {
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
-	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
+	mlog.Debug(ctx, "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
@@ -455,7 +465,7 @@ func GetManifestHandleWithExtfs(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, merr.Wrap(err, "inject extfs")
 	}
-	return openManifest(manifest, cProperties)
+	return openManifest(ctx, manifest, cProperties)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface

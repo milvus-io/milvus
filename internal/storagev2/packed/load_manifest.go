@@ -46,7 +46,7 @@ func OpenLoadManifest(ctx context.Context, path string, config *indexpb.StorageC
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	native, err := GetManifestHandle(path, config, common.TalonStageManifest)
+	native, err := getManifestHandle(ctx, path, config, ExternalSpecContext{}, common.TalonStageManifest)
 	if err != nil {
 		return nil, merr.Wrap(err, "open segment load manifest")
 	}
