@@ -20,11 +20,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -64,6 +68,53 @@ func TestTaskResource_StatsTargetsFields(t *testing.T) {
 	assert.Equal(t, taskresource.Stats(taskresource.BigFixtureRows*68), st.GetTaskResource())
 	assert.Equal(t, taskresource.Stats(taskresource.BigFixtureRows*68), st.GetTaskResource()) // cached
 	assert.Less(t, st.GetTaskResource().Memory, taskresource.Stats(taskresource.BigFixtureRows*(taskresource.SystemFieldsBytesPerRow+8+512+64)).Memory)
+}
+
+func TestTaskResource_StatsUnknownText(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceStatsMemoryFactor.Key, "2"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceMinTaskMemory.Key, "1MB"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceDefaultCPU.Key, "1"))
+	t.Cleanup(func() {
+		params.Reset(params.DataCoordCfg.TaskResourceStatsMemoryFactor.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceMinTaskMemory.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceDefaultCPU.Key)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		recorded   int64
+		wantMemory int64
+	}{
+		// Unknown TEXT uses 1000 rows at 64 KiB before the 2x stats factor.
+		// The group's reference bytes must not cap that input estimate.
+		{"reference group below fallback", 8 << 20, 131072000},
+		{"recorded input above fallback", 96 << 20, 192 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mt := taskresource.NewFixtureMeta(false)
+			schema := taskresource.FixtureSchema()
+			field := typeutil.GetFieldByID(schema, 102)
+			field.DataType = schemapb.DataType_Text
+			field.TypeParams = []*commonpb.KeyValuePair{
+				{Key: "enable_match", Value: "true"}, {Key: "enable_analyzer", Value: "true"},
+			}
+			taskresource.PutFixtureSchema(mt, schema)
+			taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) {
+				seg.Level = datapb.SegmentLevel_L1
+				seg.ManifestPath = packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+				seg.Stats.InsertBinlogSize = tc.recorded + 536000
+				seg.Stats.LoadResource = &datapb.LoadResourceStatistics{
+					ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 102, FieldIds: []int64{102}, MemorySize: tc.recorded}},
+				}
+			})
+			st := newStatsTask(&indexpb.StatsTask{
+				CollectionID: 1, SegmentID: 3, TaskID: 7, SubJobType: indexpb.StatsSubJob_TextIndexJob,
+			}, 1, mt, nil, nil, nil, nil)
+			assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: tc.wantMemory}, st.GetTaskResource())
+		})
+	}
 }
 
 // TestTaskResource_StatsSchemaCacheMiss: without a schema the targeted fields

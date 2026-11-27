@@ -423,6 +423,57 @@ func TestEstimateFieldSize(t *testing.T) {
 	assert.Equal(t, total, EstimateFieldSize(v3, unsizable, 102))
 }
 
+func TestEstimateUnknownTextFieldSize(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name     string
+		rows     int64
+		recorded int64
+		want     int64
+	}{
+		{"references omit LOB bodies", 100_000, 24 * 100_000, 6_553_600_000},
+		{"recorded payload exceeds row estimate", 10, 2 << 20, 2 << 20},
+		{"no recorded field size", 100_000, 0, 6_553_600_000},
+		{"row multiplication saturates", math.MaxInt64, 24, math.MaxInt64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 3, NumOfRows: tc.rows, StorageVersion: storage.StorageV3,
+				Level: datapb.SegmentLevel_L1, ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 1),
+				Stats: &datapb.Statistics{
+					InsertBinlogSize: 256,
+					LoadResource: &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+						{GroupId: 0, FieldIds: []int64{102}, MemorySize: tc.recorded},
+					}},
+				},
+			}}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 102, DataType: schemapb.DataType_Text}}}
+			assert.Equal(t, tc.want, EstimateFieldSize(segment, schema, 102))
+		})
+	}
+}
+
+func TestUnknownTextFieldSizeConfiguration(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	const key = "dataCoord.taskResource.textFallbackBytesPerRow"
+	require.NoError(t, params.Save(key, "128KB"))
+	t.Cleanup(func() { params.Reset(key) })
+	segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 3, NumOfRows: 10, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+		ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 1),
+		Stats:        &datapb.Statistics{InsertBinlogSize: 256},
+	}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 102, DataType: schemapb.DataType_Text}}}
+	assert.EqualValues(t, 1_310_720, EstimateFieldSize(segment, schema, 102))
+	segment.FieldLogicalSizesManifest = segment.ManifestPath
+	segment.Stats.FieldLogicalSizes = &datapb.FieldLogicalSizes{
+		Version: storage.FieldLogicalSizeVersion, RowCount: 10,
+		Fields: map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: 500}},
+	}
+	assert.EqualValues(t, 500, EstimateFieldSize(segment, schema, 102), "fallback configuration must not inflate exact values")
+}
+
 func TestEstimateFieldSizeLogicalSizes(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
@@ -443,20 +494,20 @@ func TestEstimateFieldSizeLogicalSizes(t *testing.T) {
 		}, want: 1002},
 		{name: "unmeasured field", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
 			delete(segment.Stats.FieldLogicalSizes.Fields, 102)
-		}, want: 64},
+		}, want: 9 * 64 * 1024},
 		{name: "legacy segment", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
 			segment.Stats.FieldLogicalSizes = nil
 			segment.FieldLogicalSizesManifest = ""
-		}, want: 64},
+		}, want: 9 * 64 * 1024},
 		{name: "replaced manifest", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
 			segment.ManifestPath = packed.MarshalManifestPath("files/insert_log/1/2/3", 2)
-		}, want: 64},
+		}, want: 9 * 64 * 1024},
 		{name: "changed row count", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
 			segment.NumOfRows++
-		}, want: 64},
+		}, want: 10 * 64 * 1024},
 		{name: "unknown statistics version", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
 			segment.Stats.FieldLogicalSizes.Version++
-		}, want: 64},
+		}, want: 9 * 64 * 1024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifest := packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
@@ -490,6 +541,38 @@ func TestEstimateFieldSizeLogicalSizes(t *testing.T) {
 	}
 }
 
+func TestStatsInputSizeUnknownTextSharedGroup(t *testing.T) {
+	paramtable.Init()
+	for _, cachedBinlogs := range []bool{false, true} {
+		segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 3, NumOfRows: 10, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+			ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 1),
+			Stats: &datapb.Statistics{
+				InsertBinlogSize: 256,
+				LoadResource: &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+					{GroupId: 0, FieldIds: []int64{102, 103, 104}, MemorySize: 64},
+				}},
+			},
+		}}
+		if cachedBinlogs {
+			segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, ChildFields: []int64{102, 103, 104}, Binlogs: []*datapb.Binlog{{MemorySize: 64}}}}
+		}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 102, DataType: schemapb.DataType_Text, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}}},
+			{FieldID: 103, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}, {Key: "max_length", Value: "64"}}},
+			{FieldID: 104, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}, {Key: "max_length", Value: "64"}}},
+		}}
+		// TEXT bypasses the encoded cap; the two VARCHAR fields still share
+		// one group charge, even when binlogs and persistent stats both exist.
+		assert.EqualValues(t, 655_424, StatsInputSize(segment, schema, indexpb.StatsSubJob_TextIndexJob))
+		segment.NumOfRows = math.MaxInt64
+		// All selected TEXT fields are charged before group caps, saturating
+		// rather than wrapping the aggregate back to a small budget.
+		schema.Fields = schema.Fields[:1]
+		assert.EqualValues(t, math.MaxInt64, StatsInputSize(segment, schema, indexpb.StatsSubJob_TextIndexJob))
+	}
+}
+
 func TestStatsInputSizeLogicalSizes(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
@@ -504,11 +587,11 @@ func TestStatsInputSizeLogicalSizes(t *testing.T) {
 		}, 3001},
 		{"known and unmeasured fields share a group", map[int64]*datapb.FieldLogicalSize{
 			102: {PayloadBytes: 1000, ValidityBits: 3},
-		}, 1065},
+		}, 1001 + 3*64*1024},
 		{"known nulls", map[int64]*datapb.FieldLogicalSize{
 			102: {ValidityBits: 3}, 103: {ValidityBits: 3},
 		}, 1},
-		{"unmeasured group charged once", nil, 64},
+		{"unmeasured TEXT fields charged independently", nil, 2 * 3 * 64 * 1024},
 		{"unsigned payload and unmeasured field saturate the resource budget", map[int64]*datapb.FieldLogicalSize{
 			102: {PayloadBytes: math.MaxUint64, ValidityBits: 3},
 		}, math.MaxInt64},
@@ -668,9 +751,9 @@ func TestCompactionReaderMemoryStreamingBatches(t *testing.T) {
 func TestStatsInputSizeDeduplicatesColumnGroups(t *testing.T) {
 	paramtable.Init()
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, DataType: schemapb.DataType_Text, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}}},
-		{FieldID: 101, DataType: schemapb.DataType_Text, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}}},
-		{FieldID: 102, DataType: schemapb.DataType_Text, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}}},
+		{FieldID: 100, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}, {Key: "max_length", Value: "64"}}},
+		{FieldID: 101, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}, {Key: "max_length", Value: "64"}}},
+		{FieldID: 102, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}, {Key: "max_length", Value: "64"}}},
 	}}
 	segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		StorageVersion: storage.StorageV2, NumOfRows: 100,

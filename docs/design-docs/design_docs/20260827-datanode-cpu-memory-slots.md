@@ -161,20 +161,35 @@ entry supplies its payload bytes plus its validity bitmap, including a known
 zero. Zero payloads retain the index's CPU request and FM-index per-row model.
 TEXT payload includes inline and external bodies exactly once. Known
 totals are not capped by encoded group or segment sizes. Stats combines the
-selected known fields before rounding validity bits, then estimates remaining
-fields through the existing group logic. A mixed known/unknown group can still
+selected known fields before rounding validity bits, prices unknown TEXT as
+described below, and estimates other fields through the existing group logic.
+A mixed known/unknown group can still
 include some encoded bytes of a known field in the unknown-field estimate.
 Unsigned logical counters and expanded task budgets saturate at `MaxInt64`.
 
-Missing or invalid logical statistics retain the existing metadata estimates,
-without reading manifests, footers, or LOB bodies. This includes historical
-segments and compaction outputs that cannot measure reused TEXT references.
-Their estimates can still undercount LOB payloads. Logical input bytes exclude
-reader and index allocation overhead; the existing factors and memory floor
-remain resource estimates, not RSS bounds.
+When a TEXT field has no valid logical total, its input estimate is
+`max(recorded field/group bytes, rows * textFallbackBytesPerRow)`.
+`dataCoord.taskResource.textFallbackBytesPerRow` defaults to 64 KiB and is an
+assumed average width, not a schema bound: TEXT writes do not enforce
+`max_length`. This covers missing historical statistics and compaction outputs
+that cannot measure reused LOB references without reading manifests, footers, or
+LOB bodies. Stats prices these unknown TEXT fields before applying encoded group
+caps to other unknown fields. Exact totals, including known zero, take precedence
+for all field types and index families. Ordinary indexes apply indexMemoryFactor;
+FMINDEX applies its own peak-memory model to the same field input.
 
-For fields without logical totals, VarChar uses the smaller of the recorded field/group
-size and its schema bound: rows x (max_length + 4) plus the nullable bitmap.
+For 100,000 unknown TEXT rows, the default input estimate is 6,553,600,000 bytes
+(about 6.1 GiB), and the default 2x NGRAM budget is about 12.2 GiB. Larger recorded
+sizes are retained. Raising the assumed width reduces concurrency; a task whose
+budget exceeds every worker can still run through the existing idle-worker
+oversized path. The assumption can undercount fields with a larger actual average
+width and must be calibrated to the workload. Logical input bytes exclude reader
+and index allocation overhead; the factors and memory floor remain resource
+estimates, not RSS bounds. Schemas or index parameters that have not been resolved
+still use the existing uncached segment fallback.
+
+For other fields without logical totals, VarChar uses the smaller of the recorded
+field/group size and its schema bound: rows x (max_length + 4) plus the nullable bitmap.
 Without a valid schema bound, the recorded size is retained. A projecting
 reader can cap non-nullable fixed-width fields at their schema width. For a
 nullable fixed-width field, the estimator keeps the recorded size when available.
@@ -182,7 +197,7 @@ The fallback schema bound for a nullable fixed-dimension vector includes its
 validity bitmap and `4 * (rows + 1)` bytes for Arrow offsets. V2 file readers
 keep the whole-group estimate for fixed-width fields. The VarChar cap estimates
 field input, not the peak memory of decoding a whole group. Stats deduplicates
-shared groups among unknown fields; parallel field readers and index-building
+shared groups among the remaining unknown fields; parallel field readers and index-building
 allocations are additional overhead represented by the stats factor, not a
 proven upper bound on RSS.
 

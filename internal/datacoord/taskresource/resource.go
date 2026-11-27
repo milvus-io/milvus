@@ -375,16 +375,20 @@ func StatsInputSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema
 	}
 	known := meta.SegmentFieldLogicalSizes(segment.SegmentInfo)
 	var measured []*datapb.FieldLogicalSize
+	var size int64
 	for fieldID := range remaining {
 		if field, ok := known.GetFields()[fieldID]; ok {
 			measured = append(measured, field)
 			delete(remaining, fieldID)
+		} else if typeutil.GetFieldByID(schema, fieldID).GetDataType() == schemapb.DataType_Text {
+			size = meta.SaturatingAdd(size, EstimateFieldSize(segment, schema, fieldID))
+			delete(remaining, fieldID)
 		}
 	}
-	size := logicalSizeBytes(measured...)
-	// Known logical totals are independent of column groups and may include
-	// external TEXT bodies. Unknown fields retain the group estimate, which may
-	// also include encoded bytes of known fields in a mixed group. Parallel
+	size = meta.SaturatingAdd(size, logicalSizeBytes(measured...))
+	// Logical totals and unknown TEXT estimates can include external LOB bodies,
+	// so encoded groups must not cap them. Other unknown fields retain the group
+	// estimate, which may include encoded bytes of fields already priced. Parallel
 	// readers and index allocations remain covered by the stats factor; these
 	// input estimates are not a hard bound on peak RSS.
 	chargeGroup := func(groupID int64, members []int64, groupSize int64) {
@@ -501,7 +505,11 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 //  1. A validated V3 logical-size entry, including a known zero. It covers the
 //     current manifest and row count, and includes TEXT bodies stored in LOBs.
 //     Logical bytes are not capped by encoded column-group or segment sizes.
-//  2. Otherwise the size meta recorded for the field (recordedFieldSize: its own
+//  2. Unknown TEXT uses the larger of its recorded size and rows times
+//     textFallbackBytesPerRow (64 KiB by default). This is an assumed average
+//     width, not a schema limit; TEXT writes do not enforce max_length.
+//     Encoded group and segment sizes do not cap this estimate either.
+//  3. Otherwise the size meta recorded for the field (recordedFieldSize: its own
 //     FieldBinlog in storage v1, its column group in v2, and the column group
 //     in Stats.LoadResource for a v3 manifest segment). VarChar is capped at
 //     its schema upper bound so a shared group's other fields do not inflate
@@ -509,13 +517,13 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 //     when the reader projects them; StorageV2 file reads retain the whole-group
 //     size for those fields. The VarChar cap estimates field input, not peak
 //     memory while a V2 file reader decodes the whole group.
-//  3. Otherwise the schema's upper bound (fieldsize.EstimateFieldSize). This is
+//  4. Otherwise the schema's upper bound (fieldsize.EstimateFieldSize). This is
 //     the storage v3 case after a DataCoord restart, whose per-field binlogs are
 //     not persisted in meta.
-//  4. Otherwise -- no schema, a field the schema does not know, or a type the
-//     write path does not bound (text, geometry) -- the whole segment.
+//  5. Otherwise -- no schema, a field the schema does not know, or another type
+//     the write path does not bound (geometry) -- the whole segment.
 //
-// Steps 3 and 4 retain the segment cap as a fallback heuristic. A schema bound is
+// Steps 4 and 5 retain the segment cap as a fallback heuristic. A schema bound is
 // rows x the per-row limit, and for a varchar(65535) or a JSON field (64KB per
 // value) that is orders of magnitude above the real data; a task priced there
 // exceeds every worker, is dispatched as oversized, and the worker then books
@@ -523,8 +531,8 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 // tasks take every worker out of memory-aware placement at once.
 // If the segment has no recorded size, the cap is itself a heuristic; see
 // EstimateSegmentSize for that fallback's accepted estimation trade-off.
-// Missing logical totals can still under-price TEXT whose recorded sizes only
-// account for LOB references. Resolving unknown sizes performs no storage I/O.
+// The TEXT fallback can still under-price a field whose actual average width
+// exceeds the configured assumption. Resolving sizes performs no storage I/O.
 //
 // The rule does not look at whether the collection is external. External
 // segments differ only in what meta holds for them, and that is exactly what
@@ -534,7 +542,12 @@ func EstimateFieldSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSch
 		return logicalSizeBytes(size)
 	}
 	field := typeutil.GetFieldByID(schema, fieldID)
-	if recorded := segment.RecordedFieldSize(fieldID); recorded > 0 {
+	recorded := segment.RecordedFieldSize(fieldID)
+	if field.GetDataType() == schemapb.DataType_Text {
+		return max(recorded, meta.SaturatingMul(segment.GetNumOfRows(),
+			paramtable.Get().DataCoordCfg.TaskResourceTextFallbackBytesPerRow.GetAsSize()))
+	}
+	if recorded > 0 {
 		if bound, exact, ok := fieldsize.SchemaFieldSize(field, segment.GetNumOfRows()); ok && bound > 0 {
 			if field.GetDataType() == schemapb.DataType_VarChar || (exact && !decodesWholeColumnGroup(segment)) {
 				return min(recorded, bound)
