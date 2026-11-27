@@ -195,3 +195,14 @@ counter	proxy	upsert_write_condition=gte
 counter	proxy	upsert_on_missing=insert
 counter	proxy	upsert_on_missing=skip
 counter	proxy	upsert_on_missing=error
+counter	proxy	snapshot=create
+counter	proxy	snapshot=restore
+counter	proxy	snapshot=export
+counter	proxy	file_resource=add
+counter	proxy	running_requests=list
+counter	proxy	running_requests=cancel
+counter	proxy	truncate_collection
+counter	proxy	schema_change=add_field
+counter	proxy	schema_change=alter_schema
+counter	proxy	schema_change=alter_function
+counter	proxy	query_function_chains

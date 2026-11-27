@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -384,6 +385,75 @@ func (s *MultiSegmentWriterSuite) TestWriteMultipleSegments() {
 	}
 }
 
+// A plan may cap its output segments at a row count in addition to the byte
+// size (a collection without a vector field): the writer then starts a new
+// segment every segmentMaxRows rows even though the bytes stay far below
+// segmentSize.
+func (s *MultiSegmentWriterSuite) TestWriteRotatesOnMaxRows() {
+	schema := s.genSimpleSchema()
+	allocator := NewCompactionAllocator(s.mockAlloc, s.mockAlloc)
+
+	newWriter := func() *MultiSegmentWriter {
+		writer, err := NewMultiSegmentWriter(
+			context.Background(),
+			s.mockBinlogIO,
+			allocator,
+			1024*1024*1024, // never reached
+			schema,
+			s.params,
+			1000,
+			s.partitionID,
+			s.collectionID,
+			s.channel,
+			s.batchSize,
+			storage.WithStorageConfig(s.params.StorageConfig),
+		)
+		s.Require().NoError(err)
+		return writer
+	}
+	write := func(writer *MultiSegmentWriter, numRows int) []int64 {
+		for i := 0; i < numRows; i++ {
+			s.Require().NoError(writer.WriteValue(s.genTestValue(int64(i))))
+		}
+		s.Require().NoError(writer.Close())
+		return lo.Map(writer.GetCompactionSegments(), func(seg *datapb.CompactionSegment, _ int) int64 {
+			return seg.GetNumOfRows()
+		})
+	}
+
+	s.Run("cut every maxRows rows", func() {
+		writer := newWriter()
+		writer.SetSegmentMaxRows(300)
+		s.Equal([]int64{300, 300, 300, 100}, write(writer, 1000))
+	})
+	// Compaction hands the writer whole record batches. The batch that
+	// crosses the cap is split, so a segment ends at maxRows rows exactly.
+	s.Run("a record crossing the cap is split", func() {
+		writer := newWriter()
+		writer.SetSegmentMaxRows(300)
+		for batch := 0; batch < 4; batch++ {
+			values := make([]*storage.Value, 0, 250)
+			for i := 0; i < 250; i++ {
+				values = append(values, s.genTestValue(int64(batch*250+i)))
+			}
+			record, err := storage.ValueSerializer(values, schema)
+			s.Require().NoError(err)
+			s.Require().NoError(writer.Write(record))
+			record.Release()
+		}
+		s.Require().NoError(writer.Close())
+		rows := lo.Map(writer.GetCompactionSegments(), func(seg *datapb.CompactionSegment, _ int) int64 {
+			return seg.GetNumOfRows()
+		})
+		s.Equal([]int64{300, 300, 300, 100}, rows)
+	})
+	s.Run("no row cap keeps one segment", func() {
+		writer := newWriter()
+		writer.SetSegmentMaxRows(0)
+		s.Equal([]int64{1000}, write(writer, 1000))
+	})
+}
+
 func (s *MultiSegmentWriterSuite) TestSegmentRotation() {
 	schema := s.genSimpleSchema()
 	allocator := NewCompactionAllocator(s.mockAlloc, s.mockAlloc)
@@ -719,4 +789,50 @@ func (s *MultiSegmentWriterSuite) TestLargeDataWrite() {
 		totalRows += segment.NumOfRows
 	}
 	s.Equal(int64(numRows), totalRows)
+}
+
+// The number of outputs estimated before a mix compaction decides the LOB
+// strategy (one input splitting into several outputs forces a rewrite). A plan
+// with a row cap splits on rows while the bytes stay under the size target, so
+// the estimate has to count rows too.
+func TestMixPreCompactEstimatesOutputsOnRows(t *testing.T) {
+	paramtable.Init()
+	newTask := func(maxSegmentRows int64) *mixCompactionTask {
+		return &mixCompactionTask{
+			ctx: context.Background(),
+			plan: &datapb.CompactionPlan{
+				PlanID:         1,
+				MaxSize:        1024 * 1024 * 1024,
+				MaxSegmentRows: maxSegmentRows,
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				}},
+				SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+					SegmentID:    1,
+					CollectionID: 1,
+					PartitionID:  1,
+					FieldBinlogs: []*datapb.FieldBinlog{{
+						FieldID: 100,
+						Binlogs: []*datapb.Binlog{{EntriesNum: 10_000_000, MemorySize: 120_000_000}},
+					}},
+				}},
+			},
+		}
+	}
+
+	uncapped := newTask(0)
+	if err := uncapped.preCompact(); err != nil {
+		t.Fatal(err)
+	}
+	if uncapped.estimatedOutputSegmentCount != 1 {
+		t.Fatalf("uncapped: want 1 output, got %d", uncapped.estimatedOutputSegmentCount)
+	}
+
+	capped := newTask(4_000_000)
+	if err := capped.preCompact(); err != nil {
+		t.Fatal(err)
+	}
+	if capped.estimatedOutputSegmentCount != 3 {
+		t.Fatalf("capped: want 3 outputs, got %d", capped.estimatedOutputSegmentCount)
+	}
 }

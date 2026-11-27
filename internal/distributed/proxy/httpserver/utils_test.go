@@ -115,6 +115,48 @@ func TestCheckLimiter_ZeroTokenRequestsBypassLimiter(t *testing.T) {
 	}
 }
 
+// A request naming a partition that does not exist is not a rate limit
+// rejection: the limiter is not consulted and the request goes on to the Proxy
+// method, which reports the real error, as it does behind the gRPC rate limit
+// interceptor.
+func TestCheckLimiter_MetaLookupFailureIsNotARateLimitRejection(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(&proxy.SimpleLimiter{}, nil).Build()
+	defer getLimiter.UnPatch()
+	check := mockey.Mock((*proxy.SimpleLimiter).Check).Return(nil).Build()
+	defer check.UnPatch()
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).Return(&metacache.DatabaseInfo{DBID: 100}, nil).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(10), nil).Build()
+	defer getCollection.UnPatch()
+	getPartition := mockey.Mock((*proxy.MetaCache).GetPartitionInfo).Return(nil, merr.WrapErrPartitionNotFound("nopart")).Build()
+	defer getPartition.UnPatch()
+
+	testCases := []struct {
+		name    string
+		request proto.Message
+	}{
+		{"insert", &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "nopart"}},
+		{"delete", &milvuspb.DeleteRequest{DbName: "target", CollectionName: "collection", PartitionName: "nopart", Expr: "id == 1"}},
+		{"search", &milvuspb.SearchRequest{DbName: "target", CollectionName: "collection", PartitionNames: []string{"nopart"}, Nq: 1}},
+		{"query", &milvuspb.QueryRequest{DbName: "target", CollectionName: "collection", PartitionNames: []string{"nopart"}}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+			assert.NoError(t, err)
+			assert.Nil(t, resp)
+		})
+	}
+	assert.Zero(t, check.Times(), "the limiter must not be consulted when the request info cannot be resolved")
+	assert.EqualValues(t, len(testCases), getPartition.Times(), "the lookup failure must be the reason the limiter was skipped")
+}
+
 func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
 	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
 	originalValue := quotaConfig.GetValue()
@@ -6072,7 +6114,7 @@ func TestAnyToColumnsStructArrayAsOnlyVectorField(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_ArrayOfStruct, fds[1].GetType())
 }
 
-func TestAnyToColumnsRejectsSchemaWithoutVectorOrFunction(t *testing.T) {
+func TestAnyToColumnsAcceptsSchemaWithoutVectorOrFunction(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	schema.Fields = schema.Fields[:1]
 	schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
@@ -6088,8 +6130,9 @@ func TestAnyToColumnsRejectsSchemaWithoutVectorOrFunction(t *testing.T) {
 	rows, _, err := checkAndSetData(body, schema, false)
 	require.NoError(t, err)
 
-	_, err = anyToColumns(rows, nil, schema, true, false)
-	require.ErrorContains(t, err, "has no vector field or functions")
+	columns, err := anyToColumns(rows, nil, schema, true, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, columns)
 }
 
 func TestAnyToColumnsNullableStructArray(t *testing.T) {
@@ -7053,10 +7096,11 @@ func TestFieldSchemaStructArrayHelpers(t *testing.T) {
 func TestPrintStructArrayFieldsV2QualifiedSubFields(t *testing.T) {
 	printed := printStructArrayFieldsV2([]*schemapb.StructArrayFieldSchema{
 		{
-			FieldID:     10,
-			Name:        "my_struct",
-			Description: "qualified names",
-			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			FieldID:       10,
+			Name:          "my_struct",
+			ExternalField: "raw_struct",
+			Description:   "qualified names",
+			TypeParams:    []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:     11,

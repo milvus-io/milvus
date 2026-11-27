@@ -20,10 +20,12 @@
 package specutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -179,6 +181,156 @@ var booleanExtfsKeys = map[string]bool{
 	ExtfsKeyAnonymous:      true,
 }
 
+// knownSpecKeys are the top-level keys ExternalSpec decodes, plus
+// cloud_extra, which a cloud layer in front of Milvus writes next to extfs.
+var knownSpecKeys = []string{"format", "columns", "extfs", "snapshot_id", "scan_mode", "cloud_extra"}
+
+// knownSpecKeysByFold maps foldKey of each known top-level key to the key.
+var knownSpecKeysByFold = func() map[string]string {
+	m := make(map[string]string, len(knownSpecKeys))
+	for _, key := range knownSpecKeys {
+		m[foldKey(key)] = key
+	}
+	return m
+}()
+
+// CanonicalSpecKey returns the known top-level key that equals key ignoring
+// case (with the folding encoding/json uses for struct fields), or key itself.
+func CanonicalSpecKey(key string) string {
+	if canonical, ok := knownSpecKeysByFold[foldKey(key)]; ok {
+		return canonical
+	}
+	return key
+}
+
+// ValidateExternalSpecKeys rejects a spec that sets one key more than once.
+// encoding/json matches ExternalSpec fields ignoring case, so a lone "Format"
+// or "EXTFS" is read as format or extfs; it stays accepted, and
+// NormalizeExternalSpec gives it the canonical name for native code. Two keys
+// that match the same field, such as "Extfs" and "extfs", are merged by
+// encoding/json instead, so a layer that replaces only the exact "extfs" key
+// would still pass the caller's other extfs keys to native code.
+//
+// The error names the keys. It is returned when, after JSON unescaping:
+//   - a top-level key or an extfs key appears more than once;
+//   - two top-level keys match the same known key ignoring case;
+//   - two extfs keys are equal ignoring case.
+//
+// Unknown top-level keys are extension metadata that encoding/json does not
+// fold, so only their exact repeats are rejected.
+func ValidateExternalSpecKeys(specStr string) error {
+	if specStr == "" {
+		return nil
+	}
+	data := []byte(specStr)
+	if !json.Valid(data) {
+		return merr.WrapErrParameterInvalidMsg("invalid external spec JSON")
+	}
+	members, err := objectMembers(data)
+	if err != nil {
+		return err
+	}
+	if err := checkObjectKeys("external spec", members, func(key string) (string, bool) {
+		known, ok := knownSpecKeysByFold[foldKey(key)]
+		return known, ok
+	}); err != nil {
+		return err
+	}
+	for _, member := range members {
+		if CanonicalSpecKey(member.key) != "extfs" {
+			continue
+		}
+		extfs, err := objectMembers(member.value)
+		if err != nil {
+			return err
+		}
+		if err := checkObjectKeys("extfs", extfs, func(key string) (string, bool) {
+			return foldKey(key), true
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type objectMember struct {
+	key   string
+	value json.RawMessage
+}
+
+// objectMembers returns the members of a valid JSON object in input order,
+// keeping repeated keys. Any other JSON value, including null, has none.
+func objectMembers(data []byte) ([]objectMember, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	if tok != json.Delim('{') {
+		return nil, nil
+	}
+	var members []objectMember
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid external spec JSON")
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+		}
+		members = append(members, objectMember{key: key, value: value})
+	}
+	return members, nil
+}
+
+// checkObjectKeys rejects a repeated key, and two different keys that group
+// puts in the same group. Keys for which group returns false are only checked
+// for repeats.
+func checkObjectKeys(scope string, members []objectMember, group func(key string) (string, bool)) error {
+	exact := make(map[string]bool, len(members))
+	firstInGroup := make(map[string]string, len(members))
+	for _, member := range members {
+		if exact[member.key] {
+			return merr.WrapErrParameterInvalidMsg("%s key %q appears more than once", scope, member.key)
+		}
+		exact[member.key] = true
+		g, ok := group(member.key)
+		if !ok {
+			continue
+		}
+		if first, ok := firstInGroup[g]; ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"%s keys %q and %q differ only in case; set the key once", scope, first, member.key)
+		}
+		firstInGroup[g] = member.key
+	}
+	return nil
+}
+
+// foldKey maps keys that strings.EqualFold treats as equal to the same
+// string. encoding/json folds struct field names the same way.
+func foldKey(key string) string {
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range key {
+		for {
+			next := unicode.SimpleFold(r)
+			if next <= r {
+				r = next
+				break
+			}
+			r = next
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // ParseExternalSpec parses and validates the JSON shape of an external spec.
 func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if specStr == "" {
@@ -188,6 +340,9 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	var spec ExternalSpec
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	if err := ValidateExternalSpecKeys(specStr); err != nil {
+		return nil, err
 	}
 
 	if spec.Format == "" {
@@ -230,12 +385,14 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 // keys for case-sensitive native readers. Call it at native boundaries as well
 // as for new inputs: persisted schemas may contain legacy case variants.
 //
-// Duplicate known keys use the result of Go's existing typed decoder, in input
-// order (including map merging and null handling). Unknown values stay as raw
-// JSON, preserving nested fields and numeric precision. Missing optional keys
-// remain absent, so a missing scan_mode does not override reader defaults.
-// API policy validation remains in ParseExternalSpec; native callers retain
-// their existing handling of unknown formats and filesystem options.
+// A lone non-canonical spelling of a known key, such as "Format", is written
+// under its canonical name. Specs that ValidateExternalSpecKeys rejects, such
+// as "Extfs" next to "extfs", fail here too, so a persisted spec that set one
+// key twice cannot reach native code as a merge of both values. Unknown values
+// stay as raw JSON, preserving nested fields and numeric precision. Missing
+// optional keys remain absent, so a missing scan_mode does not override reader
+// defaults. API policy validation remains in ParseExternalSpec; native callers
+// retain their existing handling of unknown formats and filesystem options.
 func NormalizeExternalSpec(specStr string) (string, error) {
 	if specStr == "" {
 		return "", nil
@@ -243,6 +400,9 @@ func NormalizeExternalSpec(specStr string) (string, error) {
 	var spec ExternalSpec
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return "", merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	if err := ValidateExternalSpecKeys(specStr); err != nil {
+		return "", err
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(specStr), &fields); err != nil {

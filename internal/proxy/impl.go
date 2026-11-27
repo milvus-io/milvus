@@ -617,6 +617,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 			Status: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureTruncateCollection)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
 	defer sp.End()
@@ -893,6 +894,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
 	defer sp.End()
@@ -947,6 +949,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
 	defer sp.End()
@@ -956,7 +959,8 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		return merr.Status(err), nil
 	}
 
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+	if typeutil.IsExternalCollection(dresp.GetSchema()) &&
+		!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
 		return merr.Status(merr.WrapErrParameterInvalidMsg(
 			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
@@ -1006,6 +1010,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 			AlterStatus: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterSchema)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionSchema")
 	defer sp.End()
 
@@ -1038,8 +1043,8 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		case nil:
 			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request"))}, nil
 		}
-		if plan == nil || plan.Kind != schemautil.AlterSchemaAddField {
-			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table top-level field additions"))}, nil
+		if plan == nil || (plan.Kind != schemautil.AlterSchemaAddField && plan.Kind != schemautil.AlterSchemaAddStructSubField) {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table field additions"))}, nil
 		}
 	}
 
@@ -1309,6 +1314,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterFunction)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionFunction")
 	defer sp.End()
@@ -3300,8 +3306,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
-				"no vector field found in schema")
+			return nil, merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", request.GetCollectionName())
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
@@ -6793,6 +6798,7 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureFileResourceAdd)
 
 	mlog.Info(context.TODO(), "receive AddFileResource request")
 

@@ -7,11 +7,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -178,4 +180,48 @@ func TestGrpcAuthStreamInterceptor(t *testing.T) {
 		assert.Equal(t, "alice", seen,
 			"the rewritten context is the only way user identity reaches a stream handler")
 	})
+}
+
+type authReportExtension struct {
+	hookutil.DefaultExtension
+	contexts []context.Context
+}
+
+func (e *authReportExtension) ReportAction(ctx context.Context, _ interface{}, _ interface{}, _ error, _ string, action string) error {
+	if action == hookutil.ActionAuthorize {
+		e.contexts = append(e.contexts, ctx)
+	}
+	return nil
+}
+
+// The report of a refused credential carries the request context: it is where
+// the hook extension reads the claimed user and the peer address from. An empty
+// context leaves the audit record of a failed login without either.
+func TestGrpcAuthFailureIsReportedWithRequestContext(t *testing.T) {
+	original := hookutil.GetExtension()
+	t.Cleanup(func() { hookutil.SetTestExtension(original) })
+	extension := &authReportExtension{}
+	hookutil.SetTestExtension(extension)
+
+	refuse := func(ctx context.Context) (context.Context, error) {
+		return nil, status.Error(codes.Unauthenticated, "no")
+	}
+	requestCtx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "YWxpY2U6d3Jvbmc="))
+
+	_, err := GrpcAuthInterceptor(refuse)(requestCtx, &milvuspb.SearchRequest{},
+		&grpc.UnaryServerInfo{FullMethod: "/milvus.proto.milvus.MilvusService/Search"},
+		func(context.Context, any) (any, error) { return nil, nil })
+	assert.Error(t, err)
+
+	err = GrpcAuthStreamInterceptor(refuse)(struct{}{}, &streamForAuth{ctx: requestCtx},
+		&grpc.StreamServerInfo{FullMethod: "/milvus.proto.milvus.MilvusService/CreateReplicateStream"},
+		func(any, grpc.ServerStream) error { return nil })
+	assert.Error(t, err)
+
+	require.Len(t, extension.contexts, 2)
+	for _, reported := range extension.contexts {
+		md, ok := metadata.FromIncomingContext(reported)
+		require.True(t, ok)
+		assert.Equal(t, []string{"YWxpY2U6d3Jvbmc="}, md.Get("authorization"))
+	}
 }

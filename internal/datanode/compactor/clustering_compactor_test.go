@@ -1198,6 +1198,54 @@ func TestClusterBufferCloseFlushesLazyWriter(t *testing.T) {
 	require.NoError(t, buffer.Close())
 }
 
+// A bucket writer cuts its output on rows under the row cap, so one key with
+// more rows than the cap, or the null bucket, does not become one segment
+// above it. Without the cap the bucket is one segment, as before.
+func TestClusteringBucketWriterCutsOnSegmentMaxRows(t *testing.T) {
+	for _, tc := range []struct {
+		maxRows int64
+		want    []int64
+	}{
+		{maxRows: 3, want: []int64{3, 3, 1}},
+		{maxRows: 0, want: []int64{7}},
+	} {
+		t.Run(fmt.Sprint(tc.maxRows), func(t *testing.T) {
+			paramtable.Init()
+			schema := clusteringWideSchema()
+			params := compaction.GenParams()
+			params.StorageVersion = storage.StorageV1
+			params.BinLogMaxSize = 64 << 20
+			params.StorageConfig = &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			params.SegmentMaxRows = tc.maxRows
+			binlogIO := mock_util.NewMockBinlogIO(t)
+			binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+			task := &clusteringCompactionTask{
+				binlogIO:         binlogIO,
+				segIDAlloc:       allocator.NewLocalAllocator(1, 100),
+				logIDAlloc:       allocator.NewLocalAllocator(100, 10000),
+				compactionParams: params,
+				partitionID:      PartitionID,
+				collectionID:     CollectionID,
+				bufferSize:       64 << 20,
+				// MaxSegmentRows of a clustering plan is the row budget of a
+				// bucket; it does not cut the writer.
+				plan: &datapb.CompactionPlan{MaxSize: 1 << 30, Schema: schema, MaxSegmentRows: 2},
+			}
+			writer, err := task.newBucketWriter(context.Background())
+			require.NoError(t, err)
+			buffer := newClusterBuffer(0, writer, nil)
+			for i := 0; i < 7; i++ {
+				record := clusteringTestRecord(t, schema, i, 1)
+				require.NoError(t, buffer.WriteRecord(record, 0))
+				record.Release()
+			}
+			require.NoError(t, buffer.Close())
+			rows := lo.Map(writer.res, func(segment *datapb.CompactionSegment, _ int) int64 { return segment.GetNumOfRows() })
+			require.Equal(t, tc.want, rows)
+		})
+	}
+}
+
 func TestClusterBufferOversizedRowAndWriteError(t *testing.T) {
 	buffer, observer := newClusteringTestBuffer(t, clusteringWideSchema(), 1024, storage.StorageV1)
 	record := clusteringTestRecord(t, clusteringWideSchema(), 1, 2)

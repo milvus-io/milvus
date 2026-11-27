@@ -97,6 +97,8 @@ WAL checkpoints cannot make their missing positions known. They continue to
 participate in periodic GC checks, with the associated catalog-read cost.
 
 GC runs on `checkInternal` ticks, rather than on each newly enqueued tombstone.
+The ACK scheduler releases its resource keys after persisting TOMBSTONE and
+before acquiring the tombstone queue mutex.
 Completed callbacks enqueue into an unbounded `typeutil.MultipartQueue` protected
 by a short mutex. Enqueue records the age timestamp while holding that mutex,
 preserving FIFO age order across concurrent callbacks. At each GC tick, the
