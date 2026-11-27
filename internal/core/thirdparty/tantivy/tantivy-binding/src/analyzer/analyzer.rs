@@ -8,13 +8,15 @@ use crate::error::TantivyBindingError;
 
 struct AnalyzerBuilder<'a> {
     filters: HashMap<String, SystemFilter>,
+    enforce_file_access: bool,
     params: &'a json::Map<String, json::Value>,
 }
 
 impl AnalyzerBuilder<'_> {
-    fn new(params: &json::Map<String, json::Value>) -> AnalyzerBuilder {
+    fn new(params: &json::Map<String, json::Value>, check_file_access: bool) -> AnalyzerBuilder {
         AnalyzerBuilder {
             filters: HashMap::new(),
+            enforce_file_access: check_file_access,
             params: params,
         }
     }
@@ -163,7 +165,11 @@ impl AnalyzerBuilder<'_> {
 
         //build custom analyzer
         let tokenizer_params = self.get_tokenizer_params()?;
-        let mut builder = get_builder_with_tokenizer(&tokenizer_params, create_analyzer_by_json)?;
+        let mut builder = get_builder_with_tokenizer(
+            &tokenizer_params,
+            create_analyzer_by_json,
+            self.enforce_file_access,
+        )?;
 
         // build and check other options
         builder = self.build_option(builder)?;
@@ -173,16 +179,17 @@ impl AnalyzerBuilder<'_> {
 
 pub fn create_analyzer_by_json(
     analyzer_params: &json::Map<String, json::Value>,
+    check_file_access: bool,
 ) -> Result<TextAnalyzer> {
     if analyzer_params.is_empty() {
         return Ok(standard_analyzer(vec![]));
     }
 
-    let builder = AnalyzerBuilder::new(analyzer_params);
+    let builder = AnalyzerBuilder::new(analyzer_params, check_file_access);
     builder.build()
 }
 
-pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
+pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
     if params.len() == 0 {
         return Ok(standard_analyzer(vec![]));
     }
@@ -190,12 +197,21 @@ pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
     let json_params =
         json::from_str::<json::Value>(&params).map_err(|e| TantivyBindingError::JsonError(e))?;
 
+    let extra: json::Map<String, json::Value> = if extra_info.is_empty() {
+        json::Map::new()
+    } else {
+        json::from_str(extra_info).map_err(TantivyBindingError::JsonError)?
+    };
     create_analyzer_by_json(
         json_params
             .as_object()
             .ok_or(TantivyBindingError::InternalError(
                 "params should be a json map".to_string(),
             ))?,
+        extra
+            .get("check_file_access")
+            .and_then(json::Value::as_bool)
+            == Some(true),
     )
 }
 
@@ -210,7 +226,7 @@ mod tests {
             "stop_words": ["_english_"]
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
     }
 
@@ -220,7 +236,7 @@ mod tests {
             "type": "chinese"
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
         let mut bining = tokenizer.unwrap();
         let mut stream = bining.token_stream("系统安全;,'';lxyz密码");
@@ -244,7 +260,7 @@ mod tests {
             }
         }"#;
 
-        let tokenizer = create_analyzer(&params.to_string());
+        let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
 
         let mut bining = tokenizer.unwrap();

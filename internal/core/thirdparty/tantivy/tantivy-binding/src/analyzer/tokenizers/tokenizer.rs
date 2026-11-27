@@ -24,14 +24,15 @@ pub fn icu_builder() -> TextAnalyzerBuilder {
 
 pub fn lang_ident_builder(
     params: Option<&json::Map<String, json::Value>>,
-    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+    enforce_file_access: bool,
+    fc: fn(&json::Map<String, json::Value>, bool) -> Result<TextAnalyzer>,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "lang ident tokenizer must be customized"
         )));
     }
-    let tokenizer = LangIdentTokenizer::from_json(params.unwrap(), fc)?;
+    let tokenizer = LangIdentTokenizer::from_json(params.unwrap(), fc, enforce_file_access)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -59,13 +60,14 @@ pub fn lindera_builder(
 
 pub fn grpc_builder(
     params: Option<&json::Map<String, json::Value>>,
+    enforce_file_access: bool,
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(format!(
             "grpc tokenizer must be customized"
         )));
     }
-    let tokenizer = GrpcTokenizer::from_json(params.unwrap())?;
+    let tokenizer = GrpcTokenizer::from_json(params.unwrap(), enforce_file_access)?;
     Ok(TextAnalyzer::builder(tokenizer).dynamic())
 }
 
@@ -83,7 +85,8 @@ pub fn char_group_builder(
 
 pub fn get_builder_with_tokenizer(
     params: &json::Value,
-    fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+    fc: fn(&json::Map<String, json::Value>, bool) -> Result<TextAnalyzer>,
+    enforce_file_access: bool,
 ) -> Result<TextAnalyzerBuilder> {
     let name;
     let params_map;
@@ -117,8 +120,8 @@ pub fn get_builder_with_tokenizer(
         "lindera" => lindera_builder(params_map),
         "char_group" => char_group_builder(params_map),
         "icu" => Ok(icu_builder()),
-        "language_identifier" => lang_ident_builder(params_map, fc),
-        "grpc" => grpc_builder(params_map),
+        "language_identifier" => lang_ident_builder(params_map, enforce_file_access, fc),
+        "grpc" => grpc_builder(params_map, enforce_file_access),
         other => {
             warn!("unsupported tokenizer: {}", other);
             Err(TantivyBindingError::InvalidArgument(format!(

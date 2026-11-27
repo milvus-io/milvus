@@ -12,6 +12,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "segcore/token_stream_c.h"
 #include "common/type_c.h"
@@ -26,7 +27,9 @@ CStatus
 set_tokenizer_option(const char* params);
 
 CStatus
-create_tokenizer(const char* params, CTokenizer* tokenizer);
+create_tokenizer(const char* params,
+                 const char* extra_info,
+                 CTokenizer* tokenizer);
 
 CStatus
 clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst);

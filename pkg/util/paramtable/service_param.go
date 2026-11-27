@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 )
 
@@ -43,6 +45,7 @@ const (
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
+	TLSAllowedPath  ParamItem `refreshable:"false"`
 	LocalStorageCfg LocalStorageConfig
 	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
@@ -58,6 +61,31 @@ type ServiceParam struct {
 
 func (p *ServiceParam) init(bt *BaseTable) {
 	p.LocalStorageCfg.Init(bt)
+	// 2.6 does not retain Forbidden values; capture the credential boundary once.
+	tlsAllowedPath := bt.GetWithDefault("tls.allowedPath", "")
+	if tlsAllowedPath == "" {
+		var err error
+		tlsAllowedPath, err = filepath.Abs(filepath.Join(p.LocalStorageCfg.Path.GetValue(), "tls"))
+		if err != nil {
+			panic(merr.WrapErrIoFailed("tls.allowedPath", err))
+		}
+	}
+	if !filepath.IsAbs(tlsAllowedPath) || filepath.Clean(tlsAllowedPath) == "/" {
+		panic(merr.WrapErrParameterInvalidMsg("tls.allowedPath must be an absolute non-root directory"))
+	}
+	tlsAllowedPath = filepath.Clean(tlsAllowedPath)
+	p.TLSAllowedPath = ParamItem{
+		Key:          "tls.allowedPath",
+		Version:      "2.6.0",
+		DefaultValue: "",
+		Forbidden:    true,
+		Export:       true,
+		Doc:          "Admission base for request-selected TLS files, used by the gRPC tokenizer. Empty uses localStorage.path/tls. Existing schemas retain their paths. Keep separate from dictionary and file-resource directories. Restart required.",
+		Formatter: func(string) string {
+			return tlsAllowedPath
+		},
+	}
+	p.TLSAllowedPath.Init(bt.mgr)
 	p.MetaStoreCfg.Init(bt)
 	p.EtcdCfg.Init(bt)
 	p.TiKVCfg.Init(bt)

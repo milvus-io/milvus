@@ -122,7 +122,7 @@ func getAnalyzerParams(field *schemapb.FieldSchema) string {
 
 func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
 	params := getAnalyzerParams(field)
-	tokenizer, err := analyzer.NewAnalyzer(params)
+	tokenizer, err := analyzer.NewAnalyzer(params, "")
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	params = getAnalyzerParams(inputField)
-	tokenizer, err := analyzer.NewAnalyzer(params)
+	tokenizer, err := analyzer.NewAnalyzer(params, "")
 	if err != nil {
 		return nil, err
 	}

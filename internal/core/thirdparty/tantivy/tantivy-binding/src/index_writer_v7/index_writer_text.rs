@@ -38,7 +38,7 @@ impl IndexWriterWrapperImpl {
             field_name
         );
 
-        let tokenizer = create_analyzer(tokenizer_params)?;
+        let tokenizer = create_analyzer(tokenizer_params, "")?;
 
         let (schema, field) = build_text_schema(field_name, tokenizer_name);
         let index = if in_ram {

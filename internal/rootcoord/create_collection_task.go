@@ -189,27 +189,8 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	// check analyzer was vaild
-	analyzerInfos := make([]*querypb.AnalyzerInfo, 0)
-	for _, field := range schema.GetFields() {
-		err := validateAnalyzer(schema, field, &analyzerInfos)
-		if err != nil {
-			return err
-		}
-	}
-
-	// validate analyzer params at any streaming node
-	if len(analyzerInfos) > 0 {
-		resp, err := t.mixCoord.ValidateAnalyzer(t.ctx, &querypb.ValidateAnalyzerRequest{
-			AnalyzerInfos: analyzerInfos,
-		})
-		if err != nil {
-			return err
-		}
-
-		if err := merr.Error(resp.GetStatus()); err != nil {
-			return err
-		}
+	if err := t.validateChangedAnalyzers(ctx, schema, nil); err != nil {
+		return err
 	}
 
 	return validateFieldDataType(schema.GetFields())
@@ -614,12 +595,12 @@ func validateMultiAnalyzerParams(params string, coll *schemapb.CollectionSchema,
 
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
-	if !h.EnableMatch() && !typeutil.IsBm25FunctionInputField(collSchema, fieldSchema) {
-		return nil
+	if (h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)) && !h.EnableAnalyzer() {
+		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
 
 	if !h.EnableAnalyzer() {
-		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
+		return nil
 	}
 
 	if params, ok := h.GetMultiAnalyzerParams(); ok {

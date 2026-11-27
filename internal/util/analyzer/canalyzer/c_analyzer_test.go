@@ -33,7 +33,7 @@ func TestAnalyzer(t *testing.T) {
 	// use default analyzer.
 	{
 		m := "{}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -49,7 +49,7 @@ func TestAnalyzer(t *testing.T) {
 
 	{
 		m := ""
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -66,7 +66,7 @@ func TestAnalyzer(t *testing.T) {
 	// use default tokenizer.
 	{
 		m := "{\"tokenizer\": \"standard\"}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -83,7 +83,7 @@ func TestAnalyzer(t *testing.T) {
 	// jieba tokenizer.
 	{
 		m := "{\"tokenizer\": \"jieba\"}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -125,7 +125,7 @@ func TestAnalyzer(t *testing.T) {
 		defer stop()
 
 		m := "{\"tokenizer\": {\"type\":\"grpc\", \"endpoint\":\"http://" + addr + "\"}}"
-		analyzer, err := NewAnalyzer(m)
+		analyzer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		assert.NoError(t, err)
 		defer analyzer.Destroy()
 
@@ -139,7 +139,7 @@ func TestAnalyzer(t *testing.T) {
 	// lindera tokenizer.
 	{
 		m := "{\"tokenizer\": {\"type\":\"lindera\", \"dict_kind\": \"ipadic\"}}"
-		tokenizer, err := NewAnalyzer(m)
+		tokenizer, err := NewAnalyzer(m, `{"check_file_access":true}`)
 		require.NoError(t, err)
 		defer tokenizer.Destroy()
 
@@ -183,6 +183,7 @@ func TestBuildRuntimeOptions(t *testing.T) {
 	defer params.Reset(urlKey)
 
 	options := BuildRuntimeOptions()
+	assert.Equal(t, params.TLSAllowedPath.GetValue(), options["tls_allowed_path"])
 	assert.Equal(t, localResourcePath, options[DefaultDictPathKey])
 	assert.Equal(t,
 		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz", "http://b.test/ipadic.tar.gz"}},
