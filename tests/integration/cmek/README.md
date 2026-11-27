@@ -36,7 +36,7 @@ Segment Storage Version, index engine version and index artifact format are sepa
 
 Key propagation tests cover two behaviors: each business path receives the key/context needed for its actual reads and writes, and an encrypted target cannot write when its writer key is unavailable.
 
-Each case uses an isolated database/EZ. Background-task scenarios replace the DataNode after preparing their inputs, so encrypted requests must register their keys in a fresh process. Fixture observations check both Go key receipt and C++ context registration there. Task IDs and segment/build metadata identify the resulting objects; object inspection and release/load query or search results verify those same outputs. Import replaces the DataNode between independently dispatched stages as well.
+Each case uses an isolated database/EZ. Background-task scenarios replace the DataNode after preparing their inputs, so encrypted requests must register their keys in a fresh process. Fixture observations check both Go key receipt and C++ context registration there. Task IDs and segment/build metadata identify the resulting objects; object inspection and release/load query or search results verify those same outputs. Import attempts replacement between independently dispatched stages. If the next stage has already started, it keeps the worker and reports the missed cold-node window instead of failing. A dispatch racing shutdown may complete on the old worker or retry on the replacement. Positive task NodeIDs select the registration checks; when cleanup has cleared every NodeID, the test requires Go/C++ registration on an eligible process and reports cold coverage as unconfirmed. This fallback does not prove fresh key delivery for that stage. Missing-key scenarios retain strict no-dispatch, no-output and cold-worker recovery checks.
 
 Failure scenarios inject an empty key at the Go plugin lookup selected by role, EZ, collection and adapter. They compare the storage object set and content hashes while blocked, including unpublished objects. Background requests must be rejected before DataNode dispatch; ordinary flush rejects the key in its StreamingNode writer. Recovery follows each path's existing task policy, as shown below.
 
@@ -55,6 +55,8 @@ The entry-point tables generate **49 cases**, including successful paths and fau
 | `TestKeyPropagationAnalyzeAndClustering` | 2 | V3 Analyze reads encrypted input; clustering uses another cold DataNode. | The Analyze-fault case recovers through clustering. The clustering-fault case reports the missing key, leaves storage unchanged and produces no output segments. |
 
 Import protocol version is independent of Segment Storage Version: both protocols use **Storage V2 backup objects and target segments** here. Import V3 additionally checks every Parquet fragment against the exact completed reshard manifest. Its backup PreImport is size-only; reshard establishes the source row count.
+
+`TestKeyPropagationImportEarlyDispatch` adds two timing regressions (V2/V3) outside the 49-case business matrix. They deliberately let the next stage complete and clear its NodeID before deciding whether to replace the worker, then retain the registration, encrypted-object and query checks on the warmed process.
 
 ### Code map
 
@@ -80,6 +82,41 @@ The fixture protocol and physical-format inspectors are shared with the other CM
 Raw-data format campaigns disable compaction before starting the cluster; propagation scenarios enable the required task explicitly. On master, ordinary flush persists WAL SegmentView data through PackWriter and chooses BulkPackWriterV2 or BulkPackWriterV3 using the Segment Storage Version. Each campaign inspects every object reported by its completed flush, releases/reloads the collection, and verifies the loaded Segment identities. The old QueryNode growing-source writer and its dedicated batch/recovery tests are excluded from this PR.
 
 The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
+
+QueryView checks use the shared IT-only `MiniClusterSuite.GetQueryViewDistribution`
+helper. It reads the collection's persisted Coordinator Views from etcd in one
+linearizable prefix read, retains all states for release checks, and selects the
+highest Up version per shard/replica for confirmed placements. Preparing is only
+intent; `ready_segment_ids` are not persisted. These records expose minimum
+Manifest requirements, not a direct sample of a worker's native read revision.
+
+Physical segment IDs and HNSW build identities are checked through existing QN
+segment metrics. Serving checks independently compare the persisted Up QueryView
+with the StreamingNode's actual QueryPlan, and require its Growing Statistics to
+be zero before claiming a sealed-only cold read. Release waits for QN collection
+cache ownership and every persisted collection QueryView to disappear before
+reloading. The inspected DataCoord Manifest identities must remain exact across
+the cold load and queries, and the Up View must require those revisions. Together
+these checks establish cold source identity without adding production distribution
+reporting or Manifest reads to resource preparation.
+
+For V2 JSON Stats, each new binding fetches fresh loading metadata. The test
+checks cold QV Up confirmation, exact inspected Stats BuildID/version/files
+remaining unchanged across reload, physical segment presence, and the original
+JSON queries with shredding enabled and synchronous warmup.
+
+StorageV3 index publication advances the segment manifest and retires the
+Finished catalog row. Index propagation checks join DataCoord's actual task
+statistics (including the cold worker and BuildID) with `GetIndexInfos` artifact
+identities. The V3 consumer verifies the old manifest bytes and exact raw-data
+objects remain unchanged, the same segment lineage advances, and the cold read
+uses the new manifest containing the HNSW build.
+
+Collection cipher contexts are shared by `(EZ, collection)` across native
+collection shells, including StreamingNode growing/recovery resources and
+versioned read bindings. Releasing an older binding must not remove the context
+while another shell still needs it. The first shell acquires the required key;
+the last shell releases the context.
 
 ## Object discovery and encryption checks
 

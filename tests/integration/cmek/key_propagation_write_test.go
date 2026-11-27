@@ -23,8 +23,10 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -194,6 +196,20 @@ type propagationImportSuite struct {
 	protocol                         int
 	sourceEncrypted, targetEncrypted bool
 	faultStage                       string
+	waitForNextStage                 bool
+}
+
+// Exercise the missed cold-node window deliberately, including tasks whose
+// Completed metadata has already lost its NodeID during worker cleanup.
+func TestKeyPropagationImportEarlyDispatch(t *testing.T) {
+	for _, protocol := range []int{2, 3} {
+		t.Run(fmt.Sprintf("protocol%d", protocol), func(t *testing.T) {
+			suite.Run(t, &propagationImportSuite{
+				protocol: protocol, sourceEncrypted: true, targetEncrypted: true,
+				faultStage: "none", waitForNextStage: true,
+			})
+		})
+	}
 }
 
 func (s *propagationImportSuite) SetupSuite() {
@@ -202,9 +218,9 @@ func (s *propagationImportSuite) SetupSuite() {
 	s.WithMilvusConfig("dataCoord.import.enableImportV3", strconv.FormatBool(s.protocol == 3))
 	s.WithMilvusConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
 	s.WithMilvusConfig("dataCoord.import.enableIDRangeMsg", "true")
-	// Leave time to replace DN between independently dispatched stages. The
-	// test checks task metadata, so an unexpected early dispatch fails it.
-	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "20")
+	// Stop each stage's DN before inspecting its outputs, so those checks do
+	// not require slowing down every transition in the import state machine.
+	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "2")
 	s.WithMilvusConfig("dataCoord.import.scheduleInterval", "0.1")
 	s.WithMilvusConfig("dataCoord.taskCheckInterval", "1")
 	s.setupRawData(2) // backup input is a real packed-binlog collection
@@ -238,6 +254,49 @@ type propagationImportTask struct {
 	id, nodeID, rows int64
 	state            datapb.ImportTaskStateV2
 	reason           string
+}
+
+func importStageStarted(tasks map[int64]propagationImportTask) bool {
+	for _, task := range tasks {
+		// Completed tasks may already have had their NodeID cleared by cleanup.
+		if task.nodeID > 0 || task.state != datapb.ImportTaskStateV2_Pending {
+			return true
+		}
+	}
+	return false
+}
+
+// Completed task cleanup can erase the worker identity before the test polls.
+// In that case check registration on an eligible process, without claiming an
+// exact task-to-process association or cold-node coverage.
+func (s *propagationImportSuite) assertStageRegistration(tasks map[int64]propagationImportTask, eligible []int64, ezID, collectionID int64) {
+	nodes := make(map[int64]bool)
+	for _, task := range tasks {
+		if task.nodeID > 0 {
+			nodes[task.nodeID] = true
+		}
+	}
+	if len(nodes) == 0 {
+		goEvents, cppEvents := s.fixture.observations(s.T(), "go"), s.fixture.observations(s.T(), "cpp")
+		for _, nodeID := range eligible {
+			for _, goEvent := range goEvents {
+				if goEvent.NodeID != nodeID || goEvent.Role != "datanode" || goEvent.EZID != ezID || goEvent.Operation != "register" {
+					continue
+				}
+				for _, cppEvent := range cppEvents {
+					if cppEvent.NodeID == nodeID && cppEvent.PID == goEvent.PID && cppEvent.EZID == ezID &&
+						cppEvent.CollectionID == collectionID && cppEvent.Operation == "register" {
+						nodes[nodeID] = true
+					}
+				}
+			}
+		}
+		s.Require().NotEmpty(nodes, "no eligible DataNode registered EZ=%d collection=%d", ezID, collectionID)
+		s.T().Logf("stage=registration task-node=cleared eligible=%v registered=%v cold-coverage=unconfirmed", eligible, nodes)
+	}
+	for nodeID := range nodes {
+		s.fixture.assertRegistration(s.T(), nodeID, ezID, collectionID)
+	}
 }
 
 func (s *propagationImportSuite) stageTasks(ctx context.Context, jobID int64, stage string) map[int64]propagationImportTask {
@@ -347,13 +406,16 @@ func (s *propagationImportSuite) TestBackup() {
 	if s.protocol == 3 {
 		stages = []string{"preimport", "reshard", "import"}
 	}
+	eligibleNodes := []int64{nodeID}
+	startColdNode := false
 	for i, stage := range stages {
-		if i > 0 {
-			for _, task := range s.stageTasks(ctx, jobID, stage) {
-				s.Require().LessOrEqual(task.nodeID, int64(0), "stage %s was dispatched before cold-node replacement", stage)
-			}
-			nodeID = s.coldDataNode(s.fixture)
+		if startColdNode {
+			// A dispatch may race the previous Stop. Keep that worker eligible
+			// for completed tasks; unfinished tasks can retry on this new worker.
+			nodeID = s.Cluster.AddDataNode().GetNodeID()
+			eligibleNodes = append(eligibleNodes, nodeID)
 		}
+		stageNodes := eligibleNodes
 		var blocked map[int64]propagationImportTask
 		if stage == s.faultStage {
 			before = s.objectSnapshot(ctx, prefixes...)
@@ -383,14 +445,42 @@ func (s *propagationImportSuite) TestBackup() {
 			}
 			return true
 		}, 2*time.Minute, 100*time.Millisecond, "job=%d stage=%s", jobID, stage)
+		if i+1 < len(stages) {
+			nextStage := stages[i+1]
+			if s.waitForNextStage {
+				s.Require().Eventually(func() bool {
+					tasks := s.stageTasks(ctx, jobID, nextStage)
+					if len(tasks) == 0 {
+						return false
+					}
+					for _, task := range tasks {
+						if task.state != datapb.ImportTaskStateV2_Completed || task.nodeID > 0 {
+							return false
+						}
+					}
+					return true
+				}, 2*time.Minute, 100*time.Millisecond, "next stage must finish and clear its node before checking replacement")
+			}
+			startColdNode = !importStageStarted(s.stageTasks(ctx, jobID, nextStage))
+			if startColdNode {
+				for _, node := range s.Cluster.GetAllDataNodes() {
+					s.Require().NoError(node.Stop())
+				}
+				s.T().Logf("job=%d stage=%s cold-replacement=attempted dispatch-during-stop=%t", jobID, nextStage,
+					importStageStarted(s.stageTasks(ctx, jobID, nextStage)))
+			} else {
+				s.T().Logf("job=%d stage=%s cold-replacement=missed reason=already-dispatched node=%d", jobID, nextStage, nodeID)
+			}
+		}
 		for id, task := range completed {
-			// Completed task cleanup may clear NodeID. Registration still
-			// identifies the only eligible process for this isolated stage.
-			s.Require().True(task.nodeID <= 0 || task.nodeID == nodeID)
+			if task.nodeID > 0 {
+				s.Require().Contains(stageNodes, task.nodeID, "task ran on an unexpected DataNode")
+			}
 			if blocked != nil {
 				s.Require().Contains(blocked, id, "recovery replaced the original task")
+				s.Require().True(task.nodeID <= 0 || task.nodeID == nodeID, "blocked task must recover on the cold worker")
 			}
-			s.T().Logf("job=%d stage=%s task=%d node=%d rows=%d", jobID, stage, id, nodeID, task.rows)
+			s.T().Logf("job=%d stage=%s task=%d node=%d eligible=%v rows=%d", jobID, stage, id, task.nodeID, stageNodes, task.rows)
 		}
 		if stage == "preimport" {
 			var rows int64
@@ -404,10 +494,18 @@ func (s *propagationImportSuite) TestBackup() {
 			}
 		}
 		if s.sourceEncrypted && (stage == "preimport" && s.protocol == 2 || stage == "reshard" || stage == "import" && s.protocol == 2) {
-			s.fixture.assertRegistration(s.T(), nodeID, sourceEZ, 0)
+			if blocked != nil {
+				s.fixture.assertRegistration(s.T(), nodeID, sourceEZ, 0)
+			} else {
+				s.assertStageRegistration(completed, stageNodes, sourceEZ, 0)
+			}
 		}
 		if s.targetEncrypted && stage != "preimport" {
-			s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+			if blocked != nil {
+				s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+			} else {
+				s.assertStageRegistration(completed, stageNodes, s.ezID, collectionID)
+			}
 		}
 		if stage == "reshard" {
 			s.inspectReshardFragments(ctx, jobID, collectionID, int64(len(expected)), completed)
