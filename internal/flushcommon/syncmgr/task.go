@@ -205,9 +205,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	nodeID, collection := paramtable.GetStringNodeID(), fmt.Sprint(t.collectionID)
 	metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.InsertLabel, collection).Add(float64(t.batchRows))
 	metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.DeleteLabel, collection).Add(float64(deletes))
-	if updates > 0 {
-		metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.UpdateLabel, collection).Add(float64(updates))
-	}
+	metrics.DataNodeWriteDataCount.WithLabelValues(nodeID, t.dataSource, metrics.UpdateLabel, collection).Add(float64(updates))
 	metrics.DataNodeFlushedSize.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource, t.level.String()).Add(float64(t.flushedSize))
 
 	metrics.DataNodeFlushedRows.WithLabelValues(paramtable.GetStringNodeID(), t.dataSource).Add(float64(t.batchRows))
