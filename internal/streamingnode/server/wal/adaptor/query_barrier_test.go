@@ -83,12 +83,13 @@ func TestQueryPlanFutureBarrierDoesNotBlockSharedSync(t *testing.T) {
 		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Channel).Return(channel).Build()
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(channel).Build()
 		var normalSyncs, durableSyncs atomic.Int32
-		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Sync).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, persisted bool) {
+		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Sync).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, persisted bool) (uint64, error) {
 			if persisted {
 				durableSyncs.Add(1)
 			} else {
 				normalSyncs.Add(1)
 			}
+			return 0, nil
 		}).Build()
 		var scopedSyncs atomic.Int32
 		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).SyncWithQueryBarriers).To(func(_ *mock_inspector.MockTimeTickSyncOperator, ctx context.Context, _ bool, targets map[string]uint64) (map[string]uint64, error) {

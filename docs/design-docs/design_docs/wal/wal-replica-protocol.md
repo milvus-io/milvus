@@ -1,13 +1,13 @@
 # WAL 多副本协议设计
 
-四个 RPC 属于 StreamingNodeWALReplicaService。Sync 传递期望拓扑和实际状态，Watch 同步 checkpoint 和 QueryView，Prepare 与 Seal 协调写权交接。[生产 proto](../../../../pkg/proto/streaming.proto) · [副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [多副本工作流](wal-replicas.md)
+五个 RPC 属于 StreamingNodeWALReplicaService。Sync 传递期望拓扑和实际状态，Watch 同步 checkpoint 和 QueryView，Preparing、Catchup 和 Seal 协调写权交接。[生产 proto](../../../../pkg/proto/streaming.proto) · [副本状态机与 Coord 收敛](wal-replica-state-machine.md) · [多副本工作流](wal-replicas.md)
 
 | 使用点 | 消息和责任 |
 | --- | --- |
 | 目标分配与恢复 | Coord 在 SyncWALReplicas 上发送完整拓扑，SN 回报本地实例及就绪情况；服务路由来自各 SN session。 |
 | RO 冷启动 | 从 etcd 及共享 WAL 建立本地基线；根据历史查询需求读取对象。 |
 | 稳态、重连和换源 | RO 打开 WatchWALReplicaState，首包全量对齐 checkpoint 和 QueryView 信号；后续只发送变化。RO 在同一条流回报 View 的本地状态。 |
-| A/7 → B/8 | B 向 A 依次请求 Prepare 和 Seal，中间从冻结的持久状态恢复 writer。两个 RPC 各有独立的空响应。 |
+| A/7 → B/8 | B 向 A 请求 Preparing 取得持久 TimeTick，在本地观察到它后请求 Catchup。A 排尽持久化，B 从冻结的基线预恢复，再请求 Seal。 |
 | 异常接管 | Coord 确认原目标 writer 的 session 失效后重新选主并广播新拓扑；新接任者按授权从持久存储和 WAL 恢复。 |
 
 ## 1. Coord 保存期望，SN 回报实况
@@ -78,12 +78,12 @@ RW 在当前 PChannel 上串行处理参与集合、收票和提交。通过确�
 
 | 时刻 | A/7（旧 RW） | B（原 RO，目标 RW/8） |
 | --- | --- | --- |
-| 拓扑变更 | 仍按已公告角色服务 | 收到目标授权，确认已观察到 A 最近的持久写入后，调用 PrepareWALHandoff(P, 8)。单次 checkpoint 更新不能证明已经追近 WAL 尾部。 |
-| Prepare 成功 | 暂停新的外部持久化和 View 提交，排尽在途对象、DataCoord 及 etcd 发布，随后返回 PrepareWALHandoffResponse；继续 Append 和 Strong | 保留当前读侧，隔离旧主过期回调，从冻结后的 etcd/S3 读取 writer 基线。单独对 writer 重放所需尾部并持续跟进原 scanner。 |
+| PreparingWALHandoff(P, 8) | 强制将已确认前缀的 TimeTick 写入 WAL，成功后返回 persisted_time_tick。写入和持久化保持开放。 | 用原 scanner 等待本地 Buffer 观察到该 TimeTick，再向 A 请求 Catchup。 |
+| WALHandoffCatchup(P, 8) | 暂停新的外部持久化和 View 提交，排尽在途对象、DataCoord 及 etcd 发布，随后返回 WALHandoffCatchupResponse；继续 Append 和 Strong | 保留当前读侧，隔离旧主过期回调，从冻结后的 etcd/S3 读取 writer 基线。单独对 writer 重放所需尾部并持续跟进原 scanner。 |
 | Seal 成功 | 关闭 Append 和 Strong 准入、排尽写，确认 session 已改为 RO 或撤下，再返回 SealWALHandoffResponse | 预恢复完成后才请求 SealWALHandoff(P, 8)。核验最新拓扑并 CAS 领取 WALCheckpoint.term，隔离旧后端 writer。 |
 | B 激活 | 继续按本地能力读，发现 B/8 后订阅其 checkpoint 和 QueryView 信号 | 写入本任 RecoveryBarrier，使用原 scanner 观察并完成 writer 恢复；随后开放写入和持久化，发布 B/8。 |
 
-两次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。已经发起 Seal 后，A 负责把旧任排空并完成公告更新，B 重试未决的 Seal 或核实其效果。即使旧 RW 公告尚未撤下，也不能要求 A 重新写入近期 TimeTick 才允许这项收尾。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。追近依据在接入时验证。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
+三次 RPC 按调用方 SN 注册身份、本地阶段、PChannel 和目标任期校验，同任期成功效果可重试。已经发起 Seal 后，A 负责把旧任排空并完成公告更新，B 重试未决的 Seal 或核实其效果。即使旧 RW 公告尚未撤下，也不能要求 A 重新写入近期 TimeTick 才允许这项收尾。A 仍存活而应答丢失时 B 向同一源重试；临时无 RW 路由不足以判定 A 已排空。A 已失去原 session 时改走故障接管。B 未获得写权就只继续读。A 在该副本内按目标 term 复用第一次成功写入的 TimeTick。Preparing 应答丢失或 B 等待超时时，同一交接重试得到同一追近点。WAL 确认前缀尚未推进时，A 返回可重试错误。新任期的独占写入依赖底层 WAL fence；各后端的 fence 实现和验证在本 PR 范围之外。Checkpoint 不承担交接切点或选主凭证的职责。
 
 ### AlterWAL 与升主并发
 
@@ -95,7 +95,7 @@ RO 从持久 checkpoint 的物理位置打开逻辑 scanner。读到旧后端的
 
 A/7 正在向 B/8 交接时，若 B 的 SN session 已退出，Coord 重新选定 writer，例如 C/9，持久化目标拓扑后向所有存活 SN 广播 Sync。Coord 若同时重启，从持久拓扑和当前 session 重新执行相同的分配流程。目标节点仍存活、仅 Sync 或应答丢失时，Coord 补发同一拓扑，SN 幂等处理。
 
-若 A/7 仍可接受写入，C 追近后按新授权向 A 发起 Prepare 和 Seal，已冻结持久化的 A 可复用排空结果。若 A 已开始 Seal 且旧公告尚可见，A 继续排尽并更新公告，C 在等待追近时需重新发现写源，随后按最新实况接管。若 A 已 Seal 并公告为 RO，C 按 C/9 的新授权和常规故障恢复流程接管。A 的 session 可以继续存活，C 无需取得 B/8 的 Seal 应答。旧任期的迟到请求按最新授权丢弃。
+若 A/7 仍可接受写入，C 按新授权从 A 获取追近点，追近后发起 Catchup 和 Seal，已冻结持久化的 A 可复用排空结果。若 A 已开始 Seal 且旧公告尚可见，A 继续排尽并更新公告，C 在等待追近时需重新发现写源，随后按最新实况接管。若 A 已 Seal 并公告为 RO，C 按 C/9 的新授权和常规故障恢复流程接管。A 的 session 可以继续存活，C 无需取得 B/8 的 Seal 应答。旧任期的迟到请求按最新授权丢弃。
 
 ## 6. 实现验收
 
@@ -111,5 +111,5 @@ A/7 正在向 B/8 交接时，若 B 的 SN session 已退出，Coord 重新选�
 | RO 仍在准备 V2，RW 本地准备 V2 进入 Unrecoverable | RW 立即向 QueryCoord 回报 V2 的失败，RO 随后按退休目标清理 V2。 |
 | 新增成员、原成员仍在排空、Up 写成功后 RW 宕机 | 新成员独立确认；仍存活的排空者不可跳过；新主从持久 Up 补报。 |
 | 交接期间执行普通查询与写入 | 已就绪的普通读保留原 runtime；A Seal 后拒绝旧 term，B 屏障就绪后才对外写；既有查询无重复 replay。 |
-| Prepare 后 B 退出；另一次在 Seal 后 B 退出且 Coord 重启 | Coord 按 session 重新分配更高任期并广播；所有 SN 幂等收敛到最新拓扑，旧任期的请求不再生效。 |
+| Catchup 后 B 退出；另一次在 Seal 后 B 退出且 Coord 重启 | Coord 按 session 重新分配更高任期并广播；所有 SN 幂等收敛到最新拓扑，旧任期的请求不再生效。 |
 | 旧主的 QueryView Up/Down 元数据提交迟到 | catalog 事务的拓扑和所有权校验阻止旧提交覆盖新主的 View。 |

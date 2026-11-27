@@ -1,7 +1,6 @@
 package inspector_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ func TestInsepctor(t *testing.T) {
 		Term: 1,
 	}
 	operator.EXPECT().Channel().Return(pchannel)
-	operator.EXPECT().Sync(mock.Anything, mock.Anything).Run(func(ctx context.Context, forcePersisted bool) {})
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return(0, nil)
 
 	i.RegisterSyncOperator(operator)
 	assert.Panics(t, func() {

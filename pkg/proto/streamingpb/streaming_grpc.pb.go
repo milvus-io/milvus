@@ -1248,7 +1248,8 @@ var StreamingNodeManagerService_ServiceDesc = grpc.ServiceDesc{
 const (
 	StreamingNodeWALReplicaService_SyncWALReplicas_FullMethodName      = "/milvus.proto.streaming.StreamingNodeWALReplicaService/SyncWALReplicas"
 	StreamingNodeWALReplicaService_WatchWALReplicaState_FullMethodName = "/milvus.proto.streaming.StreamingNodeWALReplicaService/WatchWALReplicaState"
-	StreamingNodeWALReplicaService_PrepareWALHandoff_FullMethodName    = "/milvus.proto.streaming.StreamingNodeWALReplicaService/PrepareWALHandoff"
+	StreamingNodeWALReplicaService_PreparingWALHandoff_FullMethodName  = "/milvus.proto.streaming.StreamingNodeWALReplicaService/PreparingWALHandoff"
+	StreamingNodeWALReplicaService_WALHandoffCatchup_FullMethodName    = "/milvus.proto.streaming.StreamingNodeWALReplicaService/WALHandoffCatchup"
 	StreamingNodeWALReplicaService_SealWALHandoff_FullMethodName       = "/milvus.proto.streaming.StreamingNodeWALReplicaService/SealWALHandoff"
 )
 
@@ -1262,9 +1263,12 @@ type StreamingNodeWALReplicaServiceClient interface {
 	// A reader opens against a specific writer incarnation. The writer registers
 	// the listener and captures its first snapshot atomically, then sends changes.
 	WatchWALReplicaState(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeWALReplicaService_WatchWALReplicaStateClient, error)
+	// The old writer appends a durable TimeTick while continuing to serve.
+	// The successor waits for its own reader to observe that tick before Catchup.
+	PreparingWALHandoff(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*PreparingWALHandoffResponse, error)
 	// The successor waits for the old writer to freeze and drain persistence.
 	// On success it can read a stable durable snapshot while appends continue.
-	PrepareWALHandoff(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*PrepareWALHandoffResponse, error)
+	WALHandoffCatchup(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*WALHandoffCatchupResponse, error)
 	// Called after reconciling that snapshot. Success confirms write admission
 	// has closed, appends have drained and the old writer route has been withdrawn.
 	SealWALHandoff(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*SealWALHandoffResponse, error)
@@ -1340,9 +1344,18 @@ func (x *streamingNodeWALReplicaServiceWatchWALReplicaStateClient) Recv() (*Watc
 	return m, nil
 }
 
-func (c *streamingNodeWALReplicaServiceClient) PrepareWALHandoff(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*PrepareWALHandoffResponse, error) {
-	out := new(PrepareWALHandoffResponse)
-	err := c.cc.Invoke(ctx, StreamingNodeWALReplicaService_PrepareWALHandoff_FullMethodName, in, out, opts...)
+func (c *streamingNodeWALReplicaServiceClient) PreparingWALHandoff(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*PreparingWALHandoffResponse, error) {
+	out := new(PreparingWALHandoffResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeWALReplicaService_PreparingWALHandoff_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingNodeWALReplicaServiceClient) WALHandoffCatchup(ctx context.Context, in *WALHandoffRequest, opts ...grpc.CallOption) (*WALHandoffCatchupResponse, error) {
+	out := new(WALHandoffCatchupResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeWALReplicaService_WALHandoffCatchup_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1368,9 +1381,12 @@ type StreamingNodeWALReplicaServiceServer interface {
 	// A reader opens against a specific writer incarnation. The writer registers
 	// the listener and captures its first snapshot atomically, then sends changes.
 	WatchWALReplicaState(StreamingNodeWALReplicaService_WatchWALReplicaStateServer) error
+	// The old writer appends a durable TimeTick while continuing to serve.
+	// The successor waits for its own reader to observe that tick before Catchup.
+	PreparingWALHandoff(context.Context, *WALHandoffRequest) (*PreparingWALHandoffResponse, error)
 	// The successor waits for the old writer to freeze and drain persistence.
 	// On success it can read a stable durable snapshot while appends continue.
-	PrepareWALHandoff(context.Context, *WALHandoffRequest) (*PrepareWALHandoffResponse, error)
+	WALHandoffCatchup(context.Context, *WALHandoffRequest) (*WALHandoffCatchupResponse, error)
 	// Called after reconciling that snapshot. Success confirms write admission
 	// has closed, appends have drained and the old writer route has been withdrawn.
 	SealWALHandoff(context.Context, *WALHandoffRequest) (*SealWALHandoffResponse, error)
@@ -1386,8 +1402,11 @@ func (UnimplementedStreamingNodeWALReplicaServiceServer) SyncWALReplicas(Streami
 func (UnimplementedStreamingNodeWALReplicaServiceServer) WatchWALReplicaState(StreamingNodeWALReplicaService_WatchWALReplicaStateServer) error {
 	return status.Errorf(codes.Unimplemented, "method WatchWALReplicaState not implemented")
 }
-func (UnimplementedStreamingNodeWALReplicaServiceServer) PrepareWALHandoff(context.Context, *WALHandoffRequest) (*PrepareWALHandoffResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PrepareWALHandoff not implemented")
+func (UnimplementedStreamingNodeWALReplicaServiceServer) PreparingWALHandoff(context.Context, *WALHandoffRequest) (*PreparingWALHandoffResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PreparingWALHandoff not implemented")
+}
+func (UnimplementedStreamingNodeWALReplicaServiceServer) WALHandoffCatchup(context.Context, *WALHandoffRequest) (*WALHandoffCatchupResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WALHandoffCatchup not implemented")
 }
 func (UnimplementedStreamingNodeWALReplicaServiceServer) SealWALHandoff(context.Context, *WALHandoffRequest) (*SealWALHandoffResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SealWALHandoff not implemented")
@@ -1456,20 +1475,38 @@ func (x *streamingNodeWALReplicaServiceWatchWALReplicaStateServer) Recv() (*Watc
 	return m, nil
 }
 
-func _StreamingNodeWALReplicaService_PrepareWALHandoff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _StreamingNodeWALReplicaService_PreparingWALHandoff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WALHandoffRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(StreamingNodeWALReplicaServiceServer).PrepareWALHandoff(ctx, in)
+		return srv.(StreamingNodeWALReplicaServiceServer).PreparingWALHandoff(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: StreamingNodeWALReplicaService_PrepareWALHandoff_FullMethodName,
+		FullMethod: StreamingNodeWALReplicaService_PreparingWALHandoff_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StreamingNodeWALReplicaServiceServer).PrepareWALHandoff(ctx, req.(*WALHandoffRequest))
+		return srv.(StreamingNodeWALReplicaServiceServer).PreparingWALHandoff(ctx, req.(*WALHandoffRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingNodeWALReplicaService_WALHandoffCatchup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WALHandoffRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeWALReplicaServiceServer).WALHandoffCatchup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeWALReplicaService_WALHandoffCatchup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeWALReplicaServiceServer).WALHandoffCatchup(ctx, req.(*WALHandoffRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1500,8 +1537,12 @@ var StreamingNodeWALReplicaService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*StreamingNodeWALReplicaServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "PrepareWALHandoff",
-			Handler:    _StreamingNodeWALReplicaService_PrepareWALHandoff_Handler,
+			MethodName: "PreparingWALHandoff",
+			Handler:    _StreamingNodeWALReplicaService_PreparingWALHandoff_Handler,
+		},
+		{
+			MethodName: "WALHandoffCatchup",
+			Handler:    _StreamingNodeWALReplicaService_WALHandoffCatchup_Handler,
 		},
 		{
 			MethodName: "SealWALHandoff",

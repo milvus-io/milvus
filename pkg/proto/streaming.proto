@@ -1307,9 +1307,13 @@ service StreamingNodeWALReplicaService {
     // the listener and captures its first snapshot atomically, then sends changes.
     rpc WatchWALReplicaState(stream WatchWALReplicaStateRequest) returns (stream WatchWALReplicaStateResponse);
 
+    // The old writer appends a durable TimeTick while continuing to serve.
+    // The successor waits for its own reader to observe that tick before Catchup.
+    rpc PreparingWALHandoff(WALHandoffRequest) returns (PreparingWALHandoffResponse);
+
     // The successor waits for the old writer to freeze and drain persistence.
     // On success it can read a stable durable snapshot while appends continue.
-    rpc PrepareWALHandoff(WALHandoffRequest) returns (PrepareWALHandoffResponse);
+    rpc WALHandoffCatchup(WALHandoffRequest) returns (WALHandoffCatchupResponse);
     // Called after reconciling that snapshot. Success confirms write admission
     // has closed, appends have drained and the old writer route has been withdrawn.
     rpc SealWALHandoff(WALHandoffRequest) returns (SealWALHandoffResponse);
@@ -1422,13 +1426,17 @@ message WALQueryViewReport {
     view.QueryViewState local_state = 2;
 }
 
-// Both operations are idempotent for the authorized successor's term.
+// These operations are idempotent for the authorized successor's term.
 // Final write catch-up is observed on the shared WAL by the successor itself.
 message WALHandoffRequest {
     string pchannel = 1;
     int64 target_term = 2;
 }
 
-message PrepareWALHandoffResponse {}
+message PreparingWALHandoffResponse {
+    uint64 persisted_time_tick = 1;
+}
+
+message WALHandoffCatchupResponse {}
 
 message SealWALHandoffResponse {}

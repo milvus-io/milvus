@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -57,17 +58,17 @@ func (c *ReplicaControl) prepareSuccessor(ctx context.Context, r *localReplica, 
 		source = 0
 	}
 	if source != 0 {
-		ts, err := resource.Resource().TSOAllocator().Allocate(ctx)
-		if err != nil {
-			return current, err
-		}
 		catchup, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err = reader.WaitThrough(catchup, ts)
+		ts, err := c.peers.Prepare(catchup, source, c.nodeID, req)
+		if err == nil {
+			err = reader.WaitThrough(catchup, ts)
+		}
 		cancel()
 		if err != nil {
 			return current, err
 		}
-		if err := c.peers.Prepare(ctx, source, c.nodeID, req); err != nil {
+		mlog.Info(ctx, "successor observed handoff TimeTick", mlog.String("channel", want.Name), mlog.Int64("targetTerm", want.Term), mlog.Uint64("timeTick", ts))
+		if err := c.peers.Catchup(ctx, source, c.nodeID, req); err != nil {
 			return current, err
 		}
 	}
@@ -85,4 +86,56 @@ func (c *ReplicaControl) prepareSuccessor(ctx context.Context, r *localReplica, 
 		return current, err
 	}
 	return writer, nil
+}
+
+func (c *ReplicaControl) PreparingHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest, caller int64) (uint64, error) {
+	var tick uint64
+	err := c.withHandoff(ctx, req, caller, func(ctx context.Context, r *localReplica, current wal.WAL) error {
+		if r.handoffTickTerm != req.TargetTerm {
+			writer := current.(interface {
+				SyncHandoffTimeTick(context.Context) (uint64, error)
+			})
+			persisted, err := writer.SyncHandoffTimeTick(ctx)
+			if err != nil {
+				return err
+			}
+			r.handoffTick, r.handoffTickTerm = persisted, req.TargetTerm
+			mlog.Info(ctx, "writer persisted handoff TimeTick", mlog.String("channel", req.Pchannel), mlog.Int64("targetTerm", req.TargetTerm), mlog.Uint64("timeTick", persisted))
+		}
+		tick = r.handoffTick
+		return nil
+	})
+	return tick, err
+}
+
+func (c *ReplicaControl) CatchupHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest, caller int64) error {
+	return c.withHandoff(ctx, req, caller, func(ctx context.Context, r *localReplica, current wal.WAL) error {
+		if r.prepared == req.TargetTerm {
+			return nil
+		}
+		if r.handoffTickTerm != req.TargetTerm {
+			return status.NewIgnoreOperation("WAL handoff requires a persisted catch-up TimeTick")
+		}
+		writer := current.(interface{ PrepareHandoff(context.Context) error })
+		if err := writer.PrepareHandoff(ctx); err != nil {
+			return err
+		}
+		r.prepared = req.TargetTerm
+		return nil
+	})
+}
+
+func (c *ReplicaControl) SealHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest, caller int64) error {
+	return c.withHandoff(ctx, req, caller, func(_ context.Context, r *localReplica, current wal.WAL) error {
+		if r.sealed == req.TargetTerm {
+			return nil
+		}
+		if r.prepared != req.TargetTerm {
+			return status.NewIgnoreOperation("WAL handoff requires a completed catch-up")
+		}
+		// Once admitted the source finishes draining even if the caller disconnects.
+		r.sealing = req.TargetTerm
+		_, err := c.finishSeal(c.ctx, req.Pchannel, r, current)
+		return err
+	})
 }

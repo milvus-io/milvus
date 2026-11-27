@@ -33,4 +33,4 @@ RW 接到 Preparing 时开始本地资源准备。在发布 Preparing 信号前�
 
 RO 从 etcd 读已发布 checkpoint，从安全物理位置打开只读 scanner，并恢复具体 View 需要的持久基线。如果 RW 在读 checkpoint 后已经截掉起点，重新取可恢复的 checkpoint 和元数据，验证连续性后再服务。RO 只能读取对象；现有 writer 恢复入口会领取 checkpoint 所有权、恢复 Summary 并调度后台任务，不能直接用于 RO。[当前 writer 恢复入口](../../../../internal/streamingnode/server/wal/recovery/recovery_persisted.go)
 
-协作升主时先等旧主 Prepare 成功，准接任者再按上述捕获顺序构建 writer 的完整内存状态，恢复控制元数据、Segment、VChannel 以及 S3 Summary 等，并按组件覆盖过滤尾部。此阶段保持只读，延迟迁移写、Summary PUT、DataCoord 操作和后台持久化。等旧主 Seal、写授权 CAS 及后端 fencing 完成后才执行需写权的动作。原 scanner 观察本任 RecoveryBarrier，writer 追到该屏障才开放写入。故障接管无法冻结旧主，须先获授权并隔离旧发布者，再从权威存储恢复。失去连续 Buffer 的实例须从安全位置重读，不能假定内存始终覆盖。[交接时序](wal-replica-protocol.md)
+协作升主时先观察旧主在 Preparing 阶段写入的 TimeTick，再等旧主 Catchup 排空持久化，准接任者再按上述捕获顺序构建 writer 的完整内存状态，恢复控制元数据、Segment、VChannel 以及 S3 Summary 等，并按组件覆盖过滤尾部。此阶段保持只读，延迟迁移写、Summary PUT、DataCoord 操作和后台持久化。等旧主 Seal、写授权 CAS 及后端 fencing 完成后才执行需写权的动作。原 scanner 观察本任 RecoveryBarrier，writer 追到该屏障才开放写入。故障接管无法冻结旧主，须先获授权并隔离旧发布者，再从权威存储恢复。失去连续 Buffer 的实例须从安全位置重读，不能假定内存始终覆盖。[交接时序](wal-replica-protocol.md)

@@ -135,15 +135,23 @@ func (s *WALReplicaService) WatchWALReplicaState(stream streamingpb.StreamingNod
 	}
 }
 
-func (s *WALReplicaService) PrepareWALHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest) (*streamingpb.PrepareWALHandoffResponse, error) {
-	if err := s.control.Handoff(ctx, req, contextutil.WALReplicaCaller(ctx), false); err != nil {
+func (s *WALReplicaService) PreparingWALHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest) (*streamingpb.PreparingWALHandoffResponse, error) {
+	tick, err := s.control.PreparingHandoff(ctx, req, contextutil.WALReplicaCaller(ctx))
+	if err != nil {
 		return nil, err
 	}
-	return &streamingpb.PrepareWALHandoffResponse{}, nil
+	return &streamingpb.PreparingWALHandoffResponse{PersistedTimeTick: tick}, nil
+}
+
+func (s *WALReplicaService) WALHandoffCatchup(ctx context.Context, req *streamingpb.WALHandoffRequest) (*streamingpb.WALHandoffCatchupResponse, error) {
+	if err := s.control.CatchupHandoff(ctx, req, contextutil.WALReplicaCaller(ctx)); err != nil {
+		return nil, err
+	}
+	return &streamingpb.WALHandoffCatchupResponse{}, nil
 }
 
 func (s *WALReplicaService) SealWALHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest) (*streamingpb.SealWALHandoffResponse, error) {
-	if err := s.control.Handoff(ctx, req, contextutil.WALReplicaCaller(ctx), true); err != nil {
+	if err := s.control.SealHandoff(ctx, req, contextutil.WALReplicaCaller(ctx)); err != nil {
 		return nil, err
 	}
 	return &streamingpb.SealWALHandoffResponse{}, nil

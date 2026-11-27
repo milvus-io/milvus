@@ -141,8 +141,13 @@ func (w *walAdaptorImpl) Demote() wal.WAL {
 	return reader
 }
 
-func (w *walAdaptorImpl) ConfirmReplicaTail() {
-	resource.Resource().TimeTickInspector().TriggerSync(w.Channel(), true)
+func (w *walAdaptorImpl) SyncHandoffTimeTick(ctx context.Context) (uint64, error) {
+	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.Channel())
+	tick, err := operator.Sync(ctx, true)
+	if err == nil && tick == 0 {
+		return 0, status.NewIgnoreOperation("waiting for acknowledged WAL prefix on %s", w.Channel().Name)
+	}
+	return tick, err
 }
 
 // ReplicaPublisher exposes writer signals only on the read-write adaptor.

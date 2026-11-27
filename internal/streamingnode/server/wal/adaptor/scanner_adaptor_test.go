@@ -43,7 +43,7 @@ func TestScannerAdaptorReadError(t *testing.T) {
 	operator.EXPECT().Channel().Return(types.PChannelInfo{})
 	operator.EXPECT().Sync(mock.Anything, mock.Anything).Run(func(ctx context.Context, forcePersisted bool) {
 		sig1.Close()
-	})
+	}).Return(0, nil)
 	wb := mock_wab.NewMockROWriteAheadBuffer(t)
 	operator.EXPECT().WriteAheadBuffer().Return(wb)
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
@@ -164,7 +164,7 @@ func TestScannerAdaptorWaitsForTimeTickOperator(t *testing.T) {
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
 	operator.EXPECT().Channel().Return(pchannel)
 	operator.EXPECT().WriteAheadBuffer().Return(wb)
-	operator.EXPECT().Sync(mock.Anything, mock.Anything).Maybe()
+	operator.EXPECT().Sync(mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	resource.Resource().TimeTickInspector().RegisterSyncOperator(operator)
 	defer resource.Resource().TimeTickInspector().UnregisterSyncOperator(operator)
 

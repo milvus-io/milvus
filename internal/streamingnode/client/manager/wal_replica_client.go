@@ -80,12 +80,21 @@ func (c *WALReplicaClient) Close() {
 	c.resolver.Close()
 }
 
-func (c *WALReplicaClient) Prepare(ctx context.Context, source int64, caller int64, req *streamingpb.WALHandoffRequest) error {
+func (c *WALReplicaClient) Prepare(ctx context.Context, source int64, caller int64, req *streamingpb.WALHandoffRequest) (uint64, error) {
+	service, err := c.service.GetService(ctx)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := service.PreparingWALHandoff(contextutil.WithPickServerID(contextutil.WithWALReplicaCaller(ctx, caller), source), req)
+	return resp.GetPersistedTimeTick(), err
+}
+
+func (c *WALReplicaClient) Catchup(ctx context.Context, source int64, caller int64, req *streamingpb.WALHandoffRequest) error {
 	service, err := c.service.GetService(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = service.PrepareWALHandoff(contextutil.WithPickServerID(contextutil.WithWALReplicaCaller(ctx, caller), source), req)
+	_, err = service.WALHandoffCatchup(contextutil.WithPickServerID(contextutil.WithWALReplicaCaller(ctx, caller), source), req)
 	return err
 }
 

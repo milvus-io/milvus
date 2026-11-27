@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/ack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -79,13 +80,28 @@ func TestTimeTickSyncOperator(t *testing.T) {
 	assert.NotNil(t, msg)
 	assert.Greater(t, msg.TimeTick(), ts)
 
-	// should trigger wal operation.
+	// A forced idle sync must return the timestamp of the actual durable append.
+	var appended uint64
 	l.EXPECT().Append(mock.Anything, mock.Anything).Unset()
 	l.EXPECT().Append(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, mm message.MutableMessage) (*types.AppendResult, error) {
+		assert.Nil(t, utility.GetNotPersisted(ctx))
+		appended = mm.TimeTick()
 		return &types.AppendResult{
 			MessageID: walimplstest.NewTestMessageID(1),
 			TimeTick:  mm.TimeTick(),
 		}, nil
 	})
-	operator.Sync(context.Background(), true)
+	tick, err := operator.Sync(context.Background(), true)
+	assert.NoError(t, err)
+	assert.Greater(t, tick, ts)
+	assert.Equal(t, appended, tick)
+
+	// An unresolved earlier append prevents the next ACK prefix from advancing.
+	// Returning the preceding sync's tick would falsely confirm this attempt.
+	pending, err := operator.AckManager().Allocate(context.Background())
+	assert.NoError(t, err)
+	defer pending.Ack(ack.OptSync())
+	tick, err = operator.Sync(context.Background(), true)
+	assert.NoError(t, err)
+	assert.Zero(t, tick)
 }

@@ -293,11 +293,9 @@ func TestReplicaWithdrawalBeforeReplacement(t *testing.T) {
 type replicaTestWriter struct {
 	handoffTestWAL
 	publisher *replica.Publisher
-	confirms  int
 }
 
 func (w *replicaTestWriter) ReadReplica() wal.WAL                 { return w.reader }
-func (w *replicaTestWriter) ConfirmReplicaTail()                  { w.confirms++ }
 func (w *replicaTestWriter) ReplicaPublisher() *replica.Publisher { return w.publisher }
 
 func TestReplicaReconcileHandoffAndRuntimeFailures(t *testing.T) {
@@ -336,7 +334,6 @@ func TestReplicaReconcileHandoffAndRuntimeFailures(t *testing.T) {
 			case streamingpb.LocalWALReplica_PREPARING:
 				require.Error(t, err)
 				require.Same(t, writer, w)
-				require.Equal(t, 1, writer.confirms)
 				require.Empty(t, ads)
 			case streamingpb.LocalWALReplica_RO:
 				require.NoError(t, err)

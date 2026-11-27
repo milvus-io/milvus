@@ -52,8 +52,11 @@ type localReplica struct {
 	// by a cold writer Open. Protected by operations.
 	opened bool
 	// Once retirement has started, a newer Sync cannot reopen this ID.
-	closing                   bool
-	operations                sync.Mutex
+	closing    bool
+	operations sync.Mutex
+	// One fixed catch-up target per successor term, protected by operations.
+	handoffTickTerm           int64
+	handoffTick               uint64
 	prepared, sealing, sealed int64
 	// Retain an unconfirmed outbound Seal across retries of this promotion.
 	successorSealTerm, successorSealSource int64
@@ -318,7 +321,6 @@ func (c *ReplicaControl) reconcile(ctx context.Context, name string, r *localRep
 	}
 	if current != nil && current.Channel().AccessMode == types.AccessModeRW && current.Channel() != want {
 		if want.AccessMode == types.AccessModeRO {
-			current.(interface{ ConfirmReplicaTail() }).ConfirmReplicaTail()
 			return current, status.NewIgnoreOperation("awaiting seal of WAL %s", name)
 		}
 		// A successor may have lost its lease before sealing this writer.
@@ -479,9 +481,9 @@ func (c *ReplicaControl) Close() {
 	}
 }
 
-// Handoff executes on the source. The same ordered pair of calls can be
-// retried after a lost reply. Durable authority is checked on every invocation.
-func (c *ReplicaControl) Handoff(ctx context.Context, req *streamingpb.WALHandoffRequest, caller int64, seal bool) error {
+// withHandoff serializes a source-side step with reconciliation and checks the
+// current successor authorization even when replaying a successful response.
+func (c *ReplicaControl) withHandoff(ctx context.Context, req *streamingpb.WALHandoffRequest, caller int64, step func(context.Context, *localReplica, wal.WAL) error) error {
 	if req.GetPchannel() == "" || req.GetTargetTerm() <= 0 || caller <= 0 || caller == c.nodeID {
 		return status.NewInvalidArgument("missing or invalid WAL handoff endpoint")
 	}
@@ -523,26 +525,8 @@ func (c *ReplicaControl) Handoff(ctx context.Context, req *streamingpb.WALHandof
 	if accepted == nil || accepted.Revision != t.Revision {
 		return status.NewIgnoreOperation("waiting for local WAL handoff topology")
 	}
-	if r.sealed == req.TargetTerm {
-		return nil
-	}
-	if current == nil || current.Channel().AccessMode != types.AccessModeRW || current.Channel().Term >= req.TargetTerm {
+	if r.sealed != req.TargetTerm && (current == nil || current.Channel().AccessMode != types.AccessModeRW || current.Channel().Term >= req.TargetTerm) {
 		return status.NewChannelNotExist(req.Pchannel)
 	}
-	if !seal {
-		writer := current.(interface{ PrepareHandoff(context.Context) error })
-		if err := writer.PrepareHandoff(ctx); err != nil {
-			return err
-		}
-		r.prepared = req.TargetTerm
-		return nil
-	}
-	if r.prepared != req.TargetTerm {
-		return status.NewIgnoreOperation("WAL handoff requires a completed prepare")
-	}
-	// Seal owns the drain once admitted. A lost RPC must not leave a live
-	// writer permanently rejecting appends while still advertising its old term.
-	r.sealing = req.TargetTerm
-	_, err = c.finishSeal(c.ctx, req.Pchannel, r, current)
-	return err
+	return step(ctx, r, current)
 }
