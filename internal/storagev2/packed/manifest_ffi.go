@@ -658,17 +658,9 @@ func readMilvusTableRefreshFragments(manifestPath string, config *indexpb.Storag
 	return projectManifestFragments(groups, columns), missing, nil
 }
 
-// readManifestColumnGroupEntries copies selected column-group metadata into
-// Go-owned descriptors. Unlike Fragment, ColumnGroupEntry preserves all file
-// properties (including file_size and footer_size), so the native manifest can
-// be released here without losing metadata needed by Parquet/Vortex readers.
-// Mixed groups are rejected: changing their column lists would not project the
-// underlying files.
-func readManifestColumnGroupEntries(
-	manifestPath string,
-	storageConfig *indexpb.StorageConfig,
-	columns []string,
-) ([]ColumnGroupEntry, error) {
+// ReadManifestColumnGroups returns Go-owned physical descriptors for the exact
+// catalog revision, including file properties and row ranges used by replay.
+func ReadManifestColumnGroups(manifestPath string, storageConfig *indexpb.StorageConfig) ([]ColumnGroupEntry, error) {
 	manifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
 		return nil, merr.Wrap(err, "read source manifest column groups")
@@ -682,6 +674,24 @@ func readManifestColumnGroupEntries(
 		// The shared decoder also handles writer output. At this boundary its
 		// shape errors describe corrupt persisted metadata, not a writer failure.
 		return nil, merr.WrapErrDataIntegrity(err, "decode column groups from manifest %s", manifestPath)
+	}
+	return groups, nil
+}
+
+// readManifestColumnGroupEntries copies selected column-group metadata into
+// Go-owned descriptors. Unlike Fragment, ColumnGroupEntry preserves all file
+// properties (including file_size and footer_size), so the native manifest can
+// be released here without losing metadata needed by Parquet/Vortex readers.
+// Mixed groups are rejected: changing their column lists would not project the
+// underlying files.
+func readManifestColumnGroupEntries(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+) ([]ColumnGroupEntry, error) {
+	groups, err := ReadManifestColumnGroups(manifestPath, storageConfig)
+	if err != nil {
+		return nil, err
 	}
 
 	required := make(map[string]struct{}, len(columns))

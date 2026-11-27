@@ -72,7 +72,9 @@ type Entry interface {
 // (func(*datapb.SegmentInfo)) applied to a clone at the apply site. It is
 // intentionally omitted until such a caller exists.
 type SegmentEntry struct {
-	Segment *datapb.SegmentInfo
+	// RequireAtomic prevents a manifest batch from being split across transactions.
+	RequireAtomic bool
+	Segment       *datapb.SegmentInfo
 	// Binlogs carries per-segment binlog increments for an ActionUpdate with
 	// AlterEncoding (the legacy AlterSegments encoding). Compaction's
 	// AlterSegment leaves it nil (a retirement rewrite); the batch publication
@@ -221,6 +223,11 @@ func AddSegment(seg *datapb.SegmentInfo) UpdateAction {
 // AlterSegments GC-compat behavior is required.
 func UpdateSegment(seg *datapb.SegmentInfo) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg}}
+}
+
+// PublishSegmentManifest stages a record-only segment update in an atomic batch.
+func PublishSegmentManifest(seg *datapb.SegmentInfo) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentEntry{Segment: seg, RequireAtomic: true}}
 }
 
 // DropSegmentIndex returns an UpdateAction that removes a segment index

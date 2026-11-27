@@ -42,12 +42,21 @@ import (
 // error and are rejected with a ServiceInternal error and no write.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	b := txn.New()
+	atomic := false
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
+			atomic = atomic || e.RequireAtomic
 			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
 				return err
 			}
+		case metastore.SegmentIndexEntry:
+			if action.Type != metastore.ActionDelete || e.SegmentIndex == nil {
+				return unsupportedAction(action)
+			}
+			seg := e.SegmentIndex
+			b.Remove(BuildSegmentIndexKey(seg.CollectionID, seg.PartitionID, seg.SegmentID, seg.BuildID))
+			atomic = true // Never separate an index retirement from the new segment pointer.
 		case metastore.SegmentChangeGroupEntry:
 			switch action.Type {
 			case metastore.ActionUpdate:
@@ -87,7 +96,11 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
 		}
 	}
-	return txn.Commit(ctx, kc.MetaKv, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt(), b)
+	limit := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()
+	if atomic {
+		return txn.CommitWithoutFallback(ctx, kc.MetaKv, limit, b)
+	}
+	return txn.Commit(ctx, kc.MetaKv, limit, b)
 }
 
 // applySegmentEntry stages the kv writes for a segment action.
