@@ -3621,8 +3621,8 @@ TEST(InjectExtfsAllowlist, CaseSensitiveAllowlist) {
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     // The allowlist is case-sensitive — an attacker cannot smuggle a secret
-    // key by changing case. Only the lowercase form "access_key_id" is
-    // recognised.
+    // key by changing case. A case variant of an allowlisted key fails the
+    // request, as Go's extfs allowlist check (ParseExternalSpec) does.
     std::string spec = R"({
         "format": "parquet",
         "extfs": {
@@ -3630,8 +3630,9 @@ TEST(InjectExtfsAllowlist, CaseSensitiveAllowlist) {
         }
     })";
 
-    ::InjectExternalSpecProperties(
-        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+    EXPECT_THROW(::InjectExternalSpecProperties(
+                     props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec),
+                 milvus::SegcoreError);
 
     // The non-allowlisted upper-case variant must not land under its own
     // name or be silently case-folded into the lowercase slot.
@@ -3639,6 +3640,152 @@ TEST(InjectExtfsAllowlist, CaseSensitiveAllowlist) {
     // Layer 0 empties static credentials; the case-variant bypass attempt
     // must not fill the lowercase slot.
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.access_key_id")), "");
+}
+
+// Go's encoding/json reads a top-level key that equals an ExternalSpec field
+// ignoring case as that field, lets a later occurrence override an earlier one
+// and merges two extfs objects. This reader reads one occurrence, so a spec
+// that sets one key twice is rejected.
+TEST(InjectExtfsAllowlist, KeysSetTwiceAreRejected) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {R"({"extfs":{"use_iam":"true"},"extfs":{"use_iam":"false","access_key_id":"AK","access_key_value":"SK"}})",
+         "external_spec key 'extfs' is duplicated"},
+        {R"({"extfs":{"use_iam":"true"},"\u0065xtfs":{"use_iam":"false"}})",
+         "external_spec key 'extfs' is duplicated"},
+        {R"({"format":"parquet","format":"lance-table"})",
+         "external_spec key 'format' is duplicated"},
+        {R"({"extfs":{"use_iam":"true"},"Extfs":{"use_iam":"false"}})",
+         "external_spec keys 'extfs' and 'Extfs' differ only in case"},
+        {R"({"Extfs":{"use_iam":"true"},"EXTFS":{"use_iam":"false"}})",
+         "external_spec keys 'Extfs' and 'EXTFS' differ only in case"},
+        {R"({"Format":"lance-table","format":"parquet"})",
+         "external_spec keys 'Format' and 'format' differ only in case"},
+        {R"({"format":"iceberg-table","snapshot_id":"7","Snapshot_ID":"8"})",
+         "external_spec keys 'snapshot_id' and 'Snapshot_ID' differ only in "
+         "case"},
+        // U+017F (long s) folds to 's' in Go.
+        {"{\"extfs\":{\"region\":\"us-east-1\"},"
+         "\"extf\xC5\xBF\":{\"region\":\"us-west-2\"}}",
+         "differ only in case"},
+        {R"({"extfs":{"use_iam":"true","use_iam":""}})",
+         "extfs key 'use_iam' is duplicated"},
+        {R"({"EXTFS":{"region":"a","region":"b"}})",
+         "extfs key 'region' is duplicated"},
+        {R"({"extfs":{"Use_IAM":"true"}})",
+         "extfs key 'Use_IAM' must be written as 'use_iam'"},
+        {R"({"Extfs":{"Use_IAM":"true"}})",
+         "extfs key 'Use_IAM' must be written as 'use_iam'"},
+        // U+212A (Kelvin sign) folds to 'k' in Go.
+        {"{\"extfs\":{\"access_\xE2\x84\xAA"
+         "ey_id\":\"AK\"}}",
+         "must be written as 'access_key_id'"},
+    };
+    for (const auto& [spec, expected] : cases) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        try {
+            ::InjectExternalSpecProperties(
+                props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+            FAIL() << "expected the spec to be rejected";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(),
+                      milvus::ErrorCode::InvalidParameter);
+            EXPECT_NE(std::string(error.what()).find(expected),
+                      std::string::npos)
+                << error.what();
+        }
+    }
+
+    // Keys that only resemble a canonical key stay unknown and are dropped.
+    milvus_storage::api::Properties props;
+    ::InjectExternalSpecProperties(
+        props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"comment":"a","Comment":"b","extfs":{"region":"us-west-2"}})");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-west-2");
+}
+
+// A lone non-canonical spelling is read as the canonical key, as Go reads it.
+TEST(InjectExtfsAllowlist, LoneCaseVariantsAreRead) {
+    {
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(
+            props,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            R"({"Format":"iceberg-table","Snapshot_ID":"7","EXTFS":{"region":"us-west-2"}})");
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")),
+                  "us-west-2");
+        const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+        ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+        EXPECT_EQ(*snapshot_id, 7);
+    }
+    {
+        // U+017F (long s) folds to 's' in Go, so this key is extfs.
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(
+            props,
+            42,
+            "s3://s3.amazonaws.com/bucket/key",
+            "{\"extf\xC5\xBF\":{\"region\":\"us-west-2\"}}");
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")),
+                  "us-west-2");
+    }
+}
+
+// Go decodes escapes in keys, so "extfs", "format" and "snapshot_id" are
+// found by their unescaped names; simdjson's find_field compares raw bytes.
+TEST(InjectExtfsAllowlist, EscapedKeysAreRead) {
+    milvus_storage::api::Properties props;
+    ::InjectExternalSpecProperties(
+        props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"\u0066ormat":"iceberg-table","snapshot_\u0069d":"7","\u0065xtfs":{"region":"us-west-2"}})");
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-west-2");
+    const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
+        props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+    ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
+    EXPECT_EQ(*snapshot_id, 7);
+}
+
+// Go's encoding/json decodes an escaped lone surrogate in a key as U+FFFD and
+// accepts the spec, so it must load here too.
+TEST(InjectExtfsAllowlist, LoneSurrogateKeyEscapeIsRead) {
+    milvus_storage::api::Properties props;
+    ::InjectExternalSpecProperties(
+        props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"format":"parquet","comment\ud800":"x","extfs":{"region":"us-west-2"}})");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.region")), "us-west-2");
+}
+
+// A spec simdjson cannot read fails instead of loading without its extfs. Go
+// decodes invalid UTF-8 as U+FFFD, so it may have accepted such a spec.
+TEST(InjectExtfsAllowlist, UnreadableSpecIsRejected) {
+    for (const std::string& spec :
+         {std::string("{\"comment\":\"\xC5\","
+                      "\"extfs\":{\"region\":\"us-west-2\"}}"),
+          std::string(R"({"extfs":{"region":"us-west-2"},)")}) {
+        SCOPED_TRACE(spec);
+        milvus_storage::api::Properties props;
+        try {
+            ::InjectExternalSpecProperties(
+                props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+            FAIL() << "expected the spec to be rejected";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(),
+                      milvus::ErrorCode::InvalidParameter);
+            EXPECT_NE(std::string(error.what())
+                          .find("external_spec cannot be parsed"),
+                      std::string::npos)
+                << error.what();
+        }
+    }
 }
 
 TEST(InjectExtfsAllowlist, EmptySpecNoExtfsSection) {

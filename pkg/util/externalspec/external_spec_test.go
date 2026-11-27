@@ -103,6 +103,90 @@ func TestParseExternalSpec_AddressRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "not allowed")
 }
 
+// encoding/json reads a top-level key that equals an ExternalSpec field
+// ignoring case as that field, and so does the C++ reader, so a lone
+// non-canonical spelling is accepted. A spec that sets one key twice is
+// rejected: encoding/json would merge or override it.
+func TestParseExternalSpec_NonCanonicalKeys(t *testing.T) {
+	cases := []struct {
+		name    string
+		spec    string
+		wantErr string // empty: accepted
+	}{
+		{name: "canonical keys", spec: `{"format":"parquet","columns":["a"],"snapshot_id":"7","extfs":{"cloud_provider":"aliyun","region":"cn-hangzhou","use_iam":"true"}}`},
+		{name: "unknown top-level key", spec: `{"format":"parquet","comment":"kept"}`},
+		{name: "unknown keys differing only by case", spec: `{"comment":"a","Comment":"b"}`},
+		{name: "null extfs", spec: `{"extfs":null}`},
+		{name: "escaped canonical key", spec: `{"\u0065xtfs":{"region":"us-west-2"}}`},
+		{name: "lone surrogate escape in unknown key", spec: `{"comment\ud800":"x","extfs":{"region":"us-west-2"}}`},
+		{name: "case-variant extfs alone", spec: `{"Extfs":{"region":"us-west-2"}}`},
+		{name: "case-variant format", spec: `{"Format":"lance-table"}`},
+		{name: "case-variant columns", spec: `{"COLUMNS":["a"]}`},
+		{name: "case-variant snapshot_id", spec: `{"format":"iceberg-table","Snapshot_ID":"7"}`},
+		{name: "Unicode long s folds to extfs", spec: "{\"extf\u017f\":{\"region\":\"us-west-2\"}}"},
+
+		{name: "duplicate extfs", spec: `{"extfs":{"use_iam":"true"},"extfs":{"use_iam":"false","access_key_id":"AK","access_key_value":"SK"}}`, wantErr: `external spec key "extfs" is duplicated`},
+		{name: "duplicate extfs spelled with an escape", spec: `{"extfs":{"use_iam":"true"},"\u0065xtfs":{"use_iam":"false"}}`, wantErr: `external spec key "extfs" is duplicated`},
+		{name: "duplicate format", spec: `{"format":"parquet","format":"lance-table"}`, wantErr: `external spec key "format" is duplicated`},
+		{name: "duplicate unknown top-level key", spec: `{"comment":"a","comment":"b"}`, wantErr: `external spec key "comment" is duplicated`},
+		{name: "case-variant extfs after extfs", spec: `{"extfs":{"use_iam":"true"},"EXTFS":{"use_iam":"false"}}`, wantErr: `external spec keys "extfs" and "EXTFS" differ only in case; set the key once`},
+		{name: "two case variants of extfs", spec: `{"Extfs":{"use_iam":"true"},"EXTFS":{"use_iam":"false"}}`, wantErr: `external spec keys "Extfs" and "EXTFS" differ only in case`},
+		{name: "case-variant format before format", spec: `{"Format":"lance-table","format":"parquet"}`, wantErr: `external spec keys "Format" and "format" differ only in case`},
+		{name: "Unicode long s collides with extfs", spec: "{\"extfs\":{\"region\":\"us-east-1\"},\"extf\u017f\":{\"region\":\"us-west-2\"}}", wantErr: `differ only in case`},
+
+		{name: "duplicate extfs key", spec: `{"extfs":{"use_iam":"true","use_iam":"false"}}`, wantErr: `extfs key "use_iam" is duplicated`},
+		{name: "duplicate extfs key with empty value", spec: `{"extfs":{"access_key_id":"AK","access_key_id":""}}`, wantErr: `extfs key "access_key_id" is duplicated`},
+		{name: "case-variant extfs key", spec: `{"extfs":{"Use_IAM":"true"}}`, wantErr: `extfs key "Use_IAM" must be written as "use_iam"`},
+		{name: "case-variant key in a case-variant extfs", spec: `{"Extfs":{"Use_IAM":"true"}}`, wantErr: `extfs key "Use_IAM" must be written as "use_iam"`},
+		{name: "duplicate key in a case-variant extfs", spec: `{"EXTFS":{"region":"a","region":"b"}}`, wantErr: `extfs key "region" is duplicated`},
+		{name: "Kelvin sign folds to extfs key", spec: "{\"extfs\":{\"access_\u212aey_id\":\"AK\"}}", wantErr: `must be written as "access_key_id"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := ParseExternalSpec(c.spec)
+			if c.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+// A lone non-canonical spelling is read as the canonical key, as the C++ reader
+// reads it.
+func TestParseExternalSpec_LoneCaseVariantsAreRead(t *testing.T) {
+	spec, err := ParseExternalSpec(`{"Format":"iceberg-table","Snapshot_ID":"7","COLUMNS":["a"],"EXTFS":{"region":"us-west-2"}}`)
+	require.NoError(t, err)
+	assert.Equal(t, "iceberg-table", spec.Format)
+	require.NotNil(t, spec.SnapshotID)
+	assert.Equal(t, int64(7), *spec.SnapshotID)
+	assert.Equal(t, []string{"a"}, spec.Columns)
+	assert.Equal(t, map[string]string{"region": "us-west-2"}, spec.Extfs)
+}
+
+// Go used to merge the two extfs objects and validate AK/SK, while the C++
+// reader applied only the first one and read with the node identity.
+func TestValidateSourceAndSpec_RejectsAmbiguousExtfs(t *testing.T) {
+	const source = "oss://bucket/prefix/"
+	const iam = `{"cloud_provider":"aliyun","region":"cn-hangzhou","use_iam":"true"}`
+	const aksk = `{"cloud_provider":"aliyun","region":"cn-hangzhou","use_iam":"false","access_key_id":"AK","access_key_value":"SK"}`
+
+	require.NoError(t, ValidateSourceAndSpec(source, `{"format":"parquet","extfs":`+aksk+`}`))
+	require.NoError(t, ValidateSourceAndSpec(source, `{"format":"parquet","extfs":`+iam+`}`))
+
+	for _, spec := range []string{
+		`{"format":"parquet","extfs":` + iam + `,"extfs":` + aksk + `}`,
+		`{"format":"parquet","extfs":` + iam + `,"Extfs":` + aksk + `}`,
+		`{"format":"parquet","Extfs":` + aksk + `,"extfs":` + iam + `}`,
+	} {
+		err := ValidateSourceAndSpec(source, spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, spec)
+		assert.Contains(t, err.Error(), "external_spec is invalid", spec)
+	}
+}
+
 func TestValidateExternalSource(t *testing.T) {
 	t.Run("empty_rejected", func(t *testing.T) {
 		err := ValidateExternalSource("")
@@ -1381,4 +1465,26 @@ func TestAzureLegacyBrokerQuery(t *testing.T) {
 	extfs["azure_credential_endpoint"] = endpoint
 	extfs["credential_endpoint"] = endpoint + "&extra=1"
 	require.Error(t, validate())
+}
+
+// A lone "EXTFS" is read as extfs, so its secrets are redacted like those of
+// extfs. A spec that sets one key twice is not shown.
+func TestRedactExternalSpec_CaseVariantKeys(t *testing.T) {
+	out := RedactExternalSpec(`{"Format":"parquet","EXTFS":{"access_key_id":"AKIA","access_key_value":"SEC","region":"us"}}`)
+	assert.Contains(t, out, `"format":"parquet"`)
+	assert.Contains(t, out, `"access_key_id":"***"`)
+	assert.Contains(t, out, `"access_key_value":"***"`)
+	assert.Contains(t, out, `"region":"us"`)
+	assert.NotContains(t, out, "AKIA")
+	assert.NotContains(t, out, "SEC")
+	assert.NotContains(t, out, "EXTFS")
+
+	assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"extfs":{"access_key_value":"SEC"},"Extfs":{"region":"us"}}`))
+	assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"parquet","format":"lance-table"}`))
+}
+
+func TestRedactExternalSpecForLog_CaseVariantKeys(t *testing.T) {
+	out := RedactExternalSpecForLog(`{"Format":"parquet","EXTFS":{"access_key_value":"SEC"}}`)
+	assert.Equal(t, `{"extfs":"***","format":"parquet"}`, out)
+	assert.Equal(t, "<redacted>", RedactExternalSpecForLog(`{"extfs":{"access_key_value":"SEC"},"Extfs":{"region":"us"}}`))
 }

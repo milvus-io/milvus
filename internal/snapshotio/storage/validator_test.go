@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSnapshotForeignStorageForTest(
@@ -108,6 +109,57 @@ func TestValidateSnapshotForeignStorageRestoreGCPServiceAccountJSONAllowed(t *te
 	require.NoError(t, err)
 	assert.Equal(t, credentialJSON, cfg.GcpCredentialJSON)
 	assert.False(t, cfg.UseIAM)
+}
+
+// A spec with credential_json is decoded and encoded again before the generic
+// parser sees it, which would merge two keys that set the same field. They are
+// rejected as written, as everywhere else; a lone case variant is accepted.
+func TestValidateSnapshotForeignStorageRejectsNonCanonicalKeys(t *testing.T) {
+	const serviceAccountField = `"credential_json":"{\"type\":\"service_account\",\"project_id\":\"snapshot-project\"}"`
+	tests := []struct {
+		name    string
+		spec    string
+		wantErr string // empty: accepted
+	}{
+		{
+			name: "canonical keys",
+			spec: `{"extfs":{"cloud_provider":"gcpnative",` + serviceAccountField + `}}`,
+		},
+		{
+			name: "case-variant extfs alone",
+			spec: `{"Extfs":{"cloud_provider":"gcpnative",` + serviceAccountField + `}}`,
+		},
+		{
+			name:    "case-variant extfs next to extfs",
+			spec:    `{"extfs":{"cloud_provider":"aws"},"Extfs":{"cloud_provider":"gcpnative",` + serviceAccountField + `}}`,
+			wantErr: `external spec keys "extfs" and "Extfs" differ only in case`,
+		},
+		{
+			name:    "duplicate extfs",
+			spec:    `{"extfs":{"cloud_provider":"aws"},"extfs":{"cloud_provider":"gcpnative",` + serviceAccountField + `}}`,
+			wantErr: `external spec key "extfs" is duplicated`,
+		},
+		{
+			name:    "duplicate credential_json",
+			spec:    `{"extfs":{"cloud_provider":"gcpnative","credential_json":"{}",` + serviceAccountField + `}}`,
+			wantErr: `extfs key "credential_json" is duplicated`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, err := validateSnapshotForeignStorageForTest(
+				DirectionRestore,
+				"gs://foreign-bucket/root/snapshots/100/metadata/1.json",
+				tt.spec,
+			)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
 }
 
 func TestApplySnapshotExternalSpecUseIAMClearsInheritedCredentials(t *testing.T) {

@@ -27,6 +27,7 @@
 #include "arrow/type.h"
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
+#include "common/ExternalSpecKey.h"
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
 #include "common/VirtualPK.h"
@@ -72,7 +73,23 @@ IsMilvusTableExternalSpec(const std::string& external_spec) {
     }
     try {
         auto spec = nlohmann::json::parse(external_spec);
-        return spec.value("format", "parquet") == "milvus-table";
+        if (!spec.is_object()) {
+            return false;
+        }
+        // Go's encoding/json reads a lone "Format" as format. Two keys that
+        // fold to format make the spec invalid, so it is not milvus-table.
+        const nlohmann::json* format = nullptr;
+        for (auto it = spec.begin(); it != spec.end(); ++it) {
+            if (FoldExternalSpecKey(it.key()) != "format") {
+                continue;
+            }
+            if (format != nullptr) {
+                return false;
+            }
+            format = &it.value();
+        }
+        return format != nullptr && format->is_string() &&
+               format->get<std::string>() == "milvus-table";
     } catch (const std::exception&) {
         return false;
     }

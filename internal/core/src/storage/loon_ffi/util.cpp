@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -40,6 +41,7 @@
 #include "arrow/status.h"
 #include "simdjson.h"
 #include "common/EasyAssert.h"
+#include "common/ExternalSpecKey.h"
 #include "log/Log.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/extend_status.h"
@@ -563,7 +565,9 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
 //
 // Any key outside this set is dropped with a warning — we do not fail the
 // request because the Go side should have rejected it already, so reaching
-// here means either a programming error or an attempted bypass.
+// here means either a programming error or an attempted bypass. A key that
+// differs from one in this set only by case, or a duplicate key, fails the
+// request instead (CheckExtfsSpecKey).
 static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "use_iam",
     "use_ssl",
@@ -588,6 +592,150 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "azure_credential_endpoint",
     "credential_endpoint",
 };
+
+// kExternalSpecKeys are the top-level external_spec keys Go decodes into
+// specutil.ExternalSpec. Keep in sync with specKeys in
+// pkg/util/externalspec/specutil/spec.go.
+static const std::unordered_set<std::string> kExternalSpecKeys = {
+    "format",
+    "columns",
+    "extfs",
+    "snapshot_id",
+};
+
+// CheckTopLevelSpecKey rejects a repeated top-level key, and a second key that
+// Go's encoding/json reads as the same ExternalSpec field, such as "Extfs"
+// after "extfs". A lone non-canonical spelling such as "Format" is accepted:
+// FindSpecField reads it as the canonical key, as Go does. Other keys are
+// unknown to ExternalSpec, so only their exact repeats are rejected.
+static arrow::Status
+CheckTopLevelSpecKey(
+    const std::string& key,
+    std::unordered_set<std::string>& seen,
+    std::unordered_map<std::string, std::string>& first_by_name) {
+    if (!seen.emplace(key).second) {
+        return arrow::Status::Invalid(
+            "external_spec key '", key, "' is duplicated");
+    }
+    auto name = milvus::FoldExternalSpecKey(key);
+    if (kExternalSpecKeys.count(name) == 0) {
+        return arrow::Status::OK();
+    }
+    const auto [first, inserted] = first_by_name.emplace(name, key);
+    if (!inserted) {
+        return arrow::Status::Invalid(
+            "external_spec keys '",
+            first->second,
+            "' and '",
+            key,
+            "' differ only in case; set the key once");
+    }
+    return arrow::Status::OK();
+}
+
+// CheckExtfsSpecKey rejects a repeated extfs key, and a key that differs from
+// an allowlisted one only by case. Go keeps such a key as written and its
+// allowlist rejects it, while this file would drop it.
+static arrow::Status
+CheckExtfsSpecKey(std::string_view key, std::unordered_set<std::string>& seen) {
+    if (!seen.emplace(key).second) {
+        return arrow::Status::Invalid("extfs key '", key, "' is duplicated");
+    }
+    if (kAllowedExtfsSpecKeys.count(std::string(key)) > 0) {
+        return arrow::Status::OK();
+    }
+    const auto folded = milvus::FoldExternalSpecKey(key);
+    if (kAllowedExtfsSpecKeys.count(folded) > 0) {
+        return arrow::Status::Invalid(
+            "extfs key '", key, "' must be written as '", folded, "'");
+    }
+    return arrow::Status::OK();
+}
+
+// CheckExternalSpecKeys rejects a spec that sets one key twice. Go's
+// encoding/json reads a top-level key that equals an ExternalSpec field
+// ignoring case as that field, lets a later occurrence override an earlier one
+// and merges two extfs objects, while this file reads one occurrence, so the
+// two sides would read different settings or credentials. Go rejects these
+// specs first (specutil.CheckSpecKeys); this check covers specs persisted
+// before Go did. Keys are unescaped with allow_replacement, as encoding/json
+// unescapes them: an escaped lone surrogate such as "\ud800" becomes U+FFFD
+// instead of failing a spec Go accepts. A spec, or an extfs value, that is not
+// a JSON object has no keys to check; any other error, such as invalid UTF-8,
+// fails the request, and a parse error met while iterating throws
+// simdjson_error.
+static arrow::Status
+CheckExternalSpecKeys(const simdjson::padded_string& external_spec) {
+    // A separate parser: a failed lookup can leave a document unusable, and
+    // the caller iterates the spec again.
+    simdjson::ondemand::parser parser;
+    auto doc = parser.iterate(external_spec);
+    simdjson::ondemand::object spec;
+    if (const auto error = doc.get_object().get(spec);
+        error != simdjson::SUCCESS) {
+        if (error == simdjson::INCORRECT_TYPE) {
+            return arrow::Status::OK();
+        }
+        return arrow::Status::Invalid("external_spec cannot be parsed: ",
+                                      simdjson::error_message(error));
+    }
+    std::unordered_set<std::string> seen;
+    std::unordered_map<std::string, std::string> first_by_name;
+    for (auto field : spec) {
+        const auto key = std::string(
+            field.unescaped_key(/*allow_replacement=*/true).value());
+        ARROW_RETURN_NOT_OK(CheckTopLevelSpecKey(key, seen, first_by_name));
+        if (milvus::FoldExternalSpecKey(key) != "extfs") {
+            continue;
+        }
+        simdjson::ondemand::object extfs;
+        if (const auto error = field.value().get_object().get(extfs);
+            error != simdjson::SUCCESS) {
+            if (error == simdjson::INCORRECT_TYPE) {
+                continue;
+            }
+            return arrow::Status::Invalid(
+                "external_spec extfs cannot be parsed: ",
+                simdjson::error_message(error));
+        }
+        std::unordered_set<std::string> seen_extfs;
+        for (auto extfs_field : extfs) {
+            ARROW_RETURN_NOT_OK(CheckExtfsSpecKey(
+                extfs_field.unescaped_key(/*allow_replacement=*/true).value(),
+                seen_extfs));
+        }
+    }
+    return arrow::Status::OK();
+}
+
+// FindSpecField returns the top-level field that Go's encoding/json reads as
+// name, a key in kExternalSpecKeys: its unescaped key folds to name, so a lone
+// "Format" or "\u0065xtfs" is found as format or extfs. simdjson's find_field
+// compares raw bytes and would miss both. CheckExternalSpecKeys has rejected a
+// spec with two keys that fold to the same name, so at most one field matches.
+// doc must be freshly iterated: rewinding a document after a parse error
+// dereferences a released parser.
+static simdjson::simdjson_result<simdjson::ondemand::value>
+FindSpecField(simdjson::simdjson_result<simdjson::ondemand::document>& doc,
+              std::string_view name) {
+    simdjson::ondemand::object spec;
+    if (const auto error = doc.get_object().get(spec);
+        error != simdjson::SUCCESS) {
+        return error;
+    }
+    for (auto field : spec) {
+        std::string_view key;
+        if (const auto error =
+                field.unescaped_key(/*allow_replacement=*/true).get(key);
+            error != simdjson::SUCCESS) {
+            return error;
+        }
+        if (milvus::FoldExternalSpecKey(key) == name) {
+            return field.value();
+        }
+    }
+    return simdjson::NO_SUCH_FIELD;
+}
 
 // kExtfsFields is the contract with Go extfsFields in
 // internal/storagev2/packed/ffi_common.go. Keep in lockstep.
@@ -916,12 +1064,26 @@ InjectExternalSpecProperties(
         try {
             simdjson::ondemand::parser parser;
             simdjson::padded_string padded(external_spec);
+            ARROW_RETURN_NOT_OK(CheckExternalSpecKeys(padded));
             auto doc = parser.iterate(padded);
-            auto extfs_obj = doc.find_field_unordered("extfs");
+            auto extfs_obj = FindSpecField(doc, "extfs");
+            // NO_SUCH_FIELD means no extfs, and INCORRECT_TYPE that the spec
+            // is not a JSON object (Go reads null as a spec without extfs).
+            // Any other error must not silently drop the spec's extfs.
+            if (const auto error = extfs_obj.error();
+                error != simdjson::SUCCESS &&
+                error != simdjson::NO_SUCH_FIELD &&
+                error != simdjson::INCORRECT_TYPE) {
+                return arrow::Status::Invalid(
+                    "external_spec extfs cannot be read: ",
+                    simdjson::error_message(error));
+            }
             if (extfs_obj.error() == simdjson::SUCCESS) {
                 for (auto field : extfs_obj.get_object()) {
                     try {
-                        auto key = std::string(field.unescaped_key().value());
+                        auto key = std::string(
+                            field.unescaped_key(/*allow_replacement=*/true)
+                                .value());
                         if (kAllowedExtfsSpecKeys.find(key) ==
                             kAllowedExtfsSpecKeys.end()) {
                             LOG_WARN(
@@ -1344,12 +1506,14 @@ InjectExternalSpecProperties(
         simdjson::padded_string padded(external_spec);
         auto doc = parser.iterate(padded);
         std::string_view format_view;
-        if (doc.find_field("format").get_string().get(format_view) ==
+        if (FindSpecField(doc, "format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "lance-table" || format == "iceberg-table") {
-                // JSON fields may appear before or after "format".
-                auto snapshot_field = doc.find_field_unordered("snapshot_id");
+                // JSON fields may appear before or after "format", so
+                // search a fresh iteration.
+                doc = parser.iterate(padded);
+                auto snapshot_field = FindSpecField(doc, "snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
                 if (int_err == simdjson::INCORRECT_TYPE) {
