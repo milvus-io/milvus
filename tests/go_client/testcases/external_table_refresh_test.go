@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	miniocreds "github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -3830,6 +3831,20 @@ func waitRefreshTerminal(t *testing.T, ctx context.Context, mc *base.MilvusClien
 	}
 }
 
+func waitForSourceSchemaBackfill(ctx context.Context, t *testing.T, mc *base.MilvusClient, source string) {
+	t.Helper()
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(source))
+		require.NoError(c, err)
+		total, err := strconv.Atoi(stats["schema_version_total_segments"])
+		require.NoError(c, err)
+		consistent, err := strconv.Atoi(stats["schema_version_consistent_segments"])
+		require.NoError(c, err)
+		require.Positive(c, total)
+		require.Equal(c, total, consistent)
+	}, 3*time.Minute, 2*time.Second, "waiting for physical schema backfill on %s", source)
+}
+
 func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	ctx := hp.CreateContext(t, 12*time.Minute)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -4090,18 +4105,7 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 
 		_, err = hp.AlterServerConfig("dataCoord.compaction.bumpSchemaVersion.enabled", "true")
 		require.NoError(t, err)
-		// These API statistics report physical segment schema convergence, not
-		// the logical NULL values that an internal-table query can synthesize.
-		require.Eventually(t, func() bool {
-			stats, err := mc.GetCollectionStats(ctx, client.NewGetCollectionStatsOption(sourceName))
-			if err != nil {
-				t.Logf("waiting for backfill: %v", err)
-				return false
-			}
-			total, totalErr := strconv.Atoi(stats["schema_version_total_segments"])
-			consistent, consistentErr := strconv.Atoi(stats["schema_version_consistent_segments"])
-			return totalErr == nil && consistentErr == nil && total > 0 && total == consistent
-		}, 3*time.Minute, 2*time.Second, "source physical backfill did not finish")
+		waitForSourceSchemaBackfill(ctx, t, mc, sourceName)
 		backfilledSnapshot := common.GenRandomString("mt_backfilled", 6)
 		require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(backfilledSnapshot, sourceName)))
 		t.Cleanup(func() {
@@ -5808,11 +5812,15 @@ func testMilvusTableDeferredFieldBindingSnapshot(t *testing.T, disableWarmup boo
 	require.NoError(t, flushWithRetry(ctx, mc, source))
 	compaction, err := mc.Compact(ctx, client.NewCompactOption(source))
 	require.NoError(t, err)
-	require.Eventually(t, func() bool {
-		state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(compaction))
-		require.NoError(t, err)
-		return state == entity.CompactionStateCompleted
-	}, 3*time.Minute, time.Second)
+	if compaction != -1 {
+		require.EventuallyWithT(t, func(c *assert.CollectT) {
+			state, err := mc.GetCompactionState(ctx, client.NewGetCompactionStateOption(compaction))
+			require.NoError(c, err)
+			require.Equal(c, entity.CompactionStateCompleted, state)
+		}, 3*time.Minute, time.Second)
+	}
+	// Background schema compaction can own the old segment even when the manual request has no plan.
+	waitForSourceSchemaBackfill(ctx, t, mc, source)
 	newSnapshot := snapshot()
 	for _, phase := range []string{"refresh", "repeat_refresh", "release_reload", "indexed_reload"} {
 		t.Logf("verify deferred binding phase=%s", phase)
