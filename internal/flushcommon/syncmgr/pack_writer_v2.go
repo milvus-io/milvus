@@ -18,6 +18,7 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -217,6 +218,11 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
+	if pack.pluginContext == nil {
+		if ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID); ez != nil && !hookutil.IsClusterEncryptionEnabled() {
+			return nil, "", merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+		}
+	}
 	pluginContextPtr, err := bw.getPluginContext(ctx, pack)
 	if err != nil {
 		return nil, "", err

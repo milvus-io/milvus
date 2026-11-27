@@ -119,14 +119,13 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetReaderProperties(c_plugin_context),
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -164,14 +163,13 @@ NewPackedReaderWithProperties(char** paths,
         }
         auto trueFs = fs_result.ValueOrDie();
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetReaderProperties(c_plugin_context),
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -200,14 +198,12 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
-
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
             trueFs,
             truePaths,
             trueSchema,
             buffer_size,
-            milvus::storage::GetReaderProperties(),
+            milvus::storage::GetReaderProperties(c_plugin_context),
             milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
@@ -287,14 +283,15 @@ GetPackedFileFieldIDs(char** paths,
                 milvus::ErrorCode::FileReadFailed,
                 "[StorageV2] Failed to get filesystem");
         }
-        milvus::storage::RegisterReaderKeys(c_plugin_context);
+        auto reader_properties =
+            milvus::storage::GetReaderProperties(c_plugin_context);
 
         std::vector<int64_t> ids;
         std::vector<int64_t> counts;
         counts.reserve(num_paths);
         for (int64_t i = 0; i < num_paths; ++i) {
-            auto file_ids =
-                milvus::storage::GetPackedFileColumnFieldIDs(fs, paths[i]);
+            auto file_ids = milvus::storage::GetPackedFileColumnFieldIDs(
+                fs, paths[i], reader_properties);
             ids.insert(ids.end(), file_ids.begin(), file_ids.end());
             counts.push_back(static_cast<int64_t>(file_ids.size()));
         }

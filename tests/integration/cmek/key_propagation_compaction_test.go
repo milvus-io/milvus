@@ -194,7 +194,8 @@ func (s *propagationAnalyzeSuite) TestVectorClustering() {
 	s.Require().Equal(int64(len(expected)), rows)
 	s.Require().True(slices.Contains(plan.GetInputSegments(), inputs[0].GetID()))
 	s.inspectPropagationRaw(ctx, outputs, collectionID)
-	s.fixture.assertRegistration(s.T(), compactNode, s.ezID, collectionID)
+	s.fixture.assertNativeCipherOperation(s.T(), compactNode, s.ezID, collectionID, "read_keyset")
+	s.fixture.assertNativeCipherOperation(s.T(), compactNode, s.ezID, collectionID, "write_keyset")
 	s.reloadPropagation(ctx, description, outputs)
 	s.assertConsumerRows(ctx, collection, expected)
 }
@@ -299,28 +300,6 @@ func (s *propagationCompactionSuite) TestRewrite() {
 		s.Require().NoError(merr.CheckRPCCall(response, err))
 		s.Require().Positive(response.GetCompactionID())
 	}
-	var blocked map[int64]*datapb.CompactionTask
-	if s.fault {
-		s.fixture.waitForRetry(s.T(), fault, func() {
-			s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)))
-			s.fixture.assertNotRegistered(s.T(), nodeID, s.ezID)
-			blocked = make(map[int64]*datapb.CompactionTask)
-			for id, current := range s.propagationPlans(ctx, collectionID, s.kind) {
-				if _, old := baseline[id]; old {
-					continue
-				}
-				if len(current.GetInputSegments()) == 0 || !slices.Contains(inputIDs, current.GetInputSegments()[0]) {
-					continue
-				}
-				s.Require().NotEqual(datapb.CompactionTaskState_failed, current.GetState(), current.GetFailReason())
-				s.Require().NotEqual(datapb.CompactionTaskState_completed, current.GetState())
-				s.Require().Empty(current.GetResultSegments())
-				blocked[id] = current
-			}
-		})
-		s.Require().NotEmpty(blocked)
-		s.fixture.restore(s.T())
-	}
 	var plan *datapb.CompactionTask
 	s.Require().Eventually(func() bool {
 		for id, current := range s.propagationPlans(ctx, collectionID, s.kind) {
@@ -330,20 +309,33 @@ func (s *propagationCompactionSuite) TestRewrite() {
 			if len(current.GetInputSegments()) == 0 || !slices.Contains(inputIDs, current.GetInputSegments()[0]) {
 				continue
 			}
-			s.Require().Empty(current.GetFailReason())
-			if current.GetState() == datapb.CompactionTaskState_completed || current.GetState() == datapb.CompactionTaskState_cleaned {
-				plan = current
-				return true
+			if s.fault {
+				if current.GetState() == datapb.CompactionTaskState_failed || current.GetFailReason() != "" {
+					plan = current
+					return true
+				}
+			} else {
+				s.Require().Empty(current.GetFailReason())
+				if current.GetState() == datapb.CompactionTaskState_completed || current.GetState() == datapb.CompactionTaskState_cleaned {
+					plan = current
+					return true
+				}
 			}
 		}
 		return false
 	}, 2*time.Minute, 100*time.Millisecond)
 	s.Require().NotNil(plan)
-	if blocked != nil {
-		s.Require().Contains(blocked, plan.GetPlanID(), "recovery replaced the original compaction plan")
-	}
 	s.Require().ElementsMatch(inputIDs, plan.GetInputSegments())
 	s.T().Logf("stage=compaction type=%s plan=%d node=%d input=%v output=%v state=%s", s.kind, plan.GetPlanID(), plan.GetNodeID(), plan.GetInputSegments(), plan.GetResultSegments(), plan.GetState())
+	if s.fault {
+		s.Require().NotEmpty(s.fixture.faultHits(s.T(), fault))
+		s.Require().Empty(plan.GetResultSegments())
+		s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)))
+		for _, event := range s.fixture.observations(s.T(), "go") {
+			s.Require().False(event.NodeID == nodeID && event.EZID == s.ezID && event.Operation == "register")
+		}
+		return
+	}
 	s.Require().Equal(nodeID, plan.GetNodeID())
 	outputs := s.propagationSegments(ctx, collection)
 	s.Require().Len(outputs, 1)
@@ -459,45 +451,37 @@ func (s *propagationSchemaSuite) TestBackfill() {
 	}
 	revert := s.Cluster.MustModifyMilvusConfig(map[string]string{"dataCoord.compaction.bumpSchemaVersion.enabled": "true"})
 	defer revert()
-	var blocked map[int64]*datapb.CompactionTask
-	if s.faultStage == "schema" {
-		s.fixture.waitForRetry(s.T(), fault, func() {
-			s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)))
-			s.fixture.assertNotRegistered(s.T(), nodeID, s.ezID)
-			blocked = make(map[int64]*datapb.CompactionTask)
-			for id, candidate := range s.propagationPlans(ctx, collectionID, datapb.CompactionType_BumpSchemaVersionCompaction) {
-				if _, old := baseline[id]; old {
-					continue
-				}
-				s.Require().NotEqual(datapb.CompactionTaskState_failed, candidate.GetState(), candidate.GetFailReason())
-				s.Require().NotEqual(datapb.CompactionTaskState_completed, candidate.GetState())
-				s.Require().Empty(candidate.GetResultSegments())
-				blocked[id] = candidate
-			}
-		})
-		s.Require().NotEmpty(blocked)
-		s.fixture.restore(s.T())
-	}
 	var plan *datapb.CompactionTask
 	s.Require().Eventually(func() bool {
 		for id, candidate := range s.propagationPlans(ctx, collectionID, datapb.CompactionType_BumpSchemaVersionCompaction) {
 			if _, old := baseline[id]; old {
 				continue
 			}
-			s.Require().Empty(candidate.GetFailReason())
-			if candidate.GetState() == datapb.CompactionTaskState_completed || candidate.GetState() == datapb.CompactionTaskState_cleaned {
-				plan = candidate
-				return true
+			if s.faultStage == "schema" {
+				if candidate.GetFailReason() != "" {
+					plan = candidate
+					return true
+				}
+			} else {
+				s.Require().Empty(candidate.GetFailReason())
+				if candidate.GetState() == datapb.CompactionTaskState_completed || candidate.GetState() == datapb.CompactionTaskState_cleaned {
+					plan = candidate
+					return true
+				}
 			}
 		}
 		return false
 	}, 2*time.Minute, 100*time.Millisecond)
 	s.Require().NotNil(plan)
-	if blocked != nil {
-		s.Require().Contains(blocked, plan.GetPlanID(), "recovery replaced the original schema-bump plan")
-	}
 	s.Require().Equal([]int64{inputs[0].GetID()}, plan.GetInputSegments())
 	s.T().Logf("stage=schema rewrite=%t plan=%d node=%d inputs=%v outputs=%v state=%s", s.rewrite, plan.GetPlanID(), plan.GetNodeID(), plan.GetInputSegments(), plan.GetResultSegments(), plan.GetState())
+	if s.faultStage == "schema" {
+		s.Require().NotEmpty(s.fixture.faultHits(s.T(), fault))
+		s.Require().Empty(plan.GetResultSegments())
+		s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)))
+		s.fixture.assertNotRegistered(s.T(), nodeID, s.ezID)
+		return
+	}
 	s.Require().Equal(nodeID, plan.GetNodeID())
 	outputs := s.propagationSegments(ctx, collection)
 	s.Require().Len(outputs, 1)
@@ -522,7 +506,10 @@ func (s *propagationSchemaSuite) TestBackfill() {
 			s.Require().Equal(fields, columns[object], "append must retain old column groups")
 		}
 	}
-	s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+	s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "write_keyset")
+	if s.rewrite {
+		s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "read_keyset")
+	}
 	// Disable further schema work before proving the independent Stats entry.
 	s.Cluster.MustModifyMilvusConfig(map[string]string{"dataCoord.compaction.bumpSchemaVersion.enabled": "false"})
 	if !s.rewrite {

@@ -41,11 +41,10 @@ var _ ImportTask = (*PreImportTask)(nil)
 type PreImportTask struct {
 	Task atomic.Pointer[datapb.PreImportTask]
 
-	ImportMeta           ImportMeta
-	Tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	retryTimes           int64
-	nonRetryableFailures int64
+	ImportMeta ImportMeta
+	Tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func (p *PreImportTask) GetJobID() int64 {
@@ -166,18 +165,21 @@ func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	}
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
+		mlog.Warn(context.TODO(), "assemble preimport request failed", WrapTaskLog(p, mlog.Err(err))...)
 		if errors.Is(err, errSnapshotTaskSource) {
-			mlog.Warn(context.TODO(), "assemble preimport request failed terminally", WrapTaskLog(p, mlog.Err(err))...)
-			failImportDispatch(p, p.ImportMeta, err)
+			if updateErr := p.ImportMeta.UpdateJob(context.TODO(), p.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+			}
 			return
 		}
-		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
+		p.retryTimes++
 		return
 	}
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
+		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++
-		handleImportDispatchError(p, p.ImportMeta, &p.nonRetryableFailures, err)
 		return
 	}
 	err = p.ImportMeta.UpdateTask(context.TODO(), p.GetTaskID(),

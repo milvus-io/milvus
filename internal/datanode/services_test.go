@@ -618,7 +618,7 @@ func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
 		require.Equal(t, map[string]string{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="}, cipher.calls[len(cipher.calls)-1])
 	}
 
-	// Same-EZ backup import must register target (CreateEZ) before source (ImportEZ).
+	// Same-EZ backup import only registers target (CreateEZ); source stays stateless in-memory.
 	cipher.calls = nil
 	options := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
 	sameZoneEntries := []*commonpb.KeyValuePair{
@@ -631,7 +631,6 @@ func TestOrdinaryFileImportUsesCollectionKey(t *testing.T) {
 	require.Equal(t, "bGl2ZQ==", keys.Target.GetEncryptionKey())
 	require.Equal(t, []map[string]string{
 		{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="},
-		{hookutil.CipherConfigImportEZ: "17", hookutil.CipherConfigUnsafeEZK: "b2xk"},
 	}, cipher.calls)
 }
 

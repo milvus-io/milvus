@@ -74,7 +74,6 @@ func TestPrepareImportCipher(t *testing.T) {
 				require.Nil(t, ctx.Target)
 			}
 			if tc.artifact != "" {
-				calls = append(calls, map[string]string{CipherConfigImportEZ: "17", CipherConfigUnsafeEZK: base64.StdEncoding.EncodeToString(sourceKey)})
 				require.Equal(t, base64.StdEncoding.EncodeToString(sourceKey), ctx.Source.GetEncryptionKey())
 				require.Zero(t, ctx.Source.GetCollectionId())
 			} else {
@@ -83,7 +82,7 @@ func TestPrepareImportCipher(t *testing.T) {
 			require.Equal(t, calls, cipher.calls)
 		})
 	}
-	t.Run("target registration failure stops before source registration", func(t *testing.T) {
+	t.Run("target registration failure", func(t *testing.T) {
 		cipher := &importReadCipher{err: merr.ErrServiceInternal}
 		storeCipher(cipher)
 		_, err := PrepareImportCipher(artifact, properties, []*commonpb.KeyValuePair{source, target}, 23)
@@ -113,16 +112,24 @@ func TestPrepareImportCipher(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrImportSysFailed)
 		require.Empty(t, cipher.calls)
 	})
-	t.Run("source requires read-only registration", func(t *testing.T) {
+	t.Run("missing cipher plugin rejects encrypted source or target", func(t *testing.T) {
 		storeCipher(nil)
 		_, err := PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
+		_, err = PrepareImportCipher("", properties, []*commonpb.KeyValuePair{target}, 23)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, errCipherPluginMissing)
+		_, err = PrepareImportCipher("", nil, nil, 23)
+		require.NoError(t, err)
+	})
+	t.Run("target registration error classification", func(t *testing.T) {
 		storeCipher(&importReadCipher{err: merr.ErrServiceInternal})
-		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
+		_, err := PrepareImportCipher("", properties, []*commonpb.KeyValuePair{target}, 23)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Equal(t, merr.Code(merr.ErrImportSysFailed), merr.Status(err).GetCode())
 		storeCipher(&importReadCipher{err: merr.ErrServiceUnavailable})
-		_, err = PrepareImportCipher(artifact, nil, []*commonpb.KeyValuePair{source}, 23)
+		_, err = PrepareImportCipher("", properties, []*commonpb.KeyValuePair{target}, 23)
 		require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Status(err).GetCode())
 	})
 }

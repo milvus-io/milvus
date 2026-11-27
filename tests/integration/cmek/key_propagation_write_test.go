@@ -384,12 +384,15 @@ func (s *propagationImportSuite) TestBackup() {
 			}
 		}
 		if s.sourceEncrypted && (stage == "preimport" && s.protocol == 2 || stage == "reshard" || stage == "import" && s.protocol == 2) {
-			s.fixture.assertRegistration(s.T(), nodeID, sourceEZ, 0)
+			s.fixture.assertStatelessNativeCipherOperation(s.T(), nodeID, sourceEZ, source.GetCollectionID(), "read_keyset")
+			if sourceEZ != s.ezID {
+				s.fixture.assertNotRegistered(s.T(), nodeID, sourceEZ)
+			}
 		}
 		if s.targetEncrypted && stage != "preimport" {
 			s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "write_keyset")
 			if stage == "import" && s.protocol == 3 {
-				s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+				s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "read_keyset")
 			}
 		}
 		if stage == "reshard" {

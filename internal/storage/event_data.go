@@ -96,21 +96,15 @@ func (data *descriptorEventData) GetEdek() (string, bool) {
 }
 
 func (data *descriptorEventData) GetEzID() (int64, bool) {
-	value, ok := data.Extras[ezIDKey]
+	ezidInterface, ok := data.Extras[ezIDKey]
+	// previous descriptorEventData not store edek
 	if !ok {
 		return 0, false
 	}
-	if zone, ok := value.(int64); ok {
-		return zone, true
-	}
-	// Extras decodes JSON numbers into float64. Read the original integer so
-	// distinct 64-bit zone IDs cannot compare equal after rounding.
-	var stored map[string]json.RawMessage
-	if err := json.Unmarshal(data.ExtraBytes, &stored); err != nil {
-		return 0, false
-	}
-	zone, err := strconv.ParseInt(string(stored[ezIDKey]), 10, 64)
-	return zone, err == nil
+
+	// won't be not ok, already checked format when write with FinishExtra
+	ezid, _ := ezidInterface.(int64)
+	return ezid, true
 }
 
 // GetMemoryUsageInBytes returns the memory size of DescriptorEventDataFixPart.

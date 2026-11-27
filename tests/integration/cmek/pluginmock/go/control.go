@@ -48,9 +48,6 @@ func (c *fixtureCipher) key(ezID, collectionID int64, operation string) []byte {
 		return nil
 	}
 	key := c.keys[ezID]
-	if len(key) == 0 && operation == "decrypt" {
-		key = c.readKeys[ezID]
-	}
 	if len(key) == 0 && c.role != "datanode" {
 		// These roles obtain their own EZK; DataNode must receive it in a task.
 		key = deriveEZKey(ezID)

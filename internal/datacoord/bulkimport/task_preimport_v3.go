@@ -48,11 +48,10 @@ var _ ImportTask = (*preImportV3Task)(nil)
 type preImportV3Task struct {
 	task atomic.Pointer[datapb.PreImportTaskV3]
 
-	importMeta           ImportMeta
-	tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	retryTimes           int64
-	nonRetryableFailures int64
+	importMeta ImportMeta
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	retryTimes int64
 }
 
 func newPreImportTaskV3(p *datapb.PreImportTaskV3, importMeta ImportMeta) *preImportV3Task {
@@ -186,25 +185,27 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	}
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
+		mlog.Warn(context.TODO(), "assemble preimport v3 request failed", WrapTaskLog(p, mlog.Err(err))...)
 		if errors.Is(err, errSnapshotTaskSource) {
-			mlog.Warn(context.TODO(), "assemble preimport v3 request failed terminally", WrapTaskLog(p, mlog.Err(err))...)
-			failImportDispatch(p, p.importMeta, err)
+			if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
+				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+				mlog.Warn(context.TODO(), "failed to mark preimport v3 job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+			}
 			return
 		}
-		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
+		p.retryTimes++
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport v3 failed", WrapTaskLog(p, mlog.Err(err))...)
-		p.retryTimes++
 		// Raw transport errors are not terminal and retry; a deterministic
 		// rejection fails the task.
 		if importcommon.IsTerminalImportV3Err(err) {
 			p.Fail(err.Error())
 			return
 		}
-		handleImportDispatchError(p, p.importMeta, &p.nonRetryableFailures, err)
+		p.retryTimes++
 		return
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),

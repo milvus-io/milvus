@@ -101,6 +101,9 @@ func TestBackupSourcePluginContext(t *testing.T) {
 			storeCipher(tc.cipher)
 			ctx, err := ResolveImportEZ(artifact)
 			require.ErrorIs(t, err, tc.err)
+			if tc.cipher == nil {
+				require.ErrorIs(t, err, errCipherPluginMissing)
+			}
 			require.Nil(t, ctx)
 		})
 	}

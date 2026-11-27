@@ -156,15 +156,15 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		segments = append(segments, segInfo)
 	}
 
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
-	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
-		return nil, err
-	}
 	return plan, nil
 }
 
@@ -241,9 +241,6 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to build compaction request", mlog.Err(err))
-		if merr.IsRetryableErr(err) {
-			return
-		}
 		err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))

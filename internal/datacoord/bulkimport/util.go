@@ -389,50 +389,6 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 	return assemblePreImportRequest(task, job, importFiles)
 }
 
-const maxImportDispatchRetries = 3
-
-func retryableKMSCause(err error) bool {
-	for ; err != nil; err = errors.Unwrap(err) {
-		if joined, ok := err.(interface{ Unwrap() []error }); ok {
-			for _, cause := range joined.Unwrap() {
-				if retryableKMSCause(cause) {
-					return true
-				}
-			}
-			return false
-		}
-		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
-			return true
-		}
-		if timeout, ok := err.(interface{ Timeout() bool }); ok && timeout.Timeout() {
-			return true
-		}
-		if temporary, ok := err.(interface{ Temporary() bool }); ok && temporary.Temporary() {
-			return true
-		}
-	}
-	return false
-}
-
-func failImportDispatch(task ImportTask, im ImportMeta, cause error) {
-	if err := im.UpdateJob(context.TODO(), task.GetJobID(),
-		UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(cause.Error())); err != nil {
-		mlog.Warn(context.TODO(), "failed to persist import dispatch failure", WrapTaskLog(task, mlog.Err(err))...)
-	}
-}
-
-func handleImportDispatchError(task ImportTask, im ImportMeta, nonRetryableFailures *int64, cause error) {
-	mlog.Warn(context.TODO(), "failed to dispatch import task", WrapTaskLog(task, mlog.Err(cause))...)
-	if merr.IsRetryableErr(cause) || merr.IsCanceledOrTimeout(cause) || retryableKMSCause(cause) {
-		return
-	}
-	*nonRetryableFailures++
-	if *nonRetryableFailures < maxImportDispatchRetries {
-		return
-	}
-	failImportDispatch(task, im, cause)
-}
-
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {

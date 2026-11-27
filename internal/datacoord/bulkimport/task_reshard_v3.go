@@ -43,14 +43,13 @@ import (
 )
 
 type reshardTask struct {
-	task                 atomic.Pointer[datapb.ReshardTask]
-	importMeta           ImportMeta
-	meta                 *meta.Meta
-	alloc                allocator.Allocator
-	tr                   *timerecord.TimeRecorder
-	times                *taskcommon.Times
-	metrics              importTaskMetrics
-	nonRetryableFailures int64
+	task       atomic.Pointer[datapb.ReshardTask]
+	importMeta ImportMeta
+	meta       *meta.Meta
+	alloc      allocator.Allocator
+	tr         *timerecord.TimeRecorder
+	times      *taskcommon.Times
+	metrics    importTaskMetrics
 
 	// sourceProgress is the latest per-source hashed rows the worker reported.
 	// It is deliberately in-memory only: progress is transient, so it is not
@@ -220,7 +219,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	}
 	pluginContext, err := meta.GetImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions())
 	if err != nil {
-		handleImportDispatchError(t, t.importMeta, &t.nonRetryableFailures, err)
+		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
 	cfg := getImportV3Config()

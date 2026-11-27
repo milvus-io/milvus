@@ -48,14 +48,6 @@ const (
 	NullNodeID = -1
 )
 
-func GetReadPluginContext(options importutilv2.Options) ([]*commonpb.KeyValuePair, error) {
-	importEzk, err := importutilv2.GetEZK(options)
-	if err != nil {
-		return nil, err
-	}
-	return hookutil.ResolveImportEZ(importEzk)
-}
-
 func GetImportPluginContext(collectionID int64, properties, options []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	artifact, _ := importutilv2.GetEZK(options)
 	return hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)

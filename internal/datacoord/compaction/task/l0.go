@@ -130,9 +130,6 @@ func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to build compaction request", mlog.Err(err))
-		if merr.IsRetryableErr(err) {
-			return
-		}
 		err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 		if err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
@@ -453,6 +450,10 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		return plan, nil
 	}
 
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
+
 	segments = append(segments, flushedSegments...)
 	logIDRange, err := PreAllocateBinlogIDs(t.Allocator, segments, nil)
 	if err != nil {
@@ -468,9 +469,6 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		mlog.Any("target segments count", len(flushedSegBinlogs)),
 		mlog.Any("PreAllocatedLogIDs", logIDRange))
 
-	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
-		return nil, err
-	}
 	return plan, nil
 }
 

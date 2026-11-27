@@ -34,7 +34,6 @@ import (
 
 const (
 	createEZKey            = "cipher.ez.create"
-	importEZKey            = "cipher.ez.import"
 	unsafeEZK              = "cipher.ezk"
 	kmsKeyARN              = "cipher.kmsKeyArn"
 	expectedFixtureRootKey = "fixture-root-key"
@@ -52,10 +51,9 @@ const (
 var CipherPlugin = fixtureCipher{}
 
 type fixtureCipher struct {
-	mu       sync.Mutex
-	role     string
-	keys     map[int64][]byte
-	readKeys map[int64][]byte
+	mu   sync.Mutex
+	role string
+	keys map[int64][]byte
 }
 
 type fixtureBackup struct {
@@ -94,22 +92,6 @@ func (c *fixtureCipher) Init(params map[string]string) error {
 	defer c.mu.Unlock()
 	if role := params["cipher.milvusRoleName"]; role != "" {
 		c.role = role
-	}
-	if ezText := params[importEZKey]; ezText != "" {
-		ezID, err := strconv.ParseInt(ezText, 10, 64)
-		if err != nil || ezID <= 0 {
-			return fmt.Errorf("fixture cipher: invalid import EZ id %q", ezText)
-		}
-		keyBytes, err := decodeFixtureEZK(ezID, params[unsafeEZK])
-		if err != nil {
-			return err
-		}
-		if c.readKeys == nil {
-			c.readKeys = make(map[int64][]byte)
-		}
-		c.readKeys[ezID] = append([]byte(nil), keyBytes...)
-		c.record(ezID, 0, "register", "available", nil)
-		return nil
 	}
 	ezText := params[createEZKey]
 	if ezText == "" {
@@ -181,14 +163,31 @@ func (c *fixtureCipher) GetEncryptor(ezID, collectionID int64) (hook.Encryptor, 
 }
 
 func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
-	nonce, tag, err := decodeEDEK(safeKey)
-	if err != nil {
-		return nil, fmt.Errorf("fixture cipher: decode EDEK for EZ %d: %w", ezID, err)
-	}
-
 	ezk := c.key(ezID, collectionID, "decrypt")
 	if len(ezk) == 0 {
 		return nil, fmt.Errorf("fixture cipher: key unavailable for EZ %d and collection %d", ezID, collectionID)
+	}
+	return decryptWithEZK(ezID, collectionID, ezk, safeKey)
+}
+
+func (c *fixtureCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
+	if ezID <= 0 || len(keyset) == 0 || !hmac.Equal(keyset, deriveEZKey(ezID)) {
+		return nil, fmt.Errorf("fixture cipher: unexpected keyset for EZ %d", ezID)
+	}
+	decryptor, err := decryptWithEZK(ezID, collectionID, keyset, safeKey)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.record(ezID, collectionID, "decrypt_keyset", "available", nil)
+	c.mu.Unlock()
+	return decryptor, nil
+}
+
+func decryptWithEZK(ezID, collectionID int64, ezk, safeKey []byte) (hook.Decryptor, error) {
+	nonce, tag, err := decodeEDEK(safeKey)
+	if err != nil {
+		return nil, fmt.Errorf("fixture cipher: decode EDEK for EZ %d: %w", ezID, err)
 	}
 	expectedTag := deriveEDEKTag(ezk, nonce, ezID, collectionID)
 	if !hmac.Equal(tag, expectedTag) {

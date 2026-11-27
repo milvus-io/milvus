@@ -66,7 +66,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if req == nil || req.GetRunId() <= 0 || req.GetStorageConfig() == nil || req.GetSlot() <= 0 || req.GetPlan() == nil {
 		return merr.Status(merr.WrapErrImportSysFailedMsg("invalid or incomplete ImportTaskV3 request")), nil
 	}
-	cipher, err := hookutil.PrepareImportCipherForZone(req.GetPlan().GetSourceEzId(), req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPluginContext(), req.GetPlan().GetCollectionId())
+	cipher, err := hookutil.PrepareImportCipher("", req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPluginContext(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}

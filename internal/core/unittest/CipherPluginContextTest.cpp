@@ -83,14 +83,14 @@ class ImportCipherPlugin : public RecordingCipherPlugin {
  public:
     using EncryptorResult =
         std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>;
-    MOCK_METHOD(void,
-                RegisterReadKeyset,
-                (int64_t, int64_t, const std::string&),
-                (override));
     MOCK_METHOD(EncryptorResult,
                 GetEncryptorForKeyset,
                 (int64_t, int64_t, const std::string&),
                 (override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
+                (const, override));
 };
 
 void

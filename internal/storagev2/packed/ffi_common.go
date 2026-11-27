@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strconv"
 	"unsafe"
 
@@ -307,12 +306,6 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	if namespace := storageConfig.GetTalonNamespace(); namespace != "" {
 		keys = append(keys, "fs.talon.namespace")
 		values = append(values, namespace)
-	}
-
-	if extraKVs[PropertyWriterEncEnable] == "true" {
-		extraKVs = maps.Clone(extraKVs)
-		extraKVs[PropertyWriterFormat] = "parquet"
-		delete(extraKVs, PropertyWriterSchemaBasedFormats)
 	}
 
 	// Add extra kvs (override existing keys if present)

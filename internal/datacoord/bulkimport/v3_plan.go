@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/reshardmem"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -171,17 +170,6 @@ func importPlan(job ImportJob, p *datapb.ImportTaskV3, cfg importV3Config) (*imp
 	if p.GetRows() <= 0 {
 		return nil, 0, merr.WrapErrImportSysFailedMsg("import v3 task %d has no planned rows", p.GetTaskId())
 	}
-	var sourceEZ int64
-	if artifact, _ := importutilv2.GetEZK(job.GetOptions()); artifact != "" {
-		zone, err := hookutil.GetEzIDByImportEzk(artifact)
-		if err != nil {
-			return nil, 0, err
-		}
-		if zone <= 0 {
-			return nil, 0, merr.WrapErrImportSysFailedMsg("invalid backup encryption zone")
-		}
-		sourceEZ = zone
-	}
 	backup := importutilv2.IsBackup(job.GetOptions())
 	segmentSchema := typeutil.AppendSystemFields(job.GetSchema())
 	if err := validateImportV3StorageVersion(segmentSchema, cfg.storageVersion); err != nil {
@@ -196,7 +184,6 @@ func importPlan(job ImportJob, p *datapb.ImportTaskV3, cfg importV3Config) (*imp
 		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize,
 		textWriterBuffer(cfg, job.GetSchema()), fanIn)
 	return &importv3pb.ImportTaskPlan{
-		SourceEzId:       sourceEZ,
 		PartitionId:      p.GetPartitionId(),
 		Fragments:        p.GetFragments(),
 		Rows:             p.GetRows(),

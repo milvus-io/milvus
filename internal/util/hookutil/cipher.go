@@ -57,6 +57,10 @@ type EZBackupCipher interface {
 	// each call and returns its original EZ ID and raw keyset without publishing
 	// it to the ordinary writable EZ cache.
 	ResolveImportEZ(artifact string) (int64, []byte, error)
+
+	// GetDecryptorForKeyset creates a decryptor using an explicit raw keyset
+	// without reading from or mutating the ordinary zone cache.
+	GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error)
 }
 
 // GetCipher returns singleton hook.Cipher instance.
@@ -328,7 +332,7 @@ func GetImportStoragePluginContext(artifact string, collProps []*commonpb.KeyVal
 		return nil, err
 	}
 	if (artifact != "" || hasTarget) && !IsClusterEncryptionEnabled() {
-		return nil, merr.Wrap(merr.ErrServiceUnavailable, "cipher plugin is unavailable for encrypted import")
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted import")
 	}
 	source, err := ResolveImportEZ(artifact)
 	if err != nil || !hasTarget {
@@ -365,7 +369,7 @@ func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
 	for _, value := range context {
 		if value.GetKey() == CipherConfigUnsafeEZK {
 			if GetCipher() == nil {
-				return merr.Wrap(merr.ErrServiceUnavailable, "cannot register task encryption context without a cipher plugin")
+				return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register task encryption context without a cipher plugin")
 			}
 			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
 			if err != nil {
@@ -561,6 +565,10 @@ func (d testCipher) GetEncryptor(ezID, collectionID int64) (encryptor hook.Encry
 }
 
 func (d testCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
+	return createTestCryptoImpl(ezID, collectionID), nil
+}
+
+func (d testCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
 	return createTestCryptoImpl(ezID, collectionID), nil
 }
 

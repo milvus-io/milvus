@@ -145,10 +145,14 @@ GetLoonReader(
     auto reader = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, bound_columns, *properties);
 
-    milvus::storage::RegisterReaderKeys(c_plugin_context);
-    auto keys = std::make_shared<milvus::storage::KeyRetriever>();
-    reader->set_keyretriever(
-        [keys](const std::string& metadata) { return keys->GetKey(metadata); });
+    // Configure CMEK decryption if plugin context is provided
+    if (c_plugin_context != nullptr) {
+        auto keys =
+            std::make_shared<milvus::storage::KeyRetriever>(c_plugin_context);
+        reader->set_keyretriever([keys](const std::string& metadata) {
+            return keys->GetKey(metadata);
+        });
+    }
     return reader;
 }
 

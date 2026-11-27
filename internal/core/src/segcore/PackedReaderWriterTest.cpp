@@ -203,26 +203,30 @@ class TestParquetKey : public milvus::test::PlannerIdentityEncryptor,
     }
 };
 
-class PackedImportCipher : public milvus::test::PlannerCipherPlugin {
+class OrdinaryPackedCipher : public milvus::test::PlannerCipherPlugin {
  public:
-    using EncryptorResult =
-        std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>,
-                  std::string>;
     MOCK_METHOD(void,
                 Update,
-                (int64_t, int64_t, const std::string&),
-                (override));
-    MOCK_METHOD(void,
-                RegisterReadKeyset,
-                (int64_t, int64_t, const std::string&),
-                (override));
-    MOCK_METHOD(EncryptorResult,
-                GetEncryptorForKeyset,
                 (int64_t, int64_t, const std::string&),
                 (override));
     MOCK_METHOD(std::shared_ptr<milvus::storage::plugin::IDecryptor>,
                 GetDecryptor,
                 (int64_t, int64_t, const std::string&),
+                (const, override));
+};
+
+class PackedImportCipher : public OrdinaryPackedCipher {
+ public:
+    using EncryptorResult =
+        std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>,
+                  std::string>;
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(std::shared_ptr<milvus::storage::plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
                 (const, override));
 };
 
@@ -298,19 +302,19 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     auto dek = std::make_shared<TestParquetKey>();
     CPluginContext target{17, 23, "dGFyZ2V0"};
     CPluginContext source{17, 0, "c291cmNl"};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl")).Times(3);
     EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "dGFyZ2V0"))
         .WillOnce(testing::Return(
             PackedImportCipher::EncryptorResult{dek, "target-edek"}));
-    EXPECT_CALL(*cipher, GetDecryptor(17, 23, "target-edek"))
-        .Times(testing::AtLeast(2))
+    EXPECT_CALL(*cipher,
+                GetDecryptorForKeyset(17, 23, "c291cmNl", "target-edek"))
+        .Times(testing::AtLeast(3))
         .WillRepeatedly(testing::Return(dek));
 
     auto path = TestLocalPath + "import_task_keysets";
     std::shared_ptr<arrow::Schema> schema;
     ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema, &target));
     char* paths[] = {path.data()};
-    // Each open can register an older source for the same EZ independently.
+    // Each open uses its bound source keyset statelessly without mutating global cache.
     int64_t* ids = nullptr;
     int64_t* counts = nullptr;
     auto status =
@@ -340,22 +344,39 @@ TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
     ASSERT_TRUE(ffi_rows.ok()) << ffi_rows.status();
     EXPECT_EQ(*ffi_rows, 3);
 
+    // Mismatched bound EZ falls back to GetDecryptor; nil context falls back for packed readers.
     CPluginContext other{29, 0, "b3RoZXI="};
-    EXPECT_CALL(*cipher, RegisterReadKeyset(29, 0, "b3RoZXI=")).Times(1);
-    for (auto* context : {&other, static_cast<CPluginContext*>(nullptr)}) {
-        auto rows = ReadImportFFIFile(path, schema, context);
-        ASSERT_TRUE(rows.ok()) << rows.status();
-        EXPECT_EQ(*rows, 3);
-        int64_t* file_ids = nullptr;
-        int64_t* file_counts = nullptr;
-        status = GetPackedFileFieldIDs(
-            paths, 1, nullptr, nullptr, &file_ids, &file_counts);
-        ASSERT_EQ(status.error_code, 0) << status.error_msg;
-        EXPECT_EQ(file_counts[0], 1);
-        EXPECT_EQ(file_ids[0], 100);
-        free(file_ids);
-        free(file_counts);
-    }
+    EXPECT_CALL(*cipher, GetDecryptor(17, 23, "target-edek"))
+        .Times(testing::AtLeast(2))
+        .WillRepeatedly(testing::Return(dek));
+    auto rows = ReadImportFFIFile(path, schema, &other);
+    ASSERT_TRUE(rows.ok()) << rows.status();
+    EXPECT_EQ(*rows, 3);
+    // Plaintext FFI reader (c_plugin_context == nullptr) does not attach a key retriever.
+    auto nil_ffi_rows = ReadImportFFIFile(path, schema, nullptr);
+    EXPECT_FALSE(nil_ffi_rows.ok());
+
+    int64_t* file_ids = nullptr;
+    int64_t* file_counts = nullptr;
+    status = GetPackedFileFieldIDs(
+        paths, 1, nullptr, nullptr, &file_ids, &file_counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(file_counts[0], 1);
+    EXPECT_EQ(file_ids[0], 100);
+    free(file_ids);
+    free(file_counts);
+
+    // Default ICipherPlugin::GetDecryptorForKeyset falls back to GetDecryptor.
+    auto ordinary =
+        std::make_shared<testing::StrictMock<OrdinaryPackedCipher>>();
+    loader.registerPluginForTest(ordinary);
+    EXPECT_CALL(*ordinary, GetDecryptor(17, 23, "target-edek"))
+        .WillOnce(testing::Return(dek));
+    auto ordinary_props = milvus::storage::GetReaderProperties(&source);
+    EXPECT_EQ(
+        ordinary_props.file_decryption_properties()->key_retriever()->GetKey(
+            milvus::storage::EncodeKeyMetadata(17, 23, "target-edek")),
+        dek->GetKey());
 }
 
 TEST(CPackedTest, PlaintextImportOpensPackedDataAndFooterWithoutCipher) {
@@ -496,15 +517,11 @@ TEST(CPackedTest, ReportsWriterAndReaderKeysetErrors) {
     EXPECT_EQ(enc_key, nullptr);
     EXPECT_EQ(enc_meta, nullptr);
 
-    // Reader keyset errors: empty key -> InvalidParameter; runtime_error -> UnexpectedError.
+    // Reader keyset errors: null/empty key -> InvalidParameter; decryptor errors throw.
     std::string file = TestLocalPath + "rejected-reader.parquet";
     char* path = file.data();
-    EXPECT_CALL(*cipher, RegisterReadKeyset(17, 0, "c291cmNl"))
-        .WillOnce(testing::Throw(std::runtime_error("conflicting key ID")));
-    for (auto [ctx, expected_code] : {
-             std::pair{&empty_key, milvus::ErrorCode::InvalidParameter},
-             std::pair{&bad_reader_key, milvus::ErrorCode::UnexpectedError},
-         }) {
+    CPluginContext null_key{17, 0, nullptr};
+    for (auto* ctx : {&null_key, &empty_key}) {
         ArrowSchema c_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
         CPackedReader reader = nullptr;
@@ -513,16 +530,38 @@ TEST(CPackedTest, ReportsWriterAndReaderKeysetErrors) {
         if (c_schema.release != nullptr) {
             c_schema.release(&c_schema);
         }
-        EXPECT_EQ(status.error_code, expected_code);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
         free(const_cast<char*>(status.error_msg));
         EXPECT_EQ(reader, nullptr);
     }
+
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, "c291cmNl", "wrapped"))
+        .WillOnce(testing::Throw(std::runtime_error("invalid keyset")))
+        .WillOnce(testing::Return(nullptr));
+    auto retriever = milvus::storage::GetReaderProperties(&bad_reader_key)
+                         .file_decryption_properties()
+                         ->key_retriever();
+    auto meta = milvus::storage::EncodeKeyMetadata(17, 23, "wrapped");
+    EXPECT_THROW(retriever->GetKey(meta), std::runtime_error);
+    EXPECT_THROW(retriever->GetKey(meta), milvus::SegcoreError);
 
     // Missing cipher plugin -> Unsupported for both writer and reader.
     loader.unregisterPluginForTest("CipherPlugin");
     auto no_plugin_writer = GetEncParams(&valid_target, &enc_key, &enc_meta);
     EXPECT_EQ(no_plugin_writer.error_code, milvus::ErrorCode::Unsupported);
     free(const_cast<char*>(no_plugin_writer.error_msg));
+    ArrowSchema c_schema;
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+    CPackedReader no_plugin_reader = nullptr;
+    auto no_plugin_reader_status = NewPackedReader(
+        &path, 1, &c_schema, 1024, 0, &no_plugin_reader, &valid_target);
+    if (c_schema.release != nullptr) {
+        c_schema.release(&c_schema);
+    }
+    EXPECT_EQ(no_plugin_reader_status.error_code,
+              milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(no_plugin_reader_status.error_msg));
+    EXPECT_EQ(no_plugin_reader, nullptr);
 }
 
 TEST(CPackedTest, PluginContextUpdateExceptionsReturnStatus) {

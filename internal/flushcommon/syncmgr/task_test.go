@@ -266,7 +266,7 @@ func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
 			s.Run("missing_cipher_plugin", func() {
 				s.T().Cleanup(hookutil.SetTestCipher(nil))
 				pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
-				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(1))
+				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.AttemptAlways())
 				err := task.Run(context.Background())
 				s.ErrorIs(err, merr.ErrServiceUnavailable)
 			})

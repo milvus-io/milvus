@@ -76,8 +76,8 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 				})
 			}
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil)
 			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 			taskMeta := NewCompactionTaskMetaOverCatalog(catalog)
 			taskProto := &datapb.CompactionTask{
 				PlanID: 1, CollectionID: 23, PartitionID: 10, Channel: "ch-1", Type: kind,
@@ -100,12 +100,11 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 			require.Nil(t, plan)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 			require.True(t, merr.IsRetryableErr(err))
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 			cluster := session.NewMockCluster(t)
-			// Retryable key errors must keep the compaction task pipelining without
-			// dispatching or failing it.
 			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
-			require.Equal(t, datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-			catalog.AssertNotCalled(t, "SaveCompactionTask", mock.Anything, mock.Anything)
+			require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 		})
 	}
 }

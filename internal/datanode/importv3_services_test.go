@@ -357,15 +357,17 @@ func TestCreateTaskNormalizesLegacyV3PriceAtIngress(t *testing.T) {
 	}
 }
 
-func TestImportV3ServicesRegisterTargetBeforeSource(t *testing.T) {
+func TestImportV3ServicesRegisterTargetOnly(t *testing.T) {
 	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
 	sameZoneEntries := []*commonpb.KeyValuePair{
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b2xk"},
 		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="},
 	}
+	targetOnlyEntries := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="},
+	}
 	wantCalls := []map[string]string{
 		{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="},
-		{hookutil.CipherConfigImportEZ: "17", hookutil.CipherConfigUnsafeEZK: "b2xk"},
 	}
 
 	t.Run("reshard", func(t *testing.T) {
@@ -392,11 +394,16 @@ func TestImportV3ServicesRegisterTargetBeforeSource(t *testing.T) {
 		node, _ := newImportV3ServicesNode(t, false)
 		req := validImportV3Request()
 		req.Plan.CollectionSchema = &schemapb.CollectionSchema{Properties: properties}
-		req.Plan.SourceEzId = 17
-		req.PluginContext = sameZoneEntries
+		req.PluginContext = targetOnlyEntries
 		status, err := node.submitImportTaskV3(context.Background(), req, taskcommon.Resource{CPU: 1, Memory: 1})
 		require.NoError(t, err)
 		require.True(t, merr.Ok(status))
 		require.Equal(t, wantCalls, cipher.calls)
+
+		// Extra source entries on ImportTaskV3 are rejected since final merge only uses target key.
+		req.PluginContext = sameZoneEntries
+		status, err = node.submitImportTaskV3(context.Background(), req, taskcommon.Resource{CPU: 1, Memory: 1})
+		require.NoError(t, err)
+		require.Equal(t, merr.Code(merr.ErrImportSysFailed), status.GetCode())
 	})
 }
