@@ -50,6 +50,8 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 		}
 	}()
 
+	// Keep the read bound and its final check consistent across the unlocked I/O.
+	maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize()
 	var size int64
 	sizeChecked := false
 	for {
@@ -66,7 +68,6 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 			return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
 		}
 		if resource == nil {
-			maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize()
 			if !sizeChecked {
 				// Storage admission must not block unrelated DDL.
 				broadcaster.Close()
