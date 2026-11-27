@@ -25,10 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -56,13 +54,6 @@ func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.
 		}
 		if n == 0 {
 			return handler(ctx, req)
-		}
-		if rt == internalpb.RateType_DMLBulkLoad {
-			if importReq, ok := req.(*milvuspb.ImportRequest); ok {
-				if importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {
-					return handler(ctx, req)
-				}
-			}
 		}
 		err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)
 		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)

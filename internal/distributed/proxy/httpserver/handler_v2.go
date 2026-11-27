@@ -800,28 +800,28 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		}
 		ctx = ginCtx.Request.Context()
 	}
-	if checkLimit {
-		_, err := CheckLimiter(ctx, req, pxy)
-		if err != nil {
-			mlog.Warn(context.TODO(), "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
-			// A rate limit rejection is not an authorization decision and is
-			// not reported as one; the gRPC limiter does not report it either.
-			// The request still reaches the audit log through the report made
-			// when the RESTful request returns.
-			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
-				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
-			})
-			return nil, RestRequestInterceptorErr
-		}
-	}
 	mlog.Debug(ctx, "high level restful api, try to do a grpc call")
 	username, ok := ginCtx.Get(ContextUsername)
 	if !ok {
 		username = ""
 	}
 
+	var limitErr error
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
+		if checkLimit {
+			rejection, err := CheckLimiter(reqCtx, req, pxy)
+			if err != nil {
+				limitErr = err
+				mlog.Warn(reqCtx, "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
+				// After needs a native failure status so it can clean up
+				// resources prepared by Before. Render the REST error outside
+				// the hook chain.
+				if rejection == nil {
+					rejection = merr.Status(err)
+				}
+				return rejection, nil
+			}
+		}
 		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
 		if token, ok := ginCtx.Get(ContextToken); ok {
 			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
@@ -831,6 +831,13 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		})
 	}
 	response, err := proxy.HookInterceptor(ContextWithGin(ctx, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	if limitErr != nil && err == nil {
+		HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + limitErr.Error(),
+		})
+		return nil, RestRequestInterceptorErr
+	}
 	if response != nil {
 		ginCtx.Set(ContextResponse, response)
 	}
@@ -3339,7 +3346,7 @@ func (h *HandlersV2) alterDatabase(ctx context.Context, c *gin.Context, anyReq a
 	req.Properties = properties
 
 	c.Set(ContextRequest, req)
-	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
 	})
 	if err == nil {
@@ -4179,7 +4186,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}
 		ctx = c.Request.Context()
 	}
-	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -2336,9 +2337,19 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.DeleteRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
-	case *milvuspb.ImportRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
+	case *milvuspb.ImportRequest, *internalpb.ImportRequest:
+		importReq := r.(interface {
+			reqPartName
+			GetOptions() []*commonpb.KeyValuePair
+		})
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, importReq)
+		tokens := 0
+		if !importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {
+			// Charge the protobuf request as received by each entry point.
+			// This preserves the gRPC charge and avoids flattening REST file groups.
+			tokens = proto.Size(r)
+		}
+		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, tokens, err
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(searchRequestNq(r)), err
@@ -2446,6 +2457,10 @@ func GetFailedResponse(req any, err error) any {
 		return failedMutationResult(err)
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}
+	case *internalpb.ImportRequest:
+		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
 		}
 	case *milvuspb.SearchRequest:
