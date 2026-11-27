@@ -32,6 +32,7 @@ message StorageConfig {
   bool talon_enable_for_external_table = 24;
   // Milvus stage mask; absent/zero preserves unrestricted legacy routing.
   uint32 talon_enabled_stages = 25;
+  string talon_namespace = 26;
 }
 
 message InsertFiles {

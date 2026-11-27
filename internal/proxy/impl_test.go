@@ -3660,6 +3660,24 @@ func TestProxy_AlterCollectionField_ExternalCollection(t *testing.T) {
 	assert.Contains(t, resp.GetReason(), "alter field operation is not supported for external collection")
 }
 
+func TestProxy_GetQuotaMetricsDeadlineExceeded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	req := &internalpb.GetQuotaMetricsRequest{}
+	coord := mocks.NewMockMixCoordClient(t)
+	coord.EXPECT().GetQuotaMetrics(mock.Anything, req).RunAndReturn(
+		func(ctx context.Context, _ *internalpb.GetQuotaMetricsRequest, _ ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+			return nil, ctx.Err()
+		},
+	).Once()
+	node := &Proxy{mixCoord: coord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	resp, err := node.GetQuotaMetrics(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, merr.TimeoutCode, resp.GetStatus().GetCode())
+}
+
 func TestProxy_GetReplicateConfiguration_Success(t *testing.T) {
 	expectedConfig := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
@@ -3847,7 +3865,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 	})
 }
 
-func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
+func TestProxyAdmitsMilvusTableStructSubField(t *testing.T) {
 	node := createTestProxy()
 	defer node.sched.Close()
 	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
@@ -3880,8 +3898,8 @@ func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrOperationNotSupported)
-	require.Zero(t, enqueueCalls)
+	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrServiceUnavailable)
+	require.Equal(t, 1, enqueueCalls)
 }
 
 func TestProxy_AlterCollectionSchemaMilvusTableValidation(t *testing.T) {
@@ -3947,7 +3965,7 @@ func TestProxy_AlterCollectionSchemaMilvusTableValidation(t *testing.T) {
 				},
 			},
 			code:   merr.ErrOperationNotSupported,
-			reason: "only mapped milvus-table top-level field additions",
+			reason: "only mapped milvus-table field additions",
 		},
 		{
 			name: "mapped field reaches the DDL queue",

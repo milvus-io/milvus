@@ -54,6 +54,7 @@ type L0ImportTask struct {
 	syncMgr    syncmgr.SyncManager
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
+	picker     *SegmentPicker
 }
 
 func NewL0ImportTask(req *datapb.ImportRequest,
@@ -81,6 +82,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 		manager:      manager,
 		syncMgr:      syncMgr,
 		cm:           cm,
+		picker:       NewSegmentPicker(),
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -144,6 +146,7 @@ func (t *L0ImportTask) Clone() Task {
 		syncMgr:      t.syncMgr,
 		cm:           t.cm,
 		metaCaches:   t.metaCaches,
+		picker:       t.picker,
 	}
 }
 
@@ -258,7 +261,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			continue
 		}
 		partitionID := t.GetPartitionIDs()[0]
-		segmentID, err := PickSegment(t.req.GetRequestSegments(), channel, partitionID)
+		segmentID, err := t.picker.PickSegment(t.req.GetRequestSegments(), channel, partitionID, data.Size())
 		if err != nil {
 			return nil, nil, err
 		}

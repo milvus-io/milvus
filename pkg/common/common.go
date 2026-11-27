@@ -887,6 +887,12 @@ func IsNamespaceModePartition(kvs ...*commonpb.KeyValuePair) bool {
 	return GetNamespaceMode(kvs...) == NamespaceModePartition
 }
 
+// UsesNamespacePartitionKey reports whether rows carry the namespace as a partition
+// key. In partition mode the physical partition identifies the namespace instead.
+func UsesNamespacePartitionKey(schema *schemapb.CollectionSchema) bool {
+	return schema.GetEnableNamespace() && IsNamespaceModePartitionKey(schema.GetProperties()...)
+}
+
 func ValidateNamespaceMode(kvs ...*commonpb.KeyValuePair) error {
 	for _, kv := range kvs {
 		if kv.GetKey() == NamespaceModeKey {

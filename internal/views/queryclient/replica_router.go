@@ -82,6 +82,25 @@ func (r *replicaRouter) Close() {
 	r.channels = nil
 }
 
+func (r *replicaRoute) hasAvailableReplica(ctx context.Context) (bool, error) {
+	for {
+		r.mu.Lock()
+		snapshot, changed, closed := r.snapshot, r.changed, r.closed
+		r.mu.Unlock()
+		if closed {
+			return false, merr.Wrap(merr.ErrServiceNotReady, "replica router closed")
+		}
+		if snapshot.Valid {
+			return len(snapshot.Replicas) > 0, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, context.Cause(ctx)
+		case <-changed:
+		}
+	}
+}
+
 // nextReplica visits every candidate before retrying a temporarily failed one.
 // A permanently unavailable candidate is retried only after its advertised
 // maximum or QN session directory changes. The caller additionally rejects

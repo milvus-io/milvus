@@ -1309,7 +1309,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-	resp.Properties = collInfo.Properties
+	// Reuse the filtered slice from collectionSchemaPB so legacy create-only
+	// directives persisted on v3.0.0–v3.0.6 are never returned by DescribeCollection.
+	resp.Properties = resp.Schema.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
@@ -3529,7 +3531,7 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 }
 
 func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
-	return c.quotaCenter.getQuotaMetrics(), nil
+	return c.quotaCenter.getQuotaMetrics(ctx), nil
 }
 
 // GetFeatureUsage computes the collection-derived groups of the feature usage

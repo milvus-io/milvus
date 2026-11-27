@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION 95215819ea9094f7b96be0f9503346dfee0b62e5)
+set( milvus-storage_VERSION bae7a2673949353a3feda0f456bc689b4a2249ec)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -31,12 +31,12 @@ endif ()
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 
-# milvus-storage's Rust bridge now depends on crates that require Rust 1.94.1.
+# The Delta kernel crates used by milvus-storage require Rust 1.95 or newer.
 # The top-level CMake cache may have been initialized by other Rust components
 # that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
 # before adding milvus-storage. Use rustup's toolchain name so Corrosion can
 # append the current host triple on Linux and macOS.
-set(Rust_TOOLCHAIN "1.94.1" CACHE STRING "" FORCE)
+set(Rust_TOOLCHAIN "1.95.0" CACHE STRING "" FORCE)
 unset(Rust_COMPILER_CACHED CACHE)
 unset(Rust_CARGO_CACHED CACHE)
 unset(_CORROSION_RUSTC CACHE)

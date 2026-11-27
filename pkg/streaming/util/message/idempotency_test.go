@@ -36,6 +36,21 @@ func TestIdempotencyKeyProperty(t *testing.T) {
 	require.NotContains(t, keyless.Properties().ToRawMap(), messageIdempotencyKey)
 }
 
+func TestWithoutIdempotencyKey(t *testing.T) {
+	msg := NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey(NewCollectionScopedIdempotencyKey(1, "key-1")).
+		MustBuildMutable()
+	require.Equal(t, IdempotencyKey("3:1:key-1"), IdempotencyKeyOf(msg))
+
+	require.Same(t, msg, msg.WithoutIdempotencyKey())
+	require.Empty(t, IdempotencyKeyOf(msg))
+	require.NotContains(t, msg.Properties().ToRawMap(), messageIdempotencyKey)
+	require.Empty(t, IdempotencyKeyOf(msg.WithTimeTick(1).WithLastConfirmedUseMessageID().IntoImmutableMessage(nil)))
+}
+
 func TestIdempotencyKeySurvivesSplit(t *testing.T) {
 	// Every per-vchannel message that SplitIntoMutableMessage produces must still
 	// carry the key: neither the WAL append path nor the recovery side can read it

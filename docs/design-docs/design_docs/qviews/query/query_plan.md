@@ -9,6 +9,11 @@ locates the local shard by vchannel and returns its real identity in the plan.
 Matching UpRecovering state waits for local recovery; missing or unusable views
 return the existing View errors.
 
+Waiting is local to SN; the Coord-facing `UpRecovering` to `Up` projection is
+unchanged. WAL shutdown stops query acquisition before draining its in-flight
+operations: waiters wake and new acquisitions fail with an on-shutdown error.
+QueryView resources are released only after those operations finish.
+
 Planning first acquires a serving View with the request's exact schema, then
 fixes one MVCC and waits for the runtime's Growing and Transform data visibility.
 It resolves the View's loaded partitions and optimizes against its exact read

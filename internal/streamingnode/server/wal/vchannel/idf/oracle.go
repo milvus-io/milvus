@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 var oracleRunnerGeneration atomic.Uint64
@@ -454,7 +455,9 @@ func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.Da
 	return r.commitDiff(ctx, diff)
 }
 
-func (r *oracleRuntime) ensureMaterialized(ctx context.Context) error {
+func (r *oracleRuntime) ensureMaterialized(ctx context.Context) (retErr error) {
+	timer := bm25Materialized.Begin()
+	defer timer.EndError(&retErr)
 	for {
 		if retry, err := r.awaitMaterialization(ctx); !retry {
 			return err
@@ -474,6 +477,7 @@ func (r *oracleRuntime) awaitMaterialization(ctx context.Context) (retry bool, e
 // cancellation; an active query sharing that flight retains its own waiter.
 func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qviews.DataVersion) (retry bool, err error) {
 	var call *materializationCall
+	var waitTimer stage.Timer
 	for {
 		if err := ctx.Err(); err != nil {
 			return false, err
@@ -503,6 +507,7 @@ func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qvie
 				return false, ctx.Err()
 			}
 		}
+		shared := call != nil
 		if call == nil {
 			materializationCtx, cancel := context.WithCancel(r.ctx)
 			call = &materializationCall{
@@ -525,6 +530,10 @@ func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qvie
 			call.warmWaiters++
 		}
 		r.mu.Unlock()
+
+		if shared && target == nil {
+			waitTimer = bm25SharedWait.Begin()
+		}
 		break
 	}
 	defer func() {
@@ -541,6 +550,7 @@ func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qvie
 
 	select {
 	case <-call.done:
+		waitTimer.End(call.err)
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
@@ -549,7 +559,9 @@ func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qvie
 		r.mu.RUnlock()
 		return targetChanged, call.err
 	case <-ctx.Done():
-		return false, ctx.Err()
+		err := ctx.Err()
+		waitTimer.End(err)
+		return false, err
 	}
 }
 
@@ -943,3 +955,8 @@ func (p *Provider) fetchResources(ctx context.Context, collectionID int64, vchan
 	}
 	return response, nil
 }
+
+var (
+	bm25Materialized = stage.New("streamingNode", "bm25_stats", "ensure_materialized")
+	bm25SharedWait   = stage.New("streamingNode", "bm25_stats", "shared_wait")
+)

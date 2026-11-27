@@ -26,12 +26,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1249,6 +1255,7 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, "all"))
 					config := CreateStorageConfig()
 					config.TalonEnabledStages = tc.mask
+					config.TalonNamespace = "request-namespace"
 					config.AccessKeyID = "request-access-key"
 					config.SecretAccessKey = "request-secret-key"
 					original := proto.Clone(config)
@@ -1276,6 +1283,7 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 						wantOpenOnly = "false"
 					}
 					assert.Equal(t, wantOpenOnly, loonPropertyString(props, "fs.talon.open_only"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "fs.talon.namespace"))
 					assert.Equal(t, "request-access-key", loonPropertyString(props, "fs.access_key_id"))
 					assert.Equal(t, "request-secret-key", loonPropertyString(props, "fs.access_key_value"))
 					assert.True(t, proto.Equal(original, config), "conversions must preserve the request")
@@ -1295,8 +1303,10 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet"}`))
 					assert.Equal(t, tc.wantExternalMode, loonPropertyString(props, "extfs.42.talon.mode"))
 					assert.Equal(t, "127.0.0.1:7000", loonPropertyString(props, "extfs.42.talon.coordinator"))
+					assert.Equal(t, "request-namespace", loonPropertyString(props, "extfs.42.talon.namespace"))
 					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet","extfs":{"storage_type":"local"}}`))
 					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.namespace"))
 				})
 			}
 		})
@@ -1782,11 +1792,35 @@ func TestInjectExternalSpecProperties_LegacyKeys(t *testing.T) {
 	props, err := MakePropertiesFromStorageConfig(config, nil)
 	require.NoError(t, err)
 	defer FreeProperties(props)
-	const spec = `{"FORMAT":"paimon-table","Snapshot_Id":9007199254740993,"SCAN_MODE":"auto","scan_mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}}`
+	const spec = `{"FORMAT":"paimon-table","Snapshot_Id":9007199254740993,"SCAN_MODE":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}}`
 	require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/table", spec))
 	require.Equal(t, "data-split", loonPropertyString(props, "paimon.scan_mode"))
 	require.Equal(t, "9007199254740993", loonPropertyString(props, "reader.exttable.snapshot_id"))
 	require.Equal(t, "us-east-1", loonPropertyString(props, ExtfsPrefixForCollection(42)+"region"))
+}
+
+// A persisted spec that sets one key twice stops at the Go boundary instead of
+// reaching native code as a merge of both values.
+func TestInjectExternalSpecProperties_RejectsCollidingKeys(t *testing.T) {
+	paramtable.Init()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"FORMAT":"paimon-table","SCAN_MODE":"auto","scan_mode":"data-split"}`, `external spec keys "SCAN_MODE" and "scan_mode" differ only in case`},
+		{`{"extfs":{"cloud_provider":"gcp","use_iam":"true"},"Extfs":{"gcp_target_service_account":"other@project.iam.gserviceaccount.com"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","region":"eu-west-1"}}`, `extfs key "region" appears more than once`},
+	} {
+		err := injectExternalSpecProperties(props, 42, "s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+		source, cSpec, cleanup, err := newCExternalContext("s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.Nil(t, source)
+		require.Nil(t, cSpec)
+		require.Nil(t, cleanup)
+	}
 }
 
 func TestNewCExternalContextRejectsMalformedSpec(t *testing.T) {
@@ -3614,6 +3648,78 @@ func TestMilvusTableLegacyManifestColumnValidation(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Empty(t, missing)
+		})
+	}
+}
+
+func TestMilvusTableHistoricalStructManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored []string
+	}{
+		{"whole parent", []string{"100"}},
+		{"new child", []string{"100", "102"}},
+		{"newer physical field", []string{"100", "102", "104"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			source, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: tc.stored, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filepath.Join(dir, "data.parquet"), EndIndex: 3}}}}, DeltaLogs: []DeltaLogEntry{{Path: filepath.Join(dir, "delta"), NumEntries: 1}}})
+			require.NoError(t, err)
+			ext := ExternalSpecContext{}
+			required := []string{"100", "102", "103"}
+			deltas, deltaErr := GetMilvusTableSourceDeltalogs(source, cfg, ext, required)
+			target, err := CreateMilvusTableManifestFromSegmentManifests(filepath.Join(dir, "target"), required, []Fragment{{FilePath: source, RowCount: 3, EndRow: 3}}, cfg, ext)
+			require.ErrorIs(t, deltaErr, merr.ErrOperationNotSupported)
+			require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			require.Empty(t, deltas)
+			require.Empty(t, target)
+		})
+	}
+}
+
+func TestSampleExternalFieldSizesHistoricalStruct(t *testing.T) {
+	for _, hasSibling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sibling=%t", hasSibling), func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			columns := []string{"1", "100"}
+			fields := []arrow.Field{{Name: "1", Type: arrow.PrimitiveTypes.Int64}, {Name: "100", Type: arrow.PrimitiveTypes.Int64}}
+			if hasSibling {
+				columns = append(columns, "102")
+				fields = append(fields, arrow.Field{Name: "102", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64), Nullable: true})
+			}
+			as := arrow.NewSchema(fields, nil)
+			b := array.NewRecordBuilder(memory.DefaultAllocator, as)
+			defer b.Release()
+			b.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			b.Field(1).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
+			if hasSibling {
+				list := b.Field(2).(*array.ListBuilder)
+				list.Append(true)
+				list.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{10, 20, 30}, nil)
+				list.AppendNull()
+				list.Append(true)
+			}
+			rec := b.NewRecord()
+			defer rec.Release()
+			filename := filepath.Join(dir, "data.parquet")
+			f, err := os.Create(filename)
+			require.NoError(t, err)
+			defer f.Close()
+			writer, err := pqarrow.NewFileWriter(as, f, parquet.NewWriterProperties(), pqarrow.DefaultWriterProps())
+			require.NoError(t, err)
+			require.NoError(t, writer.Write(rec))
+			require.NoError(t, writer.Close())
+			manifest, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(dir, "source"), ManifestEarliest), cfg, &ManifestUpdates{ColumnGroups: []ColumnGroupEntry{{Columns: columns, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: filename, EndIndex: 3}}}}})
+			require.NoError(t, err)
+			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "id"}}, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "clips", FieldID: 101, Nullable: true}}}
+			for _, id := range []int64{102, 103} {
+				child := &schemapb.FieldSchema{Name: fmt.Sprintf("clips[f%d]", id), FieldID: id, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: id == 103, TypeParams: []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "4"}}}
+				schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, child)
+			}
+			_, err = SampleExternalFieldSizes(manifest, 3, 42, "", schema.ExternalSpec, schema, cfg)
+			require.ErrorContains(t, err, "not found in schema")
 		})
 	}
 }

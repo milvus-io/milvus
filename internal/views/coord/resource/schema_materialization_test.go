@@ -28,10 +28,19 @@ func TestSchemaRequiresMaterialization_MilvusTableMappedAdditions(t *testing.T) 
 	published := &schemapb.CollectionSchema{
 		Version: 1, ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`,
 	}
-	target := &schemapb.CollectionSchema{
-		Version: 2, ExternalSource: published.ExternalSource, ExternalSpec: published.ExternalSpec,
-		Fields: []*schemapb.FieldSchema{{FieldID: 103, Name: "extra", ExternalField: "extra", DataType: schemapb.DataType_Int64, Nullable: true}},
+	for _, target := range []*schemapb.CollectionSchema{
+		{
+			Version: 2, ExternalSource: published.ExternalSource, ExternalSpec: published.ExternalSpec,
+			Fields: []*schemapb.FieldSchema{{FieldID: 103, Name: "extra", ExternalField: "extra", DataType: schemapb.DataType_Int64, Nullable: true}},
+		},
+		{
+			Version: 2, ExternalSource: published.ExternalSource, ExternalSpec: published.ExternalSpec,
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 104, Name: "items", Fields: []*schemapb.FieldSchema{
+				{FieldID: 105, Name: "items[value]", ExternalField: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+			}}},
+		},
+	} {
+		require.False(t, SchemaRequiresMaterialization(published, target),
+			"mapped additions publish schema independently; explicit refresh prepares the projection")
 	}
-	require.False(t, SchemaRequiresMaterialization(published, target),
-		"mapped additions publish schema independently; explicit refresh prepares the projection")
 }

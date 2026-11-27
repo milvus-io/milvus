@@ -37,6 +37,8 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "folly/ScopeGuard.h"
+#include "folly/coro/WithCancellation.h"
+#include "storage/LoadAdmissionController.h"
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
@@ -45,7 +47,7 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
@@ -241,15 +243,20 @@ class CountingChunkReader : public milvus_storage::api::ChunkReader {
     get_chunks(const std::vector<int64_t>& chunk_indices,
                size_t parallelism) override {
         sync_calls_.fetch_add(1);
+        if (before_sync_read) {
+            before_sync_read();
+        }
         return inner_->get_chunks(chunk_indices, parallelism);
     }
 
     folly::SemiFuture<
         arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
     get_chunks_async(const std::vector<int64_t>& chunk_indices,
-                     size_t parallelism) override {
+                     size_t parallelism,
+                     folly::CancellationToken cancellation) override {
         async_calls_.fetch_add(1);
-        return inner_->get_chunks_async(chunk_indices, parallelism);
+        return inner_->get_chunks_async(
+            chunk_indices, parallelism, cancellation);
     }
 
     arrow::Result<std::vector<uint64_t>>
@@ -269,6 +276,8 @@ class CountingChunkReader : public milvus_storage::api::ChunkReader {
         }
         return inner_->get_chunk_rows();
     }
+
+    std::function<void()> before_sync_read;
 
     size_t
     SyncCalls() const {
@@ -1359,18 +1368,119 @@ TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
     }
 }
 
+TEST_P(ManifestGroupTranslatorTest, LegacyReadYieldsAndDrainsOnCancellation) {
+    auto reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto translator = MakeTranslator(0, GetParam(), false, reader);
+    const std::vector<cachinglayer::cid_t> cids{0};
+    folly::CPUThreadPoolExecutor caller(1);
+    folly::CancellationSource cancellation;
+    std::promise<void> started;
+    auto started_future = started.get_future();
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    reader->before_sync_read = [&] {
+        started.set_value();
+        released.wait();
+    };
+    auto operation = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(folly::coro::co_withExecutor(
+            &caller,
+            folly::coro::co_withCancellation(
+                cancellation.getToken(),
+                translator->get_cells_async(nullptr, cids))));
+    });
+    auto cleanup = folly::makeGuard([&] { release.set_value(); });
+    ASSERT_EQ(started_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    auto marker = std::make_shared<std::promise<void>>();
+    auto marker_future = marker->get_future();
+    caller.add([marker] { marker->set_value(); });
+    EXPECT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    cancellation.requestCancellation();
+    EXPECT_EQ(operation.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    release.set_value();
+    cleanup.dismiss();
+    ASSERT_EQ(operation.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    try {
+        operation.get();
+        FAIL()
+            << "expected inherited cancellation after synchronous read drains";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_GT(reader->SyncCalls(), 0);
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+}
+
+TEST_P(ManifestGroupTranslatorTest,
+       LegacyBudgetWaitYieldsAndCancelsBeforeRead) {
+    auto reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto translator = MakeTranslator(0, GetParam(), false, reader);
+    const std::vector<cachinglayer::cid_t> cids{0};
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto capacity = budget.CapacityBytes();
+    budget.SetCapacityBytes(1);
+    budget.Acquire({1, 1}, storage::LoadAdmissionPriority::High);
+    auto restore = folly::makeGuard([&] { budget.SetCapacityBytes(capacity); });
+    folly::CPUThreadPoolExecutor caller(1);
+    folly::CancellationSource cancellation;
+    std::promise<void> started;
+    auto started_future = started.get_future();
+    auto load = [&]()
+        -> folly::coro::Task<std::vector<
+            std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>>> {
+        started.set_value();
+        co_return co_await translator->get_cells_async(nullptr, cids);
+    };
+    auto operation = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(folly::coro::co_withExecutor(
+            &caller,
+            folly::coro::co_withCancellation(cancellation.getToken(), load())));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancellation.requestCancellation();
+        budget.Release({1, 1});
+    });
+    ASSERT_EQ(started_future.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    auto marker = std::make_shared<std::promise<void>>();
+    auto marker_future = marker->get_future();
+    caller.add([marker] { marker->set_value(); });
+    EXPECT_EQ(marker_future.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    EXPECT_EQ(operation.wait_for(std::chrono::milliseconds(20)),
+              std::future_status::timeout);
+    cancellation.requestCancellation();
+    ASSERT_EQ(operation.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    try {
+        operation.get();
+        FAIL() << "expected inherited cancellation while awaiting budget";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(reader->SyncCalls(), 0);
+    EXPECT_EQ(reader->AsyncCalls(), 0);
+}
+
 TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
-    const auto previous_window = StorageV2AsyncLoadReadWindowSizeBytes();
+    const auto previous_window =
+        milvus::storage::LoadFieldDataReadWindowSizeBytes();
     const auto previous_cell_target = GetCellTargetSizeBytes();
     auto restore = folly::makeGuard([&] {
-        SetStorageV2AsyncLoadReadWindowSizeBytes(previous_window);
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous_window);
         SetCellTargetSizeBytes(previous_cell_target);
     });
     SetCellTargetSizeBytes(1);
     const int64_t wide_window = 4 * FieldDataLoadBatchTargetBytes();
     for (const int64_t window :
          {int64_t{1}, wide_window, std::numeric_limits<int64_t>::max()}) {
-        SetStorageV2AsyncLoadReadWindowSizeBytes(window);
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(window);
         // Group 0 contains arrays; group 1 contains only a vector field.
         for (const int64_t group : {int64_t{0}, int64_t{1}}) {
             auto translator = MakeTranslator(group, GetParam(), true);
@@ -1402,9 +1512,10 @@ TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
 }
 
 TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
-    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
-    auto restore = folly::makeGuard(
-        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous = milvus::storage::LoadFieldDataReadWindowSizeBytes();
+    auto restore = folly::makeGuard([previous]() {
+        milvus::storage::SetLoadFieldDataReadWindowSizeBytes(previous);
+    });
     auto previous_cell_target = GetCellTargetSizeBytes();
     auto restore_cell_target = folly::makeGuard([previous_cell_target]() {
         SetCellTargetSizeBytes(previous_cell_target);
@@ -1412,7 +1523,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     auto use_mmap = GetParam();
 
     SetCellTargetSizeBytes(1);
-    SetStorageV2AsyncLoadReadWindowSizeBytes(
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(
         std::numeric_limits<int64_t>::max());
     auto wide_window_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
@@ -1426,7 +1537,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     EXPECT_EQ(wide_window_cells.size(), num_cells);
     EXPECT_EQ(wide_window_reader->AsyncCalls(), 1);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(1);
     auto reloaded_cells = wide_window_translator->get_cells(nullptr, cids);
     EXPECT_EQ(reloaded_cells.size(), num_cells);
     EXPECT_EQ(wide_window_reader->AsyncCalls(), 2);
@@ -1438,7 +1549,7 @@ TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
     EXPECT_EQ(limited_cells.size(), num_cells);
     EXPECT_EQ(limited_reader->AsyncCalls(), num_cells);
 
-    SetStorageV2AsyncLoadReadWindowSizeBytes(
+    milvus::storage::SetLoadFieldDataReadWindowSizeBytes(
         std::numeric_limits<int64_t>::max());
     auto limited_reload = limited_translator->get_cells(nullptr, cids);
     EXPECT_EQ(limited_reload.size(), num_cells);
@@ -1519,12 +1630,12 @@ TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
 }
 
 TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
-    SetStorageV2AsyncLoadEnabled(false);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     auto sync_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
-    auto sync_translator =
-        MakeTranslator(0, GetParam(), StorageV2AsyncLoadEnabled(), sync_reader);
-    SetStorageV2AsyncLoadEnabled(true);
+    auto sync_translator = MakeTranslator(
+        0, GetParam(), milvus::storage::LoadAsyncReadEnabled(), sync_reader);
+    milvus::storage::SetLoadAsyncReadEnabled(true);
     sync_translator->get_cells(nullptr, {0});
     EXPECT_GT(sync_reader->SyncCalls(), 0);
     EXPECT_EQ(sync_reader->AsyncCalls(), 0);
@@ -1532,8 +1643,8 @@ TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
     auto async_reader =
         std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
     auto async_translator = MakeTranslator(
-        0, GetParam(), StorageV2AsyncLoadEnabled(), async_reader);
-    SetStorageV2AsyncLoadEnabled(false);
+        0, GetParam(), milvus::storage::LoadAsyncReadEnabled(), async_reader);
+    milvus::storage::SetLoadAsyncReadEnabled(false);
     async_translator->get_cells(nullptr, {0});
     EXPECT_EQ(async_reader->SyncCalls(), 0);
     EXPECT_GT(async_reader->AsyncCalls(), 0);
@@ -1647,3 +1758,169 @@ TEST_P(ManifestGroupTranslatorTest, TestRowGroupRangesCoverage) {
 INSTANTIATE_TEST_SUITE_P(ManifestGroupTranslator,
                          ManifestGroupTranslatorTest,
                          testing::Bool());
+
+// One physical Struct column, with deterministic sizes for each estimate path.
+class StructProjectionTestReader : public milvus_storage::api::ChunkReader {
+ public:
+    explicit StructProjectionTestReader(int estimate_mode,
+                                        bool missing_child = false)
+        : estimate_mode_(estimate_mode) {
+        arrow::Int64Builder builder;
+        EXPECT_TRUE(builder.AppendValues({11, 22}).ok());
+        auto values = builder.Finish().ValueOrDie();
+        auto items = arrow::StructArray::Make(
+                         missing_child ? arrow::ArrayVector{values}
+                                       : arrow::ArrayVector{values, values},
+                         missing_child ? std::vector<std::string>{"a"}
+                                       : std::vector<std::string>{"a", "b"})
+                         .ValueOrDie();
+        batch_ = arrow::RecordBatch::Make(
+            arrow::schema({arrow::field("items", items->type())}), 2, {items});
+    }
+    size_t
+    total_number_of_chunks() const override {
+        return 1;
+    }
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>&) override {
+        return std::vector<int64_t>{0};
+    }
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t) override {
+        return batch_;
+    }
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>&, size_t) override {
+        return std::vector<std::shared_ptr<arrow::RecordBatch>>{batch_};
+    }
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        return std::vector<uint64_t>{2};
+    }
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        if (estimate_mode_ > 1)
+            return arrow::Status::NotImplemented("no total estimate");
+        return std::vector<uint64_t>{100};
+    }
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        if (estimate_mode_ > 0)
+            return arrow::Status::NotImplemented("no column estimate");
+        return std::vector<std::vector<uint64_t>>{{100}};
+    }
+
+ private:
+    int estimate_mode_;
+    std::shared_ptr<arrow::RecordBatch> batch_;
+};
+
+TEST_P(ManifestGroupTranslatorTest,
+       StructProjectionSelectedChildrenAndEstimates) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("pk");
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+    for (bool async : {false, true}) {
+        for (int count : {1, 2}) {
+            std::vector<FieldId> selected{FieldId(201)};
+            if (count == 2)
+                selected.emplace_back(202);
+            std::unordered_map<FieldId, FieldMeta> metas;
+            for (auto id : selected) metas.emplace(id, (*schema)[id]);
+            for (int mode : {0, 1, 2, 3}) {
+                SCOPED_TRACE(testing::Message()
+                             << "children=" << count << " mode=" << mode);
+                ManifestGroupTranslator translator(
+                    segment_id_,
+                    GroupChunkType::DEFAULT,
+                    0,
+                    std::make_shared<StructProjectionTestReader>(mode,
+                                                                 count == 1),
+                    metas,
+                    {},
+                    std::vector<std::string>{"items"},
+                    std::vector<std::string>{"items"},
+                    GetParam(),
+                    true,
+                    mmap_dir_,
+                    count,
+                    milvus::proto::common::LoadPriority::LOW,
+                    true,
+                    "",
+                    "",
+                    mode == 2 ? 10 : 0,
+                    "",
+                    std::nullopt,
+                    MmapChunkWritebackMode::Disabled,
+                    async,
+                    schema->GetOrdinaryStructProjections(selected));
+                auto* meta = static_cast<GroupCTMeta*>(translator.meta());
+                const int64_t base_size =
+                    mode < 2 ? 100 : (mode == 2 ? 20 : 8192);
+                EXPECT_EQ(meta->chunk_memory_size_,
+                          std::vector<int64_t>{base_size * count});
+                auto cells = translator.get_cells(nullptr, {0});
+                ASSERT_EQ(cells.size(), 1);
+                ASSERT_NE(cells[0].second->GetChunk(FieldId(201)), nullptr);
+                EXPECT_EQ(cells[0].second->GetChunk(FieldId(201))->RowNums(),
+                          2);
+                EXPECT_EQ(cells[0].second->GetChunk(FieldId(202)) != nullptr,
+                          count == 2);
+            }
+        }
+    }
+    std::vector<FieldId> selected{FieldId(201), FieldId(202)};
+    std::unordered_map<FieldId, FieldMeta> metas;
+    for (auto id : selected) metas.emplace(id, (*schema)[id]);
+    auto make = [&](OrdinaryStructProjections projections, bool missing_child) {
+        return std::make_unique<ManifestGroupTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            0,
+            std::make_shared<StructProjectionTestReader>(0, missing_child),
+            metas,
+            std::unordered_map<std::string, std::vector<FieldId>>{},
+            std::vector<std::string>{"items"},
+            std::vector<std::string>{"items"},
+            GetParam(),
+            true,
+            mmap_dir_,
+            2,
+            milvus::proto::common::LoadPriority::LOW,
+            true,
+            "",
+            "",
+            0,
+            "",
+            std::nullopt,
+            MmapChunkWritebackMode::Disabled,
+            false,
+            std::move(projections));
+    };
+    auto projections = schema->GetOrdinaryStructProjections(selected);
+    auto missing = make(projections, true);
+    EXPECT_THROW(missing->get_cells(nullptr, {0}), milvus::SegcoreError);
+    projections.at("items").child_field_ids.push_back(FieldId(201));
+    EXPECT_THROW(make(projections, false), milvus::SegcoreError);
+    projections = schema->GetOrdinaryStructProjections(selected);
+    projections.at("items").parent_field_id = FieldId(201);
+    EXPECT_THROW(make(projections, false), milvus::SegcoreError);
+}

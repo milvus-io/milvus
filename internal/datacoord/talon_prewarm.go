@@ -83,6 +83,7 @@ func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier
 		BucketName:          p.MinioCfg.BucketName.GetValue(),
 		CloudProvider:       p.MinioCfg.CloudProvider.GetValue(),
 		TalonCoordinator:    coordinator,
+		TalonNamespace:      p.CommonCfg.TalonNamespace(),
 		TalonBlockSize:      p.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
 		TalonMaxIdlePerAddr: p.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
 	}, 1)
@@ -97,10 +98,14 @@ func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier
 func manifestPrewarmResolver(provider, bucket string) (func(string) (string, uint64, error), error) {
 	scheme := ""
 	switch provider {
-	case objectstorage.CloudProviderAWS, objectstorage.CloudProviderAliyun,
-		objectstorage.CloudProviderTencent, objectstorage.CloudProviderHuawei,
-		objectstorage.CloudProviderGCP:
+	case objectstorage.CloudProviderAWS, objectstorage.CloudProviderHuawei:
 		scheme = packed.TalonSchemeS3
+	case objectstorage.CloudProviderAliyun:
+		scheme = packed.TalonSchemeAliyun
+	case objectstorage.CloudProviderTencent:
+		scheme = packed.TalonSchemeTencent
+	case objectstorage.CloudProviderGCP:
+		scheme = packed.TalonSchemeGCS
 	case objectstorage.CloudProviderAzure:
 		scheme = packed.TalonSchemeAzure
 	default:

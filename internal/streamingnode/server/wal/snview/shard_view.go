@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // snShardView manages all query view state machines for a single shard on a StreamingNode.
@@ -27,6 +28,9 @@ type snShardView struct {
 	preparingViews  int
 	mu              sync.Mutex
 	recoveryChanged chan struct{}
+	// queriesStopped fails acquisitions with a shutdown error; set by WAL
+	// shutdown before it waits for in-flight queries.
+	queriesStopped  bool
 	closed          bool
 	detached        bool
 	ctx             context.Context
@@ -154,8 +158,10 @@ func (s *snShardView) CloseForHandoff() {
 	s.notifyRecoveryChangedLocked()
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
+	canceled := make([]qviews.QueryViewKey, 0, len(s.views))
 	for version, entry := range s.views {
 		entry.cancelPendingDown()
+		canceled = append(canceled, entry.View.QueryViewKey())
 		releases = append(releases, s.startReleaseLocked(version, entry))
 	}
 	s.views = make(map[qviews.QueryViewVersion]*snViewEntry)
@@ -164,6 +170,9 @@ func (s *snShardView) CloseForHandoff() {
 	}
 	s.mu.Unlock()
 
+	for _, key := range canceled {
+		qvobserve.CancelView("streamingNode", key)
+	}
 	for _, releaseDone := range releases {
 		<-releaseDone
 	}
@@ -405,7 +414,10 @@ func (s *snShardView) consumeAndPersist(entry *snViewEntry) bool {
 		return true
 	}
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodePersistViewEvent{View: entry.View.QueryViewKey(), State: qviews.QueryViewState(persist.Meta.State)})
-	if err := s.catalog.SaveQueryViews(s.ctx, s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
+	persistTimer := snCatalogSave.Begin()
+	persistErr := s.catalog.SaveQueryViews(s.ctx, s.pchannel, []*viewpb.QueryViewOfShard{persist})
+	persistTimer.End(persistErr)
+	if err := persistErr; err != nil {
 		if s.ctx.Err() != nil {
 			return false
 		}
@@ -464,6 +476,9 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.queriesStopped {
+		return nil, nil, viewerror.NewOnShutdownError("query view %s is shutting down", s.shardID.String())
+	}
 
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
@@ -513,6 +528,16 @@ func (s *snShardView) recoveryChangedLocked() <-chan struct{} {
 		s.recoveryChanged = make(chan struct{})
 	}
 	return s.recoveryChanged
+}
+
+// stopQueryAcquisition fails current and future acquisitions with a shutdown
+// error and wakes recovery waiters. Leases already handed out keep their
+// resources until CloseForHandoff releases the views.
+func (s *snShardView) stopQueryAcquisition() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queriesStopped = true
+	s.notifyRecoveryChangedLocked()
 }
 
 func (s *snShardView) notifyRecoveryChangedLocked() {
@@ -582,3 +607,5 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 func collectionIDForEntry(entry *snViewEntry) int64 {
 	return entry.sm.Meta().GetCollectionId()
 }
+
+var snCatalogSave = stage.New("streamingNode", "view_load", "catalog_save")

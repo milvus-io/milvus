@@ -949,7 +949,7 @@ func maxChunkSize(df *DataFrame) int64 {
 
 // ToRetrieveResults exports every column of the final materialized DataFrame.
 // Collection fields are identified by their saved DataFrame definitions; other
-// non-system columns are computed results. Only $id and $timestamp are exported from system columns.
+// non-system columns are computed results. System identities and query element indices use their dedicated wire representation.
 // Callers must prune intermediate columns and reject
 // computed names that collide with collection fields before export. Zero-row
 // frames must retain typed $id, $timestamp and all projected output columns.
@@ -965,6 +965,22 @@ func ToRetrieveResults(df *DataFrame) (*segcorepb.RetrieveResults, error) {
 		return nil, err
 	}
 	result.Ids = ids
+	if col := df.Column(types.QueryElementIndicesFieldName); col != nil {
+		if !arrow.TypeEqual(col.DataType(), arrow.ListOf(arrow.PrimitiveTypes.Int32)) || int64(col.Len()) != df.NumRows() {
+			return nil, merr.WrapErrServiceInternalMsg("invalid query element indices column")
+		}
+		result.ElementLevel = true
+		for _, chunk := range col.Chunks() {
+			lists := chunk.(*array.List)
+			values := lists.ListValues().(*array.Int32)
+			for i := 0; i < lists.Len(); i++ {
+				start, end := lists.ValueOffsets(i)
+				result.ElementIndices = append(result.ElementIndices, &segcorepb.ElementIndices{
+					Indices: append([]int32(nil), values.Int32Values()[start:end]...),
+				})
+			}
+		}
+	}
 	for _, name := range df.ColumnNames() {
 		if IsFunctionChainSystemName(name) {
 			continue

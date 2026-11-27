@@ -27,7 +27,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "storage/LoadOverheadController.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 
 namespace milvus {
 
@@ -165,7 +165,7 @@ class LoadPoolTaskMetrics final
 
 bool
 UpdateLoadOverheadControllers(int64_t executor_workers) {
-    if (segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
+    if (milvus::storage::LoadAsyncReadEnabled()) {
         return true;
     }
     // All current Group bindings provide max_runtime_unit, so both policy

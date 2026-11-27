@@ -617,6 +617,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 			Status: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureTruncateCollection)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
 	defer sp.End()
@@ -897,6 +898,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
 	defer sp.End()
@@ -951,6 +953,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
 	defer sp.End()
@@ -960,7 +963,8 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 		return merr.Status(err), nil
 	}
 
-	if typeutil.IsExternalCollection(dresp.GetSchema()) {
+	if typeutil.IsExternalCollection(dresp.GetSchema()) &&
+		!typeutil.NewStorageColumnResolver(dresp.GetSchema()).IsMilvusTable() {
 		return merr.Status(merr.WrapErrParameterInvalidMsg(
 			"add struct field operation is not supported for external collection %s", request.GetCollectionName())), nil
 	}
@@ -1010,6 +1014,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 			AlterStatus: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterSchema)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionSchema")
 	defer sp.End()
 
@@ -1042,8 +1047,8 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 		case nil:
 			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrParameterInvalidMsg("unknown action type in alter collection schema request"))}, nil
 		}
-		if plan == nil || plan.Kind != schemautil.AlterSchemaAddField {
-			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table top-level field additions"))}, nil
+		if plan == nil || (plan.Kind != schemautil.AlterSchemaAddField && plan.Kind != schemautil.AlterSchemaAddStructSubField) {
+			return &milvuspb.AlterCollectionSchemaResponse{AlterStatus: merr.Status(merr.WrapErrOperationNotSupportedMsg("external collections support only mapped milvus-table field additions"))}, nil
 		}
 	}
 
@@ -1313,6 +1318,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterFunction)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionFunction")
 	defer sp.End()
@@ -2651,12 +2657,14 @@ func GetCollectionRateSubLabel(req any) string {
 }
 
 // Search searches the most similar records of requests.
-func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (retResp *milvuspb.SearchResults, retErr error) {
 	// Register the request before anything else so that it is listable and
 	// cancellable for its whole lifetime, including the retries below.
 	ctx, entry := node.registerRequest(ctx, searchRequestInfo(request))
 	defer node.unregisterRequest(entry)
 
+	ctx, timing := startDQL(ctx, "Search")
+	defer func() { timing.End(retResp.GetStatus(), retErr) }()
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2725,6 +2733,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 // un-optimized retry, the recall-evaluation ground truth, a retry.Handle
 // re-entry -- and those runs must not move the feature counters again.
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2917,10 +2927,12 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), qt.IsRecallEvaluation(), nil
 }
 
-func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (retResp *milvuspb.SearchResults, retErr error) {
 	ctx, entry := node.registerRequest(ctx, hybridSearchRequestInfo(request))
 	defer node.unregisterRequest(entry)
 
+	ctx, timing := startDQL(ctx, "HybridSearch")
+	defer func() { timing.End(retResp.GetStatus(), retErr) }()
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2983,6 +2995,8 @@ func (l *hybridSearchRequestExprLogger) String() string {
 // countFeatures carries the same meaning as in search: only the first task
 // built for a user request moves the feature counters.
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3300,8 +3314,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
-				"no vector field found in schema")
+			return nil, merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", request.GetCollectionName())
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
 			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
@@ -3692,12 +3705,14 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 }
 
 // Query get the records by primary keys.
-func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (retResp *milvuspb.QueryResults, retErr error) {
 	// Register before the retry loop so that the request is listable and
 	// cancelable while it waits for an automatic load or a view refresh.
 	ctx, entry := node.registerRequest(ctx, queryRequestInfo(request))
 	defer node.unregisterRequest(entry)
 
+	ctx, timing := startDQL(ctx, "Query")
+	defer func() { timing.End(retResp.GetStatus(), retErr) }()
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -3733,6 +3748,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 }
 
 func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
+	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
@@ -6751,10 +6768,9 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 
 	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetQuotaMetrics fail",
+		mlog.Warn(ctx, "GetQuotaMetrics fail",
 			mlog.Err(err))
-		metricsResp.Status = merr.Status(err)
-		return metricsResp, nil
+		return &internalpb.GetQuotaMetricsResponse{Status: merr.Status(err)}, nil
 	}
 	err = merr.Error(metricsResp.GetStatus())
 	if err != nil {
@@ -6792,6 +6808,7 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureFileResourceAdd)
 
 	mlog.Info(context.TODO(), "receive AddFileResource request")
 

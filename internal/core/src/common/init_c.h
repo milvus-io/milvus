@@ -110,34 +110,34 @@ SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
 void
 UpdateArrowIOThreadPoolMetrics();
 
-// Target average byte size of one storage v2 cache cell. Row groups are
+// Target average byte size of one field-data cell. Row groups are
 // packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.
 void
-SetStorageV2CellTargetSizeBytes(int64_t bytes);
+SetLoadFieldDataCellTargetSizeBytes(int64_t bytes);
 
-// Updates the rollout default used by newly constructed manifest translators.
+// Updates the async-read default for supported field-data and index loaders.
 CStatus
-SetStorageV2AsyncLoadEnabled(bool enabled);
+SetLoadAsyncReadEnabled(bool enabled);
 
 // Sets a positive async executor worker limit without creating an unused pool.
 // Resizes an existing pool in place; reports invalid values or resize failures.
 CStatus
-SetStorageV2AsyncLoadThreadPoolSize(int threads);
+SetLoadExecutorThreads(int threads);
 
 // Returns the effective worker limit, including before first executor use.
 int
-GetStorageV2AsyncLoadThreadPoolSize();
+GetLoadExecutorThreads();
 
-// Target estimated-byte threshold for one Storage V3 async read window.
+// Target estimated-byte threshold for one Storage V3 field-data async read window.
 // The value must be positive; non-positive values restore the process default.
 // A window always contains at least one cell, so an oversized cell may exceed
 // the configured threshold.
 void
-SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+SetLoadFieldDataReadWindowSizeBytes(int64_t bytes);
 
-// Returns the effective Storage V3 async read-window threshold in bytes.
+// Returns the effective Storage V3 field-data async read-window threshold in bytes.
 int64_t
-GetStorageV2AsyncLoadReadWindowSizeBytes();
+GetLoadFieldDataReadWindowSizeBytes();
 
 #ifdef __cplusplus
 };

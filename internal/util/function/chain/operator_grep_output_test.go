@@ -34,6 +34,7 @@ import (
 )
 
 type grepJSONLine struct {
+	Type    string  `json:"type"`
 	Content string  `json:"content"`
 	Starts  []int64 `json:"starts"`
 	Ends    []int64 `json:"ends"`
@@ -68,7 +69,7 @@ func decodeGrepJSON(t *testing.T, payload []byte) []grepJSONLine {
 func TestQueryScanJSONExportOwnership(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
-	source, _, err := grepJSONColumn(pool, strings.NewReader(`[[{"content":"skip","starts":[0],"ends":[4]}],[{"content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"content":"hello foo","starts":[6],"ends":[9]}],[]]`))
+	source, _, err := grepJSONColumn(pool, strings.NewReader(`[[{"type":"match","content":"skip","starts":[0],"ends":[4]}],[{"type":"match","content":"foo bar foo","starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","starts":[6],"ends":[9]}],[]]`))
 	require.NoError(t, err)
 	builder := NewDataFrameBuilder().SetChunkSizes([]int64{1, 0, 2})
 	defer builder.Release()
@@ -84,7 +85,7 @@ func TestQueryScanJSONExportOwnership(t *testing.T) {
 	require.NotSame(t, &source.(*array.Binary).Value(1)[0], &payloads[0][0])
 	source.Release()
 	frame.Release()
-	want := []grepJSONLine{{"foo bar foo", []int64{0, 8}, []int64{3, 11}}, {"hello foo", []int64{6}, []int64{9}}}
+	want := []grepJSONLine{{"match", "foo bar foo", []int64{0, 8}, []int64{3, 11}}, {"match", "hello foo", []int64{6}, []int64{9}}}
 	require.Equal(t, want, decodeGrepJSON(t, payloads[0]))
 	require.Equal(t, want, decodeGrepJSON(t, payloads[1]))
 	require.Empty(t, decodeGrepJSON(t, payloads[2]))
@@ -101,7 +102,7 @@ func TestQueryScanFinalOutputProjection(t *testing.T) {
 		builder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
 		for _, name := range []string{"first", "second"} {
 			b := array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary)
-			payload, err := json.Marshal([]grepJSONLine{{name, []int64{0}, []int64{1}}})
+			payload, err := json.Marshal([]grepJSONLine{{"match", name, []int64{0}, []int64{1}}})
 			require.NoError(t, err)
 			b.Append(payload)
 			require.NoError(t, builder.SetComputedField(grepOutputField(name)))

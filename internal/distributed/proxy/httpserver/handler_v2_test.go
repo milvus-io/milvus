@@ -127,10 +127,11 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 	})
 
 	cases := []struct {
-		name   string
-		body   string
-		schema *schemapb.CollectionSchema
-		rows   bool
+		name        string
+		body        string
+		schema      *schemapb.CollectionSchema
+		rows        bool
+		failColumns bool
 	}{
 		{
 			name:   "row conversion",
@@ -138,12 +139,16 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 			schema: &schemapb.CollectionSchema{Name: "book"},
 		},
 		{
+			// A schema with only a primary key used to fail column conversion on
+			// the "no vector field or functions" check; that check is gone, so
+			// the column stage is made to fail explicitly.
 			name: "column conversion",
 			body: `{"collectionName":"book","data":[{"id":"REST_BODY_SECRET_SENTINEL"}]}`,
 			schema: &schemapb.CollectionSchema{Name: "book", Fields: []*schemapb.FieldSchema{
 				{FieldID: common.StartOfUserFieldID, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar},
 			}},
-			rows: true,
+			rows:        true,
+			failColumns: true,
 		},
 	}
 	for _, action := range []string{InsertAction, UpsertAction} {
@@ -154,6 +159,10 @@ func TestRESTV2MutationFailureOmitsExplicitPayloadLogFields(t *testing.T) {
 					Status: merr.Success(),
 				}, nil).Build()
 				defer describePatch.UnPatch()
+				if test.failColumns {
+					columnsPatch := mockey.Mock(anyToColumns).Return(nil, merr.WrapErrParameterInvalidMsg("column conversion failed")).Build()
+					defer columnsPatch.UnPatch()
+				}
 
 				logs := captureHTTPServerLogs(t)
 				body := []byte(test.body)
@@ -1005,6 +1014,7 @@ func TestTimeoutMiddlewareCommitsBufferedResponsesAndMetadata(t *testing.T) {
 				c.Header("X-Test", testcase.name)
 				c.Set(ContextRequest, "request-"+testcase.name)
 				c.Set(ContextResponse, "response-"+testcase.name)
+				c.Set(ContextErrorType, merr.InputError.String())
 				c.Set("traceID", "trace-"+testcase.name)
 				testcase.write(c, testcase.code, testcase.name)
 			}))
@@ -1034,6 +1044,9 @@ func TestTimeoutMiddlewareCommitsBufferedResponsesAndMetadata(t *testing.T) {
 			value, ok = ctx.Get(ContextResponse)
 			assert.True(t, ok)
 			assert.Equal(t, "response-"+testcase.name, value)
+			value, ok = ctx.Get(ContextErrorType)
+			assert.True(t, ok)
+			assert.Equal(t, merr.InputError.String(), value)
 			value, ok = ctx.Get("traceID")
 			assert.True(t, ok)
 			assert.Equal(t, "trace-"+testcase.name, value)
@@ -1764,6 +1777,60 @@ func TestHybridSearchWithRerank(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "hello_milvus", "partitionNames": ["part_a"], "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "functionScore": {"functions": [{"name": "testRank", "type": "Rerank", "inputFieldNames": ["FieldWordCount"], "params": {"name": "decay"}}]}}`),
 	}
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
+}
+
+// TestSearchCollectionWithoutVectorField: search, search by primary keys and
+// hybrid search on a collection without a vector field return the error of the
+// Proxy, not a request body error, and never reach the Proxy.
+func TestSearchCollectionWithoutVectorField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+		},
+	}
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(5)
+
+	errCode := merr.Code(merr.ErrParameterInvalid)
+	errMsg := "collection book has no vector field, search is not supported"
+	for name, tc := range map[string]requestBodyTestCase{
+		"search with annsField": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}`),
+		},
+		"search without annsField": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "limit": 3}`),
+		},
+		"search by ids": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "ids": [1, 2], "limit": 3}`),
+		},
+		"hybrid search": {
+			path:        versionalV2(EntityCategory, HybridSearchAction),
+			requestBody: []byte(`{"collectionName": "book", "search": [{"data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k": 1}}, "limit": 3}`),
+		},
+		"advanced search": {
+			path:        versionalV2(EntityCategory, AdvancedSearchAction),
+			requestBody: []byte(`{"collectionName": "book", "search": [{"data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k": 1}}, "limit": 3}`),
+		},
+	} {
+		tc.errCode = errCode
+		tc.errMsg = errMsg
+		sendReqAndVerify(t, testEngine, name, http.MethodPost, tc)
+	}
 }
 
 // TestSearchStructVectorOnlyWithoutAnnsField: on a collection whose only vector
@@ -8275,4 +8342,71 @@ func TestTopLevelResultShapeErrorResponse(t *testing.T) {
 	assert.EqualValues(t, merr.Code(merr.ErrInvalidSearchResult), resp[HTTPReturnCode])
 	assert.Equal(t, wantMessage, resp[HTTPReturnMessage])
 	assert.NotContains(t, resp, HTTPReturnData)
+}
+
+func TestInsertRejectsWriteCondition(t *testing.T) {
+	mp := &mockProxyComponent{}
+	testEngine := initHTTPServerV2(mp, false)
+
+	w := httptest.NewRecorder()
+	body := `{"collectionName": "book", "data": [{"id": 1, "version": 2}], "writeCondition": {"field": "version", "op": "gt"}}`
+	testEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, InsertAction), strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp ReturnErrMsg
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), resp.Code)
+	assert.Contains(t, resp.Message, "writeCondition is only supported for upsert")
+}
+
+func TestConditionalUpsertAllSkippedResponse(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	mp := &mockProxyComponent{}
+	describePatch := mockey.Mock((*mockProxyComponent).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Build()
+	defer describePatch.UnPatch()
+	upsertPatch := mockey.Mock((*mockProxyComponent).Upsert).To(func(_ *mockProxyComponent, _ context.Context, req *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+		require.True(t, req.GetPartialUpdate())
+		require.NotNil(t, req.GetWriteCondition())
+		assert.Equal(t, "version", req.GetWriteCondition().GetField())
+		assert.Equal(t, milvuspb.WriteCondition_GT, req.GetWriteCondition().GetOp())
+		return &milvuspb.MutationResult{
+			Status:    commonSuccessStatus,
+			UpsertCnt: 0,
+			IDs: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}},
+			},
+		}, nil
+	}).Build()
+	defer upsertPatch.UnPatch()
+	testEngine := initHTTPServerV2(mp, false)
+
+	w := httptest.NewRecorder()
+	body := `{"collectionName": "book", "data": [{"id": 1, "version": 2}], "writeCondition": {"field": "version", "op": "gt"}}`
+	testEngine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, UpsertAction), strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, merr.Code(nil), resp[HTTPReturnCode])
+	data, ok := resp[HTTPReturnData].(map[string]interface{})
+	require.True(t, ok)
+	assert.EqualValues(t, 0, data["upsertCount"])
+	assert.Equal(t, []interface{}{}, data["upsertIds"])
+	assert.Equal(t, []interface{}{}, data["succIndex"])
 }

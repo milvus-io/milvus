@@ -168,12 +168,25 @@ var readingWrites = []struct {
 	{name: "partial upsert", write: func(t *testing.T, e *dmlAutoLoadEnv) *milvuspb.MutationResult { return e.upsert(t, true) }},
 }
 
+func TestDMLReadSkipsAutoLoadForReadyCollection(t *testing.T) {
+	for _, tc := range readingWrites {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newDMLAutoLoadEnv(t, "hot", tc.autoID)
+
+			resp := tc.write(t, env)
+
+			require.NoError(t, merr.Error(resp.GetStatus()))
+			env.client.coordinator.AssertNotCalled(t, "EnsureCollectionReady", mock.Anything, mock.Anything)
+			require.EqualValues(t, 1, env.client.server.queries.Load())
+			require.Equal(t, 1, env.wal.calls)
+		})
+	}
+}
+
 func TestDMLReadLoadsUnloadedCollection(t *testing.T) {
 	for _, tc := range readingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			env := newDMLAutoLoadEnv(t, "", tc.autoID)
-			// The WAL owner has no View for the tenant, so GetQueryPlan answers VIEW_NOT_FOUND.
-			env.client.server.loaded.Store(false)
+			env := newDMLAutoLoadEnv(t, "unloaded", tc.autoID)
 			env.client.expectAutoLoad(t)
 
 			resp := tc.write(t, env)
@@ -181,6 +194,7 @@ func TestDMLReadLoadsUnloadedCollection(t *testing.T) {
 			require.NoError(t, merr.Error(resp.GetStatus()))
 			require.EqualValues(t, 1, env.client.loads.Load())
 			require.EqualValues(t, 1, env.client.checks.Load())
+			require.EqualValues(t, 1, env.client.server.plans.Load())
 			require.EqualValues(t, 1, env.client.server.queries.Load(), "the first read runs after the load finished")
 			require.Equal(t, 1, env.wal.calls)
 		})
@@ -200,7 +214,7 @@ func TestDMLReadRetriesAfterRelease(t *testing.T) {
 				require.NoError(t, merr.Error(resp.GetStatus()))
 				require.True(t, env.client.server.injected.Load())
 				require.EqualValues(t, 1, env.client.loads.Load())
-				require.EqualValues(t, 2, env.client.checks.Load())
+				require.EqualValues(t, 1, env.client.checks.Load())
 				require.Equal(t, 1, env.wal.calls)
 			})
 		}
@@ -250,14 +264,12 @@ func TestDMLDoesNotRetryWrite(t *testing.T) {
 	for _, tc := range readingWrites {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newDMLAutoLoadEnv(t, "", tc.autoID)
-			env.client.expectAutoLoad(t)
 			env.wal.err = merr.Wrap(merr.ErrQueryViewNotReady, "write failed")
 
 			resp := tc.write(t, env)
 
 			require.Error(t, merr.Error(resp.GetStatus()))
 			require.EqualValues(t, 1, env.client.server.queries.Load())
-			require.EqualValues(t, 1, env.client.checks.Load())
 			require.Equal(t, 1, env.wal.calls)
 		})
 	}
@@ -266,8 +278,7 @@ func TestDMLDoesNotRetryWrite(t *testing.T) {
 func TestDMLFailsWhenLoadCannotStart(t *testing.T) {
 	for _, tc := range readingWrites {
 		t.Run(tc.name, func(t *testing.T) {
-			env := newDMLAutoLoadEnv(t, "", tc.autoID)
-			env.client.server.loaded.Store(false)
+			env := newDMLAutoLoadEnv(t, "unloaded", tc.autoID)
 			env.client.coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).
 				Return(merr.Status(merr.WrapErrIndexNotFoundForCollection("collection")), nil).Once()
 
@@ -282,7 +293,6 @@ func TestDMLFailsWhenLoadCannotStart(t *testing.T) {
 
 func TestExpressionDeleteWritesTheRowsItRead(t *testing.T) {
 	env := newDMLAutoLoadEnv(t, "", false)
-	env.client.expectAutoLoad(t)
 
 	resp := env.delete(t, "id > 0")
 
@@ -348,7 +358,7 @@ func startDMLUpsert(ctx context.Context, env *dmlAutoLoadEnv, collection string,
 
 func TestDMLReadinessWaitDoesNotBlockOtherCollection(t *testing.T) {
 	for _, partial := range []bool{false, true} {
-		for _, phase := range []string{"initial", "query"} {
+		for _, phase := range []string{"unloaded", "query"} {
 			for _, outcome := range []string{"ready", "cancel", "deadline"} {
 				t.Run(fmt.Sprintf("partial=%t/%s/%s", partial, phase, outcome), func(t *testing.T) {
 					env := newDMLAutoLoadEnv(t, phase, !partial)
@@ -356,23 +366,19 @@ func TestDMLReadinessWaitDoesNotBlockOtherCollection(t *testing.T) {
 					waiting, release := make(chan struct{}), make(chan struct{})
 					var once sync.Once
 					t.Cleanup(func() { once.Do(func() { close(release) }) })
-					calls := 0
 					env.client.coordinator.EXPECT().EnsureCollectionReady(mock.Anything, mock.Anything).RunAndReturn(
 						func(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
-							calls++
 							require.EqualValues(t, 100, req.GetCollectionID())
-							if phase == "query" && calls == 1 {
-								return merr.Success(), nil
-							}
 							close(waiting)
 							select {
 							case <-release:
 								env.client.server.loaded.Store(true)
+								env.client.publishReplica()
 								return merr.Success(), nil
 							case <-ctx.Done():
 								return nil, ctx.Err()
 							}
-						})
+						}).Once()
 					ctx, cancel := context.WithCancel(env.node.ctx)
 					if outcome == "deadline" {
 						cancel()

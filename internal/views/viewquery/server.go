@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -100,7 +101,10 @@ func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOn
 	return assembleAdvancedSearchResults(results), nil
 }
 
-func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest, selection *viewpb.SegmentSelection) (*internalpb.SearchResults, error) {
+func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequest, searchReq *internalpb.SearchRequest, selection *viewpb.SegmentSelection) (retResp *internalpb.SearchResults, retErr error) {
+	totalTimer := workerQueryTotal.Begin()
+	defer totalTimer.EndError(&retErr)
+	acquireTimer := workerQueryAcquire.Begin()
 	tasks, err := s.provider.AcquireSearchSegmentTasks(
 		ctx,
 		qviews.FromProtoShardID(req.GetShardId()),
@@ -109,6 +113,7 @@ func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequ
 		searchReq,
 		selection,
 	)
+	acquireTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +125,9 @@ func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequ
 	if req.GetExecutionOptions() != nil {
 		tasks = &SearchTasksWithOptions{SearchSegmentTasks: tasks, Options: req.GetExecutionOptions()}
 	}
+	executeTimer := workerQueryExecute.Begin()
 	result, err := s.scheduler.Search(ctx, tasks)
+	executeTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +223,12 @@ func (s *Server) PrewarmOnView(ctx context.Context, req *viewpb.PrewarmOnViewReq
 	}
 	return &viewpb.PrewarmOnViewResponse{}, nil
 }
+
+var (
+	workerQueryTotal   = stage.New("worker", "Search", "total")
+	workerQueryAcquire = stage.New("worker", "Search", "acquire_tasks")
+	workerQueryExecute = stage.New("worker", "Search", "execute_tasks")
+)
 
 func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStreamServer) error {
 	initial, err := stream.Recv()

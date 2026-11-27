@@ -39,17 +39,23 @@ func TestManifestPrewarmURI(t *testing.T) {
 	const basePath = "files//literal/../insert_log/1/2/3/"
 	descriptor := packed.MarshalManifestPath(basePath, 17)
 	sized := packed.CommittedManifestPath(basePath, 17, 4096, "remote")
-	for _, provider := range []string{"aws", "aliyun", "tencent", "huawei", "gcp", "azure"} {
-		t.Run(provider, func(t *testing.T) {
-			scheme := "s3"
-			if provider == "azure" {
-				scheme = "az"
-			}
-			resolve, err := manifestPrewarmResolver(provider, "bucket///")
+	for _, tc := range []struct {
+		provider string
+		scheme   string
+	}{
+		{"aws", "s3"},
+		{"aliyun", "ali"},
+		{"tencent", "tc"},
+		{"huawei", "s3"},
+		{"gcp", "gcs"},
+		{"azure", "az"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			resolve, err := manifestPrewarmResolver(tc.provider, "bucket///")
 			require.NoError(t, err)
 			uri, size, err := resolve(descriptor)
 			require.NoError(t, err)
-			require.Equal(t, scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
+			require.Equal(t, tc.scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
 			require.Zero(t, size)
 			// A committed revision records its manifest size, which is not part of the URI.
 			sizedURI, size, err := resolve(sized)
@@ -79,6 +85,7 @@ func TestTalonPrewarmConfiguration(t *testing.T) {
 		calls++
 		require.Equal(t, 1, concurrency)
 		require.Equal(t, "coordinator:7000", config.GetTalonCoordinator())
+		require.Equal(t, "cluster-1-VectorLake-meta", config.GetTalonNamespace())
 		return nil, merr.WrapErrServiceInternalMsg("recorded construction")
 	}
 	supplier := func(context.Context) ([]string, error) { return nil, nil }
@@ -94,6 +101,10 @@ func TestTalonPrewarmConfiguration(t *testing.T) {
 	require.Zero(t, calls)
 	require.NoError(t, p.Save(p.CommonCfg.StorageType.Key, "remote"))
 	require.NoError(t, p.Save(p.CommonCfg.StorageTalonCoordinator.Key, "coordinator:7000"))
+	require.NoError(t, p.Save("common.cloud.clusterId", "cluster-1"))
+	require.NoError(t, p.Save("common.cloud.instanceType", "VectorLake"))
+	require.NoError(t, p.Save("common.cloud.classType", "Tiered"))
+	require.NoError(t, p.Save(p.CommonCfg.StorageTalonEnabledStages.Key, "manifest"))
 	require.NoError(t, p.Save(p.MinioCfg.CloudProvider.Key, "aws"))
 	require.NoError(t, p.Save(p.MinioCfg.BucketName.Key, "bucket"))
 	for _, tc := range []struct{ key, value string }{

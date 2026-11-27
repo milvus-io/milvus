@@ -64,6 +64,7 @@
 #include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/OpContext.h"
+#include "common/PrometheusClient.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
@@ -96,7 +97,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
-#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadConfig.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
@@ -136,6 +137,29 @@ IsLazyColumnForTest(const std::shared_ptr<ChunkedColumnInterface>& column) {
     auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
     EXPECT_NE(proxy, nullptr);
     return proxy != nullptr && proxy->IsLazy();
+}
+
+uint64_t
+QueryStageSampleCount(const std::string& stage, const std::string& result) {
+    for (const auto& family :
+         milvus::monitor::getPrometheusClient().GetRegistry().Collect()) {
+        if (family.name != "internal_core_query_stage_duration_seconds") {
+            continue;
+        }
+        for (const auto& metric : family.metric) {
+            bool matches_stage = false;
+            bool matches_result = false;
+            for (const auto& label : metric.label) {
+                matches_stage |= label.name == "stage" && label.value == stage;
+                matches_result |=
+                    label.name == "result" && label.value == result;
+            }
+            if (matches_stage && matches_result) {
+                return metric.histogram.sample_count;
+            }
+        }
+    }
+    return 0;
 }
 
 class LazyColumnGroupGuard {
@@ -314,18 +338,21 @@ class BlockingMetadataReader : public milvus_storage::api::Reader {
     }
 
     folly::SemiFuture<OpenResult>
-    get_chunk_reader_async(int64_t index,
-                           const std::shared_ptr<std::vector<std::string>>&
-                               columns) const override {
+    get_chunk_reader_async(
+        int64_t index,
+        const std::shared_ptr<std::vector<std::string>>& columns,
+        folly::CancellationToken cancellation) const override {
         ++async_calls;
         if (!block_next_.exchange(false)) {
-            return reader_->get_chunk_reader_async(index, columns);
+            return reader_->get_chunk_reader_async(
+                index, columns, cancellation);
         }
         auto gate = release_.getSemiFuture();
         started_.set_value();
         return std::move(gate).deferValue(
-            [reader = reader_, index, columns](folly::Unit) {
-                return reader->get_chunk_reader(index, columns);
+            [reader = reader_, index, columns, cancellation](folly::Unit) {
+                return reader->get_chunk_reader_async(
+                    index, columns, cancellation);
             });
     }
 
@@ -1071,18 +1098,16 @@ TEST_P(TestLazyManifest, StructOffsetsBuiltBeforePublicationAndDoNotReloadRaw) {
 
 TEST_P(TestLazyManifest, LazyManifestMatchCancellationDuringMetadataOpen) {
     LazyColumnGroupGuard lazy_group_guard(true);
-    const auto previous_async =
-        storagev2translator::StorageV2AsyncLoadEnabled();
-    auto restore_async = folly::makeGuard([&] {
-        storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
-    });
+    const auto previous_async = milvus::storage::LoadAsyncReadEnabled();
+    auto restore_async = folly::makeGuard(
+        [&] { milvus::storage::SetLoadAsyncReadEnabled(previous_async); });
     auto policies =
         cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
     policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
     CacheWarmupPolicyGuard warmup_guard(policies);
     for (bool async_enabled : {false, true}) {
         SCOPED_TRACE(async_enabled);
-        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(async_enabled);
         auto schema = GenChunkedSegmentTestSchema(GetParam());
         schema->AddDebugArrayField("items[source]", DataType::INT32, true);
         auto label =
@@ -1269,6 +1294,11 @@ TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
         EXPECT_TRUE(IsLazyColumnForTest(column));
     }
 
+    const auto reader_opens =
+        QueryStageSampleCount("manifest_reader_open", "success");
+    const auto translators =
+        QueryStageSampleCount("manifest_translator", "success");
+    const auto slots = QueryStageSampleCount("manifest_cache_slot", "success");
     auto memory_before_materialize = segment_impl->GetMemoryUsageInBytes();
     constexpr int kThreadCount = 16;
     std::atomic<int> ready{0};
@@ -1302,6 +1332,16 @@ TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
     }
 
     EXPECT_FALSE(failed.load(std::memory_order_acquire));
+    EXPECT_EQ(QueryStageSampleCount("manifest_reader_open", "success"),
+              reader_opens + 1);
+    EXPECT_EQ(QueryStageSampleCount("manifest_translator", "success"),
+              translators + 1);
+    EXPECT_EQ(QueryStageSampleCount("manifest_cache_slot", "success"),
+              slots + 1);
+    // Warm access must not be reported as another cold reader construction.
+    ASSERT_NE(int64_column->DataOfChunk(nullptr, 0).get(), nullptr);
+    EXPECT_EQ(QueryStageSampleCount("manifest_reader_open", "success"),
+              reader_opens + 1);
     EXPECT_GT(int64_column->DataByteSize(), 0);
     EXPECT_GT(string_column->DataByteSize(), 0);
     // The untouched user-field sibling shares the same Task.
@@ -1702,6 +1742,11 @@ TEST_P(TestLazyManifest, LazyManifestFirstNonCancellationFailureIsRetryable) {
     int64_t first_offset = 0;
     EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
 
+    auto failed_load_stages = [] {
+        return QueryStageSampleCount("manifest_reader_open", "error") +
+               QueryStageSampleCount("manifest_load_cells", "error");
+    };
+    const auto failures_before = failed_load_stages();
     std::optional<ErrorCode> first_error;
     try {
         (void)column->DataOfChunk(nullptr, 0);
@@ -1740,6 +1785,7 @@ TEST_P(TestLazyManifest, LazyManifestFirstNonCancellationFailureIsRetryable) {
         std::rethrow_exception(unexpected_error);
     }
 
+    EXPECT_GT(failed_load_stages(), failures_before);
     ASSERT_TRUE(first_error.has_value());
     EXPECT_NE(*first_error, ErrorCode::FollyCancel);
     ASSERT_TRUE(operator_error.has_value());
@@ -3176,12 +3222,11 @@ TEST_F(MilvusTableManifestLoadTest, ReopenLoadsNewlyBoundField) {
 TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
     for (bool async_enabled : {false, true}) {
         SCOPED_TRACE(async_enabled);
-        const auto previous_async =
-            storagev2translator::StorageV2AsyncLoadEnabled();
+        const auto previous_async = milvus::storage::LoadAsyncReadEnabled();
         auto restore_async = folly::makeGuard([previous_async] {
-            storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+            milvus::storage::SetLoadAsyncReadEnabled(previous_async);
         });
-        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        milvus::storage::SetLoadAsyncReadEnabled(async_enabled);
         LazyColumnGroupGuard lazy_group_guard(true);
         auto policies =
             cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
@@ -5766,4 +5811,162 @@ TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
         EXPECT_EQ(c.expected, final.count())
             << "UnaryRangeFilterExpr(pk " << c.name << " X)";
     }
+}
+
+TEST(LazyManifest, EmptyExternalStructViewDoesNotRegisterChildren) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    // The primary key is virtual; the empty View selects no user fields.
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+
+    auto physical = std::make_shared<Schema>();
+    physical->AddField(FieldMeta(FieldName("items"),
+                                 FieldId(201),
+                                 DataType::INT64,
+                                 true,
+                                 std::nullopt,
+                                 "items"));
+    physical->set_external_source(source.external_source());
+    physical->set_external_spec(source.external_spec());
+    const auto path = UniqueManifestTestPath("empty_external_struct_view");
+    auto fs = GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, path);
+    constexpr int64_t rows = 8;
+    milvus::test::V3SegmentTestData data(
+        physical, 1, rows, 1, TestLocalPath, path, "items");
+    ASSERT_EQ(data.NumColumnGroups(), 1);
+    // Remove the payload. A correctly empty load scope must never open it,
+    // even though the manifest still contains a real target Struct parent.
+    const auto payload = data.GetColumnGroups()->at(0)->files.front().path;
+    ASSERT_TRUE(fs->DeleteFile(payload).ok());
+    auto layout =
+        std::make_shared<const SealedFieldLayout>(schema, LoadScope({}));
+    ASSERT_TRUE(layout->IsOrdinaryExternalStruct("items"));
+    ASSERT_TRUE(
+        layout->GetOrdinaryStructProjections(schema->get_field_ids()).empty());
+    constexpr int64_t segment_id = 3199;
+    ChunkedSegmentSealedImpl segment(
+        layout, nullptr, SegcoreConfig::default_config(), segment_id);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(segment_id);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(rows);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(data.ManifestPathJson());
+    segment.SetLoadInfo(info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment.Load(trace_ctx, nullptr));
+    const auto state = segment.TestGetPublishedStateSnapshot();
+    EXPECT_EQ(state->runtime->fields.count(FieldId(201)), 0);
+    EXPECT_EQ(state->runtime->fields.count(FieldId(202)), 0);
+    EXPECT_FALSE(state->fields->has_field(FieldId(201)));
+    EXPECT_FALSE(state->fields->has_field(FieldId(202)));
+}
+
+TEST(LazyManifest, MilvusTableRefreshWithoutSchemaLoadsNewBinding) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    policies.scalarIndexCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    const FieldId first(100), added(101), pk(102);
+    auto source = std::make_shared<Schema>();
+    source->AddField(FieldMeta(
+        FieldName("first"), first, DataType::INT64, false, std::nullopt));
+    auto expanded = std::make_shared<Schema>(*source);
+    expanded->AddField(FieldMeta(
+        FieldName("added"), added, DataType::INT64, false, std::nullopt));
+    auto fs = GetDefaultArrowFileSystem();
+    auto old_path = UniqueManifestTestPath("deferred_old");
+    auto new_path = UniqueManifestTestPath("deferred_new");
+    StorageV2TempDirGuard old_guard(fs, old_path), new_guard(fs, new_path);
+    milvus::test::V3SegmentTestData old_data(
+        source, 1, 8, 1, TestLocalPath, old_path, "100");
+    milvus::test::V3SegmentTestData new_data(
+        expanded, 1, 8, 1, TestLocalPath, new_path, "100|101");
+    auto target = std::make_shared<Schema>(*expanded);
+    target->set_external_source("s3://bucket/snapshot");
+    target->set_external_spec(R"({"format":"milvus-table"})");
+    target->AddField(FieldMeta(
+        FieldName("__virtual_pk__"), pk, DataType::INT64, false, std::nullopt));
+    target->set_primary_field_id(pk);
+    target->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    target->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto segment = CreateSealedSegment(target, nullptr, 3198);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(3198);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(8);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(old_data.ManifestPathJson());
+    segment->SetLoadInfo(info);
+    milvus::tracer::TraceContext trace;
+    ASSERT_NO_THROW(segment->Load(trace, nullptr));
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    ASSERT_FALSE(sealed->HasFieldInLoadedManifest(added));
+    // A second native caller must not silently discard an index for the newly
+    // bound field while constructing its load-info cache from the old view.
+    auto indexed_segment = CreateSealedSegment(target, nullptr, 3199);
+    auto index_info = info;
+    index_info.set_segmentid(3199);
+    indexed_segment->SetLoadInfo(index_info);
+    ASSERT_NO_THROW(indexed_segment->Load(trace, nullptr));
+    auto* indexed =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(indexed_segment.get());
+    ASSERT_NE(indexed, nullptr);
+    index_info.set_manifest_path(new_data.ManifestPathJson());
+    auto* missing_index = index_info.add_index_infos();
+    missing_index->set_fieldid(added.get());
+    missing_index->set_indexid(9001);
+    missing_index->set_buildid(9002);
+    missing_index->set_index_version(1);
+    missing_index->set_enable_index(true);
+    missing_index->add_index_file_paths(new_path + "/missing-index");
+    auto* type = missing_index->add_index_params();
+    type->set_key("index_type");
+    type->set_value("INVERTED");
+    auto* priority = missing_index->add_index_params();
+    priority->set_key(milvus::LOAD_PRIORITY);
+    priority->set_value("HIGH");
+    milvus::OpContext index_ctx;
+    EXPECT_THROW(indexed->Reopen(&index_ctx, index_info), SegcoreError);
+    EXPECT_FALSE(indexed->HasFieldInLoadedManifest(added));
+    info.set_manifest_path(new_data.ManifestPathJson());
+    milvus::OpContext ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&ctx, info));
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(state->load_info->HasFieldInSchema(added));
+    ASSERT_TRUE(state->runtime->fields.count(added));
+    int64_t offsets[] = {0, 2, 7};
+    auto values = segment->bulk_subscript(nullptr, added, offsets, 3);
+    ASSERT_EQ(values->scalars().long_data().data_size(), 3);
+    EXPECT_EQ(values->scalars().long_data().data(1), 2);
 }
