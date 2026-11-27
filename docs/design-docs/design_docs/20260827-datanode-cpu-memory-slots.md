@@ -137,7 +137,7 @@ variable-width distributions are not a strict bound.
 | Task | Memory model |
 |---|---|
 | Vector/scalar index | Estimated field size x indexMemoryFactor; FM index uses its existing peak-memory model |
-| Text/JSON/BM25 stats | Distinct input column groups/fields x statsMemoryFactor |
+| Text/JSON/BM25 stats | Known logical field bytes plus estimates for unknown fields x statsMemoryFactor |
 | Sort compaction | Whole segment x statsMemoryFactor; sorting retains its input |
 | Mix / schema-bump compaction | Streaming writer budget + concurrently live reader budgets + delete maps |
 | L0 compaction | Deltalog bytes x l0CompactionMemoryFactor + target bloom-filter stats |
@@ -155,7 +155,25 @@ meta.SupportsFieldProjection. That projection check recognizes StorageV3 with a
 manifest; task memory estimation also treats StorageV2 with a manifest as
 projecting. The paths share width helpers, not a single field-size policy.
 
-For task memory estimates, VarChar uses the smaller of the recorded field/group
+Task field estimates first use `meta.SegmentFieldLogicalSizes` to validate the
+statistics version, row count, and committed manifest binding. A present field
+entry supplies its payload bytes plus its validity bitmap, including a known
+zero. Zero payloads retain the index's CPU request and FM-index per-row model.
+TEXT payload includes inline and external bodies exactly once. Known
+totals are not capped by encoded group or segment sizes. Stats combines the
+selected known fields before rounding validity bits, then estimates remaining
+fields through the existing group logic. A mixed known/unknown group can still
+include some encoded bytes of a known field in the unknown-field estimate.
+Unsigned logical counters and expanded task budgets saturate at `MaxInt64`.
+
+Missing or invalid logical statistics retain the existing metadata estimates,
+without reading manifests, footers, or LOB bodies. This includes historical
+segments and compaction outputs that cannot measure reused TEXT references.
+Their estimates can still undercount LOB payloads. Logical input bytes exclude
+reader and index allocation overhead; the existing factors and memory floor
+remain resource estimates, not RSS bounds.
+
+For fields without logical totals, VarChar uses the smaller of the recorded field/group
 size and its schema bound: rows x (max_length + 4) plus the nullable bitmap.
 Without a valid schema bound, the recorded size is retained. A projecting
 reader can cap non-nullable fixed-width fields at their schema width. For a
@@ -164,7 +182,7 @@ The fallback schema bound for a nullable fixed-dimension vector includes its
 validity bitmap and `4 * (rows + 1)` bytes for Arrow offsets. V2 file readers
 keep the whole-group estimate for fixed-width fields. The VarChar cap estimates
 field input, not the peak memory of decoding a whole group. Stats deduplicates
-shared column groups as logical input; parallel field readers and index-building
+shared groups among unknown fields; parallel field readers and index-building
 allocations are additional overhead represented by the stats factor, not a
 proven upper bound on RSS.
 

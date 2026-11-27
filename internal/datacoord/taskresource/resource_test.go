@@ -17,6 +17,7 @@
 package taskresource
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -420,6 +421,129 @@ func TestEstimateFieldSize(t *testing.T) {
 		{FieldID: 102, Name: "str", DataType: schemapb.DataType_VarChar},
 	}}
 	assert.Equal(t, total, EstimateFieldSize(v3, unsizable, 102))
+}
+
+func TestEstimateFieldSizeLogicalSizes(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name   string
+		change func(*meta.SegmentInfo, *schemapb.CollectionSchema)
+		want   int64
+	}{
+		{name: "payload exceeds encoded group and segment", want: 1000},
+		{name: "known zero", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.Stats.FieldLogicalSizes.Fields[102].PayloadBytes = 0
+		}, want: 0},
+		{name: "unsigned payload saturates the resource budget", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.Stats.FieldLogicalSizes.Fields[102].PayloadBytes = math.MaxUint64
+		}, want: math.MaxInt64},
+		{name: "nullable bitmap", change: func(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema) {
+			schema.Fields[0].Nullable = true
+			segment.Stats.FieldLogicalSizes.Fields[102].ValidityBits = 9
+		}, want: 1002},
+		{name: "unmeasured field", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			delete(segment.Stats.FieldLogicalSizes.Fields, 102)
+		}, want: 64},
+		{name: "legacy segment", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.Stats.FieldLogicalSizes = nil
+			segment.FieldLogicalSizesManifest = ""
+		}, want: 64},
+		{name: "replaced manifest", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.ManifestPath = packed.MarshalManifestPath("files/insert_log/1/2/3", 2)
+		}, want: 64},
+		{name: "changed row count", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.NumOfRows++
+		}, want: 64},
+		{name: "unknown statistics version", change: func(segment *meta.SegmentInfo, _ *schemapb.CollectionSchema) {
+			segment.Stats.FieldLogicalSizes.Version++
+		}, want: 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+			segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 3, NumOfRows: 9, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+				ManifestPath: manifest, FieldLogicalSizesManifest: manifest,
+				Stats: &datapb.Statistics{
+					InsertBinlogSize: 256,
+					LoadResource: &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+						{GroupId: 0, FieldIds: []int64{102, 103}, MemorySize: 64},
+					}},
+					FieldLogicalSizes: &datapb.FieldLogicalSizes{
+						Version: storage.FieldLogicalSizeVersion, RowCount: 9,
+						Fields: map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: 1000}},
+					},
+				},
+			}}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 102, DataType: schemapb.DataType_Text},
+				{FieldID: 103, DataType: schemapb.DataType_Text},
+			}}
+			if tc.change != nil {
+				tc.change(segment, schema)
+			}
+			size := EstimateFieldSize(segment, schema, 102)
+			assert.Equal(t, tc.want, size)
+			if tc.want == math.MaxInt64 {
+				assert.EqualValues(t, math.MaxInt64, Index(size, false).Memory)
+			}
+		})
+	}
+}
+
+func TestStatsInputSizeLogicalSizes(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name   string
+		fields map[int64]*datapb.FieldLogicalSize
+		want   int64
+	}{
+		// Round the selected fields' validity bits after aggregation: six bits
+		// need one byte. Neither the group nor segment size caps known payloads.
+		{"known fields exceed reference group", map[int64]*datapb.FieldLogicalSize{
+			102: {PayloadBytes: 1000, ValidityBits: 3}, 103: {PayloadBytes: 2000, ValidityBits: 3},
+		}, 3001},
+		{"known and unmeasured fields share a group", map[int64]*datapb.FieldLogicalSize{
+			102: {PayloadBytes: 1000, ValidityBits: 3},
+		}, 1065},
+		{"known nulls", map[int64]*datapb.FieldLogicalSize{
+			102: {ValidityBits: 3}, 103: {ValidityBits: 3},
+		}, 1},
+		{"unmeasured group charged once", nil, 64},
+		{"unsigned payload and unmeasured field saturate the resource budget", map[int64]*datapb.FieldLogicalSize{
+			102: {PayloadBytes: math.MaxUint64, ValidityBits: 3},
+		}, math.MaxInt64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+			segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 3, NumOfRows: 3, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+				ManifestPath: manifest, FieldLogicalSizesManifest: manifest,
+				Stats: &datapb.Statistics{
+					InsertBinlogSize: 256,
+					LoadResource: &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+						{GroupId: 0, FieldIds: []int64{102, 103}, MemorySize: 64},
+					}},
+					FieldLogicalSizes: &datapb.FieldLogicalSizes{
+						Version: storage.FieldLogicalSizeVersion, RowCount: 3, Fields: tc.fields,
+					},
+				},
+			}}
+			schema := &schemapb.CollectionSchema{}
+			for _, id := range []int64{102, 103} {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: id, DataType: schemapb.DataType_Text, Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "enable_match", Value: "true"}, {Key: "enable_analyzer", Value: "true"},
+					},
+				})
+			}
+			size := StatsInputSize(segment, schema, indexpb.StatsSubJob_TextIndexJob)
+			assert.Equal(t, tc.want, size)
+			if tc.want == math.MaxInt64 {
+				assert.EqualValues(t, math.MaxInt64, Stats(size).Memory)
+			}
+		})
+	}
 }
 
 // The schema bound of a varchar(65535) or a JSON field is rows x the per-value

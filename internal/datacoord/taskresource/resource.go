@@ -18,6 +18,7 @@ package taskresource
 
 import (
 	"context"
+	"math"
 	"slices"
 	"sync/atomic"
 
@@ -66,7 +67,11 @@ func ClampMemory(memory int64) int64 {
 }
 
 func scaled(size int64, factor float64) int64 {
-	return int64(float64(size) * factor)
+	value := float64(size) * factor
+	if value >= float64(math.MaxInt64) {
+		return math.MaxInt64
+	}
+	return int64(value)
 }
 
 // Default is the answer when a task's inputs are gone for good: a
@@ -368,11 +373,20 @@ func StatsInputSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema
 	for _, fieldID := range fields {
 		remaining[fieldID] = struct{}{}
 	}
-	var size int64
-	// StatsInputSize counts distinct input bytes, not peak RSS. Text and JSON
-	// workers build fields concurrently, and V2 may decode the same group in
-	// several readers. Stats' expansion factor budgets that extra work; this
-	// deduplicated input is not a hard bound on those allocations.
+	known := meta.SegmentFieldLogicalSizes(segment.SegmentInfo)
+	var measured []*datapb.FieldLogicalSize
+	for fieldID := range remaining {
+		if field, ok := known.GetFields()[fieldID]; ok {
+			measured = append(measured, field)
+			delete(remaining, fieldID)
+		}
+	}
+	size := logicalSizeBytes(measured...)
+	// Known logical totals are independent of column groups and may include
+	// external TEXT bodies. Unknown fields retain the group estimate, which may
+	// also include encoded bytes of known fields in a mixed group. Parallel
+	// readers and index allocations remain covered by the stats factor; these
+	// input estimates are not a hard bound on peak RSS.
 	chargeGroup := func(groupID int64, members []int64, groupSize int64) {
 		if groupSize <= 0 {
 			return
@@ -384,7 +398,7 @@ func StatsInputSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema
 				delete(remaining, fieldID)
 			}
 		}
-		size += min(requestedSize, groupSize)
+		size = meta.SaturatingAdd(size, min(requestedSize, groupSize))
 	}
 	for _, group := range segment.GetBinlogs() {
 		var groupSize int64
@@ -398,7 +412,7 @@ func StatsInputSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema
 		chargeGroup(group.GetGroupId(), group.GetFieldIds(), group.GetMemorySize())
 	}
 	for fieldID := range remaining {
-		size += EstimateFieldSize(segment, schema, fieldID)
+		size = meta.SaturatingAdd(size, EstimateFieldSize(segment, schema, fieldID))
 	}
 	return size
 }
@@ -467,12 +481,27 @@ func decodesWholeColumnGroup(segment *meta.SegmentInfo) bool {
 	return segment.GetStorageVersion() == storage.StorageV2 && segment.GetManifestPath() == ""
 }
 
+// logicalSizeBytes combines validated field totals before rounding validity
+// bits. Counters are uint64 on the wire; task budgets saturate at MaxInt64.
+func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
+	var size, remainingBits int64
+	for _, field := range fields {
+		size = meta.SaturatingAdd(size,
+			int64(min(field.PayloadBytes, uint64(math.MaxInt64))), int64(field.ValidityBits/8))
+		remainingBits += int64(field.ValidityBits % 8)
+	}
+	return meta.SaturatingAdd(size, meta.CeilDiv(remainingBits, 8))
+}
+
 // EstimateFieldSize estimates field input bytes for index and stats task
 // memory. Legacy scalar slots use the inspectors' estimates based on
 // meta.EstimateFieldsReadSize and meta.SupportsFieldProjection instead. Those
 // paths share fixed-width helpers, but not the full estimation policy.
 //
-//  1. The size meta recorded for the field (recordedFieldSize: its own
+//  1. A validated V3 logical-size entry, including a known zero. It covers the
+//     current manifest and row count, and includes TEXT bodies stored in LOBs.
+//     Logical bytes are not capped by encoded column-group or segment sizes.
+//  2. Otherwise the size meta recorded for the field (recordedFieldSize: its own
 //     FieldBinlog in storage v1, its column group in v2, and the column group
 //     in Stats.LoadResource for a v3 manifest segment). VarChar is capped at
 //     its schema upper bound so a shared group's other fields do not inflate
@@ -480,14 +509,13 @@ func decodesWholeColumnGroup(segment *meta.SegmentInfo) bool {
 //     when the reader projects them; StorageV2 file reads retain the whole-group
 //     size for those fields. The VarChar cap estimates field input, not peak
 //     memory while a V2 file reader decodes the whole group.
-//  2. Otherwise the schema's upper bound (fieldsize.EstimateFieldSize). This is
+//  3. Otherwise the schema's upper bound (fieldsize.EstimateFieldSize). This is
 //     the storage v3 case after a DataCoord restart, whose per-field binlogs are
 //     not persisted in meta.
-//  3. Otherwise -- no schema, a field the schema does not know, or a type the
+//  4. Otherwise -- no schema, a field the schema does not know, or a type the
 //     write path does not bound (text, geometry) -- the whole segment.
 //
-// Steps 2 and 3 are both capped at the segment: one field can never hold more
-// than the segment it is part of. The cap is not decoration. A schema bound is
+// Steps 3 and 4 retain the segment cap as a fallback heuristic. A schema bound is
 // rows x the per-row limit, and for a varchar(65535) or a JSON field (64KB per
 // value) that is orders of magnitude above the real data; a task priced there
 // exceeds every worker, is dispatched as oversized, and the worker then books
@@ -495,11 +523,16 @@ func decodesWholeColumnGroup(segment *meta.SegmentInfo) bool {
 // tasks take every worker out of memory-aware placement at once.
 // If the segment has no recorded size, the cap is itself a heuristic; see
 // EstimateSegmentSize for that fallback's accepted estimation trade-off.
+// Missing logical totals can still under-price TEXT whose recorded sizes only
+// account for LOB references. Resolving unknown sizes performs no storage I/O.
 //
 // The rule does not look at whether the collection is external. External
 // segments differ only in what meta holds for them, and that is exactly what
-// the three steps key on.
+// these steps key on.
 func EstimateFieldSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSchema, fieldID int64) int64 {
+	if size, ok := meta.SegmentFieldLogicalSizes(segment.SegmentInfo).GetFields()[fieldID]; ok {
+		return logicalSizeBytes(size)
+	}
 	field := typeutil.GetFieldByID(schema, fieldID)
 	if recorded := segment.RecordedFieldSize(fieldID); recorded > 0 {
 		if bound, exact, ok := fieldsize.SchemaFieldSize(field, segment.GetNumOfRows()); ok && bound > 0 {
