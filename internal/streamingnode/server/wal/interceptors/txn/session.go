@@ -259,14 +259,21 @@ func (s *TxnSession) Cleanup() {
 
 // abort terminates a session under the exclusive WAL lock. Marking the outcome
 // lets LastConfirmedMessageID advance without waiting for the session's lease.
-func (s *TxnSession) abort() {
+func (s *TxnSession) abort() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// OnCommit may already have reached WAL even if it lost the reply.
+	// Replicated transactions have an infinite lease and never reroute local DML.
+	var uncommittedUntil uint64
+	if s.state == message.TxnStateInFlight && s.txnContext.Keepalive != message.TxnKeepaliveInfinite {
+		uncommittedUntil = s.expiredTimeTick()
+	}
 	if s.state != message.TxnStateCommitted {
 		s.state = message.TxnStateRollbacked
 	}
 	s.cleanup()
+	return uncommittedUntil
 }
 
 // cleanup calls the cleanup functions.

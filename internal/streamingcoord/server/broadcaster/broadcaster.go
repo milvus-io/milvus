@@ -43,6 +43,16 @@ type Broadcaster interface {
 	// Ack acknowledges the message at the specified vchannel.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
+	// WaitVChannelsAcked blocks until every given vchannel of a broadcast is
+	// acknowledged on this cluster, and returns the greatest time tick they
+	// were acknowledged at. The broadcast need not exist yet.
+	WaitVChannelsAcked(ctx context.Context, typ message.MessageType, broadcastID uint64, vchannels []string) (uint64, error)
+
+	// ReportVChannelAppended records, in memory, that the copy of a broadcast
+	// on vchannel was appended to the WAL of this cluster at timeTick.
+	// WaitVChannelsAcked answers with it before the copy is acknowledged.
+	ReportVChannelAppended(ctx context.Context, broadcastID uint64, vchannel string, timeTick uint64) error
+
 	// GetPendingSchemaFileResources returns collection ID -> file resource IDs
 	// for all pending schema broadcast tasks that haven't completed their ack
 	// callback yet. Used during recovery to rebuild file resource refCnt.

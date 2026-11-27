@@ -1285,6 +1285,13 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.SplitChunkProxy.Key, "false")
 		assert.False(t, Params.SplitChunkProxy.GetAsBool())
 		params.Reset(Params.SplitChunkProxy.Key)
+
+		assert.Equal(t, "proxy.shardSplit.maxFenceRetryWait", Params.ShardSplitMaxFenceRetryWait.Key)
+		assert.Equal(t, 60*time.Second, Params.ShardSplitMaxFenceRetryWait.GetAsDurationByParse())
+		assert.False(t, Params.ShardSplitMaxFenceRetryWait.Export, "a new parameter is not exported to milvus.yaml")
+		params.Save(Params.ShardSplitMaxFenceRetryWait.Key, "5s")
+		assert.Equal(t, 5*time.Second, Params.ShardSplitMaxFenceRetryWait.GetAsDurationByParse())
+		params.Reset(Params.ShardSplitMaxFenceRetryWait.Key)
 		assert.True(t, Params.SplitChunkProxy.GetAsBool())
 
 		t.Logf("TimeTickInterval: %v", &Params.TimeTickInterval)

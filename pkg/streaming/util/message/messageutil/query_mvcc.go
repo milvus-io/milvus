@@ -24,6 +24,12 @@ func AdvancesQueryTransformMVCC(msg message.BasicMessage) bool {
 		message.MessageTypeFlushAll,
 		message.MessageTypeAlterWAL:
 		return true
+	case message.MessageTypeSplitShard:
+		// The copy on the source is the last event of that vchannel, and the
+		// copy on a target is its first. Both move the transform frontier of the
+		// vchannel to the message.
+		role := splitShardRoleOfMessage(msg)
+		return role == SplitShardRoleSource || role == SplitShardRoleTarget
 	case message.MessageTypeAlterCollection:
 		if immutable, ok := msg.(message.ImmutableMessage); ok {
 			return IsSchemaChange(message.MustAsImmutableAlterCollectionMessageV2(immutable).Header())

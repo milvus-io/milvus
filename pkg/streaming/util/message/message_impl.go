@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -229,6 +230,15 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 	bh := m.broadcastHeader()
 	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
 		panic("broadcast vchannels length mismatch")
+	}
+	// The append-first vchannels are a subset of the vchannels, so they are
+	// renamed through the mapping the caller supplied for that list.
+	for i, appendFirst := range bh.AppendFirstVchannels {
+		idx := slices.Index(bh.Vchannels, appendFirst)
+		if idx < 0 {
+			panic("append-first vchannel is not a vchannel of the broadcast")
+		}
+		bh.AppendFirstVchannels[i] = broadcastVChannels[0][idx]
 	}
 	bh.Vchannels = broadcastVChannels[0]
 	bhVal, err := EncodeProto(bh)

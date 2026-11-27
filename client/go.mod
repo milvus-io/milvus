@@ -7,7 +7,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/bytedance/mockey v1.4.6
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/cockroachdb/errors v1.9.1
+	github.com/cockroachdb/errors v1.11.3
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261123113001-86488f2f6240
@@ -23,10 +23,10 @@ require (
 
 require (
 	github.com/bits-and-blooms/bitset v1.12.0 // indirect
-	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
-	github.com/cockroachdb/redact v1.1.3 // indirect
+	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
+	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/getsentry/sentry-go v0.12.0 // indirect
+	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect

@@ -23,6 +23,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
@@ -486,6 +489,8 @@ func (s *WriteSuite) TestUpsert() {
 			WithIdempotencyKey("key-1"))
 		s.ErrorIs(err, merr.ErrParameterInvalid)
 		s.ErrorContains(err, "only supported for Insert")
+		s.True(errors.Is(err, errIdempotencyKeyUnsupportedForDML))
+		s.NotErrorIs(err, merr.ErrCollectionSchemaMismatch)
 	})
 
 	s.Run("failure", func() {
@@ -629,4 +634,49 @@ func TestWithIdempotencyKeyContext(t *testing.T) {
 
 func TestWrite(t *testing.T) {
 	suite.Run(t, new(WriteSuite))
+}
+
+func (s *WriteSuite) TestPartialInsertDoesNotReplayWholeBatch() {
+	collName := s.randString(8)
+	schema := entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))
+	s.setupCache(collName, schema)
+	s.mock.EXPECT().Insert(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+		s.EqualValues(2, req.GetNumRows())
+		return &milvuspb.MutationResult{
+			Status:    merr.Status(merr.ErrCollectionMutationIncomplete),
+			SuccIndex: []uint32{1}, ErrIndex: []uint32{0},
+			IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{22}}}},
+		}, nil
+	}).Once()
+	result, err := s.client.Insert(context.Background(), NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{11, 22}))
+	s.Require().ErrorIs(err, ErrCollectionMutationIncomplete)
+	s.False(IsRetryableError(err))
+	s.EqualValues(1, result.InsertCount)
+	id, err := result.IDs.GetAsInt64(0)
+	s.NoError(err)
+	s.EqualValues(22, id)
+}
+
+func (s *WriteSuite) TestPartialInsertPreservesDecodeFailure() {
+	collName := s.randString(8)
+	schema := entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))
+	s.setupCache(collName, schema)
+	decodeErr := merr.WrapErrServiceInternal("injected primary key decode failure")
+	decode := mockey.Mock(column.IDColumns).Return(nil, decodeErr).Build()
+	defer decode.UnPatch()
+	s.mock.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
+		Status:    merr.Status(merr.ErrCollectionMutationIncomplete),
+		SuccIndex: []uint32{1}, ErrIndex: []uint32{0},
+		IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{22}}}},
+	}, nil).Once()
+
+	result, err := s.client.Insert(context.Background(), NewColumnBasedInsertOption(collName).WithInt64Column("id", []int64{11, 22}))
+	s.Require().True(errors.Is(err, ErrCollectionMutationIncomplete))
+	s.True(errors.Is(err, decodeErr))
+	s.ErrorIs(err, ErrCollectionMutationIncomplete)
+	s.ErrorIs(err, decodeErr)
+	s.Equal(merr.Code(ErrCollectionMutationIncomplete), ErrorCode(err))
+	s.False(IsRetryableError(err))
+	s.EqualValues(1, result.InsertCount)
+	s.Nil(result.IDs)
 }

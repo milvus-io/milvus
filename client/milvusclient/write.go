@@ -84,6 +84,12 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 			resp, err := milvusService.Insert(ctx, req, callOptions...)
 
 			err = merr.CheckRPCCall(resp, err)
+			if errors.Is(err, merr.ErrCollectionMutationIncomplete) {
+				result.InsertCount = int64(len(resp.GetSuccIndex()))
+				ids, decodeErr := column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+				result.IDs = ids
+				return errors.Join(err, decodeErr)
+			}
 			if err != nil {
 				return err
 			}
