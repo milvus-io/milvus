@@ -6991,7 +6991,6 @@ type dataCoordConfig struct {
 	TaskResourceClusteringCompactionCPU  ParamItem `refreshable:"true"`
 	TaskResourceDefaultCPU               ParamItem `refreshable:"true"`
 	TaskResourceIndexMemoryFactor        ParamItem `refreshable:"true"`
-	TaskResourceTextFallbackBytesPerRow  ParamItem `refreshable:"true"`
 	TaskResourceStatsMemoryFactor        ParamItem `refreshable:"true"`
 	TaskResourceL0CompactionMemoryFactor ParamItem `refreshable:"true"`
 	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
@@ -9034,15 +9033,6 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 		Export:       false,
 	}
 	p.TaskResourceIndexMemoryFactor.Init(base.mgr)
-
-	p.TaskResourceTextFallbackBytesPerRow = ParamItem{
-		Key:          "dataCoord.taskResource.textFallbackBytesPerRow",
-		Version:      "3.0.1",
-		DefaultValue: "64k",
-		Doc:          "assumed average bytes per TEXT row when logical field statistics are unavailable; field input is the larger of recorded bytes and rows times this value, before the index/stats memory factor; this is an estimate, not a TEXT length limit",
-		Export:       false,
-	}
-	p.TaskResourceTextFallbackBytesPerRow.Init(base.mgr)
 
 	p.TaskResourceStatsMemoryFactor = ParamItem{
 		Key:          "dataCoord.taskResource.statsMemoryFactor",

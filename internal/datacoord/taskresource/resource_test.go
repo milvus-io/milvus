@@ -453,25 +453,21 @@ func TestEstimateUnknownTextFieldSize(t *testing.T) {
 	}
 }
 
-func TestUnknownTextFieldSizeConfiguration(t *testing.T) {
+func TestTextFieldSizeUsesLogicalStatsWhenAvailable(t *testing.T) {
 	paramtable.Init()
-	params := paramtable.Get()
-	const key = "dataCoord.taskResource.textFallbackBytesPerRow"
-	require.NoError(t, params.Save(key, "128KB"))
-	t.Cleanup(func() { params.Reset(key) })
 	segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 3, NumOfRows: 10, StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
 		ManifestPath: packed.MarshalManifestPath("files/insert_log/1/2/3", 1),
 		Stats:        &datapb.Statistics{InsertBinlogSize: 256},
 	}}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 102, DataType: schemapb.DataType_Text}}}
-	assert.EqualValues(t, 1_310_720, EstimateFieldSize(segment, schema, 102))
+	assert.EqualValues(t, 655_360, EstimateFieldSize(segment, schema, 102))
 	segment.FieldLogicalSizesManifest = segment.ManifestPath
 	segment.Stats.FieldLogicalSizes = &datapb.FieldLogicalSizes{
 		Version: storage.FieldLogicalSizeVersion, RowCount: 10,
 		Fields: map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: 500}},
 	}
-	assert.EqualValues(t, 500, EstimateFieldSize(segment, schema, 102), "fallback configuration must not inflate exact values")
+	assert.EqualValues(t, 500, EstimateFieldSize(segment, schema, 102), "a valid logical total replaces the fallback")
 }
 
 func TestEstimateFieldSizeLogicalSizes(t *testing.T) {

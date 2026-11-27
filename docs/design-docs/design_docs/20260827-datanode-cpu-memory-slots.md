@@ -168,9 +168,8 @@ include some encoded bytes of a known field in the unknown-field estimate.
 Unsigned logical counters and expanded task budgets saturate at `MaxInt64`.
 
 When a TEXT field has no valid logical total, its input estimate is
-`max(recorded field/group bytes, rows * textFallbackBytesPerRow)`.
-`dataCoord.taskResource.textFallbackBytesPerRow` defaults to 64 KiB and is an
-assumed average width, not a schema bound: TEXT writes do not enforce
+`max(recorded field/group bytes, rows * 64 KiB)`. The fixed 64 KiB width is an
+assumed average, not a schema bound: TEXT writes do not enforce
 `max_length`. This covers missing historical statistics and compaction outputs
 that cannot measure reused LOB references without reading manifests, footers, or
 LOB bodies. Stats prices these unknown TEXT fields before applying encoded group
@@ -178,12 +177,11 @@ caps to other unknown fields. Exact totals, including known zero, take precedenc
 for all field types and index families. Ordinary indexes apply indexMemoryFactor;
 FMINDEX applies its own peak-memory model to the same field input.
 
-For 100,000 unknown TEXT rows, the default input estimate is 6,553,600,000 bytes
+For 100,000 unknown TEXT rows, the input estimate is 6,553,600,000 bytes
 (about 6.1 GiB), and the default 2x NGRAM budget is about 12.2 GiB. Larger recorded
-sizes are retained. Raising the assumed width reduces concurrency; a task whose
-budget exceeds every worker can still run through the existing idle-worker
-oversized path. The assumption can undercount fields with a larger actual average
-width and must be calibrated to the workload. Logical input bytes exclude reader
+sizes are retained. A task whose budget exceeds every worker can still run
+through the existing idle-worker oversized path. The assumption can undercount
+fields whose actual average width exceeds 64 KiB. Logical input bytes exclude reader
 and index allocation overhead; the factors and memory floor remain resource
 estimates, not RSS bounds. Schemas or index parameters that have not been resolved
 still use the existing uncached segment fallback.

@@ -497,6 +497,10 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 	return meta.SaturatingAdd(size, meta.CeilDiv(remainingBits, 8))
 }
 
+// unknownTextBytesPerRow is a conservative average-width assumption, not a
+// schema limit. Exact logical totals and larger recorded sizes take precedence.
+const unknownTextBytesPerRow = 64 * 1024
+
 // EstimateFieldSize estimates field input bytes for index and stats task
 // memory. Legacy scalar slots use the inspectors' estimates based on
 // meta.EstimateFieldsReadSize and meta.SupportsFieldProjection instead. Those
@@ -506,7 +510,7 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 //     current manifest and row count, and includes TEXT bodies stored in LOBs.
 //     Logical bytes are not capped by encoded column-group or segment sizes.
 //  2. Unknown TEXT uses the larger of its recorded size and rows times
-//     textFallbackBytesPerRow (64 KiB by default). This is an assumed average
+//     64 KiB. This is an assumed average
 //     width, not a schema limit; TEXT writes do not enforce max_length.
 //     Encoded group and segment sizes do not cap this estimate either.
 //  3. Otherwise the size meta recorded for the field (recordedFieldSize: its own
@@ -532,7 +536,7 @@ func logicalSizeBytes(fields ...*datapb.FieldLogicalSize) int64 {
 // If the segment has no recorded size, the cap is itself a heuristic; see
 // EstimateSegmentSize for that fallback's accepted estimation trade-off.
 // The TEXT fallback can still under-price a field whose actual average width
-// exceeds the configured assumption. Resolving sizes performs no storage I/O.
+// exceeds the 64 KiB assumption. Resolving sizes performs no storage I/O.
 //
 // The rule does not look at whether the collection is external. External
 // segments differ only in what meta holds for them, and that is exactly what
@@ -544,8 +548,7 @@ func EstimateFieldSize(segment *meta.SegmentInfo, schema *schemapb.CollectionSch
 	field := typeutil.GetFieldByID(schema, fieldID)
 	recorded := segment.RecordedFieldSize(fieldID)
 	if field.GetDataType() == schemapb.DataType_Text {
-		return max(recorded, meta.SaturatingMul(segment.GetNumOfRows(),
-			paramtable.Get().DataCoordCfg.TaskResourceTextFallbackBytesPerRow.GetAsSize()))
+		return max(recorded, meta.SaturatingMul(segment.GetNumOfRows(), unknownTextBytesPerRow))
 	}
 	if recorded > 0 {
 		if bound, exact, ok := fieldsize.SchemaFieldSize(field, segment.GetNumOfRows()); ok && bound > 0 {
