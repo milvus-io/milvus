@@ -80,6 +80,10 @@ func (impl *shardInterceptor) Name() string {
 
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
+	// CDC appends bypass the target Proxy's admission check.
+	if msg.MessageType() == message.MessageTypeUpdate && !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool() {
+		return nil, status.NewUnrecoverableError("PK-update requires proxy.pkUpdate.enabled and upgraded consumers")
+	}
 	op, ok := impl.ops[msg.MessageType()]
 	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.

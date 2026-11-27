@@ -34,7 +34,8 @@ const (
 	TransformLogKindMutation
 )
 
-func (k TransformLogKind) HasPayload() bool {
+// IsMutation reports whether the kind represents deletes or updates in TransformLog.
+func (k TransformLogKind) IsMutation() bool {
 	return k == TransformLogKindMutation
 }
 
@@ -66,7 +67,7 @@ func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 			kind = TransformLogKindMutation
 		case message.MessageTypeInsert:
 		default:
-			if !kind.HasPayload() {
+			if !kind.IsMutation() {
 				kind = TransformLogKindBarrier
 			}
 		}
@@ -97,7 +98,7 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 		return nil
 	}
 	entry := &streamingpb.TransformLogEntry{TimeTick: msg.TimeTick()}
-	if !kind.HasPayload() {
+	if !kind.IsMutation() {
 		return entry
 	}
 	var mutations streamingpb.TransformMutationEntry
@@ -147,6 +148,25 @@ func MutationsFromLegacyDeletes(deletes *streamingpb.TransformDeleteEntry) *stre
 		})
 	}
 	return &streamingpb.TransformMutationEntry{Blocks: blocks}
+}
+
+// LegacyDeleteEntry converts a delete-only entry for consumers predating UPDATE.
+// It never changes the input or drops an operation that legacy readers cannot apply.
+func LegacyDeleteEntry(entry *streamingpb.TransformLogEntry) (*streamingpb.TransformLogEntry, bool) {
+	if entry.GetMutations() == nil {
+		return entry, true
+	}
+	deletes := &streamingpb.TransformDeleteEntry{}
+	for _, block := range entry.GetMutations().GetBlocks() {
+		if block.GetDelete() == nil {
+			return nil, false
+		}
+		deletes.Blocks = append(deletes.Blocks, block.GetDelete())
+	}
+	return &streamingpb.TransformLogEntry{
+		TimeTick: entry.GetTimeTick(),
+		Entry:    &streamingpb.TransformLogEntry_Delete{Delete: deletes},
+	}, true
 }
 
 // PrimaryKeyCount counts the primary keys of a DeleteRequest.

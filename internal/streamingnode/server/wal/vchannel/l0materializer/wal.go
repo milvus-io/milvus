@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // WALConfig wires the temporary retained-message consumer.
@@ -101,7 +102,7 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
 	flush := isL0FlushMessage(msg.MessageType())
-	mutation := messageutil.ClassifyTransformLogMessage(msg).HasPayload()
+	mutation := messageutil.ClassifyTransformLogMessage(msg).IsMutation()
 	m.mu.Lock()
 	if m.terminalErr != nil {
 		m.mu.Unlock()
@@ -223,7 +224,10 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 		}
 	}
 	handles := m.pending[:end:end]
-	task := &walMaterializeTask{owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick()}
+	task := &walMaterializeTask{
+		owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick(),
+		legacyFormat: !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool(),
+	}
 	task.schemas = make(map[uint64]*schemapb.CollectionSchema)
 	m.pending = m.pending[end:]
 	for _, handle := range handles {
@@ -250,14 +254,15 @@ func (m *WALMaterializer) submit(task *walMaterializeTask) {
 }
 
 type walMaterializeTask struct {
-	schemas  map[uint64]*schemapb.CollectionSchema
-	priority moduleapi.DataTaskPriority
-	mu       sync.Mutex
-	owner    *WALMaterializer
-	handles  []message.RetainedImmutableMessage
-	through  uint64
-	done     bool
-	err      error
+	legacyFormat bool
+	schemas      map[uint64]*schemapb.CollectionSchema
+	priority     moduleapi.DataTaskPriority
+	mu           sync.Mutex
+	owner        *WALMaterializer
+	handles      []message.RetainedImmutableMessage
+	through      uint64
+	done         bool
+	err          error
 }
 
 func (t *walMaterializeTask) Execute(ctx context.Context) error {
@@ -296,7 +301,8 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 			return errors.Mark(merr.WrapErrServiceInternalMsg("L0 materializer output writer is nil"), nodescheduler.ErrDelay)
 		}
 		if err := m.writer.Materialize(ctx, MaterializeRequest{
-			VChannel: m.vchannel, TargetTimeTick: t.through,
+			LegacyFormat: t.legacyFormat,
+			VChannel:     m.vchannel, TargetTimeTick: t.through,
 			Entries: entries, MaxRows: m.maxRows, MaxBytes: m.maxBytes,
 			DeletePositions: positions, Schemas: t.schemas,
 		}); err != nil {

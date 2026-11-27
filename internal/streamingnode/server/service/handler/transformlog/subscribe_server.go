@@ -13,7 +13,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type SubscribeServer struct {
@@ -231,6 +233,14 @@ func (s *SubscribeServer) sendSubscriptionError(subscriptionID int64, vchannel s
 
 func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEvent) error {
 	if event.Entry != nil {
+		entry := event.Entry
+		if !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool() {
+			var ok bool
+			entry, ok = messageutil.LegacyDeleteEntry(entry)
+			if !ok {
+				return status.NewUnrecoverableError("UPDATE at TimeTick %d requires proxy.pkUpdate.enabled and upgraded TransformLog consumers", event.Entry.GetTimeTick())
+			}
+		}
 		mlog.Debug(s.stream.Context(), "streamingnode transform log forward entry",
 			mlog.FieldPChannel(s.pchannel),
 			mlog.FieldVChannel(event.VChannel),
@@ -242,7 +252,7 @@ func (s *SubscribeServer) sendSubscriptionEvent(event wal.TransformLogStreamEven
 				MessageBatch: &streamingpb.TransformMessageBatch{
 					SubscriptionId: event.SubscriptionID,
 					Vchannel:       event.VChannel,
-					Entries:        []*streamingpb.TransformLogEntry{event.Entry},
+					Entries:        []*streamingpb.TransformLogEntry{entry},
 				},
 			},
 		})

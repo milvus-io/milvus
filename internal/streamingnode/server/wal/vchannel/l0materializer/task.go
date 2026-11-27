@@ -26,6 +26,7 @@ import (
 )
 
 type materializeTask struct {
+	legacyFormat bool
 	materializer *L0Materializer
 	target       uint64
 	capacity     bool
@@ -39,7 +40,7 @@ func (t *materializeTask) Execute(ctx context.Context) error {
 	if t.done.Load() {
 		return nil
 	}
-	if err := m.materialize(ctx, t.target, t.capacity); err != nil {
+	if err := m.materialize(ctx, t.target, t.capacity, t.legacyFormat); err != nil {
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	// Completion and the next scheduling decision share observation's lock.

@@ -181,7 +181,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			if err := ctx.Err(); err != nil {
 				return TransformBatch{}, err
 			}
-			if !appendEntry(record.entry, true, record.entry) {
+			if !appendEntry(record.entry, true, record.transformRecord()) {
 				return batch, nil
 			}
 		}
@@ -190,7 +190,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if err := ctx.Err(); err != nil {
 			return TransformBatch{}, err
 		}
-		if record.vchannel == vchannel && !appendEntry(record.entry, true, record.entry) {
+		if record.vchannel == vchannel && !appendEntry(record.entry, true, record.transformRecord()) {
 			return batch, nil
 		}
 	}

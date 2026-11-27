@@ -55,6 +55,8 @@ type Materializer interface {
 }
 
 type MaterializeRequest struct {
+	// Captured when scheduling; retries must use the same output format.
+	LegacyFormat bool
 	// Historical schemas pinned while the WAL bodies are observed.
 	Schemas        map[uint64]*schemapb.CollectionSchema
 	VChannel       string
@@ -160,8 +162,19 @@ func (m *SyncMaterializer) materializeGroup(
 		WithLevel(datapb.SegmentLevel_L0).
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithBatchRows(0).
-		WithMutationDelta(&group.delta, group.bytes).
 		WithFlush()
+	if req.LegacyFormat && !slices.ContainsFunc(group.delta.Rows, func(r deltacodec.Row) bool { return r.Operation == deltacodec.Update }) {
+		deletes := &storage.DeleteData{}
+		for _, row := range group.delta.Rows {
+			for _, pk := range storage.ParseIDs2PrimaryKeys(row.PrimaryKeys) {
+				deletes.Append(pk, row.TimeTick)
+			}
+		}
+		pack.WithDeleteData(deletes)
+	} else {
+		// Replay must preserve committed updates even if admission has been disabled.
+		pack.WithMutationDelta(&group.delta, group.bytes)
+	}
 
 	task := syncmgr.NewSyncTask().
 		WithAllocator(m.allocator).

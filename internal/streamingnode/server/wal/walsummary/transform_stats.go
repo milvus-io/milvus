@@ -53,7 +53,7 @@ func transformEntryKeyCount(entry *streamingpb.TransformLogEntry) uint64 {
 	return rows
 }
 
-func addTransformSize(indexes map[string]*streamingpb.VChannelSummaryTransformIndex, vc string, entry *streamingpb.TransformLogEntry) {
+func addTransformSize(indexes map[string]*streamingpb.VChannelSummaryTransformIndex, vc string, entry *streamingpb.VChannelSummaryTransformRecord) {
 	index := indexes[vc]
 	if index == nil {
 		index = &streamingpb.VChannelSummaryTransformIndex{StartTimeTick: entry.GetTimeTick()}

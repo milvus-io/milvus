@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // DroppedVChannelTimeTick releases all transform records after durable cleanup.
@@ -142,7 +143,7 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	idempotency, insert := insertSummaryOf(msg)
 	var entry *streamingpb.TransformLogEntry
 	// Persist delete and update payloads. Barriers only advance the consumer window.
-	if messageutil.ClassifyTransformLogMessage(msg).HasPayload() {
+	if messageutil.ClassifyTransformLogMessage(msg).IsMutation() {
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
 	m.mu.Lock()
@@ -177,14 +178,15 @@ func (m *Manager) stageRecordLocked(
 	entry *streamingpb.TransformLogEntry,
 ) {
 	record := stagedRecord{
-		entry:       entry,
-		vchannel:    msg.VChannel(),
-		timeTick:    msg.TimeTick(),
-		idempotency: idempotency,
-		insert:      insert,
+		legacyDelete: !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool(),
+		entry:        entry,
+		vchannel:     msg.VChannel(),
+		timeTick:     msg.TimeTick(),
+		idempotency:  idempotency,
+		insert:       insert,
 	}
 	if entry != nil {
-		addTransformSize(m.pendingTransforms, msg.VChannel(), entry)
+		addTransformSize(m.pendingTransforms, msg.VChannel(), record.transformRecord())
 	}
 	m.pending = append(m.pending, record)
 	m.pendingBytes += stagedRecordSize(msg, &record)
@@ -203,7 +205,10 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 	if record.insert == nil {
 		return uint64(msg.EstimateSize())
 	}
-	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency)) + uint64(proto.Size(record.entry))
+	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency))
+	if record.entry != nil {
+		size += uint64(proto.Size(record.transformRecord()))
+	}
 	return size
 }
 
@@ -374,9 +379,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		cs := &ChunkSections{}
 		for _, record := range staged {
 			if record.entry != nil {
-				cs.Transform = append(cs.Transform, &streamingpb.VChannelSummaryTransformRecord{
-					TimeTick: record.timeTick, Mutations: record.entry.GetMutations(),
-				})
+				cs.Transform = append(cs.Transform, record.transformRecord())
 			}
 			if record.insert != nil {
 				cs.Inserts = append(cs.Inserts, record.insert)
@@ -664,9 +667,11 @@ func vchannelChunkIndex(chunk *streamingpb.PChannelSummaryChunkIndexEntry, vchan
 // stagedRecord is one staged record: the built section halves plus the WAL
 // position they came from. The message itself is not retained.
 type stagedRecord struct {
-	entry    *streamingpb.TransformLogEntry
-	vchannel string
-	timeTick uint64
+	// Freeze the output format before asynchronous persistence and retries.
+	legacyDelete bool
+	entry        *streamingpb.TransformLogEntry
+	vchannel     string
+	timeTick     uint64
 
 	// idempotency and insert are the two halves of the idempotency consumer's
 	// record, set together or not at all. A message contributes to the sections
@@ -674,6 +679,19 @@ type stagedRecord struct {
 	// idempotent insert contributes to both from one staged record.
 	idempotency *streamingpb.VChannelSummaryIdempotencyRecord
 	insert      *streamingpb.VChannelSummaryInsertRecord
+}
+
+func (r *stagedRecord) transformRecord() *streamingpb.VChannelSummaryTransformRecord {
+	entry := r.entry
+	if r.legacyDelete {
+		if legacy, ok := messageutil.LegacyDeleteEntry(entry); ok {
+			entry = legacy
+		}
+		// Already committed updates must survive recovery even after admission closes.
+	}
+	return &streamingpb.VChannelSummaryTransformRecord{
+		TimeTick: r.timeTick, Delete: entry.GetDelete(), Mutations: entry.GetMutations(),
+	}
 }
 
 // SealedChunk is one chunk span taken out of the pending buffer: the records

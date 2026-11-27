@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Config wires one VChannel's materialization consumer.
@@ -192,7 +193,10 @@ func (m *L0Materializer) scheduleLocked() *materializeTask {
 		}
 		capacity = true
 	}
-	m.task = &materializeTask{materializer: m, target: target, capacity: capacity}
+	m.task = &materializeTask{
+		materializer: m, target: target, capacity: capacity,
+		legacyFormat: !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool(),
+	}
 	return m.task
 }
 
@@ -202,7 +206,7 @@ func (m *L0Materializer) submit(task *materializeTask) {
 	}
 }
 
-func (m *L0Materializer) materialize(ctx context.Context, target uint64, capacity bool) error {
+func (m *L0Materializer) materialize(ctx context.Context, target uint64, capacity, legacyFormat bool) error {
 	m.mu.Lock()
 	after := m.materializedTimeTick
 	target = min(target, m.requestedThrough, m.materializeUpperBound)
@@ -240,7 +244,8 @@ func (m *L0Materializer) materialize(ctx context.Context, target uint64, capacit
 			return merr.WrapErrServiceInternalMsg("L0 materializer output writer is nil")
 		}
 		if err := m.materializer.Materialize(ctx, MaterializeRequest{
-			VChannel: m.vchannel, TargetTimeTick: batch.CoveredThrough, Entries: batch.Entries,
+			LegacyFormat: legacyFormat,
+			VChannel:     m.vchannel, TargetTimeTick: batch.CoveredThrough, Entries: batch.Entries,
 			MaxRows: m.materializeMaxRows, MaxBytes: m.materializeMaxBytes,
 		}); err != nil {
 			return err
