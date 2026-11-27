@@ -73,11 +73,13 @@ type segmentBinding struct {
 	partitionID int64
 	manifest    int64
 	// Zero-manifest requirements validate fresh metadata before reusing a read.
-	snapshot     *SegmentLoadInfoSnapshot
-	prepared     *preparedSegmentRead
-	reported     bool
-	retryAfter   time.Time
-	retryBackoff *backoff.ExponentialBackOff
+	snapshot *SegmentLoadInfoSnapshot
+	// An ordinary minimum-version binding refreshes metadata after a failed preparation.
+	refreshSnapshot bool
+	prepared        *preparedSegmentRead
+	reported        bool
+	retryAfter      time.Time
+	retryBackoff    *backoff.ExponentialBackOff
 }
 
 type preparedSegmentRead struct {
@@ -353,7 +355,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.dirty = true
 			b = nil
 		}
-		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
+		if b != nil && (b.refreshSnapshot || r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
@@ -366,14 +368,19 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 				continue
 			}
 			if err == nil {
-				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
-				snapshot.ManifestIndexes = typeutil.Clone(snapshot.ManifestIndexes)
-				r.snapshot = &snapshot
-				if b.manifest == 0 {
-					b.snapshot = r.snapshot
-				}
 				if snapshotManifestVersion(snapshot) < b.manifest {
 					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
+				} else {
+					b.refreshSnapshot = false
+				}
+				// A refresh that cannot satisfy this retry leaves the shared snapshot available.
+				if !b.refreshSnapshot {
+					snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
+					snapshot.ManifestIndexes = typeutil.Clone(snapshot.ManifestIndexes)
+					r.snapshot = &snapshot
+					if b.manifest == 0 {
+						b.snapshot = r.snapshot
+					}
 				}
 			}
 			if err != nil {
@@ -429,9 +436,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			// A preparation retry needs current metadata: a committed revision
 			// may have removed artifacts referenced by the failed load.
 			b.snapshot = nil
-			if b.manifest != 0 && !typeutil.IsExternalCollection(collection.Schema()) {
-				r.snapshot = nil
-			}
+			b.refreshSnapshot = b.manifest != 0 && !typeutil.IsExternalCollection(collection.Schema())
 			b.backoffLocked()
 		} else {
 			if b.manifest == 0 {

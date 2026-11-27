@@ -41,6 +41,33 @@ func (r segmentIndexRecords) lookup(indexID int64) (*model.SegmentIndex, *datapb
 	return nil, nil
 }
 
+func (r segmentIndexRecords) coversIndexes(indexIDs []int64, missing typeutil.UniqueSet) bool {
+	completed := r.segment.GetIndexSummaries()
+	for _, id := range indexIDs {
+		if r.tasks != nil {
+			if task, _ := r.tasks.Get(id); task != nil {
+				// Any retained task satisfies the scheduling existence check.
+				continue
+			}
+		}
+		if len(completed) == 0 {
+			return false
+		}
+		missing[id] = struct{}{}
+	}
+	for _, summary := range completed {
+		if len(missing) == 0 {
+			break
+		}
+		if summary != nil {
+			delete(missing, summary.GetIndexId())
+		}
+	}
+	covered := len(missing) == 0
+	clear(missing)
+	return covered
+}
+
 func (m *IndexMeta) readSegmentIndexRecords(segmentID int64, read func(segmentIndexRecords)) {
 	usesSummaries := m.UsesSegmentSummaries()
 	if usesSummaries {

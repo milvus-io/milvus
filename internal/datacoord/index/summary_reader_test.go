@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -187,6 +188,64 @@ func TestSummaryModeReaderDuringTaskRetirement(t *testing.T) {
 	require.Contains(t, <-result, int64(10))
 	require.NoError(t, <-finished)
 	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexSummaries(1, 3)[10].IndexState)
+}
+
+func TestSummaryModeReconciliationChecksAllActiveIndexes(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	im := &IndexMeta{
+		Indexes: map[int64]map[int64]*model.Index{
+			1: {10: {IndexID: 10}, 20: {IndexID: 20}, 30: {IndexID: 30, IsDeleted: true}},
+		},
+		SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
+		summarySource:  store,
+	}
+	// Retained deleted tasks suppress rescheduling and take precedence over summaries.
+	tasks := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+	tasks.Insert(10, &model.SegmentIndex{IndexID: 10, IsDeleted: true})
+	im.SegmentIndexes.Insert(1, tasks)
+	store.LoadSegments([]*datapb.SegmentInfo{
+		{ID: 1, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10}, {IndexId: 20}}},
+		{ID: 2, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10}, {IndexId: 10}, {IndexId: 30}, {IndexId: 40}}},
+		{ID: 3, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 20}}},
+		{ID: 4, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 20}, {IndexId: 10}}},
+		{ID: 5},
+	})
+	im.SegmentIndexes.Insert(3, tasks)
+	// Empty completions still count. Duplicate, deleted and unrelated IDs cannot
+	// stand in for a missing active ID. Segment 6 does not have metadata.
+	require.ElementsMatch(t, []int64{2, 5, 6}, im.GetUnIndexedSegmentIDsForIndexTask(1, []int64{1, 2, 3, 4, 5, 6}).Collect())
+	require.Equal(t, commonpb.IndexState_Unissued, im.GetSegmentIndexState(1, 1, 10).GetState())
+	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexState(1, 1, 20).GetState())
+}
+
+func BenchmarkSummaryIndexReconciliation(b *testing.B) {
+	const segmentCount = 1024
+	for _, indexCount := range []int{1, 8, 32, 128, 512} {
+		b.Run(strconv.Itoa(indexCount)+"Indexes", func(b *testing.B) {
+			store := metacache.NewMetaStore(nil)
+			im := &IndexMeta{Indexes: map[int64]map[int64]*model.Index{1: {}}, summarySource: store}
+			segmentIDs := make([]int64, segmentCount)
+			segments := make([]*datapb.SegmentInfo, segmentCount)
+			for id := int64(1); id <= int64(indexCount); id++ {
+				im.Indexes[1][id] = &model.Index{CollectionID: 1, IndexID: id}
+			}
+			for i := range segments {
+				segmentIDs[i] = int64(i + 1)
+				segment := &datapb.SegmentInfo{ID: segmentIDs[i], CollectionID: 1}
+				for id := int64(1); id <= int64(indexCount); id++ {
+					segment.IndexSummaries = append(segment.IndexSummaries, &datapb.SegmentIndexSummary{IndexId: id, HasArtifact: true})
+				}
+				segments[i] = segment
+			}
+			store.LoadSegments(segments)
+			b.ReportAllocs()
+			for b.Loop() {
+				if len(im.GetUnIndexedSegmentIDsForIndexTask(1, segmentIDs)) != 0 {
+					b.Fatal("expected every segment to have all index summaries")
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkLegacyIndexLookup(b *testing.B) {

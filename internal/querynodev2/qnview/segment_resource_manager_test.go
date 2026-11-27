@@ -768,3 +768,59 @@ func TestSegmentResourceRetriesWithCurrentManifestAfterArtifactRemoval(t *testin
 		f.drop(t, req)
 	})
 }
+
+func TestSegmentResourceReleaseDuringFailedPreparationPreservesSiblingSnapshot(t *testing.T) {
+	mockey.PatchConvey("a released binding's failed load leaves the accepted metadata available", t, func() {
+		const manifestVersion = 7
+		f := setupResourceTest(t, nil)
+		defer f.manager.Close()
+		started, resume := make(chan struct{}), make(chan struct{})
+		defer func() {
+			select {
+			case <-resume:
+			default:
+				close(resume)
+			}
+		}()
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error) {
+			if f.gets.Add(1) == 1 {
+				return resourceSnapshot(collectionID, segmentID, manifestVersion), nil
+			}
+			return SegmentLoadInfoSnapshot{}, merr.WrapErrServiceNotReadyMsg("coordinator unavailable")
+		}).Build()
+		loaded := make(chan *querypb.SegmentLoadInfo, 1)
+		f.loadMock.UnPatch()
+		mockey.Mock((*resourceTestLoader).Load).To(func(_ *resourceTestLoader, ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error) {
+			f.loads.Add(1)
+			if collection.SchemaVersion() == 1 {
+				close(started)
+				select {
+				case <-resume:
+					return nil, os.ErrNotExist
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			loaded <- info
+			return &fakeTransformSegment{id: info.GetSegmentID(), partitionID: info.GetPartitionID()}, nil
+		}).Build()
+		first := f.request(1, 1, 1)
+		first.View.Partitions[0].SegmentManifestVersions[0] = manifestVersion
+		f.manager.Acquire(first)
+		awaitShutdown(t, started)
+		sibling := f.request(2, 2, 2)
+		sibling.View.Partitions[0].SegmentManifestVersions[0] = manifestVersion
+		f.manager.Acquire(sibling)
+		dropped := f.beginDrop(first)
+		close(resume)
+		awaitShutdown(t, dropped)
+		f.await(t, 2)
+		info := <-loaded
+		require.Equal(t, packed.MarshalManifestPath("test", manifestVersion), info.GetManifestPath())
+		require.EqualValues(t, 50, info.GetTransformStartAfterTimetick())
+		require.EqualValues(t, 1, f.gets.Load())
+		require.EqualValues(t, 2, f.loads.Load())
+		f.drop(t, sibling)
+	})
+}

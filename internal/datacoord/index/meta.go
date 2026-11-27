@@ -1039,14 +1039,15 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 		return unindexed
 	}
 
+	var missing typeutil.UniqueSet
+	if m.UsesSegmentSummaries() {
+		// Reuse storage for the active IDs missing from each segment's task map.
+		missing = make(typeutil.UniqueSet, len(activeIndexIDs))
+	}
 	for _, segID := range segIDs {
 		m.readSegmentIndexRecords(segID, func(records segmentIndexRecords) {
-			for _, indexID := range activeIndexIDs {
-				task, completed := records.lookup(indexID)
-				if task == nil && completed == nil {
-					unindexed.Insert(segID)
-					return
-				}
+			if !records.coversIndexes(activeIndexIDs, missing) {
+				unindexed.Insert(segID)
 			}
 		})
 	}
