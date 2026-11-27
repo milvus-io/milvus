@@ -24,8 +24,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hamba/avro/v2"
-	"github.com/hamba/avro/v2/ocf"
+	"github.com/iskorotkov/avro/v2"
+	"github.com/iskorotkov/avro/v2/ocf"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -353,7 +353,10 @@ func ParseSegmentManifest(data []byte, formatVersion int) (*datapb.SegmentDescri
 // validateOCFBlockSizes scans framing without allocating block buffers. The OCF
 // decoder allocates from declared block sizes before checking for truncated input.
 func validateOCFBlockSizes(data []byte) error {
-	reader := avro.NewReader(nil, 0).Reset(data)
+	// Every uncompressed OCF metadata entry occupies at least one input byte.
+	// Bound cumulative map counts before allocating from an untrusted header.
+	cfg := avro.Config{MaxMapAllocSize: max(1, len(data))}.Freeze()
+	reader := avro.NewReader(nil, 0, avro.WithReaderConfig(cfg)).Reset(data)
 	var header ocf.Header
 	reader.ReadVal(ocf.HeaderSchema, &header)
 	for reader.Error == nil {
