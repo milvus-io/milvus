@@ -513,10 +513,11 @@ func NewSegment(ctx context.Context,
 		createPoolWait.Observe(time.Since(submitTime), stage.Success)
 		var err error
 		csegment, err = collection.CreateCSegment(&segcore.CreateCSegmentRequest{
-			SegmentID:   loadInfo.GetSegmentID(),
-			SegmentType: segmentType,
-			IsSorted:    loadInfo.GetIsSorted(),
-			LoadInfo:    loadInfo,
+			SegmentID:    loadInfo.GetSegmentID(),
+			SegmentType:  segmentType,
+			IsSorted:     loadInfo.GetIsSorted(),
+			LoadInfo:     loadInfo,
+			LoadManifest: packed.LoadManifestFromContext(ctx, loadInfo.GetManifestPath()),
 		})
 		return nil, err
 	}).Await(); err != nil {
@@ -1268,6 +1269,7 @@ func (s *LocalSegment) syncFieldJSONStatsFromLoadInfo(ctx context.Context, loadI
 	}
 
 	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).
+		WithLoadManifest(ctx).
 		WithManifestReadOrigin(packed.ManifestReadPostSync).TextAndJSONIndexStatsWithBasePaths()
 	jsonKeyStats := statsResult.JSONKeyStats
 	if statsResult.Err() != nil {

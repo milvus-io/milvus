@@ -65,6 +65,7 @@
 #include "glog/logging.h"
 #include "index/Meta.h"
 #include "log/Log.h"
+#include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "monitor/scope_metric.h"
 #include "monitor/QueryMetrics.h"
@@ -200,6 +201,24 @@ NewSegmentWithLoadInfo(CCollection collection,
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
+static std::shared_ptr<milvus_storage::api::ColumnGroups>
+ImportLoadColumnGroups(const void* manifest) {
+    if (manifest == nullptr) {
+        return nullptr;
+    }
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    auto status = milvus_storage::column_groups_import(
+        &static_cast<const LoonManifest*>(manifest)->column_groups,
+        groups.get());
+    if (!status.ok()) {
+        const auto error = milvus_storage::ToSegcoreError(status);
+        ThrowInfo(error.get_error_code(),
+                  "Failed to import segment load column groups: {}",
+                  error.what());
+    }
+    return groups;
+}
+
 CStatus
 NewSealedSegmentWithCollection(CCollection collection,
                                int64_t segment_id,
@@ -209,6 +228,27 @@ NewSealedSegmentWithCollection(CCollection collection,
                                int64_t load_length,
                                const int64_t* load_fields,
                                int64_t field_count) {
+    return NewSealedSegmentWithManifest(collection,
+                                        segment_id,
+                                        output,
+                                        sorted,
+                                        load_blob,
+                                        load_length,
+                                        load_fields,
+                                        field_count,
+                                        nullptr);
+}
+
+CStatus
+NewSealedSegmentWithManifest(CCollection collection,
+                             int64_t segment_id,
+                             CSegmentInterface* output,
+                             bool sorted,
+                             const uint8_t* load_blob,
+                             int64_t load_length,
+                             const int64_t* load_fields,
+                             int64_t field_count,
+                             const void* manifest) {
     SCOPE_CGO_CALL_METRIC();
     try {
         auto* col = static_cast<milvus::segcore::Collection*>(collection);
@@ -230,7 +270,7 @@ NewSealedSegmentWithCollection(CCollection collection,
                 milvus::segcore::SegcoreConfig::default_config(),
                 segment_id,
                 sorted);
-        segment->SetLoadInfo(std::move(info));
+        segment->SetLoadInfo(std::move(info), ImportLoadColumnGroups(manifest));
         *output = segment.release();
         return milvus::SuccessCStatus();
     }
@@ -271,6 +311,25 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        int64_t load_length,
                                        const int64_t* load_fields,
                                        int64_t load_field_count) {
+    return AsyncReopenSealedSegmentWithManifest(trace,
+                                                c_segment,
+                                                c_collection,
+                                                load_blob,
+                                                load_length,
+                                                load_fields,
+                                                load_field_count,
+                                                nullptr);
+}
+
+CFuture*
+AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
+                                     CSegmentInterface c_segment,
+                                     CCollection c_collection,
+                                     const uint8_t* load_blob,
+                                     int64_t load_length,
+                                     const int64_t* load_fields,
+                                     int64_t load_field_count,
+                                     const void* manifest) {
     try {
         auto* collection =
             static_cast<milvus::segcore::Collection*>(c_collection);
@@ -281,6 +340,19 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
         milvus::proto::segcore::SegmentLoadInfo info;
         AssertInfo(info.ParseFromArray(load_blob, load_length),
                    "unmarshal load info failed");
+        auto* segment =
+            dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                static_cast<milvus::segcore::SegmentInterface*>(c_segment));
+        AssertInfo(segment != nullptr,
+                   "borrowed schema reopen requires a sealed segment");
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups;
+        if (manifest != nullptr) {
+            column_groups =
+                segment->GetCachedColumnGroupsForManifest(info.manifest_path());
+            if (column_groups == nullptr) {
+                column_groups = ImportLoadColumnGroups(manifest);
+            }
+        }
         auto layout =
             collection->GetSealedFieldLayout(milvus::segcore::LoadScope(
                 fields,
@@ -292,16 +364,13 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [c_segment, info = std::move(info), layout = std::move(layout)](
+            [segment,
+             info = std::move(info),
+             layout = std::move(layout),
+             column_groups = std::move(column_groups)](
                 folly::CancellationToken token) -> bool* {
-                auto* segment =
-                    dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
-                        static_cast<milvus::segcore::SegmentInterface*>(
-                            c_segment));
-                AssertInfo(segment != nullptr,
-                           "borrowed schema reopen requires a sealed segment");
                 milvus::OpContext ctx(token);
-                segment->Reopen(&ctx, info, layout);
+                segment->Reopen(&ctx, info, layout, column_groups);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);

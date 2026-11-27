@@ -664,9 +664,24 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 	})
 
+	summaryMode := h.s.indexMeta.UsesSegmentSummaries()
+	var indexDefinitions map[int64]*indexpb.IndexInfo
+	if summaryMode {
+		indexDefinitions = lo.SliceToMap(indexInfos, func(info *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+			return info.GetIndexID(), info
+		})
+	}
+	var manifestBuildIDs []int64
 	segDescList := make([]*datapb.SegmentDescription, 0, len(segmentInfos))
 	for _, segInfo := range segmentInfos {
-		indexesFiles, err := uncompressIndexFiles(h, segInfo)
+		var indexFiles []*indexpb.IndexFilePathInfo
+		if summaryMode {
+			var buildIDs []int64
+			indexFiles, buildIDs, err = collectSnapshotIndexSummaries(segInfo, indexDefinitions)
+			manifestBuildIDs = append(manifestBuildIDs, buildIDs...)
+		} else {
+			indexFiles, err = uncompressIndexFiles(h, segInfo)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -693,7 +708,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			Deltalogs:         segInfo.GetDeltalogs(),
 			Statslogs:         segInfo.GetStatslogs(),
 			Bm25Statslogs:     segInfo.GetBm25Statslogs(),
-			IndexFiles:        indexesFiles,
+			IndexFiles:        indexFiles,
 			JsonKeyIndexFiles: uncompressedJSONStats,
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
@@ -726,9 +741,33 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			Partitions:          partitionMapping,
 			VirtualChannelNames: slices.Clone(collInfo.VChannelNames),
 		},
-		Indexes:  indexInfos,
-		Segments: segDescList,
+		Indexes:                indexInfos,
+		Segments:               segDescList,
+		BuildIDs:               manifestBuildIDs,
+		IndexFilesFromManifest: summaryMode,
 	}, nil
+}
+
+func collectSnapshotIndexSummaries(segment *datapb.SegmentInfo, definitions map[int64]*indexpb.IndexInfo) ([]*indexpb.IndexFilePathInfo, []int64, error) {
+	records, artifacts, err := meta.MergeSegmentIndexSummaries(segment, nil, func(id int64) bool { return definitions[id] != nil })
+	if err != nil {
+		return nil, nil, err
+	}
+	var emptyCompletions []*indexpb.IndexFilePathInfo
+	buildIDs := make([]int64, 0, len(artifacts))
+	for id, record := range records {
+		if _, hasArtifact := artifacts[id]; hasArtifact {
+			buildIDs = append(buildIDs, record.BuildID)
+			continue
+		}
+		definition := definitions[id]
+		params := common.CloneKeyValuePairs(definition.GetIndexParams())
+		params = append(params, common.CloneKeyValuePairs(definition.GetTypeParams())...)
+		info := indexFilePathInfo(segment.GetID(), record, definition, params)
+		info.IndexName = definition.GetIndexName()
+		emptyCompletions = append(emptyCompletions, info)
+	}
+	return emptyCompletions, buildIDs, nil
 }
 
 func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStats *datapb.JsonKeyStats) *datapb.JsonKeyStats {
@@ -739,7 +778,7 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 }
 
 func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
-	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
+	segIdxes := h.s.indexMeta.GetSegmentIndexTasks(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {

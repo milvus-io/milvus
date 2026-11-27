@@ -1721,7 +1721,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			}
 
 			_, restartedDM := index.BootMetaForRestart(s.T(), catalog, collectionID)
-			recovered := restartedDM.IndexMeta.GetSegmentIndexes(collectionID, segmentID)
+			recovered := restartedDM.IndexMeta.GetSegmentIndexSummaries(collectionID, segmentID)
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
@@ -1790,7 +1790,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdI
 				s.EqualValues(9001, persisted[0].BuildID)
 				s.Equal([]string{"index.bin"}, persisted[0].IndexFileKeys)
 				_, restartedDM := index.BootMetaForRestart(s.T(), catalog, 100)
-				indexes := restartedDM.IndexMeta.GetSegmentIndexes(100, 2001)
+				indexes := restartedDM.IndexMeta.GetSegmentIndexSummaries(100, 2001)
 				s.Require().Len(indexes, 1)
 				s.EqualValues(9001, indexes[300].BuildID)
 				s.Equal(commonpb.IndexState_Finished, indexes[300].IndexState)
@@ -2382,7 +2382,7 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 				segment := m.GetSegment(context.Background(), 2001)
 				s.Equal(commonpb.SegmentState_Importing, segment.GetState())
 				s.False(segment.GetManifestHasIndex())
-				s.Empty(im.GetSegmentIndexes(100, 2001))
+				s.Empty(im.GetSegmentIndexSummaries(100, 2001))
 				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, copyMeta.GetTask(context.Background(), task.GetTaskId()).GetState())
 			})
 		}
@@ -2436,7 +2436,7 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 	record, ok := im.GetIndexJob(9001)
 	s.Require().True(ok)
 	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
-	s.NotContains(im.GetSegmentIndexes(100, 2001), int64(301))
+	s.NotContains(im.GetSegmentIndexSummaries(100, 2001), int64(301))
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {

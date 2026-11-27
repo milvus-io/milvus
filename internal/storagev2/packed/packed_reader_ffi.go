@@ -443,10 +443,11 @@ func GetManifestHandleWithExtfs(
 	extfs ExternalSpecContext,
 	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
-	return getManifestHandleWithTiming(manifestPath, storageConfig, extfs, nil, talonStages...)
+	return getManifestHandle(context.Background(), manifestPath, storageConfig, extfs, nil, talonStages...)
 }
 
-func getManifestHandleWithTiming(
+func getManifestHandle(
+	ctx context.Context,
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
@@ -459,7 +460,7 @@ func getManifestHandleWithTiming(
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
-	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
+	mlog.Debug(ctx, "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
 	propertiesTimer := manifestProperties.Begin()
 	propertiesStartedAt := time.Now()
@@ -475,7 +476,7 @@ func getManifestHandleWithTiming(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, merr.Wrap(err, "inject extfs")
 	}
-	return openManifest(manifest, cProperties, timing)
+	return openManifest(ctx, manifest, cProperties, timing)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface

@@ -1132,23 +1132,23 @@ func TestIndexDDLDoesNotHoldFieldIndexLockAcrossCatalogIO(t *testing.T) {
 	assert.False(t, m.IsIndexExist(1, 10))
 }
 
-func TestMeta_GetSegmentIndexes(t *testing.T) {
+func TestMeta_GetSegmentIndexSummaries(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
 	im := createIndexMeta(catalog)
 
 	t.Run("success", func(t *testing.T) {
-		segIndexes := im.GetSegmentIndexes(meta.CollID, meta.SegID)
+		segIndexes := im.GetSegmentIndexSummaries(meta.CollID, meta.SegID)
 		assert.Equal(t, 1, len(segIndexes))
 	})
 
 	t.Run("segment not exist", func(t *testing.T) {
-		segIndexes := im.GetSegmentIndexes(meta.CollID, meta.SegID+100)
+		segIndexes := im.GetSegmentIndexSummaries(meta.CollID, meta.SegID+100)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
 	t.Run("no index exist- segment index empty", func(t *testing.T) {
 		m := NewSegmentIndexMeta(nil)
-		segIndexes := m.GetSegmentIndexes(meta.CollID, meta.SegID)
+		segIndexes := m.GetSegmentIndexSummaries(meta.CollID, meta.SegID)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
@@ -1158,7 +1158,7 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 		segIdxes.Insert(meta.IndexID, &model.SegmentIndex{})
 		m.SegmentIndexes.Insert(meta.SegID, segIdxes)
 
-		segIndexes := m.GetSegmentIndexes(meta.CollID, 1)
+		segIndexes := m.GetSegmentIndexSummaries(meta.CollID, 1)
 		assert.Equal(t, 0, len(segIndexes))
 	})
 
@@ -1191,7 +1191,7 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 		m.SegmentIndexes.Insert(meta.SegID, segIdxes)
-		segIndexes := m.GetSegmentIndexes(meta.CollID, meta.SegID)
+		segIndexes := m.GetSegmentIndexSummaries(meta.CollID, meta.SegID)
 		assert.Equal(t, 1, len(segIndexes))
 
 		segIdx, ok := segIndexes[meta.IndexID]
@@ -1236,7 +1236,7 @@ func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(
 	firstSegmentRead := make(chan struct{})
 	continueSnapshot := make(chan struct{})
 	var getSegmentIndexesOrigin func(*IndexMeta, UniqueID, UniqueID) map[UniqueID]*model.SegmentIndex
-	getSegmentIndexesMock := mockey.Mock((*IndexMeta).GetSegmentIndexesUnsafe).To(
+	getSegmentIndexesMock := mockey.Mock((*IndexMeta).getSegmentIndexTasksLocked).To(
 		func(meta *IndexMeta, collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
 			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID)
 			if segmentID == segment1ID {
@@ -1321,7 +1321,7 @@ func TestMeta_GetAllSegmentIndexSummaries(t *testing.T) {
 	})
 	m.SegmentIndexes.Insert(meta.SegID, segIdxes)
 
-	assert.Empty(t, m.GetSegmentIndexes(meta.CollID, meta.SegID))
+	assert.Empty(t, m.GetSegmentIndexSummaries(meta.CollID, meta.SegID))
 	segIndexes := m.GetAllSegmentIndexSummaries(meta.SegID)
 	require.Len(t, segIndexes, 1)
 	assert.Equal(t, meta.BuildID, segIndexes[0].BuildID)
@@ -2088,7 +2088,7 @@ func TestRemoveSegmentIndexConcurrentCreateDifferentIndex(t *testing.T) {
 	assert.False(t, exists)
 	_, exists = m.GetIndexJob(created.BuildID)
 	assert.True(t, exists)
-	current := m.GetSegmentIndexes(created.CollectionID, created.SegmentID)
+	current := m.GetSegmentIndexSummaries(created.CollectionID, created.SegmentID)
 	require.Contains(t, current, created.IndexID, "GC must not discard the new index's segment mapping")
 	assert.Equal(t, created.BuildID, current[created.IndexID].BuildID)
 }

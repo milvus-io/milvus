@@ -42,6 +42,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -137,6 +138,100 @@ func TestSnapshotManager_CreateSnapshot_Success(t *testing.T) {
 	// Verify
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1001), snapshotID)
+}
+
+func TestSnapshotManager_CreateSnapshot_DrainsIndexGC(t *testing.T) {
+	const collectionID, otherCollectionID, buildID int64 = 100, 200, 5
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	metadata := CreateTestSnapshotMetaLoaded(t)
+	t.Cleanup(metadata.LoaderCancel)
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	metadata.catalog = catalog
+	catalog.EXPECT().SaveSnapshot(mock.Anything, mock.Anything).Return(nil).Times(4)
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(1), nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(int64(2), nil).Once()
+	handler := meta.NewNMockHandler(t)
+	var deleteFinished atomic.Bool
+	handler.EXPECT().GenSnapshot(mock.Anything, collectionID, mock.Anything).
+		Run(func(_ context.Context, _ int64, _ []*msgpb.MsgPosition) {
+			assert.True(t, deleteFinished.Load(), "snapshot selection must wait for the active deletion")
+		}).Return(&snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: collectionID},
+		Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}},
+		Segments: []*datapb.SegmentDescription{{
+			SegmentId: 3, IndexFiles: []*indexpb.IndexFilePathInfo{{BuildID: buildID}},
+		}},
+	}, nil).Once()
+	handler.EXPECT().GenSnapshot(mock.Anything, otherCollectionID, mock.Anything).Return(&snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{CollectionId: otherCollectionID},
+		Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "other"}},
+	}, nil).Once()
+	manager := NewSnapshotManager(nil, metadata, nil, alloc, handler, nil, nil, nil)
+
+	release, ok := metadata.TryGuardIndexGC(collectionID)
+	require.True(t, ok)
+	release = sync.OnceFunc(release)
+	defer release()
+	create := func(id int64) <-chan error {
+		result := make(chan error, 1)
+		go func() {
+			_, err := manager.CreateSnapshot(ctx, id, "snap", "", 0, nil)
+			result <- err
+		}()
+		return result
+	}
+	result := create(collectionID)
+	require.Eventually(t, func() bool { return metadata.IsCollectionCompactionBlocked(collectionID) }, time.Second, time.Millisecond)
+	_, ok = metadata.TryGuardIndexGC(collectionID)
+	require.False(t, ok, "new deletes must be deferred while the snapshot drains the active deletion")
+	select {
+	case err := <-create(otherCollectionID):
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("snapshot in another collection was blocked by the active deletion")
+	}
+	deleteFinished.Store(true)
+	release()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("snapshot did not finish after the active deletion drained")
+	}
+	require.False(t, metadata.IsCollectionCompactionBlocked(collectionID))
+	require.True(t, metadata.IsBuildIDGCBlocked(collectionID, buildID))
+}
+
+func TestSnapshotManager_CreateSnapshot_CancelsIndexGCWait(t *testing.T) {
+	const collectionID int64 = 100
+	metadata := CreateTestSnapshotMetaLoaded(t)
+	t.Cleanup(metadata.LoaderCancel)
+	manager := NewSnapshotManager(nil, metadata, nil, allocator.NewMockAllocator(t), meta.NewNMockHandler(t), nil, nil, nil)
+	release, ok := metadata.TryGuardIndexGC(collectionID)
+	require.True(t, ok)
+	defer release()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := manager.CreateSnapshot(ctx, collectionID, "snap", "", 0, nil)
+		result <- err
+	}()
+	require.Eventually(t, func() bool { return metadata.IsCollectionCompactionBlocked(collectionID) }, time.Second, time.Millisecond)
+	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("snapshot did not cancel while the deletion was active")
+	}
+	require.False(t, metadata.IsCollectionCompactionBlocked(collectionID))
+	releaseNext, ok := metadata.TryGuardIndexGC(collectionID)
+	require.True(t, ok, "canceling the snapshot must unblock new deletes")
+	releaseNext()
 }
 
 func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {

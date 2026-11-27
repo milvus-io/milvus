@@ -81,21 +81,11 @@ func TestIndexMetadataModeStartupValidation(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 
 	Params.Save(mode.Key, "true")
-	err = startup()
-	expected := "segment-summary-v1"
-	if !segmentIndexSummaryReadersReady {
-		require.ErrorContains(t, err, "require summary-aware readers and garbage collection")
-		_, err = kv.Load(ctx, modeKey)
-		require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
-		Params.Save(mode.Key, "false")
-		err = startup()
-		expected = "legacy"
-	}
-	require.NoError(t, err)
+	require.NoError(t, startup())
 	require.NoError(t, startup())
 	persisted, err := kv.Load(ctx, modeKey)
 	require.NoError(t, err)
-	require.Equal(t, expected, persisted)
+	require.Equal(t, "segment-summary-v1", persisted)
 }
 
 func TestSummaryModeRejectsDirectManifestAdoption(t *testing.T) {

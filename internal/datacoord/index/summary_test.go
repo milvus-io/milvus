@@ -361,3 +361,47 @@ func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) 
 		})
 	}
 }
+
+func TestSummaryOnlyRetirementStagesInventoryAndAccountsAfterCommit(t *testing.T) {
+	mt, dm, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	require.NoError(t, dm.IndexMeta.CreateIndex(t.Context(), &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+	mt.MetaStore.PutSegment(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped,
+		IndexSummaries: []*datapb.SegmentIndexSummary{{
+			IndexId: 10, FieldId: 100, BuildId: 19, HasArtifact: true,
+			SerializedSize: 500, MemSize: 800, IndexVersion: 2, VectorEngineVersion: 3, ScalarEngineVersion: 4, IndexType: "HNSW",
+		}},
+	})
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	require.EqualValues(t, 1, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
+	require.EqualValues(t, 500, dm.IndexMeta.taskCounts.activeSizes[1])
+	staged, err := dm.IndexMeta.StageSegmentIndexMutation(meta.SegmentIndexMutation{
+		Type: meta.SegmentIndexRemove, SegmentID: 3, BuildID: 19,
+	})
+	require.NoError(t, err)
+	require.Nil(t, staged.Record, "summary inventory must not masquerade as a task record")
+	require.Nil(t, staged.Action, "the completed summary has no catalog task row to delete")
+	require.NotNil(t, staged.Summary)
+	require.True(t, staged.Summary.HasArtifact)
+	require.EqualValues(t, 500, staged.Summary.IndexSerializedSize)
+	require.EqualValues(t, 2, staged.Summary.IndexVersion)
+	require.Equal(t, "HNSW", staged.Summary.IndexType)
+	require.False(t, dm.IndexMeta.HasBuildInfo(19))
+	locks := mt.GetSegmentManifestLocks()
+	locks.Lock(3)
+	defer locks.Unlock(3)
+	failure := mockey.Mock((*datacoord.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
+	defer failure.UnPatch()
+	require.ErrorIs(t, mt.RetireIndexSummaryLocked(t.Context(), 3, 19), merr.ErrServiceUnavailable)
+	require.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(3), 1)
+	require.EqualValues(t, 1, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
+	require.EqualValues(t, 500, dm.IndexMeta.taskCounts.activeSizes[1])
+	failure.UnPatch()
+	require.NoError(t, mt.RetireIndexSummaryLocked(t.Context(), 3, 19))
+	require.Empty(t, dm.IndexMeta.GetAllSegmentIndexSummaries(3))
+	require.EqualValues(t, 0, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
+	require.Empty(t, dm.IndexMeta.taskCounts.activeSizes)
+	require.NoError(t, mt.RetireIndexSummaryLocked(t.Context(), 3, 19))
+	require.EqualValues(t, 0, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
+}

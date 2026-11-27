@@ -18,6 +18,8 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -26,21 +28,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+type LoadManifestOpener func(context.Context, string, *indexpb.StorageConfig) (*packed.LoadManifest, error)
+
 // SegmentResourceManager owns view bindings and every physical segment they use.
 // All decisions are serialized by mu; I/O and callbacks never run under it.
 type SegmentResourceManager struct {
-	ctx         context.Context
-	scheduler   nodescheduler.Scheduler
-	loader      PhysicalSegmentLoader
-	estimator   SegmentResourceEstimator
-	metadata    SegmentLoadInfoProvider
-	buffer      TransformLogBuffer
-	collections QueryViewCollectionRuntimeManager
-	mu          sync.Mutex
-	views       map[qviews.QueryViewKey]*viewResources
-	resources   map[int64]*segmentResource
-	closed      bool
-	closeOnce   sync.Once
+	ctx          context.Context
+	scheduler    nodescheduler.Scheduler
+	loader       PhysicalSegmentLoader
+	openManifest LoadManifestOpener
+	estimator    SegmentResourceEstimator
+	metadata     SegmentLoadInfoProvider
+	buffer       TransformLogBuffer
+	collections  QueryViewCollectionRuntimeManager
+	mu           sync.Mutex
+	views        map[qviews.QueryViewKey]*viewResources
+	resources    map[int64]*segmentResource
+	closed       bool
+	closeOnce    sync.Once
 	// Tracks owners through actual cleanup, including views removed from the map.
 	drain sync.WaitGroup
 
@@ -69,18 +74,20 @@ type segmentBinding struct {
 	partitionID int64
 	manifest    int64
 	// Zero-manifest requirements validate fresh metadata before reusing a read.
-	snapshot     *SegmentLoadInfoSnapshot
-	prepared     *preparedSegmentRead
-	reported     bool
-	retryAfter   time.Time
-	retryBackoff *backoff.ExponentialBackOff
+	snapshot *SegmentLoadInfoSnapshot
+	// An ordinary minimum-version binding refreshes metadata after a failed preparation.
+	refreshSnapshot bool
+	prepared        *preparedSegmentRead
+	reported        bool
+	retryAfter      time.Time
+	retryBackoff    *backoff.ExponentialBackOff
 }
 
 type preparedSegmentRead struct {
 	schema   int32
 	load     uint64
 	manifest int64
-	snapshot *querypb.SegmentLoadInfo
+	snapshot *SegmentLoadInfoSnapshot
 	base     *segmentBase
 	read     segments.ReadState
 }
@@ -124,8 +131,8 @@ type segmentResource struct {
 	operations sync.WaitGroup
 }
 
-func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
-	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
+func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager, openManifest LoadManifestOpener) *SegmentResourceManager {
+	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, openManifest: openManifest, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
 }
 
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
@@ -349,7 +356,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.dirty = true
 			b = nil
 		}
-		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
+		if b != nil && (b.refreshSnapshot || r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 			fetchTimer := loadInfoFetch.Begin()
@@ -364,13 +371,19 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 				continue
 			}
 			if err == nil {
-				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
-				r.snapshot = &snapshot
-				if b.manifest == 0 {
-					b.snapshot = r.snapshot
-				}
 				if snapshotManifestVersion(snapshot) < b.manifest {
 					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
+				} else {
+					b.refreshSnapshot = false
+				}
+				// A refresh that cannot satisfy this retry leaves the shared snapshot available.
+				if !b.refreshSnapshot {
+					snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
+					snapshot.ManifestIndexes = typeutil.Clone(snapshot.ManifestIndexes)
+					r.snapshot = &snapshot
+					if b.manifest == 0 {
+						b.snapshot = r.snapshot
+					}
 				}
 			}
 			if err != nil {
@@ -423,12 +436,14 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		m.mu.Lock()
 		b.view.operationRefs--
 		if err != nil {
-			// A missing V2 artifact may have appeared since this attempt.
+			// A preparation retry needs current metadata: a committed revision
+			// may have removed artifacts referenced by the failed load.
 			b.snapshot = nil
+			b.refreshSnapshot = b.manifest != 0 && !typeutil.IsExternalCollection(collection.Schema())
 			b.backoffLocked()
 		} else {
 			if b.manifest == 0 {
-				result.snapshot = snapshot.LoadInfo
+				result.snapshot = &snapshot
 			}
 			b.resetRetryLocked()
 			r.reads = append(r.reads, result)
@@ -523,8 +538,12 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
-	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
-		return false
+	if b.manifest == 0 {
+		if read.snapshot == nil || b.snapshot == nil ||
+			!proto.Equal(read.snapshot.LoadInfo, b.snapshot.LoadInfo) ||
+			!proto.Equal(read.snapshot.ManifestIndexes, b.snapshot.ManifestIndexes) {
+			return false
+		}
 	}
 	return read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() &&
 		read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest)
@@ -539,6 +558,9 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 	legacyV2 := info.GetStorageVersion() == storage.StorageV2 && info.GetManifestPath() == ""
 	if !legacyV2 && (err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3) {
 		return merr.WrapErrServiceInternalMsg("segment %d requires a committed StorageV3 manifest", r.id)
+	}
+	if snapshot.ManifestIndexes != nil && (legacyV2 || info.GetLevel() == datapb.SegmentLevel_L0) {
+		return merr.WrapErrDataIntegrityMsg("segment %d does not support local manifest index resolution", r.id)
 	}
 	if info.GetTransformStartAfterTimetick() == 0 {
 		return merr.WrapErrServiceNotReadyMsg("segment %d has no certified transform replay cursor", r.id)
@@ -559,14 +581,41 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		totalTimer.EndResult(timing.result)
 	}()
 	info := proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
-	selected := make(map[int64]struct{}, len(collection.IndexInfos()))
-	for _, index := range collection.IndexInfos() {
-		selected[index.GetIndexID()] = struct{}{}
+	var storageConfig *indexpb.StorageConfig
+	if m.openManifest != nil && info.GetStorageVersion() == storage.StorageV3 &&
+		info.GetLevel() != datapb.SegmentLevel_L0 && !typeutil.IsExternalCollection(collection.Schema()) {
+		storageConfig = packed.CreateStorageConfig()
+		manifest, err := m.openManifest(ctx, info.GetManifestPath(), storageConfig)
+		if err != nil {
+			return nil, err
+		}
+		defer manifest.Close()
+		ctx = packed.WithLoadManifest(ctx, manifest)
 	}
-	info.IndexInfos = slices.DeleteFunc(info.IndexInfos, func(index *querypb.FieldIndexInfo) bool {
-		_, ok := selected[index.GetIndexID()]
-		return !ok
-	})
+	selected := make(map[int64]*indexpb.IndexInfo, len(collection.IndexInfos()))
+	for _, index := range collection.IndexInfos() {
+		selected[index.GetIndexID()] = index
+	}
+	if snapshot.ManifestIndexes != nil {
+		manifest := packed.LoadManifestFromContext(ctx, info.GetManifestPath())
+		if manifest == nil {
+			err := merr.WrapErrServiceInternalMsg("segment %d has no opened manifest for local index resolution", r.id)
+			m.failView(b.view, err)
+			return nil, err
+		}
+		indexes, err := resolveQueryViewManifestIndexes(info, snapshot.ManifestIndexes, selected, manifest, storageConfig.GetRootPath())
+		if err != nil {
+			if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, merr.ErrServiceInternal) {
+				m.failView(b.view, err)
+			}
+			return nil, err
+		}
+		info.IndexInfos = indexes
+	} else {
+		info.IndexInfos = slices.DeleteFunc(info.IndexInfos, func(index *querypb.FieldIndexInfo) bool {
+			return selected[index.GetIndexID()] == nil
+		})
+	}
 	if m.estimator != nil {
 		reserveResourceStartedAt := time.Now()
 		reservation, err := m.estimator.Reserve(ctx, info, collection)

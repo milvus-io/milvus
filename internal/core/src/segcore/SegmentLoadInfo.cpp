@@ -38,12 +38,18 @@
 namespace milvus::segcore {
 
 std::pair<SegmentLoadInfo, SealedFieldLayoutPtr>
-SegmentLoadInfo::PrepareForLoad(const ProtoType& info,
-                                SealedFieldLayoutPtr fields,
-                                const SegmentLoadInfo& current,
-                                bool restrict_to_load_fields) {
+SegmentLoadInfo::PrepareForLoad(
+    const ProtoType& info,
+    SealedFieldLayoutPtr fields,
+    const SegmentLoadInfo& current,
+    bool restrict_to_load_fields,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
     SegmentLoadInfo prepared(info);
-    prepared.InheritCachedColumnGroupsFrom(current);
+    if (groups) {
+        prepared.SetCachedColumnGroups(std::move(groups));
+    } else {
+        prepared.InheritCachedColumnGroupsFrom(current);
+    }
     fields = prepared.BindManifestFields(fields);
     prepared.restrict_load_fields_ =
         restrict_to_load_fields || fields->HasExplicitLoadScope();

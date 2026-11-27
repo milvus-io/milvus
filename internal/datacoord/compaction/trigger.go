@@ -912,10 +912,10 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo) bool {
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
-		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
-		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+		// Rebuild an existing artifact when its engine version is below the resolved version.
+		summaries := t.indexMeta.GetSegmentIndexSummaries(segment.CollectionID, segment.ID)
+		for _, idx := range summaries {
+			if !idx.HasArtifact {
 				continue
 			}
 
@@ -939,7 +939,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 					mlog.FieldIndexID(idx.IndexID),
 					mlog.String("indexType", indexType),
 					mlog.Bool("isVectorIndex", isVectorIndex),
-					mlog.Strings("indexFileKeys", idx.IndexFileKeys),
+					mlog.FieldBuildID(idx.BuildID),
 					mlog.Int32("segmentIndexVersion", segmentIndexVersion),
 					mlog.Int32("resolvedEngineVersion", resolvedEngineVersion))
 				return true
@@ -950,9 +950,9 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 	// enable force rebuild index with target index version (only for vector index)
 	if Params.DataCoordCfg.ForceRebuildSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetVecIndexVersion.GetAsInt64() != -1 {
 		resolvedVecTarget := t.indexEngineVersionManager.ResolveVecIndexVersion()
-		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+		summaries := t.indexMeta.GetSegmentIndexSummaries(segment.CollectionID, segment.ID)
+		for _, idx := range summaries {
+			if !idx.HasArtifact {
 				continue
 			}
 
@@ -970,7 +970,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 					mlog.FieldSegmentID(segment.ID),
 					mlog.FieldIndexID(idx.IndexID),
 					mlog.String("indexType", indexType),
-					mlog.Strings("indexFileKeys", idx.IndexFileKeys),
+					mlog.FieldBuildID(idx.BuildID),
 					mlog.Int32("currentIndexVersion", idx.CurrentIndexVersion),
 					mlog.Int32("resolvedTargetVersion", resolvedVecTarget))
 				return true
@@ -981,9 +981,9 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 	// enable force rebuild scalar index with target scalar index version
 	if Params.DataCoordCfg.ForceRebuildScalarSegmentIndex.GetAsBool() && Params.DataCoordCfg.TargetScalarIndexVersion.GetAsInt64() != -1 {
 		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
-		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
-		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+		summaries := t.indexMeta.GetSegmentIndexSummaries(segment.CollectionID, segment.ID)
+		for _, idx := range summaries {
+			if !idx.HasArtifact {
 				continue
 			}
 

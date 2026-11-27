@@ -61,7 +61,9 @@ func validateSummarySnapshot(ctx context.Context, mt *meta.Meta, snapshot *snaps
 				captured[index.GetIndexID()] = struct{}{}
 			}
 		}
-		if segment.GetManifestHasIndex() && len(captured) < len(liveIndexes) {
+		// Manifest-backed snapshots were resolved against their captured build IDs
+		// during load. Other entries in the pinned revision are outside the snapshot.
+		if !snapshot.IndexFilesFromManifest && segment.GetManifestHasIndex() && len(captured) < len(liveIndexes) {
 			path := segment.GetManifestPath()
 			if foreignConfig != nil && foreignConfig.GetStorageType() != "local" {
 				revision, err := packed.ParseManifestPath(path)

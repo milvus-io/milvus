@@ -327,7 +327,7 @@ func CreateManifestForSegment(
 	defer C.loon_properties_free(cProperties)
 
 	// Begin transaction at the earliest version
-	transactionHandle, err := openTransaction(ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
+	transactionHandle, err := openTransaction(context.Background(), ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_open failed")

@@ -130,6 +130,13 @@ type StorageV2SegmentManifest struct {
   - is_sorted (whether segment data is sorted by primary key)
 - Uses Avro format to provide schema evolution support
 
+In index summary mode, new referenced snapshots set
+`index_files_from_manifest` in metadata JSON. A build listed in `build_ids`
+without an explicit file record is resolved from the captured StorageV3
+manifest revision by restore and export. The Avro schema is shared with
+existing snapshots. Readers of referenced snapshots need this resolution
+support. Self-contained exports include explicit index file records.
+
 ### Snapshot format compatibility
 
 V0 (missing `format_version`) and V1-V5 manifests use raw Avro binary.

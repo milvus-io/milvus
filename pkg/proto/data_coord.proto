@@ -305,12 +305,16 @@ message GetSegmentInfoRequest {
   common.MsgBase base = 1;
   repeated int64 segmentIDs = 2;
   bool includeUnHealthy =3;
+  // A nonzero collection ID requests the index resource projection for preflight checks.
+  int64 index_resource_collection_id = 4;
 }
 
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
   map<string, msg.MsgPosition> channel_checkpoint = 3;
+  // An entry, including an empty one, replaces GetIndexInfos for estimation.
+  map<int64, index.SegmentInfo> index_resource_info = 4;
 }
 
 message GetInsertBinlogPathsRequest {
@@ -517,6 +521,7 @@ message SegmentIndexSummary {
   int32 vector_engine_version = 8;
   int32 scalar_engine_version = 9;
   string index_type = 10;
+  optional int64 num_rows = 11;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -2213,6 +2218,9 @@ message SnapshotMetadata {
   repeated int64 segment_ids = 7;
   repeated int64 build_ids = 8;
   SnapshotLayout layout = 9;
+  // Build IDs not represented in the snapshot's file records resolve from the
+  // exact StorageV3 manifests selected at capture time.
+  bool index_files_from_manifest = 10;
 }
 
 message RestoreSnapshotInfo {

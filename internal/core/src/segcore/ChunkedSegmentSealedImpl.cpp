@@ -1504,6 +1504,17 @@ ChunkedSegmentSealedImpl::CaptureLoadInfoSnapshot() const {
     return CapturePublishedState()->load_info;
 }
 
+std::shared_ptr<milvus_storage::api::ColumnGroups>
+ChunkedSegmentSealedImpl::GetCachedColumnGroupsForManifest(
+    const std::string& manifest_path) const {
+    auto info = CaptureLoadInfoSnapshot();
+    if (info == nullptr || !info->HasManifestPath() ||
+        !::IsSameLoonManifestPath(info->GetManifestPath(), manifest_path)) {
+        return nullptr;
+    }
+    return info->GetCachedColumnGroups();
+}
+
 std::shared_ptr<const ChunkedSegmentSealedImpl::PublishedSegmentState>
 ChunkedSegmentSealedImpl::CapturePublishedState() const {
     return std::atomic_load(&published_state_);
@@ -8856,6 +8867,15 @@ ChunkedSegmentSealedImpl::Reopen(
     milvus::OpContext* op_ctx,
     const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
     SealedFieldLayoutPtr new_schema) {
+    Reopen(op_ctx, new_load_info, std::move(new_schema), nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::Reopen(
+    milvus::OpContext* op_ctx,
+    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
+    SealedFieldLayoutPtr new_schema,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
     auto current = CapturePublishedState();
@@ -8877,7 +8897,8 @@ ChunkedSegmentSealedImpl::Reopen(
         new_load_info,
         has_schema_update ? std::move(new_schema) : current_schema,
         *current->load_info,
-        read_state_fork_);
+        read_state_fork_,
+        std::move(groups));
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::Reopen()");
     SegmentLoadInfo current_mutable(*current->load_info);
     current_mutable.ResolveLegacyBinlogChildFields(current_schema, nullptr);
@@ -9428,6 +9449,13 @@ ChunkedSegmentSealedImpl::GetCommitTimestamp() const {
 void
 ChunkedSegmentSealedImpl::SetLoadInfo(
     proto::segcore::SegmentLoadInfo load_info) {
+    SetLoadInfo(std::move(load_info), nullptr);
+}
+
+void
+ChunkedSegmentSealedImpl::SetLoadInfo(
+    proto::segcore::SegmentLoadInfo load_info,
+    std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     auto current = CapturePublishedState();
     auto schema_snapshot = current->fields;
@@ -9439,8 +9467,9 @@ ChunkedSegmentSealedImpl::SetLoadInfo(
     }
     // Do not parse manifest here: Load() must be able to observe a
     // pre-cancelled OpContext before any storage/manifest IO happens.
-    auto published = std::make_shared<const SegmentLoadInfo>(
-        std::move(load_info), schema_snapshot);
+    auto published = std::make_shared<SegmentLoadInfo>(std::move(load_info),
+                                                       schema_snapshot);
+    published->SetCachedColumnGroups(std::move(groups));
     PublishStateOnline(BuildNextPublishedState(
         current,
         MakeStateDelta(

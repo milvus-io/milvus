@@ -806,38 +806,37 @@ func (m *IndexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	m.fieldIndexLock.RLock()
-	fieldIndexesMap, ok := m.Indexes[collID]
+	indexes, ok := m.Indexes[collID]
+	index := indexes[indexID]
+	m.fieldIndexLock.RUnlock()
 	if !ok {
 		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
-		m.fieldIndexLock.RUnlock()
-		return state
-	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
-	}
-	m.fieldIndexLock.RUnlock()
-
-	indexes, ok := m.SegmentIndexes.Get(segmentID)
-	if !ok {
-		state.State = commonpb.IndexState_Unissued
-		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
 		return state
 	}
 
-	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if segIdx, ok := indexes.Get(indexID); ok && !segIdx.IsDeleted {
-			state.IndexName = index.IndexName
-			state.State = segIdx.IndexState
-			state.FailReason = segIdx.FailReason
-			return state
+	m.readSegmentIndexRecords(segmentID, func(records segmentIndexRecords) {
+		if (records.tasks == nil || records.tasks.Len() == 0) && len(records.segment.GetIndexSummaries()) == 0 {
+			state.State = commonpb.IndexState_Unissued
+			state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
+			return
 		}
-		state.State = commonpb.IndexState_Unissued
-		return state
-	}
-
-	state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+		if index == nil || index.IsDeleted {
+			state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+			return
+		}
+		task, completed := records.lookup(indexID)
+		switch {
+		case task != nil && !task.IsDeleted:
+			state.IndexName = index.IndexName
+			state.State = task.IndexState
+			state.FailReason = task.FailReason
+		case completed != nil:
+			state.IndexName = index.IndexName
+			state.State = commonpb.IndexState_Finished
+		default:
+			state.State = commonpb.IndexState_Unissued
+		}
+	})
 	return state
 }
 
@@ -870,10 +869,10 @@ func (m *IndexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 		return nil
 	}
 
-	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+	checkSegmentState := func(summaries map[UniqueID]*model.SegmentIndexSummary) bool {
 		indexedFields := 0
 		for _, index := range targetIndices {
-			if segIdx, ok := indexes.Get(index.IndexID); ok && !segIdx.IsDeleted && segIdx.IndexState == commonpb.IndexState_Finished {
+			if summary := summaries[index.IndexID]; summary != nil && !summary.IsDeleted && summary.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
 		}
@@ -883,10 +882,8 @@ func (m *IndexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 
 	ret := make([]int64, 0)
 	for _, sid := range segmentIDs {
-		if indexes, ok := m.SegmentIndexes.Get(sid); ok {
-			if checkSegmentState(indexes) {
-				ret = append(ret, sid)
-			}
+		if summaries := m.segmentIndexSummaries(sid); len(summaries) != 0 && checkSegmentState(summaries) {
+			ret = append(ret, sid)
 		}
 	}
 
@@ -1042,31 +1039,28 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 		return unindexed
 	}
 
+	var missing typeutil.UniqueSet
+	if m.UsesSegmentSummaries() {
+		// Reuse storage for the active IDs missing from each segment's task map.
+		missing = make(typeutil.UniqueSet, len(activeIndexIDs))
+	}
 	for _, segID := range segIDs {
-		// the segment should be unindexed status if the fieldIndexes is not nil
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
-		if !ok || segIndexInfos.Len() == 0 {
-			unindexed.Insert(segID)
-			continue
-		}
-		for _, indexID := range activeIndexIDs {
-			if _, ok := segIndexInfos.Get(indexID); !ok {
-				// the segment should be unindexed status if the segment index is not found within field indexes
+		m.readSegmentIndexRecords(segID, func(records segmentIndexRecords) {
+			if !records.coversIndexes(activeIndexIDs, missing) {
 				unindexed.Insert(segID)
-				break
 			}
-		}
+		})
 	}
 
 	return unindexed
 }
 
-func (m *IndexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+func (m *IndexMeta) GetSegmentsIndexTasks(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
 	segmentsIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex)
 	for _, segmentID := range segIDs {
-		segmentsIndexes[segmentID] = m.GetSegmentIndexesUnsafe(collectionID, segmentID)
+		segmentsIndexes[segmentID] = m.getSegmentIndexTasksLocked(collectionID, segmentID)
 	}
 	return segmentsIndexes
 }
@@ -1087,15 +1081,9 @@ func (m *IndexMeta) GetQueryViewIndexSnapshot(collectionID UniqueID, segmentIDs 
 	}
 	segmentIndexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
-		segmentIndexes[segmentID] = m.GetSegmentIndexesUnsafe(collectionID, segmentID)
+		segmentIndexes[segmentID] = m.getSegmentIndexTasksLocked(collectionID, segmentID)
 	}
 	return indexes, segmentIndexes
-}
-
-func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
-	m.fieldIndexLock.RLock()
-	defer m.fieldIndexLock.RUnlock()
-	return m.GetSegmentIndexesUnsafe(collectionID, segID)
 }
 
 // GetAllSegmentIndexSummaries returns detached inventory for active, completed and
@@ -1136,11 +1124,21 @@ func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.Segment
 	return summaries
 }
 
-// Note: thread-unsafe, don't call it outside indexMeta
-func (m *IndexMeta) GetSegmentIndexesUnsafe(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
-	ret := make(map[UniqueID]*model.SegmentIndex, 0)
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
+// GetSegmentIndexTasks returns live records from the task map, which also
+// contains completed indexes in legacy mode.
+func (m *IndexMeta) GetSegmentIndexTasks(collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	return m.getSegmentIndexTasksLocked(collectionID, segmentID)
+}
+
+func (m *IndexMeta) getSegmentIndexTasksLocked(collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
+	if m.SegmentIndexes == nil {
+		return nil
+	}
+	tasks, _ := m.SegmentIndexes.Get(segmentID)
+	ret := make(map[UniqueID]*model.SegmentIndex)
+	if tasks == nil || tasks.Len() == 0 {
 		return ret
 	}
 
@@ -1149,7 +1147,7 @@ func (m *IndexMeta) GetSegmentIndexesUnsafe(collectionID UniqueID, segID UniqueI
 		return ret
 	}
 
-	for _, segIdx := range segIndexInfos.Values() {
+	for _, segIdx := range tasks.Values() {
 		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 			ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
 		}
@@ -1688,8 +1686,8 @@ func (m *IndexMeta) GetSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	m.fieldIndexLock.RUnlock()
 
 	for _, segID := range segmentIDs {
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
-		if !ok || segIndexInfos.Len() == 0 {
+		summaries := m.segmentIndexSummaries(segID)
+		if len(summaries) == 0 {
 			// Leave the entry out rather than storing an empty map. Both
 			// callers read it as `states[indexID]`, which behaves identically
 			// on a missing key and on an empty map - and a caller that scans
@@ -1699,16 +1697,16 @@ func (m *IndexMeta) GetSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		}
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
-		for _, segIdx := range segIndexInfos.Values() {
-			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
-				indexVersion := segIdx.CurrentIndexVersion
-				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
-					indexVersion = segIdx.CurrentScalarIndexVersion
+		for _, summary := range summaries {
+			if index, ok := fieldIndexes[summary.IndexID]; ok && !index.IsDeleted && !summary.IsDeleted {
+				indexVersion := summary.CurrentIndexVersion
+				if indexparamcheck.IsScalarIndexType(summary.IndexType) {
+					indexVersion = summary.CurrentScalarIndexVersion
 				}
-				ret[segID][segIdx.IndexID] = &indexpb.SegmentIndexState{
+				ret[segID][summary.IndexID] = &indexpb.SegmentIndexState{
 					SegmentID:    segID,
-					State:        segIdx.IndexState,
-					FailReason:   segIdx.FailReason,
+					State:        summary.IndexState,
+					FailReason:   summary.FailReason,
 					IndexName:    index.IndexName,
 					IndexVersion: indexVersion,
 				}
@@ -1838,23 +1836,23 @@ func (m *IndexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	m.fieldIndexLock.RUnlock()
 
 	// the segment should be unindexed status if the segment indexes is not found
-	segIndexInfos, ok := m.SegmentIndexes.Get(segmentID)
-	if !ok || segIndexInfos.Len() == 0 {
+	summaries := m.segmentIndexSummaries(segmentID)
+	if len(summaries) == 0 {
 		return false, []*metricsinfo.IndexedField{}
 	}
 
 	isIndexed := true
 	var SegmentIndexes []*metricsinfo.IndexedField
 	for _, index := range fieldIndexes {
-		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted {
+		if summary := summaries[index.IndexID]; !index.IsDeleted {
 			buildID := int64(-1)
 			serializedSize := int64(0)
-			if !ok || si == nil {
+			if summary == nil {
 				// the segment should be unindexed status if the segment index is not found within field indexes
 				isIndexed = false
 			} else {
-				buildID = si.BuildID
-				serializedSize = int64(si.IndexSerializedSize)
+				buildID = summary.BuildID
+				serializedSize = int64(summary.IndexSerializedSize)
 			}
 
 			SegmentIndexes = append(SegmentIndexes, &metricsinfo.IndexedField{

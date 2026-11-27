@@ -18,7 +18,10 @@ package datacoord
 
 import (
 	"context"
+	"path"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
@@ -31,9 +34,14 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -212,4 +220,121 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestSummaryModeIndexInfoKeepsRetainedTasksAndEmptySlots(t *testing.T) {
+	ctx := t.Context()
+	mt, dm, err := index.NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	im := dm.IndexMeta
+	require.NoError(t, im.CreateIndex(ctx, &model.Index{IndexID: 10, CollectionID: 1, FieldID: 100, IndexName: "idx"}))
+	base := t.TempDir()
+	mt.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(base))
+	for _, id := range []int64{3, 4} {
+		require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped,
+			StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(base, 1), TransformStartAfterTimetick: 100,
+		})))
+	}
+	require.NoError(t, im.UseSegmentSummaries(mt.MetaStore))
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	for _, id := range []int64{3, 4} {
+		require.NoError(t, im.AddSegmentIndex(ctx, &model.SegmentIndex{
+			IndexID: 10, BuildID: id + 20, IndexVersion: 1, SegmentID: id, CollectionID: 1, PartitionID: 2,
+			IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: version,
+		}))
+	}
+	require.NoError(t, mt.FinishTask(ctx, &workerpb.IndexTaskInfo{
+		BuildID: 23, State: commonpb.IndexState_Finished, IndexFileKeys: []string{"idx.bin"}, IndexStorePathVersion: version,
+	}))
+	srv := &Server{meta: mt, domainMetas: domainMetas{indexMeta: im}}
+	srv.stateCode.Store(commonpb.StateCode_Healthy)
+	require.Equal(t, []int64{3}, im.GetIndexedSegments(1, []int64{3, 4}, []int64{100}))
+
+	resp, err := srv.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{CollectionID: 1, SegmentIDs: []int64{3, 4, 5, 3}})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Len(t, resp.SegmentInfo, 3)
+	require.Len(t, resp.SegmentInfo[3].GetIndexInfos(), 1)
+	expected := []string{path.Join(base, "_index/23/1/idx.bin")}
+	require.Equal(t, expected, resp.SegmentInfo[3].GetIndexInfos()[0].GetIndexFilePaths())
+	require.True(t, resp.SegmentInfo[4].GetEnableIndex())
+	require.Empty(t, resp.SegmentInfo[4].GetIndexInfos())
+	require.False(t, resp.SegmentInfo[5].GetEnableIndex())
+	require.Empty(t, resp.SegmentInfo[5].GetIndexInfos())
+
+	results, _, err := srv.GetQueryViewSegmentLoadInfos(ctx, 1, []int64{3}, types.QueryViewIndexFull)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, merr.Error(results[0].GetStatus()))
+	require.Len(t, results[0].GetLoadInfo().GetIndexInfos(), 1)
+	require.Equal(t, expected, results[0].GetLoadInfo().GetIndexInfos()[0].GetIndexFilePaths())
+}
+
+func TestSummaryModeIndexInfoReadsManifestsConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	limit := &paramtable.Get().DataCoordCfg.SegmentIndexManifestLoadConcurrency
+	previous := limit.SwapTempValue("2")
+	t.Cleanup(func() { limit.SwapTempValue(previous) })
+
+	mt, dm, err := index.NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10, FieldID: 100}))
+	root := t.TempDir()
+	mt.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	manifestEntries := make(map[string]packed.ManifestIndexInfo)
+	for _, id := range []int64{3, 4} {
+		base := path.Join(root, "insert_log/1/2", strconv.FormatInt(id, 10))
+		manifest := packed.MarshalManifestPath(base, 1)
+		manifestEntries[manifest] = packed.ManifestIndexInfo{
+			IndexID: 10, BuildID: id, FieldID: 100, IndexVersion: 1, IndexName: "idx", IndexType: "HNSW",
+			Path:          path.Join(base, "_index", strconv.FormatInt(id, 10), "1"),
+			IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: version,
+		}
+		require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+			ManifestPath: manifest, ManifestHasIndex: true,
+			IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, FieldId: 100, BuildId: id, HasArtifact: true, IndexVersion: 1}},
+		})))
+	}
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	srv := &Server{meta: mt, domainMetas: domainMetas{indexMeta: dm.IndexMeta}}
+	srv.stateCode.Store(commonpb.StateCode_Healthy)
+	started := make(chan string, len(manifestEntries))
+	release := make(chan struct{})
+	read := mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+		func(readCtx context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			started <- manifest
+			select {
+			case <-release:
+				return []packed.ManifestIndexInfo{manifestEntries[manifest]}, nil
+			case <-readCtx.Done():
+				return nil, readCtx.Err()
+			}
+		}).Build()
+	defer read.UnPatch()
+	done := make(chan *indexpb.GetIndexInfoResponse, 1)
+	go func() {
+		resp, _ := srv.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{CollectionID: 1, SegmentIDs: []int64{3, 4}})
+		done <- resp
+	}()
+	var opened []string
+	for i := 0; i < len(manifestEntries); i++ {
+		select {
+		case manifest := <-started:
+			opened = append(opened, manifest)
+		case <-ctx.Done():
+		}
+	}
+	close(release)
+	resp := <-done
+	require.Len(t, opened, 2)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	for _, manifest := range opened {
+		entry := manifestEntries[manifest]
+		require.Len(t, resp.SegmentInfo[entry.BuildID].IndexInfos, 1)
+		require.Equal(t, []string{path.Join(entry.Path, "index.bin")}, resp.SegmentInfo[entry.BuildID].IndexInfos[0].IndexFilePaths)
+	}
 }

@@ -6,6 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -14,8 +19,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -541,4 +549,114 @@ func TestConvertToSegcoreSegmentLoadInfo_V3ManifestErrorReturnsError(t *testing.
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
+}
+
+func TestSealedLoadAndReopenUsePreparedManifest(t *testing.T) {
+	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
+	dir := t.TempDir()
+	require.NoError(t, initcore.InitLocalArrowFileSystem(dir))
+	initcore.InitLocalChunkManager(dir)
+	require.NoError(t, initcore.InitMmapManager(paramtable.Get(), 1))
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+
+	ctx := t.Context()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	base := filepath.Join(dir, "insert_log/1/2/3")
+	fields := []arrow.Field{
+		{Name: "0", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "1", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "100", Type: arrow.PrimitiveTypes.Int64},
+	}
+	arrowSchema := arrow.NewSchema(fields, nil)
+	writer, err := packed.NewFFIPackedWriter(base, arrowSchema,
+		[]storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}, GroupID: storagecommon.DefaultShortColumnGroupID}}, config, nil)
+	require.NoError(t, err)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	for _, field := range builder.Fields() {
+		field.(*array.Int64Builder).AppendValues([]int64{1, 2, 3, 4, 5}, nil)
+	}
+	record := builder.NewRecord()
+	defer record.Release()
+	require.NoError(t, writer.WriteRecordBatch(record))
+	out, err := writer.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	pointer, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), config,
+		&packed.ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+
+	bloomPath := filepath.Join(base, "_stats", "bloom_filter.100", "1")
+	pointer, err = packed.AddStatsToManifest(pointer, config, []packed.StatEntry{{
+		Key: "bloom_filter.100", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "128"},
+	}})
+	require.NoError(t, err)
+	manifest, err := packed.OpenLoadManifest(ctx, pointer, config)
+	require.NoError(t, err)
+	defer manifest.Close()
+	params := paramtable.Get()
+	oldType := params.CommonCfg.StorageType.SwapTempValue("local")
+	defer params.CommonCfg.StorageType.SwapTempValue(oldType)
+	oldPath := params.LocalStorageCfg.Path.SwapTempValue(dir)
+	defer params.LocalStorageCfg.Path.SwapTempValue(oldPath)
+	preparedCtx := packed.WithLoadManifest(ctx, manifest)
+
+	info := &querypb.SegmentLoadInfo{
+		CollectionID: 1, PartitionID: 2, SegmentID: 3, NumOfRows: 5,
+		ManifestPath: pointer, StorageVersion: storage.StorageV3,
+	}
+	resolver := packed.NewStatsResolverFromLoadInfo(info).WithLoadManifest(preparedCtx)
+	paths, err := resolver.BloomFilterPaths(100)
+	require.NoError(t, err)
+	require.Equal(t, []string{bloomPath}, paths)
+	memorySize, err := resolver.BloomFilterMemorySize(100)
+	require.NoError(t, err)
+	require.EqualValues(t, 128, memorySize)
+
+	schema := &schemapb.CollectionSchema{Name: "prepared_manifest", Fields: []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "RowID", DataType: schemapb.DataType_Int64},
+		{FieldID: 1, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 1, Schema: schema})
+	require.NoError(t, err)
+	defer collection.Release()
+	// Count fallback calls even when the native process cache satisfies the read.
+	readCount := func(t *testing.T, operation string) uint64 {
+		t.Helper()
+		observer := metrics.QueryStageDuration.WithLabelValues("storage", operation, "total", "success")
+		var sample dto.Metric
+		require.NoError(t, observer.(prometheus.Metric).Write(&sample))
+		return sample.GetHistogram().GetSampleCount()
+	}
+	for _, tc := range []struct {
+		name     string
+		ctx      context.Context
+		manifest *packed.LoadManifest
+		reads    uint64
+	}{
+		{"prepared", preparedCtx, manifest, 0},
+		{"unprepared", ctx, nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := readCount(t, "manifest_create")
+			segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+				Collection: collection, SegmentID: 3, SegmentType: segcore.SegmentTypeSealed,
+				LoadInfo: info, LoadManifest: tc.manifest, ExplicitLoadScope: true, LoadFields: []int64{100},
+			})
+			require.NoError(t, err)
+			defer segment.Release()
+			require.Equal(t, before+tc.reads, readCount(t, "manifest_create"))
+			require.NoError(t, segment.Load(tc.ctx))
+
+			read, err := segcore.PinSealedReadState(segment)
+			require.NoError(t, err)
+			defer read.Release()
+			before = readCount(t, "manifest_reopen")
+			require.NoError(t, read.Reopen(tc.ctx, &segcore.ReopenRequest{Collection: collection, LoadInfo: info, LoadFields: []int64{100}}))
+			require.Equal(t, before+tc.reads, readCount(t, "manifest_reopen"))
+			assertEqualCount(t, collection, read, 5)
+		})
+	}
 }

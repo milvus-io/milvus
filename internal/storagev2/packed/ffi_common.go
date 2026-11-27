@@ -528,14 +528,16 @@ func CommittedManifestPath(basePath string, version, size int64, storageType str
 // recorded manifest size lets loon read the manifest without first asking
 // storage for its size. loon reads exactly that many bytes, so a size that does
 // not match the manifest object fails the read.
-func openTransaction(manifest ManifestJSON, cProperties *C.LoonProperties, resolveID C.int32_t, retryLimit C.uint32_t) (C.LoonTransactionHandle, error) {
+func openTransaction(ctx context.Context, manifest ManifestJSON, cProperties *C.LoonProperties, resolveID C.int32_t, retryLimit C.uint32_t) (C.LoonTransactionHandle, error) {
 	cBasePath := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBasePath))
 	var handle C.LoonTransactionHandle
 	// The open reads the manifest revision from storage and blocks the calling
 	// goroutine's OS thread; bound it process-wide like every other blocking
 	// manifest FFI call so concurrent commits cannot explode thread count.
-	acquireManifestFFI(context.Background())
+	if err := acquireManifestFFI(ctx); err != nil {
+		return 0, err
+	}
 	defer releaseManifestFFI()
 	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(manifest.ManifestVersion),
 		C.int64_t(manifest.Size), resolveID, retryLimit, &handle)
@@ -543,10 +545,10 @@ func openTransaction(manifest ManifestJSON, cProperties *C.LoonProperties, resol
 }
 
 // openManifest reads the manifest of the revision manifest names.
-func openManifest(manifest ManifestJSON, cProperties *C.LoonProperties, timing *manifestReadTiming) (*C.LoonManifest, error) {
+func openManifest(ctx context.Context, manifest ManifestJSON, cProperties *C.LoonProperties, timing *manifestReadTiming) (*C.LoonManifest, error) {
 	beginTimer := manifestBegin.Begin()
 	beginStartedAt := time.Now()
-	handle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
+	handle, err := openTransaction(ctx, manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
 	if timing != nil {
 		timing.durations[manifestReadBegin] = time.Since(beginStartedAt)
 	}
@@ -664,7 +666,7 @@ func AddLobFilesToTransaction(manifestPath string, storageConfig *indexpb.Storag
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cTransactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
+	cTransactionHandle, err := openTransaction(context.Background(), manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}

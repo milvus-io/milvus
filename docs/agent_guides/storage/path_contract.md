@@ -106,6 +106,18 @@ Manifest publication updates the pointer and summary and retires the task in
 one catalog transaction. An artifact-free completion retains a summary without
 creating a manifest index entry. GC must consult the current manifest after an
 active-task lookup misses; absence from the task table does not prove orphanhood.
+A new snapshot blocks index reclamation in its collection from revision selection
+through pin publication. Queued deletes check snapshot pins again before removing
+files. Dropped-segment GC clears completed index readiness before deleting files
+and retains the manifest and any task rows for retry.
+Referenced snapshots in summary mode record the selected manifest revisions and
+build IDs without opening segment manifests. Restore and export resolve the
+selected build IDs using those revisions. Exported bundles carry explicit index
+file paths.
+To restore a summary-mode snapshot on an older reader without manifest-backed
+snapshot support, export it on the source version and use the self-contained
+bundle. Older readers can ignore the deferred-file marker in referenced
+snapshots and rebuild the indexes.
 Historical migration, rollback, incompatible snapshot restore and direct manifest
 version adoption are unsupported in this mode. See the
 [index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).

@@ -2776,7 +2776,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		{name: "v2 legacy base", version: 2, segment: &datapb.SegmentInfo{ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/2/1000", 1)}, wantSuffix: "/data/legacy/insert_log/1/2/1000/_index/10000/1/index.bin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			segIdx := s.indexMeta.GetSegmentIndexes(collID, segID)[indexID]
+			segIdx := s.indexMeta.GetSegmentIndexTasks(collID, segID)[indexID]
 			segIdx.IndexStorePathVersion = tc.version
 			segIdx.IndexFileKeys = []string{"index.bin"}
 			segIdx1.Insert(indexID, segIdx)

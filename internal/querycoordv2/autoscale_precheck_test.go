@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func setAutoscaleCapacityRatiosForTest(t *testing.T, memoryHighWaterLevel, maxDiskUsagePercentage string) {
@@ -452,7 +453,7 @@ func newAutoscalePrecheckTestBroker(t *testing.T, recoveryErr, segmentErr, index
 		}, nil).
 		Once()
 	broker.EXPECT().
-		GetSegmentInfo(mock.Anything, autoscalePrecheckTestSegmentID).
+		GetSegmentInfoForResourceEstimation(mock.Anything, autoscalePrecheckTestCollectionID, autoscalePrecheckTestSegmentID).
 		Return([]*datapb.SegmentInfo{
 			{
 				ID:             autoscalePrecheckTestSegmentID,
@@ -470,7 +471,7 @@ func newAutoscalePrecheckTestBroker(t *testing.T, recoveryErr, segmentErr, index
 					},
 				},
 			},
-		}, segmentErr).
+		}, nil, segmentErr).
 		Once()
 	if segmentErr != nil {
 		return broker
@@ -1272,4 +1273,48 @@ func TestAutoscalePrecheckStatusExtraInfo(t *testing.T) {
 	assert.Equal(t, "75", status.GetExtraInfo()["suggested_expand_percent"])
 	assert.NotContains(t, status.GetExtraInfo(), "memory_bytes")
 	assert.NotContains(t, status.GetExtraInfo(), "disk_bytes")
+}
+
+func TestRequiredLoadResourceUsesProjectedIndexResources(t *testing.T) {
+	req := newAutoscalePrecheckTestRequest()
+	req.CollectionInfo.Schema.Fields[0].DataType = schemapb.DataType_FloatVector
+	req.CollectionInfo.Schema.Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
+	id := autoscalePrecheckTestSegmentID
+	segment := &datapb.SegmentInfo{
+		ID: id, CollectionID: req.CollectionInfo.ID,
+		PartitionID: autoscalePrecheckTestPartitionID, StorageVersion: storage.StorageV3, NumOfRows: 8000,
+		ManifestPath: "unavailable", Stats: &datapb.Statistics{LoadResource: &datapb.LoadResourceStatistics{
+			ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 100, FieldIds: []int64{100}, MemorySize: 512000}},
+		}},
+	}
+	for _, artifact := range []bool{true, false} {
+		for _, loadFields := range [][]int64{nil, {101}} {
+			req.Expected.ExpectedLoadFields = loadFields
+			broker := meta.NewMockBroker(t)
+			broker.EXPECT().GetRecoveryInfoV2(mock.Anything, segment.GetCollectionID(), segment.GetPartitionID()).
+				Return(nil, []*datapb.SegmentInfo{segment}, nil).Once()
+			index := &querypb.FieldIndexInfo{
+				FieldID: 100, IndexID: 5, BuildID: 6, IndexSize: 1024 * 1024, NumRows: 4000, HasArtifact: &artifact,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "DISKANN"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: common.DimKey, Value: "128"},
+				},
+			}
+			broker.EXPECT().GetSegmentInfoForResourceEstimation(mock.Anything, segment.GetCollectionID(), id).
+				Return([]*datapb.SegmentInfo{segment}, map[int64][]*querypb.FieldIndexInfo{id: {index}}, nil).Once()
+			got, err := (&Server{broker: broker}).requiredLoadResourceByRG(t.Context(), req)
+			require.NoError(t, err)
+
+			legacy := typeutil.Clone(index)
+			legacy.HasArtifact = nil
+			if artifact {
+				legacy.IndexFilePaths = []string{"unavailable/index_file"}
+			}
+			want, err := estimateLoadResourceForLoadConfig(t.Context(), req.CollectionInfo.Schema, nil,
+				[]*datapb.SegmentInfo{segment}, map[int64][]*querypb.FieldIndexInfo{id: {legacy}}, loadFields)
+			require.NoError(t, err)
+			require.Equal(t, want, got[meta.DefaultResourceGroupName])
+		}
+	}
 }

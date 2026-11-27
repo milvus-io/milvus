@@ -28,7 +28,7 @@ import (
 )
 
 func TestManifestIndexFileKeysRejectPathTraversal(t *testing.T) {
-	_, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+	_, ok := packed.ManifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
 		IndexName:             "index",
 		IndexType:             "HNSW",
 		Path:                  "index_v1/1/2/3/102/4",
@@ -61,7 +61,7 @@ func TestValidateManifestIndexPublishable(t *testing.T) {
 }
 
 func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
-	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+	info, ok := packed.ManifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
 		IndexName: "index", IndexType: "FLAT",
 		Path:                  "files/insert_log/1/2/3/_index/102/4",
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
@@ -73,7 +73,7 @@ func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
 }
 
 func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {
-	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+	info, ok := packed.ManifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
 		IndexName: "custom_vector", IndexType: "HNSW_SQ",
 		Path: "index_v1/1/2/3/102/4", IndexFileKeys: []string{"index.bin"},
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,

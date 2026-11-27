@@ -868,10 +868,6 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 	}
 }
 
-// Summary publication retires task rows that the legacy readers and GC need.
-// Enable startup only in the same revision that installs the summary consumers.
-const segmentIndexSummaryReadersReady = false
-
 func (s *Server) initIndexMetadataMode() error {
 	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled
 	summaryMode, err := strconv.ParseBool(mode.GetValue())
@@ -883,9 +879,6 @@ func (s *Server) initIndexMetadataMode() error {
 	}
 	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
 		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
-	}
-	if summaryMode && !segmentIndexSummaryReadersReady {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require summary-aware readers and garbage collection")
 	}
 	if modeCatalog, ok := s.catalog.(interface {
 		EnsureIndexMetadataMode(context.Context, bool, bool) error
@@ -1013,6 +1006,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// Publish only fully recovered metadata. A failed later phase must not
 	// make a subsequent initMeta call return early with partial state.
 	recoveredMeta.DataViewManager = manager
+	recoveredDomainMetas.snapshotMeta.SetManifestIndexReader(recoveredMeta.ReadManifestIndexesWithIO)
 	s.meta = recoveredMeta
 	s.domainMetas = recoveredDomainMetas
 	s.importMeta = recoveredImports

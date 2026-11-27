@@ -3115,7 +3115,7 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 		DropTolerance:        0,
 	}))
 
-	assert.Empty(t, dm.IndexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID),
+	assert.Empty(t, dm.IndexMeta.GetSegmentIndexSummaries(segment.CollectionID, segment.ID),
 		"deleted field indexes are filtered by the existing query API")
 	assert.Len(t, dm.IndexMeta.GetAllSegmentIndexSummaries(segment.ID), 1)
 

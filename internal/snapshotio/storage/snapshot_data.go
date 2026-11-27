@@ -56,6 +56,8 @@ type SnapshotData struct {
 	SegmentIDs    []int64
 	BuildIDs      []int64
 	Layout        datapb.SnapshotLayout
+	// IndexFilesFromManifest marks an inventory whose file paths are resolved on demand.
+	IndexFilesFromManifest bool
 }
 
 // SnapshotWriter writes snapshot metadata and segment manifests.
@@ -302,15 +304,16 @@ func (w *SnapshotWriter) writeSegmentManifest(ctx context.Context, manifestPath 
 
 func marshalSnapshotMetadata(snapshot *SnapshotData, manifestPaths []string, storagev2Manifests []*datapb.StorageV2SegmentManifest) ([]byte, error) {
 	metadata := &datapb.SnapshotMetadata{
-		FormatVersion:         int32(SnapshotFormatVersion),
-		SnapshotInfo:          snapshot.SnapshotInfo,
-		Collection:            snapshot.Collection,
-		Indexes:               snapshot.Indexes,
-		ManifestList:          manifestPaths,
-		Storagev2ManifestList: storagev2Manifests,
-		SegmentIds:            snapshot.SegmentIDs,
-		BuildIds:              snapshot.BuildIDs,
-		Layout:                snapshot.Layout,
+		FormatVersion:          int32(SnapshotFormatVersion),
+		SnapshotInfo:           snapshot.SnapshotInfo,
+		Collection:             snapshot.Collection,
+		Indexes:                snapshot.Indexes,
+		ManifestList:           manifestPaths,
+		Storagev2ManifestList:  storagev2Manifests,
+		SegmentIds:             snapshot.SegmentIDs,
+		BuildIds:               snapshot.BuildIDs,
+		Layout:                 snapshot.Layout,
+		IndexFilesFromManifest: snapshot.IndexFilesFromManifest,
 	}
 
 	opts := protojson.MarshalOptions{
@@ -509,15 +512,16 @@ func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataF
 	}
 
 	snapshotData := &SnapshotData{
-		SnapshotInfo:  metadata.GetSnapshotInfo(),
-		Collection:    metadata.GetCollection(),
-		Segments:      allSegments,
-		Indexes:       metadata.GetIndexes(),
-		MetadataPath:  metadataFilePath,
-		ManifestPaths: append([]string(nil), metadata.GetManifestList()...),
-		SegmentIDs:    metadata.GetSegmentIds(),
-		BuildIDs:      metadata.GetBuildIds(),
-		Layout:        layout,
+		SnapshotInfo:           metadata.GetSnapshotInfo(),
+		Collection:             metadata.GetCollection(),
+		Segments:               allSegments,
+		Indexes:                metadata.GetIndexes(),
+		MetadataPath:           metadataFilePath,
+		ManifestPaths:          append([]string(nil), metadata.GetManifestList()...),
+		SegmentIDs:             metadata.GetSegmentIds(),
+		BuildIDs:               metadata.GetBuildIds(),
+		Layout:                 layout,
+		IndexFilesFromManifest: metadata.GetIndexFilesFromManifest(),
 	}
 
 	if layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {

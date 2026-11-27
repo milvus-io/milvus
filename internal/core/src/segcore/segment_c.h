@@ -76,6 +76,18 @@ NewSealedSegmentWithCollection(CCollection collection,
                                const int64_t* load_fields,
                                int64_t field_count);
 
+// The optional manifest is borrowed for the duration of the call.
+CStatus
+NewSealedSegmentWithManifest(CCollection collection,
+                             int64_t segment_id,
+                             CSegmentInterface* output,
+                             bool sorted,
+                             const uint8_t* load_blob,
+                             int64_t load_length,
+                             const int64_t* load_fields,
+                             int64_t field_count,
+                             const void* manifest);
+
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.
@@ -168,6 +180,17 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        int64_t load_length,
                                        const int64_t* load_fields,
                                        int64_t load_field_count);
+
+// The optional manifest is borrowed only until this call returns.
+CFuture*
+AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
+                                     CSegmentInterface segment,
+                                     CCollection collection,
+                                     const uint8_t* load_blob,
+                                     int64_t load_length,
+                                     const int64_t* load_fields,
+                                     int64_t load_field_count,
+                                     const void* manifest);
 
 // Return a read-only sealed facade. Retain c_segment until deleting the facade.
 CStatus

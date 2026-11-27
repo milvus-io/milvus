@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <iosfwd>
 #include <map>
 #include <memory>
@@ -63,11 +64,13 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
+#include "milvus-storage/ffi_c.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/properties.h"
 #include "mmap/ChunkedColumn.h"
@@ -1766,6 +1769,75 @@ TEST(test_chunk_segment, InitialSegmentsHavePrivateLoadScopes) {
         EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(left));
         EXPECT_TRUE(collection.get_schema()->IsFieldInLoadScope(right));
     }
+}
+
+TEST(test_chunk_segment, ReopenSharesCachedColumnGroupsForSameManifest) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto dataset = segcore::DataGen(schema, 5, 42);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* base =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    auto schema_proto = schema->ToProto();
+    segcore::Collection collection(&schema_proto);
+
+    proto::segcore::SegmentLoadInfo info;
+    info.set_num_of_rows(5);
+    info.set_manifest_path(R"({"ver":3,"base_path":"segment"})");
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    base->SetLoadInfo(info, groups);
+
+    auto reopen = [&](segcore::ChunkedSegmentSealedImpl& read,
+                      const LoonManifest& manifest) {
+        const auto blob = info.SerializeAsString();
+        const int64_t field = pk.get();
+        auto* future = AsyncReopenSealedSegmentWithManifest(
+            {},
+            &read,
+            &collection,
+            reinterpret_cast<const uint8_t*>(blob.data()),
+            blob.size(),
+            &field,
+            1,
+            &manifest);
+        auto release = folly::makeGuard([&] { future_destroy(future); });
+        std::promise<void> ready;
+        auto done = ready.get_future();
+        future_register_ready_callback(
+            future,
+            [](CLockedGoMutex* state) {
+                reinterpret_cast<std::promise<void>*>(state)->set_value();
+            },
+            reinterpret_cast<CLockedGoMutex*>(&ready));
+        done.wait();
+        void* result = nullptr;
+        return future_leak_and_get(future, &result);
+    };
+
+    LoonManifest unused_manifest{};
+    unused_manifest.column_groups.num_of_column_groups = 1;
+    // Import would fail because the nonzero count has no backing array.
+    info.set_manifest_path(R"({"base_path":"segment","ver":3,"size":8})");
+    auto first = base->PinReadState();
+    auto second = first->PinReadState();
+    for (auto* read : {first.get(), second.get()}) {
+        auto status = reopen(*read, unused_manifest);
+        ASSERT_EQ(status.error_code, 0) << status.error_msg;
+        EXPECT_EQ(read->TestGetLoadInfoSnapshot()->GetCachedColumnGroups(),
+                  groups);
+    }
+
+    LoonManifest next_manifest{};
+    info.set_manifest_path(R"({"ver":4,"base_path":"segment"})");
+    auto status = reopen(*second, next_manifest);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto next_groups =
+        second->TestGetLoadInfoSnapshot()->GetCachedColumnGroups();
+    EXPECT_NE(next_groups, nullptr);
+    EXPECT_NE(next_groups, groups);
+    EXPECT_EQ(first->TestGetLoadInfoSnapshot()->GetCachedColumnGroups(),
+              groups);
 }
 
 TEST(test_chunk_segment, ReadStateLoadScopeReleasesStructOffsets) {

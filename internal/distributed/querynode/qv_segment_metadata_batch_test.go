@@ -66,6 +66,10 @@ func TestQueryViewMetadataBatchGrouping(t *testing.T) {
 					result.Status = merr.Status(merr.WrapErrSegmentNotFound(2))
 					result.LoadInfo = nil
 				}
+				if result.SegmentID == 3 {
+					result.ManifestIndexes = &querypb.QueryViewManifestIndexes{}
+					result.LoadInfo.IndexInfos = nil
+				}
 			}
 			return resp, nil
 		})
@@ -80,6 +84,12 @@ func TestQueryViewMetadataBatchGrouping(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, item[0], snapshot.LoadInfo.CollectionID)
 				require.Equal(t, item[1], snapshot.LoadInfo.SegmentID)
+				if item[1] == 3 {
+					require.NotNil(t, snapshot.ManifestIndexes)
+					require.Empty(t, snapshot.LoadInfo.GetIndexInfos())
+					return
+				}
+				require.Nil(t, snapshot.ManifestIndexes)
 				require.EqualValues(t, 100+item[1], snapshot.LoadInfo.IndexInfos[0].IndexID)
 			})
 		}
@@ -88,6 +98,7 @@ func TestQueryViewMetadataBatchGrouping(t *testing.T) {
 		wg.Wait()
 		require.Len(t, calls, 2)
 		for _, req := range calls {
+			require.True(t, req.GetResolveManifestIndexesLocally())
 			if req.CollectionID == 1 {
 				require.ElementsMatch(t, []int64{1, 2, 3}, req.SegmentIDs)
 			} else {

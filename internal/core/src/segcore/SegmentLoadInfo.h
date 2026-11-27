@@ -416,10 +416,12 @@ class SegmentLoadInfo {
     // Full Load/Reopen have a fresh proto. Bind the layout before selecting
     // fields or converting index metadata from that proto.
     static std::pair<SegmentLoadInfo, SealedFieldLayoutPtr>
-    PrepareForLoad(const ProtoType& info,
-                   SealedFieldLayoutPtr fields,
-                   const SegmentLoadInfo& current,
-                   bool restrict_to_load_fields = false);
+    PrepareForLoad(
+        const ProtoType& info,
+        SealedFieldLayoutPtr fields,
+        const SegmentLoadInfo& current,
+        bool restrict_to_load_fields = false,
+        std::shared_ptr<milvus_storage::api::ColumnGroups> groups = nullptr);
 
     explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
         : SegmentLoadInfo(info,
@@ -850,6 +852,17 @@ class SegmentLoadInfo {
      */
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
+
+    [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
+    GetCachedColumnGroups() const {
+        return column_groups_;
+    }
+
+    void
+    SetCachedColumnGroups(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> groups) {
+        column_groups_ = std::move(groups);
+    }
 
     // Bind the logical layout to this immutable manifest revision before diffing
     // or publishing its reader. Legacy manifests keep identity mapping.

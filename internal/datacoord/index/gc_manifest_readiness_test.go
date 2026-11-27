@@ -47,6 +47,6 @@ func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
 	record, ok := im.GetIndexJob(records[0].BuildID)
 	require.True(t, ok)
 	require.Equal(t, []string{"from-etcd"}, record.IndexFileKeys)
-	require.Empty(t, im.GetSegmentIndexes(100, 5001))
+	require.Empty(t, im.GetSegmentIndexSummaries(100, 5001))
 	require.Nil(t, im.GetSegmentsIndexStates(100, []int64{5001})[5001][500])
 }

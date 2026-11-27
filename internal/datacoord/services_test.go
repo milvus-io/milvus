@@ -5397,7 +5397,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The SegmentIndex record is retracted in the same transaction, so the
 		// stale Finished record no longer serves the old artifact and the
 		// inspector will rebuild against the new column data.
-		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 810))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexSummaries(100, 810))
 		// The manifest dropped the column's index entries and re-registered
 		// the field with the new files.
 		updated := m.GetSegment(ctx, 810)
@@ -5949,7 +5949,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The late Finished record is retracted atomically with the new pointer:
 		// readers never serve an index built from the old column data, and the
 		// inspector rebuilds against the new data.
-		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 812))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexSummaries(100, 812))
 	})
 
 	// A backfill replace whose field has NO index definition at classification
@@ -6032,7 +6032,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 		// The record created against the index definition that appeared during
 		// the window is retracted atomically with the new pointer.
-		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 814))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexSummaries(100, 814))
 		groups, err := packed.ReadManifestColumnGroups(m.GetSegment(ctx, 814).GetManifestPath(), cfg)
 		require.NoError(t, err)
 		require.Len(t, groups, 1)

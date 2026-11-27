@@ -86,7 +86,7 @@ func setupResourceSchedulingTest(t *testing.T) *resourceSchedulingFixture {
 		base := &segmentBase{segment: &fakeTransformSegment{id: r.id}, caughtUp: f.caughtUp, registration: instantTransformRegistration{}}
 		return &preparedSegmentRead{schema: b.view.req.Meta.SchemaVersion, load: b.view.req.Meta.LoadInfoVersion, manifest: snapshotManifestVersion(snapshot), base: base, read: &resourceTestRead{}}, nil
 	}).Build()
-	m := NewSegmentResourceManager(t.Context(), &resourceSchedulingTestScheduler{}, &resourceTestLoader{}, nil, &resourceTestMetadata{}, nil, nil)
+	m := NewSegmentResourceManager(t.Context(), &resourceSchedulingTestScheduler{}, &resourceTestLoader{}, nil, &resourceTestMetadata{}, nil, nil, nil)
 	f.r = m.newResourceLocked(1000, 1)
 	f.addBinding(1)
 	t.Cleanup(func() {

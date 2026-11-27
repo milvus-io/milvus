@@ -7,7 +7,8 @@ Related issue: #53047.
 Keep completed index inventory in SegmentInfo and artifact details in the
 segment manifest. Do not reconstruct completed SegmentIndex objects at startup.
 Collection index definitions and active or pending-cleanup build tasks remain
-coordinator metadata. The default mode retains existing behavior.
+coordinator metadata. The default mode retains its index metadata source and
+publication behavior.
 
 Completed inventory has one publication mode: legacy mode retains completed
 SegmentIndex records and does not write summaries; summary mode writes summaries
@@ -24,10 +25,7 @@ and pre-baked backfill results) is rejected before publication because it cannot
 update index inventory or fence active builds. Structured backfill remains
 supported by the commit framework.
 
-The publication layer rejects summary mode before storing the durable choice.
-The consumer layer enables startup once summary-aware readers and garbage
-collection are present. Enable at the first startup with both index migration
-switches disabled:
+Enable at the first startup with both index migration switches disabled:
 
 ```yaml
 dataCoord:
@@ -65,8 +63,40 @@ a task record takes precedence when the same BuildID also has a persisted summar
 
 Readiness, build deduplication, progress and compaction decisions use summaries
 plus active tasks. Load responses resolve artifact details from the exact manifest
-revision paired with the segment snapshot. Manifest read failures propagate;
-absence of a cached record never proves absence of a live artifact.
+revision paired with the segment snapshot. Load also reads live finished task
+rows, such as a build that completes after its segment is dropped. Batch reads
+share the manifest I/O budget and preserve empty results for missing segments.
+Manifest read failures propagate.
+
+Resource preflight requests an index projection alongside `GetSegmentInfo`.
+In summary mode the projection combines the returned segment's summaries with
+live index definitions and finished tasks. Artifact presence, memory size and
+build row count suffice for estimation. A response entry with zero indexes is
+a complete projection. A missing entry uses `GetIndexInfos` for compatibility.
+New summaries retain the build's row count. For summaries written before that
+field existed, estimates use the segment's persisted row count. Full load
+responses still resolve manifest-backed indexes from the manifest.
+
+For an ordinary StorageV3 QueryView segment in summary mode, QueryNode can
+request local index resolution. DataCoord returns the summaries, retained
+finished tasks, manifest pointer and matching replay cursor from the accepted
+snapshot without opening the manifest. QueryNode opens that revision once per
+preparation and uses it for index artifacts, column groups, delta paths and stats.
+The manifest closes when preparation ends. Read states of the same revision
+share the imported column groups. The View's index definitions supply its load
+parameters. A finished task for the same build supplies the artifact metadata.
+Complete load metadata remains available for older consumers, external
+collections and StorageV2. In summary mode, segment diagnostics use the
+selected segment's summaries and finished tasks directly. Full metadata batches
+use the shared manifest I/O limit and return per-segment errors.
+A QueryView load does not pin index files in DataCoord GC. If preparation
+fails after a newer revision retracts an index, an ordinary StorageV3 binding
+retries with current metadata and accepts a revision at or above its minimum.
+
+Manifest reuse also applies to ordinary non-L0 StorageV3 QueryView loads when
+summary mode is off. The default `common.storage.useLoonFFI=true` allows
+QueryNode to share the selected revision for column groups, delta paths and stats.
+Those loads use DataCoord's index file paths from the complete load metadata.
 
 ## Cleanup and restore
 
@@ -74,13 +104,31 @@ GC keeps active tasks, current manifest references, importing targets and
 snapshot-pinned builds. Superseded artifacts are reclaimed by the build-aware
 segment-rooted orphan scan after retention. Dropped index cleanup reads one
 segment manifest at a time and retracts its matching summary atomically. Dropped
-segments retain the existing whole-directory cleanup and snapshot protections.
-No full-cluster artifact metadata cache is introduced.
+segments retire completed readiness in one catalog update before removing
+files. Their manifests and task rows supply the retry list. Orphan scans reuse
+one manifest revision at a time and check snapshot protection again at deletion.
+A pending snapshot blocks new index deletions in its collection and waits for
+already admitted deletions to finish before selecting revisions. The block lasts
+until publication installs the build pins or snapshot creation fails.
+
+Snapshot creation collects build IDs from the selected segments' summaries and
+persists them with the snapshot's exact manifest pointers. The snapshot metadata
+marks that manifest-backed file records are deferred. Summaries without files
+remain explicit completion records. Restore and export use DataCoord's shared
+manifest read limit to resolve deferred records from those versions and verify
+that every captured build is accounted for. The self-contained export writes
+the complete file list with rewritten paths.
+
+To move a summary-mode snapshot to a version without manifest-backed snapshot
+support, export it on the source version and restore the self-contained bundle.
+The referenced snapshot's V6 metadata uses `index_files_from_manifest` to mark
+the deferred files. Older readers ignore that field and can accept the snapshot
+without copying its index artifacts, causing the target to rebuild them.
 
 Copy/restore verifies compatibility before creating work or copying files.
 Compatible targets publish their manifest and summaries before becoming visible.
-Restore checks incomplete index inventories against the pinned manifest and the
-snapshot's live definitions. An entry for a dropped index does not require files
+For older snapshots, restore checks incomplete index inventories against the pinned
+manifest and the snapshot's live definitions. An entry for a dropped index does not require files
 in the snapshot. Workers that do not report a separate copied-index memory
 estimate retain the serialized-size fallback.
 L0 delete segments keep their existing format. When a snapshot captures no

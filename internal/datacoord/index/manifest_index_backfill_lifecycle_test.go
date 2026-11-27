@@ -169,7 +169,7 @@ func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
 	assert.False(t, old.ManifestPublished, "a reader's existing snapshot must remain unchanged")
 	assert.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), old.BuildID))
 	assert.False(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), replacement.BuildID))
-	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexes(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
+	assert.Equal(t, replacement, m.IndexCatalog.(*IndexMeta).GetSegmentIndexTasks(meta.RestartCollID, meta.RestartSegID)[meta.RestartIndexID])
 	rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)

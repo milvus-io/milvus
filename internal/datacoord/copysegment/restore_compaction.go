@@ -73,7 +73,7 @@ func (c *Checker) materializeRestoreDeletes(job CopySegmentJob) (bool, error) {
 		}
 		return true, nil
 	}
-	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource)
+	snapshot, err := loadCopySnapshot(c.Ctx, job, c.SnapshotSource, c.Meta.ReadManifestIndexesWithIO)
 	if err != nil {
 		return false, err
 	}

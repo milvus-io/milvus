@@ -23,6 +23,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"strconv"
 	"time"
 	"unsafe"
@@ -142,7 +143,7 @@ func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig,
 		timing.durations[manifestReadTotal] = time.Since(startedAt)
 		timing.observe(origin, err)
 	}()
-	cManifest, err := getManifestHandleWithTiming(manifestPath, storageConfig, ExternalSpecContext{}, &timing, talonStages...)
+	cManifest, err := getManifestHandle(context.Background(), manifestPath, storageConfig, ExternalSpecContext{}, &timing, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
@@ -150,10 +151,12 @@ func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig,
 		return nil, merr.WrapErrDataIntegrityMsg("manifest %s returned a nil handle", manifestPath)
 	}
 	defer C.loon_manifest_destroy(cManifest)
-
 	extractStartedAt := time.Now()
 	defer func() { timing.durations[manifestReadExtract] = time.Since(extractStartedAt) }()
+	return decodeManifestStats(cManifest, manifestPath)
+}
 
+func decodeManifestStats(cManifest *C.LoonManifest, manifestPath string) (map[string]ManifestStat, error) {
 	numStats := int(cManifest.stats.num_stats)
 	result := make(map[string]ManifestStat, numStats)
 

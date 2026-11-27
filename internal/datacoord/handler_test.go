@@ -2049,7 +2049,7 @@ func TestGenSnapshot(t *testing.T) {
 	}).Build()
 	defer mock6.UnPatch()
 
-	mock7 := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mock7 := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{}
 	}).Build()
 	defer mock7.UnPatch()
@@ -2195,7 +2195,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(
+	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).To(
 		func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
@@ -2387,7 +2387,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	}).Build()
 	defer mockCompactionTo.UnPatch()
 
-	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(
+	mockSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).To(
 		func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
@@ -2576,7 +2576,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 		},
 	}
 
-	mockGetSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+	mockGetSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 		return map[int64]*model.SegmentIndex{
 			10: {
 				CollectionID:          collectionID,
@@ -2758,7 +2758,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}).Build()
 		mockers = append(mockers, m4)
 
-		m5 := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		m5 := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
 			return map[int64]*model.SegmentIndex{}
 		}).Build()
 		mockers = append(mockers, m5)
@@ -2817,4 +2817,44 @@ func TestServerHandler_GetCollectionWaitsForApply(t *testing.T) {
 
 	_, err = h.GetCollection(context.Background(), 2)
 	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+}
+
+func TestGenSnapshot_SummaryIndexesNeedNoManifestRead(t *testing.T) {
+	ctx := t.Context()
+	mt, dm, err := index.NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	handler := &ServerHandler{s: &Server{ctx: ctx, meta: mt, domainMetas: domainMetas{indexMeta: dm.IndexMeta}}}
+	seedCollections(handler.s, &meta.CollectionInfo{ID: 1, Schema: meta.NewTestSchema(), Partitions: []int64{2}})
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 4, FieldID: 100, IndexName: "vector"}))
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 6, FieldID: 101, IndexName: "empty"}))
+
+	pinned := packed.MarshalManifestPath(t.TempDir(), 1)
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, InsertChannel: "ch-1", StorageVersion: storage.StorageV3,
+		State: commonpb.SegmentState_Flushed, ManifestPath: pinned, ManifestHasIndex: true, CommitTimestamp: 10,
+		IndexSummaries: []*datapb.SegmentIndexSummary{
+			{IndexId: 4, BuildId: 5, FieldId: 100, HasArtifact: true},
+			{IndexId: 6, BuildId: 7, FieldId: 101},
+			{IndexId: 8, BuildId: 9, FieldId: 102, HasArtifact: true},
+		},
+	})))
+	read := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
+	defer read.UnPatch()
+	tasks := mockey.Mock((*index.IndexMeta).GetSegmentIndexTasks).Return(nil).Build()
+	defer tasks.UnPatch()
+
+	snapshot, err := handler.GenSnapshot(ctx, 1, []*msgpb.MsgPosition{{ChannelName: "ch-1", Timestamp: 20}})
+	require.NoError(t, err)
+	require.Zero(t, read.Times())
+	require.Zero(t, tasks.Times())
+	require.True(t, snapshot.IndexFilesFromManifest)
+	require.Equal(t, []int64{5}, snapshot.BuildIDs)
+	require.Len(t, snapshot.Segments, 1)
+	require.Equal(t, pinned, snapshot.Segments[0].GetManifestPath())
+	require.Len(t, snapshot.Segments[0].GetIndexFiles(), 1)
+	empty := snapshot.Segments[0].GetIndexFiles()[0]
+	require.EqualValues(t, 7, empty.GetBuildID())
+	require.Equal(t, "empty", empty.GetIndexName())
+	require.Empty(t, empty.GetIndexFilePaths())
 }

@@ -286,11 +286,19 @@ type MixCoordClient interface {
 	datapb.DataCoordClient
 }
 
+type QueryViewIndexMode uint8
+
+const (
+	QueryViewIndexFull QueryViewIndexMode = iota
+	QueryViewIndexResolveLocally
+	QueryViewIndexMetadataOnly
+)
+
 // MixCoord is the interface `MixCoord` package implements
 //
 //go:generate mockery --name=MixCoord  --output=../mocks --filename=mock_mixcoord.go --with-expecter
 type MixCoord interface {
-	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)
+	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, indexMode QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)
 	Component
 	rootcoordpb.RootCoordServer
 	querypb.QueryCoordServer

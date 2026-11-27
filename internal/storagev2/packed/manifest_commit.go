@@ -19,6 +19,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -151,7 +152,7 @@ func CommitManifestUpdates(baseManifestPath string,
 	// delta-log adds don't collide on a key in the first place. A single
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
-	handle, err := openTransaction(baseManifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	handle, err := openTransaction(context.Background(), baseManifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
 	if err != nil {
 		// HandleLoonFFIResult returns a bare ErrLoonTransient chain; give it the
 		// storage wire code like transaction.go does, instead of leaking 65535.

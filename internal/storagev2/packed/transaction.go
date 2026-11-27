@@ -108,7 +108,7 @@ func addDeltaLogsToManifest(
 	defer C.loon_properties_free(cProperties)
 
 	// Start transaction
-	transactionHandle, err := openTransaction(manifest, cProperties, resolveID, getRetryLimit())
+	transactionHandle, err := openTransaction(context.Background(), manifest, cProperties, resolveID, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -153,24 +153,21 @@ func GetDeltaLogPathsFromManifest(
 	if err != nil {
 		return nil, err
 	}
-	if len(deltaLogs) == 0 {
-		return nil, nil
-	}
+	return deltaLogPaths(deltaLogs), nil
+}
+
+func deltaLogPaths(deltaLogs []*datapb.FieldBinlog) []string {
 	var paths []string
 	for _, deltaLog := range deltaLogs {
 		for _, binlog := range deltaLog.GetBinlogs() {
-			// Metadata integrity is checked by the decoder above; this view
-			// only excludes valid zero-entry markers that have no file to read.
-			if binlog.GetEntriesNum() == 0 {
-				continue
+			// The decoder has already validated the metadata. Zero-entry
+			// markers carry replay metadata but have no file to load.
+			if binlog.GetEntriesNum() > 0 {
+				paths = append(paths, binlog.GetLogPath())
 			}
-			paths = append(paths, binlog.GetLogPath())
 		}
 	}
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	return paths, nil
+	return paths
 }
 
 // validateDeltaLogMetadata distinguishes a legitimate zero-entry marker from
@@ -244,7 +241,7 @@ func getDeltaLogsFromManifest(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	cManifest, err := openManifest(manifest, cProperties, nil)
+	cManifest, err := openManifest(context.Background(), manifest, cProperties, nil)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}
@@ -354,7 +351,7 @@ func AddStatsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	transactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	transactionHandle, err := openTransaction(context.Background(), manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}

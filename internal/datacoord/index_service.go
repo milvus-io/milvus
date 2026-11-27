@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1261,9 +1262,42 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
-	segmentsIndexes := s.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
-	for _, segID := range req.GetSegmentIDs() {
+	segmentIDs := lo.Uniq(req.GetSegmentIDs())
+	segmentsIndexes := s.indexMeta.GetSegmentsIndexTasks(req.GetCollectionID(), segmentIDs)
+	pinned := make([]*datapb.SegmentInfo, len(segmentIDs))
+	if s.indexMeta.UsesSegmentSummaries() {
+		live := typeutil.NewUniqueSet()
+		for _, index := range s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "") {
+			live.Insert(index.IndexID)
+		}
+		resolved := make([]map[int64]*model.SegmentIndex, len(segmentIDs))
+		group, readCtx := errgroup.WithContext(ctx)
+		group.SetLimit(meta.SegmentIndexManifestReadConcurrency())
+		for i, segID := range segmentIDs {
+			group.Go(func() error {
+				if err := readCtx.Err(); err != nil {
+					return err
+				}
+				segment := s.meta.GetSegment(readCtx, segID)
+				if segment == nil || segment.GetCollectionID() != req.GetCollectionID() {
+					return nil
+				}
+				pinned[i] = segment.SegmentInfo
+				var err error
+				resolved[i], err = s.meta.ResolveSegmentIndexes(readCtx, pinned[i], segmentsIndexes[segID], func(id int64) bool { return live.Contain(id) })
+				return err
+			})
+		}
+		if err := group.Wait(); err != nil {
+			return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+		}
+		for i, segID := range segmentIDs {
+			segmentsIndexes[segID] = resolved[i]
+		}
+	}
+	for i, segID := range segmentIDs {
 		segIdxes := segmentsIndexes[segID]
+		summarySegment := pinned[i]
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
@@ -1274,8 +1308,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					var segmentInfo *datapb.SegmentInfo
-					if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
+					segmentInfo := summarySegment
+					if segmentInfo == nil && metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
 						if segment := s.meta.GetSegment(ctx, segID); segment != nil {
 							segmentInfo = segment.SegmentInfo
 						}
@@ -1286,41 +1320,83 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 					}
 					indexParams := s.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
-					// respect segment-based index type
-					for _, param := range indexParams {
-						if param.Key == common.IndexTypeKey && segIdx.IndexType != "" && segIdx.IndexType != param.Value {
-							param.Value = segIdx.IndexType
-							break
-						}
+					definition := &indexpb.IndexInfo{
+						FieldID:   s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+						IndexName: s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 					}
-					indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
-					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
-						indexName = segIdx.IndexType
-					}
-					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
-						&indexpb.IndexFilePathInfo{
-							SegmentID:                 segID,
-							FieldID:                   s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-							IndexID:                   segIdx.IndexID,
-							BuildID:                   segIdx.BuildID,
-							IndexName:                 indexName,
-							IndexType:                 segIdx.IndexType,
-							IndexParams:               indexParams,
-							IndexFilePaths:            indexFilePaths,
-							SerializedSize:            segIdx.IndexSerializedSize,
-							MemSize:                   segIdx.IndexMemSize,
-							IndexVersion:              segIdx.IndexVersion,
-							NumRows:                   segIdx.NumRows,
-							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
-							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
-							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
-						})
+					info := indexFilePathInfo(segID, segIdx, definition, indexParams)
+					info.IndexFilePaths = indexFilePaths
+					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos, info)
 				}
 			}
 		}
 	}
 
 	return ret, nil
+}
+
+// projectIndexResourceInfo includes only the metadata needed by resource preflight.
+func projectIndexResourceInfo(collectionID int64, segments []*datapb.SegmentInfo, indexes []*model.Index, tasks map[int64]map[int64]*model.SegmentIndex) (map[int64]*indexpb.SegmentInfo, error) {
+	definitions := lo.SliceToMap(packQueryViewCollectionIndexInfos(indexes), func(index *indexpb.IndexInfo) (int64, *indexpb.IndexInfo) {
+		return index.GetIndexID(), index
+	})
+	result := make(map[int64]*indexpb.SegmentInfo, len(segments))
+	for _, segment := range segments {
+		if segment.GetCollectionID() != collectionID {
+			continue
+		}
+		id := segment.GetID()
+		records, _, err := meta.MergeSegmentIndexSummaries(segment, tasks[id], func(indexID int64) bool {
+			return definitions[indexID] != nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		resourceInfo := &indexpb.SegmentInfo{CollectionID: collectionID, SegmentID: id}
+		for _, record := range records {
+			definition := definitions[record.IndexID]
+			if definition == nil || record.IndexState != commonpb.IndexState_Finished {
+				continue
+			}
+			params := common.CloneKeyValuePairs(definition.GetIndexParams())
+			params = append(params, common.CloneKeyValuePairs(definition.GetTypeParams())...)
+			info := indexFilePathInfo(id, record, definition, params)
+			hasArtifact := record.HasArtifact()
+			info.HasArtifact = &hasArtifact
+			resourceInfo.IndexInfos = append(resourceInfo.IndexInfos, info)
+		}
+		result[id] = resourceInfo
+	}
+	return result, nil
+}
+
+func indexFilePathInfo(segmentID int64, record *model.SegmentIndex, definition *indexpb.IndexInfo, params []*commonpb.KeyValuePair) *indexpb.IndexFilePathInfo {
+	for _, param := range params {
+		if param.GetKey() == common.IndexTypeKey && record.IndexType != "" && record.IndexType != param.GetValue() {
+			param.Value = record.IndexType
+			break
+		}
+	}
+	name := definition.GetIndexName()
+	if record.IndexType != "" {
+		name = record.IndexType
+	}
+	return &indexpb.IndexFilePathInfo{
+		SegmentID:                 segmentID,
+		FieldID:                   definition.GetFieldID(),
+		IndexID:                   record.IndexID,
+		BuildID:                   record.BuildID,
+		IndexName:                 name,
+		IndexType:                 record.IndexType,
+		IndexParams:               params,
+		SerializedSize:            record.IndexSerializedSize,
+		MemSize:                   record.IndexMemSize,
+		IndexVersion:              record.IndexVersion,
+		NumRows:                   record.NumRows,
+		CurrentIndexVersion:       record.CurrentIndexVersion,
+		CurrentScalarIndexVersion: record.CurrentScalarIndexVersion,
+		IndexStorePathVersion:     record.IndexStorePathVersion,
+	}
 }
 
 // ListIndexes returns all indexes created on provided collection.

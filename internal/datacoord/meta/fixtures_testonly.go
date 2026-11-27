@@ -60,6 +60,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1740,7 +1741,7 @@ func NewTestGroup() *model.SegmentChangeGroup {
 	}
 }
 
-func (*MockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+func (*MockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64, componenttypes.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 	panic("patch GetQueryViewSegmentLoadInfos with mockey")
 }
 

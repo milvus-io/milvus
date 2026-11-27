@@ -44,6 +44,7 @@ type Broker interface {
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
+	GetSegmentInfoForResourceEstimation(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
 }
@@ -147,13 +148,24 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 }
 
 func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) ([]*datapb.SegmentInfo, error) {
+	segments, _, err := broker.getSegmentInfo(ctx, 0, ids)
+	return segments, err
+}
+
+func (broker *CoordinatorBroker) GetSegmentInfoForResourceEstimation(ctx context.Context, collectionID UniqueID, ids ...UniqueID) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error) {
+	return broker.getSegmentInfo(ctx, collectionID, ids)
+}
+
+// An index map entry with no indexes denotes a complete estimate for that segment.
+func (broker *CoordinatorBroker) getSegmentInfo(ctx context.Context, indexResourceCollectionID UniqueID, ids []UniqueID) ([]*datapb.SegmentInfo, map[int64][]*querypb.FieldIndexInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 
 	getSegmentInfo := func(ids []UniqueID) (*datapb.GetSegmentInfoResponse, error) {
 		req := &datapb.GetSegmentInfoRequest{
-			SegmentIDs:       ids,
-			IncludeUnHealthy: true,
+			SegmentIDs:                ids,
+			IncludeUnHealthy:          true,
+			IndexResourceCollectionId: indexResourceCollectionID,
 		}
 		resp, err := broker.mixCoord.GetSegmentInfo(ctx, req)
 		if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -176,6 +188,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 	}
 
 	ret := make([]*datapb.SegmentInfo, 0, len(ids))
+	var indexes map[int64][]*querypb.FieldIndexInfo
 	batchSize := 1000
 	startIdx := 0
 	for startIdx < len(ids) {
@@ -183,13 +196,19 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 
 		resp, err := getSegmentInfo(ids[startIdx:endIdx])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		ret = append(ret, resp.GetInfos()...)
+		if len(resp.GetIndexResourceInfo()) > 0 {
+			if indexes == nil {
+				indexes = make(map[int64][]*querypb.FieldIndexInfo)
+			}
+			appendSegmentIndexInfos(indexes, resp.GetIndexResourceInfo())
+		}
 		startIdx += batchSize
 	}
 
-	return ret, nil
+	return ret, indexes, nil
 }
 
 func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentIDs ...UniqueID) (map[int64][]*querypb.FieldIndexInfo, error) {
@@ -224,8 +243,13 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		return nil, err
 	}
 
-	indexes := make(map[int64][]*querypb.FieldIndexInfo, 0)
-	for segmentID, segmentInfo := range resp.GetSegmentInfo() {
+	indexes := make(map[int64][]*querypb.FieldIndexInfo, len(resp.GetSegmentInfo()))
+	appendSegmentIndexInfos(indexes, resp.GetSegmentInfo())
+	return indexes, nil
+}
+
+func appendSegmentIndexInfos(indexes map[int64][]*querypb.FieldIndexInfo, segments map[int64]*indexpb.SegmentInfo) {
+	for segmentID, segmentInfo := range segments {
 		indexes[segmentID] = make([]*querypb.FieldIndexInfo, 0)
 		for _, info := range segmentInfo.GetIndexInfos() {
 			indexes[segmentID] = append(indexes[segmentID], &querypb.FieldIndexInfo{
@@ -242,11 +266,10 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 				CurrentIndexVersion:       info.GetCurrentIndexVersion(),
 				CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 				IndexStorePathVersion:     info.GetIndexStorePathVersion(),
+				HasArtifact:               info.HasArtifact,
 			})
 		}
 	}
-
-	return indexes, nil
 }
 
 func (broker *CoordinatorBroker) describeIndex(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error) {
