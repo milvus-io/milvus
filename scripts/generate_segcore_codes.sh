@@ -62,6 +62,8 @@ find_build_tree_header() {
 # The cache directory is keyed only by the pin; a flock serializes concurrent
 # invocations sharing TMPDIR, and the clone is staged in a unique temp dir and
 # renamed into place so a peer never observes a half-finished checkout.
+# flock is util-linux and is not shipped on macOS; fall back to a mkdir-based
+# spin lock there so the drift gate still works on macOS runners.
 fetch_pinned_header() {
   local pin="$1" repo="$2" dir lockdir
   [[ -n "$pin" && -n "$repo" ]] || return 1
@@ -69,25 +71,52 @@ fetch_pinned_header() {
   dir="$lockdir/$pin"
   if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
     mkdir -p "$lockdir"
-    (
-      flock -w 300 9 || exit 1
-      if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
-        local staging
-        staging="$(mktemp -d "$lockdir/.$pin.XXXXXX")" || exit 1
-        if git init -q "$staging" &&
-           git -C "$staging" remote add origin "$repo" &&
-           git -C "$staging" fetch -q --depth 1 origin "$pin" &&
-           git -C "$staging" checkout -q FETCH_HEAD; then
-          rm -rf "$dir"
-          mv "$staging" "$dir"
-        else
-          rm -rf "$staging"
-          exit 1
+    if command -v flock >/dev/null 2>&1; then
+      (
+        flock -w 300 9 || exit 1
+        if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
+          if ! fetch_pinned_header_unlocked "$pin" "$repo" "$lockdir" "$dir"; then
+            exit 1
+          fi
         fi
+      ) 9>"$lockdir/.$pin.lock" || return 1
+    else
+      local spin=0
+      while ! mkdir "$lockdir/.$pin.lockdir" 2>/dev/null; do
+        spin=$((spin + 1))
+        if [[ $spin -gt 300 ]]; then
+          echo "segcoregen: timed out waiting for cache lock $lockdir/.$pin" >&2
+          return 1
+        fi
+        sleep 1
+      done
+      if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
+        fetch_pinned_header_unlocked "$pin" "$repo" "$lockdir" "$dir"
+        local rc=$?
+        rmdir "$lockdir/.$pin.lockdir" 2>/dev/null
+        [[ $rc -eq 0 ]] || return 1
+      else
+        rmdir "$lockdir/.$pin.lockdir" 2>/dev/null
       fi
-    ) 9>"$lockdir/.$pin.lock" || return 1
+    fi
   fi
   printf '%s\n' "$dir/include/common/EasyAssert.h"
+}
+
+# Shared clone body, staged in a unique temp dir and renamed into place.
+fetch_pinned_header_unlocked() {
+  local pin="$1" repo="$2" lockdir="$3" dir="$4" staging
+  staging="$(mktemp -d "$lockdir/.$pin.XXXXXX")" || return 1
+  if git init -q "$staging" &&
+     git -C "$staging" remote add origin "$repo" &&
+     git -C "$staging" fetch -q --depth 1 origin "$pin" &&
+     git -C "$staging" checkout -q FETCH_HEAD; then
+    rm -rf "$dir"
+    mv "$staging" "$dir"
+  else
+    rm -rf "$staging"
+    return 1
+  fi
 }
 
 if [[ -z "$header" && -n "$pin" ]]; then
