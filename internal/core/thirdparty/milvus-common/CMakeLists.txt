@@ -31,13 +31,7 @@ FetchContent_Declare(
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
 FetchContent_GetProperties( milvus-common )
-if ( NOT milvus-common_POPULATED )
-    FetchContent_Populate( milvus-common )
-    # Adding the following target:
-    # milvus-common
-    add_subdirectory( ${milvus-common_SOURCE_DIR}
-                      ${milvus-common_BINARY_DIR} )
-endif()
+FetchContent_MakeAvailable( milvus-common )
 
 set( MILVUS_COMMON_INCLUDE_DIR ${milvus-common_SOURCE_DIR}/include CACHE INTERNAL "Path to milvus-common include directory" )
 
