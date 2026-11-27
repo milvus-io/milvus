@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
@@ -31,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -166,14 +165,14 @@ func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble preimport request failed", WrapTaskLog(p, mlog.Err(err))...)
-		if errors.Is(err, errSnapshotTaskSource) {
-			if updateErr := p.ImportMeta.UpdateJob(context.TODO(), p.GetJobID(),
-				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
-			}
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
 			return
 		}
-		p.retryTimes++
+		if updateErr := p.ImportMeta.UpdateJob(context.TODO(), p.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
+			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+		}
 		return
 	}
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)

@@ -58,12 +58,17 @@ type importResolverCipher struct {
 	resolve func(string) (int64, []byte, error)
 }
 
-func (c importResolverCipher) Backup(int64) (string, error) {
-	return "", nil
-}
-
 func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	return c.resolve(artifact)
+}
+
+type backupOnlyCipher struct {
+	testCipher
+	backup func(int64) (string, error)
+}
+
+func (c backupOnlyCipher) Backup(ezID int64) (string, error) {
+	return c.backup(ezID)
 }
 
 type temporaryTestError struct{ msg string }
@@ -108,9 +113,12 @@ func TestBackupSourcePluginContext(t *testing.T) {
 		{"joined temporary error maps to service unavailable", validArtifact, importResolverCipher{resolve: func(string) (int64, []byte, error) {
 			return 0, nil, errors.Join(errors.New("outer"), causeOnlyError{cause: temporaryTestError{msg: "retry"}})
 		}}, merr.ErrServiceUnavailable},
-		{"deadline exceeded stays retryable", validArtifact, importResolverCipher{resolve: func(string) (int64, []byte, error) {
+		{"deadline exceeded maps to service unavailable", validArtifact, importResolverCipher{resolve: func(string) (int64, []byte, error) {
 			return 0, nil, context.DeadlineExceeded
-		}}, context.DeadlineExceeded},
+		}}, merr.ErrServiceUnavailable},
+		{"context canceled passes through", validArtifact, importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 0, nil, context.Canceled
+		}}, context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storeCipher(tc.cipher)
@@ -119,9 +127,44 @@ func TestBackupSourcePluginContext(t *testing.T) {
 			if tc.cipher == nil {
 				require.ErrorIs(t, err, errCipherPluginMissing)
 			}
+			if tc.name == "deadline exceeded maps to service unavailable" {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.True(t, merr.IsRetryableErr(err))
+				require.True(t, merr.IsCanceledOrTimeout(err))
+			}
+			if tc.name == "context canceled passes through" {
+				require.NotErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.False(t, merr.IsRetryableErr(err))
+				require.True(t, merr.IsCanceledOrTimeout(err))
+			}
+			if tc.name == "provider error survives" || tc.name == "cipher without resolver" {
+				require.False(t, merr.IsRetryableErr(err))
+				require.False(t, merr.IsCanceledOrTimeout(err))
+			}
 			require.Nil(t, ctx)
 		})
 	}
+
+	t.Run("narrow BackupInterface and ImportEZResolver are independent", func(t *testing.T) {
+		storeCipher(backupOnlyCipher{backup: func(ezID int64) (string, error) {
+			return fmt.Sprintf("backup-%d", ezID), nil
+		}})
+		artifact, err := BackupEZ(17)
+		require.NoError(t, err)
+		require.Equal(t, "backup-17", artifact)
+		ctx, err := ResolveImportEZ(validArtifact)
+		require.Nil(t, ctx)
+		require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+
+		storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+			return 17, []byte("key"), nil
+		}})
+		_, err = BackupEZ(17)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		ctx, err = ResolveImportEZ(validArtifact)
+		require.NoError(t, err)
+		require.Len(t, ctx, 1)
+	})
 
 	t.Run("same EZ returns the bytes of each artifact", func(t *testing.T) {
 		beforeArtifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":17,"v":1}`))

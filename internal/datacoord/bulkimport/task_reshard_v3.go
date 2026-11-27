@@ -220,6 +220,10 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return
+		}
+		t.Fail(err.Error())
 		return
 	}
 	// PrepareRun: persist the intended run/node before the uncertain Create RPC.

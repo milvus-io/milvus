@@ -186,7 +186,11 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble preimport v3 request failed", WrapTaskLog(p, mlog.Err(err))...)
-		p.retryTimes++
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
+			return
+		}
+		p.Fail(err.Error())
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)

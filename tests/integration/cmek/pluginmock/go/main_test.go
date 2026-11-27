@@ -56,16 +56,10 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 
 	encryptor, edek, err := sender.GetEncryptor(17, 42)
 	require.NoError(t, err)
-	ciphertext, err := encryptor.Encrypt([]byte("stateless backup payload"))
+	_, err = encryptor.Encrypt([]byte("stateless backup payload"))
 	require.NoError(t, err)
 
-	// Stateless decryption works without registering or mutating the zone cache.
-	decryptor, err := receiver.GetDecryptorForKeyset(17, 42, key, edek)
-	require.NoError(t, err)
-	plaintext, err := decryptor.Decrypt(ciphertext)
-	require.NoError(t, err)
-	require.Equal(t, []byte("stateless backup payload"), plaintext)
-
+	// ResolveImportEZ does not register or mutate the receiver's ordinary zone cache.
 	_, err = receiver.GetDecryptor(17, 42, edek)
 	require.Error(t, err)
 	_, _, err = receiver.GetEncryptor(17, 42)
@@ -74,8 +68,6 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 	require.Empty(t, receiver.GetUnsafeKey(18, 0))
 
 	payload.Key[0] ^= 1
-	_, err = receiver.GetDecryptorForKeyset(17, 42, payload.Key, edek)
-	require.Error(t, err)
 	invalid, err := json.Marshal(payload)
 	require.NoError(t, err)
 	_, _, err = receiver.ResolveImportEZ(base64.StdEncoding.EncodeToString(invalid))

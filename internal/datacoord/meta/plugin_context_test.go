@@ -40,13 +40,8 @@ type metaTestBackupCipher struct {
 }
 
 func (c *metaTestBackupCipher) GetUnsafeKey(int64, int64) []byte { return c.targetKey }
-func (c *metaTestBackupCipher) Backup(int64) (string, error)     { return "", nil }
 func (c *metaTestBackupCipher) ResolveImportEZ(string) (int64, []byte, error) {
 	return 17, c.sourceKey, c.sourceErr
-}
-
-func (c *metaTestBackupCipher) GetDecryptorForKeyset(int64, int64, []byte, []byte) (hook.Decryptor, error) {
-	panic("dispatch does not decrypt binlogs")
 }
 
 func TestWrapPluginContextImportV2AndV3(t *testing.T) {

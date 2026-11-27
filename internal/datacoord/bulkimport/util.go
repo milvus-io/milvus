@@ -53,9 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// An immutable job/task source mismatch cannot be repaired by rescheduling.
-var errSnapshotTaskSource = errors.New("invalid snapshot task source")
-
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -415,7 +412,7 @@ func AssemblePreImportV3Request(task *preImportV3Task, job ImportJob) (*datapb.P
 func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*internalpb.ImportFile) (*datapb.PreImportRequest, error) {
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, merr.Mark(err, errSnapshotTaskSource)
+		return nil, err
 	}
 	req := &datapb.PreImportRequest{
 		JobID:            task.GetJobID(),
@@ -442,7 +439,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	})
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, merr.Mark(err, errSnapshotTaskSource)
+		return nil, err
 	}
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
@@ -487,7 +484,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
-			return nil, err
+			if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, merr.ErrParameterInvalid) {
+				return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import timestamp")
+			}
+			return nil, merr.Wrap(err, "allocate import timestamp")
 		}
 	}
 
@@ -503,6 +504,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
 		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
+		if !errors.Is(err, importid.ErrIDRangeTooSmall) &&
+			!errors.Is(err, merr.ErrParameterInvalid) &&
+			!merr.IsRetryableErr(err) &&
+			!errors.Is(err, context.Canceled) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "reserve import log IDs")
+		}
 		return nil, err
 	}
 

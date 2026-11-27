@@ -176,6 +176,10 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return
+		}
+		t.Fail(err.Error())
 		return
 	}
 	// Drop the segments a superseded run used to own but this run no longer

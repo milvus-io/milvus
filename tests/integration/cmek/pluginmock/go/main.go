@@ -167,13 +167,6 @@ func (c *fixtureCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (
 	return decryptWithKey(ezk, ezID, collectionID, safeKey)
 }
 
-func (c *fixtureCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
-	if len(keyset) == 0 || !hmac.Equal(keyset, deriveEZKey(ezID)) {
-		return nil, fmt.Errorf("fixture cipher: unexpected EZ key for EZ %d", ezID)
-	}
-	return decryptWithKey(keyset, ezID, collectionID, safeKey)
-}
-
 func decryptWithKey(ezk []byte, ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
 	nonce, tag, err := decodeEDEK(safeKey)
 	if err != nil {
