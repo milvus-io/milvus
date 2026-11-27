@@ -347,6 +347,7 @@ func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {
 		ManifestVersion:             manifestVersion,
 		RowNum:                      seg.GetNumOfRows(),
 		Size:                        seg.GetStats().GetInsertBinlogSize(),
+		FieldLogicalBytes:           dataViewFieldLogicalBytes(SegmentFieldLogicalSizes(seg.SegmentInfo), seg.GetNumOfRows(), seg.GetManifestPath()),
 	}, nil
 }
 

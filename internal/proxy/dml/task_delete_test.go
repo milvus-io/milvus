@@ -737,7 +737,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 	metaCache := NewMockCache(t)
 
-	t.Run("simple delete task failed", func(t *testing.T) {
+	t.Run("simple delete meters keys only on success", func(t *testing.T) {
 		lb := shardclient.NewMockLBPolicy(t)
 
 		expr := "pk in [1,2,3]"
@@ -768,9 +768,16 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
+		dr.EnableWriteUsage()
 		streaming.ExpectErrorOnce(errors.New("mock error"))
 		assert.Error(t, dr.Run(context.Background()))
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+		require.Zero(t, dr.WriteBytes())
+		require.NoError(t, dr.Run(context.Background()))
+		require.EqualValues(t, 24, dr.WriteBytes())
+		readBytes, present := dr.QueryReadBytes()
+		require.False(t, present)
+		require.Zero(t, readBytes)
 	})
 
 	t.Run("complex delete query rpc failed", func(t *testing.T) {
@@ -1029,7 +1036,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
-	t.Run("complex delete success", func(t *testing.T) {
+	t.Run("complex delete meters only the completed stream", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -1063,12 +1070,16 @@ func TestDeleteRunner_Run(t *testing.T) {
 			},
 			plan: plan,
 		}
+		dr.EnableWriteUsage()
 		lb.EXPECT().Execute(mock.Anything, mock.Anything).Call.Return(func(ctx context.Context, workload shardclient.CollectionWorkLoad) error {
+			require.Error(t, workload.Exec(ctx, 1, qn, ""))
 			return workload.Exec(ctx, 1, qn, "")
 		})
 
+		attempts := 0
 		qn.EXPECT().QueryStream(mock.Anything, mock.Anything).Call.Return(
 			func(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) querypb.QueryNode_QueryStreamClient {
+				attempts++
 				client := streamrpc.NewLocalQueryClient(ctx)
 				server := client.CreateServer()
 
@@ -1082,11 +1093,18 @@ func TestDeleteRunner_Run(t *testing.T) {
 						},
 					},
 				})
+				if attempts == 1 {
+					server.FinishSend(merr.ErrServiceUnavailable)
+					return client
+				}
 				server.FinishSend(nil)
 				return client
-			}, nil)
-		assert.NoError(t, dr.Run(ctx))
-		assert.Equal(t, int64(3), dr.result.DeleteCnt)
+			}, nil).Twice()
+		require.NoError(t, dr.Run(ctx))
+		require.EqualValues(t, 24, dr.WriteBytes())
+		readBytes, present := dr.QueryReadBytes()
+		require.False(t, present)
+		require.Zero(t, readBytes)
 	})
 
 	schema.Fields[1].IsPartitionKey = true

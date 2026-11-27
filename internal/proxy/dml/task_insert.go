@@ -46,6 +46,9 @@ type InsertTask struct {
 	collectionID    int64
 	schemaVersion   int32
 
+	meterWriteUsage bool
+	writeBytes      int64
+
 	idempotencyEnabled bool
 	idempotencyKey     string
 }
@@ -90,6 +93,15 @@ func NewInsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvus
 // Result returns the mutation result after execution.
 func (it *InsertTask) Result() *milvuspb.MutationResult {
 	return it.result
+}
+
+// EnableWriteUsage opts the insert into request byte metering.
+func (it *InsertTask) EnableWriteUsage() {
+	it.meterWriteUsage = true
+}
+
+func (it *InsertTask) WriteBytes() int64 {
+	return it.writeBytes
 }
 
 // InsertMsg returns the underlying insert message.
@@ -252,6 +264,11 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	var usageErr error
+	if it.meterWriteUsage {
+		it.writeBytes, usageErr = writeRequestBytes(it.insertMsg.GetFieldsData(), schema)
+	}
+
 	if err := genFunctionFields(ctx, it.insertMsg, schema, false); err != nil {
 		return err
 	}
@@ -382,6 +399,9 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 
 	if err := checkMaxInsertSize(ctx, "insert", it.insertMsg.Size()); err != nil {
 		return err
+	}
+	if usageErr != nil {
+		return merr.Wrap(usageErr, "measure insert write bytes")
 	}
 
 	log.Debug(ctx, "Proxy Insert PreExecute done")

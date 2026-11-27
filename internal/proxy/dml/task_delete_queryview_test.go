@@ -27,14 +27,14 @@ import (
 )
 
 func TestComplexDeleteQueryViewBatch(t *testing.T) {
-	for _, scenario := range []string{"int64", "varchar", "empty", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
+	for _, scenario := range []string{"int64", "varchar", "empty", "zero_hits", "missing_usage", "query_error", "incomplete", "rate_limit", "enqueue_error", "write_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			pkType := schemapb.DataType_Int64
 			values := []any{int64(1), int64(2), int64(3)}
 			if scenario == "varchar" {
 				pkType = schemapb.DataType_VarChar
-				values = []any{"a", "b", "c"}
+				values = []any{"a", "文", "é"}
 			}
 			schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Version: 7, Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: pkType},
@@ -53,6 +53,19 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				{Ids: ids(values[0], values[1]), AllRetrieveCount: 7, ScannedRemoteBytes: 10, ScannedTotalBytes: 20},
 				{Ids: ids(values[1], values[2]), AllRetrieveCount: 5, ScannedRemoteBytes: 30, ScannedTotalBytes: 40},
 			}}
+			for i, result := range response.Results {
+				result.CostAggregation = &internalpb.CostAggregation{
+					QueryReadUsage: &internalpb.QueryReadUsage{DataBytes: uint64(i+1) * 20, ValidityBits: map[int64]uint64{101: 3}},
+				}
+			}
+			if scenario == "zero_hits" {
+				for _, result := range response.Results {
+					result.Ids = nil
+				}
+			}
+			if scenario == "missing_usage" {
+				response.Results[1].CostAggregation = nil
+			}
 			if scenario == "empty" {
 				response.Results = nil
 			}
@@ -121,11 +134,13 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				// No legacy LB: falling back to GetShardLeaders would fail this test.
 			}
 			runner.SetViewQueryClient(client)
+			runner.EnableQueryReadUsage()
+			runner.EnableWriteUsage()
 			err = runner.Run(ctx)
 			switch scenario {
 			case "query_error", "enqueue_error", "write_error":
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-			case "incomplete":
+			case "incomplete", "missing_usage":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "rate_limit":
 				require.ErrorIs(t, err, merr.ErrServiceRateLimit)
@@ -145,6 +160,18 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 			require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.GetConsistencyLevel())
 			require.EqualValues(t, typeutil.Unlimited, captured.GetLimit())
 			require.Equal(t, metrics.DeleteQueryLabel, captured.GetQueryLabel())
+			require.True(t, captured.GetCollectQueryReadUsage())
+			bytes, usagePresent := runner.QueryReadBytes()
+			switch scenario {
+			case "query_error", "incomplete", "missing_usage":
+				require.False(t, usagePresent)
+			case "empty":
+				require.True(t, usagePresent)
+				require.Zero(t, bytes)
+			default:
+				require.True(t, usagePresent)
+				require.EqualValues(t, 61, bytes)
+			}
 			require.Equal(t, []int64{100, common.TimeStampField}, captured.GetOutputFieldsId())
 			parsed := &planpb.PlanNode{}
 			require.NoError(t, proto.Unmarshal(captured.GetSerializedExprPlan(), parsed))
@@ -157,10 +184,16 @@ func TestComplexDeleteQueryViewBatch(t *testing.T) {
 				require.EqualValues(t, 12, runner.AllQueryCnt())
 				require.EqualValues(t, 40, runner.ScannedRemoteBytes())
 				require.EqualValues(t, 60, runner.ScannedTotalBytes())
+				if scenario == "int64" {
+					require.EqualValues(t, 24, runner.WriteBytes())
+				} else {
+					require.EqualValues(t, len("a文é"), runner.WriteBytes())
+				}
 			} else {
 				require.Zero(t, runner.Result().GetDeleteCnt())
+				require.Zero(t, runner.WriteBytes())
 			}
-			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" {
+			if scenario == "query_error" || scenario == "incomplete" || scenario == "empty" || scenario == "zero_hits" || scenario == "missing_usage" {
 				require.Zero(t, limitCalls)
 			}
 			if scenario != "int64" && scenario != "varchar" && scenario != "enqueue_error" && scenario != "write_error" {

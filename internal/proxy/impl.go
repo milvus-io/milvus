@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/querymeter"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -2346,6 +2347,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetCollectionName(request.GetCollectionName())
 
 	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil {
+		it.EnableWriteUsage()
+	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2394,23 +2399,19 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
 	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
-		hookutil.DatabaseKey:        dbName,
-		hookutil.UsernameKey:        username,
+	report := map[string]any{
 		hookutil.RequestDataSizeKey: proto.Size(request),
 		hookutil.SuccessCntKey:      successCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeInsert, request.DbName, username).Add(float64(v))
 	}
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = it.WriteBytes()
+	}
+	reportMutationUsage(ctx, it.Result().GetStatus(), usageReporter, hookutil.OpTypeInsert, dbName, report)
 	metrics.ProxyInsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))
@@ -2456,6 +2457,13 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 	dr.SetViewQueryClient(node.viewQueryClient)
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil {
+		dr.EnableWriteUsage()
+		if node.viewQueryClient != nil {
+			dr.EnableQueryReadUsage()
+		}
+	}
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2484,16 +2492,17 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	collectionName := request.CollectionName
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
-		hookutil.DatabaseKey:   dbName,
-		hookutil.UsernameKey:   username,
-		hookutil.SuccessCntKey: successCnt,
-		hookutil.RelatedCntKey: dr.AllQueryCnt(),
-	})
-	SetReportValue(dr.Result().GetStatus(), v)
+	report := map[string]any{hookutil.SuccessCntKey: successCnt}
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = dr.WriteBytes()
+		if readBytes, metered := dr.QueryReadBytes(); metered {
+			report[hookutil.BytesKey] = readBytes
+		}
+	} else {
+		report[hookutil.RelatedCntKey] = dr.AllQueryCnt()
+	}
+	reportMutationUsage(ctx, dr.Result().GetStatus(), usageReporter, hookutil.OpTypeDelete, dbName, report)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedRemoteBytes()) / 1024 / 1024)
@@ -2504,10 +2513,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		ScannedRemoteBytes: dr.ScannedRemoteBytes(),
 		ScannedTotalBytes:  dr.ScannedTotalBytes(),
 	})
-
-	if merr.Ok(dr.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
-	}
 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
@@ -2550,6 +2555,13 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 
 	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
+	usageReporter := extension.RequestUsageReporter()
+	if usageReporter != nil {
+		it.EnableWriteUsage()
+		if node.viewQueryClient != nil {
+			it.EnableQueryReadUsage()
+		}
+	}
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
@@ -2604,27 +2616,26 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		it.Result().UpsertCnt = int64(request.NumRows)
 	}
 
-	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
 	collectionName := request.CollectionName
 	requestSize, mutationSize := it.AccountingSizes()
-	v := hookutil.GetExtension().Report(map[string]any{
-		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
-		hookutil.DatabaseKey:        request.DbName,
-		hookutil.UsernameKey:        username,
+	report := map[string]any{
 		hookutil.RequestDataSizeKey: requestSize,
 		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
 		hookutil.FailCntKey:         len(it.Result().ErrIndex),
-	})
-	SetReportValue(it.Result().GetStatus(), v)
+	}
+	if usageReporter != nil {
+		report[hookutil.WriteBytesKey] = it.WriteBytes()
+		if readBytes, metered := it.QueryReadBytes(); metered {
+			report[hookutil.BytesKey] = readBytes
+		}
+	}
+	reportMutationUsage(ctx, it.Result().GetStatus(), usageReporter, hookutil.OpTypeUpsert, dbName, report)
 	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedTotalBytes) / 1024 / 1024)
-	}
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(mutationSize))
@@ -2661,6 +2672,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	ctx, timing := startDQL(ctx, "Search")
 	defer func() { timing.End(retResp.GetStatus(), retErr) }()
+
+	reporter := extension.RequestUsageReporter()
+	var usage *querymeter.SearchUsage
+	if reporter != nil && node.viewQueryClient != nil {
+		ctx, usage = querymeter.WithSearchUsage(ctx)
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2720,6 +2738,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
 		rsp.Status = status
+		reportSearchUsage(ctx, reporter, usage, rsp, hookutil.OpTypeSearch, request.GetDbName())
 	}
 	return rsp, nil
 }
@@ -2773,6 +2792,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, err
 	}
 
+	usage := querymeter.SearchUsageFromContext(ctx)
 	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
 	if err != nil {
 		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
@@ -2794,6 +2814,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
 	qt.SetCountFeatures(countFeatures)
+	qt.CollectSearchReadUsage = usage != nil
 
 	succeeded := false
 	defer func() {
@@ -2898,6 +2919,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	if qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+	}
+	if qt.Result() != nil && usage == nil && extension.RequestUsageReporter() == nil {
 		username := GetCurUserFromContextOrDefault(ctx)
 		sentSize := proto.Size(qt.Result())
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -2909,7 +2933,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
@@ -2919,6 +2942,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		adjustSearchResultsForNullVectors(qt.Result(), validData)
 	}
 
+	if usage != nil && qt.Result() != nil {
+		if !isRecallEvaluation {
+			usage.SetResultSchema(qt.ResultSchema())
+		}
+	}
 	succeeded = true
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), qt.IsRecallEvaluation(), nil
 }
@@ -2929,6 +2957,13 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, timing := startDQL(ctx, "HybridSearch")
 	defer func() { timing.End(retResp.GetStatus(), retErr) }()
+
+	reporter := extension.RequestUsageReporter()
+	var usage *querymeter.SearchUsage
+	if reporter != nil && node.viewQueryClient != nil {
+		ctx, usage = querymeter.WithSearchUsage(ctx)
+	}
+
 	var err error
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
@@ -2969,6 +3004,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	status := finishRequest(ctx, entry, rsp.GetStatus())
 	if rsp != nil {
 		rsp.Status = status
+		reportSearchUsage(ctx, reporter, usage, rsp, hookutil.OpTypeHybridSearch, request.GetDbName())
 	}
 	return rsp, nil
 }
@@ -3013,6 +3049,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	newSearchReq := ConvertHybridSearchToSearch(request)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
 	qt.SetCountFeatures(countFeatures)
+	usage := querymeter.SearchUsageFromContext(ctx)
+	qt.CollectSearchReadUsage = usage != nil
 
 	succeeded := false
 	defer func() {
@@ -3120,6 +3158,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	}
 
 	if qt.Result() != nil {
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+	}
+	if qt.Result() != nil && usage == nil && extension.RequestUsageReporter() == nil {
 		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := hookutil.GetExtension().Report(map[string]any{
@@ -3131,10 +3172,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.Result().GetStatus(), v)
-		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
 		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
+	}
+	if usage != nil && qt.Result() != nil {
+		usage.SetResultSchema(qt.ResultSchema())
 	}
 	succeeded = true
 	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), nil
@@ -3603,6 +3646,10 @@ func (node *Proxy) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace
 // Query get the records by primary keys.
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	request := qt.Request()
+	usage := querymeter.SearchUsageFromContext(ctx)
+	if usage != nil {
+		qt.CollectQueryReadUsage = true
+	}
 	method := "Query"
 	queryLabel := qt.GetMetricLabel()
 	if sp != nil {
@@ -3696,6 +3743,11 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
 
+	if usage != nil && merr.Ok(qt.Result().GetStatus()) {
+		if err := usage.AddRead(qt.ReadUsage()); err != nil {
+			return &milvuspb.QueryResults{Status: merr.Status(err)}, segcore.StorageCost{}, err
+		}
+	}
 	succeeded = true
 	return qt.Result(), qt.StorageCost(), nil
 }
@@ -3724,10 +3776,13 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (r
 
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
+	reporter := extension.RequestUsageReporter()
+	collectUsage := reporter != nil && node.viewQueryClient != nil
 	var result *milvuspb.QueryResults
+	var usageBytes int64
 	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
 		var err error
-		result, err = node.executeQuery(ctx, request)
+		result, usageBytes, err = node.executeQuery(ctx, request, collectUsage)
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
@@ -3740,10 +3795,24 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (r
 	if status := finishRequest(ctx, entry, result.GetStatus()); !merr.Ok(status) {
 		return &milvuspb.QueryResults{Status: status}, nil
 	}
+	if collectUsage {
+		if err := ctx.Err(); err != nil {
+			return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
+		}
+		username := GetCurUserFromContextOrDefault(ctx)
+		value := reporter.Report(map[string]any{
+			hookutil.OpTypeKey:   hookutil.OpTypeQuery,
+			hookutil.DatabaseKey: request.GetDbName(),
+			hookutil.UsernameKey: username,
+			hookutil.BytesKey:    usageBytes,
+		})
+		SetReportValue(result.GetStatus(), value)
+		metrics.ProxyReportValue.WithLabelValues(paramtable.GetStringNodeID(), hookutil.OpTypeQuery, request.GetDbName(), username).Add(float64(value))
+	}
 	return result, nil
 }
 
-func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest, collectUsage bool) (*milvuspb.QueryResults, int64, error) {
 	ctx, finishAttempt := extension.BeginDQLAttempt(ctx)
 	defer finishAttempt()
 	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
@@ -3751,15 +3820,16 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		ReqID:            paramtable.GetNodeID(),
-		ConsistencyLevel: request.ConsistencyLevel,
-		QueryLabel:       metrics.QueryLabel,
+		ReqID:                 paramtable.GetNodeID(),
+		ConsistencyLevel:      request.ConsistencyLevel,
+		QueryLabel:            metrics.QueryLabel,
+		CollectQueryReadUsage: collectUsage,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, nil
+		}, 0, nil
 	}
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
@@ -3785,10 +3855,15 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 	}
 
 	if err != nil || !merr.Ok(res.Status) {
-		return res, err
+		return res, 0, err
 	}
 
 	mlog.Debug(ctx, rpcDone(method))
+
+	SetStorageCost(res.Status, storageCost)
+	if collectUsage || extension.RequestUsageReporter() != nil {
+		return res, qt.UsageBytes(), nil
+	}
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
@@ -3801,14 +3876,13 @@ func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequ
 		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
 	})
 	SetReportValue(res.Status, v)
-	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
 	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)
 		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
 	}
-	return res, nil
+	return res, 0, nil
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.

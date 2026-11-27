@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -66,6 +67,48 @@ func SegmentFieldLogicalSizes(segment *datapb.SegmentInfo) *datapb.FieldLogicalS
 		return sizes
 	}
 	return nil
+}
+
+// dataViewFieldLogicalBytes copies verified column sizes into a DataView snapshot.
+func dataViewFieldLogicalBytes(sizes *datapb.FieldLogicalSizes, rows int64, manifest string) *viewpb.FieldLogicalBytes {
+	if sizes.GetVersion() != storage.FieldLogicalSizeVersion || CheckFieldLogicalSizes(sizes, rows, manifest) != nil {
+		return nil
+	}
+	result := &viewpb.FieldLogicalBytes{
+		PayloadBytes: make(map[int64]uint64, len(sizes.GetFields())),
+		ValidityBits: make(map[int64]uint64),
+	}
+	for id, size := range sizes.GetFields() {
+		result.PayloadBytes[id] = size.GetPayloadBytes()
+		if bits := size.GetValidityBits(); bits != 0 {
+			result.ValidityBits[id] = bits
+		}
+	}
+	return result
+}
+
+// The final WAL seal can publish an existing insert manifest without repeating
+// its column sizes. Borrow only the totals for that same manifest and row set.
+func FlushDataViewFieldLogicalBytes(segment *SegmentInfo, req *datapb.SaveBinlogPathsRequest, rows int64, manifest string) *viewpb.FieldLogicalBytes {
+	if segment.GetStorageVersion() != storage.StorageV3 || segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return nil
+	}
+	reported := dataViewFieldLogicalBytes(req.GetStats().GetFieldLogicalSizes(), rows, req.GetManifestPath())
+	if segment.GetNumOfRows() != rows || !packed.SameManifestPath(segment.GetManifestPath(), manifest) {
+		return reported
+	}
+	known := dataViewFieldLogicalBytes(SegmentFieldLogicalSizes(segment.SegmentInfo), rows, manifest)
+	if known == nil {
+		return reported
+	}
+	for id, bytes := range reported.GetPayloadBytes() {
+		known.PayloadBytes[id] = bytes
+		delete(known.ValidityBits, id)
+	}
+	for id, bits := range reported.GetValidityBits() {
+		known.ValidityBits[id] = bits
+	}
+	return known
 }
 
 // installReportedStats adopts the absolute statistics of an insert output. Its

@@ -24,7 +24,8 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 	for _, plan := range plans {
 		inputs := c.results[plan.ShardID.String()]
 		if len(inputs) == 0 {
-			inputs = []*internalpb.RetrieveResults{{Status: merr.Success()}}
+			empty := &internalpb.RetrieveResults{Status: merr.Success()}
+			inputs = []*internalpb.RetrieveResults{empty}
 		}
 		hasAggregation := len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0
 		var result *internalpb.RetrieveResults
@@ -41,6 +42,16 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 				costs = append(costs, input.GetCostAggregation())
 			}
 			result.CostAggregation = mergeLegacyCosts(costs)
+		}
+		if req.Req.GetCollectQueryReadUsage() {
+			usage, err := queryPlanReadUsage(plan, req.Req.GetPartitionIDs(), req.Plans != nil)
+			if err != nil {
+				return nil, err
+			}
+			if result.CostAggregation == nil {
+				result.CostAggregation = &internalpb.CostAggregation{}
+			}
+			result.CostAggregation.QueryReadUsage = usage
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
@@ -63,6 +74,12 @@ func (c *legacySearchCollector) Reduce(ctx context.Context, req *internalpb.Sear
 		result, err := reduceLegacyShardSearch(ctx, req, inputs)
 		if err != nil {
 			return nil, err
+		}
+		if req.GetCollectSearchReadUsage() {
+			result.SearchReadUsage, err = searchPlanReadUsage(plan)
+			if err != nil {
+				return nil, err
+			}
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())}

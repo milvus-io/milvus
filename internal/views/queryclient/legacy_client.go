@@ -504,6 +504,8 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 		for _, node := range plan.WorkNodes {
 			group.Go(func() error {
 				request := proto.Clone(req.Req).(*internalpb.RetrieveRequest)
+				request.CollectQueryReadUsage = false
+				request.QueryReadFieldIds = nil
 				request.MvccTimestamp = legacyMVCCForNode(plan.Mvcc, node)
 				response, err := c.shardClient.queryServiceClient.QueryOnView(groupCtx, node, &viewpb.QueryOnViewRequest{
 					SegmentSelection: qviews.WorkNodeSelection(&viewpb.QueryPlan{WorkNodes: plan.Selections}, node).GetSegmentSelection(),

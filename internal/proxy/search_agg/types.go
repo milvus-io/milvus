@@ -1,6 +1,8 @@
 package search_agg
 
 import (
+	"slices"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 )
@@ -58,6 +60,31 @@ func (c *SearchAggregationContext) IsGroupByField(fieldID int64) bool {
 // SearchRequest.OutputFieldsId.
 func (c *SearchAggregationContext) ExtraOutputFieldIDs() []int64 {
 	return c.extraOutputFieldIDs
+}
+
+// ReadFieldIDs returns metric columns outside the group projection and keys
+// from each top-hits sort.
+func (c *SearchAggregationContext) ReadFieldIDs() []int64 {
+	var fields []int64
+	metrics := make(map[int64]struct{})
+	for _, level := range c.Levels {
+		for _, metric := range level.Metrics {
+			id := metric.FieldID
+			if _, seen := metrics[id]; id > 0 && !seen && !c.IsGroupByField(id) {
+				metrics[id] = struct{}{}
+				fields = append(fields, id)
+			}
+		}
+		if level.TopHits != nil {
+			for _, key := range level.TopHits.Sort {
+				if key.FieldID > 0 {
+					fields = append(fields, key.FieldID)
+				}
+			}
+		}
+	}
+	slices.Sort(fields)
+	return fields
 }
 
 // AllGroupByFieldIDs returns the flattened composite-key field list in the

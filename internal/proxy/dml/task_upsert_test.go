@@ -1823,6 +1823,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 		generatedPK = int64(1001)
 	)
 	task := newFullAutoIDUpsertPreExecuteTask()
+	task.EnableWriteUsage()
 	task.MetaCache = &metacache.MetaCache{}
 	task.collectionID = 1001
 	task.req.Base = commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Upsert))
@@ -1867,6 +1868,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 	require.Equal(t, []int64{generatedPK + 1, generatedPK + 2}, task.rowIDs)
 	require.NoError(t, task.Execute(context.Background()))
 	require.NoError(t, task.PostExecute(context.Background()))
+	require.EqualValues(t, 2*(8+4)+8, task.WriteBytes())
 	require.Equal(t, 1, reads)
 	require.Equal(t, 1, fakeWAL.appendCalls)
 	require.Zero(t, fakeWAL.resolveCalls, "Full Upsert must not prepare CAS terms")
@@ -2666,10 +2668,18 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 		return task.schema, nil
 	}).Build()
 	defer readSchema.UnPatch()
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).Return(&internalpb.QueryReadUsage{DataBytes: 64}).Build()
+	defer readUsage.UnPatch()
 	for _, partitionKeyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
 			task.partitionKeyMode = partitionKeyMode
+			task.EnableQueryReadUsage()
+			replacedVector := task.req.GetFieldsData()[2]
+			require.Equal(t, "vector", replacedVector.GetFieldName())
+			oldVector := proto.Clone(replacedVector).(*schemapb.FieldData)
+			oldVector.GetVectors().GetFloatVector().Data = make([]float32, 256)
+			fields := []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20}), oldVector}
 			task.upsertMsg.DeleteMsg.PartitionName = "_default"
 			beginTS := task.BeginTs()
 			fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -2687,6 +2697,8 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
 				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.GetConsistencyLevel())
 				require.Equal(t, []string{"*"}, qt.Request().GetOutputFields())
+				require.True(t, qt.GetCollectQueryReadUsage())
+				require.Empty(t, qt.GetQueryReadFieldIds())
 				require.Zero(t, qt.Request().GetBase().GetTimestamp())
 				require.Zero(t, qt.Request().GetGuaranteeTimestamp())
 				require.Zero(t, qt.GetMvccTimestamp())
@@ -2701,18 +2713,29 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 					qt.RecordChannelMvcc(channel, 70)
 				}
 				return &milvuspb.QueryResults{
-					Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20})},
+					Status: merr.Success(), FieldsData: fields,
 				}, segcore.StorageCost{}, nil
 			}).Build()
 			defer query.UnPatch()
 
 			result, _, err := retrieveByPKs(context.Background(), task, partialUpdateCASIDs([]int64{10, 20}), []string{"*"})
 			require.NoError(t, err)
-			require.Len(t, result.GetFieldsData(), 1)
+			require.Len(t, result.GetFieldsData(), 2)
+			bytes, metered := task.QueryReadBytes()
+			require.True(t, metered)
+			require.EqualValues(t, 64+2*8+256*4, bytes, "count all returned values including the vector replaced by the request")
 			require.Equal(t, beginTS, task.BeginTs())
 			for _, meta := range task.partialUpdateCASGroups {
 				require.EqualValues(t, 70, meta.GetReadTs())
 			}
+
+			fields = nil
+			result, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{30}), []string{"*"})
+			require.NoError(t, err)
+			require.Empty(t, result.GetFieldsData())
+			bytes, metered = task.QueryReadBytes()
+			require.True(t, metered)
+			require.EqualValues(t, 2*64+2*8+256*4, bytes, "a zero-hit lookup only adds the planned read")
 		})
 	}
 }
@@ -2724,16 +2747,23 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	defer readSchema.UnPatch()
 	const beginTS = uint64(200)
 	var captured *dql.QueryTask
+	var returned []*schemapb.FieldData
 
 	m := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, task *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 		captured = task
-		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+		return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: returned}, segcore.StorageCost{}, nil
 	}).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(10), nil).Build()
 	defer m.UnPatch()
 
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).Return(&internalpb.QueryReadUsage{DataBytes: 64}).Build()
+	defer readUsage.UnPatch()
 	task := createTestUpdateTask()
+	task.schema = mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+	}})
+	task.EnableQueryReadUsage()
 	task.SetTs(beginTS)
 	task.partitionKeyMode = false
 	task.upsertMsg = &msgstream.UpsertMsg{
@@ -2760,10 +2790,22 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 	require.Zero(t, captured.Request().GetBase().GetTimestamp())
 	require.False(t, captured.CanSkipAllocTimestamp(), "the Query must obtain its own Strong-read timestamp")
 	require.Equal(t, []string{"id"}, captured.Request().GetOutputFields())
+	require.True(t, captured.GetCollectQueryReadUsage())
+	require.Empty(t, captured.GetQueryReadFieldIds())
 	require.Zero(t, captured.GetMvccTimestamp())
 	require.False(t, captured.HasRecordedChannelMvcc())
 	require.Empty(t, task.partialUpdateCASGroups)
 	require.Equal(t, beginTS, task.BeginTs())
+	bytes, metered := task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 64, bytes, "an empty lookup still counts its planned primary key column")
+
+	returned = []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1})}
+	_, _, err = retrieveByPKs(t.Context(), task, ids, []string{"id"})
+	require.NoError(t, err)
+	bytes, metered = task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 128, bytes, "the existence lookup has no merge payload")
 }
 
 func TestQueryPreExecuteFullAutoIDPreservesRequestOrder(t *testing.T) {
@@ -3591,6 +3633,65 @@ func TestRetrieveByPKsRebuildsEachAttempt(t *testing.T) {
 	require.Zero(t, fakeWAL.appendCalls)
 }
 
+func TestConditionalUpsertReadUsage(t *testing.T) {
+	readSchema := mockey.Mock((*UpsertTask).upsertReadSchema).To(func(task *UpsertTask, _ context.Context, _ []string) (*metacache.SchemaInfo, error) {
+		return task.schema, nil
+	}).Build()
+	defer readSchema.UnPatch()
+
+	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+	task.partitionKeyMode = true
+	task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64},
+	}})
+	task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+	task.EnableQueryReadUsage()
+
+	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
+	oldWAL := streaming.WAL()
+	streaming.SetWALForTest(fakeWAL)
+	defer streaming.SetWALForTest(oldWAL)
+	require.NoError(t, task.preparePartialUpdateCASGroups(t.Context()))
+
+	var readErr error
+	version := partialUpdateCASPKFieldData([]int64{1, 2})
+	version.FieldName = "version"
+	version.FieldId = 101
+	executeQuery := mockey.Mock((*mockUpsertNode).query).To(func(_ *mockUpsertNode, _ context.Context, qt *dql.QueryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		require.True(t, qt.GetCollectQueryReadUsage())
+		require.Equal(t, []int64{101}, qt.GetQueryReadFieldIds())
+		for channel := range task.partialUpdateCASGroups {
+			qt.RecordChannelMvcc(channel, 90)
+		}
+		return &milvuspb.QueryResults{Status: merr.Status(readErr), FieldsData: []*schemapb.FieldData{version}}, segcore.StorageCost{}, readErr
+	}).Build()
+	defer executeQuery.UnPatch()
+
+	part := &internalpb.QueryReadUsage{DataBytes: 24, ValidityBits: map[int64]uint64{101: 2}}
+	readUsage := mockey.Mock((*dql.QueryTask).ReadUsage).To(func(*dql.QueryTask) *internalpb.QueryReadUsage { return part }).Build()
+	defer readUsage.UnPatch()
+	_, _, err := retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.NoError(t, err)
+	part = &internalpb.QueryReadUsage{DataBytes: 16, ValidityBits: map[int64]uint64{101: 2}}
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.NoError(t, err)
+	bytes, metered := task.QueryReadBytes()
+	require.True(t, metered)
+	require.EqualValues(t, 41+2*2*8, bytes)
+
+	readErr = merr.ErrServiceUnavailable
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	readErr = nil
+	part = nil
+	_, _, err = retrieveByPKs(t.Context(), task, partialUpdateCASIDs([]int64{10}), []string{"*"})
+	require.ErrorContains(t, err, "did not report read usage")
+	bytes, _ = task.QueryReadBytes()
+	require.EqualValues(t, 41+2*2*8, bytes)
+	require.Zero(t, fakeWAL.appendCalls)
+}
+
 func TestRetrieveByPKsRequiresQueryRunner(t *testing.T) {
 	task := createTestUpdateTask()
 	task.node = &mockTaskNode{}
@@ -4025,12 +4126,14 @@ func TestUpdateTaskPreExecuteSnapshotsOriginalPartialFieldsBeforeMerge(t *testin
 	defer m.UnPatch()
 
 	task := createTestUpdateTask()
+	task.EnableWriteUsage()
 	task.req.PartialUpdate = true
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
 	originalFields := cloneFieldDataList(task.req.GetFieldsData())
 
 	err := task.PreExecute(context.Background())
 	require.NoError(t, err)
+	require.EqualValues(t, 3*(8+5+128*4), task.WriteBytes())
 	require.Equal(t, originalFields, task.partialUpdateOriginalFields)
 	require.NotSame(t, task.req.GetFieldsData()[0], task.partialUpdateOriginalFields[0])
 }
@@ -8079,6 +8182,8 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 		}
 	}
 	task, _, _ := partialUpdateCASTestTask(t, true, pks, pks, pks)
+	task.EnableWriteUsage()
+	task.writeBytes = 26
 	firstChannel := partialUpdateCASTestVChannels[successful]
 	var secondChannel string
 	channels, err := typeutil.HashPK2Channels(partialUpdateCASIDs(pks), partialUpdateCASTestVChannels)
@@ -8095,6 +8200,7 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 	require.Equal(t, map[int]any{0: pks[0]}, task.partialState.written)
 	require.Equal(t, []int{1}, task.partialState.retryRows)
 	require.EqualValues(t, 1, task.partialState.insertCount)
+	require.EqualValues(t, 26+8, task.WriteBytes())
 	task.partialState.rows = []int{1}
 	task.partialState.writeRows = []int{0}
 	task.partialState.writeChannels = []string{secondChannel}
@@ -8104,6 +8210,7 @@ func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
 	require.Equal(t, pks, task.result.IDs.GetIntId().Data)
 	require.EqualValues(t, 2, task.result.UpsertCnt)
 	require.EqualValues(t, 200, task.result.Timestamp)
+	require.EqualValues(t, 26+16, task.WriteBytes())
 }
 
 func TestConditionalUpsertAllMissingWithEmptyQueryColumns(t *testing.T) {

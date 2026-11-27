@@ -269,3 +269,21 @@ func TestFieldLogicalSizesCompactionAdoption(t *testing.T) {
 		})
 	}
 }
+
+func TestFlushDataViewFieldLogicalBytes(t *testing.T) {
+	manifest := packed.MarshalManifestPath("base", 4)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		StorageVersion: storage.StorageV3, Level: datapb.SegmentLevel_L1,
+		ManifestPath: manifest, FieldLogicalSizesManifest: manifest, NumOfRows: 2,
+		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{
+			Version: 1, RowCount: 2,
+			Fields: map[int64]*datapb.FieldLogicalSize{100: {PayloadBytes: 12}, 101: {ValidityBits: 2}},
+		}},
+	})
+	req := &datapb.SaveBinlogPathsRequest{ManifestPath: manifest}
+	bytes := FlushDataViewFieldLogicalBytes(segment, req, 2, manifest)
+	require.Equal(t, map[int64]uint64{100: 12, 101: 0}, bytes.GetPayloadBytes())
+	require.Equal(t, map[int64]uint64{101: 2}, bytes.GetValidityBits())
+	require.Nil(t, FlushDataViewFieldLogicalBytes(segment, req, 3, manifest))
+	require.Nil(t, FlushDataViewFieldLogicalBytes(segment, req, 2, packed.MarshalManifestPath("base", 5)))
+}

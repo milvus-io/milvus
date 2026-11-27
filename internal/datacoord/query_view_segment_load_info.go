@@ -90,6 +90,7 @@ func (s *Server) packQueryViewSegmentLoadInfo(segment *datapb.SegmentInfo, index
 		Priority:                    commonpb.LoadPriority_HIGH,
 		ManifestPath:                segment.GetManifestPath(),
 		Stats:                       segment.GetStats(),
+		FieldLogicalSizesManifest:   segment.GetFieldLogicalSizesManifest(),
 		DataVersion:                 segment.GetDataVersion(),
 		CommitTimestamp:             segment.GetCommitTimestamp(),
 		TransformStartAfterTimetick: segment.GetTransformStartAfterTimetick(),

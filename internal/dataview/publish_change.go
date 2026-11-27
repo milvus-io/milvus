@@ -193,6 +193,7 @@ func removeSegments(view *viewpb.DataViewOfCollection, segmentIDs []int64) error
 			keptStarts := starts[:0]
 			for idx, segmentID := range segments {
 				if _, ok := remove[segmentID]; ok {
+					delete(partition.SegmentFieldBytes, segmentID)
 					continue
 				}
 				keptSegments = append(keptSegments, segmentID)

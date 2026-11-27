@@ -19,6 +19,7 @@ package storage
 import (
 	"math"
 
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -28,6 +29,16 @@ const FieldLogicalSizeVersion = 1
 // Each field still needs its own entry in the snapshot.
 func FieldLogicalSizesCover(sizes *datapb.FieldLogicalSizes, rows int64) bool {
 	return sizes.GetVersion() == FieldLogicalSizeVersion && rows >= 0 && sizes.GetRowCount() == rows
+}
+
+// FieldLogicalSizesCoverManifest requires counts bound to the loaded manifest revision.
+func FieldLogicalSizesCoverManifest(sizes *datapb.FieldLogicalSizes, rows int64, measuredManifest, loadedManifest string) bool {
+	if !FieldLogicalSizesCover(sizes, rows) {
+		return false
+	}
+	base, version, err := packed.UnmarshalManifestPath(loadedManifest)
+	return err == nil && base != "" && version > packed.ManifestEarliest &&
+		packed.SameManifestPath(measuredManifest, loadedManifest)
 }
 
 func cloneFieldLogicalSizes(sizes *datapb.FieldLogicalSizes) *datapb.FieldLogicalSizes {

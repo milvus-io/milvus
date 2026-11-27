@@ -254,6 +254,7 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 	}
 }
 
+// Metering fields describe unary read accounting independently of the reduction schema.
 func TestStreamingReductionSchemaCoverage(t *testing.T) {
 	for _, tc := range []struct {
 		message   proto.Message
@@ -266,7 +267,8 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 				group_by_field_ids aggregates order_by_fields`,
 			other: `base reqID dbID collectionID partitionIDs mvcc_timestamp guarantee_timestamp timeout_timestamp
 				ignoreGrowing iteration_extension_reduce_rate username reduce_stop_for_best consistency_level
-				collection_ttl_timestamps entity_ttl_physical_time query_label pk_filter schema_version`,
+				collection_ttl_timestamps entity_ttl_physical_time query_label pk_filter schema_version
+				collect_query_read_usage query_read_field_ids`,
 		},
 		{
 			message: &internalpb.SearchRequest{},
@@ -274,7 +276,8 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 				group_by_field_id group_size is_topk_reduce is_recall_evaluation is_iterator search_type group_by_field_ids`,
 			other: `base reqID dbID collectionID partitionIDs dsl placeholder_group dsl_type mvcc_timestamp
 				guarantee_timestamp timeout_timestamp ignoreGrowing username consistency_level field_id analyzer_name
-				collection_ttl_timestamps entity_ttl_physical_time pk_filter schema_version`,
+				collection_ttl_timestamps entity_ttl_physical_time pk_filter schema_version
+				collect_search_read_usage search_read_field_ids`,
 		},
 		{
 			message:   &internalpb.SubSearchRequest{},

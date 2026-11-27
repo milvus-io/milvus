@@ -17,6 +17,8 @@ type ShardPlan struct {
 	Version          *viewpb.QueryViewVersion
 	Mvcc             *viewpb.QueryPlanMVCC
 	WorkNodes        []qviews.WorkNode
+	Usage            *viewpb.PlannedQueryUsage
+	FilterOnlyRan    bool
 }
 
 // RequeryRunner handles the Requery stage of the query pipeline.

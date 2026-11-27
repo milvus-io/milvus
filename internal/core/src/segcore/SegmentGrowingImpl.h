@@ -40,6 +40,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/type_c.h"
 #include "segcore/TextLobSpillover.h"
 #include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
@@ -142,12 +143,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // batch. Every structure this function writes -- column data, validity,
     // pk2offset_, the growing indexes, array offsets -- addresses the batch by
     // it rather than by "wherever I currently am" (#52637).
-    load_field_data_common(FieldId field_id,
-                           size_t reserved_offset,
-                           const std::vector<FieldDataPtr>& field_data,
-                           FieldId primary_field_id,
-                           size_t num_rows,
-                           bool text_is_remote_lob_ref = false);
+    load_field_data_common(
+        FieldId field_id,
+        size_t reserved_offset,
+        const std::vector<FieldDataPtr>& field_data,
+        FieldId primary_field_id,
+        size_t num_rows,
+        bool text_is_remote_lob_ref = false,
+        std::optional<CFieldLogicalSize> persisted_size = std::nullopt);
 
     // Test-only: inject TEXT LOB base path.
     void
@@ -278,6 +281,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     GetMemoryUsageInBytes() const override {
         return stats_.mem_size.load() + deleted_record_.mem_size();
     }
+
+    // Returns the index of the first unknown field, or field_count.
+    int64_t
+    GetFieldLogicalSizes(const int64_t* fields,
+                         int64_t field_count,
+                         CFieldLogicalSize* sizes) const;
 
     int64_t
     get_row_count() const override {
@@ -990,6 +999,23 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t id_;
 
     SegmentStats stats_{};
+
+    void
+    RecordFieldLogicalSize(FieldId field_id,
+                           int64_t begin,
+                           int64_t rows,
+                           std::optional<CFieldLogicalSize> size);
+
+    // Keep one total per column. Only out-of-order batches need per-range
+    // state. The total must cover exactly the published row prefix.
+    struct FieldLogicalUsage {
+        int64_t end = 0;
+        CFieldLogicalSize size{};
+        bool unknown = false;
+        std::map<int64_t, std::pair<int64_t, CFieldLogicalSize>> pending;
+    };
+    mutable std::mutex field_usage_mutex_;
+    std::unordered_map<FieldId, FieldLogicalUsage> field_usage_;
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;

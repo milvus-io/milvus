@@ -23,8 +23,23 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
+
+func TestFieldLogicalSizesCoverManifest(t *testing.T) {
+	sizes := &datapb.FieldLogicalSizes{Version: FieldLogicalSizeVersion, RowCount: 100}
+	path := packed.MarshalManifestPath("test/segment", 2)
+	require.True(t, FieldLogicalSizesCoverManifest(sizes, 100, path, path))
+	require.True(t, FieldLogicalSizesCoverManifest(sizes, 100, `{"ver":2,"base_path":"test/segment"}`, path))
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 99, path, path))
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 100, "", path))
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 100, packed.MarshalManifestPath("test/segment", 1), path))
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 100, packed.MarshalManifestPath("test/other-segment", 2), path))
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 100, "invalid", "invalid"))
+	emptyManifest := packed.MarshalManifestPath("test/segment", packed.ManifestEarliest)
+	require.False(t, FieldLogicalSizesCoverManifest(sizes, 100, emptyManifest, emptyManifest))
+}
 
 func TestAppendFieldLogicalSizes(t *testing.T) {
 	prefix := &datapb.FieldLogicalSizes{Version: 1, RowCount: 100, Fields: map[int64]*datapb.FieldLogicalSize{

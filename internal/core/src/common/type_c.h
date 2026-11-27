@@ -61,6 +61,11 @@ typedef enum CDataType CDataType;
 
 typedef void* CSegmentInterface;
 
+typedef struct CFieldLogicalSize {
+    uint64_t payload_bytes;
+    uint64_t validity_bits;
+} CFieldLogicalSize;
+
 typedef struct CProto {
     const void* proto_blob;
     int64_t proto_size;

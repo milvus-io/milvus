@@ -1,0 +1,119 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package querymeter
+
+import (
+	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+)
+
+// QueryFieldIDs returns the planned predicate, aggregation projection, and
+// sort key columns. Grouping and aggregation share one projection. Sorting
+// contributes its keys separately from that projection and the predicates.
+func QueryFieldIDs(plan *planpb.PlanNode) []int64 {
+	query := plan.GetQuery()
+	predicate := query.GetPredicates()
+	if predicate == nil {
+		predicate = plan.GetPredicates()
+	}
+	fields := PredicateFieldIDs(predicate)
+	projected := make(map[int64]struct{}, len(query.GetGroupByFieldIds())+len(query.GetAggregates()))
+	addInput := func(fieldID int64) {
+		if _, seen := projected[fieldID]; !seen {
+			projected[fieldID] = struct{}{}
+			fields = append(fields, fieldID)
+		}
+	}
+	for _, fieldID := range query.GetGroupByFieldIds() {
+		addInput(fieldID)
+	}
+	for _, aggregate := range query.GetAggregates() {
+		if fieldID := aggregate.GetFieldId(); fieldID != 0 { // COUNT(*) has no input column.
+			addInput(fieldID)
+		}
+	}
+	for _, order := range query.GetOrderByFields() {
+		fields = append(fields, order.GetFieldId())
+	}
+	return fields
+}
+
+// SearchFieldIDs returns the planned reads for one ANN or filter-only stage.
+// Output projection is accounted for by the final response.
+func SearchFieldIDs(plan *planpb.PlanNode, filterOnly bool) []int64 {
+	anns := plan.GetVectorAnns()
+	fields := PredicateFieldIDs(anns.GetPredicates())
+	if filterOnly {
+		return fields
+	}
+	fields = append(fields, anns.GetFieldId())
+	for _, scorer := range plan.GetScorers() {
+		fields = appendPredicateFieldIDs(fields, scorer.GetFilter())
+	}
+	info := anns.GetQueryInfo()
+	if groupIDs := info.GetGroupByFieldIds(); len(groupIDs) > 0 {
+		fields = append(fields, groupIDs...)
+	} else if fieldID := info.GetGroupByFieldId(); fieldID > 0 {
+		fields = append(fields, fieldID)
+	}
+	return fields
+}
+
+// PredicateFieldIDs returns one entry per column reference in the planned
+// predicate. Both sides of a boolean expression count even if the executor
+// can short-circuit, and distinct references to the same field are retained.
+func PredicateFieldIDs(expr *planpb.Expr) []int64 {
+	return appendPredicateFieldIDs(nil, expr)
+}
+
+func appendPredicateFieldIDs(ids []int64, expr *planpb.Expr) []int64 {
+	if expr == nil {
+		return ids
+	}
+	node := expr.ProtoReflect()
+	variant := node.WhichOneof(node.Descriptor().Oneofs().ByName("expr"))
+	if variant == nil {
+		return ids
+	}
+	// Descend into expression operands only. In particular, a TERM expression
+	// can carry a large list of literal values unrelated to field accounting.
+	node.Get(variant).Message().Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		if field.Message() == nil {
+			return true
+		}
+		if field.IsList() {
+			if field.Message().FullName() == node.Descriptor().FullName() {
+				list := value.List()
+				for i := 0; i < list.Len(); i++ {
+					ids = appendPredicateFieldIDs(ids, list.Get(i).Message().Interface().(*planpb.Expr))
+				}
+			}
+			return true
+		}
+		switch message := value.Message().Interface().(type) {
+		case *planpb.ColumnInfo:
+			if message != nil {
+				ids = append(ids, message.GetFieldId())
+			}
+		case *planpb.Expr:
+			ids = appendPredicateFieldIDs(ids, message)
+		}
+		return true
+	})
+	return ids
+}

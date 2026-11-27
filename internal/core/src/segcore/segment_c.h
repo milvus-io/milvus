@@ -327,6 +327,12 @@ int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
 
 int64_t
+GetGrowingFieldLogicalSizes(CSegmentInterface c_segment,
+                            const int64_t* fields,
+                            int64_t field_count,
+                            CFieldLogicalSize* sizes);
+
+int64_t
 GetRowCount(CSegmentInterface c_segment);
 
 int64_t

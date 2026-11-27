@@ -502,6 +502,7 @@ message SegmentLoadInfo {
     // Replay cursor of this exact physical base, fetched atomically with its
     // manifest/binlogs. QueryView carries only the shard buffer retention floor.
     uint64 transform_start_after_timetick = 31;
+    string field_logical_sizes_manifest = 32;
 }
 
 message FieldIndexInfo {

@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -93,6 +95,78 @@ func TestQueryPlanPrunesSNUsingSelectedViewDataVersion(t *testing.T) {
 	require.True(t, queryPlanIncludesStreamingNode(view, options))
 	view.Meta.Version.DataVersion = sealedAt.IntoProto()
 	require.False(t, queryPlanIncludesStreamingNode(view, options))
+}
+
+func TestRetrievePlanUsageScopesGrowingHandles(t *testing.T) {
+	const fieldID = int64(100)
+	dataVersion := &viewpb.DataVersion{StreamingVersion: 8, CompactVersion: 2}
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{LoadInfoVersion: 2},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{SealedFieldBytes: map[int64]*viewpb.FieldLogicalBytes{
+			1000: {PayloadBytes: map[int64]uint64{fieldID: 12}},
+			2000: {PayloadBytes: map[int64]uint64{fieldID: 88}},
+		}},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{
+			NodeId: 1,
+			Partitions: []*viewpb.QueryViewOfPartition{
+				{PartitionId: 10, SegmentIds: []int64{1000}},
+				{PartitionId: 20, SegmentIds: []int64{2000}},
+			},
+		}},
+	}
+	projection, err := proto.Marshal(&planpb.PlanNode{OutputFieldIds: []int64{fieldID}})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name   string
+		fields []int64
+	}{
+		{name: "partition_scoped_read", fields: []int64{fieldID}},
+		{name: "projection_only"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := mockey.Mock((*queryresource.ReadRuntime).Schema).Return(&schemapb.CollectionSchema{}).Build()
+			defer schema.UnPatch()
+			loaded := mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{10, 20}, nil).Build()
+			defer loaded.UnPatch()
+			calls := 0
+			acquire := mockey.Mock((*queryresource.ReadRuntime).AcquireGrowingSegmentHandles).
+				To(func(_ *queryresource.ReadRuntime, _ context.Context, version qviews.DataVersion, partitions []int64) ([]snview.GrowingSegmentHandle, error) {
+					calls++
+					require.Equal(t, qviews.FromProtoDataVersion(dataVersion), version)
+					require.Equal(t, []int64{10}, partitions)
+					return nil, nil
+				}).Build()
+			defer acquire.UnPatch()
+
+			plan := &viewpb.QueryPlan{
+				Version: &viewpb.QueryViewVersion{DataVersion: dataVersion},
+				Request: &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{
+					CollectQueryReadUsage: true,
+					PartitionIDs:          []int64{10},
+					QueryReadFieldIds:     tc.fields,
+					SerializedExprPlan:    projection,
+				}},
+				WorkNodes: []*viewpb.QueryPlanWorkNode{
+					{Node: &viewpb.QueryPlanWorkNode_StreamingNode{StreamingNode: &viewpb.StreamingWorkNode{}}},
+					{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 1}}},
+				},
+			}
+			runtime := &queryresource.ReadRuntime{QueryRuntime: queryresource.NewQueryRuntime()}
+			usage, err := planQueryUsage(t.Context(), &viewpb.GetQueryPlanResponse{Plan: plan}, view, runtime)
+			require.NoError(t, err)
+			require.Len(t, usage.GetReads(), 1)
+			read := usage.GetReads()[0]
+			require.Equal(t, tc.fields, read.GetFieldIds())
+			if len(tc.fields) == 0 {
+				require.Zero(t, calls)
+				require.Empty(t, read.GetColumns().GetPayloadBytes())
+			} else {
+				require.Equal(t, 1, calls)
+				require.Equal(t, map[int64]uint64{fieldID: 12}, read.GetColumns().GetPayloadBytes())
+			}
+		})
+	}
 }
 
 func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {

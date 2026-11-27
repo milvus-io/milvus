@@ -60,6 +60,7 @@ type QueryViewAtCoordBuilder struct {
 	segmentManifestVersions     map[int64]int64
 	streamingNode               *viewpb.QueryViewOfStreamingNode
 	partitionStatsVersions      map[int64]int64
+	sealedFieldBytes            map[int64]*viewpb.FieldLogicalBytes
 }
 
 func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfCollection, vchannel string) *QueryViewAtCoordBuilder {
@@ -75,8 +76,12 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	}
 	manifests := make(map[int64]int64)
 	stats := make(map[int64]int64)
+	fieldBytes := make(map[int64]*viewpb.FieldLogicalBytes)
 	for _, partition := range shardView.GetPartitions() {
 		stats[partition.GetPartitionId()] = partition.GetPartitionStatsVersion()
+		for segmentID, size := range partition.GetSegmentFieldBytes() {
+			fieldBytes[segmentID] = size
+		}
 		for idx, segmentID := range partition.GetSegmentIds() {
 			if idx < len(partition.GetSegmentManifestVersions()) {
 				manifests[segmentID] = partition.GetSegmentManifestVersions()[idx]
@@ -94,6 +99,7 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 		assignments:                 make(map[int64]map[int64][]int64),
 		segmentManifestVersions:     manifests,
 		partitionStatsVersions:      stats,
+		sealedFieldBytes:            fieldBytes,
 	}
 }
 
@@ -107,6 +113,7 @@ type QueryViewBuilderMetadata struct {
 	TransformStartAfterTimetick uint64
 	SegmentManifestVersions     map[int64]int64
 	PartitionStatsVersions      map[int64]int64
+	SealedFieldBytes            map[int64]*viewpb.FieldLogicalBytes
 }
 
 // NewQueryViewAtCoordBuilderFromMetadata avoids a temporary DataView protobuf
@@ -118,6 +125,7 @@ func NewQueryViewAtCoordBuilderFromMetadata(id ShardID, metadata QueryViewBuilde
 		transformStartAfterTimetick: metadata.TransformStartAfterTimetick,
 		segmentManifestVersions:     metadata.SegmentManifestVersions,
 		partitionStatsVersions:      metadata.PartitionStatsVersions,
+		sealedFieldBytes:            metadata.SealedFieldBytes,
 	}
 }
 
@@ -216,6 +224,14 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		for _, node := range queryNodes {
 			for _, partition := range node.GetPartitions() {
 				selected[partition.GetPartitionId()] = true
+				for _, segmentID := range partition.GetSegmentIds() {
+					if sizes := b.sealedFieldBytes[segmentID]; sizes != nil {
+						if stats.SealedFieldBytes == nil {
+							stats.SealedFieldBytes = make(map[int64]*viewpb.FieldLogicalBytes)
+						}
+						stats.SealedFieldBytes[segmentID] = sizes
+					}
+				}
 			}
 		}
 		ids := make([]int64, 0, len(selected))

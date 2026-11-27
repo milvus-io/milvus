@@ -84,6 +84,9 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
 		segLoadInfo.FieldHints = req.FieldHints
+		if req.SegmentType == SegmentTypeGrowing {
+			segLoadInfo.FieldLogicalSizes = growingFieldLogicalSizes(req.LoadInfo)
+		}
 		marshalTimer := segmentMarshal.Begin()
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		marshalTimer.End(err)
@@ -127,6 +130,27 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	return seg, nil
 }
 
+// growingFieldLogicalSizes returns the verified persisted prefix of growing usage.
+func growingFieldLogicalSizes(info *querypb.SegmentLoadInfo) map[int64]*segcorepb.FieldLogicalSize {
+	if info.GetStorageVersion() != storage.StorageV3 {
+		return nil
+	}
+	sizes := info.GetStats().GetFieldLogicalSizes()
+	if !storage.FieldLogicalSizesCoverManifest(sizes, info.GetNumOfRows(), info.GetFieldLogicalSizesManifest(), info.GetManifestPath()) {
+		return nil
+	}
+	result := make(map[int64]*segcorepb.FieldLogicalSize, len(sizes.GetFields()))
+	for fieldID, size := range sizes.GetFields() {
+		if size != nil {
+			result[fieldID] = &segcorepb.FieldLogicalSize{
+				PayloadBytes: size.GetPayloadBytes(),
+				ValidityBits: size.GetValidityBits(),
+			}
+		}
+	}
+	return result
+}
+
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
 type cSegmentImpl struct {
 	id  int64
@@ -164,6 +188,30 @@ func (s *cSegmentImpl) RowNum() int64 {
 func (s *cSegmentImpl) MemSize() int64 {
 	cMemSize := C.GetMemoryUsageInBytes(s.ptr)
 	return int64(cMemSize)
+}
+
+// GrowingFieldLogicalSizes reads a single snapshot for all requested fields.
+func GrowingFieldLogicalSizes(segment CSegment, fields []int64) (payloadBytes, validityBits map[int64]uint64) {
+	s, ok := segment.(*cSegmentImpl)
+	if !ok || s == nil || len(fields) == 0 {
+		return nil, nil
+	}
+	sizes := make([]C.CFieldLogicalSize, len(fields))
+	read := C.GetGrowingFieldLogicalSizes(
+		s.ptr, (*C.int64_t)(unsafe.Pointer(&fields[0])), C.int64_t(len(fields)), &sizes[0],
+	)
+	payloadBytes = make(map[int64]uint64, int(read))
+	for i, size := range sizes[:read] {
+		fieldID := fields[i]
+		payloadBytes[fieldID] = uint64(size.payload_bytes)
+		if size.validity_bits != 0 {
+			if validityBits == nil {
+				validityBits = make(map[int64]uint64)
+			}
+			validityBits[fieldID] = uint64(size.validity_bits)
+		}
+	}
+	return payloadBytes, validityBits
 }
 
 // HasRawData checks if the segment has raw data.
