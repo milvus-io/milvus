@@ -8,13 +8,22 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDirectSegmentTaskExecutorSearchBuildsHistoricalRequestFromHandles(t *testing.T) {
@@ -87,6 +96,114 @@ func TestDirectSegmentTaskExecutorQueryRejectsUnreadableSegment(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSchedulerQueryPrunesSealedSegmentsByPK(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().QueryNodeCfg.EnableSegmentFilter
+	original := cfg.GetValue()
+	t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(cfg.Key, original)) })
+	require.NoError(t, paramtable.Get().Save(cfg.Key, "true"))
+
+	schema, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+		Name: "point_queries",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		},
+	})
+	require.NoError(t, err)
+	plan, err := planparserv2.CreateRetrievePlan(schema, "id == -1", nil)
+	require.NoError(t, err)
+	encoded, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	req := &internalpb.RetrieveRequest{SerializedExprPlan: encoded, PkFilter: common.PkFilterHasPkFilter, Limit: 1}
+	mvcc := &viewpb.QueryPlanMVCC{TransformingTimetick: 99}
+
+	newCandidate := func(id, pk int64) *pkoracle.BloomFilterSet {
+		candidate := pkoracle.NewBloomFilterSet(id, 1, commonpb.SegmentState_Sealed)
+		stats, err := storage.NewPrimaryKeyStats(100, int64(schemapb.DataType_Int64), 1)
+		require.NoError(t, err)
+		stats.Update(storage.NewInt64PrimaryKey(pk))
+		candidate.AddHistoricalStats(&storage.PkStatistics{PkFilter: stats.BF, MinPK: stats.MinPk, MaxPK: stats.MaxPk})
+		return candidate
+	}
+	matching := newCandidate(1, -1)
+	excluded := newCandidate(2, 42)
+	unknown := pkoracle.NewBloomFilterSet(3, 1, commonpb.SegmentState_Sealed)
+	makeTask := func(candidate *pkoracle.BloomFilterSet) qnview.QNQuerySegmentTask {
+		return qnview.QNQuerySegmentTask{
+			Handle: fakeSealedSegmentHandle{
+				id: candidate.ID(),
+				segment: fakeReadableSegment{
+					id: candidate.ID(), vchannel: "v1",
+					querySegment: &sealedPKTestSegment{candidate: candidate},
+				},
+			},
+			Request: req,
+			MVCC:    mvcc,
+		}
+	}
+	tasks := qnview.NewQNQuerySegmentTasks([]qnview.QNQuerySegmentTask{makeTask(matching), makeTask(excluded), makeTask(unknown)})
+	defer tasks.Release()
+
+	runner := &fakeQueryTaskRunner{result: &internalpb.RetrieveResults{Ids: &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{-1}}},
+	}}}
+	scheduler := NewScheduler(NewDirectSegmentTaskExecutorForTest(100, &fakeSearchTaskRunner{}, runner))
+
+	for _, tc := range []struct {
+		name    string
+		enabled string
+		filter  int32
+		ids     []int64
+	}{
+		{name: "point query", enabled: "true", filter: common.PkFilterHasPkFilter, ids: []int64{1, 3}},
+		{name: "disabled", enabled: "false", filter: common.PkFilterHasPkFilter, ids: []int64{1, 2, 3}},
+		{name: "no PK filter", enabled: "true", filter: common.PkFilterNoPkFilter, ids: []int64{1, 2, 3}},
+		{name: "repeated point query", enabled: "true", filter: common.PkFilterHasPkFilter, ids: []int64{1, 3}},
+		{name: "older request without filter hint", enabled: "true", filter: common.PkFilterNotChecked, ids: []int64{1, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, paramtable.Get().Save(cfg.Key, tc.enabled))
+			req.PkFilter = tc.filter
+			result, err := scheduler.Query(context.Background(), tasks)
+			require.NoError(t, err)
+			assert.Equal(t, tc.ids, runner.req.GetSegmentIDs())
+			var selectedIDs []int64
+			for _, seg := range runner.segments {
+				selectedIDs = append(selectedIDs, seg.ID())
+			}
+			assert.Equal(t, tc.ids, selectedIDs)
+			assert.Equal(t, []int64{-1}, result.GetIds().GetIntId().GetData())
+			assert.Equal(t, uint64(99), runner.req.GetReq().GetMvccTimestamp())
+			assert.Zero(t, req.GetMvccTimestamp())
+		})
+	}
+
+	t.Run("all segments excluded", func(t *testing.T) {
+		tasks := qnview.NewQNQuerySegmentTasks([]qnview.QNQuerySegmentTask{makeTask(excluded)})
+		defer tasks.Release()
+		runner.result = &internalpb.RetrieveResults{}
+		result, err := scheduler.Query(context.Background(), tasks)
+		require.NoError(t, err)
+		assert.Empty(t, runner.req.GetSegmentIDs())
+		assert.Empty(t, runner.segments)
+		assert.Same(t, runner.result, result)
+	})
+}
+
+type sealedPKTestSegment struct {
+	segments.Segment
+	candidate *pkoracle.BloomFilterSet
+}
+
+func (s *sealedPKTestSegment) ID() int64              { return s.candidate.ID() }
+func (s *sealedPKTestSegment) PkCandidateExist() bool { return s.candidate.PkCandidateExist() }
+func (s *sealedPKTestSegment) BatchPkExist(cache *storage.BatchLocationsCache) []bool {
+	return s.candidate.BatchPkExist(cache)
+}
+func (s *sealedPKTestSegment) GetMinPk() *storage.PrimaryKey { return nil }
+func (s *sealedPKTestSegment) GetMaxPk() *storage.PrimaryKey { return nil }
+
 type fakeSearchTaskRunner struct {
 	collection *segments.Collection
 	segments   []segments.Segment
@@ -122,8 +239,9 @@ func (r *fakeQueryTaskRunner) Query(ctx context.Context, collection *segments.Co
 }
 
 type fakeReadableSegment struct {
-	id       int64
-	vchannel string
+	id           int64
+	vchannel     string
+	querySegment segments.Segment
 }
 
 func (s fakeReadableSegment) ID() int64 {
@@ -159,7 +277,7 @@ func (s fakeReadableSegment) Release(context.Context) error {
 }
 
 func (s fakeReadableSegment) QuerySegment() segments.Segment {
-	return nil
+	return s.querySegment
 }
 
 func (s fakeReadableSegment) Collection() *segments.Collection {

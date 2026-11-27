@@ -1,9 +1,16 @@
 package viewquery
 
 import (
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func searchExecutionScope(tasks []qnview.QNSearchSegmentTask) (*segments.Collection, []segments.Segment, []qnview.SealedSegmentHandle, error) {
@@ -36,6 +43,39 @@ func segmentExecutionScope(handles []qnview.SealedSegmentHandle) (*segments.Coll
 		selected = append(selected, readable.QuerySegment())
 	}
 	return collection, selected, handles, nil
+}
+
+func pruneQuerySegments(req *internalpb.RetrieveRequest, selected []segments.Segment, handles []qnview.SealedSegmentHandle) ([]segments.Segment, []qnview.SealedSegmentHandle) {
+	if !paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() || req.GetPkFilter() == common.PkFilterNoPkFilter {
+		return selected, handles
+	}
+	plan := &planpb.PlanNode{}
+	if proto.Unmarshal(req.GetSerializedExprPlan(), plan) != nil {
+		return selected, handles
+	}
+	expr := delegator.BuildPKFilterExpr(plan, req.GetPkFilter())
+	if expr == nil {
+		return selected, handles
+	}
+
+	targets := make([]delegator.PKFilterTarget, len(selected))
+	for i, segment := range selected {
+		targets[i] = segment
+	}
+	matches, all := delegator.CheckPKFilter(expr, targets)
+	if all {
+		return selected, handles
+	}
+
+	// Both slices are local to execution. The task batch still owns every handle.
+	keptSegments, keptHandles := selected[:0], handles[:0]
+	for i, segment := range selected {
+		if matches.Contain(segment.ID()) {
+			keptSegments = append(keptSegments, segment)
+			keptHandles = append(keptHandles, handles[i])
+		}
+	}
+	return keptSegments, keptHandles
 }
 
 func segmentIDsFromHandles(handles []qnview.SealedSegmentHandle) []int64 {
