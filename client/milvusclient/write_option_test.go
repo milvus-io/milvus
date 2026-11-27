@@ -291,6 +291,30 @@ func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumnNilSchema() {
 	s.Error(err)
 }
 
+func (s *ColumnBasedDataOptionSuite) TestRowBasedWithStructArrayColumnDeferredError() {
+	structSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("clip_str").WithDataType(entity.FieldTypeVarChar).WithMaxLength(64))
+	coll := &entity.Collection{Schema: entity.NewSchema().WithName("c").
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true))}
+
+	// WithStructArrayColumn is a promoted method returning the embedded
+	// *columnBasedDataOption; the row-based option keeps sharing it. The
+	// deferred error must surface on both row-based request constructors.
+	opt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)})
+	s.NotPanics(func() {
+		// Ignore the returned *columnBasedDataOption, as a fluent caller would.
+		opt.WithStructArrayColumn("clips", structSchema, []map[string]any{{"wrong_key": []string{"a"}}})
+
+		_, err := opt.InsertRequest(coll)
+		s.Require().Error(err)
+		s.Contains(err.Error(), "WithStructArrayColumn")
+
+		_, upsertErr := opt.UpsertRequest(coll)
+		s.Require().Error(upsertErr)
+		s.Contains(upsertErr.Error(), "WithStructArrayColumn")
+	})
+}
+
 func (s *ColumnBasedDataOptionSuite) TestWithNamespace() {
 	collName := "namespace_write_option"
 	namespace := "tenant_a"

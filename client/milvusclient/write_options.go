@@ -713,6 +713,9 @@ func (opt *rowBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.
 }
 
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
+	if opt.deferredErr != nil {
+		return nil, opt.deferredErr
+	}
 	if opt.writeCondition != nil {
 		return nil, unsupportedDMLWriteConditionError("Insert")
 	}
