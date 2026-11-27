@@ -1706,3 +1706,7 @@ func (s *mixCoordImpl) initDataAndQueryCoord() error {
 
 	return nil
 }
+
+func (s *mixCoordImpl) GetDataViewRetention(ctx context.Context, req *datapb.GetDataViewRetentionRequest) (*datapb.GetDataViewRetentionResponse, error) {
+	return s.datacoordServer.GetDataViewRetention(ctx, req)
+}

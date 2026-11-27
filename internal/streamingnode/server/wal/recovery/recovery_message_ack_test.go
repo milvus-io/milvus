@@ -741,7 +741,9 @@ func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
 			t.Cleanup(recovery.backgroundTaskNotifier.Cancel)
 			reported := make(chan error, 1)
 			WithRecoveryFatalHandler(func(err error) { reported <- err })(recovery)
-			recovery.summaryManager = recovery.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
+			var err error
+			recovery.summaryManager, err = recovery.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
+			require.NoError(t, err)
 			recovery.summaryManager.InitLastAcked(10)
 			patch := mockey.Mock((*storage.LocalChunkManager).Write).Return(walsummary.ErrStoreCorrupted).Build()
 			defer patch.UnPatch()

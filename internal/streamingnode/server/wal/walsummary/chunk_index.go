@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"io"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -73,20 +74,15 @@ func (i *chunkIndex) snapshot(after, through uint64) []*indexedChunk {
 	return append([]*indexedChunk(nil), i.chunks[start:end]...)
 }
 
-func (i *chunkIndex) remove(generation uint64) {
-	n := sort.Search(len(i.chunks), func(n int) bool { return i.chunks[n].GetGeneration() >= generation })
-	if n == len(i.chunks) || i.chunks[n].GetGeneration() != generation {
-		return
-	}
-	chunk := i.chunks[n]
+func (i *chunkIndex) removePrefix(count int) {
 	i.cache.mu.Lock()
-	chunk.retired = true
-	chunk.verified = nil
-	i.cache.evictLocked(chunk)
-	i.cache.mu.Unlock()
-	copy(i.chunks[n:], i.chunks[n+1:])
-	i.chunks[len(i.chunks)-1] = nil
-	i.chunks = i.chunks[:len(i.chunks)-1]
+	defer i.cache.mu.Unlock()
+	for _, chunk := range i.chunks[:count] {
+		chunk.retired = true
+		chunk.verified = nil
+		i.cache.evictLocked(chunk)
+	}
+	i.chunks = slices.Delete(i.chunks, 0, count)
 }
 
 func (c *chunkCache) read(ctx context.Context, store *Store, chunk *indexedChunk) (*chunkPayload, error) {

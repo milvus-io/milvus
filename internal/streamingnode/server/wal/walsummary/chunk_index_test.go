@@ -162,8 +162,8 @@ func TestChunkCacheRetirementDuringLoad(t *testing.T) {
 	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
 	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
 		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
-		m.AdvanceGCTimeTick("a", 10)
-		m.cfg.RetentionMaxBytes = 1
+		m.SetDataViewRetention("a", 10)
+		m.cfg.MaxRetentionBytes = 0
 		require.NoError(t, m.GCOnce(ctx))
 		require.Empty(t, m.chunkIndex.chunks)
 		return original(s, ctx, copied, verified)
@@ -238,8 +238,8 @@ func TestChunkCacheOutOfOrderWritesAndRetirement(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, batch.Entries, 2)
 	require.Zero(t, calls.Load(), "both upload completions seed cache")
-	m.AdvanceGCTimeTick("a", 20)
-	m.cfg.RetentionMaxBytes = 1
+	m.SetDataViewRetention("a", 20)
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, m.GCOnce(ctx))
 	require.Empty(t, m.chunkIndex.chunks)
 	require.Zero(t, m.chunkIndex.cache.bytes)
@@ -332,7 +332,7 @@ func TestChunkCacheRetainsValidationWithoutPayload(t *testing.T) {
 			require.Equal(t, first.bytes, second.bytes)
 			require.Same(t, verified, leaf.verified)
 			require.Equal(t, int64(2), reads.Load(), "verification reuse must add no object reads")
-			m.chunkIndex.remove(leaf.GetGeneration())
+			m.chunkIndex.removePrefix(1)
 			require.Nil(t, leaf.verified)
 			require.Nil(t, leaf.payload)
 		})

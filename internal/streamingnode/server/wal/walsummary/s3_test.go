@@ -66,7 +66,7 @@ func TestS3SummaryPaginationAndRecovery(t *testing.T) {
 	require.NoError(t, successor.Restore(ctx))
 	require.Equal(t, uint64(100), successor.LastAcked())
 	require.NoError(t, drainSummary(ctx, successor))
-	successor.cfg.RetentionMaxBytes = 1
+	successor.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, successor))
 	require.Empty(t, successor.Manifest().Chunks)
 	require.NoError(t, successor.cfg.Store.RemoveAllObjects(ctx))

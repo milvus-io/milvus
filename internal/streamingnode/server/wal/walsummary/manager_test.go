@@ -71,7 +71,7 @@ func newTestManager(t *testing.T, store *Store, retentionMaxBytes uint64) *Manag
 		PChannel:          store.PChannel(),
 		Term:              store.Term(),
 		Store:             store,
-		RetentionMaxBytes: retentionMaxBytes,
+		MaxRetentionBytes: retentionMaxBytes,
 	})
 }
 
@@ -273,15 +273,14 @@ func TestManagerGCReleasesOldestFirstUnderBudget(t *testing.T) {
 	require.Len(t, manager.Manifest().GetChunks(), 3)
 
 	// Under the budget nothing is released, however old the chunks are.
-	manager.cfg.RetentionMaxBytes = 1 << 30
+	manager.cfg.MaxRetentionBytes = 1 << 30
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 3)
 
-	// A budget that only two of the three chunks fit under releases exactly
-	// the oldest one: release stops the moment the retained set is under it.
+	// A floor equal to the newest two chunks releases exactly the oldest one.
 	chunks := manager.Manifest().GetChunks()
 	twoChunks := chunks[1].GetObjectSize() + chunks[2].GetObjectSize()
-	manager.cfg.RetentionMaxBytes = twoChunks
+	manager.cfg.MaxRetentionBytes = twoChunks
 	require.NoError(t, gcSummary(ctx, manager))
 	remaining := manager.Manifest().GetChunks()
 	require.Len(t, remaining, 2)
@@ -291,16 +290,14 @@ func TestManagerGCReleasesOldestFirstUnderBudget(t *testing.T) {
 	assert.Error(t, err, "chunk object must be deleted after release")
 	assert.NotNil(t, manager.Manifest().GetCoverage())
 
-	// A budget below one object releases everything: the bound is soft, and
-	// release frees whole objects.
-	manager.cfg.RetentionMaxBytes = 1
+	// A zero capacity floor permits retiring the remaining eligible objects.
+	manager.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Empty(t, manager.Manifest().GetChunks())
 }
 
-// TestManagerGCDisabledWithoutBudget covers the off switch: a zero budget
-// disables release entirely rather than releasing everything.
-func TestManagerGCDisabledWithoutBudget(t *testing.T) {
+// Whole-chunk retention must never undershoot a positive capacity floor.
+func TestManagerGCKeepsCapacityBoundary(t *testing.T) {
 	manager, _ := newTestManagerWithStore(t)
 	ctx := context.Background()
 
@@ -308,7 +305,7 @@ func TestManagerGCDisabledWithoutBudget(t *testing.T) {
 	flushObserved(t, manager, "v1", 100, &unused)
 	require.Len(t, manager.Manifest().GetChunks(), 1)
 
-	manager.cfg.RetentionMaxBytes = 0
+	manager.cfg.MaxRetentionBytes = 1
 	require.NoError(t, gcSummary(ctx, manager))
 	assert.Len(t, manager.Manifest().GetChunks(), 1)
 }
@@ -475,7 +472,7 @@ func TestPersistSurfacesStoreCorruption(t *testing.T) {
 }
 
 // Garbage is rediscovered even after a crash loses all in-memory deletion work.
-func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
+func TestOrphanGCOnceRediscoversReleasedObjects(t *testing.T) {
 	ctx := context.Background()
 	manager, store := newTestManagerWithStore(t)
 	for gen := uint64(0); gen < 3; gen++ {
@@ -486,7 +483,8 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, StartTimeTick: 1, EndTimeTick: 300},
 	}))
 	require.NoError(t, manager.Restore(ctx))
-	require.NoError(t, gcSummary(ctx, manager))
+	manager.OrphanGCOnce()
+	require.NoError(t, drainSummary(ctx, manager))
 	for gen := uint64(0); gen < 3; gen++ {
 		exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(gen))
 		require.NoError(t, err)
@@ -502,7 +500,7 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 func TestConcurrentFlushAndGCRelease(t *testing.T) {
 	ctx := context.Background()
 	manager, _ := newTestManagerWithStore(t)
-	manager.cfg.RetentionMaxBytes = 1 // every chunk is over the budget
+	manager.cfg.MaxRetentionBytes = 0 // every chunk is over the budget
 	require.NoError(t, manager.Restore(ctx))
 
 	stop := make(chan struct{})
@@ -548,39 +546,20 @@ func newTestDropCollectionMessage(t *testing.T, vchannel string, timetick uint64
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
 }
 
-// Retention has to bound the chunk COUNT as well as the bytes: a trickle of
-// keyed writes seals a small chunk per persist cycle, so the byte budget can
-// stay orders of magnitude away from its bound while the manifest grows without
-// limit -- and every publish rewrites the whole manifest while recovery reads
-// one object per chunk.
-func TestManagerGCReleasesOverChunkCount(t *testing.T) {
+func TestManagerGCKeepsWholeCapacityBoundary(t *testing.T) {
 	manager, _ := newTestManagerWithStore(t)
-	ctx := context.Background()
-	require.NoError(t, manager.Restore(ctx))
-
+	ctx := t.Context()
 	var unused bool
 	for i := 0; i < 5; i++ {
 		flushObserved(t, manager, "v1", uint64(100+i*100), &unused)
 	}
-	require.Len(t, manager.Manifest().GetChunks(), 5)
-
-	// A byte budget nothing approaches: bytes alone would never release.
-	manager.cfg.RetentionMaxBytes = 1 << 30
+	chunks := manager.Manifest().Chunks
+	manager.cfg.MaxRetentionBytes = chunks[3].ObjectSize + chunks[4].ObjectSize + 1
 	require.NoError(t, gcSummary(ctx, manager))
-	require.Len(t, manager.Manifest().GetChunks(), 5, "the byte bound alone releases nothing here")
-
-	// The count bound does, oldest first.
-	manager.cfg.MaxRetainedChunks = 2
+	require.Len(t, manager.Manifest().Chunks, 3, "keep the whole chunk crossing the capacity floor")
+	manager.cfg.MaxRetentionBytes = chunks[3].ObjectSize + chunks[4].ObjectSize
 	require.NoError(t, gcSummary(ctx, manager))
-	chunks := manager.Manifest().GetChunks()
-	require.Len(t, chunks, 2)
-	assert.Equal(t, uint64(3), chunks[0].GetGeneration(), "release is oldest-first")
-
-	// Both bounds zero disables release entirely.
-	manager.cfg.RetentionMaxBytes = 0
-	manager.cfg.MaxRetainedChunks = 0
-	require.NoError(t, gcSummary(ctx, manager))
-	assert.Len(t, manager.Manifest().GetChunks(), 2)
+	require.Len(t, manager.Manifest().Chunks, 2, "exactly reaching the floor is allowed")
 }
 
 // DDL must not turn a delayed retry into another write, regardless of where
@@ -1151,8 +1130,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 		PChannel:          pchannel,
 		Term:              2,
 		Store:             store2,
-		RetentionMaxBytes: 1 << 30,
-		MaxRetainedChunks: 1,
+		MaxRetentionBytes: 1 << 30,
 	})
 	require.NoError(t, manager2.Restore(ctx))
 	require.Len(t, manager2.Manifest().GetChunks(), 1)
@@ -1167,12 +1145,15 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 
-	// Term 2 writes its own chunk. With a one-chunk budget the next gc retires
+	// Term 2 writes its own chunk. A capacity floor of that chunk lets GC retire
 	// term 1's last chunk, which is what makes term 1 unreachable.
 	flushObserved(t, manager2, "v1", 300, &unused)
 	require.Len(t, manager2.Manifest().GetChunks(), 2)
+	manager2.cfg.MaxRetentionBytes = manager2.Manifest().Chunks[1].ObjectSize
 	require.NoError(t, gcSummary(ctx, manager2))
 
+	manager2.OrphanGCOnce()
+	require.NoError(t, drainSummary(ctx, manager2))
 	chunks := manager2.Manifest().GetChunks()
 	require.Len(t, chunks, 1)
 	assert.Equal(t, int64(2), chunks[0].GetTerm())

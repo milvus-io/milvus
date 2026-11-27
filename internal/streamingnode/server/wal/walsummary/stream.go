@@ -79,6 +79,9 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 		}
 		// Accept Summary's retained lower bound, including an entirely retired
 		// bounded interval. Never advance beyond the requested end.
+		// TODO(#55573): Retention must prevent GC of Deletes still required by
+		// query bases, including reload and recovery. Fast-forward and SyncUp
+		// cannot repair premature deletion or prove the skipped history was empty.
 		after = max(batch.CoveredThrough, min(batch.FastForwardTimeTick, through))
 		if after >= through || after >= batch.ReadableThrough {
 			if opt.EndTimeTick == 0 || after >= through {

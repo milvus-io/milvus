@@ -12,7 +12,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -39,19 +41,6 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 			}
 			return
 		}
-		rs.gcSummaryStore(rs.backgroundTaskNotifier.Context())
-	}
-}
-
-// gcSummaryStore runs the WALSummary retention sweep. The sweep is cheap when
-// there is nothing to release; a failure here (e.g. object storage outage)
-// must not stall checkpoint persistence, so errors only log.
-func (rs *recoveryStorageImpl) gcSummaryStore(ctx context.Context) {
-	if rs.summaryManager == nil {
-		return
-	}
-	if err := rs.summaryManager.GCOnce(ctx); err != nil {
-		rs.Logger().Warn(context.TODO(), "failed to gc summary store", mlog.Err(err))
 	}
 }
 
@@ -88,10 +77,8 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	if err := rs.saveRecoverySnapshot(ctx, recoverySnapshot); err != nil {
 		return err
 	}
-	// The vchannel metas are durable now: advance the summary GC positions to
-	// their materialization frontiers. Only persisted frontiers may release
-	// summary records — a crash-recovery must observe them (see
-	// VChannelRecoveryModule.markL0Materialized).
+	// Report durable materialization for backlog accounting. Summary retirement
+	// is governed independently by retained DataView frontiers.
 	if rs.summaryManager != nil {
 		for vchannel, meta := range recoverySnapshot.VChannels {
 			if frontier := meta.GetTransformMaterializedTimeTick(); frontier > 0 {
@@ -305,4 +292,28 @@ func newBackoff() *backoff.ExponentialBackOff {
 	backoff.MaxElapsedTime = 0
 	backoff.Reset()
 	return backoff
+}
+
+// fetchDataViewRetention bounds each GC round's Coord call. An unavailable
+// frontier postpones retirement and never releases a DataView pin.
+func (rs *recoveryStorageImpl) fetchDataViewRetention(ctx context.Context) (map[string]uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := coord.GetDataViewRetention(ctx, &datapb.GetDataViewRetentionRequest{Pchannel: rs.channel.Name})
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+	if len(resp.CollectionIds) != len(resp.VchannelIndices) || len(resp.CollectionIds) != len(resp.TransformStartAfterTimeticks) {
+		return nil, merr.WrapErrServiceInternalMsg("misaligned DataView retention arrays: collections=%d, indices=%d, timeticks=%d", len(resp.CollectionIds), len(resp.VchannelIndices), len(resp.TransformStartAfterTimeticks))
+	}
+	frontiers := make(map[string]uint64, len(resp.CollectionIds))
+	for i, collectionID := range resp.CollectionIds {
+		channel := funcutil.GetVirtualChannel(rs.channel.Name, collectionID, int(resp.VchannelIndices[i]))
+		frontiers[channel] = resp.TransformStartAfterTimeticks[i]
+	}
+	return frontiers, nil
 }

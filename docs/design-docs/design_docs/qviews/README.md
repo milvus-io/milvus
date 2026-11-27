@@ -485,8 +485,9 @@ Target changes:
 The current [TransformLog adaptor](../wal/transform_log.md) wraps WALSummary
 reads. Local SN bootstrap uses bounded replay; subsequent SN events arrive via
 the VChannel live path. The local unbounded mode has scoped notifications, but
-remote QN subscriptions use the same adaptor. The advancing retention frontier
-remains deferred; see [Transform subscriptions](pure_transform_subscription.md).
+remote QN subscriptions use the same adaptor. Summary GC pulls the oldest
+retained DataView frontier from Coord on each round; see
+[Transform subscriptions](pure_transform_subscription.md).
 
 The following describes the target pure-delete consumption options; the current
 QN path uses ordered TransformLog replay and per-segment application:

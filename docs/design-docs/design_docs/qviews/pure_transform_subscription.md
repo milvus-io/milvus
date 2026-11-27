@@ -150,9 +150,15 @@ materialization prerequisites, asynchronous publication fences, and recovery.
 
 Storage GC must protect the suffix required by the latest reloadable View and
 all still-protected older Views, together with SN local recovery requirements.
-L0 materialization alone cannot release this history. A conservative initial
-implementation may retain history from the VChannel creation point; advancing
-retention requires recovered View references and coordinated publication.
+L0 materialization alone cannot release this history. RecoveryStorage restores
+per-VChannel `dataViewRetention` from collection creation TimeTicks. Each Summary
+GC round pulls per-VChannel F from Coord's oldest retained DataViews, including
+versions whose catalog deletion is still pending. An omitted channel keeps its
+local retention; a failed RPC postpones retirement. GC checks each chunk's
+Transform sections against their own channel frontiers, and removes only a
+continuous prefix of whole PChannel chunks. Coord must not pre-aggregate those
+frontiers into one PChannel minimum. The active L0 materializer consumes retained
+WAL handles independently, so durable M is not an additional Summary gate.
 
 ## Key packages
 

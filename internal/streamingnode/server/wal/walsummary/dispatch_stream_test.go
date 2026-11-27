@@ -417,8 +417,8 @@ func TestDispatchStreamKeepsExistingFastForwardPolicy(t *testing.T) {
 	m, _ := newTestManagerWithStore(t)
 	m.ObserveMessage(t.Context(), newTestDeleteMessage(t, "v", 10, 1, 10))
 	require.NoError(t, persistSummary(t.Context(), m))
-	m.AdvanceGCTimeTick("v", 10)
-	m.cfg.RetentionMaxBytes = 1
+	m.SetDataViewRetention("v", 10)
+	m.cfg.MaxRetentionBytes = 0
 	require.NoError(t, gcSummary(t.Context(), m))
 	m.ObserveMessage(t.Context(), newTestDeleteMessage(t, "v", 20, 1, 20))
 	s := NewDispatchStream(m)

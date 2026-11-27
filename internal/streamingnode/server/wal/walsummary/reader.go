@@ -79,8 +79,7 @@ func (m *Manager) notifyReadersLocked() {
 // Local physical GC is pinned only for this call. Chunk buffers use the shared
 // byte-budgeted cache; decoding adds one section in addition to the batch.
 func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, through uint64, limits ReadLimits) (TransformBatch, error) {
-	m.readMu.RLock()
-	defer m.readMu.RUnlock()
+	defer m.pinRead()()
 	m.mu.Lock()
 	if m.readableChanged == nil {
 		m.readableChanged = make(chan struct{})

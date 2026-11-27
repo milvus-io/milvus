@@ -376,9 +376,8 @@ func (m *PChannelRecoveryManager) removeModule(module *VChannelRecoveryModule) {
 		delete(m.cleanupModules, module.vchannel)
 	}
 	m.dirtyMu.Unlock()
-	// Report the GC boundary to the summary: the dropped vchannel's cleanup
-	// snapshot is durable, so its records — staged or already chunked — may
-	// be released by retention GC.
+	// VChannelMeta deletion is durable and Summary retirement already completed.
+	// Remove the lifetime's retention entry and query barriers from Summary.
 	if m.config.SummaryManager != nil {
 		m.config.SummaryManager.AdvanceGCTimeTick(module.vchannel, walsummary.DroppedVChannelTimeTick)
 	}

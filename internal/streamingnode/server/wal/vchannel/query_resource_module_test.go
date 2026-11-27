@@ -1,7 +1,6 @@
 package vchannel
 
 import (
-	"math"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -12,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -42,79 +40,7 @@ func TestDeleteReplayStartIncludesLegacySegments(t *testing.T) {
 	}
 }
 
-func TestQueryRetentionSurvivesLocalSegmentRelease(t *testing.T) {
-	for _, origin := range []uint64{0, 100} {
-		var retained uint64
-		patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, channel string, start uint64) {
-			require.Equal(t, "v1", channel)
-			retained = start
-		}).Build()
-		module := &VChannelRecoveryModule{
-			vchannel:       "v1",
-			vchannelView:   NewVChannelViewFromMeta(&streamingpb.VChannelMeta{Vchannel: "v1", CreateCollectionTimeTick: origin}),
-			summaryManager: &walsummary.Manager{},
-		}
-		module.refreshQueryRetentionLocked()
-		patch.UnPatch()
-		require.Equal(t, origin, retained, "the shared View suffix remains pinned with no local Segment; legacy origin stays conservative")
-	}
-}
-
-func TestQueryRetentionBeforeCreateCollection(t *testing.T) {
-	var retained []uint64
-	patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, channel string, start uint64) {
-		require.Equal(t, "v1", channel)
-		retained = append(retained, start)
-	}).Build()
-	defer patch.UnPatch()
-	module, err := NewModule(ModuleConfig{
-		PChannel: "p1", VChannel: "v1", SummaryManager: &walsummary.Manager{},
-	})
-	require.NoError(t, err)
-	require.Nil(t, module.vchannelView)
-	require.Equal(t, []uint64{0}, retained)
-	schema, err := proto.Marshal(&schemapb.CollectionSchema{Name: "collection"})
-	require.NoError(t, err)
-	raw := message.NewCreateCollectionMessageBuilderV1().WithVChannel("v1").
-		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
-		WithBody(&msgpb.CreateCollectionRequest{Schema: schema}).MustBuildMutable().
-		WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(99)).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(100))
-	module.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(raw))
-	require.Equal(t, []uint64{0, 100}, retained)
-}
-
-func TestQueryRetentionIncludesLegacySegmentCoverage(t *testing.T) {
-	var retained uint64
-	patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, _ string, start uint64) {
-		retained = start
-	}).Build()
-	defer patch.UnPatch()
-	module := &VChannelRecoveryModule{
-		vchannel: "v1", summaryManager: &walsummary.Manager{},
-		vchannelView: NewVChannelViewFromMeta(&streamingpb.VChannelMeta{CreateCollectionTimeTick: 50}),
-		segments: map[int64]*segment.SegmentView{
-			1: segment.NewSegmentViewFromMetaWithConfig(&streamingpb.SegmentAssignmentMeta{
-				SegmentId: 1, Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 100},
-			}, nil, segment.ViewConfig{}),
-		},
-	}
-	module.refreshQueryRetentionLocked()
-	require.Equal(t, uint64(50), retained, "local Segments cannot release history required for other nodes and reload")
-	module.segments[2] = segment.NewSegmentViewFromMetaWithConfig(&streamingpb.SegmentAssignmentMeta{SegmentId: 2}, nil, segment.ViewConfig{})
-	module.refreshQueryRetentionLocked()
-	require.Zero(t, retained, "unknown legacy coverage must not be skipped")
-	delete(module.segments, 2)
-	module.refreshQueryRetentionLocked()
-	require.Equal(t, uint64(50), retained)
-}
-
-func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.T) {
-	var retained uint64
-	patch := mockey.Mock((*walsummary.Manager).SetQueryRetention).To(func(_ *walsummary.Manager, _ string, start uint64) {
-		retained = start
-	}).Build()
-	defer patch.UnPatch()
+func TestDroppedCollectionWaitsForQueryAndSummaryCleanup(t *testing.T) {
 	module, err := NewModule(ModuleConfig{
 		PChannel: "p1", VChannel: "v1", SummaryManager: &walsummary.Manager{},
 		VChannelMeta: &streamingpb.VChannelMeta{
@@ -123,6 +49,13 @@ func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.
 		},
 	})
 	require.NoError(t, err)
+	var released bool
+	retention := mockey.Mock((*walsummary.Manager).SetDataViewRetention).To(func(_ *walsummary.Manager, vc string, tt uint64) {
+		require.Equal(t, "v1", vc)
+		require.Equal(t, uint64(walsummary.DroppedVChannelTimeTick), tt)
+		released = true
+	}).Build()
+	defer retention.UnPatch()
 	queryReferenced := true
 	references := mockey.Mock((*queryresource.Manager).OldestDataVersion).To(func(*queryresource.Manager) (qviews.DataVersion, bool) {
 		return qviews.DataVersion{}, queryReferenced
@@ -130,16 +63,56 @@ func TestDroppedCollectionReleasesQueryRetentionBeforeSummaryCleanup(t *testing.
 	defer references.UnPatch()
 	summaryRetired := false
 	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool {
-		require.Equal(t, uint64(math.MaxUint64), retained, "release the pin before waiting for Summary GC")
 		return summaryRetired
 	}}
 	require.Empty(t, module.ConsumeCleanupSnapshots(cleanup))
-	require.Equal(t, uint64(1), retained, "existing QueryViews still own the history")
+	require.False(t, released, "the old query still needs Summary history")
 	queryReferenced = false
 	require.Empty(t, module.ConsumeCleanupSnapshots(cleanup), "retain the tombstone until Summary GC finishes")
-	require.Equal(t, uint64(math.MaxUint64), retained)
+	require.True(t, released, "release the pin before waiting for Summary retirement")
 	summaryRetired = true
 	snapshots := module.ConsumeCleanupSnapshots(cleanup)
 	require.Len(t, snapshots, 1)
 	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+}
+
+func TestDataViewRetentionRestoresCollectionOrigins(t *testing.T) {
+	for _, origin := range []uint64{0, 50} {
+		var got uint64
+		patch := mockey.Mock((*walsummary.Manager).SetDataViewRetention).To(func(_ *walsummary.Manager, vc string, tt uint64) {
+			require.Equal(t, "v1", vc)
+			got = tt
+		}).Build()
+		_, err := NewModule(ModuleConfig{PChannel: "p1", VChannel: "v1", SummaryManager: &walsummary.Manager{}, VChannelMeta: &streamingpb.VChannelMeta{Vchannel: "v1", CreateCollectionTimeTick: origin}})
+		patch.UnPatch()
+		require.NoError(t, err)
+		require.Equal(t, origin, got)
+	}
+}
+
+func TestDataViewRetentionCreateReplayDoesNotReset(t *testing.T) {
+	var origins []uint64
+	patch := mockey.Mock((*walsummary.Manager).SetDataViewRetention).To(func(_ *walsummary.Manager, vc string, tt uint64) {
+		require.Equal(t, "v1", vc)
+		origins = append(origins, tt)
+	}).Build()
+	defer patch.UnPatch()
+	module, err := NewModule(ModuleConfig{PChannel: "p1", VChannel: "v1", SummaryManager: &walsummary.Manager{}})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{0}, origins)
+	schema, err := proto.Marshal(&schemapb.CollectionSchema{Name: "collection"})
+	require.NoError(t, err)
+	raw := message.NewCreateCollectionMessageBuilderV1().WithVChannel("v1").
+		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.CreateCollectionRequest{Schema: schema}).MustBuildMutable().
+		WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(99)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+	msg := message.MustAsImmutableCreateCollectionMessageV1(raw)
+	module.handleCreateCollectionMessage(msg)
+	require.Equal(t, []uint64{0, 100}, origins)
+	module.handleCreateCollectionMessage(msg)
+	require.Equal(t, []uint64{0, 100}, origins, "replayed Create must not reset the refreshed retention")
+	module.vchannelView = NewVChannelViewFromMeta(&streamingpb.VChannelMeta{Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, CheckpointTimeTick: 90})
+	module.handleCreateCollectionMessage(msg)
+	require.Equal(t, []uint64{0, 100, 100}, origins, "replacement lifetime gets its own origin")
 }

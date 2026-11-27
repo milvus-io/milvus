@@ -157,7 +157,7 @@ func (m *Manager) HasPendingWork() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.pending) > 0 || len(m.pendingSealed) > 0 || m.manifestVersion != m.publishedVersion ||
-		(m.manifestTask != nil && !m.manifestTask.Done()) || (m.gcTask != nil && !m.gcTask.Done())
+		(m.manifestTask != nil && !m.manifestTask.Done()) || (m.gcTask != nil && !m.gcTask.Done()) || (m.orphanGCTask != nil && !m.orphanGCTask.Done())
 }
 
 func (m *Manager) taskError(ctx context.Context, err error) error {
@@ -267,11 +267,6 @@ func (t *manifestWriteTask) Execute(ctx context.Context) (err error) {
 		m.manifestPublished = true
 		m.refreshLastAckedLocked()
 		m.mu.Unlock()
-	}
-	// A complete current-term manifest releases older manifests independently
-	// of the lifetime of the old chunks it still references.
-	if err := m.cfg.Store.DeleteManifestsBelowTerm(ctx, m.cfg.Term); err != nil {
-		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
