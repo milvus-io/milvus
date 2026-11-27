@@ -1,0 +1,18 @@
+# Shared overrides for CI runs started with MILVUS_ENABLE_TEST_CONFIG=true.
+# Add each override with the test that exercises it. Remove it when the setting
+# becomes the default on this branch.
+
+log:
+  level: debug
+
+dataNode:
+  storage:
+    format: vortex
+
+dataCoord:
+  targetVecIndexVersion: 11
+  forceRebuildScalarSegmentIndex: true
+  targetScalarIndexVersion: 5
+  compaction:
+    bumpSchemaVersion:
+      enabled: true

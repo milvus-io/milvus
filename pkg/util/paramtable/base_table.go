@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,10 +67,15 @@ func globalConfigPrefixs() []string {
 	return []string{"metastore", "localStorage", "etcd", "tikv", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits", "trace", "queryView"}
 }
 
-// support read "milvus.yaml", "_test.yaml", "default.yaml", "user.yaml" as this order.
-// order: milvus.yaml < _test.yaml < default.yaml < user.yaml, do not change the order below.
-// Use _test.yaml only for test related purpose.
-var defaultYaml = []string{"milvus.yaml", "_test.yaml", "default.yaml", "user.yaml"}
+// Later files override earlier ones. Deployment and user settings take precedence
+// over the optional test configuration shipped in the image.
+func defaultConfigFiles(useTestConfig bool) []string {
+	files := []string{"milvus.yaml"}
+	if useTestConfig {
+		files = append(files, config.TestConfigFile)
+	}
+	return append(files, "default.yaml", "user.yaml")
+}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
@@ -89,6 +95,7 @@ type baseTableConfig struct {
 	refreshInterval time.Duration
 	skipRemote      bool
 	skipEnv         bool
+	useTestConfig   bool
 	yamlFiles       []string
 }
 
@@ -118,16 +125,30 @@ func SkipEnv(skip bool) Option {
 	}
 }
 
-// NewBaseTableFromYamlOnly only used in migration tool.
-// Maybe we shouldn't limit the configDir internally.
+// NewBaseTableFromYamlOnly loads a single file from the configuration directory.
 func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 	return NewBaseTable(Files([]string{yaml}), SkipRemote(true), SkipEnv(true))
 }
 
+// LoadRequiredYAML loads one local configuration file and returns its
+// read or parse error to callers that must not fall back to built-in defaults.
+func LoadRequiredYAML(name string) (*BaseTable, error) {
+	dir := initConfPath()
+	manager := config.NewManager()
+	source := config.NewFileSource(&config.FileInfo{Files: []string{path.Join(dir, name)}})
+	if err := manager.AddSource(source); err != nil {
+		manager.Close()
+		return nil, err
+	}
+	return &BaseTable{mgr: manager, config: &baseTableConfig{configDir: dir}}, nil
+}
+
 func NewBaseTable(opts ...Option) *BaseTable {
+	useTestConfig := os.Getenv("MILVUS_ENABLE_TEST_CONFIG") == "true"
 	defaultConfig := &baseTableConfig{
 		configDir:       initConfPath(),
-		yamlFiles:       defaultYaml,
+		yamlFiles:       defaultConfigFiles(useTestConfig),
+		useTestConfig:   useTestConfig,
 		refreshInterval: defaultRefreshInterval,
 		skipRemote:      false,
 		skipEnv:         false,
@@ -199,7 +220,11 @@ func (bt *BaseTable) initConfigsFromLocal() {
 	if err != nil {
 		mlog.Warn(context.TODO(), "init baseTable with file failed", mlog.Strings("configFile", bt.config.yamlFiles),
 			mlog.String("error", config.RedactedValue))
-		return
+		if bt.config.useTestConfig && slices.Contains(files, path.Join(bt.config.configDir, config.TestConfigFile)) {
+			// The files publish as one source. A failure in any layer drops the test overrides.
+			// Parser errors can include configuration values, so keep the startup diagnostic safe.
+			panic("failed to load local configuration including _test.yaml")
+		}
 	}
 }
 

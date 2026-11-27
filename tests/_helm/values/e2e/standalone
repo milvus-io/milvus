@@ -23,6 +23,9 @@ woodpecker:
   enabled: true
 standalone:
   messageQueue: woodpecker
+  extraEnv:
+    - name: MILVUS_ENABLE_TEST_CONFIG
+      value: "true"
   disk:
     enabled: true
   resources:
@@ -47,16 +50,7 @@ extraConfigFiles:
       storage:
         # enable storage v3
         useLoonFFI: true
-    dataNode:
-      storage:
-        format: vortex
     dataCoord:
-      targetVecIndexVersion: 11
-      forceRebuildScalarSegmentIndex: true
-      targetScalarIndexVersion: 5
-      compaction:
-        bumpSchemaVersion:
-          enabled: true
       gc:
         interval: 1800
         missingTolerance: 1800

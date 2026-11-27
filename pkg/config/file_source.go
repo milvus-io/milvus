@@ -17,17 +17,28 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
+	yamlv3 "gopkg.in/yaml.v3"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// TestConfigFile is the shared CI overlay. Duplicate keys in this file would
+// silently discard test settings, so decode it strictly on every load.
+const TestConfigFile = "_test.yaml"
 
 type FileSource struct {
 	sync.RWMutex
@@ -142,13 +153,9 @@ func (fs *FileSource) loadFromFile() error {
 			return errors.Wrapf(err, "Read config failed: %s", configFile)
 		}
 
-		var config map[string]interface{}
-		err = yaml.Unmarshal(data, &config)
-		if err != nil {
-			return errors.Wrapf(err, "unmarshal yaml file %s failed", configFile)
+		if err := mergeYAML(configFile, data, newConfig); err != nil {
+			return merr.Wrapf(err, "load YAML file %s", configFile)
 		}
-
-		flattenAndMergeMap("", config, newConfig)
 	}
 	// not allow all config files missing, return error for this case
 	if notExistsNum == len(configFiles) {
@@ -156,6 +163,142 @@ func (fs *FileSource) loadFromFile() error {
 	}
 
 	return fs.update(newConfig)
+}
+
+func mergeYAML(file string, data []byte, result map[string]string) error {
+	var values map[string]any
+	if filepath.Base(file) != TestConfigFile {
+		if err := yaml.Unmarshal(data, &values); err != nil {
+			return err
+		}
+		return flattenAndMergeMap("", values, result, nil)
+	}
+
+	values, err := DecodeTestConfig(data)
+	if err != nil {
+		return err
+	}
+	return flattenAndMergeMap("", values, result, typeutil.NewSet[string]())
+}
+
+// DecodeTestConfig reads the shared file, preserving its YAML types for the
+// repository test that checks the feature overrides against Milvus parameters.
+func DecodeTestConfig(data []byte) (map[string]any, error) {
+	decoder := yamlv3.NewDecoder(bytes.NewReader(data))
+	var doc, trailing yamlv3.Node
+	if err := decoder.Decode(&doc); err != nil {
+		if err == io.EOF { // Empty or comment-only test file.
+			return nil, nil
+		}
+		return nil, err
+	}
+	switch err := decoder.Decode(&trailing); err {
+	case nil:
+		return nil, merr.WrapErrParameterInvalidMsg("expected a single YAML document")
+	case io.EOF:
+	default:
+		return nil, err
+	}
+	root := doc.Content[0]
+	// A document marker with no content produces an implicit empty null scalar.
+	if root.Kind == yamlv3.ScalarNode && root.Tag == "!!null" && root.Value == "" && root.Style == 0 && root.Anchor == "" {
+		return nil, nil
+	}
+	if root.Kind != yamlv3.MappingNode {
+		return nil, merr.WrapErrParameterInvalidMsg("expected a configuration mapping at line %d", root.Line)
+	}
+	if err := validateTestNode(root, true); err != nil {
+		return nil, err
+	}
+
+	// Use the deployment decoder for the values, including merge precedence.
+	// The syntax tree above is only for checks that decoding into a map loses.
+	var values map[string]any
+	if err := yaml.Unmarshal(data, &values); err != nil {
+		return nil, err
+	}
+	for key, value := range values {
+		converted, err := convertToJSONCompatible(value, true)
+		if err != nil {
+			return nil, err
+		}
+		values[key] = converted
+	}
+	return values, nil
+}
+
+func validateTestNode(node *yamlv3.Node, topLevel bool) error {
+	if node.Style&yamlv3.TaggedStyle != 0 && strings.HasPrefix(node.Tag, "!!") {
+		kind := yamlv3.ScalarNode
+		switch node.Tag {
+		case "!!map", "!!set":
+			kind = yamlv3.MappingNode
+		case "!!seq", "!!omap", "!!pairs":
+			kind = yamlv3.SequenceNode
+		}
+		if node.Kind != kind {
+			return merr.WrapErrParameterInvalidMsg("YAML tag %s does not match the node kind at line %d", node.Tag, node.Line)
+		}
+	}
+
+	var keys typeutil.Set[string]
+	if node.Kind == yamlv3.MappingNode {
+		keys = typeutil.NewSet[string]()
+	}
+	for i, child := range node.Content {
+		// Walk definitions once. The deployment decoder validates merge sources
+		// and resolves aliases when it reads the original document.
+		if err := validateTestNode(child, false); err != nil {
+			return err
+		}
+		if keys == nil || i%2 != 0 {
+			continue
+		}
+		key, err := testConfigKey(child, topLevel)
+		if err != nil {
+			return err
+		}
+		if keys.Contain(key) {
+			return merr.WrapErrParameterInvalidMsg("duplicate configuration key at line %d", child.Line)
+		}
+		keys.Insert(key)
+	}
+	return nil
+}
+
+func testConfigKey(node *yamlv3.Node, topLevel bool) (string, error) {
+	key := node
+	if key.Kind == yamlv3.AliasNode {
+		key = key.Alias
+	}
+	if key.Kind != yamlv3.ScalarNode {
+		return "", merr.WrapErrParameterInvalidMsg("expected a scalar configuration key at line %d", node.Line)
+	}
+	if key.Tag == "!!str" && (topLevel || key.Style != 0) {
+		return key.Value, nil
+	}
+
+	// A top-level map has string keys. Nested maps resolve scalar types before
+	// flattening. Use that decoder to check the spelling of keys such as on and 01.
+	encoded, err := yamlv3.Marshal(key)
+	if err != nil {
+		return "", err
+	}
+	var value any
+	if err := yaml.Unmarshal(encoded, &value); err != nil {
+		return "", err
+	}
+	name := key.Value
+	switch decoded := value.(type) {
+	case string:
+		name = decoded // Includes decoded binary strings.
+	case nil:
+		name = ""
+	}
+	if !topLevel && (value == nil || cast.ToString(value) != name) {
+		return "", merr.WrapErrParameterInvalidMsg("quote the configuration key at line %d to preserve its spelling", node.Line)
+	}
+	return name, nil
 }
 
 // update souce config

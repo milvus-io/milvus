@@ -24,6 +24,7 @@ This document will help to set up your Milvus development environment and to run
     - [Unit Tests](#unit-tests)
     - [Code coverage](#code-coverage)
     - [E2E Tests](#e2e-tests)
+      - [Run with shared test configuration](#run-with-shared-test-configuration)
     - [Test on local branch](#test-on-local-branch)
       - [With Linux and MacOS](#with-linux-and-macos)
       - [With docker](#with-docker)
@@ -385,6 +386,73 @@ To run E2E tests, use these commands:
 cd tests/python_client
 pip install -r requirements.txt
 pytest --tags=L0 -n auto
+```
+
+#### Run with shared test configuration
+
+To exercise a feature before it becomes the default, add its configuration override to
+[`configs/_test.yaml`](configs/_test.yaml) in the same PR as the test that exercises it.
+Add a value check for each new override in `checkRepositoryOverrides` in
+[`base_table_test.go`](pkg/util/paramtable/base_table_test.go). CI fails if a setting has no check.
+Remove the override once the feature is enabled by default on that branch.
+
+Set `MILVUS_ENABLE_TEST_CONFIG=true` on the Milvus processes at startup to load the
+file shipped in the image. Leave it unset to test release defaults with the same image.
+Milvus loads `milvus.yaml`, the enabled `_test.yaml`, `default.yaml` and `user.yaml`
+in that order. To override a shared setting, use the same parameter name in a later file.
+Use a single YAML mapping and define each key once. An empty file or document applies
+no overrides. An explicit `null` is invalid. Quote nested keys such as `"on"` and
+`"01"` in both the shared profile and deployment files to preserve their spelling.
+When using a YAML merge (`<<`), place it before any explicit keys that should override
+its values. Use the same key type on both sides of the merge, for example `"1"` in
+both mappings. The test profile uses the same merge order as deployment files.
+
+If the enabled test file exists and the local configuration fails to load, startup
+fails. If the file is absent, startup continues with the other files. Deployments
+that previously loaded a local `_test.yaml` automatically must set the variable when upgrading.
+
+For Helm, include the following in the CI values passed with `-f`. Set `extraEnv` on
+each enabled Milvus component. This example covers standalone and a cluster with
+MixCoord. If a component already uses `extraEnv`, append the variable to its list.
+Set the chart's log level in the CI values as well because Helm writes it to
+`default.yaml`, which takes precedence over `_test.yaml`. Omit these CI values
+when testing release defaults.
+
+The [standalone E2E values](tests/_helm/values/e2e/standalone) enable the shared
+profile. Jenkins overrides the image tag pinned in that file. For a manual deployment,
+set `MILVUS_IMAGE_TAG` to a build that includes the shared profile and supports the switch.
+Pass `--set-string image.all.tag="$MILVUS_IMAGE_TAG"` alongside `-f tests/_helm/values/e2e/standalone`.
+Keep the storage format and DataCoord feature overrides in `_test.yaml` so that editing
+the profile takes effect on the next CI run.
+
+```yaml
+log:
+  level: debug
+
+standalone:
+  extraEnv: &testEnv
+    - name: MILVUS_ENABLE_TEST_CONFIG
+      value: "true"
+proxy:
+  extraEnv: *testEnv
+mixCoordinator:
+  extraEnv: *testEnv
+queryNode:
+  extraEnv: *testEnv
+dataNode:
+  extraEnv: *testEnv
+streamingNode:
+  extraEnv: *testEnv
+```
+
+For Milvus Operator, set the shared environment on the Milvus custom resource.
+
+```yaml
+spec:
+  components:
+    env:
+      - name: MILVUS_ENABLE_TEST_CONFIG
+        value: "true"
 ```
 
 ### Test on local branch
