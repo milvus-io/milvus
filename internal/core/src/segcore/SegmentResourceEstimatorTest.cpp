@@ -18,6 +18,8 @@
 
 #include <cstdlib>
 #include <limits>
+#include <optional>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "segcore/memory_planner.h"
@@ -123,6 +125,84 @@ TEST_F(SegmentResourceEstimatorTest, DiffLoadsOnlyChangedBinlogProjection) {
         EstimateLoadDiffResources(request, target, diff, layout);
     EXPECT_EQ(estimate.max_memory_bytes(), 2000);
     EXPECT_EQ(estimate.final_memory_bytes(), 10000);
+}
+
+TEST_F(SegmentResourceEstimatorTest, DefaultStringsUseValueBytesNotMaxLength) {
+    for (const bool mmap : {false, true}) {
+        for (const bool nullable : {false, true}) {
+            for (const std::optional<std::string>& value :
+                 {std::optional<std::string>{},
+                  std::optional<std::string>{""},
+                  std::optional<std::string>{"abc"},
+                  std::optional<std::string>{"默认"}}) {
+                if (!nullable && !value) {
+                    continue;
+                }
+                for (const int64_t rows : {10, 1000000}) {
+                    for (const int64_t version : {1, 2, 3}) {
+                        auto estimate = [&](const std::string& max_length) {
+                            proto::cgo::BatchLoadResourceRequest request;
+                            request.set_mmap_scalar_field(mmap);
+                            auto* input = AddFieldSegment(request,
+                                                          proto::schema::Int64,
+                                                          0,
+                                                          rows,
+                                                          version);
+                            input->clear_fields();
+                            auto* pk =
+                                input->mutable_schema()->mutable_fields(0);
+                            pk->set_name("pk");
+                            pk->set_is_primary_key(true);
+                            auto* field = input->mutable_schema()->add_fields();
+                            field->set_fieldid(101);
+                            field->set_name("default_string");
+                            field->set_data_type(proto::schema::VarChar);
+                            field->set_nullable(nullable);
+                            auto* param = field->add_type_params();
+                            param->set_key("max_length");
+                            param->set_value(max_length);
+                            if (value) {
+                                field->mutable_default_value()->set_string_data(
+                                    *value);
+                            }
+                            auto schema = Schema::ParseFrom(input->schema());
+                            auto layout =
+                                std::make_shared<const SealedFieldLayout>(
+                                    schema,
+                                    LoadScope::FromLegacySchema(*schema));
+                            proto::segcore::SegmentLoadInfo info;
+                            info.set_num_of_rows(rows);
+                            SegmentLoadInfo target(info, layout);
+                            LoadDiff diff;
+                            diff.fields_to_fill_default.push_back(FieldId(101));
+                            return EstimateLoadDiffResources(
+                                request, target, diff, layout);
+                        };
+                        const auto small = estimate("16");
+                        const auto large = estimate("65535");
+                        EXPECT_EQ(small.SerializeAsString(),
+                                  large.SerializeAsString());
+                        const auto resident = mmap ? large.final_disk_bytes()
+                                                   : large.final_memory_bytes();
+                        const auto payload = rows * (value ? value->size() : 0);
+                        if (rows == 10) {
+                            // One string chunk: 11 offsets, padding, and optional bitmap.
+                            EXPECT_EQ(resident,
+                                      payload + 44 + 1 + (nullable ? 2 : 0));
+                        } else {
+                            EXPECT_GT(resident, payload + rows * 4);
+                            EXPECT_LT(resident, payload + rows * 5);
+                        }
+                        EXPECT_GT(large.max_memory_bytes(),
+                                  mmap ? 0 : resident);
+                        EXPECT_EQ(mmap ? large.final_memory_bytes()
+                                       : large.final_disk_bytes(),
+                                  0);
+                    }
+                }
+            }
+        }
+    }
 }
 
 TEST_F(SegmentResourceEstimatorTest, BatchSharesOversizedFieldTasks) {

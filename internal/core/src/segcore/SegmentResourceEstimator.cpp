@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "common/Chunk.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -38,6 +39,7 @@
 #include "index/Meta.h"
 #include "knowhere/index/index_factory.h"
 #include "segcore/memory_planner.h"
+#include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/FileWriter.h"
@@ -777,8 +779,36 @@ EstimateLoadDiffResources(const proto::cgo::BatchLoadResourceRequest& request,
         const auto width = IsSparseFloatVectorDataType(field.get_data_type())
                                ? sizeof(std::string_view)
                                : field.get_sizeof();
-        const auto bytes =
-            SaturatingMultiply(Nonnegative(target.GetNumOfRows()), width);
+        const auto rows = Nonnegative(target.GetNumOfRows());
+        auto bytes = SaturatingMultiply(rows, width);
+        if (IsStringDataType(field.get_data_type())) {
+            const uint64_t value_bytes =
+                field.has_default_value()
+                    ? field.default_value()->string_data().size()
+                    : 0;
+            const auto rows_per_cell = std::max<uint64_t>(
+                1,
+                storagev1translator::DefaultValueChunkTranslator::
+                        kTargetCellBytes /
+                    SaturatingAdd(value_bytes, 1u));
+            const auto full_cells = rows / rows_per_cell;
+            const auto tail_rows = rows % rows_per_cell;
+            const auto cells = full_cells + (tail_rows != 0);
+            // shortcut: charge each logical cell despite shared default buffers;
+            // refine when accounting for buffer ownership across cached cells.
+            bytes = SaturatingAdd(
+                SaturatingMultiply(rows, value_bytes),
+                SaturatingAdd(SaturatingMultiply(SaturatingAdd(rows, cells),
+                                                 sizeof(uint32_t)),
+                              SaturatingMultiply(cells, MMAP_STRING_PADDING)));
+            if (field.is_nullable()) {
+                bytes = SaturatingAdd(
+                    bytes,
+                    SaturatingAdd(
+                        SaturatingMultiply(full_cells, (rows_per_cell + 7) / 8),
+                        (tail_rows + 7) / 8));
+            }
+        }
         log->set_memory_size(
             std::min<uint64_t>(bytes, std::numeric_limits<int64_t>::max()));
     }
