@@ -29,34 +29,47 @@ func planQueryUsage(ctx context.Context, response *viewpb.GetQueryPlanResponse, 
 	if !search.GetCollectSearchReadUsage() && !retrieve.GetCollectQueryReadUsage() {
 		return nil, nil
 	}
-	var growing []snview.GrowingSegmentHandle
-	for _, worker := range plan.GetWorkNodes() {
-		if worker.GetStreamingNode() != nil {
-			partitions, err := runtime.ResolvePartitions(view.GetMeta().GetLoadInfoVersion(), nil)
-			if err != nil {
-				return nil, err
-			}
-			growing, err = runtime.AcquireGrowingSegmentHandles(ctx, qviews.FromProtoDataVersion(plan.GetVersion().GetDataVersion()), partitions)
-			if err != nil {
-				return nil, err
-			}
-			for _, handle := range growing {
-				defer handle.Release()
-			}
-			break
-		}
-	}
 	usage := &viewpb.PlannedQueryUsage{}
+	var retrieveRead *viewpb.PlannedColumnRead
 	if retrieve != nil {
 		fields, err := retrieveMeterFields(retrieve, runtime.Schema())
 		if err != nil {
 			return nil, err
 		}
-		read := newPlannedColumnRead(fields, 1)
-		if err := collectPlanColumns(read, plan, view, growing, retrieve.GetPartitionIDs(), -1); err != nil {
+		retrieveRead = newPlannedColumnRead(fields, 1)
+		usage.Reads = []*viewpb.PlannedColumnRead{retrieveRead}
+		if len(fields) == 0 {
+			return usage, nil
+		}
+	}
+
+	var growing []snview.GrowingSegmentHandle
+	for _, worker := range plan.GetWorkNodes() {
+		if worker.GetStreamingNode() != nil {
+			partitions := retrieve.GetPartitionIDs()
+			if retrieveRead == nil {
+				// Search also needs the original view's scope for retained requery.
+				loaded, err := runtime.ResolvePartitions(view.GetMeta().GetLoadInfoVersion(), nil)
+				if err != nil {
+					return nil, err
+				}
+				partitions = loaded
+			}
+			handles, err := runtime.AcquireGrowingSegmentHandles(ctx, qviews.FromProtoDataVersion(plan.GetVersion().GetDataVersion()), partitions)
+			if err != nil {
+				return nil, err
+			}
+			growing = handles
+			for _, handle := range handles {
+				defer handle.Release()
+			}
+			break
+		}
+	}
+	if retrieveRead != nil {
+		if err := collectPlanColumns(retrieveRead, plan, view, growing, retrieve.GetPartitionIDs(), -1); err != nil {
 			return nil, err
 		}
-		usage.Reads = []*viewpb.PlannedColumnRead{read}
 		return usage, nil
 	}
 
