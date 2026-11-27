@@ -44,18 +44,10 @@ namespace milvus::segcore {
 
 struct PublishedSegmentState;
 
-// Preparation required before a raw-data Text index build can start.
-enum class TextIndexDataPreparation { Existing, Load, FillDefault };
-
-/**
- * @brief Per-field prerequisites selected before executing a LoadDiff.
- * A Text build may read a column or a scalar index; wait for both when both
- * are changing. Existing means no new field-data preparation is scheduled.
- */
+// All field/index preparation is joined before Text builds; only defaults
+// require an additional ordering dependency.
 struct TextIndexBuildDependencies {
-    TextIndexDataPreparation data_preparation{
-        TextIndexDataPreparation::Existing};
-    bool load_index{false};
+    bool requires_default_fill{false};
 };
 
 /**
@@ -402,19 +394,8 @@ struct LoadDiff {
             if (!first)
                 oss << ", ";
             first = false;
-            const char* data = "existing";
-            switch (dependencies.data_preparation) {
-                case TextIndexDataPreparation::Load:
-                    data = "load";
-                    break;
-                case TextIndexDataPreparation::FillDefault:
-                    data = "default";
-                    break;
-                case TextIndexDataPreparation::Existing:
-                    break;
-            }
-            oss << field_id.get() << "(data=" << data
-                << ", index=" << dependencies.load_index << ")";
+            oss << field_id.get() << "(requires_default_fill="
+                << dependencies.requires_default_fill << ")";
         }
         oss << "], ";
 
@@ -1378,11 +1359,9 @@ class SegmentLoadInfo {
         const std::shared_ptr<const PublishedSegmentState>& existing_snapshot);
 
     void
-    ComputeDiffTextIndexes(
-        LoadDiff& diff,
-        SegmentLoadInfo& new_info,
-        const SealedFieldLayoutPtr& fields,
-        const std::shared_ptr<const PublishedSegmentState>& existing_snapshot);
+    ComputeDiffTextIndexes(LoadDiff& diff,
+                           SegmentLoadInfo& new_info,
+                           const SealedFieldLayoutPtr& fields);
 
     void
     ComputeDiffJsonKeyStats(LoadDiff& diff,

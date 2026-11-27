@@ -8427,7 +8427,7 @@ ChunkedSegmentSealedImpl::ExecuteLoadDiffAsync(
         timing, milvus::monitor::SegmentLoadPhase::ParallelPrepare);
     milvus::tracer::TraceContext trace_ctx{};
     // Retained indexes use the entry snapshot. New/replacement indexes use the
-    // same metadata capability calculation as LoadIndex's eventual publication.
+    // target's cached metadata capability unless a prepared request overrides it.
     std::unordered_set<FieldId> index_raw_fields;
     if (!diff.binlogs_to_load.empty() || !diff.binlogs_to_replace.empty()) {
         index_raw_fields.reserve(schema_snapshot->get_field_ids().size());
@@ -8446,20 +8446,31 @@ ChunkedSegmentSealedImpl::ExecuteLoadDiffAsync(
                 is_sorted_by_pk_ &&
                 schema_snapshot->get_primary_field_id() == field;
             if (infos != nullptr && !sorted_pk) {
-                for (const auto& info : *infos) {
-                    const auto request = info.load_resource_request.has_value()
-                                             ? *info.load_resource_request
-                                             : index::IndexLoadResource(
-                                                   info.field_type,
-                                                   info.element_type,
-                                                   info.index_engine_version,
-                                                   info.index_size,
-                                                   info.index_params,
-                                                   info.enable_mmap,
-                                                   info.num_rows,
-                                                   info.dim);
-                    has_raw |= index::CanUseIndexRawDataForField(
-                        info.field_type, request.has_raw_data);
+                const bool metadata_only = std::none_of(
+                    infos->begin(), infos->end(), [](const auto& info) {
+                        return info.load_resource_request.has_value();
+                    });
+                if (metadata_only) {
+                    has_raw = segment_load_info.FieldIndexHasRawData(field);
+                } else {
+                    // The field-wide cache cannot isolate a prepared override
+                    // from other indexes on the same field.
+                    for (const auto& info : *infos) {
+                        const auto request =
+                            info.load_resource_request.has_value()
+                                ? *info.load_resource_request
+                                : index::IndexLoadResource(
+                                      info.field_type,
+                                      info.element_type,
+                                      info.index_engine_version,
+                                      info.index_size,
+                                      info.index_params,
+                                      info.enable_mmap,
+                                      info.num_rows,
+                                      info.dim);
+                        has_raw |= index::CanUseIndexRawDataForField(
+                            info.field_type, request.has_raw_data);
+                    }
                 }
             } else if (!diff.indexes_to_drop.contains(field)) {
                 has_raw = HasIndexRawDataFromState(*current, field);
@@ -8772,10 +8783,7 @@ ChunkedSegmentSealedImpl::ExecuteLoadDiffAsync(
                 timing, milvus::monitor::SegmentLoadPhase::CreateTextIndexes);
             for (const auto& [field_id, dependencies] :
                  diff.text_indexes_to_create) {
-                const bool needs_defaults =
-                    dependencies.data_preparation ==
-                    TextIndexDataPreparation::FillDefault;
-                if (needs_defaults != defaults_filled) {
+                if (dependencies.requires_default_fill != defaults_filled) {
                     continue;
                 }
                 CreateTextIndexWithSchema(

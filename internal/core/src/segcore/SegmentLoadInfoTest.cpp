@@ -4764,7 +4764,7 @@ TEST_F(SegmentLoadInfoTest, ManifestRestoreUsesOneTargetActionAndLoadPolicy) {
     }
 }
 
-TEST_F(SegmentLoadInfoTest, TextBuildPlansDataAndIndexPrerequisites) {
+TEST_F(SegmentLoadInfoTest, TextBuildPlansDefaultFillDependency) {
     const auto schema = CreateSchemaWithTextMatchField();
     const auto fields = LoadFieldsFor(schema);
     const auto text_field = FieldId(102);
@@ -4777,12 +4777,11 @@ TEST_F(SegmentLoadInfoTest, TextBuildPlansDataAndIndexPrerequisites) {
     SegmentLoadInfo defaults(proto, fields);
     auto diff = defaults.GetLoadDiff(fields);
     ASSERT_EQ(diff.text_indexes_to_create.size(), 1);
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::FillDefault);
-    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+    EXPECT_TRUE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
     diff = defaults.GetLoadDiff(fields, ExistingSnapshot(fields, {text_field}));
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::Existing);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
     EXPECT_EQ(std::count(diff.fields_to_fill_default.begin(),
                          diff.fields_to_fill_default.end(),
                          text_field),
@@ -4793,14 +4792,12 @@ TEST_F(SegmentLoadInfoTest, TextBuildPlansDataAndIndexPrerequisites) {
     raw->add_binlogs()->set_log_path("text-binlog");
     SegmentLoadInfo current(proto, fields);
     diff = current.GetLoadDiff(fields);
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::Load);
-    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
     SegmentLoadInfo unchanged(proto, fields);
     diff = current.ComputeDiff(unchanged, fields);
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::Existing);
-    EXPECT_FALSE(diff.text_indexes_to_create.at(text_field).load_index);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
 
     auto* index = proto.add_index_infos();
     index->set_fieldid(text_field.get());
@@ -4811,19 +4808,17 @@ TEST_F(SegmentLoadInfoTest, TextBuildPlansDataAndIndexPrerequisites) {
     param->set_value(milvus::index::INVERTED_INDEX_TYPE);
     SegmentLoadInfo indexed(proto, fields);
     diff = current.ComputeDiff(indexed, fields);
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::Existing);
-    EXPECT_TRUE(diff.text_indexes_to_create.at(text_field).load_index);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
     proto.mutable_binlog_paths(1)->mutable_binlogs(0)->set_log_path(
         "new-text-binlog");
     SegmentLoadInfo replaced(proto, fields);
     diff = current.ComputeDiff(replaced, fields);
-    EXPECT_EQ(diff.text_indexes_to_create.at(text_field).data_preparation,
-              TextIndexDataPreparation::Load);
-    EXPECT_TRUE(diff.text_indexes_to_create.at(text_field).load_index);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(text_field).requires_default_fill);
 }
 
-TEST_F(SegmentLoadInfoTest, TextBuildWaitsForLazyManifestColumn) {
+TEST_F(SegmentLoadInfoTest, TextBuildNeedsNoDefaultsForLazyManifestColumn) {
     const auto schema = CreateSchemaWithTextMatchField();
     const auto fields =
         std::make_shared<const SealedFieldLayout>(schema, LoadScope({102}, {}));
@@ -4832,13 +4827,11 @@ TEST_F(SegmentLoadInfoTest, TextBuildWaitsForLazyManifestColumn) {
         MakeExternalColumnGroups({{{"102"}, {"text.parquet"}}}));
     const auto diff = info.GetLoadDiff(fields);
     ASSERT_EQ(diff.column_groups_to_lazyload.size(), 1);
-    EXPECT_EQ(diff.text_indexes_to_create.at(FieldId(102)).data_preparation,
-              TextIndexDataPreparation::Load);
-    EXPECT_FALSE(diff.text_indexes_to_create.at(FieldId(102)).load_index);
+    EXPECT_FALSE(
+        diff.text_indexes_to_create.at(FieldId(102)).requires_default_fill);
 }
 
-TEST_F(SegmentLoadInfoTest,
-       TextBuildRetainsExternalColumnUnlessManifestChanges) {
+TEST_F(SegmentLoadInfoTest, TextBuildNeedsNoDefaultsForExternalColumns) {
     const auto schema = CreateSchemaWithTextMatchField();
     schema->set_external_source("s3://external-bucket/table");
     const auto fields = LoadFieldsFor(schema);
@@ -4846,23 +4839,20 @@ TEST_F(SegmentLoadInfoTest,
     SegmentLoadInfo current(MakeManifestProto("/manifest/v1"), fields);
     current.SetColumnGroupsForTesting(groups);
     const auto text_field = FieldId(102);
-    EXPECT_EQ(current.GetLoadDiff(fields)
-                  .text_indexes_to_create.at(text_field)
-                  .data_preparation,
-              TextIndexDataPreparation::Load);
-    EXPECT_EQ(
+    EXPECT_FALSE(current.GetLoadDiff(fields)
+                     .text_indexes_to_create.at(text_field)
+                     .requires_default_fill);
+    EXPECT_FALSE(
         current.GetLoadDiff(fields, ExistingSnapshot(fields, {text_field}))
             .text_indexes_to_create.at(text_field)
-            .data_preparation,
-        TextIndexDataPreparation::Existing);
+            .requires_default_fill);
     SegmentLoadInfo target(MakeManifestProto("/manifest/v2"), fields);
     target.SetColumnGroupsForTesting(groups);
-    EXPECT_EQ(
+    EXPECT_FALSE(
         current
             .ComputeDiff(target, fields, ExistingSnapshot(fields, {text_field}))
             .text_indexes_to_create.at(text_field)
-            .data_preparation,
-        TextIndexDataPreparation::Load);
+            .requires_default_fill);
 }
 
 TEST_F(SegmentLoadInfoTest, InterimPlanPreservesGroupBuildConcurrency) {

@@ -346,14 +346,12 @@ newly required data using the input snapshot.
 
 ### Text and interim prerequisites
 
-`text_indexes_to_create` maps each field to `TextIndexBuildDependencies`:
-
-- `Existing`: no new column preparation is scheduled.
-- `Load`: wait for the field's load/replacement preparation.
-- `FillDefault`: wait for default-value filling.
-- `load_index`: also wait for the field's new/replacement scalar index when
-  present. The Text builder supports both columns and scalar value readers;
-  these are preparation dependencies, not a forced choice of data source.
+`text_indexes_to_create` records whether each Text build requires default-value
+filling. All field and formal-index preparation tasks are joined before any Text
+build starts, so existing and newly loaded sources need no separate dependency
+states. Builds marked `requires_default_fill` run after default filling; the
+others run before it. The Text builder supports both columns and scalar value
+readers.
 
 Default planning uses the input snapshot's normalized field-ready bits to exclude
 existing physical columns, even when a legacy direct load did not record them in
@@ -381,7 +379,10 @@ resources, and final publication. A single outer `blockingWait` runs
 `ExecuteLoadDiffAsync()` on ASYNC_LOAD:
 
 1. Capture source columns and index raw-data capabilities from the input snapshot
-   and target metadata before starting any tasks. Initialize shared LOB metadata
+   and the target's cached metadata capabilities before starting any tasks.
+   Explicit prepared resource requests retain precedence over metadata estimates;
+   sorted-PK and retained-index snapshot handling are unchanged.
+   Initialize shared LOB metadata
    before concurrent readers can access it.
 2. Start independent formal-index, raw-field, reload, pre-built Text, and JSON
    preparation tasks together. Their task vector is joined before dependent

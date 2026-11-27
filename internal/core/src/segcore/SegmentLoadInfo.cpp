@@ -895,11 +895,9 @@ JsonStatsLoadIdentityEqual(const proto::segcore::JsonKeyStats& lhs,
 }  // namespace
 
 void
-SegmentLoadInfo::ComputeDiffTextIndexes(
-    LoadDiff& diff,
-    SegmentLoadInfo& new_info,
-    const SealedFieldLayoutPtr& fields,
-    const std::shared_ptr<const PublishedSegmentState>& existing_snapshot) {
+SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
+                                        SegmentLoadInfo& new_info,
+                                        const SealedFieldLayoutPtr& fields) {
     // Build current text indexed fields (fields with loaded text index stats)
     std::set<FieldId> current_text_indexed;
     for (const auto& [field_id, stats] : GetTextStatsLogs()) {
@@ -954,52 +952,17 @@ SegmentLoadInfo::ComputeDiffTextIndexes(
             created_text_indexes_.end()) {
             continue;
         }
-        TextIndexBuildDependencies dependencies;
-        if (diff.load_external_manifest &&
-            (diff.manifest_updated ||
-             !HasExistingRawField(existing_snapshot, field_id)) &&
-            new_info.HasManifestColumn(
-                fields->get_storage_column_name(field_id))) {
-            dependencies.data_preparation = TextIndexDataPreparation::Load;
-        }
-        dependencies.load_index = diff.indexes_to_load.contains(field_id) ||
-                                  diff.indexes_to_replace.contains(field_id);
-        diff.text_indexes_to_create.emplace(field_id, dependencies);
+        diff.text_indexes_to_create.emplace(field_id,
+                                            TextIndexBuildDependencies{});
     }
     if (diff.text_indexes_to_create.empty()) {
         return;
     }
-    auto mark_preparation = [&](FieldId field_id,
-                                TextIndexDataPreparation preparation) {
+    for (const auto field_id : diff.fields_to_fill_default) {
         if (auto it = diff.text_indexes_to_create.find(field_id);
             it != diff.text_indexes_to_create.end()) {
-            it->second.data_preparation = preparation;
+            it->second.requires_default_fill = true;
         }
-    };
-    auto mark_loaded = [&](const auto& entries) {
-        for (const auto& [group, field_ids] : entries) {
-            for (const auto field_id : field_ids) {
-                mark_preparation(field_id, TextIndexDataPreparation::Load);
-            }
-        }
-    };
-    mark_loaded(diff.column_groups_to_load);
-    mark_loaded(diff.column_groups_to_replace);
-    mark_loaded(diff.column_groups_to_lazyload);
-    mark_loaded(diff.column_groups_to_lazyreplace);
-    for (const auto* entries :
-         {&diff.binlogs_to_load, &diff.binlogs_to_replace}) {
-        for (const auto& [field_ids, binlog] : *entries) {
-            for (const auto field_id : field_ids) {
-                mark_preparation(field_id, TextIndexDataPreparation::Load);
-            }
-        }
-    }
-    for (const auto field_id : diff.fields_to_reload) {
-        mark_preparation(field_id, TextIndexDataPreparation::Load);
-    }
-    for (const auto field_id : diff.fields_to_fill_default) {
-        mark_preparation(field_id, TextIndexDataPreparation::FillDefault);
     }
 }
 
@@ -1256,7 +1219,7 @@ SegmentLoadInfo::ComputeDiff(
         }
     }
 
-    ComputeDiffTextIndexes(diff, new_info, fields, existing_snapshot);
+    ComputeDiffTextIndexes(diff, new_info, fields);
     new_info.ComputeInterimIndexes(diff, fields, existing_snapshot);
     return diff;
 }
@@ -1314,7 +1277,7 @@ SegmentLoadInfo::GetLoadDiff(
             diff, *this, fields, existing_snapshot);
     }
 
-    empty_info.ComputeDiffTextIndexes(diff, *this, fields, existing_snapshot);
+    empty_info.ComputeDiffTextIndexes(diff, *this, fields);
     ComputeInterimIndexes(diff, fields, existing_snapshot);
     return diff;
 }
