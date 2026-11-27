@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 func loadSealedSegmentStats(
@@ -21,7 +22,9 @@ func loadSealedSegmentStats(
 	chunkManager storage.ChunkManager,
 	resource *datapb.StreamingNodeBM25Resource,
 	loadedFields ...bm25Stats,
-) (bm25Stats, error) {
+) (_ bm25Stats, retErr error) {
+	timer := bm25Load.Begin()
+	defer timer.EndError(&retErr)
 	if resource.GetStorageVersion() >= storage.StorageV3 && resource.GetManifestPath() == "" {
 		return nil, merr.WrapErrDataIntegrityMsg("storage v3 BM25 resource for segment %d has no manifest", resource.GetSegmentId())
 	}
@@ -61,7 +64,10 @@ func loadSealedSegmentStats(
 
 // Read directly from object storage. DataView references keep the descriptors
 // valid until a successful replacement, so evictions do not need a local cache.
-func readBM25Stats(ctx context.Context, cm storage.ChunkManager, path string) (*storage.BM25Stats, error) {
+func readBM25Stats(ctx context.Context, cm storage.ChunkManager, path string) (_ *storage.BM25Stats, retErr error) {
+	// Reading and decoding are one streaming pass, so they are timed together.
+	timer := bm25ReadDecode.Begin()
+	defer timer.EndError(&retErr)
 	var reader storage.FileReader
 	err := retry.Do(ctx, func() error {
 		var err error
@@ -91,3 +97,8 @@ func readBM25Stats(ctx context.Context, cm storage.ChunkManager, path string) (*
 	}
 	return stats, nil
 }
+
+var (
+	bm25Load       = stage.New("streamingNode", "bm25_stats", "load")
+	bm25ReadDecode = stage.New("streamingNode", "bm25_stats", "read_decode")
+)

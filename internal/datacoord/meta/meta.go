@@ -1626,20 +1626,23 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 			if s == nil {
 				continue
 			}
+			startPosition := pos.GetStartPosition()
+			// Transform coverage is a logical timestamp, independent of the
+			// physical seek ID (Woodpecker 0/0 serializes to empty bytes).
+			// Persist it with the first data pack even if its seek ID is empty.
+			if s.GetLevel() != datapb.SegmentLevel_L0 && !s.GetIsImporting() && s.GetTransformStartAfterTimetick() == 0 {
+				s.TransformStartAfterTimetick = startPosition.GetTimestamp()
+			}
 			// L0 segments materialized from WALSummary have no physical WAL
 			// position. Their timestamp-only StartPosition is a valid delete
 			// retention boundary used by QueryCoord/delegators, not a WAL seek
 			// position. Dropping it would allow live L0 deletes to be evicted.
-			startPosition := pos.GetStartPosition()
 			if len(startPosition.GetMsgID()) == 0 &&
 				(s.GetLevel() != datapb.SegmentLevel_L0 || startPosition.GetTimestamp() == 0) {
 				continue
 			}
 
 			s.StartPosition = startPosition
-			if s.GetLevel() != datapb.SegmentLevel_L0 && !s.GetIsImporting() && s.GetTransformStartAfterTimetick() == 0 {
-				s.TransformStartAfterTimetick = startPosition.GetTimestamp()
-			}
 		}
 		return true
 	}

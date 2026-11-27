@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSnapshotForeignStorageForTest(
@@ -108,6 +109,34 @@ func TestValidateSnapshotForeignStorageRestoreGCPServiceAccountJSONAllowed(t *te
 	require.NoError(t, err)
 	assert.Equal(t, credentialJSON, cfg.GcpCredentialJSON)
 	assert.False(t, cfg.UseIAM)
+}
+
+// A spec with snapshot-only extfs keys is re-marshaled before the generic
+// parser sees it, and the re-marshal would merge two spellings of one key, so
+// the caller's keys are checked first.
+func TestParseSnapshotExternalSpecRejectsCollidingKeys(t *testing.T) {
+	const extfs = `{"cloud_provider":"gcpnative","credential_json":"{}"}`
+	for _, spec := range []string{
+		`{"extfs":` + extfs + `}`,
+		`{"FORMAT":"parquet","EXTFS":` + extfs + `}`,
+	} {
+		parsed, err := parseSnapshotExternalSpec(spec)
+		require.NoError(t, err, spec)
+		assert.Equal(t, "parquet", parsed.Format, spec)
+		assert.Equal(t, "{}", parsed.Extfs[snapshotExtfsKeyCredentialJSON], spec)
+	}
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"extfs":` + extfs + `,"Extfs":{"use_iam":"true"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"format":"parquet","Format":"vortex","extfs":` + extfs + `}`, `external spec keys "format" and "Format" differ only in case`},
+		{`{"extfs":` + extfs + `,"extfs":` + extfs + `}`, `external spec key "extfs" appears more than once`},
+		{`{"extfs":{"cloud_provider":"gcpnative","credential_json":"{}","Credential_Json":"{}"}}`, `extfs keys "credential_json" and "Credential_Json" differ only in case`},
+		// Without snapshot-only keys the spec goes straight to the generic parser.
+		{`{"format":"parquet","FORMAT":"vortex"}`, `external spec keys "format" and "FORMAT" differ only in case`},
+	} {
+		_, err := parseSnapshotExternalSpec(tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+	}
 }
 
 func TestApplySnapshotExternalSpecUseIAMClearsInheritedCredentials(t *testing.T) {

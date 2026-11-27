@@ -35,6 +35,7 @@ ensure_pip() {
 check_deps() {
     "${PYTHON_BIN}" - <<'PY'
 import importlib
+from importlib.metadata import version
 import sys
 
 missing = []
@@ -48,6 +49,8 @@ try:
     lance = importlib.import_module("lance")
     if not hasattr(lance, "write_dataset"):
         missing.append("pylance (lance.write_dataset)")
+    if version("pylance") != "6.0.0":
+        missing.append("pylance==6.0.0 (stable Struct null encoding)")
 except Exception:
     missing.append("pylance")
 

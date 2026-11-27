@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 type collectionRuntimeKey struct {
@@ -41,7 +42,9 @@ func newQueryViewCollectionRuntimeManager(meta qnview.QueryViewLoadMetadataProvi
 	}
 }
 
-func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (qnview.CollectionRuntimeGuard, bool, error) {
+func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *qviews.QueryViewAtQueryNode) (ret qnview.CollectionRuntimeGuard, retryable bool, retErr error) {
+	timer := runtimeAcquire.Begin()
+	defer timer.EndError(&retErr)
 	if view == nil {
 		return nil, false, merr.WrapErrServiceInternalMsg("query view is nil")
 	}
@@ -118,7 +121,9 @@ func isRetryableCollectionRuntimeError(err error) bool {
 		!errors.Is(err, merr.ErrIndexNotFound)
 }
 
-func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *viewpb.QueryViewMeta) (qnview.QueryViewLoadInfo, error) {
+func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *viewpb.QueryViewMeta) (ret qnview.QueryViewLoadInfo, retErr error) {
+	timer := runtimeMetadata.Begin()
+	defer timer.EndError(&retErr)
 	info, err := m.meta.GetQueryViewLoadInfo(ctx, meta.GetCollectionId(), qnview.QueryViewLoadInfoVersionFromProto(meta.GetLoadInfoVersion()))
 	if err != nil {
 		return qnview.QueryViewLoadInfo{}, err
@@ -199,3 +204,8 @@ func loadInfoHintIDs(info qnview.QueryViewLoadInfo) []int64 {
 }
 
 func (g *queryViewCollectionRuntimeGuard) IndexInfos() []*indexpb.IndexInfo { return g.indexes }
+
+var (
+	runtimeAcquire  = stage.New("queryNode", "prepare", "collection_runtime")
+	runtimeMetadata = stage.New("queryNode", "prepare", "collection_metadata")
+)

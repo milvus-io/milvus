@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"runtime"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -203,7 +205,22 @@ func (bt *BaseTable) initConfigsFromLocal() {
 	}
 }
 
+// Tests replace these to observe a rejected FIPS check.
+var (
+	requireGoFIPS = fips.RequireGoModule
+	exitProcess   = os.Exit
+)
+
 func (bt *BaseTable) initConfigsFromRemote() {
+	// Package-level paramtable.Get() calls reach this point before the startup
+	// check in cmd/milvus runs, and the etcd connection opened here is the
+	// process's first. A MILVUS_FIPS_ENABLED=ON build must not open it outside
+	// Go FIPS 140-3 mode.
+	if err := requireGoFIPS(); err != nil {
+		fmt.Fprintln(os.Stderr, "Milvus cannot start:", err)
+		exitProcess(1)
+		return
+	}
 	refreshInterval := bt.config.refreshInterval
 	etcdConfig := EtcdConfig{}
 	etcdConfig.Init(bt)

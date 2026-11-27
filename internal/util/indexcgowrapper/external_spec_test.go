@@ -42,4 +42,8 @@ func TestMarshalBuildIndexInfoNormalizesHistoricalSpec(t *testing.T) {
 func TestMarshalBuildIndexInfoRejectsInvalidSpec(t *testing.T) {
 	_, err := marshalBuildIndexInfo(&indexcgopb.BuildIndexInfo{ExternalSpec: `{"Scan_Mode":true}`})
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	_, err = marshalBuildIndexInfo(&indexcgopb.BuildIndexInfo{ExternalSpec: `{"extfs":{"region":"us-east-1"},"EXTFS":{"use_ssl":"true"}}`})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `external spec keys "extfs" and "EXTFS" differ only in case`)
 }

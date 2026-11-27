@@ -3886,7 +3886,7 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 	})
 }
 
-func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
+func TestProxyAdmitsMilvusTableStructSubField(t *testing.T) {
 	node := createTestProxy()
 	defer node.sched.Close()
 	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
@@ -3919,8 +3919,8 @@ func TestProxyRejectsMilvusTableStructSubField(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrOperationNotSupported)
-	require.Zero(t, enqueueCalls)
+	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrServiceUnavailable)
+	require.Equal(t, 1, enqueueCalls)
 }
 
 func TestProxy_AlterCollectionSchemaMilvusTableValidation(t *testing.T) {
@@ -3986,7 +3986,7 @@ func TestProxy_AlterCollectionSchemaMilvusTableValidation(t *testing.T) {
 				},
 			},
 			code:   merr.ErrOperationNotSupported,
-			reason: "only mapped milvus-table top-level field additions",
+			reason: "only mapped milvus-table field additions",
 		},
 		{
 			name: "mapped field reaches the DDL queue",

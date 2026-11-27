@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -354,6 +355,11 @@ func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec,
 	var snapshotSpec externalspec.ExternalSpec
 	if err := json.Unmarshal([]byte(externalSpec), &snapshotSpec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	// The re-marshal below would turn "Format" next to "format", or "Extfs"
+	// next to "extfs", into one merged key, so check the keys first.
+	if err := specutil.ValidateExternalSpecKeys(externalSpec); err != nil {
+		return nil, err
 	}
 	snapshotOnly := make(map[string]string)
 	for key := range snapshotExtfsOnlyKeys {

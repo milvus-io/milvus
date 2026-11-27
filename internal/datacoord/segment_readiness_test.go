@@ -294,8 +294,14 @@ func readinessSegmentIndexes(segID int64, states map[int64]commonpb.IndexState) 
 
 // TestSegmentReadiness_IndexTerm_StructVectorSubField: the index term waits on
 // struct vector sub-field indexes as well as top-level vector indexes, the same
-// target set as FilterInIndexedSegments.
+// target set as FilterInIndexedSegments. Runs with forceAllIndexReady pinned
+// off so the vector-only target set is exercised in isolation; with it on the
+// same index-carrying vector fields repeat in TargetFieldIDs and scalar-indexed
+// fields join the set (see TestSegmentReadiness_IndexTerm_DVForceAllIndexReady).
 func TestSegmentReadiness_IndexTerm_StructVectorSubField(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.DVForceAllIndexReady.Key, "false")
+	defer Params.Reset(Params.DataCoordCfg.DVForceAllIndexReady.Key)
+
 	const (
 		topVecFieldID = int64(2)
 		subVecFieldID = int64(102)
@@ -379,7 +385,13 @@ func TestSegmentReadiness_IndexTerm_StructVectorSubField(t *testing.T) {
 // TestSegmentReadiness_IndexTerm_StructVectorSubFieldOnly: a collection whose
 // only vector is a struct vector sub-field takes the normal vector path, not
 // the pure-scalar degradation, so an unfinished scalar index does not block it.
+// This scenario is forceAllIndexReady=false behavior, pinned explicitly here:
+// with forceAllIndexReady=true (the default) the scalar index becomes a
+// readiness target instead, so the expectation differs.
 func TestSegmentReadiness_IndexTerm_StructVectorSubFieldOnly(t *testing.T) {
+	Params.Save(Params.DataCoordCfg.DVForceAllIndexReady.Key, "false")
+	defer Params.Reset(Params.DataCoordCfg.DVForceAllIndexReady.Key)
+
 	const (
 		scalarFieldID = int64(2)
 		subVecFieldID = int64(102)

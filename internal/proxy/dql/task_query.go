@@ -825,6 +825,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		defer t.features.HitAll()
 	}
 	collectCommonRequestFeatures(t.request, t.featureSink())
+	collectQueryFunctionChainFeature(t.request.GetFunctionChains(), t.featureSink())
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
 

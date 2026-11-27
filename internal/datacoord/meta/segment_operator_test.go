@@ -20,14 +20,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metacache"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type TestSegmentOperatorSuite struct {
@@ -66,6 +70,8 @@ func TestUpdateStartPosition(t *testing.T) {
 		{"L0 missing position", datapb.SegmentLevel_L0, nil, false},
 		{"L0 empty position", datapb.SegmentLevel_L0, &msgpb.MsgPosition{}, false},
 		{"L1 timestamp only", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100}, false},
+		{"L1 Woodpecker zero ID", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100, WALName: commonpb.WALName_WoodPecker}, false},
+		{"L1 missing position", datapb.SegmentLevel_L1, nil, false},
 		{"L1 WAL position", datapb.SegmentLevel_L1, &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 100}, true},
 		{"L1 message ID only", datapb.SegmentLevel_L1, &msgpb.MsgPosition{MsgID: []byte{1}}, true},
 	} {
@@ -86,6 +92,11 @@ func TestUpdateStartPosition(t *testing.T) {
 				want = tc.position
 			}
 			require.True(t, proto.Equal(want, segment.GetStartPosition()))
+			if tc.level != datapb.SegmentLevel_L0 {
+				require.Equal(t, tc.position.GetTimestamp(), segment.GetTransformStartAfterTimetick())
+			} else {
+				require.Zero(t, segment.GetTransformStartAfterTimetick())
+			}
 		})
 	}
 
@@ -99,6 +110,57 @@ func TestUpdateStartPosition(t *testing.T) {
 		}})(pack))
 		require.Empty(t, pack.Segments)
 	})
+}
+
+func TestFirstPackTransformCoveragePersistence(t *testing.T) {
+	ctx := context.Background()
+	m, err := NewMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, PartitionID: 10, InsertChannel: "ch",
+		Level: datapb.SegmentLevel_L1, State: commonpb.SegmentState_Growing,
+	})))
+	first := UpdateStartPosition([]*datapb.SegmentStartPosition{{
+		SegmentID: 1, StartPosition: &msgpb.MsgPosition{
+			ChannelName: "ch", Timestamp: 100, WALName: commonpb.WALName_WoodPecker,
+		},
+	}})
+	// A failed catalog write must leave both persisted and in-memory coverage
+	// unknown, so the caller retries before acknowledging the first data pack.
+	failure := mockey.Mock((*catalogkv.Catalog).AlterSegments).Return(merr.ErrServiceUnavailable).Build()
+	t.Cleanup(func() { failure.UnPatch() })
+	require.ErrorIs(t, m.UpdateSegmentsInfo(ctx, first), merr.ErrServiceUnavailable)
+	require.Zero(t, m.GetSegment(ctx, 1).GetTransformStartAfterTimetick())
+	stored, err := m.Catalog.ListSegments(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Zero(t, stored[0].GetTransformStartAfterTimetick())
+	failure.UnPatch()
+
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, first))
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, first), "first-pack replay is idempotent")
+	stored, err = m.Catalog.ListSegments(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, uint64(100), stored[0].GetTransformStartAfterTimetick())
+
+	// Reload through the real metadata loader. Final publication must resolve
+	// coverage from the persisted field even without a physical StartPosition.
+	recovered, err := NewMeta(ctx, m.Catalog, nil, NewMetaStoreWithCollections(m.Catalog, 100), nil, NoDomainMetas)
+	require.NoError(t, err)
+	t.Cleanup(recovered.CloseManifestCommitExecutor)
+	segment := recovered.GetSegment(ctx, 1)
+	require.NotNil(t, segment)
+	require.Nil(t, segment.GetStartPosition())
+	require.Equal(t, uint64(100), SegmentTransformStart(segment))
+	require.NoError(t, recovered.UpdateSegmentsInfo(ctx, UpdateStartPosition([]*datapb.SegmentStartPosition{{
+		SegmentID: 1, StartPosition: &msgpb.MsgPosition{Timestamp: 200, MsgID: []byte{1}},
+	}})))
+	require.Equal(t, uint64(100), SegmentTransformStart(recovered.GetSegment(ctx, 1)), "later positions cannot skip earlier transforms")
+
+	importing := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, Level: datapb.SegmentLevel_L1, IsImporting: true}}
+	require.True(t, first(&UpdateSegmentPack{Segments: map[int64]*SegmentInfo{1: importing}}))
+	require.Zero(t, importing.GetTransformStartAfterTimetick(), "import coverage comes from its commit")
 }
 
 func TestUpdateImportSegmentPosition(t *testing.T) {
