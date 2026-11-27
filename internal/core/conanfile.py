@@ -95,6 +95,7 @@ class MilvusConan(ConanFile):
         "fmt/*:header_only": False,
         "openblas/*:dynamic_arch": True,
         "openblas/*:shared": False,
+        "openblas/*:target": "HASWELL",
         "metis/*:with_64bit_types": True,
         "onetbb/*:tbbmalloc": False,
         "onetbb/*:tbbproxy": False,

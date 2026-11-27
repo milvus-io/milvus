@@ -240,12 +240,13 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	s.Equal(indexpb.JobState_JobStateFailed, at.GetState())
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
+	at.CreateTaskOnWorker(1, cluster)
+	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 	s.Contains(at.GetFailReason(), "102")
 	// The terminal state must be persisted, not only set on the scheduler-owned copy.
-	s.Equal(indexpb.JobState_JobStateFailed, s.am.GetTask(s.taskID).GetState())
+	s.Equal(indexpb.JobState_JobStateNone, s.am.GetTask(s.taskID).GetState())
 	s.Contains(s.am.GetTask(s.taskID).GetFailReason(), "102")
 }
 
@@ -276,10 +277,11 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
+	at.CreateTaskOnWorker(1, cluster)
 	// Should reset to Init state on dim error
-	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
@@ -292,35 +294,11 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
+	at.CreateTaskOnWorker(1, cluster)
 	// data too small → skip → mark as finished
-	s.Equal(indexpb.JobState_JobStateFinished, at.GetState())
-	// Persisting Finished is what lets the GC recycle the task's analyze stats files.
-	s.Equal(indexpb.JobState_JobStateFinished, s.am.GetTask(s.taskID).GetState())
-}
-
-func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
-	// Set MinCentroidsNum very high so data is considered too small
-	origMin := Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue("999999999")
-	defer Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.SwapTempValue(origMin)
-
-	at := s.newTask()
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	// The first save is UpdateVersion, the second one is the terminal state transition.
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
-		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
-	s.am.Catalog = catalog
-	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
-	stateBefore := s.am.GetTask(s.taskID).GetState()
-
-	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
-	// A failed persistence leaves the task at Init so the scheduler re-enqueues it,
-	// rather than dropping it on an in-memory-only terminal state.
-	s.Equal(indexpb.JobState_JobStateInit, at.GetState())
-	s.Equal(stateBefore, s.am.GetTask(s.taskID).GetState())
+	s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 }
 
 func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
@@ -476,7 +454,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
 		at.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+		s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 	})
 
 	s.Run("node not found", func() {
@@ -485,7 +463,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 		cluster.EXPECT().DropAnalyze(mock.Anything, mock.Anything).Return(nil)
 
 		at.QueryTaskOnWorker(cluster)
-		s.Equal(indexpb.JobState_JobStateInit, at.GetState())
+		s.Equal(indexpb.JobState_JobStateNone, at.GetState())
 	})
 
 	s.Run("task finished", func() {

@@ -418,8 +418,17 @@ MakeNullableLoadInput(const ValidDataView& valid_data,
                       const IdMapMmapFlags& mmap_flags = {},
                       const std::string& mmap_path_prefix = {},
                       bool embedding_list = false) {
+    // NOTE (experiment build, NOT for merge): this knowhere (pre-#1940,
+    // pinned at db959846) has no `embedding_list` field in
+    // knowhere::LoadOptions. The flag is retained in this signature so the
+    // callers and the rest of milvus still compile, but it is intentionally
+    // dropped from the returned LoadOptions. This is only safe because the
+    // AISAQ load A/B test uses a plain dense vector field (embedding_list is
+    // false); for VECTOR_ARRAY / embedding-list fields this would change the
+    // row-vs-element validity semantics described in #54899.
+    (void)embedding_list;
     if (!valid_data.found) {
-        return {.embedding_list = embedding_list};
+        return {};
     }
     ValidatePersistedValidDataCount(valid_data.count);
     if (valid_data.count > 0 && valid_data.bitmap == nullptr) {
@@ -430,8 +439,7 @@ MakeNullableLoadInput(const ValidDataView& valid_data,
     return {knowhere::ValidityView{valid_data.bitmap,
                                    GetValidDataBitmapSize(valid_data.count),
                                    ToValidDataCount(valid_data.count)},
-            NullableMmapOptions(mmap_flags, mmap_path_prefix),
-            embedding_list};
+            NullableMmapOptions(mmap_flags, mmap_path_prefix)};
 }
 
 inline ValidDataView
