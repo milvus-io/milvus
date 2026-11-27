@@ -3416,3 +3416,74 @@ TEST(test_chunk_segment, VortexNestedArrayOutputMatchesBulkArrayValueAt) {
     EXPECT_FALSE(view0.array_at(0).is_valid(1));
     EXPECT_TRUE(view0.array_at(2).empty());
 }
+
+TEST(PreparedSegmentLoadPlanTest, StalePlanDoesNotReadPayload) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema, nullptr, 1);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(10);
+    info.set_storageversion(1);
+    auto* group = info.add_binlog_paths();
+    group->set_fieldid(pk.get());
+    auto* log = group->add_binlogs();
+    log->set_log_path("/must/not/read/prepared-plan");
+    log->set_entries_num(10);
+    log->set_memory_size(80);
+    sealed->SetLoadInfo(info);
+    auto plan = sealed->PrepareLoadPlan(nullptr);
+    ASSERT_FALSE(plan->diff.binlogs_to_load.empty());
+    // A metadata publication retires the base. The plan must not keep its
+    // runtime alive, and a stale Execute must not try the inaccessible file.
+    sealed->SetLoadInfo(info);
+    EXPECT_TRUE(plan->base.expired());
+    EXPECT_FALSE(sealed->ExecuteLoadPlan(nullptr, *plan));
+    EXPECT_THROW(sealed->ExecuteLoadPlan(nullptr, *plan), SegcoreError);
+}
+
+TEST(PreparedSegmentLoadPlanTest, ReopenPreservesCapturedIndexMetadata) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    std::map<FieldId, FieldIndexMeta> field_metas;
+    field_metas.emplace(pk,
+                        FieldIndexMeta(pk, {{"index_type", "STL_SORT"}}, {}));
+    auto indexes =
+        std::make_shared<CollectionIndexMeta>(1024, std::move(field_metas));
+    auto segment = CreateSealedSegment(schema, indexes, 1);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(10);
+    info.set_storageversion(1);
+    auto* group = info.add_binlog_paths();
+    group->set_fieldid(pk.get());
+    auto* log = group->add_binlogs();
+    log->set_log_path("/must/not/read/prepared-plan");
+    log->set_entries_num(10);
+    log->set_memory_size(80);
+    sealed->SetLoadInfo(info);
+
+    auto layout = std::make_shared<const SealedFieldLayout>(
+        schema, LoadScope::FromLegacySchema(*schema));
+    auto plan = sealed->PrepareLoadPlan(nullptr, &info, layout);
+    ASSERT_EQ(plan->fields->index_meta(), indexes);
+    EXPECT_EQ(
+        plan->fields->index_meta()->GetFieldIndexMeta(pk).GetIndexParams(),
+        indexes->GetFieldIndexMeta(pk).GetIndexParams());
+
+    auto explicit_indexes = std::make_shared<CollectionIndexMeta>(
+        2048, std::map<FieldId, FieldIndexMeta>{});
+    auto explicit_plan = sealed->PrepareLoadPlan(
+        nullptr, &info, layout->WithIndexMeta(explicit_indexes));
+    EXPECT_EQ(explicit_plan->fields->index_meta(), explicit_indexes);
+}

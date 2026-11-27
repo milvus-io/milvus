@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -158,8 +159,6 @@ func (r *LoadResource) IsZero() bool {
 }
 
 type resourceEstimateFactor struct {
-	memoryUsageFactor               float64
-	memoryIndexUsageFactor          float64
 	EnableInterminSegmentIndex      bool
 	tempSegmentIndexFactor          float64
 	deltaDataExpansionFactor        float64
@@ -277,14 +276,14 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
-	// Check memory & storage limit
-	// no need to check resource for lazy load here
-	requestResourceResult, err = loader.requestResource(ctx, infos...)
-	if err != nil {
-		mlog.Warn(context.TODO(), "request resource failed", mlog.Err(err))
-		return nil, err
+	defer func() { loader.freeRequestResource(requestResourceResult) }()
+	// Growing creation retains its existing pre-construction admission.
+	if segmentType != SegmentTypeSealed {
+		requestResourceResult, err = loader.requestResource(ctx, infos...)
+		if err != nil {
+			return nil, err
+		}
 	}
-	defer loader.freeRequestResource(requestResourceResult)
 
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
@@ -326,6 +325,50 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.Insert(loadInfo.GetSegmentID(), segment)
 	}
 
+	plans := make(map[int64]*segcore.SegmentLoadPlan, len(infos))
+	defer func() {
+		for _, plan := range plans {
+			plan.Close()
+		}
+	}()
+	if segmentType == SegmentTypeSealed {
+		usage := &ResourceUsage{}
+		var maxSegmentSize uint64
+		for _, info := range infos {
+			segment, _ := newSegments.Get(info.GetSegmentID())
+			local, ok := segment.(*LocalSegment)
+			if !ok { // L0 retains its delta-only estimate.
+				extra, estimateErr := loadresource.EstimateSegmentLoadingResource(ctx, collection.Schema(), info, loadresource.DefaultSegmentLoadingEstimateOptions(), nil)
+				if estimateErr != nil {
+					return nil, estimateErr
+				}
+				usage.MemorySize += extra.MemoryBytes
+				usage.DiskSize += extra.DiskBytes
+				maxSegmentSize = max(maxSegmentSize, extra.MemoryBytes)
+				continue
+			}
+			schema, schemaVersion := collection.SchemaAndSegcoreVersion()
+			plan, prepareErr := segcore.PrepareSegmentLoadPlan(ctx, local.csegment, schema, schemaVersion, info, true)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			plans[info.GetSegmentID()] = plan
+			gpu, gpuErr := estimatePlanGPUResources(ctx, schema, info)
+			if gpuErr != nil {
+				return nil, gpuErr
+			}
+			usage.MemorySize += plan.Loading.MemoryBytes
+			usage.DiskSize += plan.Loading.DiskBytes
+			usage.MmapFieldCount += plan.Loading.MmapFieldCount
+			usage.FieldGpuMemorySize = append(usage.FieldGpuMemorySize, gpu...)
+			maxSegmentSize = max(maxSegmentSize, plan.Loading.MemoryBytes)
+		}
+		requestResourceResult, err = loader.reserveEstimatedResource(ctx, usage, maxSegmentSize, infos...)
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	loadSegmentFunc := func(idx int) (err error) {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
@@ -349,7 +392,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		// L0 segment has no index or data to be load.
 		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
 			// lazy load segment do not load segment at first time.
-			if err = loader.LoadSegment(ctx, segment, loadInfo); err != nil {
+			if err = loader.loadSegmentWithPlan(ctx, segment, loadInfo, plans[segmentID]); err != nil {
 				return merr.Wrap(err, "At LoadSegment")
 			}
 		}
@@ -500,6 +543,17 @@ func (loader *segmentLoader) requestResourceWithSchema(ctx context.Context, sche
 		return requestResourceResult{}, err
 	}
 
+	return loader.reserveEstimatedResource(ctx, loadingUsage, maxSegmentSize, infos...)
+}
+
+// reserveEstimatedResource atomically checks and commits Go-owned reservations.
+// Estimation and metadata I/O complete before acquiring loader.mut.
+func (loader *segmentLoader) reserveEstimatedResource(ctx context.Context, loadingUsage *ResourceUsage, maxSegmentSize uint64, infos ...*querypb.SegmentLoadInfo) (_ requestResourceResult, err error) {
+	if len(infos) == 0 {
+		return requestResourceResult{}, nil
+	}
+	segmentIDs := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) int64 { return info.GetSegmentID() })
+	logger := mlog.With(mlog.Int64s("segmentIDs", segmentIDs))
 	resource := LoadResource{MemorySize: loadingUsage.MemorySize, DiskSize: loadingUsage.DiskSize}
 	tieredEvictionEnabled := paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool()
 	reservedLoadingResource := false
@@ -1000,7 +1054,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonKeyIndexInfo, textBasePaths, jsonBasePaths
 }
 
-func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) (err error) {
+func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment, plan *segcore.SegmentLoadPlan) (err error) {
 	physicalLoadTiming := PhysicalLoadTimingFromContext(ctx)
 	startedAt := time.Now()
 	prepareFinished := false
@@ -1057,7 +1111,23 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				physicalLoadTiming.LocalSegmentLoad = time.Since(workerStartedAt)
 			}
 		}()
-		if err = segment.Load(ctx); err != nil {
+		if plan != nil {
+			startedAt := time.Now()
+			err = plan.Execute(ctx)
+			if physicalLoadTiming != nil {
+				physicalLoadTiming.CSegmentLoad = time.Since(startedAt)
+			}
+			if err == nil {
+				startedAt = time.Now()
+				segment.syncFieldJSONStatsFromLoadInfo(ctx, loadInfo)
+				if physicalLoadTiming != nil {
+					physicalLoadTiming.SyncJSONStats = time.Since(startedAt)
+				}
+			}
+		} else {
+			err = segment.Load(ctx)
+		}
+		if err != nil {
 			return struct{}{}, merr.Wrap(err, "At Load")
 		}
 
@@ -1100,6 +1170,10 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	seg Segment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
+	return loader.loadSegmentWithPlan(ctx, seg, loadInfo, nil)
+}
+
+func (loader *segmentLoader) loadSegmentWithPlan(ctx context.Context, seg Segment, loadInfo *querypb.SegmentLoadInfo, plan *segcore.SegmentLoadPlan) (err error) {
 	segment, ok := seg.(*LocalSegment)
 	if !ok {
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
@@ -1118,7 +1192,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	pkField := GetPkField(collection.Schema())
 
 	if segment.Type() == SegmentTypeSealed {
-		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
+		if err := loader.loadSealedSegment(ctx, loadInfo, segment, plan); err != nil {
 			return err
 		}
 	} else {
@@ -1801,56 +1875,40 @@ func (loader *segmentLoader) estimateSegmentLoadingResourceUsageWithSchema(ctx c
 		mlog.Int64("collectionID", segmentLoadInfos[0].GetCollectionID()),
 	)
 
-	maxFactor := resourceEstimateFactor{
-		memoryUsageFactor:           paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:      paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex:  paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:      paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:    paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		jsonKeyStatsExpansionFactor: paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
-		textIndexExpansionFactor:    paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
-		TieredEvictionEnabled:       paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		externalRawDataFactor:       paramtable.Get().QueryNodeCfg.ExternalCollectionRawDataFactor.GetAsFloat(),
-	}
-	maxSegmentSize := uint64(0)
-	predictMemUsage := uint64(0)
-	predictDiskUsage := uint64(0)
-	var predictGpuMemUsage []uint64
-	mmapFieldCount := 0
+	schemas := make([]*schemapb.CollectionSchema, 0, len(segmentLoadInfos))
 	for _, loadInfo := range segmentLoadInfos {
 		loadSchema := schema
 		if loadSchema == nil {
-			loadSchema = loader.manager.Collection.Get(loadInfo.GetCollectionID()).Schema()
+			collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
+			if collection == nil {
+				return nil, 0, merr.WrapErrCollectionNotFound(loadInfo.GetCollectionID())
+			}
+			loadSchema = collection.Schema()
 		}
-		loadingUsage, err := estimateLoadingResourceUsageOfSegment(loadSchema, loadInfo, maxFactor)
-		if err != nil {
-			logger.Warn(ctx, "failed to estimate max resource usage of segment",
-				mlog.Int64("collectionID", loadInfo.GetCollectionID()),
-				mlog.Int64("segmentID", loadInfo.GetSegmentID()),
-				mlog.Err(err))
-			return nil, 0, err
-		}
-
-		logger.Debug(ctx, "segment resource for loading",
-			mlog.Int64("segmentID", loadInfo.GetSegmentID()),
-			mlog.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(loadingUsage.MemorySize))),
-			mlog.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(loadingUsage.DiskSize))),
-			mlog.Float64("memoryLoadFactor", maxFactor.memoryUsageFactor),
-		)
-		mmapFieldCount += loadingUsage.MmapFieldCount
-		predictDiskUsage += loadingUsage.DiskSize
-		predictMemUsage += loadingUsage.MemorySize
-		predictGpuMemUsage = append(predictGpuMemUsage, loadingUsage.FieldGpuMemorySize...)
-		if loadingUsage.MemorySize > maxSegmentSize {
-			maxSegmentSize = loadingUsage.MemorySize
-		}
+		schemas = append(schemas, loadSchema)
 	}
-
+	total, perSegment, err := loadresource.EstimateSegmentsLoadingResource(ctx, schemas, segmentLoadInfos, loadresource.DefaultSegmentLoadingEstimateOptions(), func(fn func() error) error {
+		_, err := GetDynamicPool().Submit(func() (any, error) { return nil, fn() }).Await()
+		return err
+	})
+	if err != nil {
+		logger.Warn(ctx, "failed to estimate loading resource usage", mlog.Err(err))
+		return nil, 0, err
+	}
+	maxSegmentSize := uint64(0)
+	for i, usage := range perSegment {
+		logger.Debug(ctx, "segment resource for loading",
+			mlog.Int64("segmentID", segmentLoadInfos[i].GetSegmentID()),
+			mlog.Float64("loadingMemoryUsage(MB)", logutil.ToMB(float64(usage.MemoryBytes))),
+			mlog.Float64("loadingDiskUsage(MB)", logutil.ToMB(float64(usage.DiskBytes))),
+		)
+		maxSegmentSize = max(maxSegmentSize, usage.MemoryBytes)
+	}
 	return &ResourceUsage{
-		MemorySize:         predictMemUsage,
-		DiskSize:           predictDiskUsage,
-		MmapFieldCount:     mmapFieldCount,
-		FieldGpuMemorySize: predictGpuMemUsage,
+		MemorySize:         total.MemoryBytes,
+		DiskSize:           total.DiskBytes,
+		MmapFieldCount:     total.MmapFieldCount,
+		FieldGpuMemorySize: total.FieldGPUMemoryBytes,
 	}, maxSegmentSize, nil
 }
 
@@ -2025,15 +2083,6 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfos...)
 	defer loader.unregister(infos...)
 
-	// use full resource in case of whole segment reopen
-	// TODO use calculated resource from segcore after supported
-	requestResourceResult, err := loader.requestResource(ctx, infos...)
-	if err != nil {
-		mlog.Warn(context.TODO(), "reopen segment request resource failed", mlog.Err(err))
-		return err
-	}
-	defer loader.freeRequestResource(requestResourceResult)
-
 	for _, info := range infos {
 		segment := loader.manager.Segment.GetSealed(info.GetSegmentID())
 		if segment == nil {
@@ -2046,15 +2095,8 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 		}
 
 		var err error
-		local, ok := segment.(*LocalSegment)
-		if ok && collection != nil && typeutil.IsExternalCollection(collection.Schema()) &&
-			typeutil.NewStorageColumnResolver(collection.Schema()).IsMilvusTable() &&
-			!deltaSourceUnchanged(local.LoadInfo(), info) {
-			// External refresh may add deletes to the new manifest; replay them
-			// before the new load info is published.
-			err = local.reopen(ctx, info, func() error {
-				return loader.loadDeltalogs(ctx, local, info)
-			})
+		if local, ok := segment.(*LocalSegment); ok {
+			err = loader.reopenWithPreparedPlan(ctx, local, info)
 		} else {
 			err = segment.Reopen(ctx, info)
 		}
@@ -2180,4 +2222,70 @@ func checkSegmentGpuMemSize(fieldGpuMemSizeList []uint64, OverloadedMemoryThresh
 		currentGpuMem[minId] = minGpuMem
 	}
 	return nil
+}
+
+// estimatePlanGPUResources preserves the existing Go GPU feasibility check.
+// It does not reserve devices or infer a placement for native execution.
+func estimatePlanGPUResources(ctx context.Context, schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo) ([]uint64, error) {
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return nil, err
+	}
+	var sizes []uint64
+	for _, index := range info.GetIndexInfos() {
+		if len(index.GetIndexFilePaths()) == 0 || !gpuIndexRequiresGpu(index.GetIndexParams()) {
+			continue
+		}
+		field, err := helper.GetFieldFromID(index.GetFieldID())
+		if err != nil {
+			continue
+		} // Dropped fields are not loaded.
+		usage, err := loadresource.EstimateIndexLoadResource(ctx, field, info, index)
+		if err != nil {
+			return nil, err
+		}
+		sizes = append(sizes, usage.MaxMemoryBytes)
+	}
+	return sizes, nil
+}
+
+// reopenWithPreparedPlan keeps the segment pinned while metadata is prepared,
+// admitted and executed. Stale plans return to the existing request retry path.
+func (loader *segmentLoader) reopenWithPreparedPlan(ctx context.Context, local *LocalSegment, info *querypb.SegmentLoadInfo) error {
+	if !local.ptrLock.PinIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(local.ID())
+	}
+	defer local.ptrLock.Unpin()
+	var reservation requestResourceResult
+	reserved := false
+	defer func() {
+		if reserved {
+			loader.freeRequestResource(reservation)
+		}
+	}()
+
+	if err := prepareIndexLoadParams(info.GetIndexInfos()); err != nil {
+		return err
+	}
+	schema, schemaVersion := local.collection.SchemaAndSegcoreVersion()
+	plan, err := segcore.PrepareSegmentLoadPlan(ctx, local.csegment, schema, schemaVersion, info, false)
+	if err != nil {
+		return err
+	}
+	defer plan.Close()
+	gpu, err := estimatePlanGPUResources(ctx, schema, info)
+	if err != nil {
+		return err
+	}
+	usage := &ResourceUsage{MemorySize: plan.Loading.MemoryBytes, DiskSize: plan.Loading.DiskBytes, MmapFieldCount: plan.Loading.MmapFieldCount, FieldGpuMemorySize: gpu}
+	reservation, err = loader.reserveEstimatedResource(ctx, usage, usage.MemorySize, info)
+	if err != nil {
+		return err
+	}
+	reserved = true
+	var replay func() error
+	if typeutil.IsExternalCollection(schema) && typeutil.NewStorageColumnResolver(schema).IsMilvusTable() && !deltaSourceUnchanged(local.LoadInfo(), info) {
+		replay = func() error { return loader.loadDeltalogs(ctx, local, info) }
+	}
+	return local.reopenWithPlan(ctx, info, replay, plan)
 }

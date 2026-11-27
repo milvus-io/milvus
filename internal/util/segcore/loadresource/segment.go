@@ -21,9 +21,6 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -33,8 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -166,129 +161,29 @@ func ResolveSegmentEstimateLogs(schema *schemapb.CollectionSchema, loadInfo *que
 	return binlogs, deltalogs
 }
 
-func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentFinalEstimateOptions, runner Runner) (SegmentResourceUsage, error) {
-	if schema == nil {
-		return SegmentResourceUsage{}, merr.WrapErrServiceInternalMsg("collection schema is nil")
+// EstimateBytesPerRow resolves external sampled row sizes before native metadata
+// is captured. Keep the supplied value when no row-size sample is available.
+func EstimateBytesPerRow(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo) int64 {
+	if !typeutil.IsExternalCollection(schema) || info.GetNumOfRows() <= 0 || len(info.GetBinlogPaths()) == 0 {
+		return info.GetEstimatedBytesPerRow()
 	}
-	if loadInfo == nil {
-		return SegmentResourceUsage{}, merr.WrapErrServiceInternalMsg("segment load info is nil")
+	var bytes int64
+	for _, group := range info.GetBinlogPaths() {
+		bytes += loadingFieldBinlogMemorySize(group)
 	}
+	return bytes / info.GetNumOfRows()
+}
 
+func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentFinalEstimateOptions, runner Runner) (SegmentResourceUsage, error) {
 	options = options.normalized()
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	core, err := estimateCoreResources(ctx, []*schemapb.CollectionSchema{schema}, []*querypb.SegmentLoadInfo{loadInfo}, options.MmapVectorField, options.MmapScalarField, options.PreferFieldDataWhenIndexHasRawData, true, runner)
 	if err != nil {
 		return SegmentResourceUsage{}, err
 	}
-
-	var inevictable SegmentResourceUsage
-	var evictable SegmentResourceUsage
-	binlogs, deltalogs := ResolveSegmentEstimateLogs(schema, loadInfo)
-	id2Binlogs := make(map[int64]*datapb.FieldBinlog, len(binlogs))
-	for _, fieldBinlog := range binlogs {
-		id2Binlogs[fieldBinlog.GetFieldID()] = fieldBinlog
-	}
-
-	for _, fieldIndexInfo := range loadInfo.GetIndexInfos() {
-		if len(fieldIndexInfo.GetIndexFilePaths()) == 0 {
-			continue
-		}
-
-		fieldID := fieldIndexInfo.GetFieldID()
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			// field might have been dropped, skip its index
-			mlog.Info(ctx, "skip index for dropped field", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()))
-			continue
-		}
-
-		estimate, err := EstimateIndexLoadResourceWithRunner(ctx, fieldSchema, loadInfo, fieldIndexInfo, runner)
-		if err != nil {
-			return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate final resource usage of index, collection %d, segment %d, indexBuildID %d",
-				loadInfo.GetCollectionID(),
-				loadInfo.GetSegmentID(),
-				fieldIndexInfo.GetBuildID())
-		}
-		evictable.MemoryBytes += estimate.FinalMemoryBytes
-		evictable.DiskBytes += estimate.FinalDiskBytes
-
-		if estimate.HasRawData && !options.PreferFieldDataWhenIndexHasRawData {
-			delete(id2Binlogs, fieldID)
-			continue
-		}
-
-		if !typeutil.IsVectorType(fieldSchema.GetDataType()) {
-			continue
-		}
-
-		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.GetIndexParams())
-		if err != nil {
-			return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate final resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
-				loadInfo.GetCollectionID(),
-				loadInfo.GetSegmentID(),
-				fieldIndexInfo.GetBuildID())
-		}
-		if metricType == metric.BM25 {
-			delete(id2Binlogs, fieldID)
-		}
-	}
-
-	for fieldID, fieldBinlog := range id2Binlogs {
-		fieldIDs := fieldBinlog.GetChildFields()
-		if len(fieldIDs) == 0 {
-			fieldIDs = []int64{fieldID}
-		}
-		binlogSize := uint64(fieldBinlogMemorySize(fieldBinlog))
-
-		var containsTimestampField bool
-		var doubleMemoryDataField bool
-		mmapEnabled := true
-		isVectorType := true
-		hasLiveField := false
-		for _, fieldID := range fieldIDs {
-			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-			if err != nil {
-				// field might have been dropped, skip it and continue processing
-				// other fields in the same column group
-				mlog.Info(ctx, "skip binlog for dropped field", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()))
-				continue
-			}
-			hasLiveField = true
-			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			mmapEnabled = mmapEnabled && isDataMmapEnabled(fieldSchema, options)
-			containsTimestampField = containsTimestampField || fieldSchema.GetFieldID() == common.TimeStampField
-			doubleMemoryDataField = doubleMemoryDataField || doubleMemoryDataType(fieldSchema.GetDataType())
-		}
-		if !hasLiveField {
-			continue
-		}
-
-		if containsTimestampField {
-			timestampSize := int64(0)
-			for _, binlog := range fieldBinlog.GetBinlogs() {
-				timestampSize += binlog.GetEntriesNum() * 4
-			}
-			inevictable.MemoryBytes += uint64(2 * timestampSize)
-		}
-
-		if isVectorType {
-			if options.MmapVectorField {
-				evictable.DiskBytes += binlogSize
-			} else {
-				evictable.MemoryBytes += binlogSize
-			}
-			continue
-		}
-
-		if !mmapEnabled {
-			evictable.MemoryBytes += binlogSize
-			if doubleMemoryDataField {
-				evictable.MemoryBytes += binlogSize
-			}
-		} else {
-			evictable.DiskBytes += binlogSize
-		}
-	}
-
+	estimate := core.GetSegments()[0]
+	inevictable := SegmentResourceUsage{MemoryBytes: estimate.GetTimestampMemoryBytes()}
+	evictable := SegmentResourceUsage{MemoryBytes: estimate.GetFinalMemoryBytes(), DiskBytes: estimate.GetFinalDiskBytes()}
+	_, deltalogs := ResolveSegmentEstimateLogs(schema, loadInfo)
 	for _, fieldBinlog := range loadInfo.GetStatslogs() {
 		inevictable.MemoryBytes += uint64(fieldBinlogMemorySize(fieldBinlog))
 	}
@@ -300,7 +195,6 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 		}
 		inevictable.MemoryBytes += uint64(float64(memSize) * expansionFactor)
 	}
-
 	for _, stats := range loadInfo.GetJsonKeyStatsLogs() {
 		size := uint64(math.Ceil(float64(stats.GetMemorySize()) * options.JSONKeyStatsExpansionFactor))
 		if options.MmapJSONStats {
@@ -319,302 +213,105 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 			evictable.MemoryBytes += indexFileBytes
 		}
 	}
-
 	return SegmentResourceUsage{
 		MemoryBytes: inevictable.MemoryBytes + applyTieredRatio(evictable.MemoryBytes, options.TieredEvictionEnabled, options.TieredEvictableMemoryCacheRatio),
 		DiskBytes:   inevictable.DiskBytes + applyTieredRatio(evictable.DiskBytes, options.TieredEvictionEnabled, options.TieredEvictableDiskCacheRatio),
 	}, nil
 }
 
-// EstimateSegmentLoadingResource estimates the resource usage of the segment when loading.
-// It returns different results depending on whether tiered eviction is enabled:
-//   - when tiered eviction is enabled, the result is the max resource usage of the segment
-//     that cannot be managed by caching layer, which should be a subset of the segment inevictable part
-//   - when tiered eviction is disabled, the result is the max resource usage of both
-//     the segment evictable and inevictable part
+// EstimateSegmentLoadingResource is the single-segment form of the batch estimate.
 func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentLoadingEstimateOptions, runner Runner) (SegmentResourceUsage, error) {
-	var segMemoryLoadingSize, segDiskLoadingSize uint64
-	var indexMemorySize uint64
-	var fieldGPUMemorySize []uint64
+	total, _, err := EstimateSegmentsLoadingResource(ctx, []*schemapb.CollectionSchema{schema}, []*querypb.SegmentLoadInfo{loadInfo}, options, runner)
+	return total, err
+}
 
-	binlogs, deltalogs := ResolveSegmentEstimateLogs(schema, loadInfo)
-	id2Binlogs := lo.SliceToMap(binlogs, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
-		return fieldBinlog.GetFieldID(), fieldBinlog
-	})
-
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+// EstimateSegmentsLoadingResource reserves shared field/index scratch once for
+// the entire load request. Per-segment estimates remain independent upper bounds.
+func EstimateSegmentsLoadingResource(ctx context.Context, schemas []*schemapb.CollectionSchema, loadInfos []*querypb.SegmentLoadInfo, options SegmentLoadingEstimateOptions, runner Runner) (SegmentResourceUsage, []SegmentResourceUsage, error) {
+	core, err := estimateCoreResources(ctx, schemas, loadInfos, options.MmapVectorField, options.MmapScalarField, options.PreferFieldDataWhenIndexHasRawData, false, runner, options)
 	if err != nil {
-		mlog.Warn(ctx, "failed to create schema helper", mlog.String("name", schema.GetName()), mlog.Err(err))
-		return SegmentResourceUsage{}, err
+		return SegmentResourceUsage{}, nil, err
 	}
-	indexedFields := make(map[int64]struct{})
-
-	// PART 1: calculate size of indexes
-	for _, fieldIndexInfo := range loadInfo.IndexInfos {
-		fieldID := fieldIndexInfo.GetFieldID()
-		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
-			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-			if err != nil {
-				// field might have been dropped, skip its index
-				mlog.Info(ctx, "skip index for dropped field", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()))
-				continue
-			}
-			indexedFields[fieldID] = struct{}{}
-
-			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
-
-			estimateResult, err := EstimateIndexLoadResourceWithRunner(ctx, fieldSchema, loadInfo, fieldIndexInfo, runner)
-			if err != nil {
-				return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate loading resource usage of index, collection %d, segment %d, indexBuildID %d",
-					loadInfo.GetCollectionID(),
-					loadInfo.GetSegmentID(),
-					fieldIndexInfo.GetBuildID())
-			}
-
-			if !options.TieredEvictionEnabled {
-				indexMemorySize += estimateResult.MaxMemoryBytes
-				segDiskLoadingSize += estimateResult.MaxDiskBytes
-			}
-
-			if gpuIndexRequiresGpu(fieldIndexInfo.IndexParams) {
-				fieldGPUMemorySize = append(fieldGPUMemorySize, estimateResult.MaxMemoryBytes)
-			}
-
-			// could skip binlog or
-			// could be missing for new field or storage v2 group 0
-			if estimateResult.HasRawData &&
-				!options.PreferFieldDataWhenIndexHasRawData {
-				delete(id2Binlogs, fieldID)
-				continue
-			}
-
-			// BM25 only checks vector datatype
-			// scalar index does not have metrics type key
-			if !isVectorType {
-				continue
-			}
-
-			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
-			if err != nil {
-				return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate loading resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
-					loadInfo.GetCollectionID(),
-					loadInfo.GetSegmentID(),
-					fieldIndexInfo.GetBuildID())
-			}
-			// skip raw data for BM25 index
-			if metricType == metric.BM25 {
-				delete(id2Binlogs, fieldID)
-			}
-		}
+	total := SegmentResourceUsage{}
+	if !options.TieredEvictionEnabled {
+		total.MemoryBytes = core.GetTotal().GetMaxMemoryBytes()
+		total.DiskBytes = core.GetTotal().GetMaxDiskBytes()
 	}
-
-	// PART 2: calculate size of binlogs
-	for fieldID, fieldBinlog := range id2Binlogs {
-		fieldIDs := fieldBinlog.GetChildFields()
-		// legacy default split
-		if len(fieldIDs) == 0 {
-			fieldIDs = []int64{fieldID}
+	perSegment := make([]SegmentResourceUsage, len(loadInfos))
+	for i, loadInfo := range loadInfos {
+		estimate := core.GetSegments()[i]
+		extra := estimateSegmentLoadingExtras(schemas[i], loadInfo, options, estimate.GetTimestampMemoryBytes(), estimate.GetInterimIndexBytes())
+		total.MemoryBytes += extra.MemoryBytes
+		total.DiskBytes += extra.DiskBytes
+		usage := extra
+		if !options.TieredEvictionEnabled {
+			usage.MemoryBytes += estimate.GetMaxMemoryBytes()
+			usage.DiskBytes += estimate.GetMaxDiskBytes()
 		}
-		binlogSize := uint64(loadingFieldBinlogMemorySize(fieldBinlog))
-
-		var supportInterimIndexDataType bool
-		var containsTimestampField bool
-		var doubleMomoryDataField bool
-		var legacyNilSchema bool
-		mmapEnabled := true
-		isVectorType := true
-		hasIndex := true
-
-		for _, fieldID := range fieldIDs {
-			// get field schema from fieldID
-			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-			if err != nil {
-				// field might have been dropped, skip it and continue processing
-				// other fields in the same column group
-				mlog.Info(ctx, "skip binlog for dropped field", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()))
-				continue
-			}
-			if _, ok := indexedFields[fieldID]; !ok {
-				hasIndex = false
-			}
-
-			// missing mapping, shall be "0" group for storage v2
-			if fieldSchema == nil {
-				if !options.TieredEvictionEnabled {
-					segMemoryLoadingSize += binlogSize
-				}
-				legacyNilSchema = true
-				break
-			}
-
-			supportInterimIndexDataType = supportInterimIndexDataType || supportInterimIndexDataTypeForLoading(fieldSchema.GetDataType())
-			isVectorType = isVectorType && typeutil.IsVectorType(fieldSchema.GetDataType())
-			mmapEnabled = mmapEnabled && isLoadingDataMmapEnabled(fieldSchema, options)
-			containsTimestampField = containsTimestampField || fieldSchema.GetFieldID() == common.TimeStampField
-			doubleMomoryDataField = doubleMomoryDataField || doubleMemoryDataType(fieldSchema.GetDataType())
-		}
-		// legacy v2 segment without children
-		if legacyNilSchema {
-			continue
-		}
-
-		if !hasIndex {
-			if !options.TieredEvictionEnabled {
-				interimIndexEnable := options.EnableInterimSegmentIndex && !options.GrowingMmapEnabled && supportInterimIndexDataType
-				if interimIndexEnable {
-					segMemoryLoadingSize += uint64(float64(binlogSize) * options.TempSegmentIndexFactor)
-				}
-			}
-		}
-
-		if isVectorType {
-			if options.MmapVectorField {
-				if !options.TieredEvictionEnabled {
-					segDiskLoadingSize += binlogSize
-				}
-			} else {
-				if !options.TieredEvictionEnabled {
-					segMemoryLoadingSize += binlogSize
-				}
-			}
-			continue
-		}
-
-		// timestamp field double in InsertRecord & TimestampIndex
-		if containsTimestampField {
-			timestampSize := lo.SumBy(fieldBinlog.GetBinlogs(), func(binlog *datapb.Binlog) int64 {
-				return binlog.GetEntriesNum() * 4
-			})
-			segMemoryLoadingSize += 2 * uint64(timestampSize)
-		}
-
-		if !mmapEnabled {
-			if !options.TieredEvictionEnabled {
-				segMemoryLoadingSize += binlogSize
-				if doubleMomoryDataField {
-					segMemoryLoadingSize += binlogSize
-				}
-			}
-		} else {
-			if !options.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(loadingFieldBinlogMemorySize(fieldBinlog))
-			}
-		}
+		usage.MmapFieldCount = int(estimate.GetMmapFieldCount())
+		usage.FieldGPUMemoryBytes = estimate.GetFieldGpuMemoryBytes()
+		total.MmapFieldCount += usage.MmapFieldCount
+		total.FieldGPUMemoryBytes = append(total.FieldGPUMemoryBytes, usage.FieldGPUMemoryBytes...)
+		perSegment[i] = usage
 	}
+	return total, perSegment, nil
+}
 
-	// PART 2.5: external segment adjustments
-	//
-	// External segments carry pre-computed MemorySize in fake binlogs (from
-	// DataNode Take sampling). Adjust the memory estimate for two external-
-	// specific behaviors:
-	//   1. Non-lazy path without tiered eviction: apply ExternalRawDataFactor
-	//      to cover the peak transient memory during download + decompress +
-	//      Arrow deserialize (normal packed segments do not have this peak
-	//      because their binlogs are already in Arrow IPC format). When tiered
-	//      eviction is enabled, the caching layer reserves this loading
-	//      overhead, so Go must not reserve the same raw-data margin again.
-	//   2. When raw-data loading can be skipped: subtract the raw data size
-	//      that PART 2 added.
-	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
-	// so the tiered-cache layer sizes chunks correctly.
+// Stats and policy margins are independent of segcore's
+// field/index allocation and shared streaming reservations.
+func estimateSegmentLoadingExtras(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, options SegmentLoadingEstimateOptions, timestampBytes, interimIndexBytes uint64) SegmentResourceUsage {
+	usage := SegmentResourceUsage{MemoryBytes: timestampBytes}
+	if !options.TieredEvictionEnabled && options.EnableInterimSegmentIndex && !options.GrowingMmapEnabled {
+		usage.MemoryBytes += uint64(float64(interimIndexBytes) * options.TempSegmentIndexFactor)
+	}
+	binlogs, deltalogs := ResolveSegmentEstimateLogs(schema, loadInfo)
 	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
 		var fakeBinlogMemSize int64
 		for _, fb := range binlogs {
 			fakeBinlogMemSize += loadingFieldBinlogMemorySize(fb)
 		}
-		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
-
-		if canSkipExternalRawDataLoading(schema, indexedFields, loadInfo.GetTextStatsLogs(), options) {
-			// No raw-data loading is budgeted. Undo PART 2's rawSize addition.
-			// Safety factor does not apply: no peak to cover.
-			if segMemoryLoadingSize >= uint64(fakeBinlogMemSize) {
-				segMemoryLoadingSize -= uint64(fakeBinlogMemSize)
-			} else {
-				segMemoryLoadingSize = 0
-			}
-		} else if !options.TieredEvictionEnabled {
-			if factor := options.ExternalRawDataFactor; factor > 1.0 {
-				// Non-lazy -> add peak margin on top of rawSize that PART 2 added.
-				segMemoryLoadingSize += uint64(float64(fakeBinlogMemSize) * (factor - 1.0))
-			}
+		if !externalRawDataLoadingCanBeSkipped(schema, loadInfo, options) && !options.TieredEvictionEnabled && options.ExternalRawDataFactor > 1 {
+			usage.MemoryBytes += uint64(float64(fakeBinlogMemSize) * (options.ExternalRawDataFactor - 1))
 		}
 	}
-
-	// PART 3: calculate size of stats data
-	// stats data isn't managed by the caching layer, so its size should always be included,
-	// regardless of the tiered eviction value
+	// Stats and deletes are not managed by the evictable caching layer.
 	for _, fieldBinlog := range loadInfo.GetStatslogs() {
-		segMemoryLoadingSize += uint64(loadingFieldBinlogMemorySize(fieldBinlog))
+		usage.MemoryBytes += uint64(loadingFieldBinlogMemorySize(fieldBinlog))
 	}
-
-	// PART 4: calculate size of delete data
-	// delete data isn't managed by the caching layer, so its size should always be included,
-	// regardless of the tiered eviction value
 	for _, fieldBinlog := range deltalogs {
-		// MemorySize of filedBinlog is the actual size in memory, but we should also consider
-		// the memcpy from golang to cpp side, so the expansionFactor is set to 2.
-		expansionFactor := float64(2)
+		expansionFactor := float64(2) // Go and C++ delete buffers coexist.
 		memSize := loadingFieldBinlogMemorySize(fieldBinlog)
-
-		// Note: If MemorySize == DiskSize, it means the segment comes from Milvus 2.3,
-		//   MemorySize is actually compressed DiskSize of deltalog, so we'll fallback to use
-		//   deltaExpansionFactor to compromise the compression ratio.
 		if memSize == loadingFieldBinlogDiskSize(fieldBinlog) {
 			expansionFactor = options.DeltaDataExpansionFactor
 		}
-		segMemoryLoadingSize += uint64(float64(memSize) * expansionFactor)
+		usage.MemoryBytes += uint64(float64(memSize) * expansionFactor)
 	}
-
-	// PART 5: calculate size of json key stats data
-	for _, jsonKeyStats := range loadInfo.GetJsonKeyStatsLogs() {
-		if options.MmapJSONStats {
-			if !options.TieredEvictionEnabled {
-				segDiskLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * options.JSONKeyStatsExpansionFactor)
-			}
-		} else {
-			if !options.TieredEvictionEnabled {
-				segMemoryLoadingSize += uint64(float64(jsonKeyStats.GetMemorySize()) * options.JSONKeyStatsExpansionFactor)
-			}
-		}
-	}
-
-	// per struct memory size, used to keep mapping between row id and element id
-	var structArrayOffsetsSize uint64
-	// PART 6: calculate size of struct array offsets
-	// The memory size is 4 * row_count + 4 * total_element_count
-	// We cannot easily get the element count, so we estimate it by the row count * 10
 	rowCount := uint64(loadInfo.GetNumOfRows())
 	for range len(schema.GetStructArrayFields()) {
-		structArrayOffsetsSize += 4*rowCount + 4*rowCount*10
+		usage.MemoryBytes += 4*rowCount + 4*rowCount*10
 	}
-
-	// PART 7: calculate size of text index stats data
-	// text index data is managed by the caching layer when tiered eviction is enabled,
-	// so it only needs to be included when tiered eviction is disabled.
-	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
-	// memory_size is the sum of uploaded Tantivy index files, including sparse null sidecars.
-	// The materialized word-aligned validity bitmap is separate heap memory, and
-	// TextIndexExpansionFactor applies only to the index file bytes.
-	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
-	for _, textStats := range loadInfo.GetTextStatsLogs() {
-		if options.TieredEvictionEnabled {
-			continue
-		}
-
-		indexFileBytes := uint64(float64(textStats.GetMemorySize()) * options.TextIndexExpansionFactor)
-		segMemoryLoadingSize += validityBitmapBytes
-		if options.MmapScalarField {
-			segDiskLoadingSize += indexFileBytes
+	if options.TieredEvictionEnabled {
+		return usage
+	}
+	for _, stats := range loadInfo.GetJsonKeyStatsLogs() {
+		size := uint64(float64(stats.GetMemorySize()) * options.JSONKeyStatsExpansionFactor)
+		if options.MmapJSONStats {
+			usage.DiskBytes += size
 		} else {
-			segMemoryLoadingSize += indexFileBytes
+			usage.MemoryBytes += size
 		}
 	}
-
-	return SegmentResourceUsage{
-		MemoryBytes:         segMemoryLoadingSize + indexMemorySize + structArrayOffsetsSize,
-		DiskBytes:           segDiskLoadingSize,
-		FieldGPUMemoryBytes: fieldGPUMemorySize,
-	}, nil
+	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	for _, stats := range loadInfo.GetTextStatsLogs() {
+		size := uint64(float64(stats.GetMemorySize()) * options.TextIndexExpansionFactor)
+		usage.MemoryBytes += validityBitmapBytes
+		if options.MmapScalarField {
+			usage.DiskBytes += size
+		} else {
+			usage.MemoryBytes += size
+		}
+	}
+	return usage
 }
 
 func (options SegmentFinalEstimateOptions) normalized() SegmentFinalEstimateOptions {
@@ -634,33 +331,6 @@ func (options SegmentFinalEstimateOptions) normalized() SegmentFinalEstimateOpti
 		options.TieredEvictableDiskCacheRatio = 1
 	}
 	return options
-}
-
-func isDataMmapEnabled(field *schemapb.FieldSchema, options SegmentFinalEstimateOptions) bool {
-	if enabled, ok := common.IsMmapDataEnabled(field.GetTypeParams()...); ok {
-		return enabled
-	}
-	if typeutil.IsVectorType(field.GetDataType()) {
-		return options.MmapVectorField
-	}
-	return options.MmapScalarField
-}
-
-func isLoadingDataMmapEnabled(field *schemapb.FieldSchema, options SegmentLoadingEstimateOptions) bool {
-	enableMmap, exist := common.IsMmapDataEnabled(field.GetTypeParams()...)
-	if exist {
-		return enableMmap
-	}
-	if typeutil.IsVectorType(field.GetDataType()) {
-		return options.MmapVectorField
-	}
-	return options.MmapScalarField
-}
-
-func doubleMemoryDataType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_String ||
-		dataType == schemapb.DataType_VarChar ||
-		dataType == schemapb.DataType_JSON
 }
 
 func supportInterimIndexDataTypeForLoading(dataType schemapb.DataType) bool {
@@ -721,6 +391,17 @@ func canSkipExternalRawDataLoading(schema *schemapb.CollectionSchema, indexedFie
 	return true
 }
 
+// Resolve usable indexes before deciding whether external raw reads are optional.
+func externalRawDataLoadingCanBeSkipped(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo, options SegmentLoadingEstimateOptions) bool {
+	indexedFields := make(map[int64]struct{}, len(info.GetIndexInfos()))
+	for _, index := range info.GetIndexInfos() {
+		if len(index.GetIndexFilePaths()) != 0 {
+			indexedFields[index.GetFieldID()] = struct{}{}
+		}
+	}
+	return canSkipExternalRawDataLoading(schema, indexedFields, info.GetTextStatsLogs(), options)
+}
+
 func getFieldWarmupPolicyForLoading(field *schemapb.FieldSchema) string {
 	policy, exist := common.GetWarmupPolicy(field.GetTypeParams()...)
 	if exist {
@@ -730,37 +411,6 @@ func getFieldWarmupPolicyForLoading(field *schemapb.FieldSchema) string {
 		return paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.GetValue()
 	}
 	return paramtable.Get().QueryNodeCfg.TieredWarmupScalarField.GetValue()
-}
-
-func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
-	indexParamMap := funcutil.KeyValuePair2Map(indexParams)
-	indexType := indexParamMap[common.IndexTypeKey]
-
-	switch indexType {
-	case "GPU_CAGRA", "GPU_CUVS_CAGRA":
-	case "GPU_BRUTE_FORCE", "GPU_CUVS_BRUTE_FORCE",
-		"GPU_IVF_FLAT", "GPU_CUVS_IVF_FLAT",
-		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ":
-		return true
-	default:
-		return false
-	}
-
-	err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParamMap)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to append prepare load params for gpu index resource check",
-			mlog.String("indexType", indexType),
-			mlog.Err(err))
-	}
-
-	adaptForCPU, ok := indexParamMap["adapt_for_cpu"]
-	if ok {
-		enabled, err := strconv.ParseBool(adaptForCPU)
-		if err == nil && enabled {
-			return false
-		}
-	}
-	return true
 }
 
 func fieldBinlogMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
@@ -806,4 +456,48 @@ func applyTieredRatio(value uint64, enabled bool, ratio float64) uint64 {
 		return value
 	}
 	return uint64(math.Ceil(float64(value) * ratio))
+}
+
+func gpuIndexRequiresGpu(indexParams []*commonpb.KeyValuePair) bool {
+	indexParamMap := funcutil.KeyValuePair2Map(indexParams)
+	indexType := indexParamMap[common.IndexTypeKey]
+
+	switch indexType {
+	case "GPU_CAGRA", "GPU_CUVS_CAGRA":
+	case "GPU_BRUTE_FORCE", "GPU_CUVS_BRUTE_FORCE",
+		"GPU_IVF_FLAT", "GPU_CUVS_IVF_FLAT",
+		"GPU_IVF_PQ", "GPU_CUVS_IVF_PQ":
+		return true
+	default:
+		return false
+	}
+
+	err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParamMap)
+	if err != nil {
+		mlog.Warn(context.TODO(), "failed to append prepare load params for gpu index resource check",
+			mlog.String("indexType", indexType),
+			mlog.Err(err))
+	}
+
+	adaptForCPU, ok := indexParamMap["adapt_for_cpu"]
+	if ok {
+		enabled, err := strconv.ParseBool(adaptForCPU)
+		if err == nil && enabled {
+			return false
+		}
+	}
+	return true
+}
+
+// PreparedLoadingResource applies the existing Go policy and ancillary costs
+// to a native plan estimate. GPU checks are supplied separately by the loader.
+func PreparedLoadingResource(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo, memory, disk, timestamp, interim uint64, mmapCount int) SegmentResourceUsage {
+	options := DefaultSegmentLoadingEstimateOptions()
+	usage := estimateSegmentLoadingExtras(schema, info, options, timestamp, interim)
+	if !options.TieredEvictionEnabled {
+		usage.MemoryBytes += memory
+		usage.DiskBytes += disk
+	}
+	usage.MmapFieldCount = mmapCount
+	return usage
 }

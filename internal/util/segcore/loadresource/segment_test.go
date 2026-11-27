@@ -100,8 +100,8 @@ func TestEstimateSegmentFinalResourceUsesBinlogStatsAndTieredRatio(t *testing.T)
 		expectedMemory uint64
 		expectedDisk   uint64
 	}{
-		{name: "disabled uses full evictable resource", expectedMemory: 778, expectedDisk: 310},
-		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 484, expectedDisk: 78},
+		{name: "disabled uses full evictable resource", expectedMemory: 578, expectedDisk: 310},
+		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 384, expectedDisk: 78},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			usage, err := EstimateSegmentFinalResource(context.Background(), schema, loadInfo, SegmentFinalEstimateOptions{
@@ -252,7 +252,7 @@ func TestEstimateSegmentFinalResourceSkipsDroppedFields(t *testing.T) {
 	}
 
 	t.Run("index", func(t *testing.T) {
-		runnerCalled := false
+		calls := 0
 		usage, err := EstimateSegmentFinalResource(context.Background(), schema, &querypb.SegmentLoadInfo{
 			IndexInfos: []*querypb.FieldIndexInfo{
 				{FieldID: 999, IndexFilePaths: []string{"index"}},
@@ -261,12 +261,12 @@ func TestEstimateSegmentFinalResourceSkipsDroppedFields(t *testing.T) {
 				{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 64}}},
 			},
 		}, SegmentFinalEstimateOptions{}, func(fn func() error) error {
-			runnerCalled = true
+			calls++
 			return fn()
 		})
 
 		require.NoError(t, err)
-		require.False(t, runnerCalled)
+		require.Equal(t, 1, calls)
 		require.EqualValues(t, 64, usage.MemoryBytes)
 		require.Zero(t, usage.DiskBytes)
 	})
@@ -338,8 +338,12 @@ func TestEstimateSegmentLoadingResourceSkipsCAGRAGPUMemoryWhenAdaptForCPU(t *tes
 		},
 	}
 
-	usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{}, func(func() error) error {
-		return nil
+	info, err := buildCLoadIndexInfo(schema.Fields[1], loadInfo, loadInfo.IndexInfos[0])
+	require.NoError(t, err)
+	require.Equal(t, metric.L2, info.GetIndexParams()[common.MetricTypeKey])
+	require.Equal(t, "true", info.GetIndexParams()["adapt_for_cpu"])
+	usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{}, func(fn func() error) error {
+		return fn()
 	})
 
 	require.NoError(t, err)
@@ -399,7 +403,8 @@ func TestEstimateSegmentLoadingResourceKeepsMilvusTableRealPKEager(t *testing.T)
 	require.NoError(t, err)
 	require.EqualValues(t, 2000, usage.MemoryBytes)
 	require.Zero(t, usage.DiskBytes)
-	require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+	require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+	require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 }
 
 func TestGpuIndexRequiresGpuLoadOverride(t *testing.T) {
@@ -522,7 +527,7 @@ func TestEstimateSegmentLoadingResourceExternalVectorWarmup(t *testing.T) {
 			}
 			usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{
 				ExternalRawDataFactor: 2,
-			}, func(func() error) error { return nil })
+			}, func(fn func() error) error { return fn() })
 			require.NoError(t, err)
 			var wantMemory uint64
 			if tc.wantRawMemory {
@@ -530,7 +535,8 @@ func TestEstimateSegmentLoadingResourceExternalVectorWarmup(t *testing.T) {
 			}
 			require.Equal(t, wantMemory, usage.MemoryBytes)
 			require.Zero(t, usage.DiskBytes)
-			require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+			require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+			require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 		})
 	}
 }
@@ -598,7 +604,7 @@ func TestEstimateSegmentLoadingResourceExternalMandatoryReads(t *testing.T) {
 			for _, factor := range []float64{1, 2} {
 				usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{
 					ExternalRawDataFactor: factor,
-				}, func(func() error) error { return nil })
+				}, func(fn func() error) error { return fn() })
 				require.NoError(t, err)
 				var wantMemory uint64
 				if tc.structChild != schemapb.DataType_None || tc.geometryCache {
@@ -609,7 +615,8 @@ func TestEstimateSegmentLoadingResourceExternalMandatoryReads(t *testing.T) {
 				}
 				require.Equal(t, wantMemory, usage.MemoryBytes, "raw-data factor %v", factor)
 				require.Zero(t, usage.DiskBytes)
-				require.EqualValues(t, 100, loadInfo.GetEstimatedBytesPerRow())
+				require.EqualValues(t, 100, EstimateBytesPerRow(schema, loadInfo))
+				require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 			}
 		})
 	}
@@ -636,8 +643,8 @@ func TestEstimateSegmentLoadingResourceExternalInterimReads(t *testing.T) {
 			{name: "growing_mmap_disables_interim", dataType: schemapb.DataType_FloatVector, nullable: true, growingMmap: true},
 			{name: "unsupported_binary", dataType: schemapb.DataType_BinaryVector},
 			{name: "unsupported_int8", dataType: schemapb.DataType_Int8Vector},
-			// The mixed fake group still gets PART 2's interim margin, but no raw warmup.
-			{name: "usable_index_keeps_field_disabled", dataType: schemapb.DataType_FloatVector, nullable: true, indexFiles: []string{"index"}, wantMemory: 1150},
+			// A usable index and disabled warmup require no raw or interim loading.
+			{name: "usable_index_keeps_field_disabled", dataType: schemapb.DataType_FloatVector, nullable: true, indexFiles: []string{"index"}, wantMemory: 0},
 		} {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
 				vector := &schemapb.FieldSchema{
@@ -673,11 +680,12 @@ func TestEstimateSegmentLoadingResourceExternalInterimReads(t *testing.T) {
 					GrowingMmapEnabled:        tc.growingMmap,
 					TempSegmentIndexFactor:    1.15,
 					ExternalRawDataFactor:     2,
-				}, func(func() error) error { return nil })
+				}, func(fn func() error) error { return fn() })
 				require.NoError(t, err)
 				require.Equal(t, tc.wantMemory, usage.MemoryBytes)
 				require.Zero(t, usage.DiskBytes)
-				require.EqualValues(t, 1000, loadInfo.GetEstimatedBytesPerRow())
+				require.EqualValues(t, 1000, EstimateBytesPerRow(schema, loadInfo))
+				require.Zero(t, loadInfo.GetEstimatedBytesPerRow())
 			})
 		}
 	}
@@ -724,12 +732,12 @@ func TestEstimateSegmentLoadingResourceExternalTextMatchReads(t *testing.T) {
 				for _, factor := range []float64{1, 2} {
 					usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{ExternalRawDataFactor: factor}, nil)
 					require.NoError(t, err)
-					// VarChar retains the existing double-memory charge; Text does not.
+					// VarChar needs the double-memory charge only when raw data is read.
 					var raw uint64 = 1000
 					if tc.dataType == schemapb.DataType_VarChar {
 						raw *= 2
 					}
-					want := raw - 1000
+					var want uint64
 					if tc.enableMatch && !tc.hasStats {
 						want = raw + uint64(1000*(factor-1))
 					}
@@ -742,4 +750,70 @@ func TestEstimateSegmentLoadingResourceExternalTextMatchReads(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestEstimateSegmentsLoadingResourceUsesOneCoreCall(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:   "batch_resource",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}
+	infos := []*querypb.SegmentLoadInfo{
+		{SegmentID: 1, BinlogPaths: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 80, LogSize: 80, EntriesNum: 10}}}}, Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 30}}}}},
+		{SegmentID: 2, BinlogPaths: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{MemorySize: 160, LogSize: 160, EntriesNum: 20}}}}, Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 40}}}}},
+	}
+	for _, tiered := range []bool{false, true} {
+		calls := 0
+		total, segments, err := EstimateSegmentsLoadingResource(context.Background(), []*schemapb.CollectionSchema{schema, schema}, infos, SegmentLoadingEstimateOptions{TieredEvictionEnabled: tiered}, func(fn func() error) error { calls++; return fn() })
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+		require.Len(t, segments, 2)
+		require.LessOrEqual(t, total.MemoryBytes, segments[0].MemoryBytes+segments[1].MemoryBytes)
+		if tiered {
+			require.EqualValues(t, 70, total.MemoryBytes)
+			require.EqualValues(t, 30, segments[0].MemoryBytes)
+			require.EqualValues(t, 40, segments[1].MemoryBytes)
+		} else {
+			require.GreaterOrEqual(t, total.MemoryBytes, uint64(80+160+70))
+		}
+	}
+}
+
+func TestEstimateSegmentsLoadingResourceValidatesInput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "empty"}
+	for _, test := range []struct {
+		name    string
+		schemas []*schemapb.CollectionSchema
+		infos   []*querypb.SegmentLoadInfo
+	}{
+		{name: "count mismatch", schemas: []*schemapb.CollectionSchema{schema}},
+		{name: "nil schema", schemas: []*schemapb.CollectionSchema{nil}, infos: []*querypb.SegmentLoadInfo{{}}},
+		{name: "nil segment", schemas: []*schemapb.CollectionSchema{schema}, infos: []*querypb.SegmentLoadInfo{nil}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := EstimateSegmentsLoadingResource(context.Background(), test.schemas, test.infos, SegmentLoadingEstimateOptions{}, func(fn func() error) error { t.Fatal("invalid metadata must not reach segcore"); return nil })
+			require.Error(t, err)
+		})
+	}
+	total, segments, err := EstimateSegmentsLoadingResource(context.Background(), nil, nil, SegmentLoadingEstimateOptions{}, func(fn func() error) error { t.Fatal("empty batch must not reach segcore"); return nil })
+	require.NoError(t, err)
+	require.Zero(t, total.MemoryBytes)
+	require.Empty(t, segments)
+}
+
+func TestEstimateSegmentsLoadingResourcePropagatesRunnerFailure(t *testing.T) {
+	_, _, err := EstimateSegmentsLoadingResource(context.Background(), []*schemapb.CollectionSchema{{Name: "runner_failure"}}, []*querypb.SegmentLoadInfo{{}}, SegmentLoadingEstimateOptions{}, func(fn func() error) error { return context.Canceled })
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestEstimateBytesPerRowWithoutSample(t *testing.T) {
+	external := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, ExternalField: "value", DataType: schemapb.DataType_Int64}}}
+	info := &querypb.SegmentLoadInfo{NumOfRows: 10, EstimatedBytesPerRow: 73}
+	require.EqualValues(t, 73, EstimateBytesPerRow(external, info))
+	info.BinlogPaths = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{MemorySize: 1000}}}}
+	require.EqualValues(t, 73, EstimateBytesPerRow(&schemapb.CollectionSchema{}, info))
+	info.NumOfRows = 0
+	require.EqualValues(t, 73, EstimateBytesPerRow(external, info))
+	info.NumOfRows = 10
+	require.EqualValues(t, 100, EstimateBytesPerRow(external, info))
+	require.EqualValues(t, 73, info.GetEstimatedBytesPerRow())
 }

@@ -838,18 +838,15 @@ class SegmentLoadInfo {
 
     // ==================== Column Groups Cache ====================
 
-    /**
-     * @brief Get column groups from manifest (lazy-cached, thread-compatible)
-     * @return Shared pointer to ColumnGroups, nullptr if manifest is empty
-     *
-     * The cache is populated on first access. Callers are responsible for
-     * serializing concurrent first-time calls on the same instance.
-     * ChunkedSegmentSealedImpl publishes loaded manifest snapshots only after
-     * this cache is initialized, so query paths only read the cached value via
-     * HasManifestColumn.
-     */
+    // Read already prepared metadata; never performs I/O. A manifest-backed
+    // instance must have completed LoadPlanningMetadata before this call.
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
+
+    // Resolve manifest metadata explicitly. First-time calls on the same
+    // instance must be serialized; published instances are already prepared.
+    std::shared_ptr<milvus_storage::api::ColumnGroups>
+    LoadPlanningMetadata() const;
 
     // Bind the logical layout to this immutable manifest revision before diffing
     // or publishing its reader. Legacy manifests keep identity mapping.
@@ -1361,7 +1358,7 @@ class SegmentLoadInfo {
     std::map<FieldId, const proto::segcore::FieldBinlog*> field_binlog_cache_;
 
     // Cache for column groups metadata (used with manifest mode). Mutable so
-    // GetColumnGroups() can be const — the cache is a memoization of an
+    // LoadPlanningMetadata() can be const — the cache is a memoization of an
     // immutable manifest path.
     mutable std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
 

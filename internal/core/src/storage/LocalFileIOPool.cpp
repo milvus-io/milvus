@@ -162,6 +162,12 @@ LocalFileIOPool::GetExecutor() const {
     return folly::getKeepAliveToken(executor_.get());
 }
 
+size_t
+LocalFileIOPool::GetWorkerCount() const {
+    std::lock_guard lock(executor_mutex_);
+    return executor_ == nullptr ? 0 : executor_->numThreads();
+}
+
 LocalFileIOPool::WritePermit
 LocalFileIOPool::AcquireWritePermit() {
     // Keep the default (unlimited) path free of global mutex contention.

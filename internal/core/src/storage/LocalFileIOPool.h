@@ -84,6 +84,10 @@ class LocalFileIOPool {
     [[nodiscard]] folly::Executor::KeepAlive<>
     GetExecutor() const;
 
+    // Snapshot of executor workers; zero when the dedicated pool is disabled.
+    [[nodiscard]] size_t
+    GetWorkerCount() const;
+
     // Blocks until a configured disk-write slot is available. An empty permit
     // represents the unlimited configuration and requires no release work.
     [[nodiscard]] WritePermit

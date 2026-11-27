@@ -258,6 +258,38 @@ TEST_F(SegmentLoadInfoTest, MoveConstructor) {
     EXPECT_EQ(info2.GetNumOfRows(), 10000);
 }
 
+TEST_F(SegmentLoadInfoTest, IndexMmapAcceptsGoBooleanAliases) {
+    for (const auto field_id : {100, 101}) {
+        auto* index = proto_.add_index_infos();
+        index->set_fieldid(field_id);
+        auto* type = index->add_index_params();
+        type->set_key("index_type");
+        type->set_value(field_id == 100 ? "STL_SORT" : "IVF_SQ8");
+        auto* setting = index->add_index_params();
+        setting->set_key("mmap.enabled");
+        for (const auto value : {"1",
+                                 "t",
+                                 "T",
+                                 "true",
+                                 "TRUE",
+                                 "True",
+                                 "0",
+                                 "f",
+                                 "F",
+                                 "false",
+                                 "FALSE",
+                                 "False"}) {
+            SCOPED_TRACE(value);
+            setting->set_value(value);
+            SegmentLoadInfo info(proto_, schema_);
+            const auto load = info.ConvertFieldIndexInfoToLoadIndexInfo(
+                index, proto_.segmentid(), LoadFieldsFor(schema_));
+            EXPECT_EQ(load.enable_mmap,
+                      value[0] == '1' || value[0] == 't' || value[0] == 'T');
+        }
+    }
+}
+
 TEST_F(SegmentLoadInfoTest, CopyAssignment) {
     SegmentLoadInfo info1(proto_, schema_);
     proto::segcore::SegmentLoadInfo empty_proto;
