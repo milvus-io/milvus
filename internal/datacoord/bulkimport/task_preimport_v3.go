@@ -186,14 +186,11 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble preimport v3 request failed", WrapTaskLog(p, mlog.Err(err))...)
-		if errors.Is(err, errSnapshotTaskSource) {
-			if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
-				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to mark preimport v3 job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
-			}
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
 			return
 		}
-		p.retryTimes++
+		p.Fail(err.Error())
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)

@@ -220,6 +220,10 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	pluginContext, err := meta.GetImportPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), job.GetOptions())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return
+		}
+		t.Fail(err.Error())
 		return
 	}
 	cfg := getImportV3Config()

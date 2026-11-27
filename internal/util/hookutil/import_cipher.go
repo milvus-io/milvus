@@ -49,8 +49,8 @@ func registerTargetTaskKey(context *indexcgopb.StoragePluginContext) error {
 
 // PrepareImportCipher validates the entire ordered wire context before making
 // target keys visible. Source files carry their own collection ID in the EDEK
-// metadata and are decrypted statelessly via GetDecryptorForKeyset; the
-// destination collection ID belongs only to the writer.
+// metadata and are decrypted statelessly by the C++ reader using the bound
+// source keyset; the destination collection ID belongs only to the writer.
 func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyValuePair, collectionID int64) (ImportCipherContext, error) {
 	var sourceEZ int64
 	if artifact != "" {
@@ -111,7 +111,7 @@ func PrepareImportCipher(artifact string, properties, entries []*commonpb.KeyVal
 	if (result.Source != nil || result.Target != nil) && !IsClusterEncryptionEnabled() {
 		return ImportCipherContext{}, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted import")
 	}
-	// Only register the authoritative target zone; source decryption is stateless via GetDecryptorForKeyset.
+	// Only register the authoritative target zone; source decryption is stateless in C++ using result.Source.
 	if err := registerTargetTaskKey(result.Target); err != nil {
 		return ImportCipherContext{}, err
 	}

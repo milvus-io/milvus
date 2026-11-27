@@ -17,6 +17,7 @@
 package hookutil
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -150,7 +151,7 @@ func BackupEZ(ezID int64) (string, error) {
 		return "", errCipherPluginMissing
 	}
 
-	backupProvider, ok := cipher.(EZBackupCipher)
+	backupProvider, ok := cipher.(BackupInterface)
 	if !ok {
 		return "", merr.WrapErrServiceInternalMsg("cipher plugin does not support backup operation")
 	}
@@ -221,13 +222,14 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	if cipher == nil {
 		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted backup")
 	}
-	resolver, ok := cipher.(EZBackupCipher)
+	resolver, ok := cipher.(ImportEZResolver)
 	if !ok {
 		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support ResolveImportEZ")
 	}
 	ezID, key, err := resolver.ResolveImportEZ(artifact)
 	if err != nil {
-		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) && isTemporaryError(err) {
+		if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+			(errors.Is(err, context.DeadlineExceeded) || isTemporaryError(err)) {
 			return nil, merr.WrapErrServiceUnavailableErr(err, "resolve backup EZK")
 		}
 		return nil, merr.Wrap(err, "resolve backup EZK")

@@ -140,13 +140,6 @@ func (s *CipherSuite) TestGetTestCipher() {
 	s.NoError(err)
 	s.Equal(plainText, gotPlainText)
 
-	statelessDecryptor, err := cipher.(testCipher).GetDecryptorForKeyset(ezID, collectionID, []byte("keyset"), safeKey)
-	s.NoError(err)
-	s.NotNil(statelessDecryptor)
-	gotPlainText, err = statelessDecryptor.Decrypt(cipherText)
-	s.NoError(err)
-	s.Equal(plainText, gotPlainText)
-
 	// test GetUnsafeKey
 	s.Equal([]byte("unsafe key"), GetCipher().GetUnsafeKey(1, 2))
 }
