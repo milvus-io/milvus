@@ -13,9 +13,14 @@ package hardware
 
 import (
 	"context"
+	"math"
+	"os"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -35,6 +40,44 @@ func Test_GetMemoryCount(t *testing.T) {
 		mlog.Uint64("MemoryCount", GetMemoryCount()))
 
 	assert.NotZero(t, GetMemoryCount())
+}
+
+func TestGetMemoryCountWarnings(t *testing.T) {
+	const hostMemory = uint64(16 << 30)
+	cases := []struct {
+		name  string
+		limit uint64
+		err   error
+	}{
+		{name: "unlimited", limit: math.MaxUint64},
+		{name: "above_host", limit: hostMemory * 2},
+		{name: "container_read_error", err: os.ErrPermission},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Keep the package's background memory watcher outside these mocks.
+			hostMock := mockey.Mock(mem.VirtualMemory).IncludeCurrentGoRoutine().Return(&mem.VirtualMemoryStat{Total: hostMemory}, nil).Build()
+			t.Cleanup(func() { hostMock.UnPatch() })
+			containerMock := mockey.Mock(getContainerMemLimit).IncludeCurrentGoRoutine().Return(tc.limit, tc.err).Build()
+			t.Cleanup(func() { containerMock.UnPatch() })
+			var warnings []string
+			// Capture the call before rate limiting can suppress it.
+			warnMock := mockey.Mock(mlog.RatedWarn).IncludeCurrentGoRoutine().To(func(_ context.Context, _ rate.Limit, msg string, fields ...mlog.Field) {
+				warnings = append(warnings, msg)
+				if tc.err != nil {
+					assert.Contains(t, fields, mlog.Err(tc.err))
+				}
+			}).Build()
+			t.Cleanup(func() { warnMock.UnPatch() })
+
+			assert.Equal(t, hostMemory, GetMemoryCount())
+			if tc.err == nil {
+				assert.Empty(t, warnings)
+			} else {
+				assert.Equal(t, []string{"failed to get container memory limit"}, warnings)
+			}
+		})
+	}
 }
 
 func Test_GetUsedMemoryCount(t *testing.T) {

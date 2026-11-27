@@ -197,8 +197,11 @@ func TestEquiv_UpsertRequest(t *testing.T) {
 		FieldOps: []*schemapb.FieldPartialUpdateOp{ // field 11 (message) → folded
 			{FieldName: "title"},
 		},
-		RlsPrincipal: "alice", // field 12 (bytes) → folded to official merge
-		SkipRls:      true,    // field 13 (varint) → folded to official merge
+		RlsPrincipal: "principal", // field 12 (bytes)  → folded to official merge
+		SkipRls:      true,        // field 13 (varint) → folded to official merge
+		WriteCondition: &milvuspb.WriteCondition{
+			Field: "version", Op: milvuspb.WriteCondition_GTE, OnMissing: milvuspb.WriteCondition_SKIP_IF_MISSING,
+		},
 		FieldsData: []*schemapb.FieldData{
 			{Type: schemapb.DataType_VarChar, FieldName: "title", FieldId: 101, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x", "y", "z"}}}}}},
 			{Type: schemapb.DataType_FloatVector, FieldName: "emb", FieldId: 102, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}},
@@ -263,6 +266,13 @@ func randUpsertRequest(r *rand.Rand) *milvuspb.UpsertRequest {
 			FieldName: randString(r),
 			Op:        schemapb.FieldPartialUpdateOp_OpType(r.Intn(2)),
 		})
+	}
+	if r.Intn(2) == 0 {
+		ur.WriteCondition = &milvuspb.WriteCondition{
+			Field:     randString(r),
+			Op:        milvuspb.WriteCondition_Op(r.Intn(3)),
+			OnMissing: milvuspb.WriteCondition_MissingRowPolicy(r.Intn(3)),
+		}
 	}
 	return ur
 }

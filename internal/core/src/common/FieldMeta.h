@@ -107,16 +107,60 @@ class FieldMeta {
               DataType type,
               DataType element_type,
               bool nullable,
+              bool element_nullable,
               std::optional<DefaultValueType> default_value,
-              std::string external_field_mapping = "")
+              std::string external_field_mapping = "",
+              std::optional<milvus::proto::schema::TypeSchema> type_schema =
+                  std::nullopt,
+              TypeParams type_params = {})
         : name_(std::move(name)),
           id_(id),
           type_(type),
           element_type_(element_type),
           nullable_(nullable),
+          element_nullable_(element_nullable),
           default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)) {
-        Assert(IsArrayDataType(type_));
+          external_field_mapping_(std::move(external_field_mapping)),
+          type_schema_(std::move(type_schema)),
+          array_type_params_(std::move(type_params)) {
+        Assert(type_ == DataType::ARRAY);
+        AssertInfo(element_type_ != DataType::ARRAY || type_schema_.has_value(),
+                   "nested ARRAY field {} requires type_schema",
+                   name_.get());
+        if (type_schema_.has_value()) {
+            AssertInfo(
+                type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
+                "type_schema is only supported for nested ARRAY "
+                "FieldMeta");
+            ValidateNestedTypeSchema(*type_schema_, name_.get());
+
+            AssertInfo(type_schema_->nullable() == nullable_,
+                       "nested ARRAY field {} root nullable does not match "
+                       "FieldSchema.nullable",
+                       name_.get());
+            AssertInfo(
+                type_schema_->array_element().nullable() == element_nullable_,
+                "nested ARRAY field {} element nullable does not "
+                "match FieldSchema.element_nullable",
+                name_.get());
+        } else if (element_nullable_) {
+            ValidateArrayLeafType(element_type_, name_.get());
+            proto::schema::TypeSchema type;
+            type.set_nullable(nullable_);
+            auto* leaf = type.mutable_array_element();
+            leaf->set_leaf_type(ToProtoDataType(element_type_));
+            leaf->set_nullable(true);
+            for (const auto& [key, value] : array_type_params_) {
+                if (key != MAX_LENGTH && key != "max_capacity") {
+                    continue;
+                }
+                auto* param =
+                    (key == MAX_LENGTH ? leaf : &type)->add_type_params();
+                param->set_key(key);
+                param->set_value(value);
+            }
+            type_schema_ = std::move(type);
+        }
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -136,7 +180,7 @@ class FieldMeta {
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
           default_value_(std::move(default_value)),
           external_field_mapping_(std::move(external_field_mapping)) {
-        Assert(IsVectorDataType(type_));
+        Assert(IsVectorDataType(type_) && type_ != DataType::VECTOR_ARRAY);
         Assert(!default_value_.has_value() &&
                "vector fields do not support default values");
     }
@@ -149,16 +193,20 @@ class FieldMeta {
               int64_t dim,
               std::optional<knowhere::MetricType> metric_type,
               bool nullable,
+              bool element_nullable,
               std::string external_field_mapping = "")
         : name_(std::move(name)),
           id_(id),
           type_(type),
           nullable_(nullable),
           element_type_(element_type),
+          element_nullable_(element_nullable),
           vector_info_(VectorInfo{dim, std::move(metric_type)}),
           external_field_mapping_(std::move(external_field_mapping)) {
         Assert(type_ == DataType::VECTOR_ARRAY);
-        Assert(IsVectorDataType(element_type_));
+        Assert(IsBinaryVectorDataType(element_type_) ||
+               IsDenseFloatVectorDataType(element_type_) ||
+               IsIntVectorDataType(element_type_));
     }
 
     // for json stats shredding column field meta,
@@ -237,6 +285,59 @@ class FieldMeta {
         return element_type_;
     }
 
+    const milvus::proto::schema::TypeSchema&
+    get_array_type_schema() const {
+        Assert(type_ == DataType::ARRAY && is_native_list_array());
+        return *type_schema_;
+    }
+
+    bool
+    is_nested_array() const {
+        return type_ == DataType::ARRAY && element_type_ == DataType::ARRAY;
+    }
+
+    // Whether this Array field uses the Arrow list storage format introduced
+    // for element-level nulls and nested Arrays, as opposed to the legacy
+    // formats. It selects the new storage, load and chunk paths, and it is
+    // the C++ twin of Go typeutil.IsNativeListArrayField.
+    //
+    // True for:
+    //   - element_nullable scalar Array<T>: Arrow list<T>, loaded into
+    //     ColumnarArrayChunk;
+    //   - nested scalar Array<Array<T>>, whichever level is nullable: Arrow
+    //     list<list<T>>, loaded into ColumnarArrayChunk;
+    //   - element_nullable ArrayOfVector: Arrow list<Binary>, a null child is
+    //     a null vector, loaded into VectorArrayChunk.
+    // False for:
+    //   - single-level scalar Array<T> with element_nullable=false: one
+    //     protobuf-serialized ScalarField per row in an Arrow Binary column,
+    //     loaded into ArrayChunk;
+    //   - ArrayOfVector with element_nullable=false: Arrow
+    //     list<FixedSizeBinary>. It is an Arrow list too, but it is the
+    //     released format. VectorArrayChunk loads both vector formats; for
+    //     ArrayOfVector this predicate is equivalent to element_nullable;
+    //   - every non-Array type.
+    //
+    // This is a transitional concept. It only exists because the legacy and
+    // the new Array formats coexist. Once arbitrary Struct/Array nesting is
+    // modeled as a recursive column tree, every Array level will be an Arrow
+    // list with its own offsets and validity, and this predicate should go
+    // away together with the legacy formats.
+    bool
+    is_native_list_array() const {
+        return (type_ == DataType::ARRAY &&
+                (element_nullable_ || is_nested_array())) ||
+               (type_ == DataType::VECTOR_ARRAY && element_nullable_);
+    }
+
+    bool
+    has_nullable_array_element() const {
+        return type_ == DataType::ARRAY && is_native_list_array() &&
+               (element_nullable_ ||
+                (is_nested_array() &&
+                 type_schema_->array_element().array_element().nullable()));
+    }
+
     bool
     is_vector() const {
         return IsVectorDataType(type_);
@@ -255,6 +356,11 @@ class FieldMeta {
     bool
     is_nullable() const {
         return nullable_;
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
     }
 
     bool
@@ -323,6 +429,13 @@ class FieldMeta {
     ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto);
 
  private:
+    static void
+    ValidateNestedTypeSchema(const proto::schema::TypeSchema& type_schema,
+                             const std::string& field_name);
+
+    static void
+    ValidateArrayLeafType(DataType leaf_type, const std::string& field_name);
+
     struct VectorInfo {
         int64_t dim_;
         std::optional<knowhere::MetricType> metric_type_;
@@ -338,6 +451,7 @@ class FieldMeta {
     DataType type_ = DataType::NONE;
     DataType element_type_ = DataType::NONE;
     bool nullable_;
+    bool element_nullable_ = false;
     std::optional<DefaultValueType> default_value_;
     std::optional<VectorInfo> vector_info_;
     std::optional<StringInfo> string_info_;
@@ -345,6 +459,11 @@ class FieldMeta {
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
+    std::optional<milvus::proto::schema::TypeSchema> type_schema_;
+    TypeParams array_type_params_;
 };
+
+std::shared_ptr<arrow::DataType>
+GetArrowDataType(const FieldMeta& field_meta);
 
 }  // namespace milvus

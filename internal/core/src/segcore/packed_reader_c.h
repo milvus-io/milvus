@@ -35,6 +35,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context);
@@ -44,6 +45,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -55,6 +57,11 @@ NewPackedReaderWithProperties(char** paths,
  * @param path The root path of the packed files to read.
  * @param schema The original schema of data.
  * @param buffer_size The max buffer size of the packed reader.
+ * @param eager_prebuffer When true, all byte ranges of a read are fetched
+ *        concurrently instead of one at a time. How far adjacent ranges are
+ *        coalesced is left as configured, so the requests are the ones every
+ *        other reader issues, only together. False keeps the configured lazy
+ *        reads. Same meaning for every NewPackedReader* constructor.
  * @param c_packed_reader The output pointer of the packed reader.
  */
 CStatus
@@ -62,6 +69,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context);
 
@@ -87,6 +95,26 @@ ReadNext(CPackedReader c_packed_reader,
  */
 CStatus
 CloseReader(CPackedReader c_packed_reader);
+
+/**
+ * @brief Read the PARQUET:field_id of every column stored in each packed file.
+ *        Only the parquet footer of each file is read, once per file.
+ *
+ * @param paths The packed files, resolved the same way as NewPackedReader*.
+ * @param c_storage_config The storage config to resolve the filesystem with,
+ *        or NULL for the default filesystem (as NewPackedReader).
+ * @param field_ids Output, malloc'ed: the field ids of all files, concatenated
+ *        in path order. The caller frees it with free().
+ * @param field_counts Output, malloc'ed, num_paths entries: the number of field
+ *        ids of each file. The caller frees it with free().
+ */
+CStatus
+GetPackedFileFieldIDs(char** paths,
+                      int64_t num_paths,
+                      const CStorageConfig* c_storage_config,
+                      CPluginContext* c_plugin_context,
+                      int64_t** field_ids,
+                      int64_t** field_counts);
 
 #ifdef __cplusplus
 }

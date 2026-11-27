@@ -20,9 +20,11 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
@@ -377,4 +379,76 @@ func TestIsStreamIdleTimeout(t *testing.T) {
 
 	// Non-gRPC errors should not match
 	assert.False(t, isStreamIdleTimeout(assert.AnError))
+}
+
+// countingBackOff records how often the reconnect loop resets it and never
+// delays, so a test can drive many reconnects quickly.
+type countingBackOff struct {
+	resets atomic.Int32
+}
+
+func (b *countingBackOff) NextBackOff() time.Duration { return 0 }
+
+func (b *countingBackOff) Reset() { b.resets.Add(1) }
+
+// runReconnects starts a replicate stream client against a target whose stream
+// opens but whose Recv fails with recvErr, lets it reconnect rounds times, and
+// returns how often the backoff was reset in the meantime.
+func runReconnects(t *testing.T, recvErr error, rounds int) int32 {
+	bo := &countingBackOff{}
+	origNewBackOff := newReconnectBackOff
+	newReconnectBackOff = func() backoff.BackOff { return bo }
+	defer func() { newReconnectBackOff = origNewBackOff }()
+
+	done := make(chan struct{})
+	var doneOnce sync.Once
+	var connects atomic.Int32
+	mockMilvusClient := cluster.NewMockMilvusClient(t)
+	mockMilvusClient.EXPECT().CreateReplicateStream(mock.Anything).RunAndReturn(func(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+		if connects.Add(1) >= int32(rounds) {
+			doneOnce.Do(func() { close(done) })
+		}
+		sc := newMockReplicateStreamClient(t)
+		sc.recvError = recvErr
+		return sc, nil
+	}).Maybe()
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	streaming.SetWALForTest(wal)
+
+	channel := &meta.ReplicateChannel{
+		Key: "test-replicate-key",
+		Value: &streamingpb.ReplicatePChannelMeta{
+			SourceChannelName: "test-source-channel",
+			TargetChannelName: "test-target-channel",
+			TargetCluster: &commonpb.MilvusCluster{
+				ClusterId:       "test-cluster",
+				ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530", Token: "test-token"},
+			},
+		},
+	}
+	replicateClient := NewReplicateStreamClient(context.Background(), mockMilvusClient, channel)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("replicate stream client did not reconnect enough times")
+	}
+	replicateClient.Close()
+	return bo.resets.Load()
+}
+
+// The reconnect backoff must keep growing while the target opens the stream but
+// rejects what is sent on it, as a secondary without a replicate configuration
+// does; a reset on every successful CreateReplicateStream would pin the retry
+// interval at its initial value for as long as the target stays unconfigured.
+func TestReplicateStreamClient_BackoffNotResetWhileTargetRejects(t *testing.T) {
+	rejected := status.Error(codes.FailedPrecondition, "cluster has no replicate configuration, cannot receive replicate message")
+	assert.Equal(t, int32(0), runReconnects(t, rejected, 5))
+}
+
+// An idle timeout means the stream was healthy and simply had nothing to carry,
+// so the backoff is reset and the next reconnect is not delayed.
+func TestReplicateStreamClient_BackoffResetAfterIdleTimeout(t *testing.T) {
+	idle := status.Error(codes.Unknown, "rpc error: stream timeout")
+	assert.GreaterOrEqual(t, runReconnects(t, idle, 5), int32(4))
 }

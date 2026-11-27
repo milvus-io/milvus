@@ -17,6 +17,7 @@
 package taskcommon
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,33 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 	taskType, err := props.GetTaskType()
 	assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	assert.Equal(t, "UnknownType", taskType)
+}
+
+func TestProperties_CollectionLabels(t *testing.T) {
+	t.Run("append and get", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCollectionName("docs")
+		props.AppendDatabaseID(7)
+		props.AppendDatabaseName("analytics")
+		assert.Equal(t, "docs", props[CollectionNameKey])
+		assert.Equal(t, "7", props[DatabaseIDKey])
+		assert.Equal(t, "analytics", props[DatabaseNameKey])
+		assert.Equal(t, "docs", props.GetCollectionName())
+		assert.Equal(t, int64(7), props.GetDatabaseID())
+		assert.Equal(t, "analytics", props.GetDatabaseName())
+	})
+
+	t.Run("missing reads as zero values", func(t *testing.T) {
+		props := NewProperties(nil)
+		assert.Equal(t, "", props.GetCollectionName())
+		assert.Equal(t, int64(0), props.GetDatabaseID())
+		assert.Equal(t, "", props.GetDatabaseName())
+	})
+
+	t.Run("invalid database ID reads as zero", func(t *testing.T) {
+		props := NewProperties(map[string]string{DatabaseIDKey: "not_a_number"})
+		assert.Equal(t, int64(0), props.GetDatabaseID())
+	})
 }
 
 func TestProperties_CollectionID(t *testing.T) {
@@ -127,4 +155,69 @@ func TestProperties_CostFields(t *testing.T) {
 		assert.Equal(t, int64(0), props.GetCostTime())
 		assert.Equal(t, int64(0), props.GetCostCPUNum())
 	})
+}
+
+func TestProperties_TaskResource(t *testing.T) {
+	t.Run("round trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendTaskID(1)
+		props.AppendTaskResource(Resource{CPU: 2, Memory: 1 << 30})
+
+		assert.Equal(t, "2", props[CPUKey])
+		assert.Equal(t, "1073741824", props[MemoryKey])
+
+		resource, err := props.GetTaskResource()
+		assert.NoError(t, err)
+		assert.Equal(t, Resource{CPU: 2, Memory: 1 << 30}, resource)
+	})
+
+	t.Run("zero round trip", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendTaskID(1)
+		props.AppendTaskResource(Resource{})
+
+		resource, err := props.GetTaskResource()
+		assert.NoError(t, err)
+		assert.True(t, resource.IsZero())
+	})
+
+	// A coordinator that predates the keys sends neither. CreateTask converts
+	// the empty estimate from its scalar slot at the RPC boundary.
+	t.Run("both keys absent use legacy estimate", func(t *testing.T) {
+		props := NewProperties(map[string]string{TaskIDKey: "1"})
+		resource, err := props.GetTaskResource()
+		assert.NoError(t, err)
+		assert.Equal(t, Resource{}, resource)
+	})
+
+	t.Run("partial resource is malformed", func(t *testing.T) {
+		for _, key := range []string{CPUKey, MemoryKey} {
+			props := Properties{TaskIDKey: "1", CPUKey: "2", MemoryKey: "1024"}
+			delete(props, key)
+			_, err := props.GetTaskResource()
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.ErrorContains(t, err, key)
+		}
+	})
+
+	t.Run("unparsable values", func(t *testing.T) {
+		for _, key := range []string{CPUKey, MemoryKey} {
+			props := Properties{TaskIDKey: "1", CPUKey: "2", MemoryKey: "1024"}
+			props[key] = "abc"
+			_, err := props.GetTaskResource()
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.ErrorIs(t, err, strconv.ErrSyntax)
+			assert.ErrorContains(t, err, key)
+		}
+	})
+}
+
+func TestProperties_NegativeTaskResource(t *testing.T) {
+	for _, resource := range []Resource{{CPU: -1, Memory: 1024}, {CPU: 1, Memory: -1}} {
+		props := NewProperties(nil)
+		props.AppendTaskResource(resource)
+		_, err := props.GetTaskResource()
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	}
 }

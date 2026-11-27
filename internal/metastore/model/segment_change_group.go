@@ -213,7 +213,8 @@ func (g *SegmentChangeGroup) CanTransitionTo(next SegmentChangeState) bool {
 			next == SegmentChangeStateFailed ||
 			next == SegmentChangeStateAborted
 	case SegmentChangeStateReady:
-		return next == SegmentChangeStateReady ||
+		return next == SegmentChangeStateStaged ||
+			next == SegmentChangeStateReady ||
 			next == SegmentChangeStateCommitted ||
 			next == SegmentChangeStateFailed ||
 			next == SegmentChangeStateAborted

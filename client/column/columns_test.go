@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/entity"
@@ -97,6 +98,67 @@ func TestIDColumns(t *testing.T) {
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
 	})
+}
+
+func TestFieldDataColumnValidDataSources(t *testing.T) {
+	validData := []bool{true, false}
+	makeField := func(legacy, current []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "value",
+			ValidData: legacy,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					ValidData: current,
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 0}},
+					},
+				},
+			},
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		legacy  []bool
+		current []bool
+	}{
+		{name: "legacy only", legacy: validData},
+		{name: "field-specific only", current: validData},
+		{name: "matching dual sources", legacy: validData, current: validData},
+		// An older server may rewrite the legacy location and forward a stale
+		// field-specific copy; the legacy value wins.
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			col, err := FieldDataColumn(makeField(test.legacy, test.current), 0, -1)
+			require.NoError(t, err)
+			require.Equal(t, 2, col.Len())
+			for i, valid := range validData {
+				isNull, err := col.IsNull(i)
+				require.NoError(t, err)
+				assert.Equal(t, !valid, isNull, "row %d", i)
+			}
+		})
+	}
+}
+
+func TestSetFieldDataValidDataWritesBothLocations(t *testing.T) {
+	validData := []bool{true, false}
+
+	scalar := &schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}}
+	setFieldDataValidData(scalar, validData)
+	assert.Equal(t, validData, scalar.GetValidData())
+	assert.Equal(t, validData, scalar.GetScalars().GetValidData())
+
+	vector := &schemapb.FieldData{Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{}}}
+	setFieldDataValidData(vector, validData)
+	assert.Equal(t, validData, vector.GetValidData())
+	assert.Equal(t, validData, vector.GetVectors().GetValidData())
+
+	structArray := &schemapb.FieldData{Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{}}}
+	setFieldDataValidData(structArray, validData)
+	assert.Nil(t, structArray.GetValidData())
 }
 
 func TestGetIntData(t *testing.T) {

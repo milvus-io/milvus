@@ -40,6 +40,18 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"compacted", rpctypes.ErrCompacted, true},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "get sessions failed"), true},
+		// Every transient server error can cancel a watch when the
+		// authentication that precedes a new watch stream fails.
+		{"no leader", rpctypes.ErrNoLeader, true},
+		{"server stopped", rpctypes.ErrStopped, true},
+		{"timeout", rpctypes.ErrTimeout, true},
+		{"timeout due to leader fail", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"not capable", rpctypes.ErrNotCapable, true},
+		{"unhealthy", rpctypes.ErrUnhealthy, true},
+		{"too many requests", rpctypes.ErrTooManyRequests, true},
+		{"database space exceeded", rpctypes.ErrNoSpace, false},
 		{"invalid auth token", rpctypes.ErrInvalidAuthToken, true},
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
@@ -48,12 +60,55 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
 		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
 		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"auth failed", rpctypes.ErrAuthFailed, false},
+		{"corrupt cluster", rpctypes.ErrCorrupt, false},
+		{"context canceled", context.Canceled, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
 		{"lease not found", rpctypes.ErrLeaseNotFound, false},
 		{"generic error", errors.New("some other error"), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.want, IsRetriableWatchErr(c.err))
+		})
+	}
+}
+
+func TestIsRetriableEtcdErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
+		{"no leader", rpctypes.ErrNoLeader, true},
+		{"not leader", rpctypes.ErrNotLeader, true},
+		{"not capable", rpctypes.ErrNotCapable, true},
+		{"timeout", rpctypes.ErrTimeout, true},
+		{"timeout due to leader fail", rpctypes.ErrTimeoutDueToLeaderFail, true},
+		{"timeout due to connection lost", rpctypes.ErrTimeoutDueToConnectionLost, true},
+		{"timeout wait applied index", rpctypes.ErrTimeoutWaitAppliedIndex, true},
+		{"unhealthy", rpctypes.ErrUnhealthy, true},
+		{"server stopped", rpctypes.ErrStopped, true},
+		{"too many requests", rpctypes.ErrTooManyRequests, true},
+		{"not supported for learner", rpctypes.ErrGPRCNotSupportedForLearner, true},
+		{"cluster version unavailable", rpctypes.ErrClusterVersionUnavailable, true},
+		{"raw grpc leader changed", rpctypes.ErrGRPCLeaderChanged, true},
+		{"wrapped server stopped", errors.Wrap(rpctypes.ErrStopped, "txn failed"), true},
+		{"database space exceeded", rpctypes.ErrNoSpace, false},
+		{"raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
+		{"raw grpc unavailable", status.Error(codes.Unavailable, "connection refused"), true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "get key failed"), true},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"corrupt cluster", rpctypes.ErrCorrupt, false},
+		{"context canceled", context.Canceled, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
+		{"generic error", errors.New("some other error"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsRetriableEtcdErr(c.err))
 		})
 	}
 }

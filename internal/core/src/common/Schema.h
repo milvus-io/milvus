@@ -57,10 +57,30 @@ struct PhysicalColumnMapping {
     bool is_external_column = false;
 };
 
+// Expansion is restricted to children registered under an actual Struct parent.
+struct OrdinaryStructProjection {
+    FieldId parent_field_id;
+    std::vector<FieldId> child_field_ids;
+};
+using OrdinaryStructProjections =
+    std::unordered_map<std::string, OrdinaryStructProjection>;
+
 PhysicalColumnMapping
 ResolvePhysicalColumnMapping(
     bool is_milvus_table,
     const milvus::proto::schema::FieldSchema& field_schema);
+
+inline std::optional<std::pair<std::string, std::string>>
+ParseStructSubFieldPath(std::string_view path) {
+    auto left = path.find('[');
+    if (left == std::string_view::npos || left == 0 || path.back() != ']' ||
+        left + 2 >= path.size()) {
+        return std::nullopt;
+    }
+    return std::make_pair(
+        std::string(path.substr(0, left)),
+        std::string(path.substr(left + 1, path.size() - left - 2)));
+}
 
 inline std::optional<std::string>
 GetStructNameForArrayField(const FieldMeta& field_meta) {
@@ -69,14 +89,11 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
         return std::nullopt;
     }
 
-    const auto& field_name = field_meta.get_name().get();
-    auto left = field_name.find('[');
-    auto right = field_name.find(']', left == std::string::npos ? 0 : left);
-    if (left == std::string::npos || right == std::string::npos || left == 0) {
+    auto parsed = ParseStructSubFieldPath(field_meta.get_name().get());
+    if (!parsed.has_value()) {
         return std::nullopt;
     }
-
-    return field_name.substr(0, left);
+    return std::move(parsed->first);
 }
 
 class Schema {
@@ -140,22 +157,32 @@ class Schema {
     AddDebugField(const std::string& name,
                   DataType data_type,
                   DataType element_type,
-                  bool nullable = false) {
+                  bool nullable = false,
+                  bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, data_type, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       data_type,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
     FieldId
     AddDebugArrayField(const std::string& name,
                        DataType element_type,
-                       bool nullable) {
+                       bool nullable,
+                       bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(
-            FieldName(name), field_id, DataType::ARRAY, element_type, nullable);
+        this->AddField(FieldName(name),
+                       field_id,
+                       DataType::ARRAY,
+                       element_type,
+                       nullable,
+                       element_nullable);
         return field_id;
     }
 
@@ -185,7 +212,8 @@ class Schema {
                              DataType element_type,
                              int64_t dim,
                              std::optional<knowhere::MetricType> metric_type,
-                             bool nullable = false) {
+                             bool nullable = false,
+                             bool element_nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name),
@@ -194,7 +222,8 @@ class Schema {
                                     element_type,
                                     dim,
                                     metric_type,
-                                    nullable);
+                                    nullable,
+                                    element_nullable);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -242,9 +271,17 @@ class Schema {
              const FieldId id,
              DataType data_type,
              DataType element_type,
-             bool nullable) {
-        auto field_meta = FieldMeta(
-            name, id, data_type, element_type, nullable, std::nullopt);
+             bool nullable,
+             bool element_nullable) {
+        auto field_meta = FieldMeta(name,
+                                    id,
+                                    data_type,
+                                    element_type,
+                                    nullable,
+                                    element_nullable,
+                                    std::nullopt,
+                                    std::string{},
+                                    std::nullopt);
         this->AddField(std::move(field_meta));
     }
 
@@ -512,6 +549,19 @@ class Schema {
     FieldId
     ResolveColumnFieldId(const std::string& column_name) const;
 
+    bool
+    IsOrdinaryExternalStruct(const std::string& physical_column_name) const {
+        return is_external_collection() &&
+               !is_milvus_table_external_collection() &&
+               external_struct_parents_.count(physical_column_name) != 0;
+    }
+
+    // An empty selection produces no projections. Only selected, registered
+    // children of ordinary external Struct fields are included.
+    OrdinaryStructProjections
+    GetOrdinaryStructProjections(
+        const std::vector<FieldId>& selected_fields) const;
+
     proto::schema::CollectionSchema
     ToProto() const;
 
@@ -596,6 +646,17 @@ class Schema {
     // Find the first array field belonging to a struct (cached)
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
+
+    // Field ID of the struct array field itself. Only schemas parsed from a
+    // CollectionSchema proto know it.
+    std::optional<FieldId>
+    GetStructFieldId(const std::string& struct_name) const {
+        auto it = struct_field_ids_.find(struct_name);
+        if (it == struct_field_ids_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
 
     DataType
     GetFieldType(const FieldId& field_id) const {
@@ -691,6 +752,15 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+
+    // struct_name -> field ID of the struct array field (built in ParseFrom)
+    std::unordered_map<std::string, FieldId> struct_field_ids_;
+    std::unordered_map<std::string, std::vector<FieldId>>
+        struct_field_children_;
+    // struct_name -> physical external parent column name (built in ParseFrom)
+    std::unordered_map<std::string, std::string> struct_external_fields_;
+    // physical external parent column name -> struct_name (built in ParseFrom)
+    std::unordered_map<std::string, std::string> external_struct_parents_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

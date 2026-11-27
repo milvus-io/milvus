@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -30,13 +31,30 @@ func GetMaxLength(field *schemapb.FieldSchema) (int64, error) {
 	return int64(maxLength), nil
 }
 
-// GetMaxCapacity get max capacity of array field. Maybe also helpful outside.
+// GetMaxCapacity gets the root capacity of an Array field. Nested Arrays use
+// the TypeSchema root; legacy Arrays use FieldSchema parameters.
 func GetMaxCapacity(field *schemapb.FieldSchema) (int64, error) {
 	if !typeutil.IsArrayType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
 		msg := fmt.Sprintf("%s is not of array/vector array type", field.GetDataType())
 		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, field.GetDataType(), msg)
 	}
-	h := typeutil.NewKvPairs(append(field.GetIndexParams(), field.GetTypeParams()...))
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return GetMaxCapacityFromTypeSchema(field.GetTypeSchema())
+	}
+	return getMaxCapacityFromParams(append(field.GetIndexParams(), field.GetTypeParams()...))
+}
+
+// GetMaxCapacityFromTypeSchema gets max capacity from the current nested array schema node.
+func GetMaxCapacityFromTypeSchema(typeSchema *schemapb.TypeSchema) (int64, error) {
+	if typeSchema.GetArrayElement() == nil {
+		msg := fmt.Sprintf("%s is not of array type", typeSchema.GetLeafType())
+		return 0, merr.WrapErrParameterInvalid(schemapb.DataType_Array, typeSchema.GetLeafType(), msg)
+	}
+	return getMaxCapacityFromParams(typeSchema.GetTypeParams())
+}
+
+func getMaxCapacityFromParams(params []*commonpb.KeyValuePair) (int64, error) {
+	h := typeutil.NewKvPairs(params)
 	maxCapacityStr, err := h.Get(common.MaxCapacityKey)
 	if err != nil {
 		msg := "max capacity not found"

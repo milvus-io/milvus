@@ -32,9 +32,16 @@ const (
 	TypeKey         = "task_type"
 	SubTypeKey      = "task_sub_type" // optional, only for Stats
 	SlotKey         = "task_slot"
+	CPUKey          = "task_cpu"     // optional, absent from a coordinator that predates it
+	MemoryKey       = "task_memory"  // optional, absent from a coordinator that predates it
 	NumRowsKey      = "num_row"      // optional, only for Index, Stats
-	TaskVersionKey  = "task_version" // optional, only for Index, Stats and Analyze
+	TaskVersionKey  = "task_version" // optional, for version-aware tasks
 	CollectionIDKey = "collection_id"
+	// optional: the names of the collection a task works on; absent when the
+	// coordinator cannot resolve the collection.
+	CollectionNameKey = "collection_name"
+	DatabaseIDKey     = "database_id"
+	DatabaseNameKey   = "database_name"
 
 	// result
 	StateKey      = "task_state"
@@ -69,7 +76,7 @@ func (p Properties) AppendTaskID(taskID int64) {
 
 func (p Properties) AppendType(t Type) {
 	switch t {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
+	case PreImport, PreImportV3, Import, Reshard, ImportV3, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		p[TypeKey] = t
 	default:
 		p[TypeKey] = TypeNone
@@ -84,6 +91,13 @@ func (p Properties) AppendTaskSlot(slot int64) {
 	p[SlotKey] = fmt.Sprintf("%d", slot)
 }
 
+// AppendTaskResource carries DataCoord's estimate of what the task will occupy
+// on the worker for its whole run, alongside the scalar slot.
+func (p Properties) AppendTaskResource(r Resource) {
+	p[CPUKey] = fmt.Sprintf("%d", r.CPU)
+	p[MemoryKey] = fmt.Sprintf("%d", r.Memory)
+}
+
 func (p Properties) AppendNumRows(rows int64) {
 	p[NumRowsKey] = fmt.Sprintf("%d", rows)
 }
@@ -94,6 +108,18 @@ func (p Properties) AppendTaskVersion(version int64) {
 
 func (p Properties) AppendCollectionID(collectionID int64) {
 	p[CollectionIDKey] = fmt.Sprintf("%d", collectionID)
+}
+
+func (p Properties) AppendCollectionName(collectionName string) {
+	p[CollectionNameKey] = collectionName
+}
+
+func (p Properties) AppendDatabaseID(databaseID int64) {
+	p[DatabaseIDKey] = fmt.Sprintf("%d", databaseID)
+}
+
+func (p Properties) AppendDatabaseName(databaseName string) {
+	p[DatabaseNameKey] = databaseName
 }
 
 func (p Properties) AppendReason(reason string) {
@@ -117,7 +143,7 @@ func (p Properties) GetTaskType() (Type, error) {
 		return "", WrapErrTaskPropertyLack(TypeKey, p[TaskIDKey])
 	}
 	switch p[TypeKey] {
-	case PreImport, Import, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
+	case PreImport, PreImportV3, Import, Reshard, ImportV3, Compaction, Index, Stats, Analyze, RefreshExternalCollection, CopySegment, ExternalCopySegment:
 		return p[TypeKey], nil
 	default:
 		// Task types are assigned by the coordinator. An unrecognized type means
@@ -185,6 +211,35 @@ func (p Properties) GetTaskSlot() (int64, error) {
 	return strconv.ParseInt(p[SlotKey], 10, 64)
 }
 
+// GetTaskResource reads DataCoord's estimate. Older coordinators omit both keys;
+// CreateTask converts their scalar slot to a resource estimate at RPC ingress.
+// Otherwise both keys must contain nonnegative integers.
+func (p Properties) GetTaskResource() (Resource, error) {
+	cpuStr, cpuOK := p[CPUKey]
+	memoryStr, memoryOK := p[MemoryKey]
+	if !cpuOK && !memoryOK {
+		return Resource{}, nil
+	}
+	if !cpuOK {
+		return Resource{}, WrapErrTaskPropertyLack(CPUKey, p[TaskIDKey])
+	}
+	if !memoryOK {
+		return Resource{}, WrapErrTaskPropertyLack(MemoryKey, p[TaskIDKey])
+	}
+	cpu, err := strconv.ParseInt(cpuStr, 10, 64)
+	if err != nil {
+		return Resource{}, merr.WrapErrServiceInternalErr(err, "invalid %s", CPUKey)
+	}
+	memory, err := strconv.ParseInt(memoryStr, 10, 64)
+	if err != nil {
+		return Resource{}, merr.WrapErrServiceInternalErr(err, "invalid %s", MemoryKey)
+	}
+	if cpu < 0 || memory < 0 {
+		return Resource{}, merr.WrapErrServiceInternalMsg("negative task resource: cpu=%d memory=%d", cpu, memory)
+	}
+	return Resource{CPU: cpu, Memory: memory}, nil
+}
+
 func (p Properties) GetNumRows() int64 {
 	if _, ok := p[NumRowsKey]; !ok {
 		return 0
@@ -216,6 +271,26 @@ func (p Properties) GetCollectionID() (int64, error) {
 		return 0, err
 	}
 	return collectionID, nil
+}
+
+// GetCollectionName returns "" when the coordinator sent no name.
+func (p Properties) GetCollectionName() string {
+	return p[CollectionNameKey]
+}
+
+// GetDatabaseID returns 0 when the coordinator sent no database ID or an
+// unparsable one.
+func (p Properties) GetDatabaseID() int64 {
+	databaseID, err := strconv.ParseInt(p[DatabaseIDKey], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return databaseID
+}
+
+// GetDatabaseName returns "" when the coordinator sent no name.
+func (p Properties) GetDatabaseName() string {
+	return p[DatabaseNameKey]
 }
 
 func (p Properties) GetCostTime() int64 {

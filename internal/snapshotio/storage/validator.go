@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -364,6 +365,12 @@ func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec,
 	}
 	if len(snapshotOnly) == 0 {
 		return externalspec.ParseExternalSpec(externalSpec)
+	}
+	// The decode above merged keys that set the same field, so
+	// ParseExternalSpec would not see them in the re-encoded spec. Check the
+	// spec as written.
+	if err := specutil.CheckSpecKeys(externalSpec); err != nil {
+		return nil, merr.Wrap(err, "parse external spec")
 	}
 	sanitizedSpec, err := json.Marshal(snapshotSpec)
 	if err != nil {

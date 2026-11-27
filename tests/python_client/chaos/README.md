@@ -93,3 +93,13 @@ still in planning
 * Add yaml file to chaos_objects dir and rename it as `chaos_${component_name}_${chaos_type}.yaml`. Make sure `kubectl apply -f ${your_chaos_yaml_file}` can take effect
 * Add testcase in `testcases.yaml`. You should figure out the expectation of milvus during the chaos
 * Run your added testcase according to `Manually` above and check whether it as your expectation
+
+## Continuing writes across recovery
+
+`RecoveryContinuationChecker` runs with the existing single-request and concurrent
+chaos workloads without additional options. It alternates small and large payloads
+in an independent collection, then checks continued writes and data integrity after
+flush and reload. Fault injection uses the existing scenario orchestration.
+
+Preserve `/tmp/ci_logs/recovery_continuation/` across test phases: post-chaos checks
+use these retained write inputs to verify the original data.

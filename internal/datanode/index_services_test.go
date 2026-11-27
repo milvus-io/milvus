@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -45,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -55,9 +58,10 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	paramtable.Init()
 	manager := index.NewTaskManager(ctx)
 
-	manager.LoadOrStoreIndexTask("cluster-1", 1, &index.IndexTaskInfo{
+	attempt := &index.IndexTaskInfo{
 		State: commonpb.IndexState_InProgress,
-	})
+	}
+	manager.LoadOrStoreIndexTask("cluster-1", 1, attempt)
 	manager.LoadOrStoreIndexTask("cluster-2", 2, &index.IndexTaskInfo{
 		State: commonpb.IndexState_Finished,
 	})
@@ -65,7 +69,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	assert.True(t, manager.HasInProgressTask())
 	go func() {
 		time.Sleep(2 * time.Second)
-		manager.StoreIndexTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
+		manager.StoreIndexTaskState("cluster-1", 1, attempt, commonpb.IndexState_Finished, "")
 	}()
 	noTaskChan := make(chan struct{})
 	go func() {
@@ -76,6 +80,64 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	case <-noTaskChan:
 	case <-time.After(5 * time.Second):
 		assert.Fail(t, "timeout task chan")
+	}
+}
+
+func TestDataNodeStopWaitsForIndexTasksBeforeClosingSegcore(t *testing.T) {
+	paramtable.Init()
+	node := NewDataNode(context.Background())
+
+	entered := make(chan context.Context, 1)
+	release := make(chan struct{})
+	buildMock := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(
+		func(ctx context.Context, _ *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
+			entered <- ctx
+			<-release // A native call can outlive cancellation.
+			return nil, context.Canceled
+		}).Build()
+	defer buildMock.UnPatch()
+	segcoreClosed := make(chan struct{})
+	closeMock := mockey.Mock(index.CloseSegcore).To(func() { close(segcoreClosed) }).Build()
+	defer closeMock.UnPatch()
+
+	require.NoError(t, node.taskScheduler.Start())
+	releaseTask := sync.OnceFunc(func() { close(release) })
+	defer func() {
+		releaseTask()
+		node.Stop()
+		node.taskScheduler.Wait()
+	}()
+
+	status, err := node.createIndexTask(node.ctx, &workerpb.CreateJobRequest{
+		ClusterID: "cluster", BuildID: 1, CollectionID: 1, TaskSlot: 1,
+		Field:         &schemapb.FieldSchema{FieldID: 101, DataType: schemapb.DataType_FloatVector},
+		IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+	}, taskcommon.Resource{})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	select {
+	case ctx := <-entered:
+		go node.Stop()
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("shutdown did not cancel the index task")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("index task did not enter the native call")
+	}
+	select {
+	case <-segcoreClosed:
+		t.Fatal("Segcore closed while the index task was still in the native call")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseTask()
+	select {
+	case <-segcoreClosed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Segcore did not close after the index task exited")
 	}
 }
 
@@ -97,6 +159,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 
 	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
@@ -132,11 +195,11 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 		Dim:           8,
 		PluginContext: requestContext,
 		StorageConfig: &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.Equal(t, expected, captured)
@@ -148,6 +211,7 @@ func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
 	defer parseMock.UnPatch()
@@ -157,7 +221,7 @@ func TestCreateAnalyzeTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)
@@ -170,6 +234,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 
 	requestContext := []*commonpb.KeyValuePair{{Key: "cipher-context", Value: "opaque"}}
@@ -220,11 +285,11 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}},
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.NotNil(t, captured)
@@ -237,6 +302,7 @@ func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 	defer cancel()
 
 	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 	defer node.cancel()
 	parseMock := mockey.Mock(hookutil.GetCPluginContext).Return(nil, assert.AnError).Build()
 	defer parseMock.UnPatch()
@@ -246,7 +312,7 @@ func TestCreateStatsTaskPluginContextErrorDoesNotRegisterTask(t *testing.T) {
 		ClusterID:    "cluster",
 		TaskID:       taskID,
 		CollectionID: 1,
-	})
+	}, taskcommon.Resource{})
 	require.NoError(t, err)
 	taskErr := merr.Error(status)
 	require.Error(t, taskErr)
@@ -258,6 +324,7 @@ func TestCreateIndexTaskInitializesIndexStorePathVersion(t *testing.T) {
 		ctx := context.Background()
 		paramtable.Init()
 		node := NewDataNode(ctx)
+		node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		req := &workerpb.CreateJobRequest{

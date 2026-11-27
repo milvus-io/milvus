@@ -9,6 +9,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 #include <arrow/array.h>
+#include <arrow/array/concatenate.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_nested.h>
 #include <arrow/array/builder_primitive.h>
@@ -254,6 +255,7 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
                                  dim,
                                  std::nullopt,
                                  nullable,
+                                 false,
                                  external_field);
     }
     if (milvus::IsVectorDataType(data_type)) {
@@ -282,6 +284,7 @@ MakeExternalFieldMetaForTest(milvus::DataType data_type,
             data_type,
             element_type,
             nullable,
+            false,
             std::optional<milvus::DefaultValueType>{std::nullopt},
             external_field);
     }
@@ -1261,4 +1264,278 @@ TEST(CanonicalizeArrowVariants, AllNullStringView) {
     EXPECT_TRUE(out->IsNull(0));
     EXPECT_TRUE(out->IsNull(1));
     EXPECT_TRUE(out->IsNull(2));
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructSingletonProjection) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({10, 20}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    auto parent = arrow::StructArray::Make({values}, {"score"}).ValueOrDie();
+    milvus::FieldMeta field(milvus::FieldName("items[score]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::ARRAY,
+                            milvus::DataType::INT64,
+                            true,
+                            true,
+                            std::nullopt,
+                            "items[score]");
+    auto result = milvus::storage::NormalizeExternalArrow(parent, field);
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(result);
+    ASSERT_NE(list, nullptr);
+    ASSERT_EQ(list->length(), 2);
+    EXPECT_EQ(list->value_length(0), 1);
+    EXPECT_EQ(list->value_length(1), 1);
+    EXPECT_TRUE(list->values()->Equals(values));
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructListProjection) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({10, 20, 30}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    auto child = arrow::StructArray::Make({values}, {"score"}).ValueOrDie();
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2, 2, 3}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+    auto parent = arrow::ListArray::FromArrays(*offsets, *child).ValueOrDie();
+    milvus::FieldMeta field(milvus::FieldName("items[score]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::ARRAY,
+                            milvus::DataType::INT64,
+                            true,
+                            true,
+                            std::nullopt,
+                            "items[score]");
+    auto result = milvus::storage::NormalizeExternalArrow(parent, field);
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(result);
+    ASSERT_NE(list, nullptr);
+    EXPECT_TRUE(list->offsets()->Equals(offsets));
+    EXPECT_TRUE(list->values()->Equals(values));
+    auto sliced =
+        milvus::storage::NormalizeExternalArrow(parent->Slice(1, 2), field);
+    EXPECT_TRUE(sliced->Equals(result->Slice(1, 2)));
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructNullRowProjection) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({10, 99, 30}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    auto validity = arrow::Buffer::FromString(std::string(1, char(5)));
+    auto parent = arrow::StructArray::Make(
+                      {values}, std::vector<std::string>{"score"}, validity, 1)
+                      .ValueOrDie();
+    milvus::FieldMeta field(milvus::FieldName("items[score]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::ARRAY,
+                            milvus::DataType::INT64,
+                            true,
+                            true,
+                            std::nullopt,
+                            "items[score]");
+    auto result = milvus::storage::NormalizeExternalArrow(parent, field);
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(result);
+    ASSERT_NE(list, nullptr);
+    ASSERT_EQ(list->length(), 3);
+    EXPECT_TRUE(list->IsNull(1));
+    EXPECT_EQ(list->value_length(1), 0);
+    auto projected =
+        std::dynamic_pointer_cast<arrow::Int64Array>(list->values());
+    ASSERT_NE(projected, nullptr);
+    ASSERT_EQ(projected->length(), 2);
+    EXPECT_EQ(projected->Value(0), 10);
+    EXPECT_EQ(projected->Value(1), 30);
+    auto sliced =
+        milvus::storage::NormalizeExternalArrow(parent->Slice(1, 2), field);
+    EXPECT_TRUE(sliced->Equals(result->Slice(1, 2)));
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructRejectsMalformedSource) {
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues({10, 20}).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    milvus::FieldMeta field(milvus::FieldName("items[score]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::ARRAY,
+                            milvus::DataType::INT64,
+                            true,
+                            true,
+                            std::nullopt,
+                            "items[score]");
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(values, field, "items"),
+        milvus::SegcoreError);
+    auto missing =
+        arrow::StructArray::Make({values}, std::vector<std::string>{"other"})
+            .ValueOrDie();
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(missing, field, "items"),
+        milvus::SegcoreError);
+    arrow::StringBuilder strings;
+    ASSERT_TRUE(strings.AppendValues({"one", "two"}).ok());
+    std::shared_ptr<arrow::Array> wrong_values;
+    ASSERT_TRUE(strings.Finish(&wrong_values).ok());
+    auto wrong = arrow::StructArray::Make({wrong_values},
+                                          std::vector<std::string>{"score"})
+                     .ValueOrDie();
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(wrong, field, "items"),
+                 milvus::SegcoreError);
+    auto validity = arrow::Buffer::FromString(std::string(1, char(1)));
+    auto null_object =
+        arrow::StructArray::Make(
+            {values}, std::vector<std::string>{"score"}, validity, 1)
+            .ValueOrDie();
+    arrow::Int32Builder offsets_builder;
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+    auto parent =
+        arrow::ListArray::FromArrays(*offsets, *null_object).ValueOrDie();
+    EXPECT_THROW(
+        milvus::storage::NormalizeExternalArrow(parent, field, "items"),
+        milvus::SegcoreError);
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructNullableVectorProjection) {
+    float vector[2] = {1, 2};
+    arrow::FixedSizeBinaryBuilder builder(
+        arrow::fixed_size_binary(sizeof(vector)));
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(vector)).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    auto parent =
+        arrow::StructArray::Make({values}, std::vector<std::string>{"vec"})
+            .ValueOrDie();
+    milvus::FieldMeta field(milvus::FieldName("items[vec]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::VECTOR_ARRAY,
+                            milvus::DataType::VECTOR_FLOAT,
+                            2,
+                            std::nullopt,
+                            true,
+                            true,
+                            "items[vec]");
+    auto result =
+        milvus::storage::NormalizeExternalArrow(parent, field, "items");
+    auto list = std::dynamic_pointer_cast<arrow::ListArray>(result);
+    ASSERT_NE(list, nullptr);
+    ASSERT_EQ(list->length(), 2);
+    auto vectors =
+        std::dynamic_pointer_cast<arrow::BinaryArray>(list->values());
+    ASSERT_NE(vectors, nullptr);
+    EXPECT_TRUE(vectors->IsValid(0));
+    EXPECT_TRUE(vectors->IsNull(1));
+    EXPECT_EQ(vectors->GetView(0),
+              std::string_view(reinterpret_cast<const char*>(vector),
+                               sizeof(vector)));
+    EXPECT_EQ(list->value_length(0), 1);
+    EXPECT_EQ(list->value_length(1), 1);
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructNestedNullHiddenPayload) {
+    arrow::Int32Builder values_builder, offsets_builder;
+    ASSERT_TRUE(values_builder.AppendValues({111, 222, 7}).ok());
+    ASSERT_TRUE(offsets_builder.AppendValues({0, 2, 3, 3}).ok());
+    std::shared_ptr<arrow::Array> values, offsets;
+    ASSERT_TRUE(values_builder.Finish(&values).ok());
+    ASSERT_TRUE(offsets_builder.Finish(&offsets).ok());
+    auto validity = arrow::Buffer::FromString(std::string(1, char(6)));
+    auto tags =
+        arrow::ListArray::FromArrays(
+            *offsets, *values, arrow::default_memory_pool(), validity, 1)
+            .ValueOrDie();
+    ASSERT_TRUE(tags->ValidateFull().ok());
+    // The strict internal canonicalizer must retain its existing contract.
+    EXPECT_THROW(CanonicalizeArrowVariants(tags), milvus::SegcoreError);
+    auto objects =
+        arrow::StructArray::Make({tags}, std::vector<std::string>{"tags"})
+            .ValueOrDie();
+    milvus::proto::schema::FieldSchema schema;
+    schema.set_name("items[tags]");
+    schema.set_fieldid(102);
+    schema.set_data_type(milvus::proto::schema::Array);
+    schema.set_element_type(milvus::proto::schema::Array);
+    schema.set_external_field("items[tags]");
+    schema.set_nullable(true);
+    schema.set_element_nullable(true);
+    auto root = schema.mutable_type_schema();
+    root->set_nullable(true);
+    auto inner = root->mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(milvus::proto::schema::Int32);
+    auto field = milvus::FieldMeta::ParseFrom(schema);
+    auto padded =
+        arrow::Concatenate({objects->Slice(2, 1), objects}).ValueOrDie();
+    arrow::Int32Builder parent_offsets_builder;
+    ASSERT_TRUE(parent_offsets_builder.AppendValues({0, 1, 2, 3, 4}).ok());
+    std::shared_ptr<arrow::Array> parent_offsets;
+    ASSERT_TRUE(parent_offsets_builder.Finish(&parent_offsets).ok());
+    auto list_parent =
+        arrow::ListArray::FromArrays(*parent_offsets, *padded).ValueOrDie();
+    for (const auto& source : arrow::ArrayVector{
+             objects, padded->Slice(1, 3), list_parent->Slice(1, 3)}) {
+        auto normalized =
+            milvus::storage::NormalizeExternalArrow(source, field);
+        auto outer = std::static_pointer_cast<arrow::ListArray>(normalized);
+        auto result =
+            std::static_pointer_cast<arrow::ListArray>(outer->values());
+        EXPECT_TRUE(result->IsNull(0));
+        EXPECT_EQ(result->value_length(0), 0);
+        EXPECT_EQ(result->value_length(1), 1);
+        EXPECT_EQ(result->values()->length(), 1);
+        EXPECT_EQ(std::static_pointer_cast<arrow::Int32Array>(result->values())
+                      ->Value(0),
+                  7);
+    }
+    schema.set_element_nullable(false);
+    schema.mutable_type_schema()->mutable_array_element()->set_nullable(false);
+    auto required = milvus::FieldMeta::ParseFrom(schema);
+    EXPECT_THROW(milvus::storage::NormalizeExternalArrow(objects, required),
+                 milvus::SegcoreError);
+}
+
+TEST(NormalizeExternalArrow, OrdinaryStructNullableVectorSlice) {
+    const float a[2] = {1, 2}, b[2] = {3, 4};
+    arrow::FixedSizeBinaryBuilder builder(arrow::fixed_size_binary(sizeof(a)));
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(a)).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append(reinterpret_cast<const uint8_t*>(b)).ok());
+    std::shared_ptr<arrow::Array> values;
+    ASSERT_TRUE(builder.Finish(&values).ok());
+    auto objects =
+        arrow::StructArray::Make({values}, std::vector<std::string>{"vec"})
+            .ValueOrDie();
+    arrow::Int32Builder offset_builder;
+    ASSERT_TRUE(offset_builder.AppendValues({0, 1, 2, 3}).ok());
+    std::shared_ptr<arrow::Array> offsets;
+    ASSERT_TRUE(offset_builder.Finish(&offsets).ok());
+    auto parent = arrow::ListArray::FromArrays(*offsets, *objects).ValueOrDie();
+    milvus::FieldMeta field(milvus::FieldName("items[vec]"),
+                            milvus::FieldId(102),
+                            milvus::DataType::VECTOR_ARRAY,
+                            milvus::DataType::VECTOR_FLOAT,
+                            2,
+                            std::nullopt,
+                            true,
+                            true,
+                            "items[vec]");
+    for (const auto& source : arrow::ArrayVector{objects, parent}) {
+        auto result = milvus::storage::NormalizeExternalArrow(
+            source->Slice(1, 2), field, "items");
+        auto list = std::dynamic_pointer_cast<arrow::ListArray>(result);
+        ASSERT_NE(list, nullptr);
+        ASSERT_EQ(list->length(), 2);
+        auto vectors =
+            std::dynamic_pointer_cast<arrow::BinaryArray>(list->values());
+        ASSERT_NE(vectors, nullptr);
+        EXPECT_TRUE(vectors->IsNull(0));
+        EXPECT_TRUE(vectors->IsValid(1));
+        EXPECT_EQ(
+            vectors->GetView(1),
+            std::string_view(reinterpret_cast<const char*>(b), sizeof(b)));
+    }
 }

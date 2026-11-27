@@ -20,6 +20,7 @@
 package specutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -60,8 +61,10 @@ const (
 	ExtfsKeyUseSSL                  = "use_ssl"
 	ExtfsKeyUseVirtualHost          = "use_virtual_host"
 	ExtfsKeyLoadFrequency           = "load_frequency"
-	ExtfsKeyAzureClientID           = "azure_client_id"
-	ExtfsKeyAzureTenantID           = "azure_tenant_id"
+	// #nosec G101 -- configuration key name, not a credential.
+	ExtfsKeyCredentialEndpoint = "credential_endpoint"
+	ExtfsKeyAzureClientID      = "azure_client_id"
+	ExtfsKeyAzureTenantID      = "azure_tenant_id"
 	// #nosec G101 -- configuration key name, not a credential.
 	ExtfsKeyAzureCredentialEndpoint = "azure_credential_endpoint"
 )
@@ -161,6 +164,7 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeyBucketName:              true,
 	ExtfsKeyGCPTargetServiceAccount: true,
 	ExtfsKeyAnonymous:               true,
+	ExtfsKeyCredentialEndpoint:      true,
 	ExtfsKeyAzureClientID:           true,
 	ExtfsKeyAzureTenantID:           true,
 	ExtfsKeyAzureCredentialEndpoint: true,
@@ -173,10 +177,24 @@ var booleanExtfsKeys = map[string]bool{
 	ExtfsKeyAnonymous:      true,
 }
 
+// specKeys are the top-level keys ExternalSpec decodes. Keep in sync with the
+// json tags on ExternalSpec and kExternalSpecKeys in
+// internal/core/src/storage/loon_ffi/util.cpp.
+var specKeys = map[string]bool{
+	"format":      true,
+	"columns":     true,
+	"extfs":       true,
+	"snapshot_id": true,
+}
+
 // ParseExternalSpec parses and validates the JSON shape of an external spec.
 func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if specStr == "" {
 		return &ExternalSpec{Format: FormatParquet}, nil
+	}
+
+	if err := CheckSpecKeys(specStr); err != nil {
+		return nil, err
 	}
 
 	var spec ExternalSpec
@@ -204,6 +222,131 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	}
 
 	return &spec, nil
+}
+
+// CanonicalSpecKey returns the top-level ExternalSpec key that encoding/json
+// reads key as: the one that equals key ignoring case, under the folding of
+// strings.EqualFold. It returns key itself when key matches no ExternalSpec
+// field, so a lone "Format" is read as "format" and "comment" stays "comment".
+func CanonicalSpecKey(key string) string {
+	if specKeys[key] {
+		return key
+	}
+	for name := range specKeys {
+		if strings.EqualFold(key, name) {
+			return name
+		}
+	}
+	return key
+}
+
+// CheckSpecKeys rejects a spec that sets one key twice. encoding/json reads a
+// top-level key that equals an ExternalSpec field ignoring case as that field,
+// lets a later occurrence override an earlier one and merges two extfs objects
+// key by key, so nothing says which of two such keys should win. The error
+// names the keys. It is returned when, after JSON unescaping:
+//   - a top-level key or an extfs key appears more than once;
+//   - two top-level keys match the same ExternalSpec field ignoring case, such
+//     as "extfs" and "Extfs";
+//   - an extfs key differs from an allowed extfs key only by case. extfs is a
+//     map, so encoding/json keeps such a key as written and the allowlist in
+//     ParseExternalSpec would reject it anyway.
+//
+// A lone non-canonical top-level spelling such as "Format" or "EXTFS" is
+// accepted: encoding/json reads it as the canonical key, and so does the C++
+// reader (InjectExternalSpecProperties in
+// internal/core/src/storage/loon_ffi/util.cpp), which rejects the same specs.
+// Unknown top-level keys are not folded, so only their exact repeats are
+// rejected. Input that is not a JSON object is left to json.Unmarshal.
+//
+// ParseExternalSpec runs this check. A caller that decodes a spec into
+// ExternalSpec and encodes it again before ParseExternalSpec must run it on the
+// original spec, since decoding merges such keys.
+func CheckSpecKeys(specStr string) error {
+	keys, values, ok := objectMembers([]byte(specStr))
+	if !ok {
+		return nil
+	}
+	if err := checkTopLevelKeys(keys); err != nil {
+		return err
+	}
+	for i, key := range keys {
+		if CanonicalSpecKey(key) != "extfs" {
+			continue
+		}
+		if extfsKeys, _, ok := objectMembers(values[i]); ok {
+			return checkExtfsKeys(extfsKeys)
+		}
+	}
+	return nil
+}
+
+// checkTopLevelKeys rejects a repeated key, and a second key that matches the
+// same ExternalSpec field ignoring case.
+func checkTopLevelKeys(keys []string) error {
+	seen := make(map[string]bool, len(keys))
+	firstByName := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if seen[key] {
+			return merr.WrapErrParameterInvalidMsg("external spec key %q is duplicated", key)
+		}
+		seen[key] = true
+		name := CanonicalSpecKey(key)
+		if !specKeys[name] {
+			continue
+		}
+		if first, ok := firstByName[name]; ok {
+			return merr.WrapErrParameterInvalidMsg(
+				"external spec keys %q and %q differ only in case; set the key once", first, key)
+		}
+		firstByName[name] = key
+	}
+	return nil
+}
+
+// checkExtfsKeys rejects a repeated extfs key, and a key that differs from an
+// allowed extfs key only by case.
+func checkExtfsKeys(keys []string) error {
+	seen := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if seen[key] {
+			return merr.WrapErrParameterInvalidMsg("extfs key %q is duplicated", key)
+		}
+		seen[key] = true
+		if allowedExtfsKeys[key] {
+			continue
+		}
+		for name := range allowedExtfsKeys {
+			if strings.EqualFold(key, name) {
+				return merr.WrapErrParameterInvalidMsg("extfs key %q must be written as %q", key, name)
+			}
+		}
+	}
+	return nil
+}
+
+// objectMembers returns the keys, unescaped as encoding/json unescapes them,
+// and the raw values of a JSON object in input order. ok is false when data is
+// not a well-formed JSON object.
+func objectMembers(data []byte) (keys []string, values []json.RawMessage, ok bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, nil, false
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, nil, false
+		}
+		key, isString := tok.(string)
+		var value json.RawMessage
+		if !isString || dec.Decode(&value) != nil {
+			return nil, nil, false
+		}
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+	return keys, values, true
 }
 
 func sortedKeys(m map[string]bool) []string {

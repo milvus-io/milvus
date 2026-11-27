@@ -16,6 +16,8 @@
 
 #include "ConjunctExpr.h"
 
+#include <folly/ScopeGuard.h>
+
 #include <algorithm>
 
 #include "LikeConjunctExpr.h"
@@ -48,48 +50,36 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
     return DataType::BOOL;
 }
 
-int64_t
-PhyConjunctFilterExpr::UpdateResult(ColumnVectorPtr& input_result,
-                                    EvalCtx& ctx,
-                                    ColumnVectorPtr& result) {
-    if (is_and_) {
-        common::ThreeValuedLogicOp::And(result, input_result);
-    } else {
-        common::ThreeValuedLogicOp::Or(result, input_result);
-    }
-
-    // Return rows that still need the following expressions.
-    // For AND: TRUE or NULL rows still need evaluation; only definite FALSE can
-    // stop. For OR: FALSE or NULL rows still need evaluation; only definite TRUE
-    // can stop.
-    const size_t size = result->size();
-    TargetBitmapView res_data(result->GetRawData(), size);
-    TargetBitmapView res_valid(result->GetValidRawData(), size);
-    if (is_and_) {
-        TargetBitmap active_rows(res_valid);
-        active_rows.inplace_sub(res_data, size);  // valid & ~data
-        active_rows.flip();                       // data | ~valid
-        return static_cast<int64_t>(active_rows.count());
-    } else {
-        TargetBitmap active_rows(res_data);
-        active_rows.inplace_and(res_valid, size);  // data & valid
-        active_rows.flip();                        // ~data | ~valid
-        return static_cast<int64_t>(active_rows.count());
-    }
-}
-
-bool
-PhyConjunctFilterExpr::CanSkipFollowingExprs(ColumnVectorPtr& vec) {
-    // For AND: can only skip if ALL rows are definitely FALSE (valid=1, data=0)
-    //   - If any row is TRUE, we need to continue to determine final result
-    //   - If any row is NULL, we need to continue because NULL AND FALSE = FALSE
-    //     but NULL AND TRUE = NULL, so the result depends on following exprs
+TargetBitmap
+PhyConjunctFilterExpr::BuildActiveBitmap(const ColumnVectorPtr& vec) {
+    // Rows that still need the following expressions.
     //
-    // For OR: can only skip if ALL rows are definitely TRUE (valid=1, data=1)
-    //   - If any row is FALSE, we need to continue to determine final result
-    //   - If any row is NULL, we need to continue because NULL OR TRUE = TRUE
-    //     but NULL OR FALSE = NULL, so the result depends on following exprs
-    return is_and_ ? vec->AllFalse() : vec->AllTrue();
+    // For AND: TRUE or NULL rows still need evaluation; only definite FALSE
+    //   can stop (NULL AND FALSE = FALSE, so a NULL row can still change).
+    //   With a null-rejecting consumer, NULL is already equivalent to FALSE
+    //   downstream, so NULL rows are dropped too and only TRUE rows stay
+    //   active — restoring the pre-3VL early exit for UNKNOWN-heavy batches.
+    // For OR: FALSE or NULL rows still need evaluation; only definite TRUE
+    //   can stop. A NULL row can still become TRUE (NULL OR TRUE = TRUE),
+    //   so null-rejection does not shrink the active set for OR.
+    const size_t size = vec->size();
+    TargetBitmapView data(vec->GetRawData(), size);
+    TargetBitmapView valid(vec->GetValidRawData(), size);
+    if (is_and_) {
+        if (null_rejecting_) {
+            TargetBitmap active_rows(data);
+            active_rows.inplace_and(valid, size);  // data & valid
+            return active_rows;
+        }
+        TargetBitmap active_rows(valid);
+        active_rows.inplace_sub(data, size);  // valid & ~data
+        active_rows.flip();                   // data | ~valid
+        return active_rows;
+    }
+    TargetBitmap active_rows(data);
+    active_rows.inplace_and(valid, size);  // data & valid
+    active_rows.flip();                    // ~data | ~valid
+    return active_rows;
 }
 
 void
@@ -105,6 +95,15 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         "PhyConjunctFilterExpr::Eval", tracer::GetRootSpan(), true);
     span.SetAttribute("is_and", is_and_);
 
+    EvalCtx::BitmapInput inherited_bitmap;
+    bool has_result = false;
+    auto restore_bitmap =
+        folly::makeGuard([&context, &inherited_bitmap, &has_result] {
+            if (has_result) {
+                context.set_bitmap_input(std::move(inherited_bitmap));
+            }
+        });
+
     if (input_order_.empty()) {
         input_order_.resize(inputs_.size());
         for (size_t i = 0; i < inputs_.size(); i++) {
@@ -113,18 +112,27 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 
     auto has_input_offset = context.get_offset_input() != nullptr;
-    if (!has_input_offset && !like_batch_initialized_ && is_and_ &&
-        like_indices_.size() > 1) {
+    if (!like_batch_initialized_ && is_and_ && like_indices_.size() > 1) {
         like_batch_initialized_ = true;
-        // Collect LIKE expressions that can use ngram index at runtime
+        // Collect LIKE expressions that can use ngram index at runtime.
+        // The batch-ngram path evaluates whole batches, so it cannot be
+        // used with an offset input; ngram_exprs then stays empty and the
+        // else branch below erases the input_order_ slot reserved at
+        // compile time. Deciding here — once, in every mode — keeps the
+        // invariant that each input_order_ entry has a backing expression
+        // in inputs_ before anything indexes inputs_ with it. (An
+        // instance's offset mode is fixed for its lifetime, so no later
+        // call could have used the batch path anyway.)
         std::vector<std::shared_ptr<PhyUnaryRangeFilterExpr>> ngram_exprs;
-        for (size_t idx : like_indices_) {
-            auto unary_expr =
-                std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
-                    inputs_[idx]);
-            if (unary_expr && unary_expr->CanUseNgramIndex()) {
-                ngram_exprs.push_back(unary_expr);
-                batch_ngram_indices_.insert(idx);
+        if (!has_input_offset) {
+            for (size_t idx : like_indices_) {
+                auto unary_expr =
+                    std::dynamic_pointer_cast<PhyUnaryRangeFilterExpr>(
+                        inputs_[idx]);
+                if (unary_expr && unary_expr->CanUseNgramIndex()) {
+                    ngram_exprs.push_back(unary_expr);
+                    batch_ngram_indices_.insert(idx);
+                }
             }
         }
 
@@ -152,42 +160,63 @@ PhyConjunctFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
     }
 
-    bool has_result = false;
-    for (size_t i = 0; i < input_order_.size(); ++i) {
-        size_t idx = input_order_[i];
+    // Runtime batch-ngram entries may trail the last evaluated input.
+    size_t last_eval_pos = input_order_.size();
+    for (size_t i = input_order_.size(); i-- > 0;) {
+        if (batch_ngram_indices_.count(input_order_[i]) == 0) {
+            last_eval_pos = i;
+            break;
+        }
+    }
 
-        // Skip expressions already executed via batch ngram
+    for (size_t i = 0; i < input_order_.size(); ++i) {
+        const auto idx = input_order_[i];
         if (batch_ngram_indices_.count(idx)) {
             continue;
         }
-
         VectorPtr input_result;
         inputs_[idx]->Eval(context, input_result);
 
+        ColumnVectorPtr all_flat_result;
         if (!has_result) {
-            result = input_result;
+            // The first input needs the parent's mask in context. Take it only
+            // after that input succeeds, then restore its storage on every exit.
+            inherited_bitmap = context.take_bitmap_input();
             has_result = true;
-            auto all_flat_result = GetColumnVector(result);
-            if (CanSkipFollowingExprs(all_flat_result)) {
-                SkipFollowingExprs(i + 1);
-                ClearBitmapInput(context);
-                return;
+            result = input_result;
+            all_flat_result = GetColumnVector(result);
+        } else {
+            auto input_flat_result = GetColumnVector(input_result);
+            all_flat_result = GetColumnVector(result);
+            if (is_and_) {
+                common::ThreeValuedLogicOp::And(all_flat_result,
+                                                input_flat_result);
+            } else {
+                common::ThreeValuedLogicOp::Or(all_flat_result,
+                                               input_flat_result);
             }
-            SetNextExprBitmapInput(all_flat_result, context);
-            continue;
         }
-        auto input_flat_result = GetColumnVector(input_result);
-        auto all_flat_result = GetColumnVector(result);
-        auto active_rows =
-            UpdateResult(input_flat_result, context, all_flat_result);
-        if (active_rows == 0) {
-            SkipFollowingExprs(i + 1);
-            ClearBitmapInput(context);
+
+        // The last evaluated expression has no successor to prune or skip.
+        if (i == last_eval_pos) {
+            break;
+        }
+
+        auto active_rows = BuildActiveBitmap(all_flat_result);
+        // Local results outside the parent's candidates are unspecified and
+        // must neither reactivate rows nor prevent a batch-level early exit.
+        const auto inherited_view = inherited_bitmap.view();
+        if (!inherited_view.empty()) {
+            active_rows.inplace_and(inherited_view, active_rows.size());
+        }
+        if (active_rows.none()) {
+            if (!has_input_offset) {
+                SkipFollowingExprs(i + 1);
+            }
             return;
         }
-        SetNextExprBitmapInput(all_flat_result, context);
+        context.set_bitmap_input(std::move(active_rows));
     }
-    ClearBitmapInput(context);
 }
 
 }  //namespace exec

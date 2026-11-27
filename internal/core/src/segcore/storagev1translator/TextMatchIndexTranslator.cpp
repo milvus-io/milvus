@@ -31,6 +31,7 @@
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -80,10 +81,12 @@ TextMatchIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-TextMatchIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t) const {
+milvus::cachinglayer::LoadingResourceUsage
+TextMatchIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     // ignore the cid checking, because there is only one cell
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
     if (load_info_.enable_mmap) {
@@ -116,6 +119,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 TextMatchIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    auto config = config_;
+    if (ctx != nullptr && ctx->runtime_load_priority.has_value()) {
+        config[milvus::LOAD_PRIORITY] = *ctx->runtime_load_priority;
+    }
+
     // Check for cancellation before loading text match index
     CheckCancellation(
         ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
@@ -130,7 +138,7 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
+        index->Load(config);
         index->RegisterAnalyzer("milvus_tokenizer",
                                 load_info_.analyzer_params.c_str());
     }

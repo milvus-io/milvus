@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -45,6 +46,13 @@ func CreateConsumer(
 	opts *ConsumerOptions,
 	handlerClient streamingpb.StreamingNodeHandlerServiceClient,
 ) (Consumer, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	created := false
+	defer func() {
+		if !created {
+			cancel()
+		}
+	}()
 	ctx = contextutil.WithCreateConsumer(ctx, &streamingpb.CreateConsumerRequest{
 		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
 	})
@@ -69,6 +77,7 @@ func CreateConsumer(
 	}
 	cli := &consumerImpl{
 		ctx:              ctx,
+		cancel:           cancel,
 		walName:          createResp.GetWalName(),
 		opts:             opts,
 		grpcStreamClient: streamClient,
@@ -77,16 +86,26 @@ func CreateConsumer(
 			mlog.String("walName", createResp.GetWalName()),
 			mlog.String("pchannel", opts.Assignment.Channel.Name),
 			mlog.Int64("term", opts.Assignment.Channel.Term),
-			mlog.Int64("streamingNodeID", opts.Assignment.Node.ServerID)),
+			mlog.Int64("streamingNodeID", opts.Assignment.Node.ServerID),
+		),
 		msgHandler: opts.MessageHandler,
 		finishErr:  syncutil.NewFuture[error](),
 	}
+	if err := cli.createVChannelConsumer(); err != nil {
+		// No receiver owns finishErr yet. Cancel only this attempt and leave
+		// the upper message handler available for a retry.
+		cancel()
+		_ = streamClient.CloseSend()
+		return nil, err
+	}
+	created = true
 	go cli.execute()
 	return cli, nil
 }
 
 type consumerImpl struct {
-	ctx              context.Context // TODO: the cancel method of consumer should be managed by consumerImpl, fix it in future.
+	ctx              context.Context
+	cancel           context.CancelFunc
 	walName          string
 	opts             *ConsumerOptions
 	grpcStreamClient streamingpb.StreamingNodeHandlerService_ConsumeClient
@@ -147,12 +166,10 @@ func (c *consumerImpl) recvLoop() (err error) {
 		} else {
 			c.logger.Info(c.ctx, "recv arm of stream closed")
 		}
+		c.cancel()
 		c.finishErr.Set(err)
 		c.msgHandler.Close()
 	}()
-	if err := c.createVChannelConsumer(); err != nil {
-		return err
-	}
 	for {
 		resp, err := c.grpcStreamClient.Recv()
 		if errors.Is(err, io.EOF) {
@@ -180,12 +197,8 @@ func (c *consumerImpl) recvLoop() (err error) {
 				if c.txnBuilder != nil {
 					panic("unreachable code: txn builder should be nil if we receive a non-txn message")
 				}
-				if result := c.msgHandler.Handle(message.HandleParam{
-					Ctx:     c.ctx,
-					Message: newImmutableMsg,
-				}); result.Error != nil {
-					c.logger.Warn(c.ctx, "message handle canceled", mlog.Err(err))
-					return errors.Wrapf(result.Error, "At Handler")
+				if err := c.handleMessage(newImmutableMsg); err != nil {
+					return err
 				}
 			}
 		case *streamingpb.ConsumeResponse_Close:
@@ -219,7 +232,15 @@ func (c *consumerImpl) createVChannelConsumer() error {
 	if createVChannelResp == nil {
 		return status.NewInvalidRequestSeq("expect create vchannel response")
 	}
-	return nil
+	switch response := createVChannelResp.GetResponse().(type) {
+	case *streamingpb.CreateVChannelConsumerResponse_ConsumerId:
+		return nil
+	case *streamingpb.CreateVChannelConsumerResponse_Error:
+		if response.Error != nil {
+			return (*status.StreamingError)(response.Error)
+		}
+	}
+	return status.NewInvalidRequestSeq("expect successful create vchannel response")
 }
 
 func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
@@ -250,13 +271,7 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 			c.logger.Warn(c.ctx, "failed to build txn message", mlog.Any("messageID", commitMsg.MessageID()), mlog.Err(err))
 			return nil
 		}
-		if result := c.msgHandler.Handle(message.HandleParam{
-			Ctx:     c.ctx,
-			Message: msg,
-		}); result.Error != nil {
-			c.logger.Warn(c.ctx, "message handle canceled at txn", mlog.Err(result.Error))
-			return errors.Wrapf(result.Error, "At Handler Of Txn")
-		}
+		return c.handleMessage(msg)
 	default:
 		if c.txnBuilder == nil {
 			panic("unreachable code: txn builder should not be nil if we receive a non-begin txn message")
@@ -264,4 +279,18 @@ func (c *consumerImpl) handleTxnMessage(msg message.ImmutableMessage) error {
 		c.txnBuilder.Add(msg)
 	}
 	return nil
+}
+
+func (c *consumerImpl) handleMessage(msg message.ImmutableMessage) error {
+	param := message.HandleParam{Ctx: c.ctx, Message: msg}
+	for {
+		result := c.msgHandler.Handle(param)
+		if result.Error != nil {
+			return merr.Wrapf(result.Error, "handle %s message", msg.MessageType())
+		}
+		if result.MessageHandled {
+			return nil
+		}
+		// The handler drained an older pending pack. Offer the same message again.
+	}
 }

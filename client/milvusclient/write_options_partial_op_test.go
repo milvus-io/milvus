@@ -546,3 +546,64 @@ func TestMultipleFieldOpsEmittedTogether(t *testing.T) {
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_APPEND, seen["tags"])
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, seen["other"])
 }
+
+// A row-based PATH_REPLACE operand may hold a nested Array sub-field that is
+// not element nullable. Its row carries exactly one inner Array, with the
+// validity of a nullable leaf on that inner Array and no element validity.
+func TestRowBasedStructPathReplaceNestedArrayChild(t *testing.T) {
+	docSchema := entity.NewStructSchema().
+		WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().WithName("tags").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeVarChar).
+			WithMaxCapacity(4).WithMaxLength(8).WithElementNullable(true))
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("doc").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithMaxCapacity(8).WithStructSchema(docSchema))
+	schema.CollectionName = "struct_nested_path_replace_test"
+	coll := &entity.Collection{Name: schema.CollectionName, Schema: schema}
+	x := "x"
+
+	for _, tc := range []struct {
+		name, path string
+		operand    map[string]any
+		children   []string
+	}{
+		{"nested child only", "[1][tags]", map[string]any{"tags": [][]*string{{&x, nil}}}, []string{"tags"}},
+		{"whole element", "[1]", map[string]any{"score": []int64{5}, "tags": [][]*string{{&x, nil}}}, []string{"score", "tags"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := NewRowBasedInsertOption(coll.Name, map[string]any{"id": int64(1), "doc": tc.operand}).
+				WithPathReplace("doc", tc.path).UpsertRequest(coll)
+			require.NoError(t, err)
+			require.Equal(t, tc.path, findOp(req.GetFieldOps(), "doc").GetPath())
+
+			var doc *schemapb.FieldData
+			for _, fd := range req.GetFieldsData() {
+				if fd.GetFieldName() == "doc" {
+					doc = fd
+				}
+			}
+			require.NotNil(t, doc)
+			got := make([]string, 0, len(doc.GetStructArrays().GetFields()))
+			var tags *schemapb.FieldData
+			for _, child := range doc.GetStructArrays().GetFields() {
+				got = append(got, child.GetFieldName())
+				if child.GetFieldName() == "tags" {
+					tags = child
+				}
+			}
+			require.ElementsMatch(t, tc.children, got)
+			require.NotNil(t, tags)
+			require.Equal(t, schemapb.DataType_Array, tags.GetType())
+			require.Equal(t, schemapb.DataType_Array, tags.GetScalars().GetArrayData().GetElementType())
+			rows := tags.GetScalars().GetArrayData().GetData()
+			require.Len(t, rows, 1)
+			assert.Empty(t, rows[0].GetValidData())
+			assert.Equal(t, schemapb.DataType_VarChar, rows[0].GetArrayData().GetElementType())
+			require.Len(t, rows[0].GetArrayData().GetData(), 1)
+			inner := rows[0].GetArrayData().GetData()[0]
+			assert.Equal(t, []string{"x"}, inner.GetStringData().GetData())
+			assert.Equal(t, []bool{true, false}, inner.GetValidData())
+		})
+	}
+}

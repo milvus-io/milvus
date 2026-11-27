@@ -228,7 +228,10 @@ func GetLogIDFromBingLogPath(logPath string) (int64, error) {
 	logPathStr := logPath[(idx + 1):]
 	logID, err = strconv.ParseInt(logPathStr, 10, 64)
 	if err != nil {
-		return 0, err
+		// The path was written by a worker into the persisted result: a
+		// non-numeric basename is corrupt result metadata, not a transient
+		// failure, so callers fail instead of replaying the same result.
+		return 0, merr.WrapErrDataIntegrityMsg("invalid binlog log id %q: %v", logPathStr, err)
 	}
 	return logID, nil
 }

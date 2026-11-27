@@ -4,6 +4,8 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/storage_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
@@ -11,6 +13,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -20,6 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -36,6 +41,12 @@ import (
 // codes end-to-end, narrow this sentinel to the retryable cases and let other
 // errors propagate immediately as retry.Unrecoverable.
 var ErrLoonTransient = errors.New("loon FFI transient error")
+
+// ErrLoonPermanent marks a loon FFI failure whose err_code the producer
+// itself reports as non-retryable (loon_ffi_is_retryable_errcode == 0):
+// access denied, malformed input, corrupt data. Retrying cannot succeed;
+// callers' retry guards must terminate on it.
+var ErrLoonPermanent = errors.New("loon FFI permanent error")
 
 // Property keys exported by milvus-storage/ffi_c.h.
 var (
@@ -67,20 +78,68 @@ var (
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
-	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Base64-encoded encryption key for the FFI writer
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
+
+func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginContext) (map[string]string, error) {
+	if storagePluginContext == nil {
+		return nil, nil
+	}
+
+	var cKey *C.char
+	var cMeta *C.char
+	encKey := C.CString(storagePluginContext.EncryptionKey)
+	defer C.free(unsafe.Pointer(encKey))
+
+	pluginContext := C.CPluginContext{
+		ez_id:         C.int64_t(storagePluginContext.EncryptionZoneId),
+		collection_id: C.int64_t(storagePluginContext.CollectionId),
+		key:           encKey,
+	}
+	status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(cKey))
+	defer C.free(unsafe.Pointer(cMeta))
+
+	return map[string]string{
+		PropertyWriterEncEnable: "true",
+		PropertyWriterEncKey:    C.GoString(cKey),
+		PropertyWriterEncMeta:   C.GoString(cMeta),
+		PropertyWriterEncAlgo:   "AES_GCM_V1",
+	}, nil
+}
 
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
 }
 
+// Publish the server-owned policy for Go FFI readers.
+func initCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	policyJSON, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	cPolicy := C.CString(string(policyJSON))
+	defer C.free(unsafe.Pointer(cPolicy))
+	policyStatus := C.InitCredentialBrokerPolicy(cPolicy)
+	if policyStatus.error_code != 0 {
+		defer C.free(unsafe.Pointer(policyStatus.error_msg))
+		return merr.WrapErrServiceInternalMsg("credential broker policy initialization failed")
+	}
+	return nil
+}
+
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
 // All configuration fields are mapped to corresponding property key-value pairs,
 // with the local filesystem root normalized separately from the key prefix.
-func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string) (*C.LoonProperties, error) {
+// Optional stage bits select a private filesystem policy for that operation;
+// callers must not reuse manifest properties for data or index reads.
+func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extraKVs map[string]string, talonStages ...uint32) (*C.LoonProperties, error) {
 	if storageConfig == nil {
 		return nil, merr.WrapErrStorageMsg("storageConfig is required")
 	}
@@ -197,9 +256,57 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	// Unscoped callers only enable Talon under the unrestricted policy.
+	var stage uint32
+	for _, requested := range talonStages {
+		stage |= requested
+	}
+	mask := storageConfig.GetTalonEnabledStages()
+	if mask == 0 {
+		mask = common.TalonStagesAll // Legacy StorageConfig without stage bits.
+	}
+	var talonMode uint32
+	if mask == common.TalonStagesAll || mask&stage != 0 {
+		talonMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "fs.talon.open_only")
+	values = append(values, strconv.FormatBool(talonMode != 0 && mask != common.TalonStagesAll && mask&stage&common.TalonStageLoadOpen != 0))
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = talonMode
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", talonMode},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
+	if namespace := storageConfig.GetTalonNamespace(); namespace != "" {
+		keys = append(keys, "fs.talon.namespace")
+		values = append(values, namespace)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -312,6 +419,9 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 		return nil
 	}
 	params := paramtable.Get()
+	if err := initCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
@@ -341,8 +451,17 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 		if errMsg != nil {
 			errStr = C.GoString(errMsg)
 		}
-
-		return merr.Wrapf(ErrLoonTransient, "FFI operation failed: %s", errStr)
+		// Classify by the err_code the FFI already carries instead of
+		// flattening every failure to transient: the producer's own
+		// loon_ffi_is_retryable_errcode decides, so a 404/access-denied/
+		// corrupt-data failure stops retry loops instead of spinning them.
+		code := int32(ffiResult.err_code)
+		if C.loon_ffi_is_retryable_errcode(C.int(code)) != 0 {
+			return merr.Wrapf(ErrLoonTransient,
+				"FFI operation failed (code=%d): %s", code, errStr)
+		}
+		return merr.Wrapf(ErrLoonPermanent,
+			"FFI operation failed (code=%d): %s", code, errStr)
 	}
 	return nil
 }
@@ -432,7 +551,12 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -460,7 +584,11 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// commit transaction
 	var committedVersion C.int64_t
+	// The commit writes the manifest revision and blocks the calling
+	// goroutine's OS thread; bound it process-wide like the open above.
+	acquireManifestFFI(context.Background())
 	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -487,7 +615,12 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}

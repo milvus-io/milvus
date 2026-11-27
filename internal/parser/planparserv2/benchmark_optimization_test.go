@@ -86,7 +86,7 @@ func BenchmarkParserOverall(b *testing.B) {
 	for _, tc := range benchmarkExprs {
 		b.Run(tc.name, func(b *testing.B) {
 			// Clear cache to test raw parsing performance
-			exprCache.Purge()
+			purgeExprCache()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
@@ -184,7 +184,7 @@ func BenchmarkScalability(b *testing.B) {
 				expr += fmt.Sprintf(" && Int64Field < %d", 1000+i)
 			}
 
-			exprCache.Purge()
+			purgeExprCache()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
@@ -208,7 +208,7 @@ func BenchmarkScalability(b *testing.B) {
 			}
 			expr += "]"
 
-			exprCache.Purge()
+			purgeExprCache()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {

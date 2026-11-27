@@ -51,6 +51,12 @@ class VecIndexCreator : public IndexCreatorBase {
     void
     Build() override;
 
+    void
+    LoadData() override;
+
+    bool
+    TryReserveBuild() override;
+
     milvus::BinarySet
     Serialize() override;
 

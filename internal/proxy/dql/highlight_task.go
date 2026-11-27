@@ -110,11 +110,12 @@ func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID in
 
 func (t *HighlightTask) Execute(ctx context.Context) error {
 	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.collectionName,
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
-		Exec:           t.getHighlightOnShardleader,
+		OverloadRetryable: true,
+		Db:                t.dbName,
+		CollectionName:    t.collectionName,
+		CollectionID:      t.collectionID,
+		Nq:                int64(len(t.GetTopks()) * len(t.GetTasks())),
+		Exec:              t.getHighlightOnShardleader,
 	})
 
 	return err

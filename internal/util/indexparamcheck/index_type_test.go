@@ -26,10 +26,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
+func TestIsScalarIndexType_NGRAM(t *testing.T) {
+	assert.True(t, IsScalarIndexType(IndexNGRAM))
+}
+
+func TestIsScalarIndexType_FMINDEX(t *testing.T) {
+	assert.True(t, IsScalarIndexType(IndexFMINDEX))
+}
+
 func TestIsScalarMmapIndex(t *testing.T) {
-	t.Run("inverted index", func(t *testing.T) {
-		assert.True(t, IsScalarMmapIndex(IndexINVERTED))
-	})
+	for _, indexType := range []IndexType{IndexSTLSORT, IndexINVERTED, IndexBitmap, IndexHybrid, IndexTrie, IndexTRIE, IndexNGRAM, IndexFMINDEX} {
+		t.Run(indexType, func(t *testing.T) {
+			assert.True(t, IsScalarMmapIndex(indexType))
+			assert.NoError(t, ValidateMmapIndexParams(indexType, map[string]string{common.MmapEnabledKey: "true"}))
+		})
+	}
+	assert.False(t, IsScalarMmapIndex(IndexRTREE))
+	assert.False(t, IsScalarMmapIndex("unknown"))
 }
 
 func TestIsVectorMmapIndex(t *testing.T) {

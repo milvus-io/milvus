@@ -109,6 +109,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 			lastErr = err
 
+			// No attempt left: return now instead of sleeping a backoff that
+			// no retry will follow.
+			if c.attempts != 0 && i+1 >= c.attempts {
+				break
+			}
+
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
@@ -192,6 +198,14 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 				return err
 			}
 
+			if (c.attempts == 0 || i+1 < c.attempts) && c.retryImmediately != nil && ctx.Err() == nil && c.retryImmediately(err) {
+				if ctx.Err() != nil {
+					return err
+				}
+				lastErr = err
+				continue
+			}
+
 			deadline, ok := ctx.Deadline()
 			if ok && time.Until(deadline) < c.sleep {
 				isContextErr := errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
@@ -208,6 +222,12 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 			}
 
 			lastErr = err
+
+			// No attempt left: return now instead of sleeping a backoff that
+			// no retry will follow.
+			if c.attempts != 0 && i+1 >= c.attempts {
+				break
+			}
 
 			select {
 			case <-time.After(c.sleep):

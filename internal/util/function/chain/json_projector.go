@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	json "github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type resolvedInputGroup struct {
@@ -229,7 +230,7 @@ func projectJSONFieldData(
 			inputs[0].FieldName, len(jsonData), totalRows)
 	}
 
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 	nullableRoot := len(validData) > 0
 	if nullableRoot && int64(len(validData)) < totalRows {
 		return merr.WrapErrServiceInternalMsg(

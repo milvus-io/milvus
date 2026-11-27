@@ -1,6 +1,7 @@
 package partialupdate
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -10,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -22,7 +22,7 @@ func TestExtractPKsFromDelete(t *testing.T) {
 			},
 		})
 
-		pks, ok, err := extractPKs(msg)
+		pks, ok, err := extractPKsFromDelete(msg)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, []any{int64(10), int64(20)}, pks)
@@ -35,7 +35,7 @@ func TestExtractPKsFromDelete(t *testing.T) {
 			},
 		})
 
-		pks, ok, err := extractPKs(msg)
+		pks, ok, err := extractPKsFromDelete(msg)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, []any{"pk-1", "pk-2"}, pks)
@@ -92,7 +92,7 @@ func TestExtractPKsFromDelete(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				_, ok, err := extractPKs(newDeleteMessage(test.ids))
+				_, ok, err := extractPKsFromDelete(newDeleteMessage(test.ids))
 				require.True(t, ok)
 				requireUnrecoverable(t, err)
 			})
@@ -101,7 +101,7 @@ func TestExtractPKsFromDelete(t *testing.T) {
 }
 
 func TestExtractPKsFromNonRowMessage(t *testing.T) {
-	pks, ok, err := extractPKs(newDropCollectionMessage(10))
+	pks, ok, err := extractPKsFromDelete(newDropCollectionMessage(10))
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.Nil(t, pks)
@@ -109,7 +109,7 @@ func TestExtractPKsFromNonRowMessage(t *testing.T) {
 
 func TestExtractPKsRejectsInvalidMessages(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
-		pks, ok, err := extractPKs(nil)
+		pks, ok, err := extractPKsFromDelete(nil)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, pks)
@@ -121,14 +121,14 @@ func TestExtractPKsRejectsInvalidMessages(t *testing.T) {
 			Build()
 		defer patch.UnPatch()
 
-		_, ok, err := extractPKs(newDeleteMessage(&schemapb.IDs{}))
+		_, ok, err := extractPKsFromDelete(newDeleteMessage(&schemapb.IDs{}))
 		require.True(t, ok)
 		requireUnrecoverable(t, err)
 	})
 
 	t.Run("decode delete body", func(t *testing.T) {
 		msg := corruptMessageBody(newDeleteMessage(&schemapb.IDs{}))
-		_, ok, err := extractPKs(msg)
+		_, ok, err := extractPKsFromDelete(msg)
 		require.True(t, ok)
 		requireUnrecoverable(t, err)
 	})
@@ -196,7 +196,7 @@ func TestExtractPKsFromCASInsert(t *testing.T) {
 		require.Equal(t, []any{int64(10), int64(20)}, pks)
 		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 1}, scope)
 		require.EqualValues(t, 10, getter.collectionID)
-		require.EqualValues(t, 1, getter.schemaVersion)
+		require.Equal(t, latestCollectionSchemaVersion, getter.schemaVersion)
 	})
 
 	t.Run("varchar", func(t *testing.T) {
@@ -235,7 +235,18 @@ func TestExtractPKsFromCASInsert(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(10)}, pks)
 		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 0}, scope)
-		require.EqualValues(t, 0, getter.schemaVersion)
+		require.Equal(t, latestCollectionSchemaVersion, getter.schemaVersion)
+	})
+
+	t.Run("schema version differs from shard", func(t *testing.T) {
+		// The shard interceptor, not PK extraction, rejects the mismatch.
+		pks, scope, err := extractPKsFromCASInsert(newCASInsertMessage(t, []*schemapb.FieldData{
+			int64PKFieldData(10),
+		}, validCASMeta(100, 1)), currentSchemaDescriptorGetter{})
+
+		require.NoError(t, err)
+		require.Equal(t, []any{int64(10)}, pks)
+		require.Equal(t, casInsertScope{collectionID: 10, schemaVersion: 1}, scope)
 	})
 }
 
@@ -281,13 +292,19 @@ func TestExtractPKsFromCASInsertErrors(t *testing.T) {
 		requireUnrecoverable(t, err)
 	})
 
-	t.Run("schema version mismatch", func(t *testing.T) {
-		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
-			err: shards.ErrCollectionSchemaVersionNotMatch,
+	for _, test := range []struct {
+		err  error
+		text string
+	}{
+		{err: shards.ErrCollectionNotFound, text: "collection 10 not found"},
+		{err: shards.ErrCollectionSchemaNotFound, text: "collection 10 schema not provided by create collection message"},
+	} {
+		t.Run(test.err.Error(), func(t *testing.T) {
+			_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{err: test.err})
+			requireUnrecoverable(t, err)
+			require.Contains(t, err.Error(), test.text)
 		})
-		require.Error(t, err)
-		require.True(t, status.AsStreamingError(err).IsSchemaVersionMismatch())
-	})
+	}
 
 	t.Run("descriptor lookup", func(t *testing.T) {
 		_, _, err := extractPKsFromCASInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
@@ -365,7 +382,7 @@ func TestExtractPKsFromCASInsertErrors(t *testing.T) {
 
 func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
 	t.Run("missing schema getter", func(t *testing.T) {
-		_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), nil)
+		_, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), nil)
 		requireUnrecoverable(t, err)
 	})
 
@@ -374,11 +391,11 @@ func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
 		patch := mockey.Mock(message.AsMutableInsertMessageV1).Return(nil, expected).Build()
 		defer patch.UnPatch()
 
-		_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{})
+		_, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{})
 		requireUnrecoverable(t, err)
 	})
 
-	t.Run("legacy insert without collection id", func(t *testing.T) {
+	t.Run("insert without collection id", func(t *testing.T) {
 		msg := newInsertMessage(nil)
 		insert := message.MustAsMutableInsertMessageV1(msg)
 		header := insert.Header()
@@ -386,21 +403,43 @@ func TestExtractPKsFromOrdinaryInsertErrors(t *testing.T) {
 		header.SchemaVersion = nil
 		insert.OverwriteHeader(header)
 
-		_, _, err := extractPKsFromOrdinaryInsert(msg, &staticPrimaryKeyDescriptorGetter{
+		_, err := extractPKsFromOrdinaryInsert(msg, &staticPrimaryKeyDescriptorGetter{
 			err: shards.ErrCollectionSchemaNotFound,
 		})
 		requireUnrecoverable(t, err)
 	})
 
 	t.Run("schema lookup", func(t *testing.T) {
-		_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
+		_, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
 			err: errors.New("schema lookup failed"),
 		})
 		requireUnrecoverable(t, err)
 	})
 
+	// Supported paths always provide the schema; the write fails closed
+	// whether or not it carries a schema version.
+	for _, test := range []struct {
+		err  error
+		text string
+	}{
+		{err: shards.ErrCollectionNotFound, text: "collection 10 not found"},
+		{err: shards.ErrCollectionSchemaNotFound, text: "collection 10 schema not provided by create collection message"},
+	} {
+		for _, versionless := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/versionless=%t", test.err, versionless), func(t *testing.T) {
+				msg := newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})
+				if versionless {
+					msg = withoutSchemaVersion(msg)
+				}
+				_, err := extractPKsFromOrdinaryInsert(msg, &staticPrimaryKeyDescriptorGetter{err: test.err})
+				requireUnrecoverable(t, err)
+				require.Contains(t, err.Error(), test.text)
+			})
+		}
+	}
+
 	t.Run("unsupported primary key type", func(t *testing.T) {
-		_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
+		_, err := extractPKsFromOrdinaryInsert(newInsertMessage(nil), &staticPrimaryKeyDescriptorGetter{
 			descriptor: shards.PrimaryKeyDescriptor{
 				FieldID:  100,
 				DataType: schemapb.DataType_Float,
@@ -414,7 +453,7 @@ func TestExtractPKsFromOrdinaryInsertAllowsMissingDeclaredType(t *testing.T) {
 	field := int64PKFieldData(10)
 	field.Type = schemapb.DataType_None
 
-	pks, fenceCollectionID, err := extractPKsFromOrdinaryInsert(
+	pks, err := extractPKsFromOrdinaryInsert(
 		newInsertMessage([]*schemapb.FieldData{field}),
 		&staticPrimaryKeyDescriptorGetter{
 			descriptor: shards.PrimaryKeyDescriptor{
@@ -426,7 +465,28 @@ func TestExtractPKsFromOrdinaryInsertAllowsMissingDeclaredType(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, []any{int64(10)}, pks)
-	require.Zero(t, fenceCollectionID)
+}
+
+// The PK field cannot change, so the lookup ignores the insert's schema
+// version: a missing or stale version still yields the collection's PKs.
+func TestExtractPKsFromOrdinaryInsertIgnoresSchemaVersion(t *testing.T) {
+	stale := newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})
+	insert := message.MustAsMutableInsertMessageV1(stale)
+	header := insert.Header()
+	staleVersion := int32(0)
+	header.SchemaVersion = &staleVersion
+	insert.OverwriteHeader(header)
+	for name, msg := range map[string]message.MutableMessage{
+		"versioned":   newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)}),
+		"versionless": withoutSchemaVersion(newInsertMessage([]*schemapb.FieldData{int64PKFieldData(10)})),
+		"stale":       stale,
+	} {
+		t.Run(name, func(t *testing.T) {
+			pks, err := extractPKsFromOrdinaryInsert(msg, currentSchemaDescriptorGetter{})
+			require.NoError(t, err)
+			require.Equal(t, []any{int64(10)}, pks)
+		})
+	}
 }
 
 func TestExtractCollectionFenceID(t *testing.T) {
@@ -546,6 +606,26 @@ func (g *staticPrimaryKeyDescriptorGetter) GetPrimaryKeyDescriptor(collectionID 
 	g.collectionID = collectionID
 	g.schemaVersion = schemaVersion
 	return g.descriptor, g.err
+}
+
+// currentSchemaDescriptorGetter holds a schema newer than any message in these
+// tests, the way ShardManager does after a schema change. Only a lookup that
+// ignores the message's schema version finds the PK descriptor.
+type currentSchemaDescriptorGetter struct{}
+
+func (currentSchemaDescriptorGetter) GetPrimaryKeyDescriptor(_ int64, schemaVersion int32) (shards.PrimaryKeyDescriptor, error) {
+	if schemaVersion != latestCollectionSchemaVersion {
+		return shards.PrimaryKeyDescriptor{}, shards.ErrCollectionSchemaVersionNotMatch
+	}
+	return shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}, nil
+}
+
+func withoutSchemaVersion(msg message.MutableMessage) message.MutableMessage {
+	insert := message.MustAsMutableInsertMessageV1(msg)
+	header := insert.Header()
+	header.SchemaVersion = nil
+	insert.OverwriteHeader(header)
+	return msg
 }
 
 func newDeleteMessage(ids *schemapb.IDs) message.MutableMessage {

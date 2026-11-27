@@ -5,8 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -74,6 +77,39 @@ func (ta *AckManager) Allocate(ctx context.Context) (*Acker, error) {
 	ta.notAckHeap.Push(acker)
 	metricsGuard.Done(ts, err)
 	return acker, nil
+}
+
+// AllocateForAppend retries allocation until success or WAL lifecycle cancellation.
+// Neither the shared allocator's lock nor ta.mu is held across retry backoff.
+// Background TimeTick sync uses Allocate directly: its context belongs to the
+// process-wide inspector, so an infinite retry there could block a WAL's shutdown.
+func (ta *AckManager) AllocateForAppend(ctx context.Context, barrierTimeTick uint64) (*Acker, error) {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = 10 * time.Millisecond
+	b.MaxInterval = 5 * time.Second
+	b.MaxElapsedTime = 0
+	b.Reset()
+	for {
+		if ctx.Err() != nil {
+			return nil, context.Cause(ctx)
+		}
+		var acker *Acker
+		var err error
+		if barrierTimeTick == 0 {
+			acker, err = ta.Allocate(ctx)
+		} else {
+			acker, err = ta.AllocateWithBarrier(ctx, barrierTimeTick)
+		}
+		if err == nil {
+			return acker, nil
+		}
+		mlog.Warn(ctx, "allocate WAL timestamp failed, retrying", mlog.Err(err))
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-time.After(b.NextBackOff()):
+		}
+	}
 }
 
 // SyncAndGetAcknowledged syncs the ack records with allocator, and get the last all acknowledged info.

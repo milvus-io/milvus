@@ -658,6 +658,53 @@ TEST(PlanProto, RetrievePlanCollectsFieldAccessInfo) {
         std::vector<milvus::FieldId>({predicate_field_id, output_field_id}));
 }
 
+TEST(PlanProto, GroupByOrderLimitRequiresEveryGroupingKey) {
+    namespace planpb = milvus::proto::plan;
+
+    auto schema = BuildSchema();
+    auto age = schema->get_field_id(milvus::FieldName("age"));
+    auto score = schema->get_field_id(milvus::FieldName("score"));
+
+    planpb::PlanNode plain_plan;
+    plain_plan.add_output_field_ids(age.get());
+    auto* plain_query = plain_plan.mutable_query();
+    plain_query->set_limit(1);
+    plain_query->add_order_by_fields()->set_field_id(age.get());
+    auto plain = milvus::query::CreateRetrievePlanByExpr(
+        schema,
+        plain_plan.SerializeAsString().data(),
+        plain_plan.ByteSizeLong());
+    auto plain_order_by = std::dynamic_pointer_cast<milvus::plan::OrderByNode>(
+        plain->plan_node_->plannodes_);
+    ASSERT_NE(plain_order_by, nullptr);
+    EXPECT_EQ(plain_order_by->Limit(), 1);
+
+    for (bool complete_order : {false, true}) {
+        planpb::PlanNode plan_node;
+        plan_node.add_output_field_ids(age.get());
+        auto* query = plan_node.mutable_query();
+        query->set_limit(1);
+        query->add_group_by_field_ids(age.get());
+        query->add_group_by_field_ids(score.get());
+        auto* aggregate = query->add_aggregates();
+        aggregate->set_op(planpb::sum);
+        aggregate->set_field_id(score.get());
+        query->add_order_by_fields()->set_field_id(age.get());
+        if (complete_order) {
+            query->add_order_by_fields()->set_field_id(score.get());
+        }
+
+        auto plan = milvus::query::CreateRetrievePlanByExpr(
+            schema,
+            plan_node.SerializeAsString().data(),
+            plan_node.ByteSizeLong());
+        auto order_by = std::dynamic_pointer_cast<milvus::plan::OrderByNode>(
+            plan->plan_node_->plannodes_);
+        ASSERT_NE(order_by, nullptr);
+        EXPECT_EQ(order_by->Limit(), complete_order ? 1 : -1);
+    }
+}
+
 TEST(PlanProto, StrictGroupSettings) {
     using namespace milvus;
     auto schema = std::make_shared<Schema>();

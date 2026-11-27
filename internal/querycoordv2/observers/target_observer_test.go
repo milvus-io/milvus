@@ -487,6 +487,53 @@ func TestShouldUpdateCurrentTarget_EmptyNextTarget(t *testing.T) {
 	assert.False(t, result)
 }
 
+func TestInitWaitsForCollectionLock(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	collectionID := int64(1000)
+
+	nodeMgr := session.NewNodeManager()
+	targetMgr := meta.NewMockTargetManager(t)
+	metaInstance := &meta.Meta{
+		CollectionManager: meta.NewCollectionManager(nil),
+	}
+	observer := NewTargetObserver(metaInstance, targetMgr, meta.NewDistributionManager(nodeMgr),
+		meta.NewMockBroker(t), session.NewMockCluster(t), nodeMgr)
+	defer observer.Stop()
+
+	// init() starts by looking at the next target. The collection is not in meta, so the check()
+	// that follows returns right away.
+	started := make(chan struct{}, 1)
+	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, collectionID).RunAndReturn(func(context.Context, int64) bool {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		return true
+	})
+
+	// A check() of the collection holds the lock: init() must not touch the targets meanwhile.
+	observer.keylocks.Lock(collectionID)
+	done := make(chan struct{})
+	go func() {
+		observer.init(ctx, collectionID)
+		close(done)
+	}()
+	select {
+	case <-started:
+		t.Fatal("init() updated the targets while the collection lock was held")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	observer.keylocks.Unlock(collectionID)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("init() did not finish after the lock was released")
+	}
+	assert.Len(t, started, 1)
+}
+
 // TestShouldUpdateCurrentTarget_ReplicaReadiness tests the replica-based readiness check
 func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	paramtable.Init()
@@ -1232,4 +1279,35 @@ func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
 func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
 	suite.Run(t, new(TargetObserverCheckSuite))
+}
+
+func TestUpdatePartitionReturnsOnContextDone(t *testing.T) {
+	t.Run("loop never takes the request", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdatePartition(ctx, 1, 2)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("loop takes the request but never replies", func(t *testing.T) {
+		ob := &TargetObserver{updateChan: make(chan targetUpdateRequest, 1)}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := ob.UpdatePartition(ctx, 1, 2)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+
+		// A reply that arrives after the caller left must not block the loop.
+		req := <-ob.updateChan
+		replied := make(chan struct{})
+		go func() {
+			req.Notifier <- nil
+			close(replied)
+		}()
+		select {
+		case <-replied:
+		case <-time.After(time.Second):
+			t.Fatal("late reply blocked the schedule loop")
+		}
+	})
 }

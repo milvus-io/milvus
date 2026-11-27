@@ -26,25 +26,40 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
 type Scheduler interface {
 	Start()
 	Slots() int64
+	Resource() taskcommon.Resource
 	Close()
 }
 
 type scheduler struct {
 	manager TaskManager
 
+	// futuresMu protects futures during submission and collection.
+	futuresMu sync.Mutex
+	// futures tracks submitted file work until completion or cancellation.
+	futures map[int64][]*conc.Future[any]
+
+	// submitMu allows only one goroutine to submit tasks at a time.
+	submitMu sync.Mutex
+
 	closeOnce sync.Once
 	closeChan chan struct{}
+}
+
+func allDone(fs []*conc.Future[any]) bool {
+	return lo.EveryBy(fs, func(f *conc.Future[any]) bool { return f.Done() })
 }
 
 func NewScheduler(manager TaskManager) Scheduler {
 	return &scheduler{
 		manager:   manager,
+		futures:   make(map[int64][]*conc.Future[any]),
 		closeChan: make(chan struct{}),
 	}
 }
@@ -66,6 +81,7 @@ func (s *scheduler) Start() {
 			return
 		case <-exeTicker.C:
 			s.scheduleTasks()
+			s.collectCompletedTasks()
 		case <-logTicker.C:
 			LogStats(s.manager)
 		}
@@ -73,12 +89,17 @@ func (s *scheduler) Start() {
 }
 
 func (s *scheduler) scheduleTasks() {
+	if !s.submitMu.TryLock() {
+		return
+	}
+
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].GetTaskID() < tasks[j].GetTaskID()
 	})
 
 	if len(tasks) == 0 {
+		s.submitMu.Unlock()
 		return
 	}
 
@@ -87,22 +108,43 @@ func (s *scheduler) scheduleTasks() {
 	})
 	mlog.Info(context.TODO(), "processing tasks...", mlog.Int64s("taskIDs", taskIDs))
 
-	futures := make(map[int64][]*conc.Future[any])
-	for _, task := range tasks {
-		fs := task.Execute()
-		futures[task.GetTaskID()] = fs
-	}
+	go func() {
+		defer s.submitMu.Unlock()
 
-	for taskID, fs := range futures {
-		err := conc.AwaitAll(fs...)
-		if err != nil {
+		for _, task := range tasks {
+			fs := task.Execute()
+			s.futuresMu.Lock()
+			s.futures[task.GetTaskID()] = fs
+			s.futuresMu.Unlock()
+		}
+	}()
+}
+
+// collectCompletedTasks marks successful tasks Completed and forgets canceled work.
+func (s *scheduler) collectCompletedTasks() {
+	s.futuresMu.Lock()
+	defer s.futuresMu.Unlock()
+
+	for taskID, fs := range s.futures {
+		task := s.manager.Get(taskID)
+		if task == nil || task.GetState() == datapb.ImportTaskStateV2_Failed {
+			if task != nil {
+				mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.String("reason", task.GetReason()))...)
+			}
+			delete(s.futures, taskID)
+			continue
+		}
+		if !allDone(fs) {
+			continue
+		}
+		delete(s.futures, taskID)
+		if err := conc.AwaitAll(fs...); err != nil {
+			mlog.Warn(context.TODO(), "preimport/import failed", WrapLogFields(task, mlog.Err(err))...)
 			continue
 		}
 		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
 		mlog.Info(context.TODO(), "preimport/import done", mlog.FieldTaskID(taskID))
 	}
-
-	mlog.Info(context.TODO(), "all tasks completed", mlog.Int64s("taskIDs", taskIDs))
 }
 
 // Slots returns the used slots for import
@@ -114,21 +156,19 @@ func (s *scheduler) Slots() int64 {
 	return used
 }
 
+// Resource reports accepted live tasks and the buffers retained by their readers.
+// Canceled readers release their allocator reservations when they exit.
+func (s *scheduler) Resource() taskcommon.Resource {
+	var used taskcommon.Resource
+	for _, task := range s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress)) {
+		used = used.Add(task.GetResource())
+	}
+	used.Memory = max(used.Memory, GetMemoryAllocator().Used())
+	return used
+}
+
 func (s *scheduler) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closeChan)
 	})
-}
-
-func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
-	for k, fs := range futures {
-		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
-			if f.Done() {
-				_, err := f.Await()
-				return err != nil
-			}
-			return true
-		})
-		futures[k] = fs
-	}
 }

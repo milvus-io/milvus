@@ -97,6 +97,10 @@ func InitSegcore(nodeID int64) error {
 	// (sort compaction, import, stats). Mirror of the QueryNode wiring in #49208.
 	C.SetArrowIOThreadPoolCapacity(C.int(initcore.ResolveArrowIOThreadPoolCapacity()))
 
+	if err := initcore.InitS3CrtQueueSizes(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Apply Arrow parquet reader range-coalescing config (hole/range size limits).
 	if err := initcore.InitArrowReaderConfig(paramtable.Get()); err != nil {
 		return err
@@ -104,9 +108,15 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
 		return err
 	}
+	if err := initcore.InitExternalSparseConversionConfig(paramtable.Get()); err != nil {
+		return err
+	}
 
 	// Publish the External Table IOPS policy once for native IndexBuilder
 	// readers. Reader config watchers must not rewrite this startup policy.
+	if err := initcore.InitCredentialBrokerPolicy(paramtable.Get()); err != nil {
+		return err
+	}
 	if err := initcore.InitExternalIopsConfig(paramtable.Get()); err != nil {
 		return err
 	}
@@ -117,6 +127,7 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitLoonReaderConfig(paramtable.Get()); err != nil {
 		return err
 	}
+	initcore.LogLoonReaderConfig(paramtable.Get(), "datanode")
 
 	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
 	// without restart, matching QueryNode behavior.

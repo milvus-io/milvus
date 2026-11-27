@@ -34,6 +34,7 @@ const (
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
 	IndexNGRAM    IndexType = "NGRAM"
+	IndexFMINDEX  IndexType = "FMINDEX"
 	IndexRTREE    IndexType = "RTREE"
 
 	AutoIndex IndexType = "AUTOINDEX"
@@ -41,7 +42,8 @@ const (
 
 func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
-		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED
+		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
+		indexType == IndexNGRAM || indexType == IndexFMINDEX
 }
 
 func IsGpuIndex(indexType IndexType) bool {
@@ -62,11 +64,14 @@ func IsDiskIndex(indexType IndexType) bool {
 }
 
 func IsScalarMmapIndex(indexType IndexType) bool {
-	return indexType == IndexINVERTED ||
+	return indexType == IndexSTLSORT ||
+		indexType == IndexINVERTED ||
 		indexType == IndexBitmap ||
 		indexType == IndexHybrid ||
 		indexType == IndexTrie ||
-		indexType == IndexNGRAM
+		indexType == IndexTRIE ||
+		indexType == IndexNGRAM ||
+		indexType == IndexFMINDEX
 }
 
 func ValidateMmapIndexParams(indexType IndexType, indexParams map[string]string) error {

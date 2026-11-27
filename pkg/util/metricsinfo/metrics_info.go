@@ -364,8 +364,10 @@ type DataCoordDist struct {
 
 // DataCoordConfiguration records the configuration of DataCoord.
 type DataCoordConfiguration struct {
-	SegmentMaxSize             float64 `json:"segment_max_size"`
-	ResolvedScalarIndexVersion int32   `json:"resolved_scalar_index_version"`
+	SegmentMaxSize                  float64 `json:"segment_max_size"`
+	ForceMergeDataNodeMemoryFactor  float64 `json:"force_merge_datanode_memory_factor"`
+	ForceMergeQueryNodeMemoryFactor float64 `json:"force_merge_querynode_memory_factor"`
+	ResolvedScalarIndexVersion      int32   `json:"resolved_scalar_index_version"`
 }
 
 type DataCoordIndexInfo struct {

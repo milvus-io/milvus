@@ -27,6 +27,13 @@ func (r *timestampOverwriteRecord) Column(i storage.FieldID) arrow.Array {
 	return r.inner.Column(i)
 }
 
+func (r *timestampOverwriteRecord) TryColumn(i storage.FieldID) (arrow.Array, bool) {
+	if i == common.TimeStampField {
+		return r.tsArray, true
+	}
+	return storage.TryRecordColumn(r.inner, i)
+}
+
 func (r *timestampOverwriteRecord) Len() int { return r.inner.Len() }
 func (r *timestampOverwriteRecord) Release() { r.tsArray.Release(); r.inner.Release() }
 func (r *timestampOverwriteRecord) Retain()  { r.tsArray.Retain(); r.inner.Retain() }

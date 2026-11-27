@@ -21,7 +21,7 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/Consts.h"
@@ -96,6 +96,16 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
+    // Element-nullable VECTOR_ARRAY supports element-level search only; the
+    // reader's IdMap returns logical element ids. Embedding-list search is
+    // rejected.
+    if (field.get_data_type() == DataType::VECTOR_ARRAY &&
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
+        ThrowInfo(NotImplemented,
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
+    }
     auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
     // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
     auto dim = is_sparse ? 0 : field.get_dim();
@@ -125,7 +135,8 @@ SearchOnSealedIndex(const Schema& schema,
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 
-    const bool is_element_level_search = search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        search_info.struct_element_offsets_ != nullptr;
     search_result.element_level_ = is_element_level_search;
     BitsetView search_bitset = bitset;
 
@@ -134,7 +145,7 @@ SearchOnSealedIndex(const Schema& schema,
             *vec_index, dataset, search_info, search_bitset, op_context);
         cached_iter.NextBatch(search_info, search_result);
         FinalizeVectorSearchOffsets(search_result,
-                                    search_info.array_offsets_.get());
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -161,7 +172,7 @@ SearchOnSealedIndex(const Schema& schema,
     }
     FinalizeVectorSearchOffsets(
         search_result,
-        use_iterator ? nullptr : search_info.array_offsets_.get());
+        use_iterator ? nullptr : search_info.struct_element_offsets_.get());
     if (use_iterator) {
         search_result.resource_pins_.emplace_back(std::move(accessor));
     }
@@ -219,6 +230,13 @@ SearchOnSealedColumn(const Schema& schema,
 
     auto field_id = search_info.field_id_;
     auto& field = schema[field_id];
+    if (field.get_data_type() == DataType::VECTOR_ARRAY &&
+        field.is_element_nullable() &&
+        search_info.struct_element_offsets_ == nullptr) {
+        ThrowInfo(NotImplemented,
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
+    }
 
     auto data_type = field.get_data_type();
     auto element_type = field.get_element_type();
@@ -236,14 +254,22 @@ SearchOnSealedColumn(const Schema& schema,
 
     CheckBruteForceSearchParam(field, search_info);
 
-    const bool is_element_level_search = data_type == DataType::VECTOR_ARRAY &&
-                                         search_info.array_offsets_ != nullptr;
+    const bool is_element_level_search =
+        data_type == DataType::VECTOR_ARRAY &&
+        search_info.struct_element_offsets_ != nullptr;
     // Nullable vector chunks scan compacted physical rows. Row-level searches
     // need p2l ids; element-level VECTOR_ARRAY searches map element ids later.
     const bool needs_offset_mapping =
         column->IsNullable() && !is_element_level_search;
     if (needs_offset_mapping) {
         column->BuildValidRowIds(op_context);
+    }
+    // Element-nullable chunks store only valid vectors: scan physical
+    // elements and map them to logical element ids through the bitset.
+    const bool has_element_id_mapping =
+        is_element_level_search && field.is_element_nullable();
+    if (has_element_id_mapping) {
+        column->BuildElementPhysicalToLogicalIds(op_context);
     }
 
     // Check for nullable vector field with all null values - must be done before creating iterators
@@ -281,9 +307,11 @@ SearchOnSealedColumn(const Schema& schema,
                                          search_info,
                                          index_info,
                                          search_bitview,
-                                         data_type);
+                                         data_type,
+                                         op_context);
         cached_iter.NextBatch(search_info, result);
-        FinalizeVectorSearchOffsets(result, search_info.array_offsets_.get());
+        FinalizeVectorSearchOffsets(result,
+                                    search_info.struct_element_offsets_.get());
         return;
     }
 
@@ -320,6 +348,14 @@ SearchOnSealedColumn(const Schema& schema,
         if (has_offset_mapping) {
             id_view =
                 offset_mapping.GetPhysicalToLogicalIds(offset, chunk_size);
+            chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
+        } else if (has_element_id_mapping) {
+            id_view = column->GetElementPhysicalToLogicalIds(i);
+            AssertInfo(id_view.count == chunk_size,
+                       "element id map of chunk {} has {} ids, expected {}",
+                       i,
+                       id_view.count,
+                       chunk_size);
             chunk_bitview = AttachOffsetMappingIds(search_bitview, id_view);
         }
 
@@ -376,10 +412,10 @@ SearchOnSealedColumn(const Schema& schema,
     } else {
         // See FinalizeVectorSearchOffsets for the rationale: element-level
         // and row-level remapping are mutually exclusive.
-        if (search_info.array_offsets_ != nullptr) {
+        if (search_info.struct_element_offsets_ != nullptr) {
             auto [seg_offsets, elem_indicies] =
                 final_qr.convert_to_element_offsets(
-                    search_info.array_offsets_.get());
+                    search_info.struct_element_offsets_.get());
             result.seg_offsets_ = std::move(seg_offsets);
             result.element_indices_ = std::move(elem_indicies);
             result.element_level_ = true;

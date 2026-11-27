@@ -267,6 +267,7 @@ type ListRLSPrincipalsOption interface {
 type listRLSPrincipalsOption struct {
 	dbName         string
 	collectionName string
+	countOnly      bool
 }
 
 func NewListRLSPrincipalsOption(collectionName string) *listRLSPrincipalsOption {
@@ -278,11 +279,18 @@ func (opt *listRLSPrincipalsOption) WithDbName(dbName string) *listRLSPrincipals
 	return opt
 }
 
+// WithCountOnly requests the count without returning principal names.
+func (opt *listRLSPrincipalsOption) WithCountOnly(countOnly bool) *listRLSPrincipalsOption {
+	opt.countOnly = countOnly
+	return opt
+}
+
 func (opt *listRLSPrincipalsOption) Request() *milvuspb.ListRLSPrincipalsRequest {
 	return &milvuspb.ListRLSPrincipalsRequest{
 		Base:           &commonpb.MsgBase{},
 		DbName:         opt.dbName,
 		CollectionName: opt.collectionName,
+		Count:          opt.countOnly,
 	}
 }
 

@@ -153,26 +153,11 @@ func validateKeptEvolutionFields(oldFields, newFields *evolutionFieldMaps) error
 		if oldField.GetName() != newField.GetName() {
 			return merr.WrapErrParameterInvalidMsg("cannot rename struct field id %d from %q to %q", id, oldField.GetName(), newField.GetName())
 		}
+		if oldField.GetExternalField() != newField.GetExternalField() {
+			return merr.WrapErrParameterInvalidMsg("cannot change the external_field of struct field %q in place", oldField.GetName())
+		}
 		if oldField.GetNullable() != newField.GetNullable() {
 			return merr.WrapErrParameterInvalidMsg("cannot change the nullability of struct field %q in place", oldField.GetName())
-		}
-		oldChildren := make(map[int64]struct{}, len(oldField.GetFields()))
-		for _, child := range oldField.GetFields() {
-			oldChildren[child.GetFieldID()] = struct{}{}
-		}
-		newChildren := make(map[int64]struct{}, len(newField.GetFields()))
-		for _, child := range newField.GetFields() {
-			newChildren[child.GetFieldID()] = struct{}{}
-		}
-		for childID := range oldChildren {
-			if _, kept := newChildren[childID]; !kept {
-				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field id %d from kept struct field %q", childID, oldField.GetName())
-			}
-		}
-		for childID := range newChildren {
-			if _, existed := oldChildren[childID]; !existed {
-				return merr.WrapErrParameterInvalidMsg("cannot add sub-field id %d to kept struct field %q", childID, oldField.GetName())
-			}
 		}
 		if err := validateNumericBoundsEvolution(oldField.GetName(), oldField.GetTypeParams(), newField.GetTypeParams()); err != nil {
 			return err
@@ -190,10 +175,14 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		return merr.WrapErrParameterInvalidMsg("cannot change the data type of field %q in place", name)
 	case oldField.GetElementType() != newField.GetElementType():
 		return merr.WrapErrParameterInvalidMsg("cannot change the element type of field %q in place", name)
+	case oldField.GetElementNullable() != newField.GetElementNullable():
+		return merr.WrapErrParameterInvalidMsg("cannot change the element nullability of field %q in place", name)
 	case oldField.GetNullable() != newField.GetNullable():
 		return merr.WrapErrParameterInvalidMsg("cannot change the nullability of field %q in place", name)
 	case !oldField.GetIsFunctionOutput() && newField.GetIsFunctionOutput():
 		return merr.WrapErrParameterInvalidMsg("cannot repurpose existing field %q as a function output", name)
+	case IsAddedStructSubField(oldField) != IsAddedStructSubField(newField):
+		return merr.WrapErrParameterInvalidMsg("cannot change the origin marker of struct sub-field %q in place", name)
 	case oldField.GetIsPrimaryKey() != newField.GetIsPrimaryKey(),
 		oldField.GetIsPartitionKey() != newField.GetIsPartitionKey(),
 		oldField.GetIsClusteringKey() != newField.GetIsClusteringKey(),
@@ -201,7 +190,64 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		oldField.GetIsDynamic() != newField.GetIsDynamic():
 		return merr.WrapErrParameterInvalidMsg("cannot change the structural role of field %q in place", name)
 	}
+	if err := validateTypeSchemaEvolution(name, oldField.GetTypeSchema(), newField.GetTypeSchema()); err != nil {
+		return err
+	}
+	if err := typeutil.ValidateFieldTypeSchema(newField); err != nil {
+		return err
+	}
+	if typeutil.IsNestedArrayTypeSchema(newField.GetTypeSchema()) {
+		rootCapacity, _, err := evolutionNumericValue(
+			newField.GetTypeSchema().GetTypeParams(), common.MaxCapacityKey)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %q has an invalid type_schema root max_capacity", name)
+		}
+		mirrorCapacity, hasMirror, err := evolutionNumericValue(
+			newField.GetTypeParams(), common.MaxCapacityKey)
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"field %q has an invalid max_capacity mirror", name)
+		}
+		if hasMirror && mirrorCapacity != rootCapacity {
+			return merr.WrapErrParameterInvalidMsg(
+				"type param %s of nested array field %s must match type_schema root capacity %d",
+				common.MaxCapacityKey, name, rootCapacity)
+		}
+	}
 	return validateNumericBoundsEvolution(name, oldField.GetTypeParams(), newField.GetTypeParams())
+}
+
+func validateTypeSchemaEvolution(fieldName string, oldTypeSchema, newTypeSchema *schemapb.TypeSchema) error {
+	if oldTypeSchema == nil || newTypeSchema == nil {
+		if oldTypeSchema == nil && newTypeSchema == nil {
+			return nil
+		}
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
+	if oldTypeSchema.GetNullable() != newTypeSchema.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
+
+	switch oldKind := oldTypeSchema.GetKind().(type) {
+	case *schemapb.TypeSchema_ArrayElement:
+		newKind, ok := newTypeSchema.GetKind().(*schemapb.TypeSchema_ArrayElement)
+		if !ok || oldKind.ArrayElement == nil || newKind.ArrayElement == nil {
+			return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+		}
+		if err := validateNumericBoundsEvolution(fieldName, oldTypeSchema.GetTypeParams(), newTypeSchema.GetTypeParams()); err != nil {
+			return err
+		}
+		return validateTypeSchemaEvolution(fieldName, oldKind.ArrayElement, newKind.ArrayElement)
+	case *schemapb.TypeSchema_LeafType:
+		newKind, ok := newTypeSchema.GetKind().(*schemapb.TypeSchema_LeafType)
+		if !ok || oldKind.LeafType != newKind.LeafType {
+			return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+		}
+		return validateNumericBoundsEvolution(fieldName, oldTypeSchema.GetTypeParams(), newTypeSchema.GetTypeParams())
+	default:
+		return merr.WrapErrParameterInvalidMsg("cannot change the type schema of field %q in place", fieldName)
+	}
 }
 
 func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newSchema *schemapb.CollectionSchema) error {
@@ -211,13 +257,25 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		}
 		if _, isSubField := newFields.structSubFields[id]; isSubField {
 			parentID := newFields.structParents[id]
-			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {
-				return merr.WrapErrParameterInvalidMsg("cannot add sub-field %q to kept struct field id %d", field.GetName(), parentID)
+			parent := newFields.structFields[parentID]
+			parentExt := parent.GetExternalField()
+			if parentExt == "" {
+				parentExt = parent.GetName()
 			}
-			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() {
+			shortName, err := typeutil.ExtractStructFieldName(field.GetName())
+			expectedExt := field.GetName()
+			if err == nil {
+				expectedExt = typeutil.ConcatStructFieldName(parentExt, shortName)
+			}
+			mappedStructChild := typeutil.NewStorageColumnResolver(newSchema).IsMilvusTable() && field.GetExternalField() == expectedExt
+			if field.GetIsPrimaryKey() || field.GetAutoID() || field.GetIsPartitionKey() || field.GetIsClusteringKey() || field.GetIsFunctionOutput() || field.GetIsDynamic() || (field.GetExternalField() != "" && !mappedStructChild) {
 				return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
 			}
-			if !field.GetNullable() {
+			if _, parentExisted := oldFields.structFields[parentID]; parentExisted {
+				if err := validateAddedEvolutionStructSubField(field, parent); err != nil {
+					return err
+				}
+			} else if !field.GetNullable() {
 				return merr.WrapErrParameterInvalidMsg("cannot add non-nullable sub-field %q in a new struct field", field.GetName())
 			}
 			continue
@@ -239,6 +297,45 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 		if len(structField.GetFields()) == 0 {
 			return merr.WrapErrParameterInvalidMsg("new struct field %q must contain at least one sub-field", structField.GetName())
 		}
+	}
+	return nil
+}
+
+func validateAddedEvolutionStructSubField(field *schemapb.FieldSchema, parent *schemapb.StructArrayFieldSchema) error {
+	// Rootcoord marks every sub-field added to an existing struct, so that the
+	// drop rule can tell it from the original sub-fields.
+	if !IsAddedStructSubField(field) {
+		return merr.WrapErrServiceInternalMsg("added sub-field %q of struct field %q has no origin marker", field.GetName(), parent.GetName())
+	}
+	if !field.GetElementNullable() {
+		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), parent.GetName())
+	}
+	if field.GetDefaultValue() != nil {
+		return merr.WrapErrParameterInvalidMsg("default value is not supported for struct field, field name = %s", field.GetName())
+	}
+	if field.GetNullable() != parent.GetNullable() {
+		return merr.WrapErrParameterInvalidMsg("sub-field %q nullable=%t must match struct field %q nullable=%t", field.GetName(), field.GetNullable(), parent.GetName(), parent.GetNullable())
+	}
+	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.GetName(), field.GetDataType())
+	}
+	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+		return err
+	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		inner := field.GetTypeSchema().GetArrayElement()
+		if _, ok := inner.GetArrayElement().GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+			return merr.WrapErrParameterInvalidMsg("nested array field %s supports exactly one nested array level", field.GetName())
+		}
+		if field.GetTypeSchema().GetNullable() != parent.GetNullable() || inner.GetNullable() != field.GetElementNullable() {
+			return merr.WrapErrParameterInvalidMsg("nested array field %q nullability must match struct nullable and element_nullable", field.GetName())
+		}
+	} else if field.GetDataType() == schemapb.DataType_Array {
+		if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
+			return err
+		}
+	} else if !typeutil.IsFixDimVectorType(field.GetElementType()) {
+		return merr.WrapErrParameterInvalidMsg("unsupported element type %s of ArrayOfVector field %s", field.GetElementType(), field.GetName())
 	}
 	return nil
 }
@@ -274,6 +371,9 @@ func validateAddedEvolutionField(field *schemapb.FieldSchema, newSchema *schemap
 	if field.GetIsDynamic() {
 		return nil
 	}
+	if field.GetExternalField() == "" && typeutil.IsExternalCollection(newSchema) {
+		return merr.WrapErrParameterInvalidMsg("add field operation on external collection requires external_field mapping, field name = %s", name)
+	}
 	if !field.GetNullable() && field.GetDefaultValue() == nil {
 		return merr.WrapErrParameterInvalidMsg("cannot add non-nullable field %q without a default value", name)
 	}
@@ -286,8 +386,15 @@ func validateDroppedEvolutionFields(oldFields, newFields *evolutionFieldMaps, ne
 			continue
 		}
 		if parentID, isSubField := oldFields.structParents[id]; isSubField {
-			if _, parentKept := newFields.structFields[parentID]; parentKept {
-				return merr.WrapErrParameterInvalidMsg("cannot drop sub-field %q from kept struct field id %d", field.GetName(), parentID)
+			if parent, parentKept := newFields.structFields[parentID]; parentKept {
+				if len(parent.GetFields()) == 0 {
+					return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", field.GetName(), parent.GetName())
+				}
+				// The struct stays: it must keep an original sub-field so that
+				// readers of old segments still have a stored sibling.
+				if err := CheckStructKeepsOriginalSubField(parent.GetName(), field.GetName(), parent.GetFields()); err != nil {
+					return err
+				}
 			}
 		}
 		if err := validateDroppedEvolutionField(field, newSchema); err != nil {

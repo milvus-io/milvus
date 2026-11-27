@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -64,18 +65,19 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 		},
 	}
 
+	var attempt *StatsTaskInfo
 	s.Run("loadOrStoreStatsTask", func() {
 		_, cancel := context.WithCancel(s.manager.ctx) //nolint:gosec // cancel is deferred below
 		defer cancel()
-		info := &StatsTaskInfo{
+		attempt = &StatsTaskInfo{
 			Cancel: cancel,
 			State:  indexpb.JobState_JobStateInProgress,
 		}
 
-		reInfo := s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, info)
+		reInfo := s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, attempt)
 		s.Nil(reInfo)
 
-		reInfo = s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, info)
+		reInfo = s.manager.LoadOrStoreStatsTask(s.cluster, s.taskID, attempt)
 		s.Equal(indexpb.JobState_JobStateInProgress, reInfo.State)
 	})
 
@@ -85,12 +87,12 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsTaskState", func() {
-		s.manager.StoreStatsTaskState(s.cluster, s.taskID, indexpb.JobState_JobStateFinished, "finished")
+		s.manager.StoreStatsTaskState(s.cluster, s.taskID, attempt, indexpb.JobState_JobStateFinished, "finished")
 		s.Equal(indexpb.JobState_JobStateFinished, s.manager.GetStatsTaskState(s.cluster, s.taskID))
 	})
 
 	s.Run("storeStatsResult", func() {
-		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1", 65535,
+		s.manager.StorePKSortStatsResult(s.cluster, s.taskID, attempt, 1, 2, 3, "ch1", 65535,
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			[]*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 			[]*datapb.FieldBinlog{},
@@ -99,7 +101,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsTextIndexResult", func() {
-		s.manager.StoreStatsTextIndexResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+		s.manager.StoreStatsTextIndexResult(s.cluster, s.taskID, attempt, 1, 2, 3, "ch1",
 			map[int64]*datapb.TextIndexStats{
 				100: {
 					FieldID:    100,
@@ -115,7 +117,7 @@ func (s *statsTaskInfoSuite) Test_Methods() {
 	})
 
 	s.Run("storeStatsJsonIndexResult", func() {
-		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, 1, 2, 3, "ch1",
+		s.manager.StoreJSONKeyStatsResult(s.cluster, s.taskID, attempt, 1, 2, 3, "ch1",
 			jsonKeyStatsLogs, baseManifest, manifest)
 	})
 
@@ -159,10 +161,11 @@ func (s *statsTaskInfoSuite) TestIndexTaskInfoReturnsIndexStorePathVersion() {
 
 func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	buildID := int64(200)
-	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, &IndexTaskInfo{State: commonpb.IndexState_InProgress})
+	attempt := &IndexTaskInfo{State: commonpb.IndexState_InProgress}
+	s.manager.LoadOrStoreIndexTask(s.cluster, buildID, attempt)
 
-	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 111, 4)
-	s.manager.StoreIndexTaskExecutionEndWithState(s.cluster, buildID, 222, 111, commonpb.IndexState_Failed, "mock failure")
+	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, attempt, 111, 4)
+	s.manager.StoreIndexTaskExecutionEndWithState(s.cluster, buildID, attempt, 222, 111, commonpb.IndexState_Failed, "mock failure")
 
 	info := s.manager.GetIndexTaskInfo(s.cluster, buildID)
 	s.Require().NotNil(info)
@@ -178,10 +181,70 @@ func (s *statsTaskInfoSuite) Test_IndexTaskCostMethods() {
 	reloaded := s.manager.GetIndexTaskInfo(s.cluster, buildID)
 	s.Equal(int64(4), reloaded.CostCPUNum)
 
-	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, 333, 8)
+	s.manager.StoreIndexTaskExecutionStart(s.cluster, buildID, attempt, 333, 8)
 	reloaded = s.manager.GetIndexTaskInfo(s.cluster, buildID)
 	s.Equal(int64(333), reloaded.ExecStartMs)
 	s.Equal(int64(8), reloaded.CostCPUNum)
 	s.Equal(int64(0), reloaded.ExecEndMs)
 	s.Equal(int64(0), reloaded.CostTimeMs)
+}
+
+func TestReplacementTaskIgnoresOldAttempt(t *testing.T) {
+	ctx := context.Background()
+	manager := NewTaskManager(ctx)
+	key := Key{ClusterID: "cluster", TaskID: 42}
+	keys := []Key{key}
+	cluster, id := key.ClusterID, key.TaskID
+
+	t.Run("index", func(t *testing.T) {
+		old := &IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		current := &IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		require.Nil(t, manager.LoadOrStoreIndexTask(cluster, id, old))
+		manager.DeleteIndexTaskInfos(ctx, keys)
+		require.Nil(t, manager.LoadOrStoreIndexTask(cluster, id, current))
+		before := manager.GetIndexTaskInfo(cluster, id)
+
+		manager.StoreIndexTaskExecutionStart(cluster, id, old, 100, 2)
+		manager.StoreIndexFilesAndStatistic(cluster, id, old, []string{"old"}, 10, 20, 1, 1, 0)
+		manager.StoreIndexTaskState(cluster, id, old, commonpb.IndexState_Failed, "old")
+		manager.StoreIndexTaskExecutionEndWithState(cluster, id, old, 110, 10, commonpb.IndexState_Retry, "canceled")
+		require.Equal(t, before, manager.GetIndexTaskInfo(cluster, id))
+		manager.RemoveIndexTask(key, old)
+
+		manager.StoreIndexTaskExecutionEndWithState(cluster, id, current, 220, 20, commonpb.IndexState_Finished, "")
+		require.Equal(t, commonpb.IndexState_Finished, manager.LoadIndexTaskState(cluster, id))
+	})
+	t.Run("analyze", func(t *testing.T) {
+		old := &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		current := &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		require.Nil(t, manager.LoadOrStoreAnalyzeTask(cluster, id, old))
+		manager.DeleteAnalyzeTaskInfos(ctx, keys)
+		require.Nil(t, manager.LoadOrStoreAnalyzeTask(cluster, id, current))
+
+		manager.StoreAnalyzeFilesAndStatistic(cluster, id, old, "old-centroids")
+		manager.StoreAnalyzeTaskState(cluster, id, old, indexpb.JobState_JobStateRetry, "canceled")
+		require.Equal(t, &AnalyzeTaskInfo{State: indexpb.JobState_JobStateInProgress}, manager.GetAnalyzeTaskInfo(cluster, id))
+		manager.RemoveAnalyzeTask(key, old)
+
+		manager.StoreAnalyzeTaskState(cluster, id, current, indexpb.JobState_JobStateFinished, "")
+		require.Equal(t, indexpb.JobState_JobStateFinished, manager.LoadAnalyzeTaskState(cluster, id))
+	})
+	t.Run("stats", func(t *testing.T) {
+		old := &StatsTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		current := &StatsTaskInfo{State: indexpb.JobState_JobStateInProgress}
+		require.Nil(t, manager.LoadOrStoreStatsTask(cluster, id, old))
+		manager.DeleteStatsTaskInfos(ctx, keys)
+		require.Nil(t, manager.LoadOrStoreStatsTask(cluster, id, current))
+		before := manager.GetStatsTaskInfo(cluster, id)
+
+		manager.StorePKSortStatsResult(cluster, id, old, 1, 2, 3, "ch", 4, nil, nil, nil, "old-sort")
+		manager.StoreStatsTextIndexResult(cluster, id, old, 1, 2, 3, "ch", nil, "base", "old-text")
+		manager.StoreJSONKeyStatsResult(cluster, id, old, 1, 2, 3, "ch", nil, "base", "old-json")
+		manager.StoreStatsTaskState(cluster, id, old, indexpb.JobState_JobStateRetry, "canceled")
+		require.Equal(t, before, manager.GetStatsTaskInfo(cluster, id))
+		manager.RemoveStatsTask(key, old)
+
+		manager.StoreStatsTaskState(cluster, id, current, indexpb.JobState_JobStateFinished, "")
+		require.Equal(t, indexpb.JobState_JobStateFinished, manager.GetStatsTaskState(cluster, id))
+	})
 }

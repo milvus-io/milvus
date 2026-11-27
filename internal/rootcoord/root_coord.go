@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -71,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -158,6 +158,8 @@ type Core struct {
 	streamingCoord *streamingcoord.Server
 	quotaCenter    *QuotaCenter
 	keyManager     *KeyManager
+
+	schemaLoadFieldsUpdater schemaLoadFieldsUpdateFunc
 
 	stateCode atomic.Int32
 	initOnce  sync.Once
@@ -247,9 +249,6 @@ func (c *Core) ServerExist(serverID int64) bool {
 
 func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 	c.proxyClientManager.SetProxyClients(sessions)
-	if len(sessions) > 0 {
-		c.invalidateProxyRLSCache(0)
-	}
 	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
@@ -257,28 +256,8 @@ func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 
 func (c *Core) addProxyClient(session *sessionutil.Session) {
 	c.proxyClientManager.AddProxyClient(session)
-	c.invalidateProxyRLSCache(session.GetServerID())
 	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
-	}
-}
-
-func (c *Core) invalidateProxyRLSCache(proxyID int64) {
-	ctx := c.ctx
-	if ctx == nil {
-		ctx = context.TODO()
-	}
-	req := &proxypb.InvalidateCollMetaCacheRequest{
-		Base: &commonpb.MsgBase{Properties: map[string]string{common.RLSClearAllCacheKey: "true"}},
-	}
-	var opts []proxyutil.ExpireCacheOpt
-	if proxyID != 0 {
-		opts = append(opts, proxyutil.SetTargetProxyID(proxyID))
-	}
-	if err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, req, opts...); err != nil {
-		mlog.Warn(ctx, "failed to invalidate RLS cache on proxy registration",
-			mlog.FieldNodeID(proxyID),
-			mlog.Err(err))
 	}
 }
 
@@ -1256,6 +1235,11 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	// Use the dbName parameter (resolved from the request) for consistency
 	// with resp.DbName; the model's DBName may not always be in sync.
 	resp.Schema.DbName = dbName
+	// Hide legacy create-only directives (such as preserve_field_ids persisted
+	// on v3.0.0–v3.0.6) from DescribeCollection and snapshots without mutating
+	// collInfo.Properties in MetaTable.
+	properties := stripCreateOnlyProperties(collInfo.Properties)
+	resp.Schema.Properties = properties
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
@@ -1272,7 +1256,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-	resp.Properties = collInfo.Properties
+	resp.Properties = properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
@@ -2799,11 +2783,16 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	ctxLog.Debug(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	var visibility *internalpb.CollectionVisibilitySnapshot
+	if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+		visibility = rbacutil.CompileCollectionVisibility(policies, collectionVisibilityGroups(allGroups))
+	}
 	return &internalpb.ListPolicyResponse{
-		Status:          merr.Success(),
-		PolicyInfos:     expandPolicies,
-		UserRoles:       userRoles,
-		PrivilegeGroups: allGroups,
+		Status:               merr.Success(),
+		PolicyInfos:          expandPolicies,
+		UserRoles:            userRoles,
+		PrivilegeGroups:      allGroups,
+		CollectionVisibility: visibility,
 	}, nil
 }
 
@@ -3125,64 +3114,11 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GetName() == "" {
-		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
-	}
-
-	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
+	if err := c.broadcastAddFileResource(ctx, req); err != nil {
 		return merr.Status(err), nil
-	} else if !exist {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
-
-	alreadyExists := false
-	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-		resources, _ := c.meta.ListFileResource(ctx)
-		for _, resource := range resources {
-			if resource.GetName() != req.GetName() {
-				continue
-			}
-			if resource.GetPath() != req.GetPath() {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
-			}
-			alreadyExists = true
-			break
-		}
-
-		if !alreadyExists {
-			size, err := c.storage.Size(ctx, req.GetPath())
-			if err != nil {
-				return merr.Status(err), nil
-			}
-			if size < 0 {
-				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
-			}
-			if size > maxFileSize {
-				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
-					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
-			}
-		}
-	}
-
-	if !alreadyExists {
-		id, err := c.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-		resource := &internalpb.FileResourceInfo{
-			Id:   int64(id),
-			Name: req.GetName(),
-			Path: req.GetPath(),
-		}
-		err = c.meta.AddFileResource(ctx, resource)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-	}
-
 	if c.fileResourceObserver != nil {
-		err := c.fileResourceObserver.Sync()
-		if err != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil
 		}
@@ -3205,14 +3141,12 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	err, exist := c.meta.RemoveFileResource(ctx, req.GetName())
+	removed, err := c.broadcastRemoveFileResource(ctx, req)
 	if err != nil {
 		return merr.Status(err), nil
 	}
-
-	if exist && c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
-		if err != nil {
+	if removed && c.fileResourceObserver != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "remove file resource success but some node sync failed")), nil
 		}
@@ -3451,21 +3385,13 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 			return nil, err
 		}
 		for _, entity := range entities {
-			objectType := entity.GetObject().GetName()
-			priv := entity.GetGrantor().GetPrivilege().GetName()
-			if objectType == commonpb.ObjectType_Global.String() &&
-				priv == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
-				privilegeColls.Insert(util.AnyWord)
-				return privilegeColls, nil
+			collectionName, visible := rbacutil.CollectionVisibilityName(entity, func(name string) bool {
+				_, custom := customPrivilegeGroupMap[name]
+				return custom || Params.RbacConfig.IsCollectionPrivilegeGroup(name)
+			})
+			if !visible {
+				continue
 			}
-			// should list collection level built-in privilege group or custom privilege group objects
-			if objectType != commonpb.ObjectType_Collection.String() {
-				_, isCustomGroup := customPrivilegeGroupMap[priv]
-				if !isCustomGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
-					continue
-				}
-			}
-			collectionName := entity.GetObjectName()
 			privilegeColls.Insert(collectionName)
 			if collectionName == util.AnyWord {
 				return privilegeColls, nil
@@ -3595,329 +3521,6 @@ func (c *Core) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClie
 	return c.telemetryMgr.DeleteCommand(ctx, req)
 }
 
-func (c *Core) createRowPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest) (*commonpb.Status, error) {
-	method := "CreateRowPolicy"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)), nil
-	}
-	logger := mlog.With(
-		mlog.String("role", typeutil.RootCoordRole),
-		mlog.FieldDbName(req.GetDbName()),
-		mlog.FieldCollectionName(req.GetCollectionName()),
-		mlog.String("policyName", req.GetPolicyName()),
-	)
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	err := c.broadcastCreateRLSPolicy(ctx, req)
-	if err != nil {
-		logger.Warn(ctx, "failed to create RLS policy", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return merr.Success(), nil
-}
-
-func (c *Core) updateRowPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*commonpb.Status, error) {
-	method := "UpdateRowPolicy"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)), nil
-	}
-	logger := mlog.With(
-		mlog.String("role", typeutil.RootCoordRole),
-		mlog.FieldDbName(req.GetDbName()),
-		mlog.FieldCollectionName(req.GetCollectionName()),
-		mlog.String("policyName", req.GetPolicyName()),
-	)
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	err := c.broadcastUpdateRLSPolicy(ctx, req)
-	if err != nil {
-		logger.Warn(ctx, "failed to update RLS policy", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return merr.Success(), nil
-}
-
-func (c *Core) dropRowPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*commonpb.Status, error) {
-	method := "DropRowPolicy"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)), nil
-	}
-	logger := mlog.With(
-		mlog.String("role", typeutil.RootCoordRole),
-		mlog.FieldDbName(req.GetDbName()),
-		mlog.FieldCollectionName(req.GetCollectionName()),
-		mlog.String("policyName", req.GetPolicyName()),
-	)
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	err := c.broadcastDropRLSPolicy(ctx, req)
-	if err != nil {
-		logger.Warn(ctx, "failed to drop RLS policy", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return merr.Success(), nil
-}
-
-func (c *Core) listRowPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) (*rlsutil.ListRowPoliciesResponse, error) {
-	method := "ListRowPolicies"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.ListRowPoliciesResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)),
-		}, nil
-	}
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &rlsutil.ListRowPoliciesResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-
-	policies, err := c.meta.ListRLSPolicies(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "failed to list RLS policies", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.ListRowPoliciesResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &rlsutil.ListRowPoliciesResponse{
-		Status:         merr.Success(),
-		Policies:       policies,
-		DbName:         req.GetDbName(),
-		CollectionName: req.GetCollectionName(),
-	}, nil
-}
-
-func (c *Core) setRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
-	method := "SetRLSPrincipalTags"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)), nil
-	}
-	logger := mlog.With(
-		mlog.String("role", typeutil.RootCoordRole),
-		mlog.FieldDbName(req.GetDbName()),
-		mlog.FieldCollectionName(req.GetCollectionName()),
-		mlog.String("principalName", req.GetPrincipalName()),
-	)
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	err := c.broadcastSetRLSPrincipalTags(ctx, req)
-	if err != nil {
-		logger.Warn(ctx, "failed to set RLS principal tags", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return merr.Success(), nil
-}
-
-func (c *Core) getRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (*rlsutil.GetRLSPrincipalTagsResponse, error) {
-	method := "GetRLSPrincipalTags"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.GetRLSPrincipalTagsResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)),
-		}, nil
-	}
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &rlsutil.GetRLSPrincipalTagsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-			PrincipalName:  req.GetPrincipalName(),
-		}, nil
-	}
-
-	tags, err := c.meta.GetRLSPrincipalTags(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "failed to get RLS principal tags", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.GetRLSPrincipalTagsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-			PrincipalName:  req.GetPrincipalName(),
-		}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &rlsutil.GetRLSPrincipalTagsResponse{
-		Status:         merr.Success(),
-		Tags:           tags,
-		DbName:         req.GetDbName(),
-		CollectionName: req.GetCollectionName(),
-		PrincipalName:  req.GetPrincipalName(),
-	}, nil
-}
-
-func (c *Core) listRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) (*rlsutil.ListRLSPrincipalsResponse, error) {
-	method := "ListRLSPrincipals"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.ListRLSPrincipalsResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)),
-		}, nil
-	}
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &rlsutil.ListRLSPrincipalsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-
-	principals, err := c.meta.ListRLSPrincipals(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "failed to list RLS principals", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rlsutil.ListRLSPrincipalsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &rlsutil.ListRLSPrincipalsResponse{
-		Status:         merr.Success(),
-		PrincipalNames: principals,
-		DbName:         req.GetDbName(),
-		CollectionName: req.GetCollectionName(),
-	}, nil
-}
-
 func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
-	method := "GetRLSMetadata"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rootcoordpb.GetRLSMetadataResponse{
-			Status: merr.Status(merr.WrapErrServiceInternalMsg("%s request is nil", method)),
-		}, nil
-	}
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &rootcoordpb.GetRLSMetadataResponse{
-			Status:       merr.Status(err),
-			CollectionId: req.GetCollectionId(),
-		}, nil
-	}
-
-	metadata, err := c.meta.GetRLSMetadata(ctx, req.GetCollectionId(), req.GetKind(), req.GetPrincipalName())
-	if err != nil {
-		mlog.Warn(ctx, "failed to get RLS metadata",
-			mlog.FieldCollectionID(req.GetCollectionId()),
-			mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return &rootcoordpb.GetRLSMetadataResponse{
-			Status:       merr.Status(err),
-			CollectionId: req.GetCollectionId(),
-		}, nil
-	}
-
-	principals := make([]*rootcoordpb.RLSPrincipalInfo, 0, len(metadata.Principals))
-	for _, principal := range metadata.Principals {
-		info, err := model.MarshalRLSPrincipalModel(principal)
-		if err != nil {
-			mlog.Warn(ctx, "failed to marshal RLS principal metadata",
-				mlog.FieldCollectionID(metadata.CollectionID),
-				mlog.Err(err))
-			metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-			return &rootcoordpb.GetRLSMetadataResponse{
-				Status:       merr.Status(err),
-				CollectionId: metadata.CollectionID,
-			}, nil
-		}
-		principals = append(principals, info)
-	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return &rootcoordpb.GetRLSMetadataResponse{
-		Status:       merr.Success(),
-		CollectionId: metadata.CollectionID,
-		Policies: lo.Map(metadata.Policies, func(policy *model.RLSPolicy, _ int) *rootcoordpb.RLSPolicyInfo {
-			return model.MarshalRLSPolicyModel(policy)
-		}),
-		Principals: principals,
-	}, nil
-}
-
-func (c *Core) deleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
-	method := "DeleteRLSPrincipalTags"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
-	tr := timerecord.NewTimeRecorder(method)
-	if req == nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method)), nil
-	}
-	logger := mlog.With(
-		mlog.String("role", typeutil.RootCoordRole),
-		mlog.FieldDbName(req.GetDbName()),
-		mlog.FieldCollectionName(req.GetCollectionName()),
-		mlog.String("principalName", req.GetPrincipalName()),
-	)
-
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	err := c.broadcastDeleteRLSPrincipalTags(ctx, req)
-	if err != nil {
-		logger.Warn(ctx, "failed to delete RLS principal tags", mlog.Err(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return merr.Status(err), nil
-	}
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return merr.Success(), nil
+	return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
 }

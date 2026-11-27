@@ -17,7 +17,7 @@
 #include "storage/minio/MinioChunkManager.h"
 
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -28,16 +28,23 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <string.h>
 #include <unistd.h>
-#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <sstream>
+#include <string_view>
+#include <tuple>
+#include <utility>
 
 #include "aws/core/Aws.h"
 #include "aws/core/auth/signer/AWSAuthV4Signer.h"
 #include "aws/core/http/Scheme.h"
 #include "aws/core/utils/Outcome.h"
+#include "aws/core/utils/StringUtils.h"
 #include "aws/core/utils/memory/AWSMemory.h"
 #include "aws/core/utils/memory/stl/AWSStringStream.h"
 #include "aws/s3/S3Client.h"
@@ -49,18 +56,20 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "fmt/core.h"
-#include "google/cloud/internal/rest_client.h"
-#include "google/cloud/storage/oauth2/compute_engine_credentials.h"
-#include "google/cloud/version.h"
 #include "log/Log.h"
 #include "milvus-storage/common/extend_status.h"
-#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
+#include "milvus-storage/filesystem/s3/s3_options.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
 #include "signal.h"
 #include "storage/Types.h"
+#include "storage/loon_ffi/util.h"
 #include "storage/aliyun/AliyunCredentialsProvider.h"
 
 namespace milvus::storage {
@@ -68,20 +77,52 @@ namespace milvus::storage {
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
 
+namespace {
+
+// The options the SDK was last initialized with: Aws::ShutdownAPI undoes what
+// Aws::InitAPI set up from them.
+Aws::SDKOptions sdk_options_at_init;
+std::once_flag release_sdk_at_exit;
+
+std::mutex&
+GcpProvidersMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+using GcpProviderKey =
+    std::tuple<Aws::Http::Scheme, std::uint16_t, Aws::String, std::string>;
+using GcpProviderMap =
+    std::map<GcpProviderKey,
+             std::shared_ptr<milvus_storage::GcpCredentialProvider>>;
+
+// Providers are scoped to the primary storage identity and keep the token
+// cache across legacy client lifetimes. Only the client attaches credentials.
+GcpProviderMap&
+MilvusGcpProviders() {
+    static GcpProviderMap providers;
+    return providers;
+}
+
+}  // namespace
+
 void
 ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
     sdk_options.httpOptions.httpClientFactory_create_fn = []() {
-        auto credentials =
-            std::make_shared<google::cloud::oauth2_internal::
-                                 GOOGLE_CLOUD_CPP_NS::ComputeEngineCredentials>(
-                google::cloud::Options{},
-                [](google::cloud::Options const& opts) {
-                    return google::cloud::rest_internal::MakeDefaultRestClient(
-                        "", opts);
-                });
         return Aws::MakeShared<GoogleHttpClientFactory>(
-            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG);
     };
+}
+
+std::shared_ptr<Aws::Http::HttpRequest>
+GoogleHttpClientFactory::CreateHttpRequest(
+    const Aws::Http::URI& uri,
+    Aws::Http::HttpMethod method,
+    const Aws::IOStreamFactory& streamFactory) const {
+    auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
+        GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
+    request->SetResponseStreamFactory(streamFactory);
+    return request;
 }
 
 static void
@@ -171,7 +212,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -224,7 +265,7 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -237,20 +278,46 @@ MinioChunkManager::ShutdownSDKAPI() {
     }
 }
 
+// MinioChunkManagers share one reference to the AWS SDK. The first manager
+// takes it, and managers coming and going do not release it, since the SDK
+// would then have to be initialized again for the next one (#42459). It is
+// released when the process exits instead. A Go process ends with exit_group
+// and runs no exit handlers, but a host process that runs them would
+// otherwise destroy the SDK's static objects while the SDK is still
+// initialized: the default client bootstrap then shuts down from its static
+// destructor, and the cleanup thread that starts races the destruction of the
+// SDK's log redirection (a SIGSEGV in s_aws_logger_redirect_get_log_level).
+// Aws::ShutdownAPI counts references, so whichever holder releases the SDK
+// last shuts it down, this one or milvus-storage's own release at exit.
+void
+MinioChunkManager::InitSDKAPIUntilExit(const Aws::SDKOptions& options) {
+    Aws::InitAPI(options);
+    sdk_options_at_init = options;
+    std::call_once(release_sdk_at_exit,
+                   [] { std::atexit(MinioChunkManager::ReleaseSDKAPIAtExit); });
+}
+
+void
+MinioChunkManager::ReleaseSDKAPIAtExit() {
+    std::scoped_lock lock{client_mutex_};
+    // ShutdownSDKAPI may have released the reference already.
+    if (init_count_.exchange(0) > 0) {
+        Aws::ShutdownAPI(sdk_options_at_init);
+    }
+}
+
 void
 MinioChunkManager::BuildS3Client(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+            std::make_shared<milvus_storage::AwsCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
         AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
                    "if use iam, access key id should not be empty");
         AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
                    "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
 
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
@@ -337,35 +404,72 @@ void
 MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
-    if (!storage_config.useIAM) {
-        // Preserve the existing access-key validation before building a provider.
-        BuildAccessKeyClient(storage_config, config);
-    }
+    milvus_storage::S3Options options;
+    options.cloud_provider = "gcp";
+    options.endpoint_override = storage_config.address;
+    options.scheme = storage_config.useSSL ? "https" : "http";
 
-    // Storage may have installed the process-wide GCP HTTP factory first.
-    // Register both IAM and HMAC identities before PreCheck, even if our
-    // InitAPI was ignored. Building an access-key client alone is insufficient.
-    milvus_storage::ArrowFileSystemConfig gcp_config;
-    gcp_config.use_iam = storage_config.useIAM;
-    gcp_config.access_key_id = storage_config.access_key_id;
-    gcp_config.access_key_value = storage_config.access_key_value;
-    auto provider = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
-    if (!provider.ok()) {
-        throw milvus_storage::ToSegcoreError(provider.status());
+    const Aws::Http::URI endpoint(
+        milvus_storage::StorageUri::BuildEndpointUrl(storage_config.address,
+                                                     storage_config.useSSL)
+            .c_str());
+    const auto host =
+        Aws::Utils::StringUtils::ToLower(endpoint.GetAuthority().c_str());
+    if (endpoint.GetScheme() != Aws::Http::Scheme::HTTPS ||
+        !std::string_view(host.c_str()).ends_with(".googleapis.com")) {
+        // Opening the primary origin registers its configured endpoint.
+        auto c_config = ToCStorageConfig(storage_config);
+        c_config.storage_type = "remote";
+        c_config.cloud_provider = "gcp";
+        c_config.talon_mode = 0;
+        const auto properties =
+            MakeInternalPropertiesFromStorageConfig(c_config);
+        const auto primary =
+            milvus_storage::FilesystemCache::getInstance().get(*properties);
+        if (!primary.ok()) {
+            throw milvus_storage::ToSegcoreError(primary.status());
+        }
     }
-    milvus_storage::GcpCredentialRegistry::Instance().Register(
-        {milvus_storage::NormalizeGcpEndpoint(storage_config.address,
-                                              storage_config.useSSL),
-         storage_config.bucket_name},
-        std::move(provider).ValueOrDie());
 
     if (storage_config.useIAM) {
-        // Using S3 client instead of google client because of compatible protocol
+        const GcpProviderKey key{endpoint.GetScheme(),
+                                 endpoint.GetPort(),
+                                 host,
+                                 storage_config.bucket_name};
+        {
+            std::lock_guard<std::mutex> lock(GcpProvidersMutex());
+            auto& providers = MilvusGcpProviders();
+            if (const auto it = providers.find(key); it != providers.end()) {
+                options.credentials_provider = it->second;
+            } else {
+                milvus_storage::ArrowFileSystemConfig gcp_config;
+                gcp_config.cloud_provider = "gcp";
+                gcp_config.address = storage_config.address;
+                gcp_config.bucket_name = storage_config.bucket_name;
+                gcp_config.use_ssl = storage_config.useSSL;
+                gcp_config.use_iam = true;
+                const auto provider =
+                    milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+                if (!provider.ok()) {
+                    throw milvus_storage::ToSegcoreError(provider.status());
+                }
+                options.credentials_provider =
+                    providers.emplace(key, *provider).first->second;
+            }
+        }
+
         client_ = std::make_shared<Aws::S3::S3Client>(
+            options.credentials_provider,
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
+    } else {
+        BuildAccessKeyClient(storage_config, config);
+        options.ConfigureAccessKey(storage_config.access_key_id,
+                                   storage_config.access_key_value);
     }
+    milvus_storage::GcpCredentialProvider::ConfigS3HttpClient(options,
+                                                              *client_);
 }
 
 void
@@ -474,7 +578,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
 MinioChunkManager::~MinioChunkManager() {
     client_.reset();
-    // ShutdownSDKAPI();
+    // The SDK reference outlives the manager: see InitSDKAPIUntilExit.
 }
 
 uint64_t

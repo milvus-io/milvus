@@ -64,7 +64,7 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         downstream_client,
         sync_timeout,
     ):
-        """Test creating collections in multiple databases syncs to downstream."""
+        """Test collections and their rows sync independently across databases."""
         self._upstream_uri = upstream_uri
         self._upstream_token = upstream_token
 
@@ -93,14 +93,23 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
         # Create collection in db1 with 100 rows
         schema1 = self.create_default_schema(up_db1_client)
         up_db1_client.create_collection(collection_name=c_name_1, schema=schema1, consistency_level="Strong")
-        up_db1_client.insert(c_name_1, self.generate_test_data(100))
+        data_1 = self.generate_test_data(100)
+        up_db1_client.insert(c_name_1, data_1)
         up_db1_client.flush(c_name_1)
 
         # Create collection in db2 with 200 rows
         schema2 = self.create_default_schema(up_db2_client)
         up_db2_client.create_collection(collection_name=c_name_2, schema=schema2, consistency_level="Strong")
-        up_db2_client.insert(c_name_2, self.generate_test_data(200))
+        data_2 = self.generate_test_data(200)
+        up_db2_client.insert(c_name_2, data_2)
         up_db2_client.flush(c_name_2)
+
+        # Load both collections so the data oracle includes replicated growing rows.
+        for client, collection in ((up_db1_client, c_name_1), (up_db2_client, c_name_2)):
+            index_params = client.prepare_index_params()
+            index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+            client.create_index(collection, index_params)
+            client.load_collection(collection)
 
         up_db1_client.close()
         up_db2_client.close()
@@ -112,9 +121,6 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                     return False
                 dn_db1 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_1)
                 exists = dn_db1.has_collection(c_name_1)
-                if exists:
-                    stats = dn_db1.get_collection_stats(c_name_1)
-                    logger.info(f"Downstream db1 collection stats: {stats}")
                 dn_db1.close()
                 return exists
             except Exception as e:
@@ -129,9 +135,6 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
                     return False
                 dn_db2 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_2)
                 exists = dn_db2.has_collection(c_name_2)
-                if exists:
-                    stats = dn_db2.get_collection_stats(c_name_2)
-                    logger.info(f"Downstream db2 collection stats: {stats}")
                 dn_db2.close()
                 return exists
             except Exception as e:
@@ -140,20 +143,31 @@ class TestCDCSyncMultiDatabase(TestCDCSyncBase):
 
         assert self.wait_for_sync(check_db2_collection, sync_timeout, f"collection {c_name_2} in {db_name_2}")
 
-        # Verify row counts
+        # Collection metadata and statistics can arrive before queryable data.
+        # Verify exact rows instead of treating get_collection_stats as a barrier.
         dn_db1 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_1)
         dn_db2 = MilvusClient(uri=downstream_uri, token=downstream_token, db_name=db_name_2)
         try:
-            stats1 = dn_db1.get_collection_stats(c_name_1)
-            stats2 = dn_db2.get_collection_stats(c_name_2)
-            logger.info(f"DB1 collection row count: {stats1.get('row_count')}")
-            logger.info(f"DB2 collection row count: {stats2.get('row_count')}")
-            assert stats1.get("row_count", 0) >= 100, (
-                f"Expected >= 100 rows in {c_name_1}, got {stats1.get('row_count')}"
-            )
-            assert stats2.get("row_count", 0) >= 200, (
-                f"Expected >= 200 rows in {c_name_2}, got {stats2.get('row_count')}"
-            )
+            output_fields = ["id", "text", "number", "metadata"]
+            for client, collection, data in ((dn_db1, c_name_1, data_1), (dn_db2, c_name_2, data_2)):
+                expected = [{field: row[field] for field in output_fields} for row in data]
+
+                def check_rows():
+                    try:
+                        rows = client.query(
+                            collection_name=collection,
+                            filter="",
+                            output_fields=output_fields,
+                            limit=len(expected) + 1,
+                            consistency_level="Strong",
+                        )
+                        logger.info(f"Downstream {collection}: {len(rows)}/{len(expected)} rows")
+                        return sorted(rows, key=lambda row: row["id"]) == expected
+                    except Exception as e:
+                        logger.warning(f"Check rows in {collection} failed: {e}")
+                        return False
+
+                assert self.wait_for_sync(check_rows, sync_timeout, f"exact rows in {collection}")
         finally:
             dn_db1.close()
             dn_db2.close()

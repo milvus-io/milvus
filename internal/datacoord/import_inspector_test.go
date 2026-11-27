@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -29,10 +28,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -43,23 +45,28 @@ type ImportInspectorSuite struct {
 
 	catalog    *mocks.DataCoordCatalog
 	alloc      *allocator.MockAllocator
-	meta       *meta
-	importMeta ImportMeta
-	inspector  *importInspector
+	meta       *meta.Meta
+	importMeta bulkimport.ImportMeta
+	inspector  *bulkimport.Inspector
 }
 
 func (s *ImportInspectorSuite) SetupTest() {
+	dm := &domainMetas{}
+
 	var err error
 
 	s.collectionID = 1
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
 	s.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
-	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
@@ -72,16 +79,16 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.alloc = allocator.NewMockAllocator(s.T())
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, broker)
+	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, broker, loadDomainMetas(s.catalog, nil, dm))
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
+	s.meta.AddCollection(&meta.CollectionInfo{
 		ID:     s.collectionID,
-		Schema: newTestSchema(),
+		Schema: meta.NewTestSchema(),
 	})
-	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
+	s.importMeta, err = bulkimport.NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
 	scheduler := task2.NewMockGlobalScheduler(s.T())
-	s.inspector = NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler).(*importInspector)
+	s.inspector = bulkimport.NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler, nil).(*bulkimport.Inspector)
 }
 
 func (s *ImportInspectorSuite) TestProcessPreImport() {
@@ -95,32 +102,32 @@ func (s *ImportInspectorSuite) TestProcessPreImport() {
 		State:        datapb.ImportTaskStateV2_Pending,
 	}
 
-	var task ImportTask = &preImportTask{
-		importMeta: s.importMeta,
-		tr:         timerecord.NewTimeRecorder("preimport task"),
+	var task bulkimport.ImportTask = &bulkimport.PreImportTask{
+		ImportMeta: s.importMeta,
+		Tr:         timerecord.NewTimeRecorder("preimport task"),
 	}
-	task.(*preImportTask).task.Store(taskProto)
+	task.(*bulkimport.PreImportTask).Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
-	var job ImportJob = &importJob{
+	var job bulkimport.ImportJob = &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        0,
 			CollectionID: s.collectionID,
 			TimeoutTs:    math.MaxUint64,
 			Schema:       &schemapb.CollectionSchema{},
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
-		task.CreateTaskOnWorker(1, cluster)
+	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(1, cluster, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	})
-	s.inspector.inspect()
+	s.inspector.Inspect()
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
@@ -158,16 +165,16 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 		},
 	}
 
-	var task ImportTask = &importTask{
-		alloc:      s.alloc,
-		meta:       s.meta,
-		importMeta: s.importMeta,
-		tr:         timerecord.NewTimeRecorder("import task"),
+	var task bulkimport.ImportTask = &bulkimport.Task{
+		Alloc:      s.alloc,
+		Meta:       s.meta,
+		ImportMeta: s.importMeta,
+		Tr:         timerecord.NewTimeRecorder("import task"),
 	}
-	task.(*importTask).task.Store(taskProto)
+	task.(*bulkimport.Task).Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
-	var job ImportJob = &importJob{
+	var job bulkimport.ImportJob = &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        0,
 			CollectionID: s.collectionID,
@@ -176,7 +183,7 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
@@ -186,11 +193,11 @@ func (s *ImportInspectorSuite) TestProcessImport() {
 	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
-		task.CreateTaskOnWorker(nodeID, cluster)
+	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(nodeID, cluster, taskcommon.Resource{CPU: 1, Memory: 64 << 20})
 	})
-	s.inspector.inspect()
+	s.inspector.Inspect()
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
 
@@ -217,13 +224,13 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 		State:            datapb.ImportTaskStateV2_Failed,
 	}
 
-	var task ImportTask = &importTask{
-		tr: timerecord.NewTimeRecorder("import task"),
+	var task bulkimport.ImportTask = &bulkimport.Task{
+		Tr: timerecord.NewTimeRecorder("import task"),
 	}
-	task.(*importTask).task.Store(taskProto)
+	task.(*bulkimport.Task).Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
-	var job ImportJob = &importJob{
+	var job bulkimport.ImportJob = &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        0,
 			CollectionID: s.collectionID,
@@ -232,41 +239,42 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 			Schema:       &schemapb.CollectionSchema{},
 			TimeoutTs:    math.MaxUint64,
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	for _, id := range task.(*importTask).GetSegmentIDs() {
-		segment := &SegmentInfo{
+	for _, id := range task.(*bulkimport.Task).GetSegmentIDs() {
+		segment := &meta.SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Importing, IsImporting: true},
 		}
 		err = s.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 	}
-	for _, id := range task.(*importTask).GetSegmentIDs() {
+	for _, id := range task.(*bulkimport.Task).GetSegmentIDs() {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.NotNil(segment)
 	}
 
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
-	s.inspector.inspect()
-	for _, id := range task.(*importTask).GetSegmentIDs() {
+	s.inspector.Inspect()
+	for _, id := range task.(*bulkimport.Task).GetSegmentIDs() {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 	}
 	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
-	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
+	s.Equal(0, len(task.(*bulkimport.Task).GetSegmentIDs()))
 }
 
 func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	// Test case 1: No jobs and tasks
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	s.inspector.reloadFromMeta()
+	s.inspector.Reload()
 
 	// Test case 2: Jobs with in-progress tasks
 	jobProto := &datapb.ImportJob{
@@ -275,20 +283,20 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 		TimeoutTs:    math.MaxUint64,
 		Schema:       &schemapb.CollectionSchema{},
 	}
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: jobProto,
-		tr:        timerecord.NewTimeRecorder("import job"),
+		Tr:        timerecord.NewTimeRecorder("import job"),
 	}
 	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	err := s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Add an in-progress pre-import task
-	inprogressPreImportTask := &preImportTask{
-		importMeta: s.importMeta,
-		tr:         timerecord.NewTimeRecorder("preimport task"),
+	inprogressPreImportTask := &bulkimport.PreImportTask{
+		ImportMeta: s.importMeta,
+		Tr:         timerecord.NewTimeRecorder("preimport task"),
 	}
-	inprogressPreImportTask.task.Store(&datapb.PreImportTask{
+	inprogressPreImportTask.Task.Store(&datapb.PreImportTask{
 		JobID:        1,
 		TaskID:       1,
 		CollectionID: s.collectionID,
@@ -299,11 +307,11 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	s.NoError(err)
 
 	// Add an in-progress import task
-	inprogressImportTask := &importTask{
-		importMeta: s.importMeta,
-		tr:         timerecord.NewTimeRecorder("import task"),
+	inprogressImportTask := &bulkimport.Task{
+		ImportMeta: s.importMeta,
+		Tr:         timerecord.NewTimeRecorder("import task"),
 	}
-	inprogressImportTask.task.Store(&datapb.ImportTaskV2{
+	inprogressImportTask.Task.Store(&datapb.ImportTaskV2{
 		JobID:        1,
 		TaskID:       2,
 		CollectionID: s.collectionID,
@@ -314,11 +322,11 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	s.NoError(err)
 
 	// Add an pending import task
-	pendingImportTask := &importTask{
-		importMeta: s.importMeta,
-		tr:         timerecord.NewTimeRecorder("import task"),
+	pendingImportTask := &bulkimport.Task{
+		ImportMeta: s.importMeta,
+		Tr:         timerecord.NewTimeRecorder("import task"),
 	}
-	pendingImportTask.task.Store(&datapb.ImportTaskV2{
+	pendingImportTask.Task.Store(&datapb.ImportTaskV2{
 		JobID:        1,
 		TaskID:       3,
 		CollectionID: s.collectionID,
@@ -328,17 +336,17 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	_ = s.importMeta.AddTask(context.TODO(), pendingImportTask)
 
 	// Mock scheduler expectations
-	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
-	s.inspector.reloadFromMeta()
+	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
+	s.inspector.Reload()
 }
 
 func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
-	newTask := func(taskID int64, state datapb.ImportTaskStateV2, segmentIDs ...int64) ImportTask {
-		task := &importTask{
-			importMeta: s.importMeta,
-			tr:         timerecord.NewTimeRecorder("import task"),
+	newTask := func(taskID int64, state datapb.ImportTaskStateV2, segmentIDs ...int64) bulkimport.ImportTask {
+		task := &bulkimport.Task{
+			ImportMeta: s.importMeta,
+			Tr:         timerecord.NewTimeRecorder("import task"),
 		}
-		task.task.Store(&datapb.ImportTaskV2{
+		task.Task.Store(&datapb.ImportTaskV2{
 			JobID:        100,
 			TaskID:       taskID,
 			CollectionID: s.collectionID,
@@ -354,7 +362,7 @@ func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
 	s.NoError(s.importMeta.AddTask(context.TODO(), newTask(3, datapb.ImportTaskStateV2_Failed, 10)))
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.NoError(s.meta.AddSegment(context.TODO(), &SegmentInfo{
+	s.NoError(s.meta.AddSegment(context.TODO(), &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:          10,
 			State:       commonpb.SegmentState_Importing,
@@ -363,31 +371,52 @@ func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
 	}))
 
 	// Orphan tasks are skipped just as they were when the inspector iterated jobs first.
-	s.inspector.reloadFromMeta()
-	s.inspector.inspect()
+	s.inspector.Reload()
+	s.inspector.Inspect()
 	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(context.TODO(), 10).GetState())
 }
 
-func (s *ImportInspectorSuite) TestSortImportTasks() {
-	newTask := func(jobID, taskID int64) ImportTask {
-		task := &importTask{}
-		task.task.Store(&datapb.ImportTaskV2{JobID: jobID, TaskID: taskID})
-		return task
-	}
-	tasks := []ImportTask{
-		newTask(2, 4),
-		newTask(1, 3),
-		newTask(2, 2),
-		newTask(1, 1),
+func (s *ImportInspectorSuite) TestReloadEnqueuesInProgressTasks() {
+	for _, jobID := range []int64{1, 2} {
+		job := &bulkimport.Job{
+			ImportJob: &datapb.ImportJob{
+				JobID:        jobID,
+				CollectionID: s.collectionID,
+				TimeoutTs:    math.MaxUint64,
+				Schema:       &schemapb.CollectionSchema{},
+			},
+			Tr: timerecord.NewTimeRecorder("import job"),
+		}
+		s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		s.NoError(s.importMeta.AddJob(context.TODO(), job))
 	}
 
-	sortImportTasks(tasks)
-	s.Equal([]int64{1, 1, 2, 2}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
-		return task.GetJobID()
-	}))
-	s.Equal([]int64{1, 3, 2, 4}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
-		return task.GetTaskID()
-	}))
+	addTask := func(jobID, taskID int64) {
+		task := &bulkimport.Task{
+			ImportMeta: s.importMeta,
+			Tr:         timerecord.NewTimeRecorder("import task"),
+		}
+		task.Task.Store(&datapb.ImportTaskV2{
+			JobID:        jobID,
+			TaskID:       taskID,
+			CollectionID: s.collectionID,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		})
+		s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	}
+	addTask(2, 4)
+	addTask(1, 3)
+	addTask(2, 2)
+	addTask(1, 1)
+
+	var enqueued []int64
+	s.inspector.Scheduler.(*task2.MockGlobalScheduler).EXPECT().
+		Enqueue(mock.Anything).
+		Run(func(task task2.Task) { enqueued = append(enqueued, task.GetTaskID()) }).
+		Times(4)
+	s.inspector.Reload()
+	s.ElementsMatch([]int64{1, 2, 3, 4}, enqueued)
 }
 
 func TestImportInspector(t *testing.T) {

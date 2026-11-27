@@ -8,7 +8,23 @@ See [TimeTick Message Semantic](../message/message-semantic-time-tick.md) for th
 
 ### Allocation
 
-Every message receives a unique TimeTick from the TSO via `AckManager.Allocate()`. Transaction sub-messages each get their own TimeTick; the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick.
+Every message receives a unique TimeTick from the TSO via `AckManager.AllocateForAppend()`. Transaction sub-messages each get their own TimeTick; the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick.
+
+This append-specific entry retries both timestamp allocation and barrier advancement
+without an attempt or elapsed-time limit, until success or cancellation of its caller's
+context. For a WAL append, that context follows the WAL lifecycle, not the client RPC.
+The shared allocator's per-RPC 10-second timeout (or another transient coordinator error)
+must not escape as a failed append on a live WAL after an earlier interceptor changed
+in-memory state. Only successful allocation publishes an acker and advances the allocated
+watermark.
+
+Retries occur outside both the shared allocator's mutex and the AckManager mutex.
+Barrier waits also remain outside the AckManager mutex: the allocator's slow barrier
+path may need other allocations to advance it. Background TimeTick sync uses the
+single-attempt `Allocate()` entry and retries on the inspector's next sync; it has no
+preceding append mutation to preserve, and its context belongs to the process-wide
+inspector rather than the individual WAL. Making that path retry forever while holding
+the AckManager mutex could prevent a WAL from shutting down during a TSO outage.
 
 ### Confirm and Sync
 
@@ -29,12 +45,53 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 
 ### Transaction Lifecycle
 
-1. **Begin**: Allocate a TxnID and a TimeTick. Create a `TxnSession` tracking in-flight message count.
+1. **Begin**: Allocate a TxnID and a TimeTick. Create a `TxnSession` tracking in-flight and successful logical body counts.
 2. **Append**: Each message in the transaction increments the in-flight counter and refreshes the session TTL.
-3. **Commit**: Mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
+3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
-6. **Force-fail**: The [Lock](lock.md) interceptor force-fails all active transactions at a VChannel when an exclusive operation is appended.
+6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
+
+A Commit of either origin interrupted by WAL cancellation/fencing stays unresolved until
+recovery; it is neither marked committed nor reset for retry on the old writer.
+Ordinary backend errors retry below the interceptor. See
+[Append retry and writer lifetime](../walbackend/walbackend.md#append-retry-and-writer-lifetime).
+
+All exclusive operations, including Flush and ForcePromote, use one scope-based
+terminal-session cleanup: mark unfinished sessions rolled back, release references,
+remove them from active and recovered maps, and notify recovery/shutdown waiters.
+Committed sessions keep their outcome. There is no transaction-origin selector.
+Terminal state releases confirmation barriers without waiting for lease expiry.
+The replication helper clears the corresponding prefix under the same WAL lock;
+CDC can then replay the full source transaction. See [Local Flush Control](local-flush.md).
+
+### Scope and duplicate handling
+
+A transaction belongs to one VChannel even if it writes multiple segments. Local
+ManualFlush therefore resolves only that business VChannel's transactions; FlushAll
+resolves the whole PChannel. Incomplete replicated transactions need not finish
+before a local Flush: its durable abort boundary allows the complete transaction
+to be replayed with new local segment assignments.
+
+At consumption, every exclusive operation immediately discards unfinished
+transactions in the same scope, regardless of `_ur` or replication origin.
+An AlterReplicateConfig record marked Ignore does not abort.
+ManualFlush on CChannel does not abort business transactions.
+
+Distinguish three kinds of duplicate when reasoning about `body_cnt`:
+
+| Duplicate | Existing protection |
+| --- | --- |
+| A backend retries one logical append | Same local TimeTick; scanner physical deduplication removes retry copies before transaction assembly. |
+| CDC replays a source body | Same immutable source MessageID; the receiver deduplicates before append and does not increase the accepted-body count. |
+| A primary producer retries a body as another logical append | A new TimeTick can reach the WAL; the producer's expected body count detects excess successful appends at Commit. |
+
+Count equality proves completeness only with the producer contract: all intended
+bodies have succeeded before Commit, or, on a replica, accepted distinct source IDs
+are a subset of one immutable source transaction. A count alone cannot establish
+message identity. Zero deliberately skips validation for compatibility. These
+preconditions do not remove the local transaction's mutex or in-flight wait: primary
+body appends can be concurrent even though replicated appends are serialized.
 
 ## LastConfirmedMessageID
 

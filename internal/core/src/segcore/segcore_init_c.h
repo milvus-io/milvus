@@ -47,11 +47,19 @@ SegcoreSetEnableGISSplitFusion(const bool);
 void
 SegcoreSetNlist(const int64_t);
 
+// FM-index count-first guard threshold (queryNode.fmindexCostRatio).
+void
+SegcoreSetFMIndexCostRatio(const float);
+
 void
 SegcoreSetNprobe(const int64_t);
 
 CStatus
 SegcoreSetDenseVectorInterminIndexType(const char*);
+
+CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo);
 
 void
 SegcoreSetSubDim(const int64_t);

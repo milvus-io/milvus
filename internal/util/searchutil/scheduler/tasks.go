@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const (
@@ -95,13 +96,83 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// accountedNQ is the NQ this task carried when it was popped, before
+	// PruneCanceled may have shrunk it. The waiting counters were credited
+	// with that value at push time, so they must be debited with the same
+	// value regardless of how many members survive.
+	accountedNQ int64
+	// maxWait is how long the task may wait in the queue before the node
+	// counts as overloaded for it. Zero means no limit.
+	maxWait time.Duration
+}
+
+// countedNQ returns the NQ to debit from the waiting counters for this task.
+func (t *queuedTask) countedNQ() int64 {
+	if !t.valid() {
+		return 0
+	}
+	if t.accountedNQ > 0 {
+		return t.accountedNQ
+	}
+	return t.NQ()
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
-	return &queuedTask{
+	queued := &queuedTask{
 		Task:        task,
 		enqueueTime: enqueueTime,
+		maxWait:     maxQueueWait(task, enqueueTime),
 	}
+	if member, ok := task.(QueueBudgetTask); ok {
+		member.SetQueueBudget(QueueBudget{EnqueueTime: enqueueTime, MaxWait: queued.maxWait})
+	}
+	return queued
+}
+
+// maxQueueWait returns how long task may wait in the queue: maxQueueWaitRatio
+// of the time it has left when it is queued, at most maxQueueWait. A task
+// without a deadline gets maxQueueWait. Zero means no limit, which is the case
+// when maxQueueWaitRatio is not positive.
+func maxQueueWait(task Task, now time.Time) time.Duration {
+	cfg := &paramtable.Get().QueryNodeCfg
+	ratio := cfg.MaxQueueWaitRatio.GetAsFloat()
+	if ratio <= 0 {
+		return 0
+	}
+	limit := cfg.MaxQueueWait.GetAsDurationByParse()
+	if deadline, ok := task.Context().Deadline(); ok {
+		// A task about to expire still gets a positive limit: zero would mean
+		// no limit. One that has expired is not queued, see
+		// handleAddTaskRequest.
+		byDeadline := max(time.Duration(float64(deadline.Sub(now))*ratio), time.Nanosecond)
+		if limit <= 0 || byDeadline < limit {
+			limit = byDeadline
+		}
+	}
+	return max(limit, 0)
+}
+
+// queueWaitAdmitShare is the share of its queue wait limit that the task at
+// the head of the queue may have waited for a new task to be let in behind
+// it. With the whole limit the head would wait for about the limit all the
+// time, and nearly every new task would be let in only to be refused when it
+// leaves the queue, having waited for nothing.
+const queueWaitAdmitShare = 0.5
+
+// mustWaitTooLong reports whether a task queued at now behind head, the task
+// that leaves the queue next, would wait for longer than it may. It is judged
+// by how long head has waited so far: a measured time, where an estimate from
+// the queue length and the pace of the workers would multiply the errors of
+// both.
+func (t *queuedTask) mustWaitTooLong(head *queuedTask, now time.Time) bool {
+	return t.valid() && t.maxWait > 0 && head.valid() &&
+		head.queueDuration(now) > time.Duration(float64(t.maxWait)*queueWaitAdmitShare)
+}
+
+// overloaded reports whether the task has waited in the queue for longer than
+// it may.
+func (t *queuedTask) overloaded(now time.Time) bool {
+	return t.valid() && t.maxWait > 0 && t.queueDuration(now) > t.maxWait
 }
 
 func (t *queuedTask) queueDuration(now time.Time) time.Duration {
@@ -118,6 +189,12 @@ func (t *queuedTask) valid() bool {
 func (t *queuedTask) cleanupReady(now time.Time) bool {
 	if !t.valid() {
 		return false
+	}
+	// A task standing for a merged group answers for all of it. Its own
+	// context belongs to the owner alone, so reading that would end the whole
+	// group as soon as the owner was canceled or near its deadline.
+	if g, ok := t.Task.(ExpirableGroup); ok {
+		return g.ExpiryReady(now)
 	}
 	if t.Context().Err() != nil {
 		return true
@@ -143,6 +220,66 @@ type MergeTask interface {
 
 	// MinNQ returns the minimum NQ among the original tasks in this merged task.
 	MinNQ() int64
+}
+
+// PrunableTask is a Task that may stand for a group of merged requests and can
+// drop the members whose context is already canceled before the group
+// executes. It keeps one member's cancellation from ending the others.
+type PrunableTask interface {
+	Task
+
+	// PruneCanceled completes every member whose context is canceled with
+	// that member's own context error and returns the task to execute for the
+	// remaining members: the receiver when nothing was pruned, nil when no
+	// member remains. It also reports how many members it dropped and the
+	// context error of the first of them, so that the caller can say why.
+	PruneCanceled() (survivor Task, dropped int, cause error)
+}
+
+// ExpirableGroup is a Task that may stand for a group of merged requests and
+// answers the queue's expiry sweep for the whole group. The sweep runs when the
+// queue is full and takes out the tasks that are done; for a group that must
+// mean every request in it, not only the owner whose context the queue holds.
+type ExpirableGroup interface {
+	Task
+
+	// ExpiryReady reports whether every request in the group is canceled or
+	// has a deadline no later than cleanupTime.
+	ExpiryReady(cleanupTime time.Time) bool
+
+	// FinishExpired completes every request in the group with its own
+	// reason: its context error if it has one, otherwise
+	// context.DeadlineExceeded, for a request the sweep takes out shortly
+	// before its deadline.
+	FinishExpired()
+}
+
+// UnrunTask is a Task that can be completed without having run. Done is how
+// the executor finishes a task and records what it ran; a task the queue gives
+// up on, cleared by an administrator for instance, never reached the executor
+// and must not be counted as if it had.
+type UnrunTask interface {
+	Task
+
+	// FinishUnrun completes every request the task stands for with that
+	// request's own context error if it has one, otherwise with err.
+	FinishUnrun(err error)
+}
+
+// pruneCanceled drops a task whose context is canceled, or the canceled
+// members of a prunable group. It returns the task to execute, or nil when
+// there is nothing left to run, together with how many requests it dropped and
+// why the first of them was dropped. A dropped task has been completed with its
+// own context error.
+func pruneCanceled(t Task) (Task, int, error) {
+	if p, ok := t.(PrunableTask); ok {
+		return p.PruneCanceled()
+	}
+	if err := t.Context().Err(); err != nil {
+		t.Done(err)
+		return nil, 1, err
+	}
+	return t, 0, nil
 }
 
 // A task is execute unit of scheduler.

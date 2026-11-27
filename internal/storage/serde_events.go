@@ -83,9 +83,13 @@ func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 	}
 }
 
+// newCompositeBinlogRecordReader reads one chunk of V1 binlogs. stored is the
+// set of field IDs the segment physically stores; nil means the fields of the
+// given blobs.
 func newCompositeBinlogRecordReader(
 	schema *schemapb.CollectionSchema,
 	neededFields typeutil.Set[int64],
+	stored map[FieldID]struct{},
 	blobs []*Blob,
 	opts ...BinlogReaderOption,
 ) (*CompositeBinlogRecordReader, error) {
@@ -99,6 +103,12 @@ func newCompositeBinlogRecordReader(
 	idx := 0
 	index := make(map[FieldID]int16)
 	fields := make(map[FieldID]*schemapb.FieldSchema)
+	structs := make(map[FieldID]*schemapb.StructArrayFieldSchema)
+	for _, st := range schema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structs[child.GetFieldID()] = st
+		}
+	}
 	for _, f := range allFields {
 		index[f.FieldID] = int16(idx)
 		fields[f.FieldID] = f
@@ -107,11 +117,13 @@ func newCompositeBinlogRecordReader(
 
 	rrs := make([]array.RecordReader, len(allFields))
 	brs := make([]*BinlogReader, len(allFields))
+	blobFields := make(map[FieldID]struct{}, len(blobs))
 	for _, b := range blobs {
 		reader, err := NewBinlogReader(b.Value, opts...)
 		if err != nil {
 			return nil, err
 		}
+		blobFields[reader.FieldID] = struct{}{}
 
 		er, err := reader.NextEventReader()
 		if err != nil {
@@ -126,11 +138,16 @@ func newCompositeBinlogRecordReader(
 		brs[i] = reader
 	}
 
+	if stored == nil {
+		stored = blobFields
+	}
 	return &CompositeBinlogRecordReader{
-		fields: fields,
-		index:  index,
-		rrs:    rrs,
-		brs:    brs,
+		fields:  fields,
+		structs: structs,
+		stored:  stored,
+		index:   index,
+		rrs:     rrs,
+		brs:     brs,
 	}, nil
 }
 
@@ -140,13 +157,26 @@ func newIterativeCompositeBinlogRecordReader(
 	chunkedBlobs ChunkedBlobsReader,
 	opts ...BinlogReaderOption,
 ) *IterativeRecordReader {
+	return newIterativeCompositeBinlogRecordReaderWithStored(schema, neededFields, nil, chunkedBlobs, opts...)
+}
+
+// newIterativeCompositeBinlogRecordReaderWithStored is
+// newIterativeCompositeBinlogRecordReader with the segment's physically
+// stored field IDs; see newCompositeBinlogRecordReader.
+func newIterativeCompositeBinlogRecordReaderWithStored(
+	schema *schemapb.CollectionSchema,
+	neededFields typeutil.Set[int64],
+	stored map[FieldID]struct{},
+	chunkedBlobs ChunkedBlobsReader,
+	opts ...BinlogReaderOption,
+) *IterativeRecordReader {
 	return &IterativeRecordReader{
 		iterate: func() (RecordReader, error) {
 			blobs, err := chunkedBlobs()
 			if err != nil {
 				return nil, err
 			}
-			return newCompositeBinlogRecordReader(schema, neededFields, blobs, opts...)
+			return newCompositeBinlogRecordReader(schema, neededFields, stored, blobs, opts...)
 		},
 	}
 }
@@ -203,9 +233,15 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					elementType = f.GetElementType()
 				}
 
-				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy)
+				var d any
+				var err error
+				if dt == schemapb.DataType_Array && typeutil.IsNativeListArrayField(f) {
+					d, err = DeserializeNativeArrayRow(r.Column(j), i, f)
+				} else {
+					d, err = serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
+				}
 				if err != nil {
-					return merr.WrapErrServiceInternalMsg("deserialize error on type %s: %v", dt, err)
+					return merr.Wrapf(err, "deserialize error on type %s", dt)
 				}
 				m[j] = d // TODO: avoid memory copy here.
 			}
@@ -430,9 +466,11 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 	}
 
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	fieldsByID := make(map[FieldID]*schemapb.FieldSchema, len(allFieldsSchema))
 	textRefFields := make(map[FieldID]struct{})
 	for _, f := range allFieldsSchema {
 		types[f.FieldID] = f.DataType
+		fieldsByID[f.FieldID] = f
 	}
 	for _, vv := range v {
 		m := vv.Value.(map[FieldID]any)
@@ -459,11 +497,26 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 		arrowSchema = arrow.NewSchema(fields, nil)
 	}
 
+	type arrayOfVectorSerdeConfig struct {
+		elementType     schemapb.DataType
+		dim             int
+		elementNullable bool
+	}
 	builders := make(map[FieldID]array.Builder, len(allFieldsSchema))
-	elementTypes := make(map[FieldID]schemapb.DataType, len(allFieldsSchema)) // For ArrayOfVector
+	arrayOfVectorConfigs := make(map[FieldID]arrayOfVectorSerdeConfig, len(allFieldsSchema))
 	for i, f := range allFieldsSchema {
 		if f.DataType == schemapb.DataType_ArrayOfVector {
-			elementTypes[f.FieldID] = f.GetElementType()
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return nil, merr.WrapErrAsSysError(
+					merr.Wrapf(err, "get dimension for ArrayOfVector field %s", f.GetName()),
+				)
+			}
+			arrayOfVectorConfigs[f.FieldID] = arrayOfVectorSerdeConfig{
+				elementType:     f.GetElementType(),
+				dim:             int(dim),
+				elementNullable: f.GetElementNullable(),
+			}
 		}
 
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, arrowSchema.Field(i).Type)
@@ -479,14 +532,15 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 				panic("unknown type")
 			}
 
-			// Get element type for ArrayOfVector, otherwise use None
-			elementType := schemapb.DataType_None
-			if types[fid] == schemapb.DataType_ArrayOfVector {
-				elementType = elementTypes[fid]
+			config := arrayOfVectorConfigs[fid]
+			var err error
+			if field := fieldsByID[fid]; field.GetDataType() == schemapb.DataType_Array && typeutil.IsNativeListArrayField(field) {
+				err = SerializeNativeArrayRow(builders[fid], e, field)
+			} else {
+				err = typeEntry.serialize(builders[fid], e, config.elementType, config.dim, config.elementNullable)
 			}
-
-			if err := typeEntry.serialize(builders[fid], e, elementType); err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("serialize error on type %s: %v", types[fid], err)
+			if err != nil {
+				return nil, merr.Wrapf(err, "serialize error on type %s", types[fid])
 			}
 		}
 	}
@@ -801,6 +855,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		collectionID,
 		schema,
 		maxRowNum,
+		nil,
 	)
 	if err != nil {
 		return nil, err

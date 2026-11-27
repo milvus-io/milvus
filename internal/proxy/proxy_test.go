@@ -1511,7 +1511,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedReq := &milvuspb.InsertRequest{
 			DbName:         dbName,
@@ -1881,7 +1881,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "row %d of sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -1909,7 +1909,7 @@ func TestProxy(t *testing.T) {
 				if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 					continue
 				}
-				for i, v := range fd.GetValidData() {
+				for i, v := range typeutil.GetFieldDataValidData(fd) {
 					assert.Equal(t, !c.expectNull, v,
 						"%s: sub-field %s row %d ValidData", c.label, fd.GetFieldName(), i)
 				}
@@ -2529,7 +2529,7 @@ func TestProxy(t *testing.T) {
 			if fd.GetFieldName() != subI32Name && fd.GetFieldName() != subFVecName {
 				continue
 			}
-			for i, v := range fd.GetValidData() {
+			for i, v := range typeutil.GetFieldDataValidData(fd) {
 				assert.False(t, v, "upserted row %d sub-field %s should be null", i, fd.GetFieldName())
 			}
 		}
@@ -2547,7 +2547,7 @@ func TestProxy(t *testing.T) {
 			mask[i] = true
 		}
 		for _, sf := range mixedStruct.GetStructArrays().GetFields() {
-			sf.ValidData = mask
+			typeutil.SetFieldDataValidData(sf, mask)
 		}
 		mixedUpsertReq := &milvuspb.UpsertRequest{
 			DbName:         dbName,

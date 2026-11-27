@@ -214,8 +214,10 @@ func TestDataCoordInfos_Codec(t *testing.T) {
 			ID:          1,
 		},
 		SystemConfigurations: DataCoordConfiguration{
-			SegmentMaxSize:             1024 * 1024,
-			ResolvedScalarIndexVersion: 4,
+			SegmentMaxSize:                  1024 * 1024,
+			ForceMergeDataNodeMemoryFactor:  4,
+			ForceMergeQueryNodeMemoryFactor: 4,
+			ResolvedScalarIndexVersion:      4,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)

@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -80,6 +79,7 @@ const (
 type ShardDelegator interface {
 	Collection() int64
 	Version() int64
+	UpdateVersion(version int64) bool
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	SyncPartitionStats(ctx context.Context, partVersions map[int64]int64)
@@ -147,7 +147,7 @@ type shardDelegator struct {
 	collectionID int64
 	replicaID    int64
 	vchannelName string
-	version      int64
+	version      atomic.Int64
 	// collection schema
 	collection *segments.Collection
 
@@ -184,9 +184,10 @@ type shardDelegator struct {
 	// current forward policy
 	l0ForwardPolicy string
 
-	// schemaBarrierTs fences load results started before the latest schema update.
+	// schemaChangeMutex serializes schema updates with load publication.
 	schemaChangeMutex sync.RWMutex
-	schemaBarrierTs   uint64
+	// schemaBarrierTs orders same-version snapshots, including legacy TTL DDLs.
+	schemaBarrierTs uint64
 	// collectionVersion is the collection schema version applied to this delegator's
 	// channel-local FunctionRunner and IDF runtime.
 	collectionVersion atomic.Uint64
@@ -383,7 +384,19 @@ func (sd *shardDelegator) Collection() int64 {
 
 // Version returns delegator version.
 func (sd *shardDelegator) Version() int64 {
-	return sd.version
+	return sd.version.Load()
+}
+
+// UpdateVersion advances the channel generation acknowledged by WatchDmChannels.
+// Repeated or delayed watches must never move a live delegator backwards.
+// This does not change the query view's target version or serviceability.
+func (sd *shardDelegator) UpdateVersion(version int64) bool {
+	for current := sd.version.Load(); version > current; current = sd.version.Load() {
+		if sd.version.CompareAndSwap(current, version) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSegmentInfo returns current segment distribution snapshot.
@@ -437,6 +450,13 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	}
 }
 
+// workerReadContext retries one transient RPC error on a pinned worker, but
+// returns immediately on a failed connection so Proxy can try another replica,
+// and on a worker that refuses the request as overloaded.
+func workerReadContext(ctx context.Context) context.Context {
+	return grpcclient.WithFailFastOnOverload(grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2)))
+}
+
 // executeSearchSubTasks is a helper that encapsulates the common pattern of
 // organizeSubTask + executeSubTasks for search operations.
 // Used by both normal search and two-stage search to reduce code duplication.
@@ -456,9 +476,9 @@ func (sd *shardDelegator) executeSearchSubTasks(
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-			ctx = retry.WithMaxAttemptsContext(ctx, 3)
+			ctx = workerReadContext(ctx)
 			resp, err := worker.SearchSegments(ctx, req)
-			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+			if grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
 			}
 			return resp, err
@@ -778,9 +798,10 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		// ClientBase only retries stream creation; it never replays received data.
+		ctx = workerReadContext(ctx)
 		err := worker.QueryStreamSegments(ctx, req, srv)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return nil, err
@@ -879,9 +900,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		ctx = workerReadContext(ctx)
 		resp, err := worker.QuerySegments(ctx, req)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return resp, err
@@ -1381,9 +1402,8 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		),
 		CollectionID: sd.collectionID,
 		Schema:       schema,
-		// SchemaBarrierTs fences stale load results and lets QueryNode refresh
-		// same-version schema payloads such as collection properties. Logical
-		// schema freshness is still guarded by schema.version in collectionManager.
+		// Retain timestamp ordering for legacy TTL updates with the same schema
+		// version. Load publication checks schema version and TTL state instead.
 		SchemaBarrierTs: schemaBarrierTs,
 	},
 		sealed,
@@ -1576,7 +1596,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		collectionID:      collectionID,
 		replicaID:         replicaID,
 		vchannelName:      channel,
-		version:           version,
 		collection:        collection,
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
@@ -1599,6 +1618,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
 		schemaBarrierTs:               schemaBarrierTs,
 	}
+	sd.version.Store(version)
 	for _, opt := range opts {
 		opt(sd)
 	}

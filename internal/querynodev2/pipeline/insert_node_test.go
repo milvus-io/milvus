@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type InsertNodeSuite struct {
@@ -298,7 +299,7 @@ func setupSchemaTransitionInsertNodeTest(t *testing.T) (*segments.Manager, *segm
 	require.NoError(t, err)
 	for _, fieldData := range insertMsg.GetFieldsData() {
 		if fieldData.GetFieldId() == schemaTransitionDroppedField {
-			fieldData.ValidData = []bool{true}
+			typeutil.SetFieldDataValidData(fieldData, []bool{true})
 		}
 	}
 	return manager, collection, schemaV950, schemaV951, insertMsg

@@ -2,9 +2,9 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -17,10 +17,6 @@ import (
 
 func TestInsertDataSuite(t *testing.T) {
 	suite.Run(t, new(InsertDataSuite))
-}
-
-func TestArrayFieldDataSuite(t *testing.T) {
-	suite.Run(t, new(ArrayFieldDataSuite))
 }
 
 type InsertDataSuite struct {
@@ -133,15 +129,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(161+1, s.iDataEmpty.GetMemorySize())
+		s.Equal(165, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(535+1, s.iDataOneRow.GetMemorySize())
+		s.Equal(539, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(734+1, s.iDataTwoRows.GetMemorySize())
+		s.Equal(738, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -164,7 +160,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[FloatField].GetMemorySize(), 1)
 	s.Equal(s.iDataEmpty.Data[DoubleField].GetMemorySize(), 1)
 	s.Equal(s.iDataEmpty.Data[StringField].GetMemorySize(), 1)
-	s.Equal(s.iDataEmpty.Data[ArrayField].GetMemorySize(), 1)
+	s.Equal(s.iDataEmpty.Data[ArrayField].GetMemorySize(), 2)
 	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
 	s.Equal(s.iDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[FloatVectorField].GetMemorySize(), 4+9)
@@ -172,9 +168,9 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4+9)
 	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0+9)
 	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4+9)
-	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 1)
-	// +1 byte: Nullable flag (VectorArrayFieldData has no L2PMapping under Plan B)
-	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+1)
+	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 2)
+	// +2 bytes: Nullable and ElementNullable flags; VectorArrayFieldData has no L2PMapping.
+	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+2)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 9)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 9)
@@ -187,7 +183,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[DoubleField].GetMemorySize(), 9)
 	s.Equal(s.iDataOneRow.Data[StringField].GetMemorySize(), 20)
 	s.Equal(s.iDataOneRow.Data[JSONField].GetMemorySize(), len([]byte(`{"batch":1}`))+16+1)
-	s.Equal(s.iDataOneRow.Data[ArrayField].GetMemorySize(), 3*4+1)
+	s.Equal(s.iDataOneRow.Data[ArrayField].GetMemorySize(), 3*4+2)
 	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
 	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetMemorySize(), 5+9)
 	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetMemorySize(), 20+9)
@@ -195,8 +191,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetMemorySize(), 12+9)
 	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28+9)
 	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8+9)
-	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+1)
-	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+1)
+	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+2)
+	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 17)
@@ -208,7 +204,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[FloatField].GetMemorySize(), 9)
 	s.Equal(s.iDataTwoRows.Data[DoubleField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[StringField].GetMemorySize(), 39)
-	s.Equal(s.iDataTwoRows.Data[ArrayField].GetMemorySize(), 25)
+	s.Equal(s.iDataTwoRows.Data[ArrayField].GetMemorySize(), 26)
 	// +9 bytes: Nullable(1) + L2PMapping.GetMemorySize()(8)
 	s.Equal(s.iDataTwoRows.Data[BinaryVectorField].GetMemorySize(), 6+9)
 	s.Equal(s.iDataTwoRows.Data[FloatVectorField].GetMemorySize(), 36+9)
@@ -216,8 +212,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20+9)
 	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54+9)
 	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12+9)
-	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+1)
-	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4+1)
+	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+2)
+	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4+2)
 }
 
 func (s *InsertDataSuite) TestGetRowSize() {
@@ -274,7 +270,7 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(161+1, s.iDataEmpty.GetMemorySize())
+	s.Equal(165, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
 		RowIDField:                     int64(3),
@@ -377,308 +373,272 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 }
 
-type ArrayFieldDataSuite struct {
-	suite.Suite
+func TestInsertMemorySizeCapacityAndFieldChanges(t *testing.T) {
+	field := &StringFieldData{Data: make([]string, 0, 1024), ValidData: make([]bool, 0, 1024)}
+	require.Equal(t, 1, field.GetMemorySize(), "reserved capacity is not charged")
+	data := &InsertData{}
+	require.Zero(t, data.GetMemorySize())
+	data.Data = map[FieldID]FieldData{100: field}
+	data.Infos = []BlobInfo{{Length: 1000}}
+	require.Equal(t, 1, data.GetMemorySize(), "Infos is not charged")
+	require.NoError(t, field.AppendRow("a"))
+	require.Equal(t, 18, data.GetMemorySize())
+	data.Data[101] = &TimestamptzFieldData{Data: []int64{1, 2}}
+	require.Equal(t, 35, data.GetMemorySize())
+	data.Data[100] = &JSONFieldData{Data: [][]byte{nil, []byte("{}")}}
+	require.Equal(t, 52, data.GetMemorySize()) // JSON 35 + timestamps 17
+	delete(data.Data, 101)
+	require.Equal(t, 35, data.GetMemorySize())
 }
 
-func (s *ArrayFieldDataSuite) TestArrayFieldData() {
-	fieldID2Type := map[int64]schemapb.DataType{
-		ArrayField + 1: schemapb.DataType_Bool,
-		ArrayField + 2: schemapb.DataType_Int8,
-		ArrayField + 3: schemapb.DataType_Int16,
-		ArrayField + 4: schemapb.DataType_Int32,
-		ArrayField + 5: schemapb.DataType_Int64,
-		ArrayField + 6: schemapb.DataType_Float,
-		ArrayField + 7: schemapb.DataType_Double,
-		ArrayField + 8: schemapb.DataType_VarChar,
-	}
-
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:  RowIDField,
-				DataType: schemapb.DataType_Int64,
-			},
-			{
-				FieldID:  TimestampField,
-				DataType: schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      Int64Field,
-				IsPrimaryKey: true,
-				DataType:     schemapb.DataType_Int64,
-			},
-		},
-	}
-
-	for fieldID, elementType := range fieldID2Type {
-		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID:     fieldID,
-			DataType:    schemapb.DataType_Array,
-			ElementType: elementType,
-		})
-	}
-
-	insertData, err := NewInsertData(schema)
-	s.NoError(err)
-
-	s.Equal(0, insertData.GetRowNum())
-	s.Equal(11, insertData.GetMemorySize())
-	s.True(insertData.IsEmpty())
-
-	fieldIDToData := map[int64]interface{}{
-		RowIDField:     int64(1),
-		TimestampField: int64(2),
-		Int64Field:     int64(3),
-		ArrayField + 1: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_BoolData{
-				BoolData: &schemapb.BoolArray{Data: []bool{true, false}},
-			},
-		},
-		ArrayField + 2: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_IntData{
-				IntData: &schemapb.IntArray{Data: []int32{0, 0}},
-			},
-		},
-		ArrayField + 3: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_IntData{
-				IntData: &schemapb.IntArray{Data: []int32{1, 1}},
-			},
-		},
-		ArrayField + 4: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_IntData{
-				IntData: &schemapb.IntArray{Data: []int32{2, 2}},
-			},
-		},
-		ArrayField + 5: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_LongData{
-				LongData: &schemapb.LongArray{Data: []int64{3, 3}},
-			},
-		},
-		ArrayField + 6: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_FloatData{
-				FloatData: &schemapb.FloatArray{Data: []float32{4, 4}},
-			},
-		},
-		ArrayField + 7: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_DoubleData{
-				DoubleData: &schemapb.DoubleArray{Data: []float64{5, 5}},
-			},
-		},
-		ArrayField + 8: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_StringData{
-				StringData: &schemapb.StringArray{Data: []string{"6", "6"}},
-			},
-		},
-	}
-
-	err = insertData.Append(fieldIDToData)
-	s.NoError(err)
-	s.Equal(1, insertData.GetRowNum())
-	s.Equal(126, insertData.GetMemorySize())
-	s.False(insertData.IsEmpty())
-	s.Equal(115, insertData.GetRowSize(0))
-}
-
-func makeFloatVec(dim int, vals ...float32) *schemapb.VectorField {
-	return &schemapb.VectorField{
-		Dim: int64(dim),
-		Data: &schemapb.VectorField_FloatVector{
-			FloatVector: &schemapb.FloatArray{Data: vals},
-		},
+func TestInsertMemorySizeAllFields(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		data := &InsertData{Data: make(map[FieldID]FieldData)}
+		row := make(map[FieldID]interface{})
+		cases := fieldMemoryCases()
+		fixed := 0
+		for i, c := range cases {
+			id := FieldID(100 + i)
+			data.Data[id] = c.newField(t, nullable, 64)
+			row[id] = c.row
+			fixed += c.fixed
+		}
+		require.Equal(t, fixed, data.GetMemorySize())
+		for n := 1; n <= 2; n++ {
+			require.NoError(t, data.Append(row))
+			total := 0
+			for i, c := range cases {
+				want := c.fixed + c.shared + n*c.perRow
+				if nullable {
+					want += n * (1 + c.mapping)
+				}
+				require.Equal(t, want, data.Data[FieldID(100+i)].GetMemorySize(), "%s", c.dataType)
+				total += want
+			}
+			require.Equal(t, total, data.GetMemorySize())
+		}
 	}
 }
 
-func TestNullableVectorAppendRowsRejectsNonCompactData(t *testing.T) {
-	validData := []bool{true, false, true}
-	sparseRows := &SparseFloatVectorFieldData{
-		SparseFloatArray: schemapb.SparseFloatArray{
-			Dim: 8,
-			Contents: [][]byte{
-				typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1.0}),
-				typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2.0}),
-				typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3.0}),
-			},
-		},
-	}
+func TestNewInsertDataTrackingWithFunctionOutputs(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "input", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "output", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+	}}
+	untracked, err := NewInsertData(schema)
+	require.NoError(t, err)
+	require.NotContains(t, untracked.Data, FieldID(101))
 
-	tests := []struct {
-		name      string
-		fieldData FieldData
-		rows      any
-	}{
-		{
-			name:      "binary vector",
-			fieldData: &BinaryVectorFieldData{Dim: 8, Nullable: true},
-			rows:      []byte{0x01, 0x02, 0x03},
-		},
-		{
-			name:      "float vector",
-			fieldData: &FloatVectorFieldData{Dim: 2, Nullable: true},
-			rows:      []float32{1, 2, 3, 4, 5, 6},
-		},
-		{
-			name:      "float16 vector",
-			fieldData: &Float16VectorFieldData{Dim: 2, Nullable: true},
-			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		},
-		{
-			name:      "bfloat16 vector",
-			fieldData: &BFloat16VectorFieldData{Dim: 2, Nullable: true},
-			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		},
-		{
-			name:      "sparse vector",
-			fieldData: &SparseFloatVectorFieldData{Nullable: true},
-			rows:      sparseRows,
-		},
-		{
-			name:      "int8 vector",
-			fieldData: &Int8VectorFieldData{Dim: 2, Nullable: true},
-			rows:      []int8{1, 2, 3, 4, 5, 6},
-		},
-	}
+	tracked, err := NewInsertDataBuilder(schema).WithFunctionOutputFields().WithMemoryTracking().Build()
+	require.NoError(t, err)
+	require.Contains(t, tracked.Data, FieldID(101))
+	require.NoError(t, tracked.Append(map[FieldID]interface{}{100: "input", 101: "output"}))
+	require.Equal(t, "output", tracked.Data[101].GetRow(0))
+	require.Equal(t, 45, checkedMemorySize(t, tracked))
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.fieldData.AppendRows(tt.rows, validData)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "compact")
-			assert.Equal(t, 0, tt.fieldData.RowNum())
-			assert.Empty(t, nullableVectorValidDataForTest(tt.fieldData))
-		})
+func TestInsertDataTrackedFieldSizes(t *testing.T) {
+	cases := fieldMemoryCases()
+	cases = append(cases, fieldMemoryCase{schemapb.DataType_Text, "中", []string{"中"}, 1, 19, 0, 0})
+	for _, nullable := range []bool{false, true} {
+		for _, capacity := range []int{0, 64} {
+			t.Run(fmt.Sprintf("nullable=%t/cap=%d", nullable, capacity), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{}
+				expected := make(map[FieldID]int)
+				for i, tc := range cases {
+					element := schemapb.DataType_Int64
+					if tc.dataType == schemapb.DataType_ArrayOfVector {
+						element = schemapb.DataType_FloatVector
+					}
+					id := FieldID(100 + i)
+					schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+						FieldID: id, Name: fmt.Sprintf("field_%d", id), DataType: tc.dataType,
+						Nullable: nullable, ElementType: element,
+						TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+					})
+					expected[id] = tc.fixed
+				}
+				data, err := NewInsertDataBuilder(schema).WithCapacity(capacity).WithFunctionOutputFields().WithMemoryTracking().Build()
+				require.NoError(t, err)
+				require.Len(t, data.Data, len(cases))
+				check := func() {
+					t.Helper()
+					total, trackedTotal := 0, 0
+					for id, field := range data.Data {
+						require.Equal(t, expected[id], checkedMemorySize(t, field), "field %d", id)
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field), "field %d", id)
+						total += expected[id]
+						trackedTotal += checkedMemorySize(t, field)
+					}
+					require.Equal(t, total, trackedTotal)
+					require.Equal(t, data.GetMemorySize(), trackedTotal)
+				}
+				check()
+				for i, tc := range cases {
+					id := FieldID(100 + i)
+					field := data.Data[id] // Exercise the public FieldData interface.
+					require.NoError(t, field.AppendRow(tc.row))
+					expected[id] += tc.perRow + tc.shared
+					if nullable {
+						expected[id] += 1 + tc.mapping
+					}
+					check()
+					var validity interface{}
+					validitySize := 0
+					if nullable {
+						validity, validitySize = []bool{true}, 1+tc.mapping
+					}
+					require.NoError(t, field.AppendRows(tc.batch, validity))
+					expected[id] += tc.perRow + validitySize
+					check()
+					require.NoError(t, field.AppendDataRows(tc.batch))
+					expected[id] += tc.perRow
+					check()
+					require.NoError(t, field.AppendValidDataRows(validity))
+					expected[id] += validitySize
+					check()
+				}
+			})
+		}
 	}
 }
 
-func nullableVectorValidDataForTest(fieldData FieldData) []bool {
-	switch data := fieldData.(type) {
-	case *BinaryVectorFieldData:
-		return data.ValidData
-	case *FloatVectorFieldData:
-		return data.ValidData
-	case *Float16VectorFieldData:
-		return data.ValidData
-	case *BFloat16VectorFieldData:
-		return data.ValidData
-	case *SparseFloatVectorFieldData:
-		return data.ValidData
-	case *Int8VectorFieldData:
-		return data.ValidData
-	default:
-		return nil
-	}
-}
-
-func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
-	fd := &VectorArrayFieldData{
-		Dim:         4,
-		ElementType: schemapb.DataType_FloatVector,
-		Data:        make([]*schemapb.VectorField, 0),
-		ValidData:   make([]bool, 0),
-		Nullable:    true,
-	}
-
-	vec0 := makeFloatVec(4, 1, 2, 3, 4)
-	vec2 := makeFloatVec(4, 5, 6, 7, 8)
-
-	require.NoError(t, fd.AppendRow(vec0))
-	require.NoError(t, fd.AppendRow(nil))
-	require.NoError(t, fd.AppendRow(vec2))
-
-	assert.Equal(t, 3, fd.RowNum(), "RowNum should count all rows including null placeholders")
-	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense; null rows hold empty placeholders")
-	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
-	assert.True(t, fd.GetNullable())
-
-	assert.Equal(t, vec0, fd.GetRow(0))
-	assert.Nil(t, fd.GetRow(1), "null row should return nil despite placeholder in Data")
-	assert.Equal(t, vec2, fd.GetRow(2))
-}
-
-func TestVectorArrayFieldData_NonNullable(t *testing.T) {
-	fd := &VectorArrayFieldData{
-		Dim:         4,
-		ElementType: schemapb.DataType_FloatVector,
-		Data:        make([]*schemapb.VectorField, 0),
-		Nullable:    false,
-	}
-
-	vec := makeFloatVec(4, 1, 2, 3, 4)
-	require.NoError(t, fd.AppendRow(vec))
-
-	assert.Equal(t, 1, fd.RowNum())
-	assert.False(t, fd.GetNullable())
-	assert.Nil(t, fd.GetValidData())
-	assert.Equal(t, vec, fd.GetRow(0))
-}
-
-func TestVectorArrayFieldData_AppendValidDataRows(t *testing.T) {
-	fd := &VectorArrayFieldData{
-		Dim:         4,
-		ElementType: schemapb.DataType_FloatVector,
-		Data: []*schemapb.VectorField{
-			makeFloatVec(4, 1, 2, 3, 4),
-			makeFloatVec(4, 5, 6, 7, 8),
-		},
+func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
+	data := &InsertData{Data: map[FieldID]FieldData{100: newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
 		Nullable: true,
-	}
+	}, 0, true)}}
+	require.NoError(t, data.Data[100].AppendRow("中"))
+	require.Equal(t, 21, checkedMemorySize(t, data))
+	require.Equal(t, data.GetMemorySize(), checkedMemorySize(t, data))
+	require.Equal(t, 21, checkedMemorySize(t, data))
+	require.NoError(t, data.Data[100].AppendRow(nil))
+	require.Equal(t, 38, checkedMemorySize(t, data))
+	require.ErrorIs(t, data.Data[100].AppendRow(42), merr.ErrParameterInvalid)
+	require.Equal(t, 38, checkedMemorySize(t, data))
+	data.Data[100] = newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, true)
+	require.NoError(t, data.Data[100].AppendRow([]byte("{}")))
+	require.Equal(t, 19, checkedMemorySize(t, data))
+	data.Data[101] = newFixedFieldDataForTest(schemapb.DataType_Int64, false, 0, 0)
+	require.NoError(t, data.Data[101].AppendRow(int64(1)))
+	require.Equal(t, 28, checkedMemorySize(t, data))
+	require.Equal(t, data.GetMemorySize(), checkedMemorySize(t, data))
+	delete(data.Data, 100)
+	require.Equal(t, 9, checkedMemorySize(t, data))
+	require.Zero(t, checkedMemorySize(t, &InsertData{}))
+}
 
-	err := fd.AppendValidDataRows([]bool{true, false, true})
+func TestInsertDataMemoryTrackingMixedFields(t *testing.T) {
+	tracked := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
+		Nullable: false,
+	}, 0, true)
+	require.NoError(t, tracked.AppendRow("tracked"))
+	untracked := newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, false)
+	require.NoError(t, untracked.AppendRow([]byte("{}")))
+	data := &InsertData{Data: map[FieldID]FieldData{100: tracked, 101: untracked, 102: newFixedFieldDataForTest(schemapb.DataType_Int64, false, 0, 0)}}
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	// Changes to an untracked field are picked up by the next aggregate scan.
+	require.NoError(t, untracked.AppendRow([]byte("{\"value\":1}")))
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	delete(data.Data, 101)
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	data.Data[100] = newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_JSON,
+		Nullable: false,
+	}, 0, false)
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+}
+
+// Tracking and function outputs are independent construction options.
+func TestInsertDataBuilderOptions(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "input", DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, Name: "output", DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+	}}
+	for _, tracked := range []bool{false, true} {
+		for _, outputs := range []bool{false, true} {
+			t.Run(fmt.Sprintf("tracked=%t/outputs=%t", tracked, outputs), func(t *testing.T) {
+				builder := NewInsertDataBuilder(schema).WithCapacity(16)
+				if tracked {
+					builder.WithMemoryTracking()
+				}
+				if outputs {
+					builder.WithFunctionOutputFields()
+				}
+				data, err := builder.Build()
+				require.NoError(t, err)
+				_, hasOutput := data.Data[101]
+				require.Equal(t, outputs, hasOutput)
+				for _, field := range data.Data {
+					strings := field.(*StringFieldData)
+					require.Equal(t, 16, cap(strings.Data))
+					require.Equal(t, tracked, strings.trackMemory)
+					require.NoError(t, field.AppendRow("hello"))
+					require.Equal(t, scannedMemorySize(field), field.GetMemorySize())
+				}
+			})
+		}
+	}
+}
+
+func TestInsertDataBuilderReuse(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, DataType: schemapb.DataType_VarChar},
+		{FieldID: 101, DataType: schemapb.DataType_VarChar, IsFunctionOutput: true},
+	}}
+	builder := NewInsertDataBuilder(schema).WithCapacity(8).WithMemoryTracking()
+	first, err := builder.Build()
 	require.NoError(t, err)
-
-	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
-
-	assert.NoError(t, fd.AppendValidDataRows(nil))
-	assert.Error(t, fd.AppendValidDataRows("bad"))
-}
-
-func TestVectorArrayFieldData_GetMemorySize(t *testing.T) {
-	fd := &VectorArrayFieldData{
-		Dim:         4,
-		ElementType: schemapb.DataType_FloatVector,
-		Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
-		ValidData:   []bool{true, false},
-		Nullable:    true,
-	}
-
-	assert.Greater(t, fd.GetMemorySize(), 0)
-}
-
-func TestVectorArrayFieldData_AllNull(t *testing.T) {
-	fd := &VectorArrayFieldData{
-		Dim:         4,
-		ElementType: schemapb.DataType_FloatVector,
-		Data:        make([]*schemapb.VectorField, 0),
-		ValidData:   make([]bool, 0),
-		Nullable:    true,
-	}
-
-	for i := 0; i < 3; i++ {
-		require.NoError(t, fd.AppendRow(nil))
-	}
-
-	assert.Equal(t, 3, fd.RowNum())
-	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense, null rows hold placeholders")
-	for i := 0; i < 3; i++ {
-		assert.Nil(t, fd.GetRow(i))
-	}
-}
-
-func TestNewFieldData_NullableArrayOfVector(t *testing.T) {
-	schema := &schemapb.FieldSchema{
-		FieldID:     100,
-		Name:        "vec_arr",
-		DataType:    schemapb.DataType_ArrayOfVector,
-		ElementType: schemapb.DataType_FloatVector,
-		Nullable:    true,
-		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
-	}
-	fd, err := NewFieldData(schemapb.DataType_ArrayOfVector, schema, 10)
+	second, err := builder.Build()
 	require.NoError(t, err)
+	require.NoError(t, first.Append(map[FieldID]interface{}{100: "first"}))
+	require.Zero(t, second.GetRowNum())
+	require.NotSame(t, first.Data[100], second.Data[100])
 
-	vafd, ok := fd.(*VectorArrayFieldData)
-	require.True(t, ok)
-	assert.True(t, vafd.Nullable)
-	assert.NotNil(t, vafd.ValidData)
-	assert.Equal(t, int64(4), vafd.Dim)
+	third, err := builder.WithCapacity(16).WithFunctionOutputFields().Build()
+	require.NoError(t, err)
+	require.Contains(t, third.Data, FieldID(101))
+	require.NotContains(t, first.Data, FieldID(101))
+	require.NotContains(t, second.Data, FieldID(101))
+	require.Equal(t, 8, cap(second.Data[100].(*StringFieldData).Data))
+	require.Equal(t, 16, cap(third.Data[100].(*StringFieldData).Data))
+}
+
+func TestInsertDataCopyFrom(t *testing.T) {
+	src := &InsertData{Data: map[FieldID]FieldData{
+		100: &Int64FieldData{Data: []int64{1, 2, 3}},
+		101: &StringFieldData{Data: []string{"a", "b", "c"}, Nullable: true, ValidData: []bool{true, false, true}},
+	}}
+	t.Run("copies_selected_rows", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{},
+			101: &StringFieldData{Nullable: true},
+		}}
+		require.NoError(t, dst.CopyFrom(src, []int{2, 0}))
+		require.Equal(t, 2, dst.Data[100].RowNum())
+		require.Equal(t, []any{"c", "a"}, []any{dst.Data[101].GetRow(0), dst.Data[101].GetRow(1)})
+		require.Equal(t, []bool{true, true}, dst.Data[101].GetValidData())
+	})
+	t.Run("missing_field", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{100: &Int64FieldData{}}}
+		require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+	})
+	t.Run("incompatible_column_falls_back_to_append_row", func(t *testing.T) {
+		dst := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{},
+			101: &StringFieldData{Nullable: true},
+		}}
+		mismatched := &InsertData{Data: map[FieldID]FieldData{
+			100: &Int64FieldData{Data: []int64{1}},
+			101: &Int64FieldData{Data: []int64{7}},
+		}}
+		require.ErrorIs(t, dst.CopyFrom(mismatched, []int{0}), merr.ErrParameterInvalid)
+	})
 }

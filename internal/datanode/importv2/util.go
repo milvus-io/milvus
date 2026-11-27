@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -115,8 +117,9 @@ func NewSyncTask(ctx context.Context,
 
 // newWriteRetryOptions builds the retry options for import writes. The options are
 // order-sensitive: retry.Sleep raises maxSleepTime to 2*initial, so MaxSleepTime must
-// be applied last. The paramtable formatters guarantee both intervals are positive,
-// which keeps retry.Do from degenerating into a zero-delay loop under attempts=0.
+// follow Sleep. The paramtable formatters guarantee both intervals are positive, which
+// keeps retry.Do from degenerating into a zero-delay loop under attempts=0. RetryErr is
+// order-independent and is appended last.
 func newWriteRetryOptions() []retry.Option {
 	params := &paramtable.Get().DataNodeCfg
 	initialInterval := time.Duration(params.ImportWriteRetryInitialInterval.GetAsInt()) * time.Second
@@ -125,6 +128,16 @@ func newWriteRetryOptions() []retry.Option {
 		retry.Attempts(params.ImportMaxWriteRetryAttempts.GetAsUint()), // 0 = unlimited, preserved on purpose
 		retry.Sleep(initialInterval),
 		retry.MaxSleepTime(maxInterval),
+		// The write-retry loop only exists to absorb transient storage faults. ID
+		// exhaustion cannot be fixed by retrying against the same local allocator, so
+		// treat it as terminal. Supplying a RetryErr predicate replaces retry.Do's
+		// default InputError abort, so preserve that too.
+		retry.RetryErr(func(err error) bool {
+			if allocator.IsIDExhausted(err) {
+				return false
+			}
+			return merr.GetErrorType(err) != merr.InputError
+		}),
 	}
 }
 
@@ -180,7 +193,7 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	rows, baseFieldID := GetInsertDataRowCount(data, schema)
 	for fieldID, d := range data.Data {
 		tempField := idToField[fieldID]
-		if d.RowNum() == 0 && (CanBeZeroRowField(tempField)) {
+		if d.RowNum() == 0 && CanBeZeroRowField(tempField) {
 			continue
 		}
 		if d.RowNum() != rows {
@@ -192,20 +205,36 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 	return nil
 }
 
+// NormalizeStructArrayFields brings the struct columns of one read batch into
+// the shape the writer expects: it backfills absent element-nullable
+// sub-fields (importcommon.FillMissingStructSubFields) and then verifies the
+// sub-fields of every struct agree row by row (CheckStructArrayConsistency).
+// The JSON, CSV and Parquet readers already hand out filled batches, so that
+// their batch memory limit sees the filled columns; the fill here is a backstop
+// and leaves a filled batch as is. Preimport and import both call it.
+func NormalizeStructArrayFields(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
+	if err := importcommon.FillMissingStructSubFields(schema, data); err != nil {
+		return err
+	}
+	return CheckStructArrayConsistency(schema, data)
+}
+
 // CheckStructArrayConsistency verifies that within each StructArrayField all
 // sub-field columns are row-wise consistent: for every row, the sub-fields
 // must agree on null-ness, and, when the row is valid, on the number of
 // struct elements (array length for scalar Array sub-fields, vector count
-// for ArrayOfVector sub-fields). The proxy enforces this invariant on the
-// insert path (checkAndFlattenStructFieldData), and JSON/CSV/Parquet/NumPy
-// importers produce consistent columns by construction, but binlog import
+// for ArrayOfVector sub-fields; for element-nullable sub-fields the length of
+// the element valid_data, null elements included). The proxy enforces this
+// invariant on the insert path (checkAndFlattenStructFieldData), and the
+// JSON/CSV/Parquet importers produce consistent columns by construction
+// (NumPy carries no struct data and leaves struct rows null), but binlog import
 // deserializes each sub-field's binlogs independently — divergent sub-field
 // data would otherwise be persisted and poison the segment (query-time
 // assertion failures or silently wrong element-level filter results).
 // Cost is O(rows * subFields), negligible compared with reading the data.
 func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
 	type subColumn struct {
-		name      string
+		schema    *schemapb.FieldSchema
 		data      storage.FieldData
 		validData []bool
 	}
@@ -247,21 +276,24 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				}
 				continue
 			}
-			columns = append(columns, subColumn{name: subField.GetName(), data: fieldData, validData: validData})
+			columns = append(columns, subColumn{schema: subField, data: fieldData, validData: validData})
 		}
 		// A struct must be supplied whole: either all sub-fields present or all
 		// absent. A partial set is malformed input — the absent sub-fields get
 		// backfilled as all-NULL (AppendNullableDefaultFieldsData) while the
 		// present ones carry real elements, producing per-row element-count
 		// mismatches that poison the segment. (checkAndFlattenStructFieldData
-		// enforces the same on the proxy insert path.)
+		// enforces the same on the proxy insert path.) Absent element-nullable
+		// sub-fields are filled by importcommon.FillMissingStructSubFields
+		// before this check, which also rejects absent required ones, so this
+		// is a backstop.
 		if len(columns) == 0 {
 			continue
 		}
 		if len(columns) < len(subFields) {
 			return merr.WrapErrImportFailedMsg(
 				"struct field '%s' has a partial sub-field set: sub-field '%s' is present but sub-field '%s' is missing; provide all sub-fields or none",
-				structField.GetName(), columns[0].name, firstAbsent)
+				structField.GetName(), columns[0].schema.GetName(), firstAbsent)
 		}
 		ref := columns[0]
 		rows := ref.data.RowNum()
@@ -269,7 +301,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 			if col.data.RowNum() != rows {
 				return merr.WrapErrImportFailedMsg(
 					"struct field '%s' has misaligned sub-fields, sub-field '%s' with '%d' rows, sub-field '%s' with '%d' rows",
-					structField.GetName(), ref.name, rows, col.name, col.data.RowNum())
+					structField.GetName(), ref.schema.GetName(), rows, col.schema.GetName(), col.data.RowNum())
 			}
 		}
 
@@ -278,7 +310,7 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 			refCount := -1
 			if refValid {
 				var err error
-				refCount, err = structSubFieldRowElementCount(ref.data, i, structField.GetName(), ref.name)
+				refCount, err = importcommon.StructSubFieldRowElementCount(ref.data, ref.schema, i, structField.GetName())
 				if err != nil {
 					return err
 				}
@@ -288,19 +320,19 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 				if valid != refValid {
 					return merr.WrapErrImportFailedMsg(
 						"struct field '%s' has inconsistent sub-field null-ness at row %d, sub-field '%s' valid=%t, sub-field '%s' valid=%t",
-						structField.GetName(), i, ref.name, refValid, col.name, valid)
+						structField.GetName(), i, ref.schema.GetName(), refValid, col.schema.GetName(), valid)
 				}
 				if !valid {
 					continue
 				}
-				count, err := structSubFieldRowElementCount(col.data, i, structField.GetName(), col.name)
+				count, err := importcommon.StructSubFieldRowElementCount(col.data, col.schema, i, structField.GetName())
 				if err != nil {
 					return err
 				}
 				if count != refCount {
 					return merr.WrapErrImportFailedMsg(
 						"struct field '%s' has inconsistent element count at row %d, sub-field '%s' with %d elements, sub-field '%s' with %d elements",
-						structField.GetName(), i, ref.name, refCount, col.name, count)
+						structField.GetName(), i, ref.schema.GetName(), refCount, col.schema.GetName(), count)
 				}
 			}
 		}
@@ -308,145 +340,44 @@ func CheckStructArrayConsistency(schema *schemapb.CollectionSchema, data *storag
 	return nil
 }
 
-// structSubFieldRowElementCount returns the number of struct elements in row i
-// of a struct sub-field column: the array length for scalar Array sub-fields,
-// or the number of vectors for ArrayOfVector sub-fields.
-func structSubFieldRowElementCount(fieldData storage.FieldData, i int, structName, subFieldName string) (int, error) {
-	switch fd := fieldData.(type) {
-	case *storage.ArrayFieldData:
-		count, ok := scalarFieldElementCount(fd.Data[i])
-		if !ok {
-			return 0, merr.WrapErrImportFailedMsg(
-				"invalid scalar array data at row %d of sub-field '%s' of struct field '%s': missing or unsupported scalar payload",
-				i, subFieldName, structName)
-		}
-		return count, nil
-	case *storage.VectorArrayFieldData:
-		row := fd.Data[i]
-		var payloadLen, width int
-		dim := int(fd.Dim)
-		switch fd.ElementType {
-		case schemapb.DataType_FloatVector:
-			payloadLen = len(row.GetFloatVector().GetData())
-			width = dim
-		case schemapb.DataType_BinaryVector:
-			payloadLen = len(row.GetBinaryVector())
-			width = (dim + 7) / 8
-		case schemapb.DataType_Float16Vector:
-			payloadLen = len(row.GetFloat16Vector())
-			width = dim * 2
-		case schemapb.DataType_BFloat16Vector:
-			payloadLen = len(row.GetBfloat16Vector())
-			width = dim * 2
-		case schemapb.DataType_Int8Vector:
-			payloadLen = len(row.GetInt8Vector())
-			width = dim
-		default:
-			return 0, merr.WrapErrImportSysFailedMsg(
-				"unsupported vector element type '%s' for sub-field '%s' of struct field '%s'",
-				fd.ElementType.String(), subFieldName, structName)
-		}
-		if width <= 0 || payloadLen%width != 0 {
-			return 0, merr.WrapErrImportFailedMsg(
-				"corrupted vector array data at row %d of sub-field '%s' of struct field '%s', payload length %d is not a multiple of vector width %d",
-				i, subFieldName, structName, payloadLen, width)
-		}
-		return payloadLen / width, nil
-	default:
-		return 0, merr.WrapErrImportSysFailedMsg(
-			"unexpected column type '%s' for sub-field '%s' of struct field '%s'",
-			fieldData.GetDataType().String(), subFieldName, structName)
-	}
-}
-
-// scalarFieldElementCount returns the number of elements held by one Array row
-// and whether its scalar payload type is recognized. A typed empty payload is
-// valid and returns (0, true); a nil or unset payload returns (0, false).
-func scalarFieldElementCount(sf *schemapb.ScalarField) (int, bool) {
-	switch d := sf.GetData().(type) {
-	case *schemapb.ScalarField_BoolData:
-		return len(d.BoolData.GetData()), true
-	case *schemapb.ScalarField_IntData:
-		return len(d.IntData.GetData()), true
-	case *schemapb.ScalarField_LongData:
-		return len(d.LongData.GetData()), true
-	case *schemapb.ScalarField_FloatData:
-		return len(d.FloatData.GetData()), true
-	case *schemapb.ScalarField_DoubleData:
-		return len(d.DoubleData.GetData()), true
-	case *schemapb.ScalarField_StringData:
-		return len(d.StringData.GetData()), true
-	case *schemapb.ScalarField_BytesData:
-		return len(d.BytesData.GetData()), true
-	case *schemapb.ScalarField_ArrayData:
-		return len(d.ArrayData.GetData()), true
-	case *schemapb.ScalarField_JsonData:
-		return len(d.JsonData.GetData()), true
-	case *schemapb.ScalarField_TimestamptzData:
-		return len(d.TimestamptzData.GetData()), true
-	default:
-		return 0, false
-	}
-}
-
-// pkCursor derives deterministic autoID primary keys from a per-file id range
-// [begin, end) that was allocated once on the primary and replicated. It is
-// advanced sequentially as batches of a single import file are read; files are
-// read in order and each file owns a disjoint range, so the assignment is stable
-// and identical across clusters. A nil or empty cursor selects the legacy
-// local-allocator path (non-autoID / backup / pre-upgrade jobs).
-type pkCursor struct {
-	begin, end, next int64
-}
-
-// take reserves n contiguous ids and returns the starting id, failing loudly if
-// the file yields more rows than its reserved range (the files differ between the
-// two clusters, or the file exceeded the size bound the range was computed from).
-func (c *pkCursor) take(n int) (int64, error) {
-	if c.next+int64(n) > c.end {
-		return 0, merr.WrapErrImportFailed(fmt.Sprintf(
-			"import file produced more rows than its reserved PK range [%d, %d): the "+
-				"reservation is too small, or this file differs from the one the "+
-				"primary cluster sized", c.begin, c.end))
-	}
-	start := c.next
-	c.next += int64(n)
-	return start, nil
-}
-
-// AppendSystemFieldsData assigns autoID PK/RowID/timestamp using the task's local
-// allocator (legacy path). appendSystemFieldsDataWithCursor is the deterministic
-// per-file path used for cross-cluster-consistent autoID imports.
-func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum int) error {
-	return appendSystemFieldsDataWithCursor(task, data, rowNum, nil)
-}
-
-func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData, rowNum int, cur *pkCursor) error {
+// appendSystemFieldsDataWithCursor assigns the autoID PK/RowID/timestamp of a batch read
+// from one import file. Row ids come from the file's per-file range (cur), or from the
+// task's log id range when the file carries none (legacy / binlog jobs). A row only takes an
+// id when a PK (autoID, none present in the file) or a RowID is missing, so a backup restore
+// does not burn ids it already carries.
+func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData, rowNum int, cur *importid.FileIDRange) error {
 	pkField, err := typeutil.GetPrimaryFieldSchema(task.GetSchema())
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, rowNum)
-	var start int64
-	if cur != nil && cur.end > cur.begin {
-		// Deterministic path: derive PKs from the primary-allocated per-file range.
-		start, err = cur.take(rowNum)
-		if err != nil {
-			return err
-		}
-	} else {
-		// Legacy path: allocate PKs from the task's local allocator.
-		start, _, err = task.allocator.Alloc(uint32(rowNum))
-		if err != nil {
-			return err
-		}
-	}
-	for i := 0; i < rowNum; i++ {
-		ids[i] = start + int64(i)
-	}
 	pkData, ok := data.Data[pkField.GetFieldID()]
 	allowInsertAutoID, _ := common.IsAllowInsertAutoID(task.req.Schema.GetProperties()...)
-	if pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+	// A row only needs synthesized IDs when a primary key (autoID and none present in
+	// the file) or a RowID is missing. Backup/binlog restore carries its own PK, RowID
+	// and timestamp, so it must not burn one ID per row from the task's IDRange -- that
+	// is what made the pre-allocated budget scale with totalRows (and overflow uint32)
+	// instead of with its actual logID-only demand.
+	needPK := pkField.GetAutoID() && (!ok || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID)
+	_, hasRowID := data.Data[common.RowIDField]
+	needRowID := !hasRowID
+
+	var ids []int64
+	if needPK || needRowID {
+		ids = make([]int64, rowNum)
+		var start int64
+		if cur != nil {
+			start, err = cur.Take(rowNum)
+		} else {
+			start, _, err = task.allocator.Alloc(uint32(rowNum))
+		}
+		if err != nil {
+			return err
+		}
+		for i := 0; i < rowNum; i++ {
+			ids[i] = start + int64(i)
+		}
+	}
+	if needPK {
 		switch pkField.GetDataType() {
 		case schemapb.DataType_Int64:
 			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
@@ -457,7 +388,7 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs, DataType: pkField.GetDataType()}
 		}
 	}
-	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
+	if needRowID {
 		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {
@@ -468,6 +399,47 @@ func appendSystemFieldsDataWithCursor(task *ImportTask, data *storage.InsertData
 		}
 		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
 	}
+	return nil
+}
+
+// AppendPreallocatedSystemFields materializes the deterministic RowID and
+// AutoID PK assigned to one ordinary ImportFile.  The range is [begin, end)
+// and the caller owns the per-file offset.  Backup import does not call this
+// helper and therefore keeps the source PK/RowID/timestamp.
+func AppendPreallocatedSystemFields(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int, idRange *commonpb.IDRange, offset *int64) error {
+	if schema == nil || data == nil || offset == nil || idRange == nil || rowNum < 0 {
+		return merr.WrapErrDataIntegrityMsg("invalid preallocated import ID input")
+	}
+	if idRange.GetEnd() < idRange.GetBegin() || *offset < 0 || int64(rowNum) > idRange.GetEnd()-idRange.GetBegin()-*offset {
+		return merr.WrapErrDataIntegrityMsg(
+			"preallocated import ID range exhausted: begin=%d end=%d offset=%d rows=%d",
+			idRange.GetBegin(), idRange.GetEnd(), *offset, rowNum)
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, rowNum)
+	for index := range ids {
+		ids[index] = idRange.GetBegin() + *offset + int64(index)
+	}
+	*offset += int64(rowNum)
+
+	pkData, hasPK := data.Data[pkField.GetFieldID()]
+	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
+	if pkField.GetAutoID() && (!hasPK || pkData == nil || pkData.RowNum() == 0 || !allowInsertAutoID) {
+		switch pkField.GetDataType() {
+		case schemapb.DataType_Int64:
+			data.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: ids}
+		case schemapb.DataType_VarChar:
+			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: lo.Map(ids, func(id int64, _ int) string {
+				return strconv.FormatInt(id, 10)
+			})}
+		default:
+			return merr.WrapErrDataIntegrityMsg("unsupported AutoID PK type %s", pkField.GetDataType())
+		}
+	}
+	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	return nil
 }
 
@@ -531,7 +503,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 
 		// if the FieldData is not found, or it is nil, add a new column and fill with null or default
 		dataType := field.GetDataType()
-		fieldData, err := storage.NewFieldData(dataType, field, rowNum)
+		fieldData, err := storage.NewFieldDataBuilder(dataType, field).WithCapacity(rowNum).Build()
 		if err != nil {
 			return err
 		}
@@ -675,7 +647,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 	}
 
 	// if the FieldData is not found, or it is nil, add a new column and fill with empty json
-	fieldData, err := storage.NewFieldData(dynamicField.GetDataType(), dynamicField, rowNum)
+	fieldData, err := storage.NewFieldDataBuilder(dynamicField.GetDataType(), dynamicField).WithCapacity(rowNum).Build()
 	if err != nil {
 		return err
 	}
@@ -714,6 +686,9 @@ func CanBeZeroRowField(field *schemapb.FieldSchema) bool {
 	}
 	if IsFillableField(field) {
 		return true // nullable/default_value field can be automatically filled if the file doesn't contain this column
+	}
+	if field.GetElementNullable() {
+		return true // element-nullable struct sub-field, filled from its siblings by importcommon.FillMissingStructSubFields
 	}
 	return false
 }

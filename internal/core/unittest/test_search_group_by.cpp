@@ -559,15 +559,15 @@ TEST(GroupBY, ElementLevelKeepsElementIndices) {
 
     auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
-    auto array_offsets = growing->GetArrayOffsets(vec_fid);
-    ASSERT_NE(array_offsets, nullptr);
+    auto struct_element_offsets = growing->GetStructElementOffsets(vec_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
 
     SearchInfo search_info;
     search_info.topk_ = 10;
     search_info.group_size_ = 2;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.group_by_field_ids_.push_back(pk_fid);
-    search_info.array_offsets_ = array_offsets;
+    search_info.struct_element_offsets_ = struct_element_offsets;
 
     // Element IDs map to rows as:
     // row 0: element IDs 0, 1, 2
@@ -634,15 +634,15 @@ TEST(GroupBY, SearchGroupByNodeKeepsElementIndices) {
 
     auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
-    auto array_offsets = growing->GetArrayOffsets(vec_fid);
-    ASSERT_NE(array_offsets, nullptr);
+    auto struct_element_offsets = growing->GetStructElementOffsets(vec_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
 
     SearchInfo search_info;
     search_info.topk_ = 10;
     search_info.group_size_ = 2;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.group_by_field_ids_.push_back(pk_fid);
-    search_info.array_offsets_ = array_offsets;
+    search_info.struct_element_offsets_ = struct_element_offsets;
 
     SearchResult search_result;
     search_result.total_nq_ = 1;
@@ -672,7 +672,7 @@ TEST(GroupBY, SearchGroupByNodeKeepsElementIndices) {
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
     query_context->set_search_info(search_info);
-    query_context->set_array_offsets(array_offsets);
+    query_context->set_struct_element_offsets(struct_element_offsets);
     query_context->set_search_result(std::move(search_result));
     query_context->set_op_context(&op_context);
 

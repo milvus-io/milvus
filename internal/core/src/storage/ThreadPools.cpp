@@ -144,19 +144,26 @@ ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
         LOG_ERROR("Failed to resize threadPool, size:{}", size);
         return;
     }
+    size = ClampThreadPoolMaxThreads(size);
     auto is_load_pool = priority == ThreadPoolPriority::HIGH ||
                         priority == ThreadPoolPriority::LOW;
     ThreadPool* pool = nullptr;
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
+        // Publish with creation excluded so lazy pools see the latest ratio.
+        if (priority == MIDDLE) {
+            MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.store(ratio);
+        }
         auto iter = thread_pool_map.find(priority);
         if (iter == thread_pool_map.end()) {
+            if (priority == MIDDLE) {
+                return;
+            }
             LOG_ERROR("Failed to find threadPool, priority:{}", priority);
             return;
         }
         pool = iter->second.get();
     }
-    size = ClampThreadPoolMaxThreads(size);
     auto old_size = pool->GetMaxThreadNum();
     auto old_load_workers =
         is_load_pool ? GetLoadExecutorWorkers() : int64_t{0};

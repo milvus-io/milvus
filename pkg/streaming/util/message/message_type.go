@@ -55,7 +55,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropPartition: {
 		ExclusiveRequired: true,
 	},
-	MessageTypeImport: {},
+	MessageTypeImport:       {},
+	MessageTypeUpdateImport: {},
 	MessageTypeCommitImport: {
 		ExclusiveRequired: true,
 	},
@@ -117,6 +118,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeRestoreRBAC:         {},
 	MessageTypeAlterResourceGroup:  {},
 	MessageTypeDropResourceGroup:   {},
+	MessageTypeAddFileResource:     {},
+	MessageTypeRemoveFileResource:  {},
 	MessageTypeCreateIndex:         {},
 	MessageTypeAlterIndex:          {},
 	MessageTypeDropIndex:           {},

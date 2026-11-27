@@ -31,6 +31,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -44,6 +46,14 @@ import (
 // It returns true for:
 //   - ErrCompacted: the watched revision has been compacted; re-watch from a
 //     fresh revision (pre-existing behavior).
+//   - transient server errors (see IsRetriableEtcdErr): with etcd auth
+//     enabled, clientv3 authenticates before opening every watch stream.
+//     Authenticate is a raft request, so it fails with leader changed, no
+//     leader, server stopped, request timed out, ... while a member restarts
+//     or the cluster elects a leader. clientv3 converts the failure to an
+//     EtcdError, which the watch reconnect loop treats as a halt error, so the
+//     watch is canceled with that error instead of being reconnected. The
+//     watch owner must re-establish the watch once etcd recovers.
 //   - auth-token errors (ErrInvalidAuthToken, ErrUserEmpty, ErrAuthOldRevision):
 //     with etcd auth enabled, the auth token held by a client can be
 //     invalidated server-side (the default "simple" token is GC'd after idle
@@ -62,9 +72,6 @@ import (
 // back to these sentinels (v3rpc.Error), and ErrInvalidAuthToken is the only
 // source of Unauthenticated, so matching the sentinel is both sufficient and
 // narrower than trusting the code.
-//
-// Callers should wrap the re-watch in a bounded retry (retry.Attempts) so a
-// genuinely persistent failure does not loop forever.
 func IsRetriableWatchErr(err error) bool {
 	if err == nil {
 		return false
@@ -72,7 +79,44 @@ func IsRetriableWatchErr(err error) bool {
 	return errors.Is(err, rpctypes.ErrCompacted) ||
 		errors.Is(err, rpctypes.ErrInvalidAuthToken) ||
 		errors.Is(err, rpctypes.ErrUserEmpty) ||
-		errors.Is(err, rpctypes.ErrAuthOldRevision)
+		errors.Is(err, rpctypes.ErrAuthOldRevision) ||
+		IsRetriableEtcdErr(err)
+}
+
+// IsRetriableEtcdErr reports whether an etcd error is transient and safe to
+// retry the same request against.
+//
+// etcd marks every server-side availability error (leader changed, no leader,
+// server stopped, the request-timeout family, unhealthy cluster, ...) with
+// codes.Unavailable, the same criterion clientv3 itself uses to decide that an
+// immutable request may be retried. The error reaches callers either as a gRPC
+// status or, once clientv3 has converted it, as an rpctypes.EtcdError carrying
+// that code, so both forms are classified by code rather than by enumerating
+// sentinels. A generic gRPC Unavailable (no connection established yet) is
+// covered by the same rule. Two transient errors use other codes and are
+// matched explicitly: ErrNotLeader (FailedPrecondition) and ErrTooManyRequests
+// (ResourceExhausted, which etcd also uses for the non-transient
+// "database space exceeded").
+//
+// Genuine authorization failures, permission denials, data loss (corrupt
+// cluster), quota exhaustion and other non-transient errors carry different
+// codes and are deliberately NOT retriable.
+func IsRetriableEtcdErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Context cancellation / deadline is a terminal condition, never retried.
+	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, rpctypes.ErrNotLeader) || errors.Is(err, rpctypes.ErrTooManyRequests) {
+		return true
+	}
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		return etcdErr.Code() == codes.Unavailable
+	}
+	return status.Code(err) == codes.Unavailable
 }
 
 type ClientOption func(*clientv3.Config)

@@ -70,7 +70,12 @@ Each cluster reads the import files from its own object storage. Make sure the
 files you import exist in **both** the primary's and the standby's object
 storage: upload them to both, or use object storage that both clusters can read.
 If the files are missing on the standby, the replicated import fails there with
-an object-not-found error.
+an object-not-found error. The files must also be identical on both sides: for
+a collection with autoID enabled, if a file's row count differs between the
+primary and the standby - including one side reading the file as empty - the
+import fails on the diverging side instead of silently assigning different
+primary keys on each cluster, or committing an empty import against the other
+side's rows.
 
 The example uses the REST-based import helpers from `pymilvus.bulk_writer`.
 The `url` values are the same Milvus addresses you use for other API calls.

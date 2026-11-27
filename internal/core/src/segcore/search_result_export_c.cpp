@@ -45,12 +45,14 @@
 #include "prometheus/histogram.h"
 #include "pb/cgo_msg.pb.h"
 #include "query/PlanImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/OutputFields.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentReadLease.h"
 #include "segcore/Utils.h"
 #include "segcore/arrow_field_utils.h"
 #include "segcore/reduce/Reduce.h"
-#include "storage/ThreadPools.h"
+#include "storage/Util.h"
 
 using SearchResult = milvus::SearchResult;
 using milvus::segcore::ArrowExportFailure;
@@ -142,10 +144,20 @@ SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
 
 CStatus
 SerializeSearchResultDataToCProto(
-    const milvus::proto::schema::SearchResultData& result_data,
+    milvus::proto::schema::SearchResultData& result_data,
     CProto* out_result,
     const char* allocation_error,
     const char* serialization_error) {
+    for (auto& field_data : *result_data.mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    for (auto& field_data : *result_data.mutable_group_by_field_values()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    if (result_data.has_group_by_field_value()) {
+        milvus::SyncFieldDataRowValidData(
+            result_data.mutable_group_by_field_value());
+    }
     auto size = result_data.ByteSizeLong();
     CBufferPtr buffer(malloc(size));
     if (buffer == nullptr) {
@@ -493,8 +505,8 @@ BuildSearchResultBatch(
             auto& field_data = it->second;
             auto& field_meta = schema->operator[](field_id);
             auto name = std::string(field_meta.get_name().get());
-            auto result =
-                FieldDataToArrow(name, *field_data, total_valid, true);
+            auto result = FieldDataToArrow(
+                name, *field_data, total_valid, true, &field_meta);
             if (!result.ok()) {
                 return result.status();
             }
@@ -628,6 +640,8 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
@@ -688,7 +702,8 @@ BuildExplicitFieldsBatch(
             }
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
-                FieldDataToArrow(name, *it->second, total_rows, true));
+                FieldDataToArrow(
+                    name, *it->second, total_rows, true, &field_meta));
             array = converted.second;
         }
 
@@ -1051,40 +1066,14 @@ MaterializeOrderedFields(
     }
 
     auto materialize_one = [&](OrderedSegmentFields& materialized) {
-        milvus::futures::throwIfCancelled(cancel_token);
         auto segment = static_cast<milvus::segcore::SegmentInternalInterface*>(
             materialized.search_result->segment_);
         AssertInfo(segment != nullptr, "search result has no segment");
         materialize_segment_fields(segment, materialized);
     };
 
-    if (segment_fields.size() > 1) {
-        auto& pool = milvus::ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::MIDDLE);
-        std::vector<std::future<void>> futures;
-        futures.reserve(segment_fields.size());
-        auto futures_guard = folly::makeGuard([&futures]() {
-            for (auto& future : futures) {
-                if (future.valid()) {
-                    try {
-                        future.get();
-                    } catch (...) {
-                    }
-                }
-            }
-        });
-        for (auto& entry : segment_fields) {
-            auto* materialized = &entry.second;
-            futures.emplace_back(pool.Submit([&materialize_one, materialized] {
-                materialize_one(*materialized);
-            }));
-        }
-        for (auto& future : futures) {
-            future.get();
-        }
-    } else {
-        materialize_one(segment_fields.begin()->second);
-    }
+    milvus::segcore::MaterializeOutputSegments(
+        segment_fields, cancel_token, materialize_one);
 
     std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
     for (auto& entry : segment_fields) {
@@ -1116,7 +1105,9 @@ MaterializeOrderedFields(
                 continue;
             }
             const auto& field_data = it->second;
-            if (field_data->valid_data_size() == 0) {
+            const auto& valid_data =
+                milvus::GetFieldDataRowValidData(*field_data);
+            if (valid_data.empty()) {
                 continue;
             }
             int64_t valid_index = 0;
@@ -1126,7 +1117,7 @@ MaterializeOrderedFields(
                 auto position = materialized.result_positions[row_index];
                 result_pairs[position].setValidDataOffset(field_id,
                                                           valid_index);
-                if (field_data->valid_data(row_index)) {
+                if (valid_data[row_index]) {
                     ++valid_index;
                 }
             }
@@ -1299,21 +1290,21 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
             [plan, &cancel_token](
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
-                SearchResult temp_result;
-                temp_result.segment_ = materialized.search_result->segment_;
-                temp_result.read_snapshot_ =
+                SearchResult output;
+                output.segment_ = segment;
+                output.seg_offsets_ = materialized.segment_offsets;
+                output.distances_.resize(output.seg_offsets_.size());
+                output.read_snapshot_ =
                     materialized.search_result->read_snapshot_;
-                temp_result.seg_offsets_ = materialized.segment_offsets;
-                temp_result.distances_.resize(
-                    materialized.segment_offsets.size(), 0.0f);
                 milvus::OpContext op_ctx(cancel_token);
-                segment->FillTargetEntry(plan, temp_result, &op_ctx);
-                materialized.fields =
-                    std::move(temp_result.output_fields_data_);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
+                segment->FillTargetEntry(plan, output, &op_ctx);
+                materialized.fields = std::move(output.output_fields_data_);
                 materialized.scanned_remote_bytes =
-                    temp_result.search_storage_cost_.scanned_remote_bytes;
+                    output.search_storage_cost_.scanned_remote_bytes;
                 materialized.scanned_total_bytes =
-                    temp_result.search_storage_cost_.scanned_total_bytes;
+                    output.search_storage_cost_.scanned_total_bytes;
             });
         auto result_data =
             std::make_unique<milvus::proto::schema::SearchResultData>();
@@ -1434,24 +1425,38 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
             [plan, &requested_field_ids, &cancel_token](
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
+                auto snapshot = materialized.search_result->read_snapshot_;
+                if (!snapshot) {
+                    snapshot = segment->CaptureReadSnapshot();
+                }
                 milvus::OpContext op_ctx(cancel_token);
-                for (auto field_id : requested_field_ids) {
-                    milvus::futures::throwIfCancelled(cancel_token);
-                    auto& field_meta = plan->schema_->operator[](field_id);
-                    materialized.fields[field_id] =
-                        milvus::segcore::BulkSubscriptWithSnapshot(
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
+                auto fetched_fields = milvus::segcore::FetchOutputFields(
+                    requested_field_ids,
+                    segment->get_segment_id(),
+                    &op_ctx,
+                    [plan, segment, snapshot, &materialized](
+                        milvus::FieldId field_id,
+                        milvus::OpContext* field_ctx) {
+                        auto& field_meta = plan->schema_->operator[](field_id);
+                        return milvus::segcore::BulkSubscriptWithSnapshot(
                             segment,
-                            materialized.search_result->read_snapshot_,
-                            &op_ctx,
+                            snapshot,
+                            field_ctx,
                             field_id,
                             field_meta,
                             materialized.segment_offsets.data(),
                             materialized.segment_offsets.size());
+                    });
+                for (auto& fetched : fetched_fields) {
+                    materialized.fields[fetched.field_id] =
+                        std::move(fetched.field_data);
+                    materialized.scanned_remote_bytes +=
+                        fetched.scanned_remote_bytes;
+                    materialized.scanned_total_bytes +=
+                        fetched.scanned_total_bytes;
                 }
-                materialized.scanned_remote_bytes =
-                    op_ctx.storage_usage.scanned_cold_bytes.load();
-                materialized.scanned_total_bytes =
-                    op_ctx.storage_usage.scanned_total_bytes.load();
             });
 
         auto batch_result = BuildExplicitFieldsBatch(
@@ -1581,6 +1586,8 @@ PrepareSearchResultsForExportImpl(
         }
 
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         milvus::segcore::ReduceHelper helper(search_results,
                                              plan,
                                              placeholder_group,

@@ -270,7 +270,7 @@ func (suite *IDFOracleSuite) TestRegisterGrowingClonesStats() {
 
 	registered, ok := suite.idfOracle.growing[1]
 	suite.True(ok)
-	suite.Equal(int64(1), registered.bm25Stats[102].NumRow())
+	suite.Equal(int64(1), registered[102].NumRow())
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
@@ -279,10 +279,10 @@ func (suite *IDFOracleSuite) TestUpdateGrowingAfterEmptyRegistration() {
 
 	registered, ok := suite.idfOracle.growing[1]
 	suite.True(ok)
-	suite.NotNil(registered.bm25Stats)
+	suite.NotNil(registered)
 
 	suite.idfOracle.UpdateGrowing(1, suite.genStats(1, 2))
-	suite.Equal(int64(1), registered.bm25Stats[102].NumRow())
+	suite.Equal(int64(1), registered[102].NumRow())
 	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
@@ -1018,12 +1018,9 @@ func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
 	keptStats := genBM25StatsForField(104, 3, 4)[104]
 	idfOracle.current[102] = droppedStats
 	idfOracle.current[104] = keptStats
-	idfOracle.growing[1] = &growingBm25Stats{
-		bm25Stats: bm25Stats{
-			102: droppedStats.Clone(),
-			104: keptStats.Clone(),
-		},
-		activate: true,
+	idfOracle.growing[1] = bm25Stats{
+		102: droppedStats.Clone(),
+		104: keptStats.Clone(),
 	}
 
 	segDir := path.Join(idfOracle.dirPath, "10")
@@ -1054,9 +1051,9 @@ func TestIDFSyncFunctionsPrunesDroppedBM25Field(t *testing.T) {
 	existing, err := idfOracle.current.GetStats(104)
 	require.NoError(t, err)
 	assert.Same(t, keptStats, existing)
-	_, ok := idfOracle.growing[1].bm25Stats[102]
+	_, ok := idfOracle.growing[1][102]
 	assert.False(t, ok)
-	_, ok = idfOracle.growing[1].bm25Stats[104]
+	_, ok = idfOracle.growing[1][104]
 	assert.True(t, ok)
 
 	sealedStats, ok := idfOracle.sealed.Get(10)
@@ -1082,12 +1079,12 @@ func TestIDFSyncFunctionsPrunesAllDroppedBM25Fields(t *testing.T) {
 
 	stats := genBM25StatsForField(102, 1, 2)[102]
 	idfOracle.current[102] = stats
-	idfOracle.growing[1] = &growingBm25Stats{bm25Stats: bm25Stats{102: stats.Clone()}, activate: true}
+	idfOracle.growing[1] = bm25Stats{102: stats.Clone()}
 
 	err := idfOracle.SyncFunctions(nil)
 	require.NoError(t, err)
 
 	_, err = idfOracle.current.GetStats(102)
 	require.Error(t, err)
-	assert.Empty(t, idfOracle.growing[1].bm25Stats)
+	assert.Empty(t, idfOracle.growing[1])
 }

@@ -932,13 +932,14 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_drop_struct_array_field_and_reject_sub_field_drop(self):
+    def test_drop_struct_array_sub_field_then_whole_field(self):
         """
-        TC-L1-05: Drop StructArray field and reject sub-field drop.
+        TC-L1-05: Drop a StructArray sub-field, then the whole StructArray field.
 
-        target: verify whole StructArray field can be dropped and StructArray sub-field drop is rejected
-        method: reject events[name] drop first, then drop events and verify nested index cascade
-        expected: failed sub-field drop does not change schema; events and nested indexes disappear after whole-field drop
+        target: verify a StructArray sub-field can be dropped, then the whole StructArray field
+        method: drop events[name] first, then drop events and verify nested index cascade at each step
+        expected: events[name] and its index disappear while the other sub-fields stay readable; events and
+            the remaining nested indexes disappear after whole-field drop
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1016,22 +1017,34 @@ class TestMilvusClientDropFieldFeature(TestMilvusClientV2Base):
         assert len(pre_drop_rows) == 1
         assert pre_drop_rows[0]["events"][0]["name"] == "event_1"
 
-        # Step 3: Reject direct sub-field drop and verify schema/indexes are unchanged.
-        self.drop_collection_field(
-            client,
-            collection_name,
-            field_name="events[name]",
-            check_task=ct.CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "field not found: events[name]: invalid parameter"},
-        )
+        # Step 3: Drop the events[name] sub-field; its index is dropped with it.
+        client.drop_collection_field(collection_name, "events[name]")
 
         desc = client.describe_collection(collection_name)
-        field_names = [field["name"] for field in desc["fields"]]
-        assert "events" in field_names
-        indexes = client.list_indexes(collection_name)
+        events_field = next(field for field in desc["fields"] if field["name"] == "events")
+        assert {field["name"] for field in events_field["struct_fields"]} == {"embedding", "score"}
+
+        for _ in range(30):
+            indexes = client.list_indexes(collection_name)
+            if "events[name]" not in indexes:
+                break
+            time.sleep(1)
+
+        assert "events[name]" not in indexes
         assert "events[embedding]" in indexes
-        assert "events[name]" in indexes
         assert "vec" in indexes
+        assert client.describe_index(collection_name, index_name="events[name]") is None
+
+        post_drop_rows = client.query(
+            collection_name,
+            filter="id == 1",
+            output_fields=["id", "events"],
+        )
+        assert len(post_drop_rows) == 1
+        assert len(post_drop_rows[0]["events"]) == 2
+        for element, score in zip(post_drop_rows[0]["events"], [1, 101]):
+            assert "name" not in element
+            assert element["score"] == score
 
         # Step 4: Drop the whole StructArray field.
         client.drop_collection_field(collection_name, "events")

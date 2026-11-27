@@ -37,6 +37,7 @@ import (
 type describeCollectionVisibilitySuite struct {
 	integration.MiniClusterSuite
 	cached bool
+	local  bool
 }
 
 func (s *describeCollectionVisibilitySuite) SetupSuite() {
@@ -44,6 +45,7 @@ func (s *describeCollectionVisibilitySuite) SetupSuite() {
 	params := paramtable.Get()
 	s.WithMilvusConfig(params.CommonCfg.AuthorizationEnabled.Key, "true")
 	s.WithMilvusConfig(params.ProxyCfg.EnableCachedServiceProvider.Key, strconv.FormatBool(s.cached))
+	s.WithMilvusConfig(params.ProxyCfg.EnableLocalCollectionVisibility.Key, strconv.FormatBool(s.local))
 	s.MiniClusterSuite.SetupSuite()
 }
 
@@ -150,8 +152,10 @@ func (s *describeCollectionVisibilitySuite) TestVisibility() {
 
 func TestDescribeCollectionVisibility(t *testing.T) {
 	for _, cached := range []bool{true, false} {
-		t.Run("cached="+strconv.FormatBool(cached), func(t *testing.T) {
-			suite.Run(t, &describeCollectionVisibilitySuite{cached: cached})
-		})
+		for _, local := range []bool{false, true} {
+			t.Run("cached="+strconv.FormatBool(cached)+"/local="+strconv.FormatBool(local), func(t *testing.T) {
+				suite.Run(t, &describeCollectionVisibilitySuite{cached: cached, local: local})
+			})
+		}
 	}
 }

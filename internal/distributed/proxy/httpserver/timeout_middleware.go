@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
 // BufferPool represents a pool of buffers.
@@ -232,31 +233,51 @@ func propagateTimeoutContextKeys(dst *gin.Context, src *gin.Context) {
 	}
 }
 
+// requestTimeout preserves the existing Request-Timeout header semantics for
+// both buffered and batched DQL responses.
+func requestTimeout(gCtx *gin.Context) (time.Duration, bool) {
+	timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
+	requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
+	if requestTimeout != "" {
+		timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
+		if err != nil {
+			HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
+				mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
+				mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
+					"%s parse failed, err: %s",
+					mhttp.HTTPHeaderRequestTimeout,
+					err.Error(),
+				).Error(),
+			})
+			return 0, false
+		}
+		timeout = time.Duration(timeoutSecond) * time.Second
+	}
+	return timeout, true
+}
+
+func upsertTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
+	next := timeoutMiddleware(handler)
+	return func(c *gin.Context) {
+		ctx, _ := requestutil.WithConditionalWriteState(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		next(c)
+	}
+}
+
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	timeoutHandler := &Timeout{
 		handler: handler,
 	}
 	bufPool := &BufferPool{}
 	return func(gCtx *gin.Context) {
-		timeout := paramtable.Get().HTTPCfg.RequestTimeoutMs.GetAsDuration(time.Millisecond)
-		requestTimeout := gCtx.Request.Header.Get(mhttp.HTTPHeaderRequestTimeout)
-		if requestTimeout != "" {
-			timeoutSecond, err := strconv.ParseInt(requestTimeout, 10, 64)
-			if err != nil {
-				HTTPAbortReturn(gCtx, http.StatusOK, gin.H{
-					mhttp.HTTPReturnCode: merr.Code(merr.ErrParameterInvalid),
-					mhttp.HTTPReturnMessage: merr.WrapErrParameterInvalidMsg(
-						"%s parse failed, err: %s",
-						mhttp.HTTPHeaderRequestTimeout,
-						err.Error(),
-					).Error(),
-				})
-				return
-			}
-			timeout = time.Duration(timeoutSecond) * time.Second
+		timeout, ok := requestTimeout(gCtx)
+		if !ok {
+			return
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
 		defer cancel()
+		writeState := requestutil.ConditionalWriteStateFromContext(topCtx)
 		req := gCtx.Request.WithContext(topCtx)
 		gCtx.Request = req
 
@@ -308,9 +329,17 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 
 		case <-timer.C:
 			cancel()
+			err := context.DeadlineExceeded
+			if writeState != nil {
+				err = writeState.Cancel(err)
+			}
+			code, reason := merr.Code(err), "request timeout"
+			if code != merr.TimeoutCode {
+				reason = err.Error()
+			}
 			gCtx.Abort()
-			gCtx.Set(HTTPReturnCode, merr.TimeoutCode)
-			gCtx.Set(HTTPReturnMessage, "request timeout")
+			gCtx.Set(HTTPReturnCode, code)
+			gCtx.Set(HTTPReturnMessage, reason)
 			recorder.CloseForTimeout()
 			bufPool.Put(buffer)
 
@@ -319,7 +348,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 				setTraceIDHeaderTo(realWriter.Header(), traceID)
 			}
 			realWriter.WriteHeader(http.StatusRequestTimeout)
-			body, _ := json.Marshal(gin.H{HTTPReturnCode: merr.TimeoutCode, HTTPReturnMessage: "request timeout"})
+			body, _ := json.Marshal(gin.H{HTTPReturnCode: code, HTTPReturnMessage: reason})
 			realWriter.Write(body)
 		}
 	}

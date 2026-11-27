@@ -82,6 +82,7 @@ func (p *releaseManualFlushPreparer) PrepareReleaseManualFlush(ctx context.Conte
 		return false, err
 	}
 	flushMsg, err := message.NewManualFlushMessageBuilderV2().
+		WithUnreplicable().
 		WithVChannel(vchannel).
 		WithHeader(&message.ManualFlushMessageHeader{
 			CollectionId: collectionID,

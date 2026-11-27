@@ -117,7 +117,7 @@ func (suite *DistHandlerSuite) TestBasic() {
 		LastModifyTs: 1,
 	}, nil)
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {}, nil)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -137,7 +137,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	}))
 	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {}, nil)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -286,7 +286,7 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 		notifyCounter.Inc()
 	}
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, notifyFunc)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, notifyFunc, nil)
 	defer suite.handler.stop()
 
 	// Wait for distribution to be processed
@@ -592,6 +592,180 @@ func TestDeltaDistributionPatchNotifiesNewServiceableChannel(t *testing.T) {
 	handler.handleDistResp(ctx, deltaResp)
 
 	assert.Equal(t, []int64{collectionID}, notified)
+}
+
+func TestTriggerTargetCheckForDelegatorWaitingForTarget(t *testing.T) {
+	for _, isDelta := range []bool{false, true} {
+		t.Run(fmt.Sprintf("delta=%v", isDelta), func(t *testing.T) {
+			ctx := context.Background()
+			nodeID := time.Now().UnixNano()%1000000 + 1000000
+			collectionID := int64(11)
+			channels := []string{"test-channel-waiting-0", "test-channel-waiting-1"}
+			// Each channel has one sealed segment in the next target.
+			segmentOf := map[string]int64{channels[0]: 100, channels[1]: 101}
+			nodeManager := session.NewNodeManager()
+			nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+				NodeID:   nodeID,
+				Address:  "localhost:19530",
+				Hostname: "localhost",
+			}))
+			target := meta.NewMockTargetManager(t)
+			target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+			target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, meta.NextTarget).RunAndReturn(
+				func(_ context.Context, _ int64, channel string, _ int32) map[int64]*datapb.SegmentInfo {
+					return map[int64]*datapb.SegmentInfo{segmentOf[channel]: {ID: segmentOf[channel]}}
+				}).Maybe()
+			nextTargetExists := true
+			target.EXPECT().IsNextTargetExist(mock.Anything, collectionID).RunAndReturn(
+				func(context.Context, int64) bool { return nextTargetExists }).Maybe()
+			dist := meta.NewDistributionManager(nodeManager)
+			var triggered []int64
+			handler := &distHandler{
+				nodeID:      nodeID,
+				nodeManager: nodeManager,
+				dist:        dist,
+				target:      target,
+				triggerTargetCheck: func(collectionID int64) {
+					// The target observer reads the delegators from the distribution, so the report that
+					// triggers must be stored first: the report before it did not have the segment loaded.
+					stored := dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channels[0]))
+					if assert.Len(t, stored, 1) {
+						assert.Contains(t, stored[0].View.Segments, segmentOf[channels[0]])
+					}
+					triggered = append(triggered, collectionID)
+				},
+			}
+			defer metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+
+			type delegatorState struct {
+				status *querypb.LeaderViewStatus
+				loaded bool // whether its next-target segment is in its view
+			}
+			ts := int64(0)
+			report := func(delegators ...delegatorState) {
+				ts++
+				resp := &querypb.GetDataDistributionResponse{
+					Status:            merr.Success(),
+					NodeID:            nodeID,
+					LastModifyTs:      ts,
+					IsDelta:           isDelta,
+					TotalChannelCount: int64(len(delegators)),
+				}
+				for i, d := range delegators {
+					view := &querypb.LeaderView{Collection: collectionID, Channel: channels[i], Status: d.status}
+					if d.loaded {
+						view.SegmentDist = map[int64]*querypb.SegmentDist{segmentOf[channels[i]]: {NodeID: nodeID, Version: 1}}
+					}
+					resp.Channels = append(resp.Channels, &querypb.ChannelVersionInfo{Channel: channels[i], Collection: collectionID, Version: 1})
+					resp.LeaderViews = append(resp.LeaderViews, view)
+				}
+				handler.handleDistResp(ctx, resp)
+			}
+			catchingUp := delegatorState{&querypb.LeaderViewStatus{Serviceable: false, CatchingUpStreamingData: true}, true}
+			loading := delegatorState{&querypb.LeaderViewStatus{Serviceable: false}, false}
+			waiting := delegatorState{&querypb.LeaderViewStatus{Serviceable: false}, true}
+			serviceable := delegatorState{&querypb.LeaderViewStatus{Serviceable: true}, true}
+
+			// Not data-ready for the next target yet: still catching up, or its segment is not loaded.
+			report(catchingUp)
+			report(loading)
+			assert.Empty(t, triggered)
+
+			// Data-ready but not serviceable: trigger the check, again on every report while it waits.
+			report(waiting)
+			report(waiting)
+			assert.Equal(t, []int64{collectionID, collectionID}, triggered)
+
+			// No next target: the readiness check has no segment to look at, so nothing to trigger.
+			triggered = nil
+			nextTargetExists = false
+			report(waiting)
+			assert.Empty(t, triggered)
+			nextTargetExists = true
+
+			// Serviceable: nothing to trigger.
+			report(serviceable)
+			assert.Empty(t, triggered)
+
+			// Two waiting delegators of one collection in one response trigger the check once.
+			report(waiting, waiting)
+			assert.Equal(t, []int64{collectionID}, triggered)
+
+			// A nil trigger disables it.
+			handler.triggerTargetCheck = nil
+			report(waiting)
+		})
+	}
+}
+
+func TestSyncAllWaitsForPullInFlight(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	nodeID := time.Now().UnixNano()%1000000 + 2000000
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	fetches := atomic.NewInt32(0)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().GetDataDistribution(mock.Anything, nodeID, mock.Anything).RunAndReturn(
+		func(context.Context, int64, *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+			fetches.Inc()
+			return &querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: nodeID}, nil
+		})
+	// The first response handled blocks until released, so the pull loop stays between fetching
+	// a distribution and finishing applying it.
+	applies := atomic.NewInt32(0)
+	applying := make(chan struct{})
+	release := make(chan struct{})
+	handler := &distHandler{
+		nodeID:      nodeID,
+		client:      cluster,
+		nodeManager: nodeManager,
+		dist:        meta.NewDistributionManager(nodeManager),
+		target:      meta.NewMockTargetManager(t),
+		notifyFunc: func(...int64) {
+			if applies.Inc() == 1 {
+				close(applying)
+				<-release
+			}
+		},
+	}
+	defer metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+	controller := &ControllerImpl{handlers: map[int64]*distHandler{nodeID: handler}}
+
+	pulled := make(chan struct{})
+	go func() {
+		failures := 0
+		handler.pullDist(ctx, &failures)
+		close(pulled)
+	}()
+	select {
+	case <-applying:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pull loop did not apply its response")
+	}
+
+	synced := make(chan struct{})
+	go func() {
+		controller.SyncAll(ctx)
+		close(synced)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	assert.EqualValues(t, 1, fetches.Load(), "SyncAll fetched while the pull loop was applying its response")
+
+	close(release)
+	for _, done := range []chan struct{}{pulled, synced} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the pull loop or SyncAll did not finish after the response was released")
+		}
+	}
+	assert.EqualValues(t, 2, fetches.Load())
+	assert.EqualValues(t, 2, applies.Load())
 }
 
 func TestDeltaDistributionPatchNotifiesRemovedChannel(t *testing.T) {

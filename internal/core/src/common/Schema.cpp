@@ -27,9 +27,11 @@
 #include "arrow/type.h"
 #include "arrow/util/key_value_metadata.h"
 #include "common/Consts.h"
+#include "common/ExternalSpecKey.h"
 #include "common/FieldMeta.h"
 #include "common/SystemProperty.h"
 #include "common/VirtualPK.h"
+#include "common/Utils.h"
 #include "milvus-storage/common/constants.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
@@ -71,7 +73,23 @@ IsMilvusTableExternalSpec(const std::string& external_spec) {
     }
     try {
         auto spec = nlohmann::json::parse(external_spec);
-        return spec.value("format", "parquet") == "milvus-table";
+        if (!spec.is_object()) {
+            return false;
+        }
+        // Go's encoding/json reads a lone "Format" as format. Two keys that
+        // fold to format make the spec invalid, so it is not milvus-table.
+        const nlohmann::json* format = nullptr;
+        for (auto it = spec.begin(); it != spec.end(); ++it) {
+            if (FoldExternalSpecKey(it.key()) != "format") {
+                continue;
+            }
+            if (format != nullptr) {
+                return false;
+            }
+            format = &it.value();
+        }
+        return format != nullptr && format->is_string() &&
+               format->get<std::string>() == "milvus-table";
     } catch (const std::exception&) {
         return false;
     }
@@ -103,6 +121,17 @@ ResolvePhysicalColumnMapping(
         mapping.is_external_column = true;
     } else if (!field_schema.external_field().empty()) {
         mapping.storage_column_name = field_schema.external_field();
+        if (field_schema.data_type() == proto::schema::DataType::Array ||
+            field_schema.data_type() ==
+                proto::schema::DataType::ArrayOfVector) {
+            auto logical = ParseStructSubFieldPath(field_schema.name());
+            auto external =
+                ParseStructSubFieldPath(field_schema.external_field());
+            if (logical.has_value() && external.has_value() &&
+                logical->second == external->second) {
+                mapping.storage_column_name = std::move(external->first);
+            }
+        }
         mapping.is_external_column = true;
     }
     return mapping;
@@ -131,6 +160,10 @@ Schema::Schema(const Schema& other)
       mmap_enabled_(other.mmap_enabled_),
       mmap_fields_(other.mmap_fields_),
       struct_array_field_cache_(other.struct_array_field_cache_),
+      struct_field_ids_(other.struct_field_ids_),
+      struct_field_children_(other.struct_field_children_),
+      struct_external_fields_(other.struct_external_fields_),
+      external_struct_parents_(other.external_struct_parents_),
       warmup_vector_index_(other.warmup_vector_index_),
       warmup_scalar_index_(other.warmup_scalar_index_),
       warmup_scalar_field_(other.warmup_scalar_field_),
@@ -166,6 +199,10 @@ Schema::operator=(const Schema& other) {
     std::swap(mmap_enabled_, copied.mmap_enabled_);
     std::swap(mmap_fields_, copied.mmap_fields_);
     std::swap(struct_array_field_cache_, copied.struct_array_field_cache_);
+    std::swap(struct_field_ids_, copied.struct_field_ids_);
+    std::swap(struct_field_children_, copied.struct_field_children_);
+    std::swap(struct_external_fields_, copied.struct_external_fields_);
+    std::swap(external_struct_parents_, copied.external_struct_parents_);
     std::swap(warmup_vector_index_, copied.warmup_vector_index_);
     std::swap(warmup_scalar_index_, copied.warmup_scalar_index_);
     std::swap(warmup_scalar_field_, copied.warmup_scalar_field_);
@@ -233,10 +270,18 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
          schema_proto.struct_array_fields()) {
+        schema->struct_field_ids_[child.name()] = FieldId(child.fieldid());
+        const std::string ext_parent = child.external_field().empty()
+                                           ? child.name()
+                                           : child.external_field();
+        schema->struct_external_fields_[child.name()] = ext_parent;
+        schema->external_struct_parents_[ext_parent] = child.name();
         for (const auto& sub_field : child.fields()) {
             auto field = sub_field;
             field.set_nullable(field.nullable() || child.nullable());
             process_field(field);
+            schema->struct_field_children_[child.name()].emplace_back(
+                field.fieldid());
         }
     }
 
@@ -309,19 +354,7 @@ Schema::ConvertToArrowSchema() const {
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
         const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
-        std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
-        auto data_type = meta.get_data_type();
-        if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
-        } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
-        }
+        auto arrow_data_type = GetArrowDataType(meta);
 
         auto arrow_field = std::make_shared<arrow::Field>(
             meta.get_name().get(),
@@ -347,11 +380,6 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
     arrow_fields.reserve(field_ids_.size());
     for (const auto& field_id : field_ids_) {
         const auto& meta = fields_.at(field_id);
-        int dim = IsVectorDataType(meta.get_data_type()) &&
-                          !IsSparseFloatVectorDataType(meta.get_data_type())
-                      ? meta.get_dim()
-                      : 1;
-
         std::shared_ptr<arrow::DataType> arrow_data_type = nullptr;
         auto data_type = meta.get_data_type();
         auto is_nullable_dense_vector =
@@ -362,11 +390,8 @@ Schema::ConvertToLoonArrowSchema(bool text_lob_as_binary) const {
             arrow_data_type = arrow::binary();
         } else if (text_lob_as_binary && data_type == DataType::TEXT) {
             arrow_data_type = arrow::binary();
-        } else if (data_type == DataType::VECTOR_ARRAY) {
-            arrow_data_type = GetArrowDataTypeForVectorArray(
-                meta.get_element_type(), meta.get_dim());
         } else {
-            arrow_data_type = GetArrowDataType(data_type, dim);
+            arrow_data_type = GetArrowDataType(meta);
         }
 
         auto metadata = is_nullable_dense_vector
@@ -432,7 +457,11 @@ Schema::GetExternalColumnNames() const {
         if (it == fields_.end())
             continue;
         if (IsExternalManifestStoredField(field_id)) {
-            columns->push_back(GetPhysicalColumnName(field_id));
+            auto column = GetPhysicalColumnName(field_id);
+            if (std::find(columns->begin(), columns->end(), column) ==
+                columns->end()) {
+                columns->push_back(std::move(column));
+            }
         }
     }
     return columns;
@@ -480,6 +509,26 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
         return std::to_string(field_id.get());
     }
     if (meta.is_external_field()) {
+        if (meta.get_data_type() == DataType::ARRAY ||
+            meta.get_data_type() == DataType::VECTOR_ARRAY) {
+            auto logical = ParseStructSubFieldPath(meta.get_name().get());
+            auto external = ParseStructSubFieldPath(meta.get_external_field());
+            if (logical.has_value() && external.has_value() &&
+                logical->second == external->second) {
+                const auto children =
+                    struct_field_children_.find(logical->first);
+                const auto ext_it =
+                    struct_external_fields_.find(logical->first);
+                if (children != struct_field_children_.end() &&
+                    ext_it != struct_external_fields_.end() &&
+                    ext_it->second == external->first &&
+                    std::find(children->second.begin(),
+                              children->second.end(),
+                              field_id) != children->second.end()) {
+                    return ext_it->second;
+                }
+            }
+        }
         return meta.get_external_field();
     }
     return std::to_string(field_id.get());
@@ -515,6 +564,61 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
     ThrowInfo(ErrorCode::DataFormatBroken,
               "column '{}' is not a valid field id",
               column_name);
+}
+
+OrdinaryStructProjections
+Schema::GetOrdinaryStructProjections(
+    const std::vector<FieldId>& selected_fields) const {
+    OrdinaryStructProjections result;
+    if (!is_external_collection() || is_milvus_table_external_collection() ||
+        selected_fields.empty()) {
+        return result;
+    }
+    const std::unordered_set<FieldId> selected(selected_fields.begin(),
+                                               selected_fields.end());
+    std::unordered_set<FieldId> registered_ids;
+    for (const auto& [name, children] : struct_field_children_) {
+        const auto parent_id = struct_field_ids_.at(name);
+        const auto ext_parent_it = struct_external_fields_.find(name);
+        const std::string& ext_parent =
+            ext_parent_it != struct_external_fields_.end()
+                ? ext_parent_it->second
+                : name;
+        AssertInfo(
+            !has_field(parent_id) && registered_ids.insert(parent_id).second,
+            "invalid or duplicate Struct parent field id {}",
+            parent_id.get());
+        OrdinaryStructProjection projection{parent_id, {}};
+        for (const auto id : children) {
+            AssertInfo(registered_ids.insert(id).second,
+                       "duplicate Struct child field id {}",
+                       id.get());
+            if (!selected.count(id)) {
+                continue;
+            }
+            const auto& meta = (*this)[id];
+            auto logical = ParseStructSubFieldPath(meta.get_name().get());
+            auto external = ParseStructSubFieldPath(meta.get_external_field());
+            AssertInfo(
+                (meta.get_data_type() == DataType::ARRAY ||
+                 meta.get_data_type() == DataType::VECTOR_ARRAY) &&
+                    logical.has_value() && logical->first == name &&
+                    external.has_value() && external->first == ext_parent &&
+                    external->second == logical->second,
+                "invalid ordinary external Struct child {} for parent {} "
+                "(external_field={})",
+                id.get(),
+                name,
+                ext_parent);
+            projection.child_field_ids.push_back(id);
+        }
+        if (!projection.child_field_ids.empty()) {
+            AssertInfo(result.emplace(ext_parent, std::move(projection)).second,
+                       "duplicate ordinary external Struct physical column {}",
+                       ext_parent);
+        }
+    }
+    return result;
 }
 
 std::pair<bool, bool>

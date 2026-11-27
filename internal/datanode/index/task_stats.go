@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -72,10 +73,13 @@ type statsTask struct {
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	manager  *TaskManager
+	info     *StatsTaskInfo
 	binlogIO io.BinlogIO
 	cm       storage.ChunkManager
 
 	pluginContext *indexcgopb.StoragePluginContext
+
+	resource taskcommon.Resource
 
 	logIDOffset  int64
 	currentTime  time.Time
@@ -93,8 +97,10 @@ func NewStatsTask(ctx context.Context,
 	cancel context.CancelFunc,
 	req *workerpb.CreateStatsRequest,
 	manager *TaskManager,
+	info *StatsTaskInfo,
 	cm storage.ChunkManager,
 	pluginContext *indexcgopb.StoragePluginContext,
+	resource taskcommon.Resource,
 ) *statsTask {
 	return &statsTask{
 		ident:         fmt.Sprintf("%s/%d", req.GetClusterID(), req.GetTaskID()),
@@ -102,12 +108,14 @@ func NewStatsTask(ctx context.Context,
 		cancel:        cancel,
 		req:           req,
 		manager:       manager,
+		info:          info,
 		binlogIO:      io.NewBinlogIO(cm),
 		cm:            cm,
 		pluginContext: pluginContext,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("ClusterID: %s, TaskID: %d", req.GetClusterID(), req.GetTaskID())),
 		currentTime:   tsoutil.PhysicalTime(req.GetCurrentTs()),
 		logIDOffset:   0,
+		resource:      resource,
 	}
 }
 
@@ -132,7 +140,7 @@ func (st *statsTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (st *statsTask) SetState(state indexpb.JobState, failReason string) {
-	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), state, failReason)
+	st.manager.StoreStatsTaskState(st.req.GetClusterID(), st.req.GetTaskID(), st.info, state, failReason)
 }
 
 func (st *statsTask) GetState() indexpb.JobState {
@@ -141,6 +149,10 @@ func (st *statsTask) GetState() indexpb.JobState {
 
 func (st *statsTask) GetSlot() int64 {
 	return st.req.GetTaskSlot()
+}
+
+func (st *statsTask) GetResource() taskcommon.Resource {
+	return st.resource
 }
 
 func (st *statsTask) IsVectorIndex() bool {
@@ -350,6 +362,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 
 	st.manager.StorePKSortStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -665,6 +678,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 
 	st.manager.StoreStatsTextIndexResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),
@@ -847,6 +861,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 
 	st.manager.StoreJSONKeyStatsResult(st.req.GetClusterID(),
 		st.req.GetTaskID(),
+		st.info,
 		st.req.GetCollectionID(),
 		st.req.GetPartitionID(),
 		st.req.GetTargetSegmentID(),

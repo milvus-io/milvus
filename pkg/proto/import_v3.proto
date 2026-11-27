@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+// Import V3 control-plane contracts live in their own package so their generic
+// names (ReshardTaskPlan, ImportTaskPlan, WriterSpec, FragmentRef, ...) do not
+// leak into the shared milvus.proto.data namespace. data_coord.proto references
+// them as importv3.*. There is no dependency cycle: data_coord -> import_v3 ->
+// internal/schema/plan, none of which imports data_coord.
+package milvus.proto.importv3;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb";
+
+import "common.proto";
+import "internal.proto";
+import "plan.proto";
+import "schema.proto";
+
+message ReshardTaskPlan {
+  int64 collection_id = 1;
+  schema.CollectionSchema collection_schema = 2;
+  repeated string vchannels = 4;
+  repeated int64 partition_ids = 5;
+  repeated internal.ImportFile files = 6;
+  repeated common.KeyValuePair options = 7;
+  int64 fragment_size = 8;
+  plan.Expr rls_check_predicate = 10;
+}
+
+message FragmentDescriptor {
+  int32 vchannel_index = 1;
+  int64 partition_id = 2;
+  int64 seq = 3;
+  string path = 4;
+  int64 rows = 5;
+  int64 logical_bytes = 6;
+}
+
+message ReshardManifest {
+  repeated FragmentDescriptor fragments = 1;
+}
+
+message FragmentRef {
+  string path = 1;
+  int64 rows = 2;
+}
+
+message ColumnGroupSpec {
+  int64 id = 1;
+  repeated int64 field_ids = 2;
+  string format = 3;
+}
+
+message TextColumnWriteSpec {
+  int64 field_id = 1;
+  int64 inline_limit = 2;
+  int64 lob_limit = 3;
+  int64 flush_limit = 4;
+}
+
+message V2PackedIOConfig {
+  int64 buffer_size = 1;
+  int64 multipart_size = 2;
+}
+
+message WriterSpec {
+  int64 storage_version = 1;
+  repeated ColumnGroupSpec groups = 3;
+  string format = 4;
+  repeated TextColumnWriteSpec text = 5;
+  V2PackedIOConfig v2 = 6;
+  string bloom_type = 10;
+  double bloom_fpp = 11;
+}
+
+// ImportTaskPlan is the complete execution input of one ImportTaskV3. It is
+// built at dispatch from the ImportJob, the task record, and current config,
+// and travels inside ImportTaskV3Request; it is never persisted.
+message ImportTaskPlan {
+  int64 partition_id = 3;
+  repeated FragmentRef fragments = 4;
+  int64 rows = 5;
+  int32 fan_in = 6;
+  WriterSpec writer = 7;
+  schema.CollectionSchema collection_schema = 8;
+  uint64 data_ts = 10;
+  int64 collection_id = 11;
+  // Whether the job restores backup/binlog files. Fragments of a backup job
+  // already carry every function output column; ordinary fragments carry them
+  // because Reshard computed them.
+  bool backup = 12;
+}

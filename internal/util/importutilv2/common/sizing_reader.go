@@ -47,7 +47,12 @@ func NewSizingReaderAt(ctx context.Context, cm storage.ChunkManager, path string
 	if err != nil {
 		return nil, storage.ToMilvusIoError(path, err)
 	}
-	return &SizingReaderAt{ctx: ctx, cm: cm, path: path, size: size}, nil
+	return &SizingReaderAt{
+		ctx:  ctx,
+		cm:   cm,
+		path: path,
+		size: size,
+	}, nil
 }
 
 // FileSize returns the object size observed when the reader was created, so a

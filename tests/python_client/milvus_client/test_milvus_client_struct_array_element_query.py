@@ -9,7 +9,6 @@ Tests for struct array element-level query features:
 
 import random
 
-import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
@@ -32,13 +31,8 @@ CATEGORIES = ["A", "B", "C", "D"]
 
 
 def _seed_vector(seed, dim=default_dim):
-    """Generate a deterministic vector from a seed."""
-    rng = np.random.RandomState(seed)
-    vec = rng.rand(dim).astype(np.float32)
-    norm = np.linalg.norm(vec)
-    if norm > 0:
-        vec = vec / norm
-    return vec.tolist()
+    """Generate a deterministic vector using the shared functional-test profile."""
+    return cf.gen_vectors(1, dim, seed=seed)[0]
 
 
 def gt_element_filter_query(data, elem_filter_fn, doc_filter_fn=None):
@@ -4409,17 +4403,17 @@ class TestMilvusClientStructArrayIndexAccess(TestMilvusClientV2Base):
             ids = sorted({r["id"] for r in results})
             assert ids == expected, f"{expr}: expected {expected}, got {ids}"
 
-    # ---- 9.13 array_length(structA[i][sub_field]) is NOT supported by grammar ----
+    # ---- 9.13 array_length(structA[i][sub_field]) on a scalar sub-field ----
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_array_length_on_struct_index_field_rejected(self):
         """
-        target: array_length only accepts Identifier | JSONIdentifier |
-                StructFieldIdentifier — the indexed form structA[0][sub_field]
-                refers to a single element, not an array, so it must be rejected.
-        method: send array_length(structA[0][int_val]) and expect a parser/param
+        target: array_length(structA[i][sub_field]) is only accepted on an
+                Array<T> sub-field; on a scalar sub-field structA[0][sub_field]
+                refers to a single scalar, not an array, so it must be rejected.
+        method: send array_length(structA[0][int_val]) and expect a param
                 error (not a crash)
-        expected: server returns parameter-invalid / parser error
+        expected: server returns parameter-invalid
         """
         client = self._client()
         collection_name = cf.gen_unique_str(f"{prefix}_idx_arrlen_neg")
@@ -4427,15 +4421,13 @@ class TestMilvusClientStructArrayIndexAccess(TestMilvusClientV2Base):
         rows = [self._make_row(0, [{"int_val": 10}])]
         self._setup_collection(client, collection_name, rows)
 
-        # Grammar lists allowed forms in the parser error message; assert the
-        # indexed form is rejected as a parse mismatch.
         self.query(
             client,
             collection_name,
             filter="array_length(structA[0][int_val]) == 1",
             output_fields=["id"],
             check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "mismatched input"},
+            check_items={ct.err_code: 1100, ct.err_msg: "requires an Array<scalar> struct sub-field"},
         )
 
     # ---- 9.14 Per-segment consistency: same predicate on sealed-only / growing-only ----

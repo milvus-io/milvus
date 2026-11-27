@@ -20,6 +20,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -68,26 +70,42 @@ func (job *SyncNewCreatedPartitionJob) Execute() error {
 	if collection == nil || collection.GetLoadType() == querypb.LoadType_LoadPartition {
 		return nil
 	}
-	// check if partition already existed
-	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition != nil {
+	// The partition may already exist: the CreatePartition ack callback adds it
+	// before the proxy request arrives.
+	if partition := job.meta.GetPartition(job.ctx, job.req.GetPartitionID()); partition == nil {
+		partition := &meta.Partition{
+			PartitionLoadInfo: &querypb.PartitionLoadInfo{
+				CollectionID: req.GetCollectionID(),
+				PartitionID:  req.GetPartitionID(),
+				Status:       querypb.LoadStatus_Loaded,
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		}
+		err := job.meta.PutPartition(job.ctx, partition)
+		if err != nil {
+			msg := "failed to store partitions"
+			mlog.Warn(job.ctx, msg, mlog.Err(err))
+			return merr.Wrapf(err, "%s", msg)
+		}
+	}
+
+	if req.GetSkipWaitReady() {
+		if _, err := job.targetObserver.UpdatePartition(job.ctx, req.GetCollectionID(), req.GetPartitionID()); err != nil {
+			// A DropCollection already reached the channel level on this
+			// cluster, so the target can never include the partition. The
+			// release of the collection removes the partition from the load meta.
+			if errors.Is(err, merr.ErrChannelDroppedSentinel) {
+				mlog.Warn(job.ctx, "skip target update of new partition: collection channel is dropped sentinel",
+					mlog.FieldCollectionID(req.GetCollectionID()),
+					mlog.FieldPartitionID(req.GetPartitionID()),
+					mlog.Err(err))
+				return nil
+			}
+			return merr.Wrapf(err, "failed to update next target, collection=%d", req.GetCollectionID())
+		}
+		job.targetObserver.TriggerUpdateCurrentTarget(req.GetCollectionID())
 		return nil
 	}
-
-	partition := &meta.Partition{
-		PartitionLoadInfo: &querypb.PartitionLoadInfo{
-			CollectionID: req.GetCollectionID(),
-			PartitionID:  req.GetPartitionID(),
-			Status:       querypb.LoadStatus_Loaded,
-		},
-		LoadPercentage: 100,
-		CreatedAt:      time.Now(),
-	}
-	err := job.meta.PutPartition(job.ctx, partition)
-	if err != nil {
-		msg := "failed to store partitions"
-		mlog.Warn(job.ctx, msg, mlog.Err(err))
-		return merr.Wrapf(err, "%s", msg)
-	}
-
 	return WaitUpdatePartition(job.ctx, job.targetObserver, job.req.GetCollectionID(), job.req.GetPartitionID())
 }

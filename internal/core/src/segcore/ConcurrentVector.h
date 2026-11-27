@@ -20,6 +20,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
@@ -82,7 +83,8 @@ class ThreadSafeValidData {
         if (field_meta.is_nullable()) {
             check_source_span(num_rows, data, field_meta);
             reserve_to(length_ + num_rows);
-            write_from(length_, num_rows, data->valid_data().data());
+            write_from(
+                length_, num_rows, GetFieldDataRowValidData(*data).data());
             length_ += num_rows;
         }
     }
@@ -115,7 +117,9 @@ class ThreadSafeValidData {
                        element_offset,
                        length_);
             reserve_to(end);
-            write_from(element_offset, num_rows, data->valid_data().data());
+            write_from(element_offset,
+                       num_rows,
+                       GetFieldDataRowValidData(*data).data());
             length_ = std::max(length_, end);
         }
     }
@@ -208,8 +212,9 @@ class ThreadSafeValidData {
                       const DataArray* data,
                       const FieldMeta& field_meta) {
         // Resolve validity the same way write_from's caller does
-        // (FieldData.valid_data on 3.0).
-        const auto valid_size = static_cast<size_t>(data->valid_data_size());
+        // through GetFieldDataRowValidData.
+        const auto valid_size =
+            static_cast<size_t>(GetFieldDataRowValidData(*data).size());
         AssertInfo(valid_size == num_rows,
                    "nullable field {} valid_data size {} must match "
                    "num_rows {}",
@@ -581,9 +586,15 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_ptr_->get_element_offset(chunk_index);
     }
 
+    // The row accessors below return Type objects, which the batch-stored
+    // types (IsBatchStoredType) do not have: their chunks hold views. Read
+    // those through view_element() or view_physical_element().
+
     // just for fun, don't use it directly
     const Type*
-    get_element(ssize_t element_index) const {
+    get_element(ssize_t element_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         auto physical_index = offset_mapping_.GetPhysicalOffset(element_index);
         if (physical_index == -1) {
             return nullptr;
@@ -596,7 +607,9 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     const Type*
-    get_physical_element(ssize_t physical_index) const {
+    get_physical_element(ssize_t physical_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         if (physical_index == -1) {
             return nullptr;
         }
@@ -611,7 +624,9 @@ class ConcurrentVectorImpl : public VectorBase {
     // concurrent try_remove_chunks cannot free the buffer mid-read.
     const Type*
     get_physical_element(const ChunkSnapshot& snap,
-                         ssize_t physical_index) const {
+                         ssize_t physical_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         if (physical_index == -1) {
             return nullptr;
         }
@@ -623,7 +638,9 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     const Type&
-    operator[](ssize_t element_index) const {
+    operator[](ssize_t element_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         AssertInfo(
             elements_per_row_ == 1,
             fmt::format(
@@ -877,6 +894,46 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
 };
 
 template <>
+class ConcurrentVector<ArrayValue>
+    : public ConcurrentVectorImpl<ArrayValue, true> {
+    using Base = ConcurrentVectorImpl<ArrayValue, true>;
+
+ public:
+    explicit ConcurrentVector(
+        int64_t size_per_chunk,
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
+        : Base(1,
+               size_per_chunk,
+               std::move(mmap_descriptor),
+               std::move(valid_data_ptr)) {
+    }
+
+    using Base::set_data_raw;
+
+    void
+    set_data_raw(ssize_t element_offset,
+                 ssize_t element_count,
+                 const DataArray* data,
+                 const FieldMeta& field_meta) override;
+
+    ArrayValueView
+    view_element(ssize_t element_index) const {
+        auto chunk_id = element_index / size_per_chunk_;
+        auto chunk_offset = element_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
+    }
+
+ private:
+    void
+    set_proto_rows(ssize_t element_offset,
+                   std::span<const ScalarFieldProto* const> rows);
+
+    std::once_flag array_type_once_;
+    std::shared_ptr<const proto::schema::TypeSchema> array_type_;
+};
+
+template <>
 class ConcurrentVector<VectorArray>
     : public ConcurrentVectorImpl<VectorArray, true> {
  public:
@@ -892,6 +949,13 @@ class ConcurrentVector<VectorArray>
               std::move(mmap_descriptor),
               valid_data_ptr,
               use_mapping_storage) {
+    }
+
+    VectorArrayView
+    view_physical_element(ssize_t physical_index) const {
+        auto chunk_id = physical_index / size_per_chunk_;
+        auto chunk_offset = physical_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
 };
 

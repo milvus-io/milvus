@@ -18,17 +18,60 @@ package initcore
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	t.Cleanup(func() {
+		params.Reset(cfg.InterimIndexSparseIPAlgo.Key)
+		params.Reset(cfg.InterimIndexSparseBM25Algo.Key)
+		params.Reset(cfg.InterimIndexTargetIndexVersion.Key)
+		require.NoError(t, InitInterminIndexConfig(params))
+	})
+	for _, tc := range []struct {
+		name, ip, bm25, version string
+		wantErr                 bool
+	}{
+		{name: "inherit", version: "8"},
+		{name: "independent", ip: "sindi", bm25: "daat_wand", version: "10"},
+		{name: "bm25_sindi", ip: "TAAT_NAIVE", bm25: "SINDI", version: "10"},
+		{name: "invalid_ip", ip: "INVALID", version: "10", wantErr: true},
+		{name: "invalid_bm25", bm25: "INVALID", version: "10", wantErr: true},
+		{name: "ip_old_version", ip: "SINDI", version: "9", wantErr: true},
+		{name: "bm25_old_version", bm25: "SINDI", version: "9", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, tc.ip))
+			require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, tc.bm25))
+			require.NoError(t, params.Save(cfg.InterimIndexTargetIndexVersion.Key, tc.version))
+			err := InitInterminIndexConfig(params)
+			if tc.wantErr {
+				require.Error(t, err)
+				// 3.0 maps ConfigInvalid to the generic segcore sentinel.
+				assert.ErrorIs(t, err, merr.ErrSegcore)
+				assert.False(t, merr.IsRetryableErr(err))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
 
 func TestTracer(t *testing.T) {
 	paramtable.Init()
@@ -55,6 +98,15 @@ func TestOtlpHang(t *testing.T) {
 func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
+	previousFanout := pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, pt.Save(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key, previousFanout))
+	})
+	var fanoutCoefficient float64
+	patch := mockey.Mock(UpdateSearchFanoutThreadCoreCoefficient).To(func(value float64) {
+		fanoutCoefficient = value
+	}).Build()
+	defer patch.UnPatch()
 
 	assert.NotPanics(t, func() { SetupCoreConfigChangelCallback() })
 
@@ -68,8 +120,52 @@ func TestSetupCoreConfigChangeCallback(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "2"))
 	assert.Equal(t, "2", pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetValue())
 
+	assert.NoError(t, pt.Save(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key, "3.5"))
+	assert.Equal(t, 3.5, fanoutCoefficient)
+
 	assert.NoError(t, pt.Save(pt.CommonCfg.ThreadPoolMaxThreadsSize.Key, "32"))
 	assert.Equal(t, "32", pt.CommonCfg.ThreadPoolMaxThreadsSize.GetValue())
+	assert.Equal(t, 3.5, fanoutCoefficient)
+
+	// Management updates publish the value before sending a separator-free key.
+	manager := paramtable.GetBaseTable().Manager()
+	fanoutKey := config.FormatKey(pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.Key)
+	for _, change := range []struct {
+		eventType, value string
+		want             float64
+	}{
+		{config.CreateType, "4.5", 4.5},
+		{config.UpdateType, "NaN", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "+Inf", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "1e100", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "2147483647", float64(paramtable.DefaultSearchFanoutPoolSizeRatio)},
+		{config.UpdateType, "0.1", 0.1},
+	} {
+		manager.SetConfig(fanoutKey, change.value)
+		manager.EvictCachedValue(fanoutKey)
+		manager.OnEvent(&config.Event{
+			EventSource: "EtcdSource",
+			EventType:   change.eventType,
+			Key:         fanoutKey,
+			Value:       change.value,
+			HasUpdated:  true,
+		})
+		assert.Equal(t, change.want, pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat())
+		assert.Equal(t, change.want, fanoutCoefficient)
+	}
+	manager.ResetConfig(fanoutKey)
+	manager.EvictCachedValue(fanoutKey)
+	fallbackRatio := pt.QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat()
+	require.NotEqual(t, 0.1, fallbackRatio)
+	// A delete event carries the removed value, not the current fallback.
+	manager.OnEvent(&config.Event{
+		EventSource: "EtcdSource",
+		EventType:   config.DeleteType,
+		Key:         fanoutKey,
+		Value:       "0.1",
+		HasUpdated:  true,
+	})
+	assert.Equal(t, fallbackRatio, fanoutCoefficient)
 }
 
 func TestLazyColumnGroupHotUpdate(t *testing.T) {
@@ -118,6 +214,29 @@ func TestRegisterArrowIOThreadPoolWatchers(t *testing.T) {
 		"helper must have registered a handler on ArrowIOThreadPoolCoefficient")
 	assert.Positive(t, maxFires.Load(),
 		"helper must have registered a handler on ArrowIOThreadPoolMaxCapacity")
+}
+
+func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	coefKey := pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+	maxKey := pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key
+	defer pt.Reset(coefKey)
+	defer pt.Reset(maxKey)
+
+	// The default is one IO thread per core.
+	require.NoError(t, pt.Reset(coefKey))
+	require.NoError(t, pt.Reset(maxKey))
+	assert.Equal(t, max(1, hardware.GetCPUNum()), ResolveArrowIOThreadPoolCapacity())
+
+	// 0 keeps arrow's built-in pool and ignores the cap.
+	require.NoError(t, pt.Save(coefKey, "0"))
+	require.NoError(t, pt.Save(maxKey, "3"))
+	assert.Equal(t, 0, ResolveArrowIOThreadPoolCapacity())
+
+	// A positive coefficient is clamped by the cap.
+	require.NoError(t, pt.Save(coefKey, "2"))
+	assert.Equal(t, min(3, max(1, 2*hardware.GetCPUNum())), ResolveArrowIOThreadPoolCapacity())
 }
 
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers
@@ -189,20 +308,45 @@ func TestInitExternalVectorNullPolicy(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 }
 
+func TestInitExternalSparseConversionConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	key := pt.CommonCfg.ExternalSparseConversionMemoryLimit.Key
+	original := pt.CommonCfg.ExternalSparseConversionMemoryLimit.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, pt.Save(key, original))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+	})
+	for _, value := range []string{"1", " 268435456 ", "9223372036854775807"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+		expected, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, externalSparseConversionMemoryLimit())
+	}
+	previous := externalSparseConversionMemoryLimit()
+	for _, value := range []string{"0", "-1", "", "invalid", "9223372036854775808"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.ErrorIs(t, InitExternalSparseConversionConfig(pt), merr.ErrParameterInvalid)
+		assert.Equal(t, previous, externalSparseConversionMemoryLimit())
+	}
+}
+
 func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 
-	// The default (0) is accepted and leaves the pool uninitialized, which
-	// milvus-storage reports as parallelism 1.
+	// The default (-1, which resolves to 0 outside a DataNode) is accepted
+	// and leaves the pool uninitialized, which milvus-storage reports as
+	// parallelism 1.
 	assert.NoError(t, InitLoonReaderConfig(pt))
 	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 
 	// 4294967296 is the case the bound exists for: it truncates to 0 when
 	// narrowed to int32, which the C side accepts as "disabled" and reports
 	// as success, silently dropping the operator's configuration.
-	for _, v := range []string{"-1", "1025", "4294967296", "9223372036854775807"} {
+	for _, v := range []string{"-2", "1025", "4294967296", "9223372036854775807"} {
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, v))
 		err := InitLoonReaderConfig(pt)
 		assert.Error(t, err, "pool size %s must be rejected", v)
@@ -236,7 +380,7 @@ func TestInitLoonReaderConfigRejectsOutOfRangeWindow(t *testing.T) {
 	assert.NoError(t, InitLoonReaderConfig(pt))
 
 	before := EffectiveLoonReaderThreadPoolSize()
-	for _, invalid := range []string{"-1", "8589934592"} {
+	for _, invalid := range []string{"-2", "8589934592"} {
 		// Pair the bad window with a pool size that would otherwise be
 		// applied; the point is that it must not reach the C side.
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "8"))
@@ -319,7 +463,9 @@ func TestInitLoonReaderConfigConcurrent(t *testing.T) {
 // under both loon reader keys and that the handler survives a rejected update.
 func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	paramtable.Init()
-	pt := paramtable.Get()
+	// The registered watchers outlive the test; on the global table a later
+	// test's pool write would fire them and create the non-destroyable pool.
+	pt := newIsolatedParams()
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 
@@ -340,7 +486,10 @@ func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "1048576"))
 	assert.Positive(t, windowFires.Load(),
 		"helper must have registered a handler on IndexBuildReadWindowBytes")
-	assert.EqualValues(t, 0, pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64())
+	// The default pool size (-1) resolves to 0 outside a DataNode.
+	requested, err := ResolveLoonReaderThreadPoolSize(pt)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, requested)
 	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 
 	// An out-of-range pool size drives the handler's error branch: it must log
@@ -366,6 +515,36 @@ func TestUpdateLoadTransientBudgetBytes(t *testing.T) {
 		UpdateLoadTransientBudgetBytes(0)
 		UpdateLoadTransientBudgetBytes(128 * 1024 * 1024)
 	})
+}
+
+func TestInitStorageV2FileSystemUsesProvidedLocalConfig(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value string
+	}{
+		{key: "common.storage.talon.mode", value: "3"},
+		{key: "common.storage.talon.enabledStages", value: "unknown"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			assert.NoError(t, params.Save(params.CommonCfg.StorageType.Key, "local"))
+			assert.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "1"))
+			assert.NoError(t, params.Save(tc.key, tc.value))
+			// Invalid values supplied by the caller must be rejected, even when the
+			// global configuration has a valid default. This fails before entering C++.
+			want := "invalid " + tc.key + ": " + strconv.Quote(tc.value)
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitStorageV2FileSystem(params)
+			})
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitRemoteArrowFileSystem(params)
+			})
+			assert.PanicsWithValue(t, want, func() {
+				_ = InitRemoteChunkManager(params)
+			})
+		})
+	}
 }
 
 func TestInitStorageV2FileSystem(t *testing.T) {

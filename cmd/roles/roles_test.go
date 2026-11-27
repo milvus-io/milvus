@@ -85,11 +85,18 @@ func TestFilesystemMetricsRegisteredWithRolesRegistry(t *testing.T) {
 			continue
 		}
 		for _, metric := range family.GetMetric() {
+			var matchesFilesystem, matchesSource bool
 			for _, label := range metric.GetLabel() {
-				if label.GetName() == "fs" && strings.HasPrefix(label.GetValue(), expectedDisplayKeyPrefix) {
-					delete(missingFamilies, family.GetName())
-					break
+				switch label.GetName() {
+				case "fs":
+					matchesFilesystem = strings.HasPrefix(label.GetValue(), expectedDisplayKeyPrefix)
+				case "source":
+					matchesSource = label.GetValue() == "origin"
 				}
+			}
+			if matchesFilesystem && matchesSource {
+				delete(missingFamilies, family.GetName())
+				break
 			}
 		}
 	}

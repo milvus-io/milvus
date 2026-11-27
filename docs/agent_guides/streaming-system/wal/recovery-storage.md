@@ -4,7 +4,7 @@ Persists WAL consumer state to the catalog (etcd) and object storage. **Core inv
 
 ## Persisted State
 
-- **WALCheckpoint** (etcd): `MessageID` (= LastConfirmedMessageID of last consumed message), `TimeTick`, `ReplicateCheckpoint` (for secondary clusters), `AlterWalState` (for WAL backend migration).
+- **WALCheckpoint** (etcd): `MessageID` (= LastConfirmedMessageID of last consumed message), `TimeTick`, `ReplicateConfig`, `ReplicateCheckpoint` (for secondary clusters), `AlterWalState` (for WAL backend migration).
 - **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
 - **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
 - **Segment data** (object storage): Sealed segment binlog, indexes, and stats files.
@@ -18,3 +18,9 @@ Persists WAL consumer state to the catalog (etcd) and object storage. **Core inv
 
 - `internal/streamingnode/server/wal/recovery/` — `RecoveryStorage`, `RecoverySnapshot`, `WALCheckpoint`, background persist task
 - `internal/streamingnode/server/flusher/flusherimpl/` — `WALFlusherImpl`, segment data flush to object storage
+
+Recovery and ordinary consumption share TxnBuffer exclusive-operation boundaries.
+A durable ManualFlush aborts its business VChannel prefix; FlushAll and non-ignored
+topology changes abort all prefixes. Ignored topology changes do not abort.
+Replication recovery reads `Checkpoint.ReplicateConfig/ReplicateCheckpoint` and
+the remaining builders; it cannot restore a prefix across a durable abort boundary.

@@ -100,16 +100,6 @@ type RootCoordCatalog interface {
 	SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
 
-	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
-	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
-	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
-	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
-	// GetRLSPrincipal and ListRLSPrincipals return caller-owned results,
-	// including nested tag maps.
-	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
-	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
-	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
-
 	// File resource related
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error
 	RemoveFileResource(ctx context.Context, resourceID int64, version uint64) error
@@ -201,12 +191,17 @@ type DataCoordCatalog interface {
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
-	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
+	// The channel removal flag tells dropped-segment GC whether a channel is
+	// still live. MarkChannelAdded writes it when the channel is created, and
+	// DropChannel deletes it when the channel is dropped. A missing flag reads as
+	// a dropped channel.
 	MarkChannelAdded(ctx context.Context, channel string) error
-	MarkChannelDeleted(ctx context.Context, channel string) error
-	ShouldDropChannel(ctx context.Context, channel string) bool
-	ChannelExists(ctx context.Context, channel string) bool
+	// ChannelExists returns lookup errors separately from an absent channel.
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	DropChannel(ctx context.Context, channel string) error
+	// RemoveDroppedChannelFlags deletes the flags older versions left behind as
+	// "removed" for dropped channels and returns how many were deleted.
+	RemoveDroppedChannelFlags(ctx context.Context) (int, error)
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
 	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error
@@ -229,6 +224,17 @@ type DataCoordCatalog interface {
 	SavePreImportTask(ctx context.Context, task *datapb.PreImportTask) error
 	ListPreImportTasks(ctx context.Context) ([]*datapb.PreImportTask, error)
 	DropPreImportTask(ctx context.Context, taskID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+	SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error
+	ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error)
+	DropPreImportTaskV3(ctx context.Context, taskID int64) error
 	SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error
 	ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2, error)
 	DropImportTask(ctx context.Context, taskID int64) error

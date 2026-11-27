@@ -219,6 +219,14 @@ func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitFieldName(ctx *FieldNameContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitFieldReference(ctx *FieldReferenceContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
 	return v.VisitChildren(ctx)
 }

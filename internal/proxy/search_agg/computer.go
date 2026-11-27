@@ -20,6 +20,9 @@ type SearchAggregationComputer struct {
 	ctx  *SearchAggregationContext
 	data *schemapb.SearchResultData
 
+	// Scores have been restored to raw metric values by proxy reduce.
+	defaultScoreDirection string
+
 	// fieldsByID maps FieldID → FieldData, unioning fields_data (metric
 	// sources, top_hits sort, user output) with group_by_field_values
 	// (composite group-by key columns). Field IDs never overlap between the
@@ -30,9 +33,12 @@ type SearchAggregationComputer struct {
 // NewSearchAggregationComputer wraps an already-reduced SearchResultData.
 // Upstream searchReduceOperator owns cross-shard merge + group-size /
 // topK enforcement; this computer only does per-NQ hierarchical aggregation.
+// largerIsBetter describes the reduced scores, which may have been rewritten
+// by a FunctionChain and no longer follow the original metric direction.
 func NewSearchAggregationComputer(
 	data *schemapb.SearchResultData,
 	ctx *SearchAggregationContext,
+	largerIsBetter bool,
 ) *SearchAggregationComputer {
 	m := make(map[int64]*schemapb.FieldData, len(data.GetFieldsData())+len(data.GetGroupByFieldValues()))
 	for _, fd := range data.GetFieldsData() {
@@ -45,10 +51,15 @@ func NewSearchAggregationComputer(
 			m[fd.GetFieldId()] = fd
 		}
 	}
+	direction := "asc"
+	if largerIsBetter {
+		direction = "desc"
+	}
 	return &SearchAggregationComputer{
-		ctx:        ctx,
-		data:       data,
-		fieldsByID: m,
+		ctx:                   ctx,
+		data:                  data,
+		fieldsByID:            m,
+		defaultScoreDirection: direction,
 	}
 }
 
@@ -242,7 +253,11 @@ func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, so
 			continue
 		}
 
-		if criterion.Dir == "desc" {
+		direction := criterion.Dir
+		if criterion.FieldID == ScoreFieldID && direction == "" {
+			direction = c.defaultScoreDirection
+		}
+		if direction == "desc" {
 			cmp = -cmp
 		}
 		return cmp, nil
@@ -250,11 +265,11 @@ func (c *SearchAggregationComputer) compareRowsForTopHits(a, b reduce.RowRef, so
 
 	scoreA := c.data.GetScores()[a.RowIdx]
 	scoreB := c.data.GetScores()[b.RowIdx]
-	if scoreA > scoreB {
-		return -1, nil
-	}
-	if scoreA < scoreB {
-		return 1, nil
+	if cmp := compareFloat64(float64(scoreA), float64(scoreB)); cmp != 0 {
+		if c.defaultScoreDirection == "desc" {
+			cmp = -cmp
+		}
+		return cmp, nil
 	}
 
 	pkA := typeutil.GetPK(c.data.GetIds(), a.RowIdx)

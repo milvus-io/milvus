@@ -314,13 +314,6 @@ func (s *sealedBm25Stats) FetchStats() (map[int64]*storage.BM25Stats, error) {
 	return stats, nil
 }
 
-type growingBm25Stats struct {
-	bm25Stats
-
-	activate       bool
-	droppedVersion int64
-}
-
 func newBm25Stats(functions []*schemapb.FunctionSchema) bm25Stats {
 	stats := make(map[int64]*storage.BM25Stats)
 
@@ -384,7 +377,10 @@ func (t *idfTarget) GetSnapshot() (*snapshot, time.Time) {
 type idfOracle struct {
 	sync.RWMutex // protect current and growing segment stats
 	current      bm25Stats
-	growing      map[int64]*growingBm25Stats
+	growing      map[int64]bm25Stats
+
+	// Record removal intent without waiting for the oracle lock held by stats merges.
+	growingDropVersions typeutil.ConcurrentMap[int64, int64]
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
@@ -465,10 +461,7 @@ func (o *idfOracle) RegisterGrowing(segmentID int64, stats bm25Stats) {
 		o.Unlock()
 		return
 	}
-	o.growing[segmentID] = &growingBm25Stats{
-		bm25Stats: clonedStats,
-		activate:  true,
-	}
+	o.growing[segmentID] = clonedStats
 	o.current.Merge(clonedStats)
 	o.Unlock()
 	o.syncResource()
@@ -820,22 +813,33 @@ func (o *idfOracle) UpdateGrowing(segmentID int64, stats bm25Stats) {
 	}
 
 	old.Merge(stats)
-	if old.activate {
-		o.current.Merge(stats)
-		o.checkMemoryResource()
-	}
+	o.current.Merge(stats)
+	o.checkMemoryResource()
 	o.Unlock()
 }
 
 func (o *idfOracle) LazyRemoveGrowings(targetVersion int64, segmentIDs ...int64) {
-	o.Lock()
-	defer o.Unlock()
+	if targetVersion <= o.targetVersion.Load() {
+		return
+	}
 
 	for _, segmentID := range segmentIDs {
-		if stats, ok := o.growing[segmentID]; ok && stats.droppedVersion == 0 {
-			stats.droppedVersion = targetVersion
-		}
+		o.growingDropVersions.GetOrInsert(segmentID, targetVersion)
 	}
+}
+
+// Caller holds the oracle write lock so pending removals use the latest growing stats.
+func (o *idfOracle) removeDroppedGrowings(targetVersion int64) {
+	o.growingDropVersions.Range(func(segmentID, droppedVersion int64) bool {
+		if droppedVersion <= targetVersion {
+			if stats, ok := o.growing[segmentID]; ok {
+				o.current.Minus(stats)
+				delete(o.growing, segmentID)
+			}
+			o.growingDropVersions.Remove(segmentID)
+		}
+		return true
+	})
 }
 
 // memSize estimates total in-memory size of current + all growing stats.
@@ -846,7 +850,7 @@ func (o *idfOracle) memSize() int64 {
 		size += stats.MemSize()
 	}
 	for _, g := range o.growing {
-		for _, stats := range g.bm25Stats {
+		for _, stats := range g {
 			size += stats.MemSize()
 		}
 	}
@@ -1061,15 +1065,7 @@ func (o *idfOracle) SyncDistribution() error {
 
 	o.Lock()
 
-	for segmentID, stats := range o.growing {
-		// drop growing segment bm25 stats
-		if stats.droppedVersion != 0 && stats.droppedVersion <= snapshot.targetVersion {
-			if stats.activate {
-				o.current.Minus(stats.bm25Stats)
-			}
-			delete(o.growing, segmentID)
-		}
-	}
+	o.removeDroppedGrowings(snapshot.targetVersion)
 
 	// remove sealed segment not in target
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
@@ -1142,7 +1138,7 @@ func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracl
 		channel:        channel,
 		targetVersion:  atomic.NewInt64(0),
 		current:        newBm25Stats(functions),
-		growing:        make(map[int64]*growingBm25Stats),
+		growing:        make(map[int64]bm25Stats),
 		sealed:         typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
 		sealedDiskSize: atomic.NewInt64(0),
 		dirPath:        path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),

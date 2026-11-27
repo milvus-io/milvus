@@ -408,7 +408,8 @@ func (kv *EmbedEtcdKV) MultiSave(ctx context.Context, kvs map[string]string) err
 
 	_, err := kv.client.Txn(ctx1).If().Then(ops...).Commit()
 	if err != nil {
-		return merr.WrapErrIoFailedReason("failed to execute transaction", err.Error())
+		// Preserve the same IO contract and driver cause as external etcd.
+		return merr.WrapErrIoFailedErr(err, "failed to execute transaction")
 	}
 	return nil
 }

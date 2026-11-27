@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type AggregateOperatorsSuite struct {
@@ -802,6 +803,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 		Type: schemapb.DataType_Int64,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true, false}, // 2nd and 4th are null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{10, 20, 30, 40},
@@ -809,7 +811,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{true, false, true, false}, // 2nd and 4th are null
 	}
 	int64Accessor.SetVals(fieldData)
 	assert.False(t, int64Accessor.IsNullAt(0), "index 0 should be valid")
@@ -845,6 +846,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 		Type: schemapb.DataType_VarChar,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, true, false}, // 1st and 3rd are null
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: []string{"a", "b", "c"},
@@ -852,7 +854,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{false, true, false}, // 1st and 3rd are null
 	}
 	stringAccessor.SetVals(stringFieldData)
 	assert.True(t, stringAccessor.IsNullAt(0), "index 0 should be null")
@@ -866,6 +867,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 		Type: schemapb.DataType_Double,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false},
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
 						Data: []float64{1.1, 2.2},
@@ -873,7 +875,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{true, false},
 	}
 	float64Accessor.SetVals(floatFieldData)
 	assert.False(t, float64Accessor.IsNullAt(0))
@@ -886,6 +887,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 		Type: schemapb.DataType_Bool,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, true, false},
 				Data: &schemapb.ScalarField_BoolData{
 					BoolData: &schemapb.BoolArray{
 						Data: []bool{true, false, true},
@@ -893,7 +895,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{true, true, false},
 	}
 	boolAccessor.SetVals(boolFieldData)
 	assert.False(t, boolAccessor.IsNullAt(0))
@@ -912,6 +913,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Hash_NullValue() {
 		Type: schemapb.DataType_Int64,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false}, // 2nd is null
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: []int64{100, 200},
@@ -919,7 +921,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Hash_NullValue() {
 				},
 			},
 		},
-		ValidData: []bool{true, false}, // 2nd is null
 	}
 	int64Accessor.SetVals(fieldData)
 
@@ -935,6 +936,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Hash_NullValue() {
 		Type: schemapb.DataType_VarChar,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, true}, // 1st is null
 				Data: &schemapb.ScalarField_StringData{
 					StringData: &schemapb.StringArray{
 						Data: []string{"hello", "world"},
@@ -942,7 +944,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Hash_NullValue() {
 				},
 			},
 		},
-		ValidData: []bool{false, true}, // 1st is null
 	}
 	stringAccessor.SetVals(stringFieldData)
 
@@ -973,8 +974,8 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull() {
 	nullFv := agg.NewNullFieldValue()
 	err := agg.AssembleSingleValue(nullFv, int64FieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(int64FieldData.ValidData))
-	assert.False(t, int64FieldData.ValidData[0], "null should have ValidData=false")
+	assert.Equal(t, 1, len(typeutil.GetFieldDataValidData(int64FieldData)))
+	assert.False(t, typeutil.GetFieldDataValidData(int64FieldData)[0], "null should have ValidData=false")
 	assert.Equal(t, 1, len(int64FieldData.GetScalars().GetLongData().GetData()))
 	assert.Equal(t, int64(0), int64FieldData.GetScalars().GetLongData().GetData()[0], "null should have default value 0")
 
@@ -982,8 +983,8 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull() {
 	nonNullFv := agg.NewFieldValue(int64(42))
 	err = agg.AssembleSingleValue(nonNullFv, int64FieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(int64FieldData.ValidData))
-	assert.True(t, int64FieldData.ValidData[1], "non-null should have ValidData=true")
+	assert.Equal(t, 2, len(typeutil.GetFieldDataValidData(int64FieldData)))
+	assert.True(t, typeutil.GetFieldDataValidData(int64FieldData)[1], "non-null should have ValidData=true")
 	assert.Equal(t, int64(42), int64FieldData.GetScalars().GetLongData().GetData()[1])
 
 	// Test null String value
@@ -1002,8 +1003,8 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull() {
 	nullStrFv := agg.NewNullFieldValue()
 	err = agg.AssembleSingleValue(nullStrFv, stringFieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(stringFieldData.ValidData))
-	assert.False(t, stringFieldData.ValidData[0])
+	assert.Equal(t, 1, len(typeutil.GetFieldDataValidData(stringFieldData)))
+	assert.False(t, typeutil.GetFieldDataValidData(stringFieldData)[0])
 	assert.Equal(t, "", stringFieldData.GetScalars().GetStringData().GetData()[0], "null string should be empty")
 
 	// Test null Double value
@@ -1022,7 +1023,7 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull() {
 	nullDoubleFv := agg.NewNullFieldValue()
 	err = agg.AssembleSingleValue(nullDoubleFv, doubleFieldData)
 	assert.NoError(t, err)
-	assert.False(t, doubleFieldData.ValidData[0])
+	assert.False(t, typeutil.GetFieldDataValidData(doubleFieldData)[0])
 	assert.Equal(t, float64(0), doubleFieldData.GetScalars().GetDoubleData().GetData()[0])
 
 	// Test null Bool value
@@ -1041,7 +1042,7 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull() {
 	nullBoolFv := agg.NewNullFieldValue()
 	err = agg.AssembleSingleValue(nullBoolFv, boolFieldData)
 	assert.NoError(t, err)
-	assert.False(t, boolFieldData.ValidData[0])
+	assert.False(t, typeutil.GetFieldDataValidData(boolFieldData)[0])
 	assert.False(t, boolFieldData.GetScalars().GetBoolData().GetData()[0], "null bool should be false")
 }
 
@@ -1092,15 +1093,15 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleRow_WithMixedNulls() {
 	assert.NoError(t, err)
 
 	// Check first column (non-null int32)
-	assert.True(t, fieldDatas[0].ValidData[0])
+	assert.True(t, typeutil.GetFieldDataValidData(fieldDatas[0])[0])
 	assert.Equal(t, int32(1), fieldDatas[0].GetScalars().GetIntData().GetData()[0])
 
 	// Check second column (null int64)
-	assert.False(t, fieldDatas[1].ValidData[0])
+	assert.False(t, typeutil.GetFieldDataValidData(fieldDatas[1])[0])
 	assert.Equal(t, int64(0), fieldDatas[1].GetScalars().GetLongData().GetData()[0])
 
 	// Check third column (non-null int64)
-	assert.True(t, fieldDatas[2].ValidData[0])
+	assert.True(t, typeutil.GetFieldDataValidData(fieldDatas[2])[0])
 	assert.Equal(t, int64(100), fieldDatas[2].GetScalars().GetLongData().GetData()[0])
 }
 
@@ -1114,6 +1115,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Float32_IsNullAt() {
 		Type: schemapb.DataType_Float,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true}, // 2nd is null
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
 						Data: []float32{1.1, 2.2, 3.3},
@@ -1121,7 +1123,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Float32_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{true, false, true}, // 2nd is null
 	}
 	float32Accessor.SetVals(fieldData)
 	assert.False(t, float32Accessor.IsNullAt(0), "index 0 should be valid")
@@ -1156,6 +1157,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Timestamptz_IsNullAt() {
 		Type: schemapb.DataType_Timestamptz,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, true, false}, // 1st and 3rd are null
 				Data: &schemapb.ScalarField_TimestamptzData{
 					TimestamptzData: &schemapb.TimestamptzArray{
 						Data: []int64{1000, 2000, 3000},
@@ -1163,7 +1165,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Timestamptz_IsNullAt() {
 				},
 			},
 		},
-		ValidData: []bool{false, true, false}, // 1st and 3rd are null
 	}
 	tzAccessor.SetVals(fieldData)
 	assert.True(t, tzAccessor.IsNullAt(0), "index 0 should be null")
@@ -1198,6 +1199,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Float32_Hash_NullValue() {
 		Type: schemapb.DataType_Float,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false}, // 2nd is null
 				Data: &schemapb.ScalarField_FloatData{
 					FloatData: &schemapb.FloatArray{
 						Data: []float32{1.5, 2.5},
@@ -1205,7 +1207,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Float32_Hash_NullValue() {
 				},
 			},
 		},
-		ValidData: []bool{true, false}, // 2nd is null
 	}
 	float32Accessor.SetVals(fieldData)
 
@@ -1226,6 +1227,7 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Timestamptz_Hash_NullValue()
 		Type: schemapb.DataType_Timestamptz,
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
+				ValidData: []bool{false, true}, // 1st is null
 				Data: &schemapb.ScalarField_TimestamptzData{
 					TimestamptzData: &schemapb.TimestamptzArray{
 						Data: []int64{1000, 2000},
@@ -1233,7 +1235,6 @@ func (s *AggregateOperatorsSuite) TestFieldAccessor_Timestamptz_Hash_NullValue()
 				},
 			},
 		},
-		ValidData: []bool{false, true}, // 1st is null
 	}
 	tzAccessor.SetVals(fieldData)
 
@@ -1264,16 +1265,16 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull_Float32() {
 	nullFv := agg.NewNullFieldValue()
 	err := agg.AssembleSingleValue(nullFv, floatFieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(floatFieldData.ValidData))
-	assert.False(t, floatFieldData.ValidData[0], "null should have ValidData=false")
+	assert.Equal(t, 1, len(typeutil.GetFieldDataValidData(floatFieldData)))
+	assert.False(t, typeutil.GetFieldDataValidData(floatFieldData)[0], "null should have ValidData=false")
 	assert.Equal(t, float32(0), floatFieldData.GetScalars().GetFloatData().GetData()[0], "null should have default value 0")
 
 	// Test non-null Float32 value
 	nonNullFv := agg.NewFieldValue(float32(3.14))
 	err = agg.AssembleSingleValue(nonNullFv, floatFieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(floatFieldData.ValidData))
-	assert.True(t, floatFieldData.ValidData[1], "non-null should have ValidData=true")
+	assert.Equal(t, 2, len(typeutil.GetFieldDataValidData(floatFieldData)))
+	assert.True(t, typeutil.GetFieldDataValidData(floatFieldData)[1], "non-null should have ValidData=true")
 	assert.Equal(t, float32(3.14), floatFieldData.GetScalars().GetFloatData().GetData()[1])
 }
 
@@ -1297,16 +1298,16 @@ func (s *AggregateOperatorsSuite) TestAssembleSingleValue_WithNull_Timestamptz()
 	nullFv := agg.NewNullFieldValue()
 	err := agg.AssembleSingleValue(nullFv, tzFieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(tzFieldData.ValidData))
-	assert.False(t, tzFieldData.ValidData[0], "null should have ValidData=false")
+	assert.Equal(t, 1, len(typeutil.GetFieldDataValidData(tzFieldData)))
+	assert.False(t, typeutil.GetFieldDataValidData(tzFieldData)[0], "null should have ValidData=false")
 	assert.Equal(t, int64(0), tzFieldData.GetScalars().GetTimestamptzData().GetData()[0], "null should have default value 0")
 
 	// Test non-null Timestamptz value
 	nonNullFv := agg.NewFieldValue(int64(1234567890))
 	err = agg.AssembleSingleValue(nonNullFv, tzFieldData)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(tzFieldData.ValidData))
-	assert.True(t, tzFieldData.ValidData[1], "non-null should have ValidData=true")
+	assert.Equal(t, 2, len(typeutil.GetFieldDataValidData(tzFieldData)))
+	assert.True(t, typeutil.GetFieldDataValidData(tzFieldData)[1], "non-null should have ValidData=true")
 	assert.Equal(t, int64(1234567890), tzFieldData.GetScalars().GetTimestamptzData().GetData()[1])
 }
 

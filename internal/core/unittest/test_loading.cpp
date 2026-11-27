@@ -505,10 +505,13 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    // Positioned sync workers retain the read slice through the destination
+    // write; reserve read + write scratch even without a concrete directory.
+    // The legacy auxiliary resident/peak allocation below remains separate.
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
-        kIndexSize,
-        milvus::storage::EntryStreamTransientBytes(
-            milvus::storage::MaxEntryStreamTaskBytes(), false));
+        2 * kIndexSize,
+        2 * milvus::storage::EntryStreamTransientBytes(
+                milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);
@@ -550,10 +553,13 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    // Positioned sync workers retain the read slice through the destination
+    // write; reserve read + write scratch even without a concrete directory.
+    // The legacy auxiliary resident/peak allocation below remains separate.
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
-        kIndexSize,
-        milvus::storage::EntryStreamTransientBytes(
-            milvus::storage::MaxEntryStreamTaskBytes(), false));
+        2 * kIndexSize,
+        2 * milvus::storage::EntryStreamTransientBytes(
+                milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kIndexSize + kLegacyAuxBytes);
     ASSERT_EQ(request.final_disk_cost, 0);
@@ -596,10 +602,13 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
     loadIndexInfo.num_rows = kNumRows;
 
     auto request = EstimateLoadIndexResource(&loadIndexInfo);
+    // Positioned sync workers retain the read slice through the destination
+    // write; reserve read + write scratch even without a concrete directory.
+    // The legacy auxiliary resident/peak allocation below remains separate.
     auto stream_memory_overhead = milvus::storage::EntryStreamMaxTransientBytes(
-        kIndexSize,
-        milvus::storage::EntryStreamTransientBytes(
-            milvus::storage::MaxEntryStreamTaskBytes(), false));
+        2 * kIndexSize,
+        2 * milvus::storage::EntryStreamTransientBytes(
+                milvus::storage::MaxEntryStreamTaskBytes(), false));
 
     ASSERT_EQ(request.final_memory_cost, kLegacyCsrResidentBytes);
     ASSERT_EQ(request.final_disk_cost, kIndexSize);

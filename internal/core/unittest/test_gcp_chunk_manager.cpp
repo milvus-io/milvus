@@ -16,14 +16,18 @@
 
 #include <gtest/gtest.h>
 
-#include <aws/core/http/HttpClientFactory.h>
-#include <aws/core/http/standard/StandardHttpRequest.h>
+#include <aws/core/http/standard/StandardHttpResponse.h>
+#include <aws/s3/model/HeadObjectRequest.h>
+
 #include <cstdio>
 #include <cstdlib>
-#include <sstream>
+#include <memory>
+#include <string>
+#include <utility>
 
-#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
 #include "milvus-storage/filesystem/gcp/gcp_filesystem_producer.h"
+#include "milvus-storage/filesystem/s3/s3_options.h"
 #include "storage/minio/MinioChunkManager.h"
 
 namespace milvus::storage {
@@ -46,152 +50,202 @@ ExitWithTestResult() {
     std::_Exit(result->Failed() ? 1 : 0);
 }
 
+class RecordingHttpClient final : public Aws::Http::HttpClient {
+ public:
+    std::shared_ptr<Aws::Http::HttpResponse>
+    MakeRequest(const std::shared_ptr<Aws::Http::HttpRequest>& request,
+                Aws::Utils::RateLimits::RateLimiterInterface*,
+                Aws::Utils::RateLimits::RateLimiterInterface*) const override {
+        authorization = request->HasHeader("Authorization")
+                            ? request->GetAuthorization()
+                            : Aws::String{};
+        ++requests;
+        auto response =
+            std::make_shared<Aws::Http::Standard::StandardHttpResponse>(
+                request);
+        response->SetResponseCode(Aws::Http::HttpResponseCode::OK);
+        return response;
+    }
+
+    mutable Aws::String authorization;
+    mutable int requests = 0;
+};
+
+class RecordingHttpFactory final : public TlsHttpClientFactory {
+ public:
+    explicit RecordingHttpFactory(std::shared_ptr<RecordingHttpClient> client)
+        : TlsHttpClientFactory(""), client_(std::move(client)) {
+    }
+
+    std::shared_ptr<Aws::Http::HttpClient>
+    CreateHttpClient(const Aws::Client::ClientConfiguration&) const override {
+        return client_;
+    }
+
+ private:
+    const std::shared_ptr<RecordingHttpClient> client_;
+};
+
+class TestChunkManager : public MinioChunkManager {
+ public:
+    using MinioChunkManager::client_;
+};
+
+class TestBearer : public milvus_storage::GcpCredentialProvider {
+ public:
+    explicit TestBearer(const milvus_storage::ArrowFileSystemConfig& config)
+        : GcpCredentialProvider(config) {
+    }
+
+ private:
+    arrow::Result<bool>
+    AuthorizeRequest(
+        const std::shared_ptr<Aws::Http::HttpRequest>& request) override {
+        request->SetAuthorization("Bearer external-table");
+        return true;
+    }
+};
+
 static void
-CheckGcpRegistration(const bool legacy_first, const bool use_iam) {
-    // Disable metadata discovery while checking bucket registration only.
+CheckGcpClients(bool legacy_first, bool use_iam) {
     setenv("AWS_EC2_METADATA_DISABLED", "true", 1);
     setenv("AWS_CONFIG_FILE", "/dev/null", 1);
     setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
+    // Fail primary ADC locally so the test needs no cloud credential.
+    setenv("GOOGLE_APPLICATION_CREDENTIALS", "/dev/null", 1);
+    setenv("GCE_METADATA_ROOT", "127.0.0.1:1", 1);
 
-    MinioChunkManager manager;
+    const auto http = std::make_shared<RecordingHttpClient>();
+    Aws::SDKOptions sdk;
+    sdk.httpOptions.httpClientFactory_create_fn = [http] {
+        return std::make_shared<RecordingHttpFactory>(http);
+    };
+    Aws::InitAPI(sdk);
+
+    StorageConfig primary;
+    primary.cloud_provider = "gcp";
+    primary.address =
+        legacy_first ? "primary.example:8443" : "storage.googleapis.com";
+    primary.bucket_name = "shared-bucket";
+    primary.region = "us-east-1";
+    primary.useSSL = true;
+    primary.useIAM = use_iam;
+    primary.access_key_id = "primary-key";
+    primary.access_key_value = "primary-secret";
+    Aws::Client::ClientConfiguration config;
+    config.endpointOverride = primary.address.c_str();
+    config.region = primary.region.c_str();
+
+    TestChunkManager manager;
+    auto open_primary = [&] {
+        manager.InitSDKAPIDefault("off");
+        manager.BuildGoogleCloudClient(primary, config);
+    };
     if (legacy_first) {
-        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, use_iam, "off");
+        open_primary();
     }
 
-    milvus_storage::ArrowFileSystemConfig fs_config;
-    fs_config.address = "storage.googleapis.com:443";
-    fs_config.bucket_name = "registered-storage-bucket";
-    fs_config.cloud_provider = "gcp";
-    fs_config.region = "europe-west3";
-    fs_config.use_ssl = true;
-    fs_config.use_iam = use_iam;
-    fs_config.access_key_id = "storage-access-key";
-    fs_config.access_key_value = "storage-secret-key";
-    auto fs = milvus_storage::GcpFileSystemProducer(fs_config).Make();
+    milvus_storage::ArrowFileSystemConfig external;
+    external.storage_type = "remote";
+    external.cloud_provider = "gcp";
+    external.alias = "external";
+    external.address = primary.address;
+    external.bucket_name = primary.bucket_name;
+    external.region = primary.region;
+    external.use_ssl = true;
+    external.access_key_id = "storage-key";
+    external.access_key_value = "storage-secret";
+    auto fs = milvus_storage::GcpFileSystemProducer(external).Make();
     ASSERT_TRUE(fs.ok()) << fs.status();
 
+    const auto bearer = std::make_shared<TestBearer>(external);
+    Aws::S3::S3Client external_client(
+        bearer,
+        config,
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+        false);
+    milvus_storage::S3Options options;
+    options.cloud_provider = "gcp";
+    options.credentials_provider = bearer;
+    ASSERT_TRUE(milvus_storage::GcpCredentialProvider::ConfigS3HttpClient(
+        options, external_client));
     if (!legacy_first) {
-        manager.InitSDKAPI(RemoteStorageType::GOOGLE_CLOUD, use_iam, "off");
+        open_primary();
     }
 
-    StorageConfig storage_config;
-    storage_config.address = fs_config.address;
-    storage_config.bucket_name = "legacy-only-bucket";
-    storage_config.cloud_provider = "gcp";
-    storage_config.useSSL = true;
-    storage_config.useIAM = use_iam;
-    storage_config.access_key_id = "legacy-access-key";
-    storage_config.access_key_value = "legacy-secret-key";
-    Aws::Client::ClientConfiguration client_config;
-    client_config.region = "europe-west3";
-    client_config.endpointOverride = "storage.googleapis.com:443";
-
-    auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
-    const Aws::Http::URI uri(
-        "https://storage.googleapis.com/legacy-only-bucket?prefix=check");
-    ASSERT_EQ(registry.Lookup(uri), nullptr);
-    if (!legacy_first) {
-        // Prove storage's factory won InitAPI: an unregistered URI is rejected
-        // locally even with an AWS signature. Use loopback so a factory
-        // regression cannot send this probe to GCP.
-        client_config.connectTimeoutMs = 100;
-        client_config.requestTimeoutMs = 100;
-        const auto http_client = Aws::Http::CreateHttpClient(client_config);
-        const auto request = Aws::Http::CreateHttpRequest(
-            Aws::Http::URI("http://127.0.0.1:1/unregistered-bucket"),
-            Aws::Http::HttpMethod::HTTP_GET,
-            Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
-        request->SetHeaderValue("Authorization", "AWS4-HMAC-SHA256 test");
-        const auto response = http_client->MakeRequest(request);
-        ASSERT_EQ(response->GetResponseCode(),
-                  Aws::Http::HttpResponseCode::FORBIDDEN);
-        std::ostringstream body;
-        body << response->GetResponseBody().rdbuf();
-        ASSERT_NE(body.str().find("No GcpCredentialProvider registered"),
-                  std::string::npos);
+    Aws::S3::Model::HeadObjectRequest request;
+    request.SetBucket(primary.bucket_name.c_str());
+    request.SetKey("object");
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_TRUE(external_client.HeadObject(request).IsSuccess());
+        EXPECT_EQ(http->authorization, "Bearer external-table");
+        ASSERT_TRUE(manager.client_->HeadObject(request).IsSuccess());
+        if (use_iam) {
+            EXPECT_TRUE(http->authorization.empty());
+        } else {
+            EXPECT_NE(http->authorization.find("Credential=primary-key/"),
+                      Aws::String::npos);
+        }
     }
 
-    manager.BuildGoogleCloudClient(storage_config, client_config);
-    const auto provider = registry.Lookup(uri);
-    ASSERT_NE(provider, nullptr);
-    EXPECT_EQ(registry.Lookup(Aws::Http::URI(
-                  "https://legacy-only-bucket.storage.googleapis.com/key")),
-              provider);
-    EXPECT_EQ(registry.Lookup(Aws::Http::URI(
-                  "https://storage.googleapis.com:443/legacy-only-bucket/key")),
-              provider);
-    EXPECT_EQ(
-        registry.Lookup(Aws::Http::URI(
-            "https://storage.googleapis.com:8443/legacy-only-bucket/key")),
-        nullptr);
-    EXPECT_EQ(registry.Lookup(
-                  Aws::Http::URI("http://169.254.169.254/latest/api/token")),
-              nullptr);
+    const int before = http->requests;
+    request.SetBucket("different-bucket");
+    EXPECT_FALSE(external_client.HeadObject(request).IsSuccess());
+    EXPECT_EQ(http->requests, before);
 
-    const auto request =
-        std::make_shared<Aws::Http::Standard::StandardHttpRequest>(
-            uri, Aws::Http::HttpMethod::HTTP_PUT);
-    request->SetHeaderValue("Authorization", "existing-authorization");
-    ASSERT_TRUE(provider->MaybeSignConditionalWrite(request).ok());
-    EXPECT_EQ(request->GetHeaderValue("Authorization"),
-              "existing-authorization");
-    request->SetHeaderValue("x-goog-if-generation-match", "0");
-    ASSERT_TRUE(provider->MaybeSignConditionalWrite(request).ok());
-    if (use_iam) {
-        // IAM takes precedence even when AK/SK are also configured, and must
-        // leave Authorization to the OAuth2 path without fetching a real token.
-        EXPECT_EQ(request->GetHeaderValue("Authorization"),
-                  "existing-authorization");
-    } else {
-        EXPECT_FALSE(provider->AuthorizationHeader().has_value());
-        EXPECT_EQ(request->GetHeaderValue("Authorization")
-                      .find("GOOG4-HMAC-SHA256 Credential=legacy-access-key/"),
-                  0);
-    }
+    // Broker exchanges use their own HTTP client. Creating an unbound request
+    // to the same endpoint and bucket must not attach either GCS identity.
+    const auto broker_request = Aws::Http::CreateHttpRequest(
+        Aws::String(("https://" + primary.address + "/" + primary.bucket_name +
+                     "/broker")
+                        .c_str()),
+        Aws::Http::HttpMethod::HTTP_POST,
+        Aws::Utils::Stream::DefaultResponseStreamFactoryMethod);
+    EXPECT_FALSE(broker_request->HasHeader("Authorization"));
 }
 
 }  // namespace
 
 // Each case execs a fresh process: neither AWS InitAPI nor storage's call_once
 // can be reset reliably inside a shared all_tests process.
-TEST(GcpChunkManagerRegistrationDeathTest, StorageFirstIAM) {
+TEST(GcpChunkManagerDeathTest, StorageFirstIAM) {
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
-            CheckGcpRegistration(false, true);
+            CheckGcpClients(false, true);
             ExitWithTestResult();
         },
         ::testing::ExitedWithCode(0),
         "");
 }
 
-TEST(GcpChunkManagerRegistrationDeathTest, StorageFirstAccessKey) {
+TEST(GcpChunkManagerDeathTest, StorageFirstAccessKey) {
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
-            CheckGcpRegistration(false, false);
+            CheckGcpClients(false, false);
             ExitWithTestResult();
         },
         ::testing::ExitedWithCode(0),
         "");
 }
 
-TEST(GcpChunkManagerRegistrationDeathTest, LegacyFirstIAM) {
+TEST(GcpChunkManagerDeathTest, LegacyFirstIAM) {
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
-            CheckGcpRegistration(true, true);
+            CheckGcpClients(true, true);
             ExitWithTestResult();
         },
         ::testing::ExitedWithCode(0),
         "");
 }
 
-TEST(GcpChunkManagerRegistrationDeathTest, LegacyFirstAccessKey) {
+TEST(GcpChunkManagerDeathTest, LegacyFirstAccessKey) {
     ::testing::FLAGS_gtest_death_test_style = "threadsafe";
     ASSERT_EXIT(
         {
-            CheckGcpRegistration(true, false);
+            CheckGcpClients(true, false);
             ExitWithTestResult();
         },
         ::testing::ExitedWithCode(0),

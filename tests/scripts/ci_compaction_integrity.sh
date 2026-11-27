@@ -23,8 +23,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT}/tests/python_client"
 
+# Pytest imports -p plugins before adding test directories to sys.path.
+export PYTHONPATH="${ROOT}/tests/python_client${PYTHONPATH:+:${PYTHONPATH}}"
+
+# Match the repository log directory by default; preserve an Argo/caller path.
+export DATA_INTEGRITY_DIAGNOSTICS_PATH="${DATA_INTEGRITY_DIAGNOSTICS_PATH:-${CI_LOG_PATH:-/tmp/ci_logs}/case-events.jsonl}"
+
 # Preserve caller connection options and filters; keep workload selection serial.
 exec pytest "$@" \
+  -p common.data_integrity_diagnostics \
+  --log-cli-level=INFO \
   -n 0 \
   --tags L3 \
   --run-compaction-integrity-serial \

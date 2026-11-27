@@ -67,7 +67,7 @@ struct BinaryRangeElementFunc {
                const T* src,
                size_t n,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (filter_type == FilterType::random ||
@@ -166,7 +166,7 @@ struct BinaryRangeElementFuncForJson {
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -191,7 +191,8 @@ struct BinaryRangeElementFuncForJson {
 template <typename ValueType,
           bool lower_inclusive,
           bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
+          FilterType filter_type = FilterType::sequential,
+          typename ArrayType = milvus::ArrayView>
 struct BinaryRangeElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -200,12 +201,12 @@ struct BinaryRangeElementFuncForArray {
     operator()(const ValueType& val1,
                const ValueType& val2,
                int index,
-               const milvus::ArrayView* src,
+               const ArrayType* src,
                ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -223,12 +224,13 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (index >= src[offset].length()) {
+            if (!HasArrayElementAt(src[offset], index)) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data<GetType>(index);
+            auto value =
+                src[offset].template get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
@@ -294,6 +296,18 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
+    bool
+    CanUseOffsetsForSequentialBatch() override {
+        EnsureExecPathDetermined();
+        return expr_->column_.element_level_ &&
+               exec_path_ == ExprExecPath::RawData && SupportOffsetInput();
+    }
 
     void
     DetermineExecPath() override;

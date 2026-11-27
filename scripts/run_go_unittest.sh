@@ -20,9 +20,14 @@
 set -e
 
 BASEDIR=$(dirname "$0")
-source $BASEDIR/setenv.sh
+source $BASEDIR/setenv.sh || exit 1
 # setenv.sh disables errexit; restore fail-fast behavior for test commands.
 set -e
+
+if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+    echo "ERROR: Go -race tests require a separate build without USE_TSAN" >&2
+    exit 1
+fi
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
@@ -167,6 +172,7 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/meta
 function test_cmd()
 {
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${ROOT_DIR}/cmd/milvus/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_streaming()

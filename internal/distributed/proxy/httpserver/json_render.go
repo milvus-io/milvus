@@ -31,6 +31,9 @@ type jsonRender struct {
 // Render writes data with custom ContentType.
 func (r jsonRender) Render(w http.ResponseWriter) error {
 	r.WriteContentType(w)
+	if dqlWriter, ok := w.(*dqlResponseWriter); ok {
+		return dqlWriter.renderDQLResult(r.Data)
+	}
 	encoder := json.NewEncoder(w)
 	return encoder.Encode(r.Data)
 }

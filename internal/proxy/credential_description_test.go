@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -210,6 +211,18 @@ func TestUpdateCredentialRejectsOverLimitDescription(t *testing.T) {
 
 func TestUpdateCredentialPasswordValidationErrors(t *testing.T) {
 	paramtable.Init()
+
+	// Password verification needs its own cache fixture, even when this test
+	// runs alone or after another test has reset the process-global cache.
+	cacheCoord := mocks.NewMockMixCoordClient(t)
+	cacheCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).
+		Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
+	t.Cleanup(privilege.ResetPrivilegeCacheForTest)
+	require.NoError(t, privilege.InitPrivilegeCache(context.Background(), cacheCoord))
+	privilege.GetPrivilegeCache().UpdateCredential(&internalpb.CredentialInfo{
+		Username:       "desc_user",
+		Sha256Password: crypto.SHA256("correct_password", "desc_user"),
+	})
 
 	tests := []struct {
 		name        string

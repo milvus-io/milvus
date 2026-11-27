@@ -261,6 +261,11 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		})
 		resources.flusher = flusher
 	}
+	// RecoverySnapshot contains only live VChannels. Register them at the fixed
+	// opening fence before the interceptors admit new writes.
+	for vchannel := range snapshot.VChannels {
+		param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
+	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param, flusher)
 	o.walInstances.Insert(id, wal)
 	resources.Release()

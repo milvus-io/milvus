@@ -47,7 +47,7 @@ func selectReduceMode(r *reduce.ResultInfo) reduceMode {
 	}
 }
 
-func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, reduceInfo *reduce.ResultInfo) (*milvuspb.SearchResults, error) {
+func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, reduceInfo *reduce.ResultInfo, scoreRewritten bool) (*milvuspb.SearchResults, error) {
 	switch selectReduceMode(reduceInfo) {
 	case reduceModeGroupBy:
 		return reduceSearchResultDataWithGroupBy(ctx,
@@ -59,7 +59,7 @@ func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.Sea
 			reduceInfo.EffectiveOffset(),
 			reduceInfo.GetGroupSize(),
 			reduceInfo.GetGroupByFieldIds(),
-			reduceInfo.GetIsSearchAggregation())
+			reduceInfo.GetIsSearchAggregation(), scoreRewritten)
 	case reduceModeAdvanceGroupBy:
 		return reduceAdvanceGroupBy(ctx,
 			subSearchResultData,
@@ -67,7 +67,7 @@ func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.Sea
 			reduceInfo.GetTopK(),
 			reduceInfo.GetPkType(),
 			reduceInfo.GetMetricType(),
-			reduceInfo.GetGroupByFieldIds())
+			reduceInfo.GetGroupByFieldIds(), scoreRewritten)
 	default:
 		return reduceSearchResultDataNoGroupBy(ctx,
 			subSearchResultData,
@@ -75,7 +75,7 @@ func reduceSearchResult(ctx context.Context, subSearchResultData []*schemapb.Sea
 			reduceInfo.GetTopK(),
 			reduceInfo.GetMetricType(),
 			reduceInfo.GetPkType(),
-			reduceInfo.GetOffset())
+			reduceInfo.GetOffset(), scoreRewritten)
 	}
 }
 
@@ -94,6 +94,7 @@ func reduceSearchResultDataWithGroupBy(
 	groupSize int64,
 	groupByFieldIDs []int64,
 	isSearchAggregation bool,
+	scoreRewritten bool,
 ) (*milvuspb.SearchResults, error) {
 	tr := timerecord.NewTimeRecorder("reduceSearchResultDataWithGroupBy")
 	defer func() { tr.CtxElapse(ctx, "done") }()
@@ -178,7 +179,7 @@ func reduceSearchResultDataWithGroupBy(
 		return ret, merr.Wrap(err, "failed to construct group by field data builder")
 	}
 
-	if !metric.PositivelyRelated(metricType) {
+	if shouldRestoreDistance(metricType, scoreRewritten) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
 		}
@@ -428,6 +429,7 @@ func checkResultDatas(ctx context.Context, subSearchResultData []*schemapb.Searc
 
 func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData,
 	nq int64, topK int64, pkType schemapb.DataType, metricType string, groupByFieldIDs []int64,
+	scoreRewritten bool,
 ) (*milvuspb.SearchResults, error) {
 	allowSingularFallback := len(groupByFieldIDs) == 1
 	if err := reduce.ValidateGroupByFieldsPresent(subSearchResultData, groupByFieldIDs, allowSingularFallback); err != nil {
@@ -443,9 +445,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 			if gbv == nil {
 				continue
 			}
-			if gbv.GetValidData() != nil {
+			if validData := typeutil.GetFieldDataValidData(gbv); validData != nil {
 				fieldName := gbv.GetFieldName()
-				totalRows := len(gbv.GetValidData())
+				totalRows := len(validData)
 				gpFieldBuilder, err := typeutil.NewFieldDataBuilder(gbv.GetType(), true, totalRows)
 				if err != nil {
 					return nil, err
@@ -469,7 +471,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		// otherwise the chain receives -L2 and any normalization expression
 		// (1 − 2·atan(d)/π) gets applied to a negated value, producing a
 		// monotonically inverted score and silently flipping result ordering.
-		if !metric.PositivelyRelated(metricType) {
+		if shouldRestoreDistance(metricType, scoreRewritten) {
 			for k := range subResult.Scores {
 				subResult.Scores[k] *= -1
 			}
@@ -520,7 +522,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset = make([][]int64, subSearchNum)
 	)
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i := 0; i < subSearchNum; i++ {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(subSearchResultData[i].GetFieldsData())
 		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
@@ -547,6 +551,12 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				acceptedRows = append(acceptedRows, reduce.RowRef{ResultIdx: subIdx, RowIdx: innerIdx})
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if len(ret.Results.FieldsData) > 0 {
+					// Keep output fields aligned with the concatenated IDs for
+					// reranking and assembly when hybrid search skips requery.
+					fieldIdxs := idxComputers[subIdx].Compute(innerIdx)
+					typeutil.AppendFieldData(ret.Results.FieldsData, subData.GetFieldsData(), innerIdx, fieldIdxs...)
+				}
 
 				// Handle ElementIndices if present
 				if subData.ElementIndices != nil {
@@ -569,7 +579,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		return ret, merr.Wrap(err, "failed to write group by field values")
 	}
 	ret.Results.TopK = topK // realTopK is the topK of the nq-th query
-	if !metric.PositivelyRelated(metricType) {
+	if shouldRestoreDistance(metricType, scoreRewritten) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
 		}
@@ -607,7 +617,7 @@ func buildMultiGroupKeyExtractor(data *schemapb.SearchResultData, groupByFieldID
 	return reduce.MakeCompositeKeyExtractor(iters)
 }
 
-func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64) (*milvuspb.SearchResults, error) {
+func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType, offset int64, scoreRewritten bool) (*milvuspb.SearchResults, error) {
 	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
 	defer func() {
 		tr.CtxElapse(ctx, "done")
@@ -747,7 +757,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		ret.Results.TopK = realTopK // realTopK is the topK of the nq-th query
 	}
 
-	if !metric.PositivelyRelated(metricType) {
+	if shouldRestoreDistance(metricType, scoreRewritten) {
 		for k := range ret.Results.Scores {
 			ret.Results.Scores[k] *= -1
 		}
@@ -795,7 +805,11 @@ func fillInEmptyResult(numQueries int64) *milvuspb.SearchResults {
 	}
 }
 
-func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResults, nq, topK, offset int64, metricType string, pkType schemapb.DataType, queryInfo *planpb.QueryInfo, isAdvance bool, isSearchAggregation bool, collectionID int64, partitionIDs []int64) (*milvuspb.SearchResults, error) {
+func shouldRestoreDistance(metricType string, scoreRewritten bool) bool {
+	return !scoreRewritten && !metric.PositivelyRelated(metricType)
+}
+
+func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResults, nq, topK, offset int64, metricType string, pkType schemapb.DataType, queryInfo *planpb.QueryInfo, isAdvance bool, isSearchAggregation bool, collectionID int64, partitionIDs []int64, scoreRewritten bool) (*milvuspb.SearchResults, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reduceResults")
 	defer sp.End()
 
@@ -821,7 +835,7 @@ func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResu
 	result, err = reduceSearchResult(ctx, validSearchResults, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(pkType).
 		WithOffset(offset).WithGroupSize(queryInfo.GetGroupSize()).
 		WithGroupByFieldIdsFromProto(queryInfo.GetGroupByFieldId(), queryInfo.GetGroupByFieldIds()).
-		WithAdvance(isAdvance).WithSearchAggregation(isSearchAggregation))
+		WithAdvance(isAdvance).WithSearchAggregation(isSearchAggregation), scoreRewritten)
 	if err != nil {
 		log.Warn(ctx, "failed to reduce search results", mlog.Err(err))
 		return nil, err

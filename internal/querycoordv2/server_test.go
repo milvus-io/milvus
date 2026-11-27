@@ -755,6 +755,8 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.taskScheduler,
 		suite.server.leaderCacheObserver.RegisterEvent,
+		// Read the observer when triggered: it is replaced below.
+		func(collectionID int64) { suite.server.targetObserver.TriggerUpdateCurrentTarget(collectionID) },
 	)
 	suite.server.checkerController = checkers.NewCheckerController(
 		suite.server.meta,
@@ -983,7 +985,7 @@ func TestHandleNodeDownMetricsCleanup(t *testing.T) {
 		ctx:                 ctx,
 		taskScheduler:       task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
 		dist:                meta.NewDistributionManager(session.NewNodeManager()),
-		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil),
+		distController:      dist.NewDistController(nil, nil, nil, nil, nil, nil, nil),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		meta: &meta.Meta{
 			ResourceManager: meta.NewResourceManager(nil, nil),

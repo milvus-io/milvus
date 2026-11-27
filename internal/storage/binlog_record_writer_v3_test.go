@@ -51,7 +51,7 @@ func TestPackedManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, nil, cfg, nil, false, "")
+		1024, 0, 0, nil, cfg, nil, false, "", nil)
 	require.NoError(t, err)
 
 	// No Write before Close. The internal `writer` field stays nil so
@@ -79,7 +79,7 @@ func TestPackedTextManifestRecordWriter_CloseWithoutWrite(t *testing.T) {
 	w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, nil, cfg, nil, "")
+		1024, 0, 0, nil, cfg, nil, nil, "", nil)
 	require.NoError(t, err)
 
 	// No Write before Close. The text writer's nil-handling path must
@@ -101,7 +101,7 @@ func TestPackedTextManifestRecordWriter_AppendsV3StatsToManifest(t *testing.T) {
 	w, err := NewPackedTextManifestRecordWriter(collectionID, partitionID, segmentID, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1000, 1<<20),
-		1024, 0, 0, nil, cfg, nil, "")
+		1024, 0, 0, nil, cfg, nil, nil, "", nil)
 	require.NoError(t, err)
 
 	value := &Value{
@@ -177,7 +177,7 @@ func TestPackedManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, false, "")
+		1024, 0, 0, columnGroups, cfg, nil, false, "", nil)
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 
@@ -230,7 +230,7 @@ func TestPackedManifestRecordWriter_TextRefsUseBinarySchema(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, true, "")
+		1024, 0, 0, columnGroups, cfg, nil, true, "", nil)
 	require.NoError(t, err)
 	err = w.initWriters(nil)
 	require.NoError(t, err)
@@ -308,7 +308,7 @@ func TestPackedManifestRecordWriter_UsesExplicitWriterFormat(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, false, "parquet")
+		1024, 0, 0, columnGroups, cfg, nil, false, "parquet", nil)
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 
@@ -335,10 +335,13 @@ func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) 
 	var gotWriterFormat string
 	var gotSchemaBasedFormats []string
 	var gotColumnGroups []storagecommon.ColumnGroup
+	pluginContext := &indexcgopb.StoragePluginContext{EncryptionZoneId: 7, CollectionId: 1, EncryptionKey: "key"}
+	var gotPluginContext *indexcgopb.StoragePluginContext
 	patch := mockey.Mock(NewPackedTextBatchWriter).To(
 		func(_ string, _ string, _ *schemapb.CollectionSchema, _, _ int64, groups []storagecommon.ColumnGroup,
-			_ *indexpb.StorageConfig, _ []packed.TextColumnConfig, writerFormat string, schemaBasedFormats []string,
+			_ *indexpb.StorageConfig, _ []packed.TextColumnConfig, gotPlugin *indexcgopb.StoragePluginContext, writerFormat string, schemaBasedFormats []string,
 		) (*packedTextBatchWriter, error) {
+			gotPluginContext = gotPlugin
 			gotWriterFormat = writerFormat
 			gotSchemaBasedFormats = append([]string(nil), schemaBasedFormats...)
 			gotColumnGroups = append([]storagecommon.ColumnGroup(nil), groups...)
@@ -349,7 +352,7 @@ func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) 
 	w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, "")
+		1024, 0, 0, columnGroups, cfg, nil, pluginContext, "", nil)
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 
@@ -359,6 +362,10 @@ func TestPackedTextManifestRecordWriter_FillsV3ColumnGroupFormats(t *testing.T) 
 	assert.Equal(t, "vortex", gotColumnGroups[0].Format)
 	assert.Equal(t, "parquet", gotColumnGroups[1].Format)
 	assert.Equal(t, gotColumnGroups, w.columnGroups)
+	// TODO: restore to assert.Same(t, pluginContext, gotPluginContext) once the
+	// TEXT read chain supports decryption.
+	assert.Nil(t, gotPluginContext)
+	assert.Same(t, pluginContext, w.storagePluginContext)
 }
 
 // TestSegmentManifestBasePath verifies that the V3 manifest base path stays
@@ -417,7 +424,7 @@ func TestPackedManifestRecordWriter_LocalStorageBasePath(t *testing.T) {
 	w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 		ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 		allocator.NewLocalAllocator(1, 1<<20),
-		1024, 0, 0, columnGroups, cfg, nil, false, "")
+		1024, 0, 0, columnGroups, cfg, nil, false, "", nil)
 	require.NoError(t, err)
 	require.NoError(t, w.initWriters(nil))
 
@@ -450,7 +457,7 @@ func TestManifestRecordReader_ResolvesOutOfLineTextLob(t *testing.T) {
 	}}
 
 	w, err := NewPackedTextBatchWriter("", segmentPath, schema, 0, 0,
-		columnGroups, config, textConfig, "parquet", []string{"parquet"})
+		columnGroups, config, textConfig, nil, "parquet", []string{"parquet"})
 	require.NoError(t, err)
 
 	arrowSchema, err := ConvertToArrowSchema(schema, true)

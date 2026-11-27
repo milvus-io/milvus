@@ -68,6 +68,14 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+// Startup-only budget for the buffers owned by one sparse normalization call.
+// Returns false for a non-positive limit and leaves the existing value intact.
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 
@@ -86,6 +94,9 @@ AddOneBinaryToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type,
@@ -108,6 +119,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
@@ -211,7 +225,8 @@ GetObjectData(
     ChunkManager* remote_chunk_manager,
     const std::vector<std::string>& remote_files,
     milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
-    bool is_field_data = true);
+    bool is_field_data = true,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 // Helper function to wait for all futures and collect exceptions
 // This ensures all background threads complete before rethrowing exception
@@ -290,6 +305,37 @@ ProcessFuturesInOrder(std::vector<std::future<T>>& futures,
     }
 }
 
+// Best-effort drain for cleanup paths (catch blocks / scope guards): wait for
+// every still-valid future and swallow its exception, so that background
+// tasks referencing the caller's stack state finish before the caller
+// unwinds (see #46958). Unlike WaitAllFutures, this never throws — use it
+// when another exception is already propagating.
+template <typename FutureContainer>
+void
+DrainFutures(FutureContainer& futures) noexcept {
+    for (auto& future : futures) {
+        if (!future.valid()) {
+            continue;
+        }
+        try {
+            future.get();
+        } catch (...) {
+        }
+    }
+}
+
+template <typename T>
+void
+DrainFuture(std::future<T>& future) noexcept {
+    if (!future.valid()) {
+        return;
+    }
+    try {
+        future.get();
+    } catch (...) {
+    }
+}
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
@@ -324,6 +370,12 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // source arrow batches held alive by in-flight decode futures; a few batches
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
+
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate);
 
 void
 IterateFieldDataFromManifest(
@@ -375,11 +427,13 @@ milvus_storage::ArrowFileSystemPtr
 InitArrowFileSystem(milvus::storage::StorageConfig storage_config);
 
 FieldDataPtr
-CreateFieldData(const DataType& type,
-                const DataType& element_type,
-                bool nullable = false,
-                int64_t dim = 1,
-                int64_t total_num_rows = 0);
+CreateFieldData(
+    const DataType& type,
+    const DataType& element_type,
+    bool nullable = false,
+    int64_t dim = 1,
+    int64_t total_num_rows = 0,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 
 // Creates field data whose rows are initialized from a schema default value.
 // Initialization completes before the FieldData is published and does not
@@ -487,6 +541,14 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Returns the PARQUET:field_id of every column stored in a packed file, in
+// column order, reading only the file footer. Throws a SegcoreError carrying
+// the storage error code on a failed read, and DataFormatBroken when a column
+// has no valid field id.
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath);
+
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
@@ -551,12 +613,14 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       std::string_view physical_column_name = {});
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector
 NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
-                             const FieldMeta& field_meta);
+                             const FieldMeta& field_meta,
+                             std::string_view physical_column_name = {});
 
 // Single source of truth for view/large-variant elimination.
 // STRING_VIEW/LARGE_STRING -> STRING, BINARY_VIEW/LARGE_BINARY -> BINARY,
@@ -565,6 +629,7 @@ NormalizeArrowForChunkWriter(const arrow::ArrayVector& arrays,
 // schemaless readers (vortex) should route arrays through this helper before
 // any type-id dispatch (refresh / load / sample / etc).
 std::shared_ptr<arrow::Array>
-CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array);
+CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array,
+                          bool discard_null_list_payload = false);
 
 }  // namespace milvus::storage

@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -319,10 +320,9 @@ func (s *MixCompactionTaskStorageV1Suite) setupTestWithTextField() {
 	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams(), []int64{pk.FieldID})
 }
 
-// V1 binlogs deserialize TEXT as arrow String while the retained-row rebuilder
-// allocates a Binary builder for TEXT, so with any filtered row rb.Append fails
-// deterministically: the task must fail instead of silently dropping the
-// retained rows of that batch.
+// Feed an Int64 column where the plan declares TEXT so rb.Append fails on a
+// real type mismatch. UTF8 TEXT is valid input for RecordBuilder. The task must
+// propagate the append error instead of silently dropping retained rows.
 func TestMixCompactionPropagatesRecordBuilderAppendError(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -341,11 +341,13 @@ func TestMixCompactionPropagatesRecordBuilderAppendError(t *testing.T) {
 
 			segmentID := int64(700)
 			alloc := allocator.NewLocalAllocator(888888, math.MaxInt64)
-			segWriter, err := NewSegmentWriter(s.meta.GetSchema(), 65535, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
+			sourceSchema := proto.Clone(s.meta.GetSchema()).(*schemapb.CollectionSchema)
+			typeutil.GetField(sourceSchema, textFieldForAppendErrorTest).DataType = schemapb.DataType_Int64
+			segWriter, err := NewSegmentWriter(sourceSchema, 65535, compactionBatchSize, segmentID, PartitionID, CollectionID, []int64{})
 			s.Require().NoError(err)
 			for i := int64(0); i < 2; i++ {
 				row := getRow(segmentID+i, 0)
-				row[textFieldForAppendErrorTest] = "text-payload"
+				row[textFieldForAppendErrorTest] = int64(42)
 				err = segWriter.Write(&storage.Value{
 					PK:        storage.NewInt64PrimaryKey(segmentID + i),
 					Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday())),
@@ -1661,110 +1663,4 @@ func BenchmarkMixCompactor(b *testing.B) {
 	}
 
 	s.TearDownTest()
-}
-
-func TestCanMergeSort(t *testing.T) {
-	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
-	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
-	// the flag canMergeSort requires. TestCanMergeSortMatchesMergeKey covers
-	// the namespace-enabled half.
-	namespaceDisabledSchema := &schemapb.CollectionSchema{}
-
-	t.Run("disabled by param", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema:         namespaceDisabledSchema,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
-		}
-		assert.False(t, canMergeSort(plan, compaction.Params{UseMergeSort: false, MaxSegmentMergeSort: 30}))
-	})
-
-	t.Run("unsorted segment rejected", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema:         namespaceDisabledSchema,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1}},
-		}
-		assert.False(t, canMergeSort(plan, params))
-	})
-
-	t.Run("single sorted segment allowed", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema:         namespaceDisabledSchema,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{SegmentID: 1, IsSorted: true}},
-		}
-		assert.True(t, canMergeSort(plan, params))
-	})
-
-	t.Run("too many segments rejected", func(t *testing.T) {
-		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort+1)
-		for i := range segs {
-			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
-		}
-		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
-		assert.False(t, canMergeSort(plan, params))
-	})
-
-	t.Run("exactly max segments allowed", func(t *testing.T) {
-		segs := make([]*datapb.CompactionSegmentBinlogs, params.MaxSegmentMergeSort)
-		for i := range segs {
-			segs[i] = &datapb.CompactionSegmentBinlogs{SegmentID: int64(i), IsSorted: true}
-		}
-		plan := &datapb.CompactionPlan{Schema: namespaceDisabledSchema, SegmentBinlogs: segs}
-		assert.True(t, canMergeSort(plan, params))
-	})
-
-	t.Run("later unsorted segment rejected", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: namespaceDisabledSchema,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: true},
-				{SegmentID: 2},
-			},
-		}
-		assert.False(t, canMergeSort(plan, params))
-	})
-}
-
-func TestCanMergeSortMatchesMergeKey(t *testing.T) {
-	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
-
-	t.Run("namespace enabled rejects pk-only sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: true, IsSortedByNamespace: false},
-			},
-		}
-		assert.False(t, canMergeSort(plan, params))
-	})
-
-	t.Run("namespace enabled accepts namespace-sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
-			},
-		}
-		assert.True(t, canMergeSort(plan, params))
-	})
-
-	t.Run("namespace disabled rejects namespace-sorted segment", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: false},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSorted: false, IsSortedByNamespace: true},
-			},
-		}
-		assert.False(t, canMergeSort(plan, params))
-	})
-
-	t.Run("mixed flags rejected when one does not match", func(t *testing.T) {
-		plan := &datapb.CompactionPlan{
-			Schema: &schemapb.CollectionSchema{EnableNamespace: true},
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{SegmentID: 1, IsSortedByNamespace: true},
-				{SegmentID: 2, IsSorted: true},
-			},
-		}
-		assert.False(t, canMergeSort(plan, params))
-	})
 }

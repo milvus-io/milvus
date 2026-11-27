@@ -24,6 +24,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -566,4 +567,85 @@ func (s *SnapshotSuite) TestSnapshotOptions() {
 
 func TestSnapshot(t *testing.T) {
 	suite.Run(t, new(SnapshotSuite))
+}
+
+func TestListSnapshotSummaries(t *testing.T) {
+	for _, scenario := range []string{"server order", "ordered", "legacy", "empty", "rpc error", "status error"} {
+		t.Run(scenario, func(t *testing.T) {
+			service := &snapshotServiceClientStub{}
+			client := &Client{service: service}
+			listCalls, describeCalls := 0, 0
+			opt := NewListSnapshotsOption("books").WithDbName("archive")
+			list := mockey.Mock((*snapshotServiceClientStub).ListSnapshots).To(func(_ *snapshotServiceClientStub, _ context.Context, req *milvuspb.ListSnapshotsRequest, options ...grpc.CallOption) (*milvuspb.ListSnapshotsResponse, error) {
+				listCalls++
+				require.Equal(t, "books", req.GetCollectionName())
+				require.Equal(t, "archive", req.GetDbName())
+				require.Len(t, options, 1)
+				if scenario == "rpc error" {
+					return nil, errors.New("rpc failed")
+				}
+				if scenario == "status error" {
+					return &milvuspb.ListSnapshotsResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
+				}
+				resp := &milvuspb.ListSnapshotsResponse{Status: merr.Success()}
+				if scenario != "empty" {
+					resp.Snapshots = []string{"old", "b", "a"}
+				}
+				if scenario == "server order" {
+					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "old"}, {Name: "b", CreateTs: 9007199254740993, Description: "daily", CreateUtcTs: 34359738368}, {Name: "a", CreateTs: 9007199254740993}}
+				}
+				if scenario == "ordered" {
+					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "a", CreateTs: 9007199254740993}, {Name: "b", CreateTs: 9007199254740993, Description: "daily", CreateUtcTs: 34359738368}, {Name: "old"}}
+				}
+				return resp, nil
+			}).Build()
+			defer list.UnPatch()
+			describe := mockey.Mock((*snapshotServiceClientStub).DescribeSnapshot).To(func(_ *snapshotServiceClientStub, _ context.Context, _ *milvuspb.DescribeSnapshotRequest, _ ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
+				describeCalls++
+				return nil, errors.New("unexpected DescribeSnapshot call")
+			}).Build()
+			defer describe.UnPatch()
+			infos, err := client.ListSnapshotSummaries(context.Background(), opt, grpc.WaitForReady(true))
+			require.Equal(t, 1, listCalls)
+			require.Zero(t, describeCalls)
+			switch scenario {
+			case "legacy":
+				require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+				require.Contains(t, err.Error(), "server does not support snapshot summaries")
+				require.Nil(t, infos)
+				names, err := client.ListSnapshots(context.Background(), opt, grpc.WaitForReady(true))
+				require.NoError(t, err)
+				require.Equal(t, []string{"old", "b", "a"}, names)
+				require.Zero(t, describeCalls)
+			case "rpc error", "status error":
+				require.Error(t, err)
+				require.Nil(t, infos)
+			case "empty":
+				require.NoError(t, err)
+				require.Empty(t, infos)
+			default:
+				require.NoError(t, err)
+				require.Len(t, infos, 3)
+				expectedNames := []string{"old", "b", "a"}
+				if scenario == "ordered" {
+					expectedNames = []string{"a", "b", "old"}
+				}
+				for i, name := range expectedNames {
+					require.Equal(t, name, infos[i].GetName())
+				}
+				require.Equal(t, int64(9007199254740993), infos[1].GetCreateTs())
+				require.Equal(t, int64(34359738368), infos[1].GetCreateUtcTs())
+				require.Zero(t, infos[0].GetCreateUtcTs())
+				require.Zero(t, infos[2].GetCreateUtcTs())
+				require.Equal(t, "daily", infos[1].GetDescription())
+			}
+		})
+	}
+	client := &Client{}
+	infos, err := client.ListSnapshotSummaries(context.Background(), nil)
+	require.Error(t, err)
+	require.Nil(t, infos)
+	infos, err = client.ListSnapshotSummaries(context.Background(), NewListSnapshotsOption("books"))
+	require.Error(t, err)
+	require.Nil(t, infos)
 }

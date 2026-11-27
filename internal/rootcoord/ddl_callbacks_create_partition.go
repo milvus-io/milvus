@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -84,6 +85,10 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 	return partID, err
 }
 
+// syncNewCreatedPartitionTimeout bounds one attempt of the load meta sync in
+// the CreatePartition ack callback.
+const syncNewCreatedPartitionTimeout = 30 * time.Second
+
 func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result message.BroadcastResultCreatePartitionMessageV1) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
@@ -96,6 +101,13 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 	}
 	if err := c.meta.AddPartition(ctx, partition); err != nil {
 		return merr.Wrap(err, "failed to add partition meta")
+	}
+	// A secondary replays this callback but never receives the proxy request,
+	// so the load meta of a loaded collection is updated here on every cluster.
+	syncCtx, cancel := context.WithTimeout(ctx, syncNewCreatedPartitionTimeout)
+	defer cancel()
+	if err := c.broker.SyncNewCreatedPartition(syncCtx, header.CollectionId, header.PartitionId); err != nil {
+		return merr.Wrap(err, "failed to sync new created partition to querycoord")
 	}
 	return c.ExpireCaches(ctx, ce.NewBuilder().
 		WithLegacyProxyCollectionMetaCache(

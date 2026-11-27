@@ -26,6 +26,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -63,6 +64,23 @@ type PackWriterV2Suite struct {
 	maxRowNum    int64
 	chunkSize    uint64
 	currentSplit []storagecommon.ColumnGroup
+}
+
+// countingAllocator is a minimal allocator.Interface for tests that only need to
+// observe how many IDs were drawn.
+type countingAllocator struct {
+	allocated int
+}
+
+func (a *countingAllocator) Alloc(count uint32) (int64, int64, error) {
+	start := int64(a.allocated)
+	a.allocated += int(count)
+	return start, start + int64(count), nil
+}
+
+func (a *countingAllocator) AllocOne() (int64, error) {
+	a.allocated++
+	return int64(a.allocated), nil
 }
 
 func (s *PackWriterV2Suite) SetupTest() {
@@ -121,6 +139,20 @@ func (s *PackWriterV2Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
 }
 
+func (s *PackWriterV2Suite) TestAllocInsertLogPathsReservesOnce() {
+	alloc := &countingAllocator{}
+	bw := NewBulkPackWriterV2(nil, s.schema, s.cm, alloc, packed.DefaultWriteBufferSize, 0, nil, s.currentSplit)
+	pack := new(SyncPack).WithCollectionID(123).WithPartitionID(456).WithSegmentID(789)
+
+	paths, err := bw.allocInsertLogPaths(pack)
+	s.NoError(err)
+	s.Equal(len(s.currentSplit), alloc.allocated)
+	s.Equal(len(s.currentSplit), len(paths))
+	for _, path := range paths {
+		s.NotEmpty(path)
+	}
+}
+
 func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	collectionID := int64(123)
 	partitionID := int64(456)
@@ -156,6 +188,34 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
 	s.Equal(gotInserts[101].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/101/2")
+	assertVectorArrayValidElementCounts(s.T(), pack, gotInserts, 103)
+}
+
+// assertVectorArrayValidElementCounts checks that the binlogs of fieldID
+// carry the number of vectors the pack inserted into that VectorArray field.
+func assertVectorArrayValidElementCounts(t *testing.T, pack *SyncPack, inserts map[int64]*datapb.FieldBinlog, fieldID int64) {
+	t.Helper()
+	var want int64
+	for _, data := range pack.insertData {
+		field := data.Data[fieldID].(*storage.VectorArrayFieldData)
+		for _, row := range field.Data {
+			want += int64(len(row.GetFloatVector().GetData())) / field.Dim
+		}
+	}
+	require.Greater(t, want, int64(0))
+	var got int64
+	var seen bool
+	for _, fieldBinlog := range inserts {
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if n, ok := binlog.GetFieldValidElementCounts()[fieldID]; ok {
+				require.Contains(t, fieldBinlog.GetChildFields(), fieldID)
+				got += n
+				seen = true
+			}
+		}
+	}
+	require.True(t, seen)
+	require.Equal(t, want, got)
 }
 
 func (s *PackWriterV2Suite) TestWriteFeedsSegmentStatistics() {

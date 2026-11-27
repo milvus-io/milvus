@@ -441,7 +441,12 @@ func buildTopHitsConfig(topHits *commonpb.TopHitsSpec, schema *schemapb.Collecti
 			return nil, nil, merr.WrapErrParameterInvalidMsg("top_hits.sort field_name is empty")
 		}
 
-		direction, err := normalizeDirection(sortSpec.GetDirection(), "desc")
+		defaultDirection := "desc"
+		if fieldName == "_score" {
+			// Resolve the default from the actual search metric at compute time.
+			defaultDirection = ""
+		}
+		direction, err := normalizeDirection(sortSpec.GetDirection(), defaultDirection)
 		if err != nil {
 			return nil, nil, merr.Wrapf(err, "invalid top_hits.sort direction for %q", fieldName)
 		}

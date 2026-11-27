@@ -34,9 +34,23 @@
 
 namespace milvus::storage {
 
+struct CachedRawData {
+    std::string path;
+    // Physical vector count and dimension written to the raw-data header.
+    int64_t rows = 0;
+    int64_t dim = 0;
+    std::vector<size_t> offsets;
+    // Logical row count in validity; zero means no validity file.
+    uint64_t valid_data_count = 0;
+    std::vector<uint8_t> validity;
+};
+
 class DiskFileManagerImpl : public FileManagerImpl {
  private:
     struct LocalDirState;
+    class BufferedOutput;
+    std::mutex buffered_output_mutex_;
+    std::map<std::string, std::shared_ptr<BufferedOutput>> buffered_outputs_;
 
  public:
     class LocalDirWriteLease {
@@ -75,8 +89,22 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    // Upload a local file like AddFile, but let a failure propagate with the
+    // original exception. AddFile logs the exception and returns false, which
+    // loses its error code, so a transient storage error (throttling, timeout)
+    // could no longer be told apart from a permanent one.
+    void
+    AddFileOrThrow(const std::string& filename);
+
     bool
     AddFileMeta(const FileMeta& file_meta) override;
+
+    std::shared_ptr<milvus::OutputStream>
+    OpenOutputStream(const std::string& filename,
+                     milvus::OutputStreamOptions options = {}) override;
+
+    void
+    UploadBufferedFiles();
 
     std::optional<bool>
     IsExisted(const std::string& filename) noexcept override;
@@ -85,14 +113,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    bool
-    AddTextLog(const std::string& filename) noexcept;
+    void
+    AddTextLog(const std::string& filename);
 
-    bool
-    AddJsonSharedIndexLog(const std::string& filename) noexcept;
+    void
+    AddJsonSharedIndexLog(const std::string& filename);
 
-    bool
-    AddJsonStatsMetaLog(const std::string& filename) noexcept;
+    void
+    AddJsonStatsMetaLog(const std::string& filename);
 
  public:
     std::string
@@ -221,7 +249,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
                        const std::vector<int64_t>& remote_file_sizes);
 
     template <typename DataType>
-    std::string
+    CachedRawData
     CacheRawDataToDisk(const Config& config);
 
     std::string
@@ -267,6 +295,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::shared_ptr<LocalDirState>
     GetOrCreateLocalDirState(const std::string& dir);
 
+    void
+    UploadFileInternal(const std::string& file_name,
+                       const std::function<std::string(const std::string&,
+                                                       int)>& get_remote_path);
+
     bool
     AddFileInternal(const std::string& file_name,
                     const std::function<std::string(const std::string&, int)>&
@@ -279,11 +312,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
                                  milvus::proto::common::LoadPriority::HIGH);
 
     template <typename DataType>
-    std::string
+    CachedRawData
     cache_raw_data_to_disk_internal(const Config& config);
 
     template <typename T>
-    std::string
+    CachedRawData
     cache_raw_data_to_disk_storage_v2(const Config& config);
 
     std::string

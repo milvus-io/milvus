@@ -154,7 +154,7 @@ struct UnaryElementFuncForMatch {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -234,7 +234,7 @@ struct UnaryElementFuncForRegexMatch {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                int start_cursor,
                const int32_t* offsets = nullptr) {
         if constexpr (std::is_same_v<T, std::string> ||
@@ -359,7 +359,7 @@ struct UnaryElementFunc {
                size_t size,
                const IndexInnerType& val,
                TargetBitmapView res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -477,35 +477,61 @@ struct UnaryElementFunc {
     }
 };
 
-#define UnaryArrayCompare(cmp)                                               \
-    do {                                                                     \
-        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {         \
-            res[i] = false;                                                  \
-        } else {                                                             \
-            if (index >= src[offset].length()) {                             \
-                res[i] = false;                                              \
-                valid_res[i] = false;                                        \
-                continue;                                                    \
-            }                                                                \
-            auto array_data = src[offset].template get_data<GetType>(index); \
-            res[i] = (cmp);                                                  \
-        }                                                                    \
+#define UnaryArrayCompare(cmp)                                           \
+    do {                                                                 \
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {     \
+            res[i] = false;                                              \
+        } else {                                                         \
+            if (!HasArrayElementAt(src[offset], index)) {                \
+                res[i] = false;                                          \
+                valid_res[i] = false;                                    \
+                continue;                                                \
+            }                                                            \
+            auto array_data =                                            \
+                src[offset].template get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                              \
+        }                                                                \
     } while (false)
 
-template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
+template <typename ValueType,
+          proto::plan::OpType op,
+          FilterType filter_type,
+          typename ArrayType = ArrayView>
 struct UnaryElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+    // For `s[i][tags] == [..]` (index >= 0 with an Array literal), compare
+    // the inner Array of struct element i; a missing or null one is UNKNOWN.
+    // Returns false when the row result is UNKNOWN.
+    static bool
+    SameArray(const ArrayType& row,
+              const proto::plan::Array& val,
+              int index,
+              bool& same) {
+        if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+            if (index >= 0) {
+                auto inner = NestedArrayElementAt(row, index);
+                if (!inner.has_value()) {
+                    return false;
+                }
+                same = inner->is_same_array(val);
+                return true;
+            }
+        }
+        same = row.is_same_array(val);
+        return true;
+    }
+
     void
-    operator()(const ArrayView* src,
+    operator()(const ArrayType* src,
                ValidityView valid_data,
                size_t size,
                const ValueType& val,
                int index,
                TargetBitmapView res,
                TargetBitmapView valid_res,
-               const TargetBitmap& bitmap_input,
+               const TargetBitmapView& bitmap_input,
                size_t start_cursor,
                const int32_t* offsets = nullptr) {
         bool has_bitmap_input = !bitmap_input.empty();
@@ -539,31 +565,27 @@ struct UnaryElementFuncForArray {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
             }
-            if constexpr (op == proto::plan::OpType::Equal) {
+            if constexpr (op == proto::plan::OpType::Equal ||
+                          op == proto::plan::OpType::NotEqual) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = src[offset].is_same_array(val);
+                    bool same = false;
+                    if (!SameArray(src[offset], val, index, same)) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    res[i] = (op == proto::plan::OpType::Equal) == same;
                 } else {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = array_data == val;
-                }
-            } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = !src[offset].is_same_array(val);
-                } else {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data<GetType>(index);
-                    res[i] = array_data != val;
+                        src[offset].template get_data_unchecked<GetType>(index);
+                    res[i] = (op == proto::plan::OpType::Equal)
+                                 ? array_data == val
+                                 : array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
                 UnaryArrayCompare(array_data > val);
@@ -585,13 +607,13 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -605,13 +627,13 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
-                        src[offset].template get_data<GetType>(index);
+                        src[offset].template get_data_unchecked<GetType>(index);
                     res[i] = (*regex_matcher)(array_data);
                 } else {
                     ThrowInfo(OpTypeInvalid,
@@ -987,6 +1009,13 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       plan_options),
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+        if (expr_->op_type_ == proto::plan::OpType::Match) {
+            EnsureLikeMatcherCache();
+        }
+        if (expr_->op_type_ == proto::plan::OpType::RegexMatch) {
+            // Validate even if phase 1 later produces zero candidates.
+            EnsureRegexCache();
+        }
         auto val_type = FromValCase(expr_->val_.val_case());
         if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
             (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
@@ -1013,6 +1042,18 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
+    bool
+    CanUseOffsetsForSequentialBatch() override {
+        EnsureExecPathDetermined();
+        return expr_->column_.element_level_ &&
+               exec_path_ == ExprExecPath::RawData && SupportOffsetInput();
+    }
 
     void
     DetermineExecPath() override;
@@ -1054,6 +1095,15 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     GetActiveCount() const {
         return active_count_;
     }
+
+    // The concrete string literal to hand to a scalar index's ShouldUseOp cost
+    // guard, for the anchored pattern ops (PrefixMatch/PostfixMatch/InnerMatch)
+    // and general LIKE/regex whose index cost depends on the pattern. Empty
+    // for every other op (including the equality family, which FMINDEX declines
+    // outright), so the guard is judged on the op alone. Lets FMINDEX decline
+    // degenerate high-hit patterns to the raw-data scan on the VARCHAR path.
+    std::string
+    StringLiteralForCostGuard() const;
 
     // Check if ngram index can be used (index exists + literal is valid + no offset input)
     bool
@@ -1131,6 +1181,17 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 
+    // FM Match/RegexMatch bitmaps are supersets, never final predicate results.
+    // Only this path consumes them, with canonical recheck on sealed VARCHAR.
+    bool
+    CanUseFMPatternCandidates();
+
+    bool
+    PinnedIndexIsFMIndex() const;
+
+    std::optional<VectorPtr>
+    ExecFMPatternCandidates(EvalCtx& context);
+
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);
 
@@ -1151,6 +1212,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     // Cached regex objects — constructed once per segment, reused across batches.
     bool regex_cache_inited_{false};
+    bool regex_scan_cache_inited_{false};
     std::unique_ptr<PartialRegexMatcher> cached_regex_matcher_;
     std::string cached_volnitsky_literal_;
     std::unique_ptr<VolnitskySearcher> cached_volnitsky_searcher_;
@@ -1164,11 +1226,21 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
             return;
         auto pattern = GetValueFromProto<std::string>(expr_->val_);
         cached_regex_matcher_ = std::make_unique<PartialRegexMatcher>(pattern);
-        auto lits = index::extract_literals_from_regex(pattern);
-        for (const auto& l : lits) {
-            if (l.size() > cached_volnitsky_literal_.size())
-                cached_volnitsky_literal_ = l;
+    }
+
+    void
+    EnsureRegexScanCache() {
+        EnsureRegexCache();
+        if (regex_scan_cache_inited_ || !cached_regex_matcher_) {
+            return;
         }
+        regex_scan_cache_inited_ = true;
+        // FM candidate rechecks do not use a substring prefilter. Defer its
+        // analysis and 64KB Volnitsky table until raw scanning actually occurs.
+        // Scan selectivity need not come from the FMIndex prefix: a mandatory
+        // suffix in x.*RARE can prune far more rows than the prefix "x".
+        // RequiredLiteral declines syntax it cannot safely analyze.
+        cached_volnitsky_literal_ = cached_regex_matcher_->RequiredLiteral();
         if (!cached_volnitsky_literal_.empty()) {
             cached_volnitsky_searcher_ =
                 std::make_unique<VolnitskySearcher>(cached_volnitsky_literal_);

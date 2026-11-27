@@ -55,16 +55,6 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(req.GetProperties(), req.GetDeleteKeys()); err != nil {
 		return err
 	}
-	if err := common.ValidateRLSProperties(req.GetProperties()...); err != nil {
-		return err
-	}
-	for _, key := range req.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
-			if strings.EqualFold(key, expected) && key != expected {
-				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
-			}
-		}
-	}
 
 	if err := validateNamespaceModeImmutable(req.GetProperties(), req.GetDeleteKeys()); err != nil {
 		return err
@@ -158,20 +148,20 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
-	if err := common.ValidateRLSForceRequiresEnabled(newPropsKeyValuePairs...); err != nil {
-		return err
-	}
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	// TTL field and duration change query visibility. Publish a new schema
+	// snapshot for both WAL admission/history and the legacy QueryNode pipeline.
 	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
 	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	ttlDurationOld, durationOldExists := oldProperties[common.CollectionTTLConfigKey]
+	ttlDurationNew, durationNewExists := newProperties[common.CollectionTTLConfigKey]
+	needTTLDurationSchemaRefresh := durationOldExists != durationNewExists || ttlDurationOld != ttlDurationNew
+	if needTTLFieldSchemaRefresh || needTTLDurationSchemaRefresh {
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -191,8 +181,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// Allocate the version when preparing the DDL, so recovery and append
+		// retries retain the same version in the persisted broadcast payload.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
 		// Preserve ExternalSource/ExternalSpec from current collection state
 		// unless this alter is itself updating them (refresh-completion sync).
@@ -458,6 +450,9 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 }
 
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	if err := c.updateSchemaLoadFields(ctx, result); err != nil {
+		return err
+	}
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 	if err := c.meta.AlterCollection(ctx, result); err != nil {

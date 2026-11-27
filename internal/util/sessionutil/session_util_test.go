@@ -210,6 +210,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		return &sessionWatcher{
 			s:        s,
+			ctx:      s.ctx,
 			prefix:   "test",
 			rewatch:  rewatch,
 			eventCh:  make(chan *SessionEvent, 10),
@@ -593,6 +594,45 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	mlog.Debug(context.TODO(), "session s2 wait done")
 	assert.False(t, s2.isStandby.Load().(bool))
 	s2.Stop()
+}
+
+// A transient etcd error (e.g. leader changed) can be reported for a
+// registration txn that was applied. The retried registration then finds the
+// active key already held by this session's lease and must become active
+// instead of waiting for its own key to be deleted.
+func TestSessionProcessActiveStandBy_ActiveKeyHeldByOwnLease(t *testing.T) {
+	ctx := context.TODO()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
+
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	require.NoError(t, etcdKV.RemoveWithPrefix(ctx, ""))
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	s := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli, WithResueNodeID(false))
+	s.Init("inittest", "testAddr", true)
+	s.SetEnableActiveStandBy(true)
+	s.Register()
+	defer s.Stop()
+
+	// The state left behind by an applied attempt whose response was lost.
+	activeKey := path.Join(metaRoot, DefaultServiceRoot, s.ServerName)
+	resp, err := etcdCli.Put(ctx, activeKey, "applied", clientv3.WithLease(*s.LeaseID))
+	require.NoError(t, err)
+
+	activated := make(chan struct{})
+	go s.ProcessActiveStandBy(func() error {
+		close(activated)
+		return nil
+	})
+	select {
+	case <-activated:
+	case <-time.After(10 * time.Second):
+		t.Fatal("session waits for its own active key instead of becoming active")
+	}
+	assert.False(t, s.isStandby.Load().(bool))
+	assert.Equal(t, resp.Header.GetRevision(), s.GetRegisteredRevision())
 }
 
 func TestSessionEventType_String(t *testing.T) {
@@ -998,4 +1038,55 @@ func TestGetResourceGroupName(t *testing.T) {
 		s := &SessionRaw{ServerLabels: map[string]string{LabelResourceGroup: "my_rg"}}
 		assert.Equal(t, "my_rg", s.GetResourceGroupName())
 	})
+}
+
+func TestLiveSessionsFollowKeepAliveLoop(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("livetest", "testAddr", false)
+	s.Register()
+	_, live := liveSessions.Load(s)
+	require.True(t, live)
+
+	s.Stop()
+	_, live = liveSessions.Load(s)
+	require.False(t, live)
+}
+
+func TestRevokeLeasesBeforeExit(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	defer etcdKV.RemoveWithPrefix(ctx, "")
+
+	// Revoking the lease of a session with a running keepalive loop exits the
+	// process through checkKeepaliveTTL. Other tests leave such sessions behind,
+	// so track only a session registered without a loop.
+	liveSessions.Clear()
+	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s.Init("revoketest", "testAddr", false)
+	require.NoError(t, s.registerService())
+	liveSessions.Store(s, struct{}{})
+	defer liveSessions.Delete(s)
+	sessions, _, err := s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+
+	RevokeLeasesBeforeExit(time.Second)
+
+	// The session key goes with its lease at once, not after the TTL.
+	sessions, _, err = s.GetSessions(ctx, "revoketest")
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+	ttl, err := etcdCli.TimeToLive(ctx, *s.LeaseID)
+	require.NoError(t, err)
+	require.EqualValues(t, -1, ttl.TTL)
 }

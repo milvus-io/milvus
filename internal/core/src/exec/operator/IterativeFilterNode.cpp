@@ -31,7 +31,7 @@
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/QueryResult.h"
@@ -64,7 +64,11 @@ PhyIterativeFilterNode::PhyIterativeFilterNode(
     query_context_ = exec_context->get_query_context();
     std::vector<expr::TypedExprPtr> filters;
     filters.emplace_back(filter->filter());
-    exprs_ = std::make_unique<ExprSet>(filters, exec_context);
+    // This operator reads only the data bits of the predicate output, so
+    // UNKNOWN rows are excluded exactly like FALSE — a null-rejecting
+    // consumer.
+    exprs_ = std::make_unique<ExprSet>(
+        filters, exec_context, /*null_rejecting=*/true);
     const auto& exprs = exprs_->exprs();
     for (const auto& expr : exprs) {
         is_native_supported_ =
@@ -127,13 +131,14 @@ PhyIterativeFilterNode::GetOutput() {
                    "your code");
 
         bool element_level = search_result.element_level_;
-        auto array_offsets = query_context_->get_array_offsets();
+        auto struct_element_offsets =
+            query_context_->get_struct_element_offsets();
 
-        // For element-level, we need array_offsets to convert element_id → doc_id
+        // For element-level, we need struct_element_offsets to convert element_id → doc_id
         if (element_level) {
-            AssertInfo(
-                array_offsets != nullptr,
-                "Array offsets required for element-level iterative filter");
+            AssertInfo(struct_element_offsets != nullptr,
+                       "Struct element offsets required for element-level "
+                       "iterative filter");
         }
 
         int nq_index = 0;
@@ -217,7 +222,8 @@ PhyIterativeFilterNode::GetOutput() {
                             elem_idx = element_id - cached_first_elem;
                         } else {
                             const auto row =
-                                array_offsets->ElementIDToRowInfo(element_id);
+                                struct_element_offsets->ElementIDToRowInfo(
+                                    element_id);
                             doc_id = row.row_id;
                             elem_idx = row.element_index;
                             cached_doc_id = row.row_id;
@@ -262,6 +268,11 @@ PhyIterativeFilterNode::GetOutput() {
                     auto col_vec_size = col_vec->size();
                     TargetBitmapView bitsetview(col_vec->GetRawData(),
                                                 col_vec_size);
+                    // Fold UNKNOWN into FALSE explicitly (data &= valid):
+                    // rows are included below on the data bit alone.
+                    TargetBitmapView validview(col_vec->GetValidRawData(),
+                                               col_vec_size);
+                    bitsetview.inplace_and(validview, col_vec_size);
 
                     if (element_level) {
                         Assert(bitsetview.size() == doc_offsets.size());

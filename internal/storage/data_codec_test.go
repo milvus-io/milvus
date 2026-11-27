@@ -1085,7 +1085,7 @@ func TestInsertCodec(t *testing.T) {
 			Int64Field:     &Int64FieldData{[]int64{}, nil, false},
 			FloatField:     &FloatFieldData{[]float32{}, nil, false},
 			DoubleField:    &DoubleFieldData{[]float64{}, nil, false},
-			StringField:    &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil, false},
+			StringField:    &StringFieldData{Data: []string{}, DataType: schemapb.DataType_VarChar},
 			BinaryVectorField: &BinaryVectorFieldData{
 				Data:      []byte{},
 				ValidData: nil,
@@ -1154,9 +1154,15 @@ func TestInsertCodec(t *testing.T) {
 				Dim:       4,
 				Nullable:  true,
 			},
-			StructSubInt32Field:       &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
-			ArrayField:                &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil, false},
-			JSONField:                 &JSONFieldData{[][]byte{}, nil, false},
+			StructSubInt32Field: &ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data:        []*schemapb.ScalarField{},
+			},
+			ArrayField: &ArrayFieldData{
+				ElementType: schemapb.DataType_Int32,
+				Data:        []*schemapb.ScalarField{},
+			},
+			JSONField:                 &JSONFieldData{Data: [][]byte{}, ValidData: nil, Nullable: false},
 			StructSubFloatVectorField: &VectorArrayFieldData{Dim: 0, ElementType: schemapb.DataType_FloatVector, Data: []*schemapb.VectorField{}},
 		},
 	}
@@ -1630,10 +1636,10 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertData1.Data[NullableBFloat16VectorField].GetMemorySize(), 22)
 	assert.Equal(t, insertData1.Data[NullableInt8VectorField].GetMemorySize(), 18)
 	assert.Equal(t, insertData1.Data[NullableSparseFloatVectorField].GetMemorySize(), 39)
-	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 13)
+	assert.Equal(t, insertData1.Data[ArrayField].GetMemorySize(), 14)
 	assert.Equal(t, insertData1.Data[JSONField].GetMemorySize(), 28)
-	assert.Equal(t, insertData1.Data[StructSubInt32Field].GetMemorySize(), 17)
-	assert.Equal(t, insertData1.Data[StructSubFloatVectorField].GetMemorySize(), 20+1)
+	assert.Equal(t, insertData1.Data[StructSubInt32Field].GetMemorySize(), 18)
+	assert.Equal(t, insertData1.Data[StructSubFloatVectorField].GetMemorySize(), 20+2)
 
 	insertData2 := &InsertData{
 		Data: map[int64]FieldData{
@@ -1784,7 +1790,7 @@ func TestMemorySize(t *testing.T) {
 			Int64Field:     &Int64FieldData{[]int64{}, nil, false},
 			FloatField:     &FloatFieldData{[]float32{}, nil, false},
 			DoubleField:    &DoubleFieldData{[]float64{}, nil, false},
-			StringField:    &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil, false},
+			StringField:    &StringFieldData{Data: []string{}, DataType: schemapb.DataType_VarChar},
 			BinaryVectorField: &BinaryVectorFieldData{
 				Data:      []byte{},
 				ValidData: nil,
@@ -1891,7 +1897,7 @@ func TestMemorySize(t *testing.T) {
 	assert.Equal(t, insertDataEmpty.Data[NullableBFloat16VectorField].GetMemorySize(), 13)
 	assert.Equal(t, insertDataEmpty.Data[NullableInt8VectorField].GetMemorySize(), 13)
 	assert.Equal(t, insertDataEmpty.Data[NullableSparseFloatVectorField].GetMemorySize(), 9)
-	assert.Equal(t, insertDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+1)
+	assert.Equal(t, insertDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0+2)
 }
 
 func TestDeleteData(t *testing.T) {
@@ -1957,7 +1963,7 @@ func TestAddFieldDataToPayload(t *testing.T) {
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{[]string{"test"}, schemapb.DataType_VarChar, nil, false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{Data: []string{"test"}, DataType: schemapb.DataType_VarChar})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_Array, &ArrayFieldData{
 		ElementType: schemapb.DataType_VarChar,
@@ -1968,7 +1974,7 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		}},
 	})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}, nil, false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{Data: [][]byte{[]byte(`"batch":2}`)}, ValidData: nil, Nullable: false})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{
 		Data:      []byte{},
@@ -2045,6 +2051,49 @@ func TestAddFieldDataToPayload_BanNullableArrayOfVector(t *testing.T) {
 	err = AddFieldDataToPayload(w, schemapb.DataType_ArrayOfVector, data)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "nullable ArrayOfVector is not supported in V1 storage format")
+}
+
+func TestAddFieldDataToPayload_BanElementNullableArray(t *testing.T) {
+	data := &ArrayFieldData{
+		ElementType:     schemapb.DataType_Int64,
+		ElementNullable: true,
+		Data: []*schemapb.ScalarField{
+			{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{Data: []int64{1, 0}},
+				},
+				ValidData: []bool{true, false},
+			},
+		},
+	}
+
+	w, err := newInsertEventWriter(schemapb.DataType_Array)
+	require.NoError(t, err)
+	defer w.Close()
+
+	err = AddFieldDataToPayload(w, schemapb.DataType_Array, data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "element nullable Array is not supported in V1 storage format")
+}
+
+func TestAddFieldDataToPayload_BanElementNullableArrayOfVector(t *testing.T) {
+	data := &VectorArrayFieldData{
+		Dim:             4,
+		ElementType:     schemapb.DataType_FloatVector,
+		ElementNullable: true,
+		Data: []*schemapb.VectorField{
+			makeFloatVec(4, 1, 2, 3, 4),
+		},
+	}
+	data.Data[0].ValidData = []bool{true}
+
+	w, err := newInsertEventWriter(schemapb.DataType_ArrayOfVector, WithDim(4), WithElementType(schemapb.DataType_FloatVector))
+	require.NoError(t, err)
+	defer w.Close()
+
+	err = AddFieldDataToPayload(w, schemapb.DataType_ArrayOfVector, data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "element nullable ArrayOfVector is not supported in V1 storage format")
 }
 
 func TestAddInsertData_BanNullableArrayOfVector(t *testing.T) {

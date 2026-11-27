@@ -67,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -77,7 +78,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -107,13 +107,13 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
-	manager               *segments.Manager
-	clusterManager        cluster.Manager
-	pipelineManager       pipeline.Manager
-	subscribingChannels   *typeutil.ConcurrentSet[string]
-	unsubscribingChannels *typeutil.ConcurrentSet[string]
-	delegators            *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
-	serverID              int64
+	manager         *segments.Manager
+	clusterManager  cluster.Manager
+	pipelineManager pipeline.Manager
+	// Serializes channel watch/unwatch through mutation and delta publication.
+	channelOperations *channelOperations
+	delegators        *typeutil.ConcurrentMap[string, delegator.ShardDelegator]
+	serverID          int64
 
 	// segment loader
 	loader segments.Loader
@@ -402,8 +402,7 @@ func (node *QueryNode) Init() error {
 			})
 		})
 		node.delegators = typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
-		node.subscribingChannels = typeutil.NewConcurrentSet[string]()
-		node.unsubscribingChannels = typeutil.NewConcurrentSet[string]()
+		node.channelOperations = newChannelOperations()
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
@@ -470,18 +469,13 @@ func (node *QueryNode) Start() error {
 }
 
 // hasOtherActiveQueryNode checks via session whether there is any other
-// non-stopping query node that can accept migrated data.
+// non-stopping query node, including one embedded in a streaming node. While one
+// exists the cluster is still serving, and the data can be migrated to it or to
+// a replacement node. An error means the answer is unknown.
 func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
-	var sessions map[string]*sessionutil.Session
-	err := retry.Do(node.ctx, func() error {
-		var err error
-		sessions, _, err = node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
-		return err
-	},
-		retry.AttemptAlways(),
-		retry.Sleep(time.Second),
-		retry.RetryErr(func(error) bool { return true }),
-	)
+	ctx, cancel := context.WithTimeout(node.ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	sessions, _, err := node.session.GetSessions(ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return false, err
 	}
@@ -506,9 +500,8 @@ func (node *QueryNode) Stop() error {
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
 			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
-			isStandalone := paramtable.GetRole() == typeutil.StandaloneRole
-			standaloneMigrateTimeout := paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.GetAsDurationByParse()
-			standaloneMigrateDeadline := time.Now().Add(standaloneMigrateTimeout)
+			migrateTimeout := paramtable.Get().QueryNodeCfg.MigrateDataTimeout.GetAsDurationByParse()
+			migrateDeadline := time.Now().Add(migrateTimeout)
 
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
@@ -529,17 +522,18 @@ func (node *QueryNode) Stop() error {
 					break outer
 				}
 
-				// In standalone mode, after the migrate timeout, check if there is any other
-				// active query node (e.g. a new standalone starting up for rolling upgrade).
-				if isStandalone && time.Now().After(standaloneMigrateDeadline) {
+				// After the migrate timeout, stop waiting once every other query node is
+				// stopping too, e.g. the whole cluster is stopping, since no node is left
+				// to take the data. A failed lookup keeps waiting, so a transient etcd
+				// error never skips migration.
+				if time.Now().After(migrateDeadline) {
 					hasOther, err := node.hasOtherActiveQueryNode()
 					if err != nil {
-						break outer
-					}
-					if !hasOther {
-						mlog.Warn(node.ctx, "standalone migrate data stopped due to no active query node available to accept data",
+						mlog.Warn(node.ctx, "failed to check other active query node, keep migrating data", mlog.Err(err))
+					} else if !hasOther {
+						mlog.Warn(node.ctx, "migrate data stopped due to no active query node available to accept data",
 							mlog.FieldNodeID(node.GetNodeID()),
-							mlog.Duration("standaloneMigrateTimeout", standaloneMigrateTimeout),
+							mlog.Duration("migrateTimeout", migrateTimeout),
 							mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 								return s.ID()
 							})),
@@ -634,9 +628,24 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// initHook initializes parameter tuning hook.
+// initHook installs the parameter tuning hook: the one compiled into this
+// binary if a distribution installed one, otherwise the plug-in at
+// queryNode.soPath.
+//
+// A compiled-in hook is used and queryNode.soPath is ignored. The compiled-in
+// hook is otherwise treated exactly as the plug-in is: the same two Init calls
+// with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
+
+	if compiled := extension.InstalledQueryHook(); compiled != nil {
+		if path != "" {
+			mlog.Warn(node.ctx, "queryNode.soPath is ignored, a query hook is compiled into this binary",
+				mlog.String("so_path", path))
+		}
+		return node.useQueryHook(compiled)
+	}
+
 	if path == "" {
 		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
@@ -645,17 +654,23 @@ func (node *QueryNode) initHook() error {
 	if err != nil {
 		return err
 	}
+	return node.useQueryHook(hoo)
+}
 
-	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
+// useQueryHook initializes a query hook with the autoIndex configuration,
+// installs it and watches that configuration on its behalf. It is the same
+// for a plug-in and a compiled-in hook, which is the point: a hook a
+// distribution compiled in must not be a second-class one.
+func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
+	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
-	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
+	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo
 	node.handleQueryHookEvent()
-
 	return nil
 }
 

@@ -424,3 +424,97 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 	err = reader.Close()
 	require.NoError(t, err)
 }
+
+func TestPackedFFIReaderMilvusTableFieldMapping(t *testing.T) {
+	paramtable.Init()
+	dir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "101", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "103", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{11, 12}, nil)
+	builder.Field(1).(*array.Int64Builder).AppendValues([]int64{31, 32}, nil)
+	record := builder.NewRecord()
+	defer record.Release()
+	base := path.Join(dir, "source")
+	writer, err := NewFFIPackedWriter(base, schema, []storagecommon.ColumnGroup{{Columns: []int{0, 1}}}, config, nil)
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteRecordBatch(record))
+	files, err := writer.Close()
+	require.NoError(t, err)
+	defer files.Destroy()
+	source, err := CommitManifestUpdates(base, ManifestEarliest, config, &ManifestUpdates{NewFiles: files})
+	require.NoError(t, err)
+	groups, err := readManifestColumnGroupEntries(source, config, []string{"101", "103"})
+	require.NoError(t, err)
+	for i := range groups {
+		for j := range groups[i].Files {
+			groups[i].Files[j].Properties = map[string]string{
+				"milvus_table.field_id_mapping": `{"101":"103","103":"101"}`,
+			}
+		}
+	}
+	target, err := CommitManifestUpdates(path.Join(dir, "target"), ManifestEarliest, config,
+		&ManifestUpdates{ColumnGroups: groups})
+	require.NoError(t, err)
+	reader, err := NewFFIPackedReader(target, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})
+	require.NoError(t, err)
+	defer reader.Close()
+	got, err := reader.ReadNext()
+	require.NoError(t, err)
+	defer got.Release()
+	require.Equal(t, []int64{31, 32}, got.Column(0).(*array.Int64).Int64Values())
+	require.Equal(t, []int64{11, 12}, got.Column(1).(*array.Int64).Int64Values())
+
+	// Partial read with a full Arrow schema containing an unmapped field whose
+	// target name collides with the mapped physical column name ("103").
+	partialGroups := make([]ColumnGroupEntry, len(groups))
+	for i, group := range groups {
+		files := make([]ColumnGroupFileEntry, len(group.Files))
+		for j, file := range group.Files {
+			file.Properties = map[string]string{
+				"milvus_table.field_id_mapping": `{"101":"103"}`,
+			}
+			files[j] = file
+		}
+		partialGroups[i] = ColumnGroupEntry{
+			Columns: []string{"103"},
+			Format:  group.Format,
+			Files:   files,
+		}
+	}
+	partialTarget, err := CommitManifestUpdates(path.Join(dir, "partial_target"), ManifestEarliest, config,
+		&ManifestUpdates{ColumnGroups: partialGroups})
+	require.NoError(t, err)
+	collidingSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "101", Type: arrow.PrimitiveTypes.Int64, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"})},
+		{Name: "103", Type: arrow.BinaryTypes.String, Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"103"})},
+	}, nil)
+	partialReader, err := NewFFIPackedReader(partialTarget, collidingSchema, []string{"101"}, 8192, config, nil, ExternalReaderContext{})
+	require.NoError(t, err)
+	defer partialReader.Close()
+	partialBatch, err := partialReader.ReadNext()
+	require.NoError(t, err)
+	defer partialBatch.Release()
+	require.Equal(t, []int64{31, 32}, partialBatch.Column(0).(*array.Int64).Int64Values())
+
+	// Non-canonical and unmapped target column names must be rejected.
+	_, err = NewFFIPackedReader(partialTarget, collidingSchema, []string{"0101"}, 8192, config, nil, ExternalReaderContext{})
+	require.Error(t, err)
+	_, err = NewFFIPackedReader(partialTarget, collidingSchema, []string{"999"}, 8192, config, nil, ExternalReaderContext{})
+	require.Error(t, err)
+
+	for i := range groups {
+		for j := range groups[i].Files {
+			groups[i].Files[j].Properties["milvus_table.field_id_mapping"] = `{"101":"103","101":"101"}`
+		}
+	}
+	corrupt, err := CommitManifestUpdates(path.Join(dir, "corrupt"), ManifestEarliest, config,
+		&ManifestUpdates{ColumnGroups: groups})
+	require.NoError(t, err)
+	_, err = NewFFIPackedReader(corrupt, schema, []string{"101", "103"}, 8192, config, nil, ExternalReaderContext{})
+	require.Error(t, err)
+}

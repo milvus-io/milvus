@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -38,6 +39,7 @@ type StatsResolver struct {
 	// Manifest-based (V3)
 	manifestPath  string
 	storageConfig *indexpb.StorageConfig
+	talonStage    uint32
 
 	// Legacy (V2)
 	statslogs     []*datapb.FieldBinlog
@@ -62,10 +64,12 @@ func NewStatsResolver(manifestPath string, storageConfig *indexpb.StorageConfig)
 
 // NewStatsResolverFromLoadInfo creates a fully-populated StatsResolver from a
 // SegmentLoadInfo. This is the preferred constructor for QueryNode call sites.
+// The Talon stage applies only to the manifest lookup, not the returned stats files.
 func NewStatsResolverFromLoadInfo(loadInfo *querypb.SegmentLoadInfo) *StatsResolver {
 	return &StatsResolver{
 		manifestPath:  loadInfo.GetManifestPath(),
 		storageConfig: CreateStorageConfig(),
+		talonStage:    common.TalonStageManifest,
 		statslogs:     loadInfo.GetStatslogs(),
 		bm25Logs:      loadInfo.GetBm25Logs(),
 		textStatsLogs: loadInfo.GetTextStatsLogs(),
@@ -234,6 +238,10 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 // For V3 (manifest): basePaths are extracted from the manifest stat paths.
 // For V2 (legacy): basePaths are empty (backward compat).
 func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr {
+	return r.textAndJSONIndexStatsWithBasePaths(false)
+}
+
+func (r *StatsResolver) textAndJSONIndexStatsWithBasePaths(includeAllJSON bool) *StatsResultWithErr {
 	if !r.isManifest() {
 		return &StatsResultWithErr{
 			StatsResult: StatsResult{
@@ -299,7 +307,7 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			}
 
 		case "json_stats":
-			if _, ok := r.jsonKeyStats[fieldID]; !ok {
+			if _, ok := r.jsonKeyStats[fieldID]; !includeAllJSON && !ok {
 				continue
 			}
 			// For V3: extract basePath and convert to relative paths
@@ -341,6 +349,21 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 	}
 }
 
+// resolveManifestStatsPlaceholders converts the already-resolved stats of a
+// final manifest into the protobuf metadata retained by DataCoord. Unlike the
+// query path, it includes every JSON stat because it is constructing the
+// placeholder map itself rather than using that map as an enablement gate.
+func resolveManifestStatsPlaceholders(
+	manifestPath string,
+	manifestStats map[string]ManifestStat,
+) (map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats) {
+	resolver := NewStatsResolver(manifestPath, nil)
+	resolver.manifestStats = manifestStats
+	resolver.manifestLoaded = true
+	result := resolver.textAndJSONIndexStatsWithBasePaths(true)
+	return result.TextIndexStats, result.JSONKeyStats
+}
+
 // StatsResultWithErr wraps StatsResult with an error.
 type StatsResultWithErr struct {
 	StatsResult
@@ -375,7 +398,7 @@ func (r *StatsResolver) loadManifest() error {
 	}
 	r.manifestLoaded = true
 
-	stats, err := GetManifestStats(r.manifestPath, r.storageConfig)
+	stats, err := GetManifestStats(r.manifestPath, r.storageConfig, r.talonStage)
 	if err != nil {
 		r.manifestErr = merr.Wrap(err, "failed to get manifest stats")
 		return r.manifestErr

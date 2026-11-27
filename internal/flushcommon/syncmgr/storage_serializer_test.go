@@ -153,12 +153,12 @@ func (s *StorageV1SerializerSuite) getBasicPack() *SyncPack {
 
 func (s *StorageV1SerializerSuite) getBfs() *pkoracle.BloomFilterSet {
 	bfs := pkoracle.NewBloomFilterSet()
-	fd, err := storage.NewFieldData(schemapb.DataType_Int64, &schemapb.FieldSchema{
+	fd, err := storage.NewFieldDataBuilder(schemapb.DataType_Int64, &schemapb.FieldSchema{
 		FieldID:      101,
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	}, 16)
+	}).WithCapacity(16).Build()
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}

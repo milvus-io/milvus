@@ -16,7 +16,7 @@ ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Upgrade openssl to fix CVE-2026-45447 (base image is a pinned/legacy ubuntu20.04 build)
 RUN apt-get update && \
-    apt-get upgrade -y openssl libssl1.1 && \
+    apt-get upgrade -y --no-install-recommends openssl libssl1.1 curl libcurl4 tar zlib1g libc6 libc-bin && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
@@ -32,6 +32,8 @@ ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 ENV MALLOC_CONF=background_thread:true
+# Milvus provides task-level parallelism; keep BLAS calls single-threaded by default.
+ENV OPENBLAS_NUM_THREADS=1
 
 # Run as milvus by default; downstream images may select another user at build time.
 USER ${MILVUS_RUNTIME_USER}

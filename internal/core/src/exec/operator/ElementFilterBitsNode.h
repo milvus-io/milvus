@@ -23,7 +23,7 @@
 #include "exec/expression/Expr.h"
 #include "exec/operator/Operator.h"
 #include "exec/QueryContext.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "expr/ITypeExpr.h"
 
 namespace milvus {
@@ -88,13 +88,17 @@ class PhyElementFilterBitsNode : public Operator {
     }
 
  private:
+    friend class ElementFilterBitsNodeCandidateTest;
+
     std::pair<TargetBitmap, TargetBitmap>
-    EvaluateElementExpression(const TargetBitmapView& doc_bitset,
-                              const TargetBitmapView& doc_bitset_valid,
-                              const IArrayOffsets* array_offsets);
+    EvaluateElementExpression(
+        const TargetBitmapView& doc_bitset,
+        const TargetBitmapView& doc_bitset_valid,
+        const IStructElementOffsets* struct_element_offsets);
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;
+    int64_t batch_size_;
     std::string struct_name_;
     bool is_finished_{false};
 };

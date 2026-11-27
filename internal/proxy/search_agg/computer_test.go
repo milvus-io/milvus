@@ -44,7 +44,7 @@ func TestSearchAggregationComputerComputeSingleLevel(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -86,7 +86,7 @@ func TestSearchAggregationComputerComputeWithTopHits(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -148,7 +148,7 @@ func TestSearchAggregationComputerTopHitsSizeBoundaries(t *testing.T) {
 			[]int64{102},
 			[]int64{102},
 		)
-		c := NewSearchAggregationComputer(mkData(), ctx)
+		c := NewSearchAggregationComputer(mkData(), ctx, true)
 		result, err := c.Compute(context.Background())
 		require.NoError(t, err)
 		require.Len(t, result[0], 1)
@@ -169,7 +169,7 @@ func TestSearchAggregationComputerTopHitsSizeBoundaries(t *testing.T) {
 			[]int64{102},
 			[]int64{102},
 		)
-		c := NewSearchAggregationComputer(mkData(), ctx)
+		c := NewSearchAggregationComputer(mkData(), ctx, true)
 		result, err := c.Compute(context.Background())
 		require.NoError(t, err)
 		require.Len(t, result[0], 1)
@@ -188,7 +188,7 @@ func TestSearchAggregationComputerTopHitsSizeBoundaries(t *testing.T) {
 			[]int64{102},
 			[]int64{102},
 		)
-		c := NewSearchAggregationComputer(mkData(), ctx)
+		c := NewSearchAggregationComputer(mkData(), ctx, true)
 		result, err := c.Compute(context.Background())
 		require.NoError(t, err)
 		require.Len(t, result[0], 1)
@@ -253,7 +253,7 @@ func TestSearchAggregationComputerTopHitsSortNullFirst(t *testing.T) {
 				[]int64{102},
 			)
 
-			computer := NewSearchAggregationComputer(mkData(), ctx)
+			computer := NewSearchAggregationComputer(mkData(), ctx, true)
 			result, err := computer.Compute(context.Background())
 			require.NoError(t, err)
 			require.Len(t, result[0], 1)
@@ -295,7 +295,7 @@ func TestSearchAggregationComputerReadsGroupByFromSeparateChannel(t *testing.T) 
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -354,7 +354,7 @@ func TestSearchAggregationComputerNormalizesInt32GroupKey(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
@@ -393,7 +393,7 @@ func TestSearchAggregationComputerNaNDistinctBuckets(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2, "two NaN rows must stay in distinct buckets")
@@ -427,17 +427,17 @@ func TestSearchAggregationComputerNullGrouping(t *testing.T) {
 		FieldsData: nil,
 		GroupByFieldValues: []*schemapb.FieldData{
 			{
-				FieldId:   101,
-				Type:      schemapb.DataType_Int64,
-				ValidData: []bool{false, false},
+				FieldId: 101,
+				Type:    schemapb.DataType_Int64,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
+					ValidData: []bool{false, false},
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{0, 0}}},
 				}},
 			},
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1, "two null rows must merge into a single bucket")
@@ -479,7 +479,7 @@ func TestSearchAggregationComputerStringMinMax(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
@@ -517,7 +517,7 @@ func TestSearchAggregationComputerAvgMetric(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
@@ -543,7 +543,7 @@ func TestSearchAggregationComputerErrorsWhenGroupByMissing(t *testing.T) {
 		GroupByFieldValues: nil,
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	_, err := computer.Compute(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "group-by field 101 missing from group_by_field_values")
@@ -580,7 +580,7 @@ func TestSearchAggregationComputerNQMultiple(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result, 2)
@@ -638,7 +638,7 @@ func TestSearchAggregationComputerMultiLevelNested(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -711,7 +711,7 @@ func TestSearchAggregationComputerCompositeKey(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 3, "three distinct (brand,color) composites expected")
@@ -758,7 +758,7 @@ func TestSearchAggregationComputerSizeTruncation(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2, "Size=2 must truncate C out after sorting")
@@ -795,7 +795,7 @@ func TestSearchAggregationComputerCountAll(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -838,7 +838,7 @@ func TestSearchAggregationComputerScoreMetric(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -875,7 +875,7 @@ func TestSearchAggregationComputerOrderByMetricAlias(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -921,7 +921,7 @@ func TestSearchAggregationComputerNumericMinMax(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -966,7 +966,7 @@ func TestSearchAggregationComputerNullMetricSkipped(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
@@ -1005,7 +1005,7 @@ func TestSearchAggregationComputerAvgAllNull(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
@@ -1048,7 +1048,7 @@ func TestSearchAggregationComputerTopHitsTieBreaker(t *testing.T) {
 				testStringFieldData(101, []string{"A", "A", "A"}),
 			},
 		}
-		c := NewSearchAggregationComputer(data, mkCtx())
+		c := NewSearchAggregationComputer(data, mkCtx(), true)
 		result, err := c.Compute(context.Background())
 		require.NoError(t, err)
 		require.Len(t, result[0], 1)
@@ -1078,7 +1078,7 @@ func TestSearchAggregationComputerTopHitsTieBreaker(t *testing.T) {
 				testStringFieldData(101, []string{"A", "A", "A"}),
 			},
 		}
-		c := NewSearchAggregationComputer(data, mkCtx())
+		c := NewSearchAggregationComputer(data, mkCtx(), true)
 		result, err := c.Compute(context.Background())
 		require.NoError(t, err)
 		require.Len(t, result[0], 1)
@@ -1109,7 +1109,7 @@ func TestSearchAggregationComputerErrorPaths(t *testing.T) {
 
 	t.Run("nil ctx", func(t *testing.T) {
 		t.Parallel()
-		c := NewSearchAggregationComputer(goodData(), nil)
+		c := NewSearchAggregationComputer(goodData(), nil, true)
 		_, err := c.Compute(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "context is nil")
@@ -1118,7 +1118,7 @@ func TestSearchAggregationComputerErrorPaths(t *testing.T) {
 	t.Run("empty levels", func(t *testing.T) {
 		t.Parallel()
 		ctx := newTestAggregationContext(t, 1, nil, nil, nil)
-		c := NewSearchAggregationComputer(goodData(), ctx)
+		c := NewSearchAggregationComputer(goodData(), ctx, true)
 		_, err := c.Compute(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no levels")
@@ -1132,7 +1132,7 @@ func TestSearchAggregationComputerErrorPaths(t *testing.T) {
 			nil,
 			nil,
 		)
-		c := NewSearchAggregationComputer(goodData(), ctx)
+		c := NewSearchAggregationComputer(goodData(), ctx, true)
 		_, err := c.Compute(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid qi")
@@ -1153,7 +1153,7 @@ func TestSearchAggregationComputerErrorPaths(t *testing.T) {
 			nil,
 			[]int64{999},
 		)
-		c := NewSearchAggregationComputer(goodData(), ctx)
+		c := NewSearchAggregationComputer(goodData(), ctx, true)
 		_, err := c.Compute(context.Background())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "field 999 missing from fields_data")
@@ -1233,7 +1233,7 @@ func TestSearchAggregationComputerTopHitsDefaultSortUsesScoreAndPK(t *testing.T)
 		},
 	}
 
-	result, err := NewSearchAggregationComputer(data, ctx).Compute(context.Background())
+	result, err := NewSearchAggregationComputer(data, ctx, true).Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
 	require.Len(t, result[0][0].Hits, 3)
@@ -1274,7 +1274,7 @@ func TestSearchAggregationComputerTopHitsMultiSort(t *testing.T) {
 		},
 	}
 
-	result, err := NewSearchAggregationComputer(data, ctx).Compute(context.Background())
+	result, err := NewSearchAggregationComputer(data, ctx, true).Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 1)
 	require.Len(t, result[0][0].Hits, 3)
@@ -1322,7 +1322,7 @@ func TestSearchAggregationComputerParentAndChildTopHits(t *testing.T) {
 		},
 	}
 
-	result, err := NewSearchAggregationComputer(data, ctx).Compute(context.Background())
+	result, err := NewSearchAggregationComputer(data, ctx, true).Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 2)
 
@@ -1370,10 +1370,10 @@ func TestSearchAggregationComputerInterleavedNullGroupBy(t *testing.T) {
 			// Row sequence:  A | null | B | null | A
 			// ValidData:     t |  f   | t |  f   | t
 			{
-				FieldId:   101,
-				Type:      schemapb.DataType_VarChar,
-				ValidData: []bool{true, false, true, false, true},
+				FieldId: 101,
+				Type:    schemapb.DataType_VarChar,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					ValidData: []bool{true, false, true, false, true},
 					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{
 						Data: []string{"A", "", "B", "", "A"},
 					}},
@@ -1382,7 +1382,7 @@ func TestSearchAggregationComputerInterleavedNullGroupBy(t *testing.T) {
 		},
 	}
 
-	computer := NewSearchAggregationComputer(data, ctx)
+	computer := NewSearchAggregationComputer(data, ctx, true)
 	result, err := computer.Compute(context.Background())
 	require.NoError(t, err)
 	require.Len(t, result[0], 3, "3 distinct buckets: null, A, B — nulls must not merge with A")
@@ -1421,7 +1421,7 @@ func testLongFieldData(fieldID int64, values []int64) *schemapb.FieldData {
 
 func testNullableLongFieldData(fieldID int64, values []int64, validData []bool) *schemapb.FieldData {
 	fd := testLongFieldData(fieldID, values)
-	fd.ValidData = validData
+	fd.GetScalars().ValidData = validData
 	return fd
 }
 

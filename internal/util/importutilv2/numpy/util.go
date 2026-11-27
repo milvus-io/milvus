@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -35,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -54,9 +54,7 @@ var (
 // basename collapse to one entry in both maps.
 func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourced, all map[string]string) {
 	all = lo.SliceToMap(paths, func(path string) (string, string) {
-		nameWithExt := filepath.Base(path)
-		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
-		return name, path
+		return pathFieldName(path), path
 	})
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
@@ -70,6 +68,50 @@ func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourc
 	return sourced, all
 }
 
+// pathFieldName returns the field name a NumPy file is matched by: its
+// basename without extension.
+func pathFieldName(path string) string {
+	nameWithExt := filepath.Base(path)
+	return strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
+}
+
+// checkStructFilePaths rejects a file named after a struct field or one of its
+// sub-fields, which resolveFieldPaths would otherwise skip as redundant and
+// leave the struct rows null. A sub-field is matched by its stored name
+// (struct[sub]) and by its own name (sub). A name that is also a top-level
+// field belongs to that field.
+func checkStructFilePaths(schema *schemapb.CollectionSchema, paths []string) error {
+	if len(schema.GetStructArrayFields()) == 0 {
+		return nil
+	}
+	topLevel := typeutil.NewSet[string]()
+	for _, field := range schema.GetFields() {
+		topLevel.Insert(field.GetName())
+	}
+	structNames := make(map[string]string) // file name -> struct field name
+	for _, structField := range schema.GetStructArrayFields() {
+		structNames[structField.GetName()] = structField.GetName()
+		for _, subField := range structField.GetFields() {
+			structNames[subField.GetName()] = structField.GetName()
+			if name, err := typeutil.ExtractStructFieldName(subField.GetName()); err == nil {
+				structNames[name] = structField.GetName()
+			}
+		}
+	}
+	for _, path := range paths {
+		name := pathFieldName(path)
+		if topLevel.Contain(name) {
+			continue
+		}
+		if structName, ok := structNames[name]; ok {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import does not support struct data: file '%s' names struct field '%s' or one of its sub-fields; use JSON, CSV or Parquet files",
+				path, structName)
+		}
+	}
+	return nil
+}
+
 // SourcePaths returns the paths CreateReaders will open for this schema: those
 // whose basename names a schema field. A caller that inspects a numpy import
 // before reading it must narrow the path set with this first, or it validates
@@ -79,10 +121,13 @@ func SourcePaths(schema *schemapb.CollectionSchema, paths []string) []string {
 	return lo.Values(sourced)
 }
 
-func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (result map[int64]storage.FileReader, err error) {
 	// Paths naming no field are redundant and ignored; only the special "$meta"
 	// field carries dynamic data, and it is a schema field like any other.
-	sourcedPaths, nameToPath := resolveFieldPaths(schema, paths)
+	if err := ValidateSchema(schema, paths); err != nil {
+		return nil, err
+	}
+	sourcedPaths, _ := resolveFieldPaths(schema, paths)
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
@@ -90,62 +135,47 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	// this loop is for "how many fields are provided?"
 	readFields := make(map[string]int64)
 	readers := make(map[int64]storage.FileReader)
+	defer func() {
+		if err != nil {
+			for _, r := range readers {
+				_ = r.Close()
+			}
+		}
+	}()
 	for name, path := range sourcedPaths {
 		field := nameToField[name]
 
-		// auto-id field must not provided
-		if typeutil.IsAutoPKField(field) {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
-		}
-		// validate function output field
-		if field.GetIsFunctionOutput() {
-			if typeutil.IsBM25FunctionOutputField(field, schema) {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
-			}
-			if !pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("not allowed to provide data for function output field '%s', "+
-						"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs))
-			}
-		}
-		// report an error if user provided the files for unsupported fields
-		err := checkUnsupportedDataType(field.GetDataType())
-		if err != nil {
-			return nil, err
-		}
-
 		reader, err := cm.Reader(ctx, path)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
+			// Opening is storage traffic, not file decoding: map it to the same
+			// typed IO error the other readers expose, so a transient outage
+			// stays retriable instead of failing the job as bad input.
+			if merr.IsMilvusError(err) {
+				return nil, err
+			}
+			return nil, storage.ToMilvusIoError(path, err)
 		}
 		retryableReader := common.NewRetryableReaderWithReopen(ctx, path, reader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
-		readers[field.GetFieldID()] = retryableReader
-		readFields[field.GetName()] = field.GetFieldID()
-	}
-
-	// this loop is for "are there any fields not provided?"
-	for _, field := range nameToField {
-		// auto-id field, function output field already checked
-		// dynamic field, nullable field, default value field, not provided or provided both ok
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
-			field.GetNullable() || field.GetDefaultValue() != nil {
-			continue
-		}
-
-		// report an error if the collection contains an unsupported field even user doesn't provide a numpy file for the field
-		err := checkUnsupportedDataType(field.GetDataType())
-		if err != nil {
+		// A .npy source is only readable if its header is well formed; screen the
+		// parser's unchecked assumptions here, where the object path and random
+		// access are already available, so the failure is a normal input error.
+		if _, err := parseHeaderPrefix(retryableReader, path); err != nil {
+			_ = retryableReader.Close()
 			return nil, err
 		}
-
-		// the other field must be provided
-		if _, ok := readers[field.GetFieldID()]; !ok {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
+		// minio's Object.ReadAt moves the object's own offset and leaves the
+		// ranged body consumed. Rewind so npyio's sequential parse starts at
+		// byte 0; without this every well-formed file pays a failed read, a
+		// reopen and a retry backoff on S3/MinIO.
+		if _, err := retryableReader.Seek(0, io.SeekStart); err != nil {
+			_ = retryableReader.Close()
+			if merr.IsMilvusError(err) {
+				return nil, err
+			}
+			return nil, storage.ToMilvusIoError(path, err)
 		}
+		readers[field.GetFieldID()] = retryableReader
+		readFields[field.GetName()] = field.GetFieldID()
 	}
 
 	mlog.Info(ctx, "create numpy readers", mlog.Any("readFields", readFields))

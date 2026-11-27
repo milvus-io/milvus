@@ -24,15 +24,78 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type CipherSuite struct {
 	suite.Suite
+}
+
+type recordingKeyCipher struct {
+	testCipher
+	key     []byte
+	lookups [][2]int64
+}
+
+func (c *recordingKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
+	c.lookups = append(c.lookups, [2]int64{ezID, collectionID})
+	return c.key
+}
+
+func TestWriterPluginContext(t *testing.T) {
+	paramtable.Init()
+	previous := GetCipher()
+	t.Cleanup(func() { storeCipher(previous) })
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	for _, resolver := range []struct {
+		name string
+		get  func() ([]*commonpb.KeyValuePair, error)
+	}{
+		{"direct", func() ([]*commonpb.KeyValuePair, error) { return GetPluginContext(17, 23) }},
+		{"collection properties", func() ([]*commonpb.KeyValuePair, error) { return GetStoragePluginContext(properties, 23) }},
+	} {
+		t.Run(resolver.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name          string
+				missingPlugin bool
+				key           []byte
+			}{
+				{name: "missing plugin", missingPlugin: true},
+				{name: "empty key"},
+				{name: "available key", key: []byte("\x00\xff0123456789abcdef0123456789abcd")},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					cipher := &recordingKeyCipher{key: tc.key}
+					storeCipher(cipher)
+					if tc.missingPlugin {
+						storeCipher(nil)
+					}
+
+					context, err := resolver.get()
+					if tc.key != nil {
+						require.NoError(t, err)
+						require.Equal(t, []*commonpb.KeyValuePair{{
+							Key: CipherConfigUnsafeEZK, Value: "17:" + base64.StdEncoding.EncodeToString(cipher.key),
+						}}, context)
+					} else {
+						require.Nil(t, context)
+						require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+						require.True(t, merr.IsRetryableErr(err))
+						require.NotEqual(t, "true", merr.Status(err).GetExtraInfo()["is_input_error"])
+					}
+					if !tc.missingPlugin {
+						require.Equal(t, [][2]int64{{17, 23}}, cipher.lookups)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestCipherSuite(t *testing.T) {
@@ -264,27 +327,6 @@ func (s *CipherSuite) TestAsMessageConfig() {
 
 	var nilEz *EZ
 	s.Nil(nilEz.AsMessageConfig())
-}
-
-func (s *CipherSuite) TestGetStoragePluginContext() {
-	storeCipher(nil)
-	result := GetStoragePluginContext([]*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}, 2)
-	s.Nil(result)
-
-	InitTestCipher()
-	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
-	result = GetStoragePluginContext(properties, 2)
-	s.NotNil(result)
-	s.Equal(1, len(result))
-	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
-	// Verify encoded format: "1:base64Key"
-	s.Contains(result[0].Value, ":")
-	parts := strings.Split(result[0].Value, ":")
-	s.Equal("1", parts[0])
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
-
-	result = GetStoragePluginContext([]*commonpb.KeyValuePair{}, 2)
-	s.Nil(result)
 }
 
 func (s *CipherSuite) TestRemoveEZByDBProperties() {
@@ -627,21 +669,79 @@ func (s *CipherSuite) TestRemoveEZ() {
 	s.NoError(err)
 }
 
-func (s *CipherSuite) TestGetPluginContext() {
-	storeCipher(nil)
-	result, err := GetPluginContext(123, 456)
-	s.NoError(err)
-	s.Nil(result)
+func TestCollectionWriterContextUsesTargetIdentity(t *testing.T) {
+	paramtable.Init()
+	previous := GetCipher()
+	t.Cleanup(func() { storeCipher(previous) })
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	for _, tc := range []struct {
+		name          string
+		missingPlugin bool
+		key           []byte
+	}{
+		{name: "missing plugin", missingPlugin: true},
+		{name: "empty key"},
+		{name: "available key", key: []byte("\x00\xff0123456789abcdef0123456789abcd")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cipher := &recordingKeyCipher{key: tc.key}
+			storeCipher(cipher)
+			if tc.missingPlugin {
+				storeCipher(nil)
+			}
+			ctx, err := GetCollectionPluginContext(properties, 23)
+			if tc.key != nil {
+				require.NoError(t, err)
+				require.NotNil(t, ctx)
+				require.Equal(t, int64(17), ctx.GetEncryptionZoneId())
+				require.Equal(t, int64(23), ctx.GetCollectionId())
+				require.Equal(t, base64.StdEncoding.EncodeToString(cipher.key), ctx.GetEncryptionKey())
+			} else {
+				require.Nil(t, ctx)
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.True(t, merr.IsRetryableErr(err))
+				require.NotEqual(t, "true", merr.Status(err).GetExtraInfo()["is_input_error"])
+			}
+			if !tc.missingPlugin {
+				require.Equal(t, [][2]int64{{17, 23}}, cipher.lookups)
+			}
 
-	InitTestCipher()
-	result, err = GetPluginContext(123, 456)
-	s.NoError(err)
-	s.NotNil(result)
-	s.Equal(1, len(result))
-	s.Equal(CipherConfigUnsafeEZK, result[0].Key)
-	// Verify encoded format: "123:base64Key"
-	s.Contains(result[0].Value, ":")
-	parts := strings.Split(result[0].Value, ":")
-	s.Equal("123", parts[0])
-	s.Equal(base64.StdEncoding.EncodeToString([]byte("unsafe key")), parts[1])
+			cipher.lookups = nil
+			plain, err := GetCollectionPluginContext(nil, 23)
+			require.NoError(t, err)
+			require.Nil(t, plain)
+			wireContext, err := GetStoragePluginContext(nil, 23)
+			require.NoError(t, err)
+			require.Nil(t, wireContext)
+			require.Empty(t, cipher.lookups, "plaintext collections do not need a writer key")
+		})
+	}
+}
+
+func TestExplicitTaskContextCannotBecomePlaintext(t *testing.T) {
+	paramtable.Init()
+	previous := GetCipher()
+	t.Cleanup(func() { storeCipher(previous) })
+	storeCipher(nil)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	taskContext := []*commonpb.KeyValuePair{{
+		Key: CipherConfigUnsafeEZK, Value: encodeEZContext(17, key),
+	}}
+	t.Run("registration requires a receiver plugin", func(t *testing.T) {
+		err := RegisterEZsFromPluginContext(taskContext)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.True(t, merr.IsRetryableErr(err))
+		require.NoError(t, RegisterEZsFromPluginContext(nil))
+	})
+	t.Run("native context preserves explicit encryption intent", func(t *testing.T) {
+		ctx, err := GetCPluginContext(taskContext, 23)
+		require.NoError(t, err)
+		require.NotNil(t, ctx)
+		require.Equal(t, int64(17), ctx.GetEncryptionZoneId())
+		require.Equal(t, int64(23), ctx.GetCollectionId())
+		require.Equal(t, base64.StdEncoding.EncodeToString(key), ctx.GetEncryptionKey())
+		plain, err := GetCPluginContext(nil, 23)
+		require.NoError(t, err)
+		require.Nil(t, plain)
+	})
 }

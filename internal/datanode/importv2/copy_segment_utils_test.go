@@ -1490,6 +1490,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 				IndexID:               10,
 				BuildID:               1001,
 				IndexName:             "idx_v0",
+				IndexType:             "HNSW_SQ",
 				IndexVersion:          1,
 				SerializedSize:        1024,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
@@ -1522,6 +1523,8 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, indexInfos[2001].GetIndexStorePathVersion())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexInfos[2002].GetIndexStorePathVersion())
+	assert.Equal(t, "HNSW_SQ", indexInfos[2001].GetIndexType())
+	assert.Empty(t, indexInfos[2002].GetIndexType())
 }
 
 func TestCopySegmentAndIndexFiles_ReturnsFileList(t *testing.T) {

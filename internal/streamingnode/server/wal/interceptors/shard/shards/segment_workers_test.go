@@ -296,30 +296,27 @@ func TestSegmentAllocWorker_InitSegmentConfig(t *testing.T) {
 	assert.Equal(t, firstLimitation, w.limitation)
 }
 
-func TestSegmentAllocWorkerStorageVersionFollowsRequirements(t *testing.T) {
+func TestSegmentAllocWorkerUsesConfiguredStorageVersion(t *testing.T) {
 	paramtable.Init()
 	resource.InitForTest(t)
 	param := paramtable.Get()
 	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
 
 	for name, tc := range map[string]struct {
-		useLoonFFI        string
-		requiresStorageV3 bool
-		expected          int64
+		useLoonFFI string
+		expected   int64
 	}{
 		"v2_without_requirement": {useLoonFFI: "false", expected: storage.StorageV2},
-		"v3_required_by_schema":  {useLoonFFI: "false", requiresStorageV3: true, expected: storage.StorageV3},
 		"v3_with_ffi":            {useLoonFFI: "true", expected: storage.StorageV3},
 	} {
 		t.Run(name, func(t *testing.T) {
 			param.Save(param.CommonCfg.UseLoonFFI.Key, tc.useLoonFFI)
 			w := &segmentAllocWorker{
-				ctx:               context.Background(),
-				collectionID:      1,
-				partitionID:       2,
-				vchannel:          "v1",
-				wal:               mock_wal.NewMockWAL(t),
-				requiresStorageV3: tc.requiresStorageV3,
+				ctx:          context.Background(),
+				collectionID: 1,
+				partitionID:  2,
+				vchannel:     "v1",
+				wal:          mock_wal.NewMockWAL(t),
 			}
 			w.SetLogger(mlog.With())
 

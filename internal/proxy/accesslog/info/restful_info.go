@@ -220,6 +220,9 @@ func (i *RestfulInfo) CollectionName() string {
 		// rename references both the source and target collection
 		return fmt.Sprintf("%s->%s", req.GetOldName(), req.GetNewName())
 	case *milvuspb.BatchDescribeCollectionRequest:
+		if len(req.GetCollectionName()) == 0 && len(req.GetCollectionID()) > 0 {
+			return fmt.Sprint(req.GetCollectionID())
+		}
 		return fmt.Sprint(req.GetCollectionName())
 	}
 

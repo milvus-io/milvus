@@ -12,7 +12,9 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -54,6 +56,13 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
 CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateNullStructSubFieldDataArray(
+    const FieldMeta& field_meta,
+    const int32_t* lengths,
+    int64_t count,
+    const std::function<bool(int64_t)>& row_valid);
 
 void
 SetUpScalarFieldData(milvus::proto::schema::ScalarField*& scalar_array,
@@ -158,9 +167,11 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
                           milvus::proto::common::LoadPriority priority);
 
 void
-LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority);
+LoadFieldDatasFromRemote(
+    const std::vector<std::string>& remote_files,
+    FieldDataChannelPtr channel,
+    milvus::proto::common::LoadPriority priority,
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

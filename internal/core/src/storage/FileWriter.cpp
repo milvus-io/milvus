@@ -420,13 +420,16 @@ FileWriter::Finish() {
     return file_size_;
 }
 
-PositionedFileWriter::PositionedFileWriter(std::string filename,
-                                           size_t file_size,
-                                           io::Priority priority)
+PositionedFileWriter::PositionedFileWriter(
+    std::string filename,
+    size_t file_size,
+    io::Priority priority,
+    std::optional<FileWriter::WriteMode> mode)
     : filename_(std::move(filename)),
       file_size_(file_size),
-      mode_(priority == io::Priority::HIGH ? FileWriter::WriteMode::BUFFERED
-                                           : FileWriter::GetMode()),
+      mode_(mode.value_or(priority == io::Priority::HIGH
+                              ? FileWriter::WriteMode::BUFFERED
+                              : FileWriter::GetMode())),
       use_direct_io_(mode_ == FileWriter::WriteMode::DIRECT),
       priority_(priority),
       rate_limiter_(io::WriteRateLimiter::GetInstance()) {

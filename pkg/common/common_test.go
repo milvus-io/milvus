@@ -16,6 +16,45 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func TestParseTalonEnabledStages(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		mask  uint32
+		valid bool
+	}{
+		{value: "all", mask: ^uint32(0), valid: true},
+		{value: " all ", mask: ^uint32(0), valid: true},
+		{value: "load_open", mask: 1, valid: true},
+		{value: " load_open ", mask: 1, valid: true},
+		{value: "load_open, load_open", mask: 1, valid: true},
+		{value: "manifest", mask: 2, valid: true},
+		{value: " manifest, manifest ", mask: 2, valid: true},
+		{value: "load_open, manifest", mask: 3, valid: true},
+		{value: "manifest,load_open", mask: 3, valid: true},
+		{value: ""},
+		{value: " "},
+		{value: "unknown"},
+		{value: "1"},
+		{value: "LOAD_OPEN"},
+		{value: "all,load_open"},
+		{value: "load_open,all"},
+		{value: "all,all"},
+		{value: "load_open,"},
+		{value: ",load_open"},
+		{value: "load_open,unknown"},
+		{value: "all,manifest"},
+		{value: "manifest,all"},
+		{value: "manifest,"},
+		{value: "manifest,unknown"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			mask, valid := ParseTalonEnabledStages(tc.value)
+			assert.Equal(t, tc.valid, valid)
+			assert.Equal(t, tc.mask, mask)
+		})
+	}
+}
+
 func TestIsSystemField(t *testing.T) {
 	type args struct {
 		fieldID int64
@@ -684,119 +723,6 @@ func TestNamespaceShardingEnabled(t *testing.T) {
 			[]string{"other.deleted.key"},
 		)
 		assert.NoError(t, err)
-	})
-}
-
-func TestRLSEnabled(t *testing.T) {
-	t.Run("returns value when set", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"})
-		assert.NoError(t, err)
-		assert.True(t, enabled)
-	})
-
-	t.Run("uses the last duplicate value", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "false"},
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
-		)
-		assert.NoError(t, err)
-		assert.True(t, enabled)
-	})
-
-	t.Run("defaults to false", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: "other.key", Value: "true"})
-		assert.NoError(t, err)
-		assert.False(t, enabled)
-
-		enabled, err = IsRLSEnabled()
-		assert.NoError(t, err)
-		assert.False(t, enabled)
-	})
-
-	t.Run("force returns value and defaults to false", func(t *testing.T) {
-		force, err := IsRLSForce(&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"})
-		assert.NoError(t, err)
-		assert.True(t, force)
-
-		force, err = IsRLSForce()
-		assert.NoError(t, err)
-		assert.False(t, force)
-	})
-
-	t.Run("accepts standard boolean values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
-			assert.NoError(t, err, "value %q should be accepted", value)
-		}
-	})
-
-	t.Run("accepts force values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.NoError(t, err)
-		}
-	})
-
-	t.Run("force requires enabled RLS in effective properties", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"},
-		))
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "false"},
-		))
-		for _, properties := range [][]*commonpb.KeyValuePair{
-			{{Key: RLSForceKey, Value: "true"}},
-			{{Key: RLSEnabledKey, Value: "false"}, {Key: RLSForceKey, Value: "true"}},
-		} {
-			err := ValidateRLSForceRequiresEnabled(properties...)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.ErrorContains(t, err, RLSForceKey+"=true requires "+RLSEnabledKey+"=true")
-		}
-	})
-
-	t.Run("accepts missing key", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSProperties())
-	})
-
-	t.Run("rejects invalid values", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-			for _, value := range []string{"", "invalid", "yes", "2"} {
-				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: value})
-				if assert.Error(t, err, "value %q should be rejected", value) {
-					assert.Contains(t, err.Error(), "invalid")
-					assert.Contains(t, err.Error(), key)
-				}
-			}
-		}
-	})
-
-	t.Run("rejects duplicate RLS properties", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-			err := ValidateRLSProperties(
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
-			)
-			if assert.ErrorIs(t, err, merr.ErrParameterInvalid) {
-				assert.Contains(t, err.Error(), "duplicated collection property")
-				assert.Contains(t, err.Error(), key)
-			}
-		}
-	})
-
-	t.Run("rejects wrong case key", func(t *testing.T) {
-		for expected, variants := range map[string][]string{
-			RLSEnabledKey: {"RLS.ENABLED", "Rls.Enabled", "RLS.enabled"},
-			RLSForceKey:   {"RLS.FORCE", "Rls.Force", "RLS.force"},
-		} {
-			for _, key := range variants {
-				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: "true"})
-				if assert.Error(t, err, "key %q should be rejected", key) {
-					assert.Contains(t, err.Error(), "did you mean")
-					assert.Contains(t, err.Error(), expected)
-				}
-			}
-		}
 	})
 }
 

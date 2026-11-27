@@ -20,10 +20,15 @@ import (
 	"context"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -917,9 +922,13 @@ func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
 	suite.NoError(err)
 
 	// test collection loaded, but its loadType is loadPartition
+	loadPartitionCollection := suite.meta.GetCollection(ctx, suite.collections[1]).Clone()
+	loadPartitionCollection.LoadType = querypb.LoadType_LoadPartition
+	suite.NoError(suite.meta.PutCollectionWithoutSave(ctx, loadPartitionCollection))
+	partitionOfLoadPartitionCollection := int64(1999)
 	req = &querypb.SyncNewCreatedPartitionRequest{
 		CollectionID: suite.collections[1],
-		PartitionID:  newPartition,
+		PartitionID:  partitionOfLoadPartitionCollection,
 	}
 	syncJob = job.NewSyncNewCreatedPartitionJob(
 		ctx,
@@ -932,6 +941,104 @@ func (suite *ServiceSuite) TestSyncNewCreatedPartition() {
 	suite.jobScheduler.Add(syncJob)
 	err = syncJob.Wait()
 	suite.NoError(err)
+	suite.Nil(suite.meta.GetPartition(ctx, partitionOfLoadPartitionCollection))
+}
+
+func (suite *ServiceSuite) runSyncNewCreatedPartitionJob(req *querypb.SyncNewCreatedPartitionRequest) error {
+	syncJob := job.NewSyncNewCreatedPartitionJob(
+		context.Background(),
+		req,
+		suite.meta,
+		suite.broker,
+		suite.targetObserver,
+		suite.targetMgr,
+	)
+	suite.jobScheduler.Add(syncJob)
+	return syncJob.Wait()
+}
+
+func (suite *ServiceSuite) TestSyncNewCreatedPartitionSkipWaitReady() {
+	newPartition := int64(999)
+	ctx := context.Background()
+
+	suite.loadAll()
+	collectionID := suite.collections[0]
+	suite.updateChannelDist(ctx, collectionID)
+	suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
+
+	err := suite.runSyncNewCreatedPartitionJob(&querypb.SyncNewCreatedPartitionRequest{
+		CollectionID:  collectionID,
+		PartitionID:   newPartition,
+		SkipWaitReady: true,
+	})
+	suite.NoError(err)
+	partition := suite.meta.GetPartition(ctx, newPartition)
+	suite.NotNil(partition)
+	suite.Equal(querypb.LoadStatus_Loaded, partition.GetStatus())
+
+	// The target update is still triggered, so the partition becomes queryable.
+	suite.Eventually(func() bool {
+		return suite.targetMgr.IsCurrentTargetExist(ctx, collectionID, newPartition)
+	}, 10*time.Second, 50*time.Millisecond)
+}
+
+// On a CDC secondary, a DropCollection can mark the channel checkpoint dropped
+// before the CreatePartition ack callback retries. The dropped sentinel must not
+// fail the callback, but other errors must, so that the callback retries them.
+func (suite *ServiceSuite) TestSyncNewCreatedPartitionSkipWaitReadyChannelDropped() {
+	newPartition := int64(999)
+
+	suite.loadAll()
+	collectionID := suite.collections[0]
+	req := &querypb.SyncNewCreatedPartitionRequest{
+		CollectionID:  collectionID,
+		PartitionID:   newPartition,
+		SkipWaitReady: true,
+	}
+
+	mockey.PatchConvey("dropped sentinel is acked with no-op", suite.T(), func() {
+		mockey.Mock((*observers.TargetObserver).UpdatePartition).
+			Return(nil, merr.WrapErrChannelDroppedSentinel("dml_0")).Build()
+		assert.NoError(suite.T(), suite.runSyncNewCreatedPartitionJob(req))
+	})
+
+	mockey.PatchConvey("other error is returned", suite.T(), func() {
+		expectedErr := merr.WrapErrServiceNotReady("querycoord", 0, "busy")
+		mockey.Mock((*observers.TargetObserver).UpdatePartition).Return(nil, expectedErr).Build()
+		err := suite.runSyncNewCreatedPartitionJob(req)
+		assert.Error(suite.T(), err)
+		assert.True(suite.T(), errors.Is(err, merr.ErrServiceNotReady))
+	})
+}
+
+// The ack callback adds the partition to the load meta first, so the proxy
+// request finds it there and must still wait until it is queryable.
+func (suite *ServiceSuite) TestSyncNewCreatedPartitionWaitsForExistingPartition() {
+	newPartition := int64(999)
+	ctx := context.Background()
+
+	suite.loadAll()
+	collectionID := suite.collections[0]
+	suite.updateChannelDist(ctx, collectionID)
+	suite.updateSegmentDist(collectionID, 3000, suite.partitions[collectionID]...)
+
+	suite.NoError(suite.meta.PutPartition(ctx, &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{
+			CollectionID: collectionID,
+			PartitionID:  newPartition,
+			Status:       querypb.LoadStatus_Loaded,
+		},
+		LoadPercentage: 100,
+		CreatedAt:      time.Now(),
+	}))
+	suite.False(suite.targetMgr.IsCurrentTargetExist(ctx, collectionID, newPartition))
+
+	err := suite.runSyncNewCreatedPartitionJob(&querypb.SyncNewCreatedPartitionRequest{
+		CollectionID: collectionID,
+		PartitionID:  newPartition,
+	})
+	suite.NoError(err)
+	suite.True(suite.targetMgr.IsCurrentTargetExist(ctx, collectionID, newPartition))
 }
 
 func (suite *ServiceSuite) assertCollectionLoaded(collection int64) {

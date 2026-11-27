@@ -55,10 +55,9 @@ class FieldChunkMetricsTranslatorFromStatistics
         return uid;
     }
 
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(
-        milvus::cachinglayer::cid_t cid) const override {
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
         // TODO(tiered storage 1): provide a better estimation.
         return {{0, 0}, {0, 0}};
     }
@@ -126,10 +125,9 @@ class FieldChunkMetricsTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override {
         return uid;
     }
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(
-        milvus::cachinglayer::cid_t cid) const override {
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
         // TODO(tiered storage 1): provide a better estimation.
         return {{0, 0}, {0, 0}};
     }

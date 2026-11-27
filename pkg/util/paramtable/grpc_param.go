@@ -53,7 +53,7 @@ const (
 	// Grpc Timeout related configs
 	DefaultDialTimeout      = 200
 	DefaultKeepAliveTime    = 10000
-	DefaultKeepAliveTimeout = 20000
+	DefaultKeepAliveTimeout = 2000
 
 	// Grpc retry policy
 	DefaultMaxAttempts                = 10

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -52,10 +54,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DataNodeServicesSuite struct {
@@ -239,7 +243,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 1,
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
-		s.node.compactionExecutor.Enqueue(mockC)
+		s.node.compactionExecutor.Enqueue(mockC, taskcommon.Resource{})
 
 		mockC2 := compactor.NewMockCompactor(s.T())
 		mockC2.EXPECT().GetCompactionType().Return(datapb.CompactionType_MixCompaction)
@@ -252,7 +256,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 2,
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
-		s.node.compactionExecutor.Enqueue(mockC2)
+		s.node.compactionExecutor.Enqueue(mockC2, taskcommon.Resource{})
 
 		s.Eventually(func() bool {
 			stat, err := s.node.GetCompactionState(s.ctx, nil)
@@ -509,6 +513,38 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
+func TestQuerySlotIncludesQueueBudget(t *testing.T) {
+	paramtable.Init()
+	slots := mockey.Mock(index.CalculateNodeSlots).Return(int64(128)).Build()
+	defer slots.UnPatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, nodeTaskCapacity, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	for id := int64(1); id <= 3; id++ {
+		task := index.NewIndexBuildTask(ctx, cancel, &workerpb.CreateJobRequest{
+			ClusterID: "queue-budget", BuildID: id, TaskSlot: 64,
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+		}, nil, node.taskManager, nil, nil, taskcommon.Resource{})
+		require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
+		resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		if id == 3 {
+			require.Zero(t, resp.GetAvailableSlots())
+		} else {
+			require.EqualValues(t, 64, resp.GetAvailableSlots())
+		}
+		if id == 1 {
+			require.Same(t, task, node.taskScheduler.TaskQueue.PopUnissuedTask(true))
+		}
+	}
+}
+
 func (s *DataNodeServicesSuite) TestQuerySlot() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()
@@ -621,6 +657,31 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
+	s.Run("malformed payload is a parameter error", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
+			},
+			Payload: []byte{0xff, 0xff, 0xff},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrParameterInvalid), status.GetCode())
+	})
+
+	s.Run("unrecognized task type is unimplemented", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "no-such-task",
+			},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
+	})
+
 	s.Run("create stats task", func() {
 		statsReq := &workerpb.CreateStatsRequest{
 			StorageConfig: s.storageConfig,
@@ -666,6 +727,81 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		s.Contains(status.GetReason(), "unrecognized task type")
 		s.ErrorIs(merr.CheckRPCCall(status, nil), merr.ErrServiceUnimplemented)
 	})
+}
+
+// TestCreateTaskBooksResourceFromProperties is the end-to-end proof that the
+// estimate DataCoord put in the CreateTask properties reaches the ledger the
+// worker reports back in QuerySlot -- the request payload carries no such
+// fields.
+func TestCreateTaskBooksResourceFromProperties(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	node := newResourceTestNode(t)
+	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	// A scheduler that was never started has no consumer goroutine, so what
+	// CreateTask books stays on the ledger for the assertion. Each case gets a
+	// fresh one so their queued tasks and bookings stay independent.
+	original := node.taskScheduler
+	defer func() { node.taskScheduler = original }()
+	freshScheduler := func() { node.taskScheduler = index.NewTaskScheduler(ctx, nodeTaskCapacity) }
+
+	createIndexTask := func(buildID int64, extra map[string]string) *commonpb.Status {
+		properties := map[string]string{
+			taskcommon.ClusterIDKey: "cluster-0",
+			taskcommon.TypeKey:      taskcommon.Index,
+			taskcommon.TaskIDKey:    strconv.FormatInt(buildID, 10),
+		}
+		for k, v := range extra {
+			properties[k] = v
+		}
+		payload, err := proto.Marshal(&workerpb.CreateJobRequest{
+			BuildID:       buildID,
+			StorageConfig: storageConfig,
+		})
+		assert.NoError(t, err)
+		status, err := node.CreateTask(ctx, &workerpb.CreateTaskRequest{
+			Properties: properties,
+			Payload:    payload,
+		})
+		assert.NoError(t, err)
+		return status
+	}
+
+	t.Run("properties carry the estimate", func(t *testing.T) {
+		freshScheduler()
+		before := node.taskScheduler.TaskQueue.GetUsingResource()
+		status := createIndexTask(9001, map[string]string{
+			taskcommon.CPUKey:    "2",
+			taskcommon.MemoryKey: strconv.FormatInt(1<<30, 10),
+		})
+		assert.NoError(t, merr.CheckRPCCall(status, nil))
+		assert.Equal(t, before.Add(taskcommon.Resource{CPU: 2, Memory: 1 << 30}),
+			node.taskScheduler.TaskQueue.GetUsingResource())
+	})
+
+	t.Run("legacy CreateTask books its slot share at ingress", func(t *testing.T) {
+		freshScheduler()
+		status := createIndexTask(9002, map[string]string{taskcommon.SlotKey: "1"})
+		assert.NoError(t, merr.CheckRPCCall(status, nil))
+		assert.Positive(t, node.taskScheduler.TaskQueue.GetUsingResource().Memory)
+	})
+
+	for _, cpu := range []string{"not-a-number", "-1"} {
+		t.Run("invalid resource cpu="+cpu, func(t *testing.T) {
+			freshScheduler()
+			before := node.taskScheduler.TaskQueue.GetUsingResource()
+			status := createIndexTask(9003, map[string]string{
+				taskcommon.CPUKey:    cpu,
+				taskcommon.MemoryKey: "1024",
+			})
+			err := merr.CheckRPCCall(status, nil)
+			assert.Error(t, err)
+			// A coordinator/worker protocol error, never blamed on user input.
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			// Nothing was booked for a task that never started.
+			assert.Equal(t, before, node.taskScheduler.TaskQueue.GetUsingResource())
+		})
+	}
 }
 
 func (s *DataNodeServicesSuite) TestQueryTask() {
@@ -747,9 +883,10 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 	})
 
 	s.Run("query index task with cost", func() {
-		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, &index.IndexTaskInfo{State: commonpb.IndexState_InProgress})
-		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, 100, 3)
-		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, 180, 80, commonpb.IndexState_Finished, "")
+		attempt := &index.IndexTaskInfo{State: commonpb.IndexState_InProgress}
+		s.node.taskManager.LoadOrStoreIndexTask("cluster-0", 101, attempt)
+		s.node.taskManager.StoreIndexTaskExecutionStart("cluster-0", 101, attempt, 100, 3)
+		s.node.taskManager.StoreIndexTaskExecutionEndWithState("cluster-0", 101, attempt, 180, 80, commonpb.IndexState_Finished, "")
 
 		req := &workerpb.QueryTaskRequest{
 			Properties: map[string]string{
@@ -877,7 +1014,7 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		defer s.node.UpdateStateCode(commonpb.StateCode_Healthy)
 
-		status, err := s.node.copySegment(s.ctx, &datapb.CopySegmentRequest{}, false)
+		status, err := s.node.copySegment(s.ctx, &datapb.CopySegmentRequest{}, false, taskcommon.Resource{})
 		s.NoError(err)
 		s.Error(merr.CheckRPCCall(status, nil))
 	})
@@ -904,7 +1041,7 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 			},
 		}
 
-		status, err := s.node.copySegment(s.ctx, req, false)
+		status, err := s.node.copySegment(s.ctx, req, false, taskcommon.Resource{})
 		s.NoError(merr.CheckRPCCall(status, err))
 	})
 
@@ -933,7 +1070,7 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 			},
 		}
 
-		status, err := s.node.copySegment(s.ctx, req, false)
+		status, err := s.node.copySegment(s.ctx, req, false, taskcommon.Resource{})
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
@@ -961,7 +1098,7 @@ func (s *DataNodeServicesSuite) TestCopySegment() {
 				{SourceRootPath: "s3://foreign-bucket/foreign-root"},
 			},
 		}
-		status, err := s.node.copySegment(s.ctx, req, true)
+		status, err := s.node.copySegment(s.ctx, req, true, taskcommon.Resource{})
 		s.NoError(err)
 		s.Equal(merr.Code(merr.ErrServiceInternal), status.GetCode())
 	})
@@ -1055,6 +1192,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesForeignSo
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
+			_ taskcommon.Resource,
 		) importv2.Task {
 			newTaskCalled = true
 			s.True(proto.Equal(req, gotReq))
@@ -1165,6 +1303,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotResolvesSameBucke
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
+			_ taskcommon.Resource,
 		) importv2.Task {
 			s.True(proto.Equal(req, gotReq))
 			s.Same(sourceCM, gotSourceCM)
@@ -1259,6 +1398,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 			gotCopier storage.CrossBucketCopier,
 			sourceBucket string,
 			targetBucket string,
+			_ taskcommon.Resource,
 		) importv2.Task {
 			sourceStorageConfig = gotSourceStorageConfig
 			s.Same(req, gotReq)
@@ -1272,7 +1412,7 @@ func (s *DataNodeServicesSuite) TestCopySegmentExternalSnapshotUsesRawCredential
 		}).Build()
 	defer mNewTask.UnPatch()
 
-	status, err := s.node.copySegment(s.ctx, req, true)
+	status, err := s.node.copySegment(s.ctx, req, true, taskcommon.Resource{})
 	s.NoError(merr.CheckRPCCall(status, err))
 	s.Len(factoryConfigs, 1)
 	s.Same(targetStorageConfig, factoryConfigs[0])
@@ -1312,7 +1452,7 @@ func (s *DataNodeServicesSuite) TestQueryCopySegment() {
 		},
 	}
 
-	status, err := s.node.copySegment(s.ctx, createReq, false)
+	status, err := s.node.copySegment(s.ctx, createReq, false, taskcommon.Resource{})
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	s.Run("query existing task", func() {
@@ -1360,7 +1500,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment() {
 		},
 	}
 
-	status, err := s.node.copySegment(s.ctx, createReq, false)
+	status, err := s.node.copySegment(s.ctx, createReq, false, taskcommon.Resource{})
 	s.NoError(merr.CheckRPCCall(status, err))
 
 	s.Run("drop existing task", func() {
@@ -1421,7 +1561,7 @@ func (s *DataNodeServicesSuite) TestDropCopySegment_CleanupLogic() {
 			}},
 		}
 
-		status, err := s.node.copySegment(s.ctx, createReq, false)
+		status, err := s.node.copySegment(s.ctx, createReq, false, taskcommon.Resource{})
 		s.NoError(merr.CheckRPCCall(status, err))
 
 		// Verify task exists
@@ -1580,7 +1720,7 @@ func (s *DataNodeServicesSuite) TestCreateRefreshExternalCollectionTaskReturnsUp
 		Return([]*datapb.SegmentInfo{patched}).Build()
 	defer mockUpdated.UnPatch()
 
-	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, req)
+	status, err := s.node.createRefreshExternalCollectionTask(s.ctx, req, taskcommon.Resource{})
 	s.NoError(err)
 	s.True(merr.Ok(status))
 	select {
@@ -1897,7 +2037,7 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 		{
 			name: "copy segment",
 			call: func() (*commonpb.Status, error) {
-				return node.copySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig}, false)
+				return node.copySegment(ctx, &datapb.CopySegmentRequest{TaskID: 6, StorageConfig: storageConfig}, false, taskcommon.Resource{})
 			},
 		},
 	}
@@ -1912,4 +2052,213 @@ func TestChunkManagerFailureDoesNotLogStorageAccessKey(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), accessKey)
 	assert.Contains(t, logs.String(), "audit-bucket")
+}
+
+func TestQuerySlotResourceReport(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	t.Run("node not healthy", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		resp, err := node.QuerySlot(ctx, nil)
+		assert.NoError(t, err)
+		assert.False(t, merr.Ok(resp.GetStatus()))
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
+		ctx := context.Background()
+		resp, err := node.QuerySlot(ctx, nil)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int64(16), resp.GetTotalCpu())
+		assert.Equal(t, int64(64)<<30, resp.GetTotalMemory())
+		// Nothing is booked on a fresh node, so everything is available.
+		assert.Equal(t, resp.GetTotalCpu(), resp.GetAvailableCpu())
+		assert.Equal(t, resp.GetTotalMemory(), resp.GetAvailableMemory())
+		assert.True(t, resp.GetIdle())
+	})
+
+	t.Run("CPU overcommit is reported while memory remains available", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
+		// A detached executor: nothing consumes its task channel, so the
+		// booking stays put for the duration of the assertion.
+		node.compactionExecutor = compactor.NewExecutor()
+		mockC := compactor.NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(int64(9527))
+		mockC.EXPECT().GetSlotUsage().Return(int64(8))
+		succeed, err := node.compactionExecutor.Enqueue(mockC, taskcommon.Resource{CPU: 20, Memory: 8 << 30})
+		assert.True(t, succeed)
+		assert.NoError(t, err)
+
+		resp, err := node.QuerySlot(context.Background(), nil)
+		assert.Equal(t, 1, memMock.Times())
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int64(16), resp.GetTotalCpu())
+		assert.Equal(t, int64(-4), resp.GetAvailableCpu())
+		assert.Equal(t, int64(64)<<30, resp.GetTotalMemory())
+		assert.Equal(t, int64(56)<<30, resp.GetAvailableMemory())
+	})
+
+	t.Run("a running refresh task is subtracted", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
+		if node.externalCollectionManager != nil {
+			node.externalCollectionManager.Close()
+		}
+		node.externalCollectionManager = external.NewExternalCollectionManager(ctx, 1)
+		defer node.externalCollectionManager.Close()
+		unblock := make(chan struct{})
+		started := make(chan struct{})
+		err := node.externalCollectionManager.SubmitTask("cluster",
+			&datapb.RefreshExternalCollectionTaskRequest{TaskID: 300, CollectionID: 100},
+			taskcommon.Resource{CPU: 1, Memory: 1 << 30},
+			func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+				close(started)
+				<-unblock
+				return &datapb.RefreshExternalCollectionTaskResponse{}, nil
+			})
+		assert.NoError(t, err)
+		// Hold execution open while querying its booking.
+		<-started
+
+		resp, err := node.QuerySlot(context.Background(), nil)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int64(15), resp.GetAvailableCpu())
+		assert.Equal(t, int64(63)<<30, resp.GetAvailableMemory())
+
+		close(unblock)
+		assert.Eventually(t, func() bool {
+			resp, err := node.QuerySlot(context.Background(), nil)
+			return err == nil && resp.GetAvailableMemory() == int64(64)<<30
+		}, time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("only task bookings consume the worker memory budget", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(16) << 30).Build()
+		defer memMock.UnPatch()
+		usedMock := mockey.Mock(hardware.GetUsedMemoryCount).Return(uint64(9) << 30).Build()
+		defer usedMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.DataNodeRole).Build()
+		defer roleMock.UnPatch()
+
+		node.compactionExecutor = compactor.NewExecutor()
+		for i, wantGiB := range []int64{16, 10, 4, 0} {
+			if i > 0 {
+				task := compactor.NewMockCompactor(t)
+				task.EXPECT().GetPlanID().Return(int64(i))
+				task.EXPECT().GetSlotUsage().Return(int64(1))
+				ok, err := node.compactionExecutor.Enqueue(task, taskcommon.Resource{CPU: 1, Memory: 6 << 30})
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			resp, err := node.QuerySlot(context.Background(), nil)
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(resp.GetStatus()))
+			require.Equal(t, wantGiB<<30, resp.GetAvailableMemory())
+			require.Equal(t, i == 0, resp.GetIdle())
+		}
+	})
+
+	t.Run("standalone discounts the totals", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		resp, err := node.QuerySlot(context.Background(), nil)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int64(4), resp.GetTotalCpu())
+		assert.Equal(t, int64(16)<<30, resp.GetTotalMemory())
+		// Idle is independent of the standalone discount.
+		assert.True(t, resp.GetIdle())
+	})
+
+	t.Run("standalone floors cpu at one core", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(2).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(8) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		resp, err := node.QuerySlot(context.Background(), nil)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		// 2 * 0.25 rounds down to 0; the floor keeps a whole core offered.
+		assert.Equal(t, int64(1), resp.GetTotalCpu())
+		assert.Equal(t, int64(2)<<30, resp.GetTotalMemory())
+	})
+
+	t.Run("a zero standalone factor retains positive capacity", func(t *testing.T) {
+		node := newResourceTestNode(t)
+		cpuMock := mockey.Mock(hardware.GetCPUNum).Return(16).Build()
+		defer cpuMock.UnPatch()
+		memMock := mockey.Mock(hardware.GetMemoryCount).Return(uint64(64) << 30).Build()
+		defer memMock.UnPatch()
+		roleMock := mockey.Mock(paramtable.GetRole).Return(typeutil.StandaloneRole).Build()
+		defer roleMock.UnPatch()
+
+		key := paramtable.Get().DataNodeCfg.StandaloneSlotRatio.Key
+		paramtable.Get().Save(key, "0")
+		defer paramtable.Get().Reset(key)
+
+		resp, err := node.QuerySlot(context.Background(), nil)
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		// A reporting worker retains a positive capacity in both dimensions.
+		assert.Equal(t, int64(1), resp.GetTotalMemory())
+		assert.Equal(t, int64(1), resp.GetTotalCpu())
+		assert.True(t, resp.GetIdle())
+	})
+}
+
+// Resource reporting and request bookkeeping need only the executors, not node
+// registration, storage services or segcore initialization.
+func newResourceTestNode(t *testing.T) *DataNode {
+	t.Helper()
+	ctx := context.Background()
+	node := NewDataNode(ctx)
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, nodeTaskCapacity, importv3.NewMetrics(1))
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	t.Cleanup(func() {
+		node.cancel()
+		node.taskScheduler.Close()
+		node.importV3Scheduler.Close()
+		node.externalCollectionManager.Close()
+	})
+	return node
 }

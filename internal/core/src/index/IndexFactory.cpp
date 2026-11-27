@@ -19,6 +19,7 @@
 #include <assert.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -43,6 +44,7 @@
 #include "index/JsonFlatIndex.h"
 #include "index/JsonHybridScalarIndex.h"
 #include "index/JsonScalarIndexWrapper.h"
+#include "index/FMIndex.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/RTreeIndex.h"
@@ -84,6 +86,9 @@ ScalarIndexStreamMemoryOverhead(
     }
     if (scalar_version < 3) {
         return index_size_in_bytes;
+    }
+    if (file_stream && stream_load_info.has_value()) {
+        return stream_load_info->positioned_total_transient_bytes;
     }
     size_t total_transient_bytes;
     size_t max_task_transient_bytes;
@@ -730,9 +735,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
              ? stream_load_info->encrypted
              : milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
                    nullptr);
-    auto file_stream = index_type == milvus::index::INVERTED_INDEX_TYPE ||
-                       index_type == milvus::index::NGRAM_INDEX_TYPE ||
-                       index_type == milvus::index::RTREE_INDEX_TYPE;
+    auto file_stream = index_type != milvus::index::BITMAP_INDEX_TYPE &&
+                       index_type != milvus::index::HYBRID_INDEX_TYPE;
     auto stream_memory_overhead =
         ScalarIndexStreamMemoryOverhead(index_size_in_bytes,
                                         scalar_version,
@@ -813,6 +817,37 @@ IndexFactory::ScalarIndexLoadResourceImpl(
         request.final_disk_cost = index_size_in_bytes;
         request.max_memory_cost = stream_memory_overhead;
         request.max_disk_cost = index_size_in_bytes;
+        request.has_raw_data = false;
+    } else if (index_type == milvus::index::FMINDEX_INDEX_TYPE) {
+        // FM-index is a single flat blob. A LoadView (mmap) load views every
+        // serialized array in place — wavelet words, sampled bitvector,
+        // sampled-SA values, doc boundaries; nothing is heap-copied. What the
+        // load DOES rebuild on the heap is the rank directories plus small
+        // derived vectors and the wrapper's null bitmap. At the default
+        // fm_block_bytes=64 the wavelet rank directory is roughly 1/8 of its
+        // packed words, so index_size can substantially overstate steady heap
+        // usage, especially when per-row document boundaries dominate the
+        // blob. Keep index_size as the deliberately conservative pre-load
+        // admission/peak bound; after LoadView succeeds FMIndex replaces the
+        // cache cell's memory_bytes with its measured resident heap while
+        // retaining file_bytes.
+        if (mmap_enable) {
+            request.final_memory_cost = index_size_in_bytes;
+            request.final_disk_cost = index_size_in_bytes;
+            request.max_memory_cost =
+                index_size_in_bytes + stream_memory_overhead;
+            request.max_disk_cost = index_size_in_bytes;
+        } else {
+            // Deserialize MOVES the reader entry buffer into owned_blob_ (no
+            // intermediate copies), so the resident set is the owned blob (~1x)
+            // plus the rebuilt rank directories (~1x blob): both steady and
+            // peak are ~2x. (Without the move overload the peak was ~4x from
+            // three simultaneous full copies.)
+            request.final_memory_cost = 2 * index_size_in_bytes;
+            request.final_disk_cost = 0;
+            request.max_memory_cost = 2 * index_size_in_bytes;
+            request.max_disk_cost = 0;
+        }
         request.has_raw_data = false;
     } else if (index_type == milvus::index::BITMAP_INDEX_TYPE) {
         if (mmap_enable) {
@@ -921,18 +956,38 @@ IndexFactory::ScalarIndexLoadResource(
     auto use_shared_group =
         scalar_version >= 3 &&
         resolved_index_type != milvus::index::BITMAP_INDEX_TYPE &&
-        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE;
-    if (use_shared_memory_overhead_group != nullptr) {
-        *use_shared_memory_overhead_group = use_shared_group;
+        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE &&
+        resolved_index_type != milvus::index::RTREE_INDEX_TYPE;
+    auto request = ScalarIndexLoadResourceImpl(field_type,
+                                               index_version,
+                                               index_size_in_bytes,
+                                               resolved_params,
+                                               mmap_enable,
+                                               num_rows,
+                                               inspected_stream_load_info);
+    if (scalar_version >= 3 && inspected_stream_load_info.has_value() &&
+        inspected_stream_load_info->retained_sidecar_bytes != 0 &&
+        resolved_index_type != milvus::index::BITMAP_INDEX_TYPE &&
+        resolved_index_type != milvus::index::HYBRID_INDEX_TYPE) {
+        // ReadEntry's payload and the destination offset vector coexist outside
+        // the downloading worker while the family / JSON wrapper initializes.
+        const auto staging = storage::SaturatingMultiply(
+            inspected_stream_load_info->retained_sidecar_bytes, size_t{2});
+        request.max_memory_cost = std::max<uint64_t>(
+            request.max_memory_cost,
+            SaturatingAdd(request.final_memory_cost,
+                          SaturatingAdd(inspected_stream_load_info
+                                            ->positioned_total_transient_bytes,
+                                        staging)));
+        use_shared_group = false;
     }
-
-    return ScalarIndexLoadResourceImpl(field_type,
-                                       index_version,
-                                       index_size_in_bytes,
-                                       resolved_params,
-                                       mmap_enable,
-                                       num_rows,
-                                       inspected_stream_load_info);
+    if (use_shared_memory_overhead_group != nullptr) {
+        *use_shared_memory_overhead_group =
+            use_shared_group && inspected_stream_load_info.has_value() &&
+            request.max_memory_cost - request.final_memory_cost <=
+                inspected_stream_load_info->positioned_total_transient_bytes;
+    }
+    return request;
 }
 
 IndexBasePtr
@@ -986,6 +1041,11 @@ IndexFactory::CreatePrimitiveScalarIndex(
             if (ngram_params.has_value()) {
                 return std::make_unique<NgramInvertedIndex>(
                     file_manager_context, ngram_params.value());
+            }
+            auto& fmindex_params = create_index_info.fmindex_params;
+            if (fmindex_params.has_value()) {
+                return std::make_unique<FMIndex>(file_manager_context,
+                                                 fmindex_params.value());
             }
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
@@ -1107,7 +1167,8 @@ IndexFactory::CreateJsonIndex(
         }
     }
 
-    // Inverted / NGram (existing paths)
+    // Inverted / NGram (existing paths). FMINDEX is VARCHAR-only in this
+    // release — JSON string paths are a follow-up — so it never reaches here.
     AssertInfo(
         index_type == INVERTED_INDEX_TYPE || index_type == NGRAM_INDEX_TYPE,
         "Invalid index type for json index: {}",

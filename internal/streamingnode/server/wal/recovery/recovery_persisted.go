@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -63,6 +64,11 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		segmentAssign, err := catalog.ListSegmentAssignment(ctx, channelInfo.Name)
 		if err != nil {
 			return struct{}{}, errors.Wrap(err, "failed to get segment assignment from catalog")
+		}
+		for _, segment := range segmentAssign {
+			if err := storagecommon.ValidateSegmentStorageVersion(segment.GetSegmentId(), segment.GetStorageVersion()); err != nil {
+				return struct{}{}, err
+			}
 		}
 		r.segments = newSegmentRecoveryInfoFromSegmentAssignmentMeta(segmentAssign)
 		r.Logger().Info(ctx, "recover segment info done", mlog.Int("segments", len(r.segments)))

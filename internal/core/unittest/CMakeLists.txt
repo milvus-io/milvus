@@ -12,6 +12,9 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if(USE_TSAN)
+    add_subdirectory(tsan)
+endif()
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -54,6 +57,7 @@ set(MILVUS_TEST_FILES
         test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_aws_runtime.cpp
         test_plugin_loader.cpp
         test_gcp_chunk_manager.cpp
         test_string_expr.cpp
@@ -118,16 +122,6 @@ else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
 endif()
 
-if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
-endif()
-
 add_compile_definitions(
         MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
         MILVUS_UNIT_TEST)
@@ -153,6 +147,7 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
+        AWS::aws-crt-cpp
         )
 
 # Link plan parser library using full path and set RPATH
@@ -162,6 +157,19 @@ set_target_properties(all_tests PROPERTIES
         BUILD_RPATH "${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
         )
+
+milvus_check_aws_runtime(all_tests)
+
+if (LINUX)
+    add_test(NAME aws_runtime_link_check
+        COMMAND ${CMAKE_COMMAND}
+            -DCHECK_SCRIPT=${MILVUS_SOURCE_DIR}/cmake/CheckAwsRuntime.cmake
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DNM=${CMAKE_NM}
+            -DSTRIP=${CMAKE_STRIP}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/aws-runtime-link-check
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_aws_runtime_test.cmake)
+endif()
 
 install(TARGETS all_tests DESTINATION unittest)
 

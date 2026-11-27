@@ -29,6 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -45,12 +48,15 @@ type CopySegmentCheckerSuite struct {
 	catalog  *mocks.DataCoordCatalog
 	alloc    *allocator.MockAllocator
 	broker   *broker.MockBroker
-	meta     *meta
-	copyMeta CopySegmentMeta
-	checker  *copySegmentChecker
+	meta     *meta.Meta
+	dm       *index.IndexTestMetas
+	copyMeta copysegment.CopySegmentMeta
+	checker  *copysegment.Checker
 }
 
 func (s *CopySegmentCheckerSuite) SetupTest() {
+	dm := &domainMetas{}
+
 	var err error
 
 	s.collectionID = 1
@@ -75,23 +81,24 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, s.broker, loadDomainMetas(s.catalog, nil, dm))
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
+	s.dm = &index.IndexTestMetas{IndexMeta: dm.indexMeta}
+	s.meta.AddCollection(&meta.CollectionInfo{
 		ID:     s.collectionID,
-		Schema: newTestSchema(),
+		Schema: meta.NewTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
+	s.copyMeta, err = copysegment.NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, s.dm.IndexMeta, nil, nil)
 	s.NoError(err)
 
-	s.checker = NewCopySegmentChecker(
+	s.checker = copysegment.NewCopySegmentChecker(
 		context.TODO(),
 		s.meta,
 		s.broker,
 		s.alloc,
 		s.copyMeta,
-	).(*copySegmentChecker)
+	).(*copysegment.Checker)
 }
 
 func (s *CopySegmentCheckerSuite) TearDownTest() {
@@ -106,21 +113,21 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoIdMappings() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 
 	// Create a job with no id mappings
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   nil,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Check pending job
-	s.checker.checkPendingJob(job)
+	s.checker.CheckPendingJob(job)
 
 	// Job should be completed since there are no segments to copy
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -141,14 +148,14 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_CreateTasks() {
 		{SourceSegmentId: 3, TargetSegmentId: 103, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
@@ -159,7 +166,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_CreateTasks() {
 	defer Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("10")
 
 	// Check pending job
-	s.checker.checkPendingJob(job)
+	s.checker.CheckPendingJob(job)
 
 	// Job should be in executing state
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -196,27 +203,27 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_ResumesPartialTaskCreation
 		{SourceSegmentId: 3, TargetSegmentId: 103, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
 	// Pre-existing task from the failed round covers the first two mappings.
-	partialTask := &copySegmentTask{
-		tr:    timerecord.NewTimeRecorder("test task"),
-		times: taskcommon.NewTimes(),
+	partialTask := &copysegment.Task{
+		Tr:    timerecord.NewTimeRecorder("test task"),
+		Times: taskcommon.NewTimes(),
 	}
-	partialTask.task.Store(&datapb.CopySegmentTask{
+	partialTask.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
-		NodeId:       NullNodeID,
+		NodeId:       meta.NullNodeID,
 		TaskSlot:     1,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
 		IdMappings:   idMappings[:2],
@@ -226,7 +233,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_ResumesPartialTaskCreation
 	Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("2")
 	defer Params.DataCoordCfg.MaxSegmentsPerCopyTask.SwapTempValue("10")
 
-	s.checker.checkPendingJob(job)
+	s.checker.CheckPendingJob(job)
 
 	// Job must reach Executing.
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -257,33 +264,33 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_AllTasksExistTransitionsTo
 		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
-	fullTask := &copySegmentTask{
-		tr:    timerecord.NewTimeRecorder("test task"),
-		times: taskcommon.NewTimes(),
+	fullTask := &copysegment.Task{
+		Tr:    timerecord.NewTimeRecorder("test task"),
+		Times: taskcommon.NewTimes(),
 	}
-	fullTask.task.Store(&datapb.CopySegmentTask{
+	fullTask.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
-		NodeId:       NullNodeID,
+		NodeId:       meta.NullNodeID,
 		TaskSlot:     1,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskPending,
 		IdMappings:   idMappings,
 	})
 	s.NoError(s.copyMeta.AddTask(context.TODO(), fullTask))
 
-	s.checker.checkPendingJob(job)
+	s.checker.CheckPendingJob(job)
 
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
@@ -302,7 +309,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurr
 	// the allocator mock has no expectation and would fail the test).
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 
-	staleJob := &copySegmentJob{
+	staleJob := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
@@ -311,7 +318,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurr
 				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
 
@@ -319,10 +326,10 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_StaleSnapshotDoesNotResurr
 	// is replaced with a Failed clone; `staleJob` keeps its Pending state and
 	// plays the stale snapshot below.
 	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
-		UpdateCopyJobReason("task failed concurrently")))
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		copysegment.UpdateCopyJobReason("task failed concurrently")))
 
-	s.checker.checkPendingJob(staleJob)
+	s.checker.CheckPendingJob(staleJob)
 
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
@@ -340,7 +347,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:          s.jobID,
 			CollectionId:   s.collectionID,
@@ -349,19 +356,19 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 			CopiedSegments: 0,
 			TotalSegments:  2,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create tasks - one completed, one in progress
-	task1 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task1"),
-		times:    taskcommon.NewTimes(),
+	task1 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task1"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task1.task.Store(&datapb.CopySegmentTask{
+	task1.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -371,12 +378,12 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 	err = s.copyMeta.AddTask(context.TODO(), task1)
 	s.NoError(err)
 
-	task2 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task2"),
-		times:    taskcommon.NewTimes(),
+	task2 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task2"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task2.task.Store(&datapb.CopySegmentTask{
+	task2.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1002,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -387,7 +394,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_UpdateProgress() {
 	s.NoError(err)
 
 	// Check copying job
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Job progress should be updated
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -404,26 +411,26 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_MarkFailed() {
 		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a failed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -435,7 +442,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_MarkFailed() {
 	s.NoError(err)
 
 	// Check copying job
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Job should be marked as failed
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -451,7 +458,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create segments
-	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+	seg1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            101,
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
@@ -467,26 +474,26 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err = s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a completed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -497,7 +504,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksCompleted() {
 	s.NoError(err)
 
 	// Check copying job
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Job should be completed
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -510,26 +517,26 @@ func (s *CopySegmentCheckerSuite) TestCheckFailedJob_MarkTasksFailed() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	// Create a failed job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
 			Reason:       "job failed",
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a pending task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -539,7 +546,7 @@ func (s *CopySegmentCheckerSuite) TestCheckFailedJob_MarkTasksFailed() {
 	s.NoError(err)
 
 	// Check failed job
-	s.checker.checkFailedJob(job)
+	s.checker.CheckFailedJob(job)
 
 	// Task should be marked as failed
 	updatedTask := s.copyMeta.GetTask(context.TODO(), 1001)
@@ -552,21 +559,21 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob() {
 
 	// Create a job with timeout in the past
 	timeoutTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			TimeoutTs:    timeoutTs,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Try timeout job
-	s.checker.tryTimeoutJob(job)
+	s.checker.TryTimeoutJob(job)
 
 	// Job should be marked as failed
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -582,20 +589,20 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_FiresWithProductionTimeoutTs
 	// a hybrid TSO, so no job ever timed out.
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			// Same composition as the creation path in snapshot_manager, with
 			// an already-elapsed deadline.
-			TimeoutTs: CopyJobTimeoutTs(-time.Minute),
+			TimeoutTs: copysegment.CopyJobTimeoutTs(-time.Minute),
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
-	s.checker.tryTimeoutJob(job)
+	s.checker.TryTimeoutJob(job)
 
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
@@ -606,18 +613,18 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_NotElapsedKeepsExecuting() {
 	// A freshly composed production deadline must NOT trigger the timeout.
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(1)
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			TimeoutTs:    CopyJobTimeoutTs(time.Hour),
+			TimeoutTs:    copysegment.CopyJobTimeoutTs(time.Hour),
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), job))
 
-	s.checker.tryTimeoutJob(job)
+	s.checker.TryTimeoutJob(job)
 
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobExecuting, updatedJob.GetState())
@@ -631,37 +638,37 @@ func (s *CopySegmentCheckerSuite) TestCheckGC_RemoveCompletedJob() {
 
 	// Create a completed job with cleanup time in the past
 	cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(-1 * time.Hour))
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
 			CleanupTs:    cleanupTs,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a completed task with no node ID
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-		NodeId:       NullNodeID,
+		NodeId:       meta.NullNodeID,
 	})
 	err = s.copyMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 
 	// Check GC
-	s.checker.checkGC(job)
+	s.checker.CheckGC(job)
 
 	// Job and task should be removed
 	removedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
@@ -675,14 +682,14 @@ func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(3)
 
 	// Create jobs in different states
-	jobs := []*copySegmentJob{
+	jobs := []*copysegment.Job{
 		{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:        100,
 				CollectionId: s.collectionID,
 				State:        datapb.CopySegmentJobState_CopySegmentJobPending,
 			},
-			tr: timerecord.NewTimeRecorder("job1"),
+			Tr: timerecord.NewTimeRecorder("job1"),
 		},
 		{
 			CopySegmentJob: &datapb.CopySegmentJob{
@@ -690,7 +697,7 @@ func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 				CollectionId: s.collectionID,
 				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			},
-			tr: timerecord.NewTimeRecorder("job2"),
+			Tr: timerecord.NewTimeRecorder("job2"),
 		},
 		{
 			CopySegmentJob: &datapb.CopySegmentJob{
@@ -698,7 +705,7 @@ func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 				CollectionId: s.collectionID,
 				State:        datapb.CopySegmentJobState_CopySegmentJobCompleted,
 			},
-			tr: timerecord.NewTimeRecorder("job3"),
+			Tr: timerecord.NewTimeRecorder("job3"),
 		},
 	}
 
@@ -708,7 +715,7 @@ func (s *CopySegmentCheckerSuite) TestLogJobStats() {
 	}
 
 	// Convert to interface slice
-	jobInterfaces := make([]CopySegmentJob, len(jobs))
+	jobInterfaces := make([]copysegment.CopySegmentJob, len(jobs))
 	for i, job := range jobs {
 		jobInterfaces[i] = job
 	}
@@ -723,39 +730,39 @@ func (s *CopySegmentCheckerSuite) TestLogTaskStats() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(4)
 
 	// Create tasks in different states
-	tasks := []*copySegmentTask{
+	tasks := []*copysegment.Task{
 		{
-			copyMeta: s.copyMeta,
-			tr:       timerecord.NewTimeRecorder("task1"),
-			times:    taskcommon.NewTimes(),
+			CopyMeta: s.copyMeta,
+			Tr:       timerecord.NewTimeRecorder("task1"),
+			Times:    taskcommon.NewTimes(),
 		},
 		{
-			copyMeta: s.copyMeta,
-			tr:       timerecord.NewTimeRecorder("task2"),
-			times:    taskcommon.NewTimes(),
+			CopyMeta: s.copyMeta,
+			Tr:       timerecord.NewTimeRecorder("task2"),
+			Times:    taskcommon.NewTimes(),
 		},
 		{
-			copyMeta: s.copyMeta,
-			tr:       timerecord.NewTimeRecorder("task3"),
-			times:    taskcommon.NewTimes(),
+			CopyMeta: s.copyMeta,
+			Tr:       timerecord.NewTimeRecorder("task3"),
+			Times:    taskcommon.NewTimes(),
 		},
 		{
-			copyMeta: s.copyMeta,
-			tr:       timerecord.NewTimeRecorder("task4"),
-			times:    taskcommon.NewTimes(),
+			CopyMeta: s.copyMeta,
+			Tr:       timerecord.NewTimeRecorder("task4"),
+			Times:    taskcommon.NewTimes(),
 		},
 	}
 
-	tasks[0].task.Store(&datapb.CopySegmentTask{
+	tasks[0].Task.Store(&datapb.CopySegmentTask{
 		TaskId: 1, JobId: s.jobID, State: datapb.CopySegmentTaskState_CopySegmentTaskPending,
 	})
-	tasks[1].task.Store(&datapb.CopySegmentTask{
+	tasks[1].Task.Store(&datapb.CopySegmentTask{
 		TaskId: 2, JobId: s.jobID, State: datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
 	})
-	tasks[2].task.Store(&datapb.CopySegmentTask{
+	tasks[2].Task.Store(&datapb.CopySegmentTask{
 		TaskId: 3, JobId: s.jobID, State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 	})
-	tasks[3].task.Store(&datapb.CopySegmentTask{
+	tasks[3].Task.Store(&datapb.CopySegmentTask{
 		TaskId: 4, JobId: s.jobID, State: datapb.CopySegmentTaskState_CopySegmentTaskFailed,
 	})
 
@@ -785,7 +792,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segments in Importing state
-	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+	seg1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            101,
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
@@ -801,26 +808,26 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 	}
 
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			IdMappings:   idMappings,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 
 	err = s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a completed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -831,7 +838,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	s.NoError(err)
 
 	// Finish job
-	s.checker.finishJob(job, 100)
+	s.checker.FinishJob(job, 100)
 
 	// Target segment should be in Flushed state
 	segment := s.meta.GetSegment(context.TODO(), 101)
@@ -848,7 +855,7 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
 	jobID := int64(100)
 
 	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -856,14 +863,14 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Completed() {
 			SnapshotName:       snapshotName,
 			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Completed via atomic meta method
 	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted))
 	s.NoError(err)
 
 	// Verify: Ref count is released
@@ -874,7 +881,7 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
 	jobID := int64(101)
 
 	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -882,14 +889,14 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Failed() {
 			SnapshotName:       snapshotName,
 			State:              datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Failed via atomic meta method
 	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed))
 	s.NoError(err)
 
 	// Verify: Ref count is released
@@ -900,7 +907,7 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
 	jobID := int64(102)
 
 	// Setup: Create job and increment ref count
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -908,14 +915,14 @@ func (s *CopySegmentCheckerSuite) TestUpdateJobStateAndReleaseRef_Executing() {
 			SnapshotName:       snapshotName,
 			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Update job to Executing (non-terminal state) via atomic meta method
 	err := s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobExecuting))
 	s.NoError(err)
 
 	// Verify: Ref count is NOT released
@@ -926,7 +933,7 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesRef() {
 	jobID := int64(200)
 
 	// Setup: Create job with no ID mappings
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -935,13 +942,13 @@ func (s *CopySegmentCheckerSuite) TestCheckPendingJob_NoMappings_ReleasesRef() {
 			State:              datapb.CopySegmentJobState_CopySegmentJobPending,
 			IdMappings:         []*datapb.CopySegmentIDMapping{}, // Empty
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil)
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Execute: Check pending job
-	s.checker.checkPendingJob(job)
+	s.checker.CheckPendingJob(job)
 
 	// Verify: Job marked as Completed and ref released
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
@@ -959,7 +966,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Setup: Create job in Executing state with all tasks completed
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -970,12 +977,12 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Create segments for target segment ID mapping
-	segment := &SegmentInfo{
+	segment := &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            101,
 			State:         commonpb.SegmentState_Growing,
@@ -987,11 +994,12 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 	s.meta.AddSegment(context.TODO(), segment)
 
 	// Create a completed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		meta:     s.meta,
-		tr:       timerecord.NewTimeRecorder("test task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta:  s.copyMeta,
+		Meta:      s.meta,
+		IndexMeta: s.dm.IndexMeta,
+		Tr:        timerecord.NewTimeRecorder("test task"),
+		Times:     taskcommon.NewTimes(),
 	}
 	taskProto := &datapb.CopySegmentTask{
 		TaskId:       1001,
@@ -1000,11 +1008,11 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_AllTasksDone_ReleasesRef()
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
 	// Execute: Check copying job
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Verify: Job marked as Completed and ref released
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
@@ -1020,7 +1028,7 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Setup: Create job in Executing state with a failed task
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -1031,16 +1039,17 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Create a failed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		meta:     s.meta,
-		tr:       timerecord.NewTimeRecorder("test task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta:  s.copyMeta,
+		Meta:      s.meta,
+		IndexMeta: s.dm.IndexMeta,
+		Tr:        timerecord.NewTimeRecorder("test task"),
+		Times:     taskcommon.NewTimes(),
 	}
 	taskProto := &datapb.CopySegmentTask{
 		TaskId:       1002,
@@ -1050,11 +1059,11 @@ func (s *CopySegmentCheckerSuite) TestCheckCopyingJob_FailedTask_ReleasesRef() {
 		Reason:       "test failure",
 		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
 	// Execute: Check copying job - should detect failed task and mark job as Failed
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Verify: Job marked as Failed and ref released
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
@@ -1073,7 +1082,7 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("etcd unavailable"))
 
 	// Setup: Create job in Executing state
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:              jobID,
 			CollectionId:       s.collectionID,
@@ -1084,12 +1093,12 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 				{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.copyMeta.AddJob(context.TODO(), job)
 
 	// Create target segment in Growing state (needs flush to Flushed)
-	segment := &SegmentInfo{
+	segment := &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:            101,
 			State:         commonpb.SegmentState_Growing,
@@ -1101,11 +1110,12 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.meta.AddSegment(context.TODO(), segment)
 
 	// Create a completed task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		meta:     s.meta,
-		tr:       timerecord.NewTimeRecorder("test task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta:  s.copyMeta,
+		Meta:      s.meta,
+		IndexMeta: s.dm.IndexMeta,
+		Tr:        timerecord.NewTimeRecorder("test task"),
+		Times:     taskcommon.NewTimes(),
 	}
 	taskProto := &datapb.CopySegmentTask{
 		TaskId:       1001,
@@ -1114,11 +1124,11 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 		State:        datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		IdMappings:   []*datapb.CopySegmentIDMapping{{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10}},
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	s.copyMeta.AddTask(context.TODO(), task)
 
 	// Execute: Check copying job - flush will fail due to AlterSegments error
-	s.checker.checkCopyingJob(job)
+	s.checker.CheckCopyingJob(job)
 
 	// Verify: Job marked as Failed (not Completed) due to flush failure
 	updatedJob := s.copyMeta.GetJob(context.TODO(), jobID)
@@ -1140,25 +1150,25 @@ func (s *CopySegmentCheckerSuite) TestTryTimeoutJob_DoesNotOverwriteTerminalJob(
 	// not reach the catalog.
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 
-	staleJob := &copySegmentJob{
+	staleJob := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
-			TimeoutTs:    CopyJobTimeoutTs(-time.Minute),
+			TimeoutTs:    copysegment.CopyJobTimeoutTs(-time.Minute),
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	s.NoError(s.copyMeta.AddJob(context.TODO(), staleJob))
 
 	// A concurrent path (finishJob in the same checker round) completes the job
 	// after the snapshot was taken.
 	s.NoError(s.copyMeta.UpdateJobStateAndReleaseRef(context.TODO(), s.jobID,
-		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
-		UpdateCopyJobTotalRows(123)))
+		copysegment.UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobCompleted),
+		copysegment.UpdateCopyJobTotalRows(123)))
 
 	// tryTimeoutJob still holds the stale Executing snapshot with an elapsed deadline.
-	s.checker.tryTimeoutJob(staleJob)
+	s.checker.TryTimeoutJob(staleJob)
 
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobCompleted, updatedJob.GetState())

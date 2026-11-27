@@ -17,13 +17,25 @@
 package storage
 
 import (
+	"context"
+	"fmt"
+	"math"
 	"testing"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestBuildStatsFromFieldBinlogs_Empty(t *testing.T) {
@@ -594,4 +606,245 @@ func TestStatisticsCollector_FormatsDigestPublishCloneRestore(t *testing.T) {
 	// Restore accumulates new formats
 	restored.Digest(fb3, nil, 0, 30, 21, 30)
 	assert.Equal(t, []string{"lance", "orc", "parquet"}, restored.Publish().GetFormats())
+}
+
+func validElementBinlog(groupID int64, members []int64, counts ...map[int64]int64) map[int64]*datapb.FieldBinlog {
+	fb := &datapb.FieldBinlog{FieldID: groupID, ChildFields: members}
+	for _, c := range counts {
+		fb.Binlogs = append(fb.Binlogs, &datapb.Binlog{EntriesNum: 10, MemorySize: 100, FieldValidElementCounts: c})
+	}
+	return map[int64]*datapb.FieldBinlog{groupID: fb}
+}
+
+func TestBuildStatsFromFieldBinlogs_ValidElementCounts(t *testing.T) {
+	fieldBinlogs := func(groups ...map[int64]*datapb.FieldBinlog) []*datapb.FieldBinlog {
+		var out []*datapb.FieldBinlog
+		for _, g := range groups {
+			for _, fb := range g {
+				out = append(out, fb)
+			}
+		}
+		return out
+	}
+	// Summed across binlogs, zero kept.
+	s := BuildStatsFromFieldBinlogs(fieldBinlogs(
+		validElementBinlog(0, []int64{100, 101}, nil, nil),
+		validElementBinlog(102, []int64{102}, map[int64]int64{102: 3}, map[int64]int64{102: 4}),
+		validElementBinlog(103, []int64{103}, map[int64]int64{103: 0}),
+	), nil, nil, nil)
+	assert.Equal(t, map[int64]int64{102: 7, 103: 0}, s.GetValidElementCounts())
+
+	// One binlog of the field without a count (written before counts were
+	// recorded): unknown, so no entry.
+	s = BuildStatsFromFieldBinlogs(fieldBinlogs(
+		validElementBinlog(102, []int64{102}, nil, map[int64]int64{102: 4}),
+		validElementBinlog(103, []int64{103}, map[int64]int64{103: 2}),
+	), nil, nil, nil)
+	assert.Equal(t, map[int64]int64{103: 2}, s.GetValidElementCounts())
+
+	// The same field in another FieldBinlog without counts is unknown too.
+	s = BuildStatsFromFieldBinlogs(fieldBinlogs(
+		validElementBinlog(102, []int64{102}, map[int64]int64{102: 4}),
+		validElementBinlog(0, []int64{100, 102}, nil),
+	), nil, nil, nil)
+	assert.Empty(t, s.GetValidElementCounts())
+}
+
+func TestStatisticsCollector_ValidElementCounts(t *testing.T) {
+	t.Run("counted syncs accumulate and survive restore", func(t *testing.T) {
+		c := NewStatisticsCollector()
+		c.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 3}), nil, 0, 10, 1, 2)
+		c.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 0}), nil, 0, 10, 3, 4)
+		s := c.Publish()
+		assert.Equal(t, map[int64]int64{102: 3}, s.GetValidElementCounts())
+
+		restored := NewStatisticsCollectorFromStats(s, 20)
+		restored.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 5}), nil, 0, 10, 5, 6)
+		assert.Equal(t, map[int64]int64{102: 8}, restored.Publish().GetValidElementCounts())
+
+		cloned := restored.Clone()
+		cloned.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 1}), nil, 0, 10, 7, 8)
+		assert.Equal(t, map[int64]int64{102: 8}, restored.Publish().GetValidElementCounts())
+		assert.Equal(t, map[int64]int64{102: 9}, cloned.Publish().GetValidElementCounts())
+	})
+
+	t.Run("a sync without the count makes it unknown for good", func(t *testing.T) {
+		c := NewStatisticsCollector()
+		c.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 3}), nil, 0, 10, 1, 2)
+		c.Digest(validElementBinlog(102, []int64{102}, nil), nil, 0, 10, 3, 4)
+		assert.Empty(t, c.Publish().GetValidElementCounts())
+		c.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 5}), nil, 0, 10, 5, 6)
+		assert.Empty(t, c.Publish().GetValidElementCounts())
+		// After a restore the field has data (null_counts) but no count.
+		restored := NewStatisticsCollectorFromStats(c.Publish(), 30)
+		restored.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 5}), nil, 0, 10, 7, 8)
+		assert.Empty(t, restored.Publish().GetValidElementCounts())
+	})
+
+	t.Run("data written before counts were recorded", func(t *testing.T) {
+		old := NewStatisticsCollector()
+		old.Digest(validElementBinlog(102, []int64{102}, nil), nil, 0, 10, 1, 2)
+		restored := NewStatisticsCollectorFromStats(old.Publish(), 10)
+		restored.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 5}), nil, 0, 10, 3, 4)
+		assert.Empty(t, restored.Publish().GetValidElementCounts())
+	})
+
+	t.Run("one binlog of a sync without the count", func(t *testing.T) {
+		c := NewStatisticsCollector()
+		c.Digest(validElementBinlog(102, []int64{102}, map[int64]int64{102: 3}, nil), nil, 0, 20, 1, 2)
+		assert.Empty(t, c.Publish().GetValidElementCounts())
+	})
+}
+
+func TestVectorArrayValidElementCount(t *testing.T) {
+	const fieldID = int64(102)
+	field := &schemapb.FieldSchema{
+		FieldID: fieldID, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 101, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{field},
+		}},
+	}
+	vec := func(valid []bool, data ...float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim: 2, ValidData: valid,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}},
+		}
+	}
+	rows := []any{
+		vec([]bool{true, false, true}, 1, 2, 3, 4), // 2 valid of 3
+		nil,                       // null struct row
+		vec(nil),                  // empty array
+		vec([]bool{false, false}), // all elements null
+		vec([]bool{true}, 5, 6),   // 1 valid
+	}
+	values := make([]*Value, 0, len(rows))
+	for i, row := range rows {
+		values = append(values, &Value{Value: map[FieldID]any{100: int64(i), fieldID: row}})
+	}
+	record, err := ValueSerializer(values, schema)
+	require.NoError(t, err)
+	defer record.Release()
+
+	n, ok := VectorArrayValidElementCount(record.Column(fieldID))
+	require.True(t, ok)
+	assert.EqualValues(t, 3, n)
+
+	// A sliced column counts only its own rows.
+	sliced := array.NewSlice(record.Column(fieldID), 2, 5)
+	defer sliced.Release()
+	n, ok = VectorArrayValidElementCount(sliced)
+	require.True(t, ok)
+	assert.EqualValues(t, 1, n)
+
+	_, ok = VectorArrayValidElementCount(record.Column(100))
+	assert.False(t, ok)
+
+	counts, unknown := CollectVectorArrayValidElements(schema, record, nil, nil)
+	assert.Equal(t, map[FieldID]int64{fieldID: 3}, counts)
+	assert.Empty(t, unknown)
+	counts, _ = CollectVectorArrayValidElements(schema, record, counts, unknown)
+	assert.Equal(t, map[FieldID]int64{fieldID: 6}, counts)
+	assert.Equal(t, map[int64]int64{fieldID: 6},
+		ColumnGroupValidElementCounts(storagecommon.ColumnGroup{GroupID: fieldID, Fields: []int64{fieldID}}, counts))
+	assert.Nil(t, ColumnGroupValidElementCounts(storagecommon.ColumnGroup{GroupID: 0, Fields: []int64{100}}, counts))
+}
+
+// The packed writers record the valid element count of every VectorArray
+// field on the binlog of its column group (StorageV2 and V3).
+func TestPackedWritersRecordValidElementCounts(t *testing.T) {
+	const (
+		pkID    = int64(100)
+		vecID   = int64(102)
+		plainID = int64(103)
+	)
+	dim := []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}
+	schema := &schemapb.CollectionSchema{
+		Name: "valid_element_counts",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			{FieldID: pkID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 101, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: vecID, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true, TypeParams: dim,
+				},
+				{
+					FieldID: plainID, Name: "s[plain]", DataType: schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector, Nullable: true, TypeParams: dim,
+				},
+			},
+		}},
+	}
+	vec := func(valid []bool, data ...float32) *schemapb.VectorField {
+		return &schemapb.VectorField{
+			Dim: 2, ValidData: valid,
+			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}},
+		}
+	}
+	type row struct{ en, plain any }
+	rows := []row{
+		{vec([]bool{true, false, true}, 1, 2, 3, 4), vec(nil, 1, 2, 3, 4)},
+		{nil, nil},           // null struct row
+		{vec(nil), vec(nil)}, // empty arrays
+		{vec([]bool{false, false}), vec(nil, 5, 6)},
+	}
+	values := make([]*Value, 0, len(rows))
+	for i, r := range rows {
+		values = append(values, &Value{Value: map[FieldID]any{
+			common.RowIDField: int64(i), common.TimeStampField: int64(1000), pkID: int64(i), vecID: r.en, plainID: r.plain,
+		}})
+	}
+	want := map[int64]int64{vecID: 2, plainID: 3}
+
+	for _, version := range []int64{StorageV2, StorageV3} {
+		t.Run(fmt.Sprintf("storage v%d", version), func(t *testing.T) {
+			dir := t.TempDir()
+			paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+			paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, dir)
+			defer func() {
+				paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+				paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+			}()
+			config := &indexpb.StorageConfig{RootPath: dir, StorageType: "local"}
+			record, err := ValueSerializer(values, schema)
+			require.NoError(t, err)
+			defer record.Release()
+			opts := []RwOption{
+				WithVersion(version), WithStorageConfig(config),
+				WithUploader(func(context.Context, map[string][]byte) error { return nil }),
+			}
+			if version == StorageV3 {
+				opts = append(opts, WithWriterFormat("parquet"))
+			}
+			w, err := NewBinlogRecordWriter(context.Background(), 1, 2, 3, schema,
+				allocator.NewLocalAllocator(1, math.MaxInt64), 1<<20, int64(len(values)), opts...)
+			require.NoError(t, err)
+			require.NoError(t, w.Write(record))
+			require.NoError(t, w.Close())
+			fieldBinlogs, _, _, _, _ := w.GetLogs()
+
+			got := make(map[int64]int64)
+			for _, fb := range fieldBinlogs {
+				for _, l := range fb.GetBinlogs() {
+					for f, n := range l.GetFieldValidElementCounts() {
+						got[f] += n
+					}
+					for f := range l.GetFieldValidElementCounts() {
+						assert.Contains(t, fb.GetChildFields(), f)
+					}
+				}
+			}
+			assert.Equal(t, want, got)
+			stats := BuildStatsFromFieldBinlogs(lo.Values(fieldBinlogs), nil, nil, nil)
+			assert.Equal(t, want, stats.GetValidElementCounts())
+		})
+	}
 }

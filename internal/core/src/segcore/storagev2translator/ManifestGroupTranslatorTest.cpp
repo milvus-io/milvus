@@ -328,7 +328,10 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
 
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
-        auto [loading, storage] = translator->estimated_byte_size_of_cell(i);
+        auto [loading, private_overhead, shared_overhead] =
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
+        const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
             EXPECT_GT(storage.file_bytes, 0) << "cid=" << i;
@@ -337,6 +340,34 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
             EXPECT_GT(storage.memory_bytes, 0) << "cid=" << i;
         }
     }
+
+    std::vector<cachinglayer::cid_t> estimate_cids{0};
+    if (translator->num_cells() > 1) {
+        estimate_cids.push_back(translator->num_cells() - 1);
+    }
+    int64_t expected_batch_bytes = 0;
+    for (const auto cid : estimate_cids) {
+        expected_batch_bytes += static_cast<GroupCTMeta*>(translator->meta())
+                                    ->chunk_memory_size_[cid];
+    }
+    const auto batch = translator->estimated_loading_usage(estimate_cids);
+    EXPECT_EQ(
+        batch.resident,
+        (use_mmap ? cachinglayer::ResourceUsage{0, expected_batch_bytes}
+                  : cachinglayer::ResourceUsage{expected_batch_bytes, 0}));
+    // The scalar group contains ARRAY fields, whose memory scratch is doubled.
+    const cachinglayer::ResourceUsage expected_overhead{
+        2 * expected_batch_bytes, use_mmap ? expected_batch_bytes : 0};
+    EXPECT_EQ(batch.private_overhead + batch.shared_overhead,
+              expected_overhead);
+    EXPECT_EQ(batch.shared_overhead,
+              translator->meta()->loading_overhead_config
+                  ? expected_overhead
+                  : cachinglayer::ResourceUsage{});
+    const auto empty = translator->estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 
     // get_cells — load all cells
     std::vector<cachinglayer::cid_t> cids;
@@ -403,7 +434,10 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
 
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
-        auto [loading, storage] = translator->estimated_byte_size_of_cell(i);
+        auto [loading, private_overhead, shared_overhead] =
+            translator->estimated_loading_usage(
+                {static_cast<cachinglayer::cid_t>(i)});
+        const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
         } else {
@@ -1221,3 +1255,162 @@ TEST_P(ManifestGroupTranslatorTest, TestRowGroupRangesCoverage) {
 INSTANTIATE_TEST_SUITE_P(ManifestGroupTranslator,
                          ManifestGroupTranslatorTest,
                          testing::Bool());
+
+// One physical Struct column, with deterministic sizes for each estimate path.
+class StructProjectionTestReader : public milvus_storage::api::ChunkReader {
+ public:
+    explicit StructProjectionTestReader(int estimate_mode,
+                                        bool missing_child = false)
+        : estimate_mode_(estimate_mode) {
+        arrow::Int64Builder builder;
+        EXPECT_TRUE(builder.AppendValues({11, 22}).ok());
+        auto values = builder.Finish().ValueOrDie();
+        auto items = arrow::StructArray::Make(
+                         missing_child ? arrow::ArrayVector{values}
+                                       : arrow::ArrayVector{values, values},
+                         missing_child ? std::vector<std::string>{"a"}
+                                       : std::vector<std::string>{"a", "b"})
+                         .ValueOrDie();
+        batch_ = arrow::RecordBatch::Make(
+            arrow::schema({arrow::field("items", items->type())}), 2, {items});
+    }
+    size_t
+    total_number_of_chunks() const override {
+        return 1;
+    }
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>&) override {
+        return std::vector<int64_t>{0};
+    }
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t) override {
+        return batch_;
+    }
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>&, size_t) override {
+        return std::vector<std::shared_ptr<arrow::RecordBatch>>{batch_};
+    }
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        return std::vector<uint64_t>{2};
+    }
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        if (estimate_mode_ > 1)
+            return arrow::Status::NotImplemented("no total estimate");
+        return std::vector<uint64_t>{100};
+    }
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        if (estimate_mode_ > 0)
+            return arrow::Status::NotImplemented("no column estimate");
+        return std::vector<std::vector<uint64_t>>{{100}};
+    }
+
+ private:
+    int estimate_mode_;
+    std::shared_ptr<arrow::RecordBatch> batch_;
+};
+
+TEST_P(ManifestGroupTranslatorTest,
+       StructProjectionSelectedChildrenAndEstimates) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("pk");
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+    for (int count : {1, 2}) {
+        std::vector<FieldId> selected{FieldId(201)};
+        if (count == 2)
+            selected.emplace_back(202);
+        std::unordered_map<FieldId, FieldMeta> metas;
+        for (auto id : selected) metas.emplace(id, (*schema)[id]);
+        for (int mode : {0, 1, 2, 3}) {
+            SCOPED_TRACE(testing::Message()
+                         << "children=" << count << " mode=" << mode);
+            ManifestGroupTranslator translator(
+                segment_id_,
+                GroupChunkType::DEFAULT,
+                0,
+                std::make_shared<StructProjectionTestReader>(mode, count == 1),
+                metas,
+                std::vector<std::string>{"items"},
+                std::vector<std::string>{"items"},
+                GetParam(),
+                true,
+                mmap_dir_,
+                count,
+                milvus::proto::common::LoadPriority::LOW,
+                true,
+                "",
+                "",
+                mode == 2 ? 10 : 0,
+                "",
+                std::nullopt,
+                MmapChunkWritebackMode::Disabled,
+                {},
+                schema->GetOrdinaryStructProjections(selected));
+            auto* meta = static_cast<GroupCTMeta*>(translator.meta());
+            const int64_t base_size = mode < 2 ? 100 : (mode == 2 ? 20 : 8192);
+            EXPECT_EQ(meta->chunk_memory_size_,
+                      std::vector<int64_t>{base_size * count});
+            auto cells = translator.get_cells(nullptr, {0});
+            ASSERT_EQ(cells.size(), 1);
+            ASSERT_NE(cells[0].second->GetChunk(FieldId(201)), nullptr);
+            EXPECT_EQ(cells[0].second->GetChunk(FieldId(201))->RowNums(), 2);
+            EXPECT_EQ(cells[0].second->GetChunk(FieldId(202)) != nullptr,
+                      count == 2);
+        }
+    }
+    std::vector<FieldId> selected{FieldId(201), FieldId(202)};
+    std::unordered_map<FieldId, FieldMeta> metas;
+    for (auto id : selected) metas.emplace(id, (*schema)[id]);
+    auto make = [&](OrdinaryStructProjections projections, bool missing_child) {
+        return std::make_unique<ManifestGroupTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            0,
+            std::make_shared<StructProjectionTestReader>(0, missing_child),
+            metas,
+            std::vector<std::string>{"items"},
+            std::vector<std::string>{"items"},
+            GetParam(),
+            true,
+            mmap_dir_,
+            2,
+            milvus::proto::common::LoadPriority::LOW,
+            true,
+            "",
+            "",
+            0,
+            "",
+            std::nullopt,
+            MmapChunkWritebackMode::Disabled,
+            std::unordered_map<std::string, FieldId>{},
+            std::move(projections));
+    };
+    auto projections = schema->GetOrdinaryStructProjections(selected);
+    auto missing = make(projections, true);
+    EXPECT_THROW(missing->get_cells(nullptr, {0}), milvus::SegcoreError);
+    projections.at("items").child_field_ids.push_back(FieldId(201));
+    EXPECT_THROW(make(projections, false), milvus::SegcoreError);
+    projections = schema->GetOrdinaryStructProjections(selected);
+    projections.at("items").parent_field_id = FieldId(201);
+    EXPECT_THROW(make(projections, false), milvus::SegcoreError);
+}

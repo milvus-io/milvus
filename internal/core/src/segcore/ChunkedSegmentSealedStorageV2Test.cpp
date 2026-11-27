@@ -23,7 +23,14 @@
 #include <arrow/type_fwd.h>
 #include <folly/CancellationToken.h>
 #include <folly/ScopeGuard.h>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include "storage/Util.h"
+#include "milvus-storage/common/extend_status.h"
+#include "common/Utils.h"
+#include <parquet/arrow/writer.h>
+#include <arrow/filesystem/mockfs.h>
 #include <boost/filesystem/operations.hpp>
 
 #include "test_utils/Constants.h"
@@ -34,6 +41,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <map>
@@ -58,6 +66,7 @@
 #include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
+#include "common/VirtualPK.h"
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
@@ -75,6 +84,7 @@
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/packed/writer.h"
+#include "milvus-storage/transaction/transaction.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -93,6 +103,7 @@
 #include "storage/FileManager.h"
 #include "storage/Types.h"
 #include "storage/loon_ffi/property_singleton.h"
+#include "storage/loon_ffi/util.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -520,6 +531,19 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             test_data_count = 100000;
             fixed_string_width = 32;
         }
+        if (test_name.find("DupPkAcrossChunk") != std::string::npos) {
+            // 1M rows -> several segcore chunks (storage v2: ~1MB parquet row
+            // groups, grouped into chunks by the translator). One PK is
+            // duplicated over the sorted row range [dup_begin, dup_end), which
+            // is wide enough to cover the start of the chunk the chunk-level
+            // binary search visits first and to extend into the chunk before.
+            chunk_num = 10;
+            test_data_count = 100000;
+            fixed_string_width = 32;
+            dup_pk_test = true;
+            dup_begin = 150000;
+            dup_end = 550000;
+        }
 
         schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
 
@@ -568,6 +592,14 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             string_data.push_back(MakeStringValue(i));
         }
         std::sort(string_data.begin(), string_data.end());
+        int_pk_data.resize(RowCount());
+        std::iota(int_pk_data.begin(), int_pk_data.end(), 0);
+        if (dup_pk_test) {
+            for (int64_t i = dup_begin; i < dup_end; i++) {
+                string_data[i] = string_data[dup_begin];
+                int_pk_data[i] = int_pk_data[dup_begin];
+            }
+        }
 
         fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
                   {"pk", schema_->get_field_id(FieldName("pk"))},
@@ -587,8 +619,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 if (arrow_schema->fields()[i]->type()->id() ==
                     arrow::Type::INT64) {
                     arrow::Int64Builder builder;
-                    auto status =
-                        builder.AppendValues(test_data.data(), test_data_count);
+                    const int64_t* src = test_data.data();
+                    if (dup_pk_test &&
+                        arrow_schema->fields()[i]->name() == "pk") {
+                        src = int_pk_data.data() + start_id;
+                    }
+                    auto status = builder.AppendValues(src, test_data_count);
                     EXPECT_TRUE(status.ok());
                     std::shared_ptr<arrow::Array> array;
                     status = builder.Finish(&array);
@@ -768,8 +804,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     int test_data_count = 10000;
     size_t fixed_string_width = 0;
     bool test_data_created = false;
+    bool dup_pk_test = false;
+    int64_t dup_begin = 0;  // [dup_begin, dup_end): rows sharing one PK
+    int64_t dup_end = 0;
     std::unordered_map<std::string, FieldId> fields;
     std::vector<std::string> string_data;
+    std::vector<int64_t> int_pk_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
@@ -968,8 +1008,8 @@ TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
         EXPECT_FLOAT_EQ(actual_values.Get(i), expected_values.Get(i));
     }
 
-    const auto& actual_valid = actual_field.valid_data();
-    const auto& expected_valid = expected_field->valid_data();
+    const auto& actual_valid = GetFieldDataRowValidData(actual_field);
+    const auto& expected_valid = GetFieldDataRowValidData(*expected_field);
     ASSERT_EQ(actual_valid.size(), kNumRows);
     ASSERT_EQ(actual_valid.size(), expected_valid.size());
     for (int64_t i = 0; i < kNumRows; ++i) {
@@ -1187,8 +1227,9 @@ TEST_P(TestLazyManifest,
     source.requestCancellation();
     milvus::OpContext cancelled_ctx(source.getToken());
     try {
-        (void)column->DataOfChunk(&cancelled_ctx, 0);
-        FAIL() << "expected cancelled field materialization";
+        (void)manifest_segment->num_chunk_data(fields.at("int64"),
+                                               &cancelled_ctx);
+        FAIL() << "expected cancelled field metadata materialization";
     } catch (const SegcoreError& err) {
         EXPECT_EQ(err.get_error_code(), ErrorCode::FollyCancel);
     }
@@ -1474,13 +1515,126 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         expected_data.get_col<std::string>(fields.at("string1"));
     const auto expected_valid =
         expected_data.get_col_valid(fields.at("string1"));
-    const auto& actual_valid = results->fields_data(0).valid_data();
+    const auto& actual_valid =
+        GetFieldDataRowValidData(results->fields_data(0));
     ASSERT_EQ(actual_valid.size(), kNumRows);
     for (int64_t i = 0; i < kNumRows; ++i) {
         EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;
         if (expected_valid[i]) {
             EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
         }
+    }
+}
+
+TEST_P(TestLazyManifest, UnsortedPkInPreservesQueryLoadPriority) {
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = std::make_shared<Schema>();
+    const auto type = GetParam() ? DataType::VARCHAR : DataType::INT64;
+    const auto pk = schema->AddDebugField("pk", type, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kRows = 64;
+    auto expected = DataGen(schema, kRows, 42);
+    std::vector<proto::plan::GenericValue> values(1);
+    IdArray ids;
+    if (GetParam()) {
+        auto value = expected.get_col<std::string>(pk)[0];
+        values[0].set_string_val(value);
+        ids.mutable_str_id()->add_data(value);
+    } else {
+        auto value = expected.get_col<int64_t>(pk)[0];
+        values[0].set_int64_val(value);
+        ids.mutable_int_id()->add_data(value);
+    }
+    // A fresh index and evicted PK column exercise the real translator load.
+    for (bool query : {false, true}) {
+        SCOPED_TRACE(query);
+        auto path = UniqueManifestTestPath("unsorted_pk_priority");
+        StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            kRows,
+            1,
+            TestLocalPath,
+            path,
+            fmt::format("{},{}", pk.get(), TimestampFieldID.get()));
+        auto segment = CreateV3ManifestSegment(
+            data, 3290 + query + 10 * GetParam(), 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto runtime = impl->TestCloneMutableRuntimeResourceState();
+        auto column = runtime->fields.at(pk);
+        column->ManualEvictCache();
+        bool loaded = false;
+        class CheckingPkTranslator
+            : public storagev2translator::PkIndexTranslator {
+         public:
+            CheckingPkTranslator(int64_t id,
+                                 std::shared_ptr<ChunkedColumnInterface> column,
+                                 DataType type,
+                                 bool query,
+                                 bool& loaded)
+                : PkIndexTranslator(id, std::move(column), type, false),
+                  query_(query),
+                  loaded_(loaded) {
+            }
+            std::vector<
+                std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<storagev2translator::PkIndexCell>>>
+            get_cells(milvus::OpContext* ctx,
+                      const std::vector<cachinglayer::cid_t>& cids) override {
+                loaded_ = true;
+                if (query_) {
+                    EXPECT_NE(ctx, nullptr);
+                    if (ctx)
+                        EXPECT_EQ(ctx->runtime_load_priority,
+                                  proto::common::LoadPriority::HIGH);
+                } else {
+                    EXPECT_TRUE(ctx == nullptr ||
+                                !ctx->runtime_load_priority.has_value());
+                }
+                return PkIndexTranslator::get_cells(ctx, cids);
+            }
+
+         private:
+            bool query_;
+            bool& loaded_;
+        };
+        runtime->pk_index_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                    std::make_unique<CheckingPkTranslator>(
+                        impl->get_segment_id(), column, type, query, loaded));
+        EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+        impl->TestPublishRuntimeResourceState(std::move(runtime));
+        if (query) {
+            auto plan = std::make_unique<query::RetrievePlan>(schema);
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            plan->plan_node_->plannodes_ =
+                milvus::test::CreateRetrievePlanByExpr(
+                    std::make_shared<expr::TermFilterExpr>(
+                        expr::ColumnInfo(pk, type), values));
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            EXPECT_GT(result->offset_size(), 0);
+        } else {
+            BitsetType bits(kRows, false);
+            static_cast<SegmentInternalInterface*>(impl)->search_ids(bits, ids);
+            EXPECT_TRUE(bits[0]);
+        }
+        EXPECT_TRUE(loaded);
     }
 }
 
@@ -1543,6 +1697,8 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         ASSERT_NE(snapshot->runtime->timestamp_index_slot, nullptr);
         EXPECT_NE(snapshot->runtime->timestamps, nullptr);
         EXPECT_NE(snapshot->runtime->timestamp_index, nullptr);
+        EXPECT_EQ(snapshot->runtime->timestamp_index->get_active_range(31),
+                  (std::pair<int64_t, int64_t>{0, kNumRows}));
         EXPECT_FALSE(snapshot->runtime->pk_index_slot->IsCached(0));
         EXPECT_TRUE(snapshot->runtime->timestamp_index_slot->IsCached(0));
 
@@ -1604,6 +1760,340 @@ TEST_P(TestLazyManifest, LazyManifestSystemFieldTaskUsesRegularLoad) {
         EXPECT_GT(pk_column->DataByteSize(), 0);
         EXPECT_GT(timestamp_column->DataByteSize(), 0);
     }
+}
+
+namespace {
+class TimestampMaskChunkStorage {
+ public:
+    std::shared_ptr<TimestampData>
+    MakeTimestampData(const std::vector<Timestamp>& values,
+                      const std::vector<int64_t>& chunk_sizes) {
+        std::vector<cachinglayer::PinWrapper<Chunk*>> pins;
+        int64_t offset = 0;
+        for (auto chunk_size : chunk_sizes) {
+            auto byte_size = static_cast<uint64_t>(chunk_size) *
+                             static_cast<uint64_t>(sizeof(Timestamp));
+            auto buffer = std::make_unique<char[]>(byte_size);
+            std::memcpy(buffer.get(),
+                        values.data() + offset,
+                        static_cast<size_t>(byte_size));
+            auto chunk = std::make_unique<FixedWidthChunk>(
+                static_cast<int32_t>(chunk_size),
+                /*dim=*/1,
+                buffer.get(),
+                byte_size,
+                /*element_size=*/sizeof(Timestamp),
+                /*nullable=*/false,
+                /*chunk_mmap_guard=*/nullptr);
+            pins.emplace_back(static_cast<Chunk*>(chunk.get()));
+            buffers_.push_back(std::move(buffer));
+            chunks_.push_back(std::move(chunk));
+            offset += chunk_size;
+        }
+        EXPECT_EQ(offset, static_cast<int64_t>(values.size()));
+
+        auto data = std::make_shared<TimestampData>();
+        data->InitFromPinnedChunks(nullptr, std::move(pins));
+        return data;
+    }
+
+ private:
+    // FixedWidthChunk does not own its backing buffer. Keep chunks before
+    // buffers in destruction order and keep this storage alive after segment.
+    std::vector<std::unique_ptr<char[]>> buffers_;
+    std::vector<std::unique_ptr<FixedWidthChunk>> chunks_;
+};
+
+SchemaPtr
+MakeTimestampMaskTestSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    return schema;
+}
+
+std::shared_ptr<TimestampIndex>
+MakeTimestampMaskTestIndex(const std::vector<Timestamp>& values,
+                           std::vector<int64_t> slice_lengths) {
+    auto index = std::make_shared<TimestampIndex>();
+    index->set_length_meta(std::move(slice_lengths));
+    index->build_with(values.data(), values.size());
+    return index;
+}
+}  // namespace
+
+// Opt-in benchmark of the actual filter. Run the same test on the PR base and
+// candidate; do not substitute an index into a different filtering algorithm.
+// Timing includes output reset, snapshot capture, temporary bitmaps and OR, but
+// excludes loading, index construction, validation and publication.
+TEST(ChunkedSegmentSealedStorageV2, DISABLED_TimestampMaskBenchmark) {
+    auto schema = MakeTimestampMaskTestSchema();
+    for (int64_t rows : {4000, 4097, 16384}) {
+        auto fs = GetDefaultArrowFileSystem();
+        auto path = UniqueManifestTestPath("timestamp_mask_benchmark");
+        StorageV2TempDirGuard dir_guard(fs, path);
+        milvus::test::V3SegmentTestData data(
+            schema, 1, rows, 1, TestLocalPath, path);
+        auto segment = CreateSealedSegment(
+            schema, nullptr, 4096000, SegcoreConfig::default_config(), false);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto* internal = static_cast<SegmentInternalInterface*>(segment.get());
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(4096000);
+        load_info.set_partitionid(1);
+        load_info.set_collectionid(1);
+        load_info.set_num_of_rows(rows);
+        load_info.set_storageversion(STORAGE_V3);
+        load_info.set_manifest_path(data.ManifestPathJson());
+        sealed->SetLoadInfo(std::move(load_info));
+        OpContext op_ctx;
+        tracer::TraceContext trace_ctx;
+        sealed->Load(trace_ctx, &op_ctx);
+        auto runtime = sealed->TestGetPublishedStateSnapshot()->runtime;
+        ASSERT_NE(runtime->timestamps, nullptr);
+        ASSERT_NE(runtime->timestamp_index, nullptr);
+        ASSERT_EQ(runtime->timestamps->size(), rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            ASSERT_EQ((*runtime->timestamps)[i], i);
+        }
+        struct Case {
+            const char* name;
+            Timestamp query;
+            Timestamp ttl;
+        };
+        std::vector<Case> cases{{"history", Timestamp(rows / 2 - 1), 0}};
+        if (rows == 4000) {
+            cases.insert(cases.end(),
+                         {{"latest", MAX_TIMESTAMP, 0},
+                          {"ttl", MAX_TIMESTAMP, Timestamp(rows / 2 - 1)},
+                          {"history_and_ttl",
+                           Timestamp(rows * 3 / 4 - 1),
+                           Timestamp(rows / 4 - 1)},
+                          {"all_expired", MAX_TIMESTAMP, Timestamp(rows - 1)}});
+        }
+        BitsetType mask(rows);
+        BitsetTypeView view(mask);
+        for (const auto& c : cases) {
+            SCOPED_TRACE(fmt::format("rows={}, case={}", rows, c.name));
+            mask.reset();
+            mask[17] = true;
+            internal->mask_with_timestamps(view, c.query, c.ttl);
+            int64_t expected_count = 0;
+            for (int64_t i = 0; i < rows; ++i) {
+                bool excluded = Timestamp(i) > c.query ||
+                                (c.ttl > 0 && Timestamp(i) <= c.ttl);
+                ASSERT_EQ(mask[i], excluded || i == 17) << "row=" << i;
+                expected_count += excluded;
+            }
+            auto measure = [&](int iterations) {
+                for (int i = 0; i < 64; ++i) {
+                    mask.reset();
+                    internal->mask_with_timestamps(view, c.query, c.ttl);
+                }
+                auto start = std::chrono::steady_clock::now();
+                for (int i = 0; i < iterations; ++i) {
+                    mask.reset();
+                    internal->mask_with_timestamps(view, c.query, c.ttl);
+                }
+                auto ns = std::chrono::duration<double, std::nano>(
+                              std::chrono::steady_clock::now() - start)
+                              .count();
+                EXPECT_EQ(mask.count(), expected_count);
+                return ns / iterations;
+            };
+            int iterations = static_cast<int>(
+                std::clamp(20000000.0 / measure(128), 512.0, 1000000.0));
+            std::vector<double> samples;
+            for (int round = 0; round < 9; ++round) {
+                samples.push_back(measure(iterations));
+            }
+            auto sorted = samples;
+            std::sort(sorted.begin(), sorted.end());
+            auto range = runtime->timestamp_index->get_active_range(c.query);
+            auto ttl_range =
+                c.ttl > 0 ? runtime->timestamp_index->get_active_range(c.ttl)
+                          : std::pair<int64_t, int64_t>{0, 0};
+            fmt::print(
+                "timestamp_benchmark rows={} case={} chunks={} "
+                "index_bytes={} query_grey_rows={} ttl_grey_rows={} "
+                "iterations={} "
+                "median_ns={:.1f} min_ns={:.1f} max_ns={:.1f} samples_ns=",
+                rows,
+                c.name,
+                runtime->timestamps->num_chunks(),
+                runtime->timestamp_index->memory_size(),
+                range.second - range.first,
+                ttl_range.second - ttl_range.first,
+                iterations,
+                sorted[4],
+                sorted.front(),
+                sorted.back());
+            for (double ns : samples) {
+                fmt::print("{:.1f},", ns);
+            }
+            fmt::print("\n");
+        }
+    }
+}
+
+TEST(ChunkedSegmentSealedStorageV2,
+     TimestampMaskBatchScanAcrossChunksAndUnalignedRange) {
+    constexpr int64_t kRows = 137;
+    constexpr Timestamp kBase = (Timestamp{1} << 63) - 80;
+    TimestampMaskChunkStorage chunk_storage;
+    std::vector<Timestamp> values(kRows);
+    for (int64_t i = 0; i < kRows; ++i) {
+        values[i] = kBase + static_cast<Timestamp>(i);
+    }
+    // Keep slice boundaries ordered, with out-of-order rows across a chunk edge.
+    std::swap(values[67], values[68]);
+
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096001, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = chunk_storage.MakeTimestampData(values, {7, 61, 69});
+    runtime->timestamp_index = MakeTimestampMaskTestIndex(values, {3, 129, 5});
+    ASSERT_EQ(runtime->timestamps->num_chunks(), 3);
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kBase + 67),
+              (std::pair<int64_t, int64_t>{3, 132}));
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kBase + 99),
+              (std::pair<int64_t, int64_t>{3, 132}));
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+    for (auto [query, ttl] : std::vector<std::pair<Timestamp, Timestamp>>{
+             {kBase + 99, 0},
+             {MAX_TIMESTAMP, kBase + 67},
+             {kBase + 99, kBase + 67}}) {
+        SCOPED_TRACE(fmt::format("query={}, ttl={}", query, ttl));
+        mask.reset();
+        mask[85] = true;
+        segment_internal->mask_with_timestamps(view, query, ttl);
+        for (int64_t i = 0; i < kRows; ++i) {
+            EXPECT_EQ(
+                mask[i],
+                i == 85 || values[i] > query || (ttl != 0 && values[i] <= ttl))
+                << "row=" << i;
+        }
+    }
+    EXPECT_FALSE(mask[67]);
+    EXPECT_TRUE(mask[68]);  // TTL is inclusive, even across the chunk boundary.
+    EXPECT_FALSE(mask[99]);  // MVCC is strict: timestamp > query timestamp.
+    EXPECT_TRUE(mask[100]);
+}
+
+TEST(ChunkedSegmentSealedStorageV2,
+     TimestampMaskBatchScanConstantAndEmptyData) {
+    constexpr int64_t kRows = 70;
+    constexpr Timestamp kValue = 42;
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096002, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitConstant(kRows, kValue);
+    auto index_values = std::vector<Timestamp>(kRows, kValue);
+    runtime->timestamp_index =
+        MakeTimestampMaskTestIndex(index_values, {kRows});
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+
+    segment_internal->mask_with_timestamps(view, kValue, 0);
+    EXPECT_EQ(mask.count(), 0);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, kValue - 1, 0);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kValue);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    mask[13] = true;
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kValue - 1);
+    EXPECT_EQ(mask.count(), 1);
+    EXPECT_TRUE(mask[13]);
+
+    runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = 0;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitFromOwnedData({});
+    runtime->timestamp_index = std::make_shared<TimestampIndex>();
+    sealed->TestPublishRuntimeResourceState(runtime);
+    BitsetType empty_mask;
+    BitsetTypeView empty_view(empty_mask);
+    segment_internal->mask_with_timestamps(empty_view, MAX_TIMESTAMP, kValue);
+    EXPECT_EQ(empty_mask.count(), 0);
+
+    // A nonempty published segment must have timestamp data with its index.
+    runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps.reset();
+    sealed->TestPublishRuntimeResourceState(runtime);
+    EXPECT_THROW(segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, 0),
+                 SegcoreError);
+}
+
+TEST(ChunkedSegmentSealedStorageV2, TimestampMaskBatchScanUsesCommitTimestamp) {
+    constexpr int64_t kRows = 70;
+    constexpr Timestamp kCommit = 1000;
+    auto schema = MakeTimestampMaskTestSchema();
+    auto segment = CreateSealedSegment(
+        schema, nullptr, 4096003, SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto* segment_internal =
+        static_cast<SegmentInternalInterface*>(segment.get());
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->row_count = kRows;
+    runtime->timestamps = std::make_shared<TimestampData>();
+    runtime->timestamps->InitFromOwnedData(
+        std::vector<Timestamp>(kRows, kCommit + 100));
+    auto index_values = std::vector<Timestamp>(kRows, kCommit + 100);
+    runtime->timestamp_index =
+        MakeTimestampMaskTestIndex(index_values, {kRows});
+    ASSERT_EQ(runtime->timestamp_index->get_active_range(kCommit),
+              (std::pair<int64_t, int64_t>{0, 0}));
+    sealed->TestPublishRuntimeResourceState(runtime);
+    // The override applies to all rows even when the existing index was built
+    // from different timestamps and would not select a grey zone.
+    sealed->SetCommitTimestamp(kCommit);
+
+    BitsetType mask(kRows);
+    BitsetTypeView view(mask);
+    mask[7] = true;
+    segment_internal->mask_with_timestamps(view, kCommit, 0);
+    EXPECT_EQ(mask.count(), 1);
+    EXPECT_TRUE(mask[7]);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, MAX_TIMESTAMP, kCommit);
+    EXPECT_EQ(mask.count(), kRows);
+
+    mask.reset();
+    segment_internal->mask_with_timestamps(view, kCommit - 1, 0);
+    EXPECT_EQ(mask.count(), kRows);
 }
 
 TEST_P(TestLazyManifest, LazyManifestPkTasksUseRegularLoad) {
@@ -1993,6 +2483,214 @@ TEST_P(TestLazyManifest, LazyManifestDisabledKeepsEagerColumnGroup) {
             fields.at("int64"))));
     EXPECT_FALSE(lazy_column->IsMaterialized());
     EXPECT_TRUE(lazy_column->IsLazy());
+}
+
+class MilvusTableManifestLoadTest : public testing::Test {
+ protected:
+    static constexpr int64_t kSegmentId = 3193;
+    const FieldId number_{100};
+    const FieldId extra_{101};
+
+    SchemaPtr
+    TargetSchema() {
+        auto schema = std::make_shared<Schema>();
+        schema->AddField(FieldMeta(FieldName("number"),
+                                   number_,
+                                   DataType::INT64,
+                                   false,
+                                   std::nullopt,
+                                   "number"));
+        schema->AddField(FieldMeta(FieldName("extra"),
+                                   extra_,
+                                   DataType::VARCHAR,
+                                   64,
+                                   true,
+                                   std::nullopt,
+                                   "extra"));
+        const FieldId pk(102);
+        schema->AddField(FieldName(VIRTUAL_PK_FIELD_NAME),
+                         pk,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("RowID"),
+                         RowFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->AddField(FieldName("Timestamp"),
+                         TimestampFieldID,
+                         DataType::INT64,
+                         false,
+                         std::nullopt);
+        schema->set_primary_field_id(pk);
+        schema->set_external_source("s3://test-bucket/snapshot");
+        schema->set_external_spec(R"({"format":"milvus-table"})");
+        return schema;
+    }
+
+    proto::segcore::SegmentLoadInfo
+    WriteManifest(const std::string& path, bool include_extra) {
+        auto source_schema = std::make_shared<Schema>();
+        source_schema->AddField(
+            FieldName("number"), number_, DataType::INT64, false, std::nullopt);
+        arrow::Int64Builder number;
+        EXPECT_TRUE(number.Append(42).ok());
+        std::vector<std::shared_ptr<arrow::Array>> columns{
+            number.Finish().ValueOrDie()};
+        if (include_extra) {
+            source_schema->AddField(FieldMeta(FieldName("extra"),
+                                              FieldId(110),
+                                              DataType::VARCHAR,
+                                              64,
+                                              true,
+                                              std::nullopt));
+            arrow::StringBuilder extra;
+            EXPECT_TRUE(extra.Append("refreshed").ok());
+            columns.push_back(extra.Finish().ValueOrDie());
+        }
+
+        const auto source_path = path + "/source";
+        const auto target_path = path + "/target";
+        auto batch = arrow::RecordBatch::Make(
+            source_schema->ConvertToLoonArrowSchema(), 1, std::move(columns));
+        const auto source_version = milvus::test::WriteRecordBatchesToV3(
+            source_schema,
+            source_path,
+            {batch},
+            include_extra ? "100|110" : "100");
+        auto properties =
+            storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+        auto source =
+            GetLoonManifest(nlohmann::json({{"base_path", source_path},
+                                            {"ver", source_version}})
+                                .dump(),
+                            properties);
+        auto groups = source->columnGroups();
+        for (auto& group : groups) {
+            group = std::make_shared<milvus_storage::api::ColumnGroup>(*group);
+            for (auto& file : group->files) {
+                file.properties[kMilvusTableFieldIdMappingProperty] =
+                    include_extra ? R"({"100":"100","101":"110"})"
+                                  : R"({"100":"100"})";
+            }
+        }
+        auto transaction = milvus_storage::api::transaction::Transaction::Open(
+                               GetDefaultArrowFileSystem(), target_path)
+                               .ValueOrDie();
+        transaction->AppendFiles(groups);
+        auto version = transaction->Commit().ValueOrDie();
+
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(kSegmentId);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(1);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(
+            nlohmann::json({{"base_path", target_path}, {"ver", version}})
+                .dump());
+        return info;
+    }
+};
+
+TEST_F(MilvusTableManifestLoadTest, LoadSkipsStatsForAnUnboundField) {
+    const auto path = UniqueManifestTestPath("milvus_table_load");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    ChunkedSegmentSealedImpl segment(
+        TargetSchema(), nullptr, SegcoreConfig::default_config(), kSegmentId);
+    auto info = WriteManifest(path, false);
+    auto& stale_stats = (*info.mutable_textstatslogs())[extra_.get()];
+    stale_stats.set_fieldid(extra_.get());
+    stale_stats.add_files("stale-text-index");
+    segment.SetLoadInfo(std::move(info));
+
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(segment.Load(trace_ctx, nullptr));
+    auto state = segment.TestGetPublishedStateSnapshot();
+    EXPECT_FALSE(state->load_info->HasFieldInLoadedManifest(extra_));
+    EXPECT_FALSE(state->load_info->HasFieldInSchema(extra_));
+    int64_t offset = 0;
+    auto values = segment.bulk_subscript(nullptr, number_, &offset, 1);
+    ASSERT_EQ(values->scalars().long_data().data_size(), 1);
+    EXPECT_EQ(values->scalars().long_data().data(0), 42);
+}
+
+TEST_F(MilvusTableManifestLoadTest, ReopenLoadsNewlyBoundField) {
+    const auto path = UniqueManifestTestPath("milvus_table_reopen");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    ChunkedSegmentSealedImpl segment(
+        TargetSchema(), nullptr, SegcoreConfig::default_config(), kSegmentId);
+    segment.SetLoadInfo(WriteManifest(path + "/old", false));
+    milvus::tracer::TraceContext trace_ctx;
+    segment.Load(trace_ctx, nullptr);
+    auto before = segment.TestGetPublishedStateSnapshot();
+    ASSERT_FALSE(before->load_info->HasFieldInLoadedManifest(extra_));
+
+    milvus::OpContext op_ctx;
+    segment.Reopen(&op_ctx, WriteManifest(path + "/new", true));
+
+    auto after = segment.TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->load_info->HasFieldInLoadedManifest(extra_));
+    EXPECT_FALSE(before->load_info->HasFieldInLoadedManifest(extra_));
+    ASSERT_TRUE(after->load_info->HasFieldInSchema(extra_));
+    int64_t offset = 0;
+    auto values = segment.bulk_subscript(nullptr, extra_, &offset, 1);
+    ASSERT_EQ(values->scalars().string_data().data_size(), 1);
+    EXPECT_EQ(values->scalars().string_data().data(0), "refreshed");
+}
+
+TEST(ExternalParquetManifestLoad, SchemaOnlyReopenReusesLoadedColumns) {
+    const FieldId number(100), extra(101), pk(102);
+    auto source_schema = std::make_shared<Schema>();
+    source_schema->AddField(FieldMeta(FieldName("number"),
+                                      number,
+                                      DataType::INT64,
+                                      false,
+                                      std::nullopt,
+                                      "number"));
+    source_schema->set_external_source("s3://test-bucket/data");
+    source_schema->set_external_spec(R"({"format":"parquet"})");
+    const auto path = UniqueManifestTestPath("external_parquet_schema_reopen");
+    StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+    milvus::test::V3SegmentTestData data(
+        source_schema, 1, 8, 1, TestLocalPath, path, "number");
+
+    auto schema = std::make_shared<Schema>(*source_schema);
+    schema->AddField(
+        FieldName("virtual_pk"), pk, DataType::INT64, false, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->set_schema_version(1);
+    constexpr int64_t segment_id = 3194;
+    ChunkedSegmentSealedImpl segment(
+        schema, nullptr, SegcoreConfig::default_config(), segment_id);
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(segment_id);
+    info.set_collectionid(1);
+    info.set_partitionid(1);
+    info.set_num_of_rows(8);
+    info.set_storageversion(STORAGE_V3);
+    info.set_manifest_path(data.ManifestPathJson());
+    segment.SetLoadInfo(info);
+    milvus::tracer::TraceContext trace_ctx;
+    segment.Load(trace_ctx, nullptr);
+    auto before = segment.TestGetPublishedStateSnapshot();
+    auto loaded_column = before->runtime->fields.at(number);
+
+    auto new_schema = std::make_shared<Schema>(*schema);
+    new_schema->AddField(FieldMeta(FieldName("extra"),
+                                   extra,
+                                   DataType::INT64,
+                                   true,
+                                   std::nullopt,
+                                   "extra"));
+    new_schema->set_schema_version(2);
+
+    ASSERT_NO_THROW(segment.Reopen(new_schema));
+    auto after = segment.TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->schema->has_field(extra));
+    EXPECT_FALSE(after->load_info->HasFieldInLoadedManifest(extra));
+    EXPECT_EQ(after->runtime->fields.at(number), loaded_column);
 }
 
 TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
@@ -2974,5 +3672,589 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
             nullptr, fields.at("pk"), seg_offsets, 2);
         ASSERT_EQ(pk_result->scalars().long_data().data(0), 0);
         ASSERT_EQ(pk_result->scalars().long_data().data(1), 42);
+    }
+}
+
+// Regression: a PK whose rows straddle a chunk boundary of a sorted sealed
+// segment must be found completely by pk == X (pk_range) and pk in [X]
+// (search_ids / TermExpr). pk_lower_bound's chunk-level binary search stops at
+// the first chunk whose [min,max] covers the pk, which is not necessarily the
+// earliest chunk containing it, so rows in the previous chunk are missed.
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundary) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    const int64_t expected = dup_end - dup_begin;
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+
+    // actual chunk layout of the pk column
+    const int64_t num_chunk = segment->num_chunk(pk_fid);
+    std::string layout;
+    std::vector<int64_t> chunk_start(num_chunk + 1);
+    for (int64_t c = 0; c < num_chunk; c++) {
+        chunk_start[c] = segment->num_rows_until_chunk(pk_fid, c);
+        layout += fmt::format("[c{} start={} rows={}]",
+                              c,
+                              chunk_start[c],
+                              segment->chunk_size(pk_fid, c));
+    }
+    chunk_start[num_chunk] = RowCount();
+    std::cout << "pk column chunks=" << num_chunk << " layout=" << layout
+              << " dup_run=[" << dup_begin << "," << dup_end << ")"
+              << std::endl;
+    ASSERT_GE(num_chunk, 3) << layout;
+    // the chunk the chunk-level binary search visits first
+    const int64_t mid = (num_chunk - 1) / 2;
+    ASSERT_GT(mid, 0) << layout;
+    // the duplicated run must start before chunk `mid` and cover its first row,
+    // so pk_lower_bound stops at chunk `mid` although earlier chunks hold the PK
+    ASSERT_LT(dup_begin, chunk_start[mid]) << layout;
+    ASSERT_GT(dup_end, chunk_start[mid]) << layout;
+
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    const int64_t b = dup_end;  // first row after the run (distinct PKs)
+
+    // 1. pk == X  (segment-level pk_range, used by UnaryExpr on sorted pk)
+    {
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, dup, view);
+        EXPECT_EQ(expected, bitset.count())
+            << "pk_range(Equal) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 2. pk in [X]  (segment-level search_ids -> search_pks)
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected, bitset.count())
+            << "search_ids missed rows of a PK run straddling a chunk boundary";
+    }
+    // 3. pk in [X, <another pk in chunk 2>]: two-pointer path with a 2nd key
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+            ids.mutable_str_id()->add_data(string_data[b + 10]);
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+            ids.mutable_int_id()->add_data(int_pk_data[b + 10]);
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected + 1, bitset.count())
+            << "search_ids (2 keys) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 4. expression path pk == X
+    {
+        proto::plan::GenericValue v;
+        if (pk_is_string) {
+            v.set_string_val(std::get<std::string>(dup));
+        } else {
+            v.set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), proto::plan::OpType::Equal, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "UnaryRangeFilterExpr(pk == X) missed straddling rows";
+    }
+    // 5. expression path pk in [X]
+    {
+        std::vector<proto::plan::GenericValue> vals(1);
+        if (pk_is_string) {
+            vals[0].set_string_val(std::get<std::string>(dup));
+        } else {
+            vals[0].set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "TermFilterExpr(pk in [X]) missed straddling rows";
+    }
+    // control: a PK fully inside chunk 2 is found
+    {
+        PkType single = pk_is_string ? PkType(string_data[b + 10])
+                                     : PkType(int_pk_data[b + 10]);
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, single, view);
+        EXPECT_EQ(1, bitset.count());
+    }
+}
+
+// Same layout as DupPkAcrossChunkBoundary; checks the four range branches of
+// pk_range on a PK whose duplicates straddle a chunk boundary.
+//   >= X : rows [dup_begin, N)      > X : rows [dup_end, N)
+//   <= X : rows [0, dup_end)        < X : rows [0, dup_begin)
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+    const int64_t n = RowCount();
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    proto::plan::GenericValue v;
+    if (pk_is_string) {
+        v.set_string_val(std::get<std::string>(dup));
+    } else {
+        v.set_int64_val(std::get<int64_t>(dup));
+    }
+    struct Case {
+        proto::plan::OpType op;
+        int64_t expected;
+        const char* name;
+    };
+    const Case cases[] = {
+        {proto::plan::OpType::GreaterEqual, n - dup_begin, ">="},
+        {proto::plan::OpType::GreaterThan, n - dup_end, ">"},
+        {proto::plan::OpType::LessEqual, dup_end, "<="},
+        {proto::plan::OpType::LessThan, dup_begin, "<"},
+    };
+    for (const auto& c : cases) {
+        BitsetType bitset(n, false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, c.op, dup, view);
+        std::cout << "pk_range(" << c.name << ") count=" << bitset.count()
+                  << " expected=" << c.expected << std::endl;
+        EXPECT_EQ(c.expected, bitset.count()) << "pk_range " << c.name;
+
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), c.op, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final =
+            query::ExecuteQueryExpr(plan, segment.get(), n, MAX_TIMESTAMP);
+        EXPECT_EQ(c.expected, final.count())
+            << "UnaryRangeFilterExpr(pk " << c.name << " X)";
+    }
+}
+
+namespace {
+
+// A 2.6.0/2.6.1 StorageV2 segment: every column in column group 0 and no
+// FieldBinlog.child_fields, so the loader learns the stored fields only from
+// the packed file footer. items[source] is a nullable struct sub-field with
+// row 1 null and rows 0, 2, 3 holding two elements each.
+struct LegacyStructSegmentFiles {
+    SchemaPtr old_schema;
+    SchemaPtr new_schema;
+    FieldId pk;
+    FieldId source;
+    FieldId added;
+    std::string root;
+    std::string path;
+    int64_t rows = 4;
+    std::vector<std::vector<int32_t>> source_values;
+
+    proto::segcore::SegmentLoadInfo
+    LoadInfo() const {
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(1);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(rows);
+        info.set_storageversion(2);
+        auto* group = info.add_binlog_paths();
+        group->set_fieldid(0);
+        auto* log = group->add_binlogs();
+        log->set_log_path(path);
+        log->set_entries_num(rows);
+        log->set_memory_size(1024);
+        return info;
+    }
+};
+
+SchemaPtr
+MakeLegacyStructSchema(FieldId pk,
+                       FieldId source,
+                       std::optional<FieldId> added,
+                       int64_t version) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(version);
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->AddField(FieldName("items[source]"),
+                     source,
+                     DataType::ARRAY,
+                     DataType::INT32,
+                     true,
+                     false);
+    if (added.has_value()) {
+        schema->AddField(FieldName("items[added]"),
+                         *added,
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true,
+                         true);
+    }
+    return schema;
+}
+
+LegacyStructSegmentFiles
+WriteLegacyStructSegment(const std::string& name) {
+    LegacyStructSegmentFiles files;
+    files.pk = FieldId(START_USER_FIELDID);
+    files.source = FieldId(START_USER_FIELDID + 1);
+    files.added = FieldId(START_USER_FIELDID + 2);
+    files.old_schema =
+        MakeLegacyStructSchema(files.pk, files.source, std::nullopt, 1);
+    files.new_schema =
+        MakeLegacyStructSchema(files.pk, files.source, files.added, 2);
+    files.source_values = {{1, 2}, {}, {5, 6}, {7, 8}};
+
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    files.root = UniqueManifestTestPath(name);
+    files.path = files.root + "/0/1.parquet";
+    EXPECT_TRUE(fs->CreateDir(files.root + "/0").ok());
+
+    auto arrow_schema = files.old_schema->ConvertToArrowSchema();
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (const auto& field : arrow_schema->fields()) {
+        auto field_id =
+            FieldId(std::stoll(field->metadata()
+                                   ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                   .ValueOrDie()));
+        if (field_id != files.source) {
+            arrow::Int64Builder builder;
+            for (int64_t row = 0; row < files.rows; ++row) {
+                EXPECT_TRUE(builder.Append(row).ok());
+            }
+            arrays.push_back(builder.Finish().ValueOrDie());
+            continue;
+        }
+        // 2.6.0/2.6.1 store an Array as a serialized ScalarField per row.
+        arrow::BinaryBuilder builder;
+        for (int64_t row = 0; row < files.rows; ++row) {
+            if (row == 1) {
+                EXPECT_TRUE(builder.AppendNull().ok());
+                continue;
+            }
+            proto::schema::ScalarField value;
+            for (auto element : files.source_values[row]) {
+                value.mutable_int_data()->add_data(element);
+            }
+            EXPECT_TRUE(builder.Append(value.SerializeAsString()).ok());
+        }
+        arrays.push_back(builder.Finish().ValueOrDie());
+    }
+
+    std::vector<std::string> paths{files.path};
+    std::vector<std::vector<int>> column_groups{{0, 1, 2, 3}};
+    auto storage_config = milvus_storage::StorageConfig();
+    auto writer = milvus_storage::PackedRecordBatchWriter::Make(
+                      fs,
+                      paths,
+                      arrow_schema,
+                      storage_config,
+                      column_groups,
+                      16 * 1024 * 1024,
+                      ::parquet::default_writer_properties())
+                      .ValueOrDie();
+    EXPECT_TRUE(
+        writer
+            ->Write(arrow::RecordBatch::Make(arrow_schema, files.rows, arrays))
+            .ok());
+    EXPECT_TRUE(writer->Close().ok());
+    return files;
+}
+
+void
+ExpectLegacyStructRows(SegmentSealed* segment,
+                       const LegacyStructSegmentFiles& files) {
+    std::vector<int64_t> row_ids(files.rows);
+    std::iota(row_ids.begin(), row_ids.end(), 0);
+    milvus::OpContext op_ctx;
+
+    auto source = segment->bulk_subscript(
+        &op_ctx, files.source, row_ids.data(), files.rows);
+    const auto& source_validity = GetFieldDataRowValidData(*source);
+    ASSERT_EQ(source_validity.size(), files.rows);
+    for (int64_t row = 0; row < files.rows; ++row) {
+        EXPECT_EQ(source_validity[row], row != 1) << "row " << row;
+        const auto& values =
+            source->scalars().array_data().data(row).int_data().data();
+        EXPECT_EQ(std::vector<int32_t>(values.begin(), values.end()),
+                  files.source_values[row])
+            << "row " << row;
+    }
+
+    auto added = segment->bulk_subscript(
+        &op_ctx, files.added, row_ids.data(), files.rows);
+    const auto& added_validity = GetFieldDataRowValidData(*added);
+    ASSERT_EQ(added_validity.size(), files.rows);
+    ASSERT_EQ(added->scalars().array_data().data_size(), files.rows);
+    for (int64_t row = 0; row < files.rows; ++row) {
+        // A null struct row stays a null row; every other row gets one null
+        // element per element of its stored sibling.
+        EXPECT_EQ(added_validity[row], row != 1) << "row " << row;
+        const auto& row_data = added->scalars().array_data().data(row);
+        EXPECT_EQ(row_data.valid_data_size(),
+                  static_cast<int>(files.source_values[row].size()))
+            << "row " << row;
+        for (bool valid : row_data.valid_data()) {
+            EXPECT_FALSE(valid) << "row " << row;
+        }
+    }
+
+    for (auto field_id : {files.source, files.added}) {
+        auto offsets = segment->GetStructElementOffsets(field_id);
+        ASSERT_NE(offsets, nullptr);
+        EXPECT_EQ(offsets->GetTotalElementCount(), 6);
+    }
+}
+
+std::unique_ptr<SegmentSealed>
+LoadLegacyStructSegment(const SchemaPtr& schema,
+                        proto::segcore::SegmentLoadInfo info) {
+    auto segment = segcore::CreateSealedSegment(
+        schema, nullptr, 1, segcore::SegcoreConfig::default_config(), false);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    EXPECT_NE(sealed, nullptr);
+    sealed->SetLoadInfo(std::move(info));
+    milvus::OpContext op_ctx;
+    milvus::tracer::TraceContext trace_ctx;
+    sealed->Load(trace_ctx, &op_ctx);
+    return segment;
+}
+
+class FailingOpenFileSystem : public arrow::fs::internal::MockFileSystem {
+ public:
+    explicit FailingOpenFileSystem(arrow::Status status)
+        : MockFileSystem(arrow::fs::TimePoint{}), status_(std::move(status)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string&) override {
+        return status_;
+    }
+
+ private:
+    arrow::Status status_;
+};
+
+ErrorCode
+FooterReadErrorCode(const milvus_storage::ArrowFileSystemPtr& fs,
+                    const std::string& path) {
+    try {
+        storage::GetPackedFileColumnFieldIDs(fs, path);
+    } catch (const SegcoreError& e) {
+        return e.get_error_code();
+    }
+    return ErrorCode::Success;
+}
+
+}  // namespace
+
+// A segment written by 2.6.0/2.6.1 has no child_fields. Loading it with a
+// schema that added an element-nullable struct sub-field must keep the stored
+// sub-field and give the new one N null elements per row (a null struct row
+// stays null), both on a direct load and on a schema-only reopen.
+TEST(ChunkedSegmentSealedStorageV2,
+     LegacyGroupWithoutChildFieldsBackfillsAddedStructChild) {
+    auto files = WriteLegacyStructSegment("legacy_struct_child");
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto cleanup = folly::makeGuard([&] { (void)fs->DeleteDir(files.root); });
+
+    EXPECT_EQ(storage::GetPackedFileColumnFieldIDs(fs, files.path),
+              (std::vector<int64_t>{RowFieldID.get(),
+                                    TimestampFieldID.get(),
+                                    files.pk.get(),
+                                    files.source.get()}));
+
+    {
+        SCOPED_TRACE("load with the new schema");
+        auto segment =
+            LoadLegacyStructSegment(files.new_schema, files.LoadInfo());
+        ExpectLegacyStructRows(segment.get(), files);
+    }
+    {
+        SCOPED_TRACE("load with the old schema, then reopen");
+        auto segment =
+            LoadLegacyStructSegment(files.old_schema, files.LoadInfo());
+        segment->Reopen(files.new_schema);
+        ExpectLegacyStructRows(segment.get(), files);
+        // Go re-sends the same legacy load info on later reopens.
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        milvus::OpContext op_ctx;
+        sealed->Reopen(&op_ctx, files.LoadInfo());
+        ExpectLegacyStructRows(segment.get(), files);
+    }
+}
+
+TEST(ChunkedSegmentSealedStorageV2, PackedFooterFieldIDReadErrorsKeepClass) {
+    // A transient object-storage failure stays the retriable 2045.
+    auto transient =
+        std::make_shared<FailingOpenFileSystem>(milvus_storage::MakeExtendError(
+            milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+            "slow down"));
+    EXPECT_EQ(FooterReadErrorCode(transient, "any/1.parquet"),
+              ErrorCode::StorageTransientError);
+
+    // A missing object is permanent, not an input error.
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    auto root = UniqueManifestTestPath("packed_footer_errors");
+    ASSERT_TRUE(fs->CreateDir(root).ok());
+    auto cleanup = folly::makeGuard([&] { (void)fs->DeleteDir(root); });
+    EXPECT_EQ(FooterReadErrorCode(fs, root + "/missing.parquet"),
+              ErrorCode::ObjectNotExist);
+
+    // A parquet file whose columns carry no field id is broken data.
+    auto plain_schema =
+        arrow::schema({arrow::field("c", arrow::int64(), false)});
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.Append(1).ok());
+    auto table =
+        arrow::Table::Make(plain_schema, {builder.Finish().ValueOrDie()});
+    auto path = root + "/no_field_id.parquet";
+    auto sink = fs->OpenOutputStream(path).ValueOrDie();
+    ASSERT_TRUE(parquet::arrow::WriteTable(
+                    *table, arrow::default_memory_pool(), sink, 1)
+                    .ok());
+    ASSERT_TRUE(sink->Close().ok());
+    EXPECT_EQ(FooterReadErrorCode(fs, path), ErrorCode::DataFormatBroken);
+}
+
+TEST(LazyManifest, MilvusTableMappedRefreshUsesManifestLocalBindings) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    auto fs = GetDefaultArrowFileSystem();
+    auto root = UniqueManifestTestPath("mapped_refresh");
+    StorageV2TempDirGuard cleanup(fs, root);
+    auto source = std::make_shared<Schema>();
+    source->AddField(
+        FieldName("first"), FieldId(101), DataType::INT64, false, std::nullopt);
+    source->AddField(FieldName("second"),
+                     FieldId(103),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    arrow::Int64Builder first_builder, second_builder;
+    ASSERT_TRUE(first_builder.AppendValues({11, 12}).ok());
+    ASSERT_TRUE(second_builder.AppendValues({31, 32}).ok());
+    auto batch =
+        arrow::RecordBatch::Make(source->ConvertToLoonArrowSchema(),
+                                 2,
+                                 {first_builder.Finish().ValueOrDie(),
+                                  second_builder.Finish().ValueOrDie()});
+    auto source_path = root + "/source";
+    auto version = milvus::test::WriteRecordBatchesToV3(
+        source, source_path, {batch}, "101,103");
+    auto properties =
+        storage::LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    auto make_manifest = [&](bool expanded) {
+        auto manifest = GetLoonManifest(
+            nlohmann::json({{"base_path", source_path}, {"ver", version}})
+                .dump(),
+            properties);
+        milvus_storage::api::ColumnGroups groups;
+        for (const auto& group : manifest->columnGroups()) {
+            if (!expanded && group->columns.front() != "103") {
+                continue;
+            }
+            EXPECT_EQ(group->columns.size(), 1);
+            for (auto& file : group->files) {
+                file.properties["milvus_table.field_id_mapping"] =
+                    group->columns.front() == "103" ? R"({"101":"103"})"
+                                                    : R"({"103":"101"})";
+            }
+            groups.push_back(group);
+        }
+        EXPECT_EQ(groups.size(), expanded ? 2 : 1);
+        auto path = root + (expanded ? "/new" : "/old");
+        auto transaction =
+            milvus_storage::api::transaction::Transaction::Open(fs, path)
+                .ValueOrDie();
+        transaction->AppendFiles(groups);
+        return nlohmann::json({{"base_path", path},
+                               {"ver", transaction->Commit().ValueOrDie()}})
+            .dump();
+    };
+    auto old_manifest = make_manifest(false),
+         new_manifest = make_manifest(true);
+    auto target = std::make_shared<Schema>(*source);
+    target->set_external_source("s3://bucket/snapshot");
+    target->set_external_spec(R"({"format":"milvus-table"})");
+    target->AddField(FieldName("__virtual_pk__"),
+                     FieldId(102),
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    target->set_primary_field_id(FieldId(102));
+    target->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    target->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    for (bool lazy : {false, true}) {
+        SCOPED_TRACE(lazy);
+        auto policies =
+            cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+        policies.scalarFieldCacheWarmupPolicy =
+            lazy ? CacheWarmupPolicy::CacheWarmupPolicy_Disable
+                 : CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+        CacheWarmupPolicyGuard warmup_guard(policies);
+        auto segment_id = lazy ? 9102 : 9101;
+        auto segment = CreateSealedSegment(target, nullptr, segment_id);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(segment_id);
+        info.set_collectionid(1);
+        info.set_partitionid(1);
+        info.set_num_of_rows(2);
+        info.set_storageversion(STORAGE_V3);
+        info.set_manifest_path(old_manifest);
+        segment->SetLoadInfo(info);
+        milvus::tracer::TraceContext trace;
+        ASSERT_NO_THROW(segment->Load(trace, nullptr));
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(101)));
+        // Physical column 103 belongs to target 101; target 103 is still unbound.
+        EXPECT_FALSE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        int64_t offsets[] = {0, 1};
+        auto old_values =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        ASSERT_EQ(old_values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(old_values->scalars().long_data().data(0), 31);
+        info.set_manifest_path(new_manifest);
+        milvus::OpContext ctx;
+        ASSERT_NO_THROW(sealed->Reopen(&ctx, info));
+        EXPECT_TRUE(sealed->HasFieldInLoadedManifest(FieldId(103)));
+        auto values =
+            segment->bulk_subscript(nullptr, FieldId(103), offsets, 2);
+        ASSERT_EQ(values->scalars().long_data().data_size(), 2);
+        EXPECT_EQ(values->scalars().long_data().data(0), 11);
+        EXPECT_EQ(values->scalars().long_data().data(1), 12);
+        auto retained =
+            segment->bulk_subscript(nullptr, FieldId(101), offsets, 2);
+        EXPECT_EQ(retained->scalars().long_data().data(0), 31);
+        EXPECT_EQ(retained->scalars().long_data().data(1), 32);
     }
 }

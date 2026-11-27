@@ -134,6 +134,17 @@ func TestParameterMissing(t *testing.T) {
 	require.Equal(t, commonpb.ErrorCode_IllegalArgument, Status(err).GetErrorCode())
 }
 
+func TestServiceUnimplemented(t *testing.T) {
+	err := WrapErrServiceUnimplemented("server does not support snapshot summaries")
+	require.ErrorIs(t, err, ErrServiceUnimplemented)
+	require.Equal(t, int32(10), Code(err))
+	require.Contains(t, err.Error(), "server does not support snapshot summaries")
+	require.False(t, IsRetryableErr(err))
+	var rpcErr *RPCError
+	require.ErrorAs(t, err, &rpcErr)
+	require.False(t, rpcErr.IsInputError())
+}
+
 func TestParameterInvalidWrappers(t *testing.T) {
 	t.Run("message", func(t *testing.T) {
 		err := WrapErrParameterInvalidMsg("invalid field %q", "vector")

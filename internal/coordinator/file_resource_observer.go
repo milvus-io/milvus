@@ -18,6 +18,7 @@ package coordinator
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 
@@ -55,11 +56,15 @@ type FileResourceMeta interface {
 	GetResources() ([]*internalpb.FileResourceInfo, uint64)
 }
 
+type fileResourceSyncResult struct {
+	targetVersion uint64
+	targetNodes   map[int64]struct{}
+}
+
 type FileResourceObserver struct {
 	ctx  context.Context
 	meta rootcoord.IMetaTable
 
-	syncMu       sync.Mutex
 	distribution *typeutil.ConcurrentMap[int64, *NodeInfo]
 
 	// node manager
@@ -76,7 +81,7 @@ type FileResourceObserver struct {
 	notifyCh  chan struct{}
 	closeCh   chan struct{}
 	wg        sync.WaitGroup
-	sf        conc.Singleflight[any]
+	sf        conc.Singleflight[fileResourceSyncResult]
 	startonce sync.Once
 	closeOnce sync.Once
 }
@@ -88,7 +93,7 @@ func NewFileResourceObserver(ctx context.Context) *FileResourceObserver {
 
 		notifyCh:  make(chan struct{}, 1),
 		closeCh:   make(chan struct{}),
-		sf:        conc.Singleflight[any]{},
+		sf:        conc.Singleflight[fileResourceSyncResult]{},
 		dnMode:    fileresource.ParseMode(paramtable.Get().CommonCfg.DNFileResourceMode.GetValue()),
 		qnMode:    fileresource.ParseMode(paramtable.Get().CommonCfg.QNFileResourceMode.GetValue()),
 		proxyMode: fileresource.ParseMode(paramtable.Get().CommonCfg.ProxyFileResourceMode.GetValue()),
@@ -98,10 +103,10 @@ func NewFileResourceObserver(ctx context.Context) *FileResourceObserver {
 // sleep and notify to sync
 func (m *FileResourceObserver) RetryNotify() {
 	go func() {
-		m.sf.Do("retry", func() (any, error) {
+		m.sf.Do("retry", func() (fileResourceSyncResult, error) {
 			time.Sleep(3 * time.Second)
 			m.Notify()
-			return nil, nil
+			return fileResourceSyncResult{}, nil
 		})
 	}()
 }
@@ -200,20 +205,59 @@ func (m *FileResourceObserver) CheckAllQnReady() error {
 }
 
 func (m *FileResourceObserver) Sync() error {
-	m.syncMu.Lock()
-	defer m.syncMu.Unlock()
+	_, targetVersion := m.meta.ListFileResource(m.ctx)
+	if targetVersion == 0 {
+		return nil
+	}
+	targetNodes := m.syncNodeIDs()
+	started := false
+	result, err, _ := m.sf.Do("sync", func() (fileResourceSyncResult, error) {
+		started = true
+		return m.syncOnce()
+	})
+	if !started && (result.targetVersion < targetVersion || !maps.Equal(result.targetNodes, targetNodes)) {
+		// A prior flight may predate this mutation or a node registration.
+		_, err, _ = m.sf.Do("sync", m.syncOnce)
+	}
+	return err
+}
+
+func (m *FileResourceObserver) syncNodeIDs() map[int64]struct{} {
+	nodes := make(map[int64]struct{})
+	if m.qnMode == fileresource.SyncMode {
+		for _, node := range m.qnManager.GetAll() {
+			nodes[node.ID()] = struct{}{}
+		}
+	}
+	if m.dnMode == fileresource.SyncMode {
+		for _, nodeID := range m.dnManager.GetClientIDs() {
+			nodes[nodeID] = struct{}{}
+		}
+	}
+	if m.proxyMode == fileresource.SyncMode && m.proxyManager != nil {
+		m.proxyManager.GetProxyClients().Range(func(nodeID int64, _ types.ProxyClient) bool {
+			nodes[nodeID] = struct{}{}
+			return true
+		})
+	}
+	return nodes
+}
+
+// syncOnce is serialized by the "sync" singleflight key.
+func (m *FileResourceObserver) syncOnce() (fileResourceSyncResult, error) {
 	var syncErr error
 	activeNodes := make(map[int64]struct{})
 	resources, targetVersion := m.meta.ListFileResource(m.ctx)
 	// Version 0 means no file resource has ever been added successfully.
 	if targetVersion == 0 {
-		return nil
+		return fileResourceSyncResult{}, nil
 	}
 
 	// sync file resource to query node if file resource mode was Sync
 	if m.qnMode == fileresource.SyncMode {
 		qnnodes := m.qnManager.GetAll()
 		for _, node := range qnnodes {
+			activeNodes[node.ID()] = struct{}{}
 			if info, ok := m.distribution.Get(node.ID()); !ok || info.Version < targetVersion {
 				status, err := m.cluster.SyncFileResource(m.ctx, node.ID(), &internalpb.SyncFileResourceRequest{
 					Resources: resources,
@@ -239,10 +283,6 @@ func (m *FileResourceObserver) Sync() error {
 				mlog.Info(m.ctx, "finish sync file resource to query node", mlog.Int64("node", node.ID()), mlog.Uint64("version", targetVersion))
 			}
 		}
-
-		for _, node := range qnnodes {
-			activeNodes[node.ID()] = struct{}{}
-		}
 	}
 
 	// sync file resource to data node if file resource mode was Sync
@@ -250,6 +290,7 @@ func (m *FileResourceObserver) Sync() error {
 		dnnodes := m.dnManager.GetClientIDs()
 
 		for _, nodeID := range dnnodes {
+			activeNodes[nodeID] = struct{}{}
 			if info, ok := m.distribution.Get(nodeID); !ok || info.Version < targetVersion {
 				c, err := m.dnManager.GetClient(nodeID)
 				if err != nil {
@@ -281,16 +322,16 @@ func (m *FileResourceObserver) Sync() error {
 				mlog.Info(m.ctx, "finish sync file resource to data node", mlog.FieldNodeID(nodeID), mlog.Uint64("version", targetVersion))
 			}
 		}
-
-		for _, nodeID := range dnnodes {
-			activeNodes[nodeID] = struct{}{}
-		}
 	}
 
+	syncNodes := activeNodes
 	// sync file resource to proxy if file resource mode was Sync
 	if m.proxyMode == fileresource.SyncMode && m.proxyManager != nil {
+		// Attempted targets can differ from the live proxy set used for cleanup.
+		syncNodes = maps.Clone(activeNodes)
 		proxyClients := m.proxyManager.GetProxyClients()
 		proxyClients.Range(func(nodeID int64, client types.ProxyClient) bool {
+			syncNodes[nodeID] = struct{}{}
 			if info, ok := m.distribution.Get(nodeID); !ok || info.Version < targetVersion {
 				status, err := client.SyncFileResource(m.ctx, &internalpb.SyncFileResourceRequest{
 					Resources: resources,
@@ -315,7 +356,6 @@ func (m *FileResourceObserver) Sync() error {
 			}
 			return true
 		})
-
 		proxyClients.Range(func(nodeID int64, _ types.ProxyClient) bool {
 			activeNodes[nodeID] = struct{}{}
 			return true
@@ -330,7 +370,7 @@ func (m *FileResourceObserver) Sync() error {
 		return true
 	})
 
-	return syncErr
+	return fileResourceSyncResult{targetVersion: targetVersion, targetNodes: syncNodes}, syncErr
 }
 
 func (m *FileResourceObserver) InitMeta(meta rootcoord.IMetaTable) {

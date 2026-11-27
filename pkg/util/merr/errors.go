@@ -86,6 +86,9 @@ var (
 	// replaying non-idempotent relative updates after a CAS rejection.
 	ErrCollectionPartialUpdateConflict = newMilvusError("partial update conflict", 111, false)
 
+	// ErrCollectionConditionalUpsertExecution means the request may have partially committed.
+	ErrCollectionConditionalUpsertExecution = newMilvusError("conditional upsert execution failed", 112, false)
+
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false) // SystemError by default; the proxy GetPartitionInfo name chokepoint stamps InputError for user-supplied partition names, while id-based lookups stay system.
 	ErrPartitionNotLoaded      = newMilvusError("partition not loaded", 201, false)
@@ -222,7 +225,7 @@ var (
 
 	// field related
 	ErrFieldNotFound    = newMilvusError("field not found", 1700, false) // SystemError by default; proxy boundaries stamp InputError where the field name is user-supplied (e.g. group_by/anns field), while result-assembly lookups stay system.
-	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false)
+	ErrFieldInvalidName = newMilvusError("field name invalid", 1701, false, WithErrorType(InputError))
 
 	// high-level restful api related
 	ErrNeedAuthenticate          = newMilvusError("user hasn't authenticated", 1800, false, WithErrorType(InputError))

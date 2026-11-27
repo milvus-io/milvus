@@ -19,6 +19,9 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -33,19 +36,21 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	if len(replicas) == 0 {
 		return
 	}
-	// Promote load-config replicas all-or-nothing. Partially exposing ready
-	// replicas can let the query path enter a resource group while the load path
-	// is still moving the remaining replicas, causing the two paths to compete
-	// for resources during the switch.
-	for _, replica := range replicas {
-		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
-			return
+	// Keep query traffic out of a resource group until its pending replicas
+	// across all collections are ready.
+	byResourceGroup := lo.GroupBy(replicas, (*meta.Replica).GetResourceGroup)
+	replicaIDs := make([]typeutil.UniqueID, 0, len(replicas))
+	for _, group := range byResourceGroup {
+		if lo.EveryBy(group, func(replica *meta.Replica) bool {
+			return s.checkReplicaServiceable(ctx, replica) == nil
+		}) {
+			for _, replica := range group {
+				replicaIDs = append(replicaIDs, replica.GetID())
+			}
 		}
 	}
-
-	replicaIDs := make([]typeutil.UniqueID, 0, len(replicas))
-	for _, replica := range replicas {
-		replicaIDs = append(replicaIDs, replica.GetID())
+	if len(replicaIDs) == 0 {
+		return
 	}
 	collections := s.meta.SetReplicasQueryVisible(ctx, replicaIDs...)
 	if len(collections) == 0 {

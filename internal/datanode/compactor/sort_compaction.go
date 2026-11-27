@@ -152,6 +152,44 @@ func (t *sortCompactionTask) preCompact() error {
 	return nil
 }
 
+// logIfParallelReadIgnored reports that the parallel chunk read option cannot
+// take effect for this sort input. Only sort compaction sets the option, and a
+// segment read through a manifest or through the StorageV1 reader ignores it:
+// the input is read serially and nothing else surfaces the no-op at runtime.
+//
+// The level depends on where the concurrency came from. Asked for by an
+// operator and then dropped on the floor is worth a warning. Derived from the
+// CPU count -- what every unconfigured DataNode gets, since the default
+// resolves to at least 2 on any multi-core machine -- is not: a cluster that
+// never opted into parallel reads would otherwise log a warning per sorted
+// manifest or StorageV1 segment, implying a misconfiguration that does not
+// exist.
+func logIfParallelReadIgnored(ctx context.Context, log *mlog.Logger, segmentID int64, storageVersion int64, manifest string, concurrency int, configured bool) {
+	if concurrency <= 1 {
+		return
+	}
+	var reason string
+	switch {
+	case manifest != "":
+		reason = "the segment is read through a manifest"
+	case storageVersion == storage.StorageV1:
+		reason = "the segment uses StorageV1 binlogs"
+	default:
+		return
+	}
+	const msg = "sort read in parallel is ignored: input is read serially"
+	fields := []mlog.Field{
+		mlog.Int64("segmentID", segmentID),
+		mlog.String("reason", reason),
+		mlog.Int("concurrency", concurrency),
+	}
+	if !configured {
+		log.Info(ctx, msg, fields...)
+		return
+	}
+	log.Warn(ctx, msg, fields...)
+}
+
 func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.CompactionPlanResult, error) {
 	log := mlog.With(
 		mlog.Int64("planID", t.plan.GetPlanID()),
@@ -267,11 +305,25 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		srw.Close()
 		return nil, err
 	}
+	sortReadConcurrency := paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt()
+	parallelRead := storage.ParallelChunkRead{
+		Concurrency: sortReadConcurrency,
+		BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
+	}
+	logIfParallelReadIgnored(ctx, log, t.segmentID, t.segmentStorageVersion, t.manifest, sortReadConcurrency,
+		paramtable.Get().DataNodeCfg.SortReadConcurrency.IsSetByUser())
 	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(t.collectionID),
+		// The sort below keeps every decoded input record until it has written
+		// its output, so decoding chunks ahead of it adds nothing to the peak;
+		// readers that stream their input must not do this. What reading ahead
+		// does add is the raw bytes of the rounds in flight: one round per
+		// chunk being read, each never larger than its chunk, so at most
+		// sortReadConcurrency * sortReadBufferSize.
+		storage.WithParallelChunkRead(parallelRead),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
@@ -371,6 +423,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		mlog.Duration("initReaderCost", initReaderCost),
 		mlog.Int("sortBatches", sortTimings.NumBatches),
 		mlog.Duration("sortReadCost", sortTimings.ReadCost),
+		mlog.Duration("sortFetchCost", sortTimings.FetchCost),
+		mlog.Duration("sortFilterCost", sortTimings.ReadCost-sortTimings.FetchCost),
 		mlog.Duration("sortSortCost", sortTimings.SortCost),
 		mlog.Duration("sortWriteCost", sortTimings.WriteCost),
 		mlog.Duration("flushCost", flushCost),

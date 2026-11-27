@@ -83,6 +83,10 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	// override the FM-index count-first guard threshold (queryNode.fmindexCostRatio)
+	cFmindexCostRatio := C.float(paramtable.Get().QueryNodeCfg.FmindexCostRatio.GetAsFloat())
+	C.SegcoreSetFMIndexCostRatio(cFmindexCostRatio)
+
 	cMaxGroupByGroups := C.int64_t(paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64())
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
@@ -123,6 +127,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
+	UpdateSearchFanoutThreadCoreCoefficient(paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio.GetAsFloat())
 
 	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
 	if knowhereBuildPoolSize < uint32(1) {
@@ -181,6 +186,9 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 	if err := InitExternalVectorNullPolicy(paramtable.Get()); err != nil {
+		return err
+	}
+	if err := InitExternalSparseConversionConfig(paramtable.Get()); err != nil {
 		return err
 	}
 

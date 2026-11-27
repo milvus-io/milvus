@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(MILVUS_GPU_VERSION STREQUAL "ON")
+if(WITH_GPU AND NOT INDEX_ENGINE STREQUAL "cardinal")
     project(core CXX C CUDA)
 else()
     project(core CXX C)
@@ -181,6 +181,7 @@ set(LINK_TARGETS
     simdjson
     tantivy_binding
     knowhere
+    libsais
     milvus-storage
     ${OpenMP_CXX_FLAGS}
     ${CONAN_TARGETS}
@@ -197,5 +198,9 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+milvus_check_aws_runtime(milvus_core)
+if(TARGET milvus-storage_aws_runtime_check)
+    add_dependencies(milvus_core milvus-storage_aws_runtime_check)
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")

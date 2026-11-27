@@ -262,7 +262,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		Handler:           h2c.NewHandler(s.httpHandler(httpserver.DQLStreamingHTTPHandler(ginHandler)), http2Server),
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
 		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
 		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),

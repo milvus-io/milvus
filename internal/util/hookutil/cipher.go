@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -303,17 +304,31 @@ func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
 	return RemoveEZ(ezID)
 }
 
-// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
-func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
+// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode.
+// An encrypted target must not fall back to a plaintext writer when its key is unavailable.
+func GetStoragePluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) ([]*commonpb.KeyValuePair, error) {
 	if ez := GetEzByCollProperties(collProps, collectionID); ez != nil {
-		pluginContext, err := GetPluginContext(ez.EzID, ez.CollectionID)
-		if err != nil {
-			mlog.Error(context.TODO(), "failed to get plugin context", mlog.Err(err))
-			return nil
-		}
-		return pluginContext
+		return GetPluginContext(ez.EzID, ez.CollectionID)
 	}
-	return nil
+	return nil, nil
+}
+
+// GetCollectionPluginContext resolves the collection's required storage context.
+// Only a collection without an EZ may use a nil context.
+func GetCollectionPluginContext(collProps []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	ez := GetEzByCollProperties(collProps, collectionID)
+	if ez == nil {
+		return nil, nil
+	}
+	key, err := requiredEZKey(ez.EzID, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: ez.EzID,
+		CollectionId:     collectionID,
+		EncryptionKey:    base64.StdEncoding.EncodeToString(key),
+	}, nil
 }
 
 // Non nill return
@@ -329,12 +344,11 @@ func GetReadStoragePluginContext(importEzk string) []*commonpb.KeyValuePair {
 // RegisterEZsFromPluginContext registers all EZ contexts from plugin context.
 // This processes ALL CipherConfigUnsafeEZK entries (for both read and write contexts).
 func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
-	if !IsClusterEncryptionEnabled() {
-		return nil
-	}
-
 	for _, value := range context {
 		if value.GetKey() == CipherConfigUnsafeEZK {
+			if GetCipher() == nil {
+				return merr.Wrap(merr.ErrServiceUnavailable, "cannot register task encryption context without a cipher plugin")
+			}
 			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
 			if err != nil {
 				return err
@@ -350,10 +364,6 @@ func RegisterEZsFromPluginContext(context []*commonpb.KeyValuePair) error {
 // GetCPluginContext gets C++ plugin context from the first CipherConfigUnsafeEZK entry.
 // Used for creating indexcgopb.StoragePluginContext for C++ segcore.
 func GetCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	if !IsClusterEncryptionEnabled() {
-		return nil, nil
-	}
-
 	for _, value := range context {
 		if value.GetKey() == CipherConfigUnsafeEZK {
 			ezID, encryptionKey, err := decodeEZContext(value.GetValue())
@@ -422,6 +432,24 @@ func initCipher() error {
 
 	pathGo := paramtable.GetCipherParams().SoPathGo.GetValue()
 	pathCpp := paramtable.GetCipherParams().SoPathCpp.GetValue()
+
+	// A cipher compiled into this binary replaces the Go half of the plug-in
+	// pair, cipherPlugin.soPathGo, and only that half: the C++ half is still
+	// loaded by the core from cipherPlugin.soPathCpp, so that path stays the
+	// deployment's declaration that encryption is on. A compiled-in cipher
+	// with no soPathCpp is left idle, exactly as no plug-in would be loaded.
+	// The compiled-in cipher is used and cipherPlugin.soPathGo is ignored.
+	if compiled := ext.InstalledCipher(); compiled != nil {
+		if pathGo != "" {
+			mlog.Warn(context.TODO(), "cipherPlugin.soPathGo is ignored, a cipher is compiled into this binary")
+		}
+		if pathCpp == "" {
+			mlog.Info(context.TODO(), "empty cipherPlugin.soPathCpp, encryption is off and the compiled-in cipher stays idle")
+			return nil
+		}
+		return useCipher(compiled, "compiled-in cipher")
+	}
+
 	if pathGo == "" || pathCpp == "" {
 		mlog.Info(context.TODO(), "empty so path for cipher plugin, skip to load plugin")
 		return nil
@@ -431,14 +459,21 @@ func initCipher() error {
 	if err != nil {
 		return err
 	}
+	return useCipher(cipherVal, "cipher plugin")
+}
 
-	initConfigs := buildCipherInitConfig()
-	if err = cipherVal.Init(initConfigs); err != nil {
-		return merr.Wrap(err, "fail to init configs for the cipher plugin")
+// useCipher initializes a cipher with the cipherPlugin.* configuration,
+// registers the reload callbacks and installs it. It is the same for a
+// plug-in and a compiled-in cipher, which is the point: a cipher a
+// distribution compiled in must not be a second-class one. origin names it
+// in the error and the log.
+func useCipher(cipherVal hook.Cipher, origin string) error {
+	if err := cipherVal.Init(buildCipherInitConfig()); err != nil {
+		return merr.Wrap(err, "fail to init configs for the "+origin)
 	}
-
 	registerCallback()
-	storeCipher((cipherVal))
+	storeCipher(cipherVal)
+	mlog.Info(context.TODO(), "using the "+origin)
 	return nil
 }
 

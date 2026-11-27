@@ -51,14 +51,14 @@ SelectOffsets(const TargetBitmapView& raw_data_view,
         return {std::move(result_pair.first), {}};
     }
 
-    auto array_offsets = query_context->get_array_offsets();
-    AssertInfo(array_offsets != nullptr,
-               "element-level ProjectNode requires array offsets");
+    auto struct_element_offsets = query_context->get_struct_element_offsets();
+    AssertInfo(struct_element_offsets != nullptr,
+               "element-level ProjectNode requires struct element offsets");
 
     auto [doc_offsets, element_indices_by_doc, _] =
         segment->find_first_n_element(segcore::Unlimited,
                                       raw_data_view,
-                                      array_offsets.get(),
+                                      struct_element_offsets.get(),
                                       std::nullopt);
 
     size_t selected_count = 0;

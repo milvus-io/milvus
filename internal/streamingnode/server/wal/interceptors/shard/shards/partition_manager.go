@@ -88,7 +88,6 @@ func (m *partitionManager) GetSegmentManager(segmentID int64) *segmentAllocManag
 }
 
 // AssignSegment assigns a segment for a assign segment request.
-// req.SchemaVersion must be set by the caller before invoking.
 func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
 	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
 	// So it's just a promise check here.
@@ -211,6 +210,6 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment(req.SchemaVersion, req.RequiresStorageV3)
+	m.asyncAllocSegment()
 	return nil, ErrWaitForNewSegment
 }

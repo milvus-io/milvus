@@ -28,7 +28,6 @@ const (
 	globalIDAllocatorSubPath  = "gid"
 	globalTSOAllocatorKey     = "timestamp"
 	globalTSOAllocatorSubPath = "tso"
-	defaultMaxArrayCapacity   = 4096
 )
 
 func checkGeneralCapacity(ctx context.Context, newColNum int,

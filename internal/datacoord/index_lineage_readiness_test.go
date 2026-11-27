@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -53,13 +54,13 @@ func newIndexLineageCaseServer(test indexLineageReadinessCase) (*Server, *model.
 	s, index := newIndexReadinessTestServer(test.segments, test.states)
 	index.IndexName = "lineage_index"
 	if len(test.otherIndexStates) > 0 {
-		s.meta.indexMeta.indexes[1][20] = &model.Index{CollectionID: 1, FieldID: 20, IndexID: 20, IndexName: "other_index"}
+		s.indexMeta.Indexes[1][20] = &model.Index{CollectionID: 1, FieldID: 20, IndexID: 20, IndexName: "other_index"}
 	}
 	for segmentID, state := range test.otherIndexStates {
-		indexes, ok := s.meta.indexMeta.segmentIndexes.Get(segmentID)
+		indexes, ok := s.indexMeta.SegmentIndexes.Get(segmentID)
 		if !ok {
 			indexes = typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-			s.meta.indexMeta.segmentIndexes.Insert(segmentID, indexes)
+			s.indexMeta.SegmentIndexes.Insert(segmentID, indexes)
 		}
 		indexes.Insert(20, &model.SegmentIndex{
 			SegmentID: segmentID, CollectionID: 1, IndexID: 20,
@@ -72,7 +73,7 @@ func newIndexLineageCaseServer(test indexLineageReadinessCase) (*Server, *model.
 func assertIndexLineageReadiness(t *testing.T, test indexLineageReadinessCase, realTime bool) *indexpb.IndexInfo {
 	t.Helper()
 	s, index := newIndexLineageCaseServer(test)
-	stats := s.selectSegmentIndexesStats(context.Background(), WithCollection(1))
+	stats := s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1))
 	for segmentID, state := range test.otherIndexStates {
 		require.Equal(t, state, stats[segmentID].indexStates[20].GetState(), "another live index survives the collector boundary")
 	}

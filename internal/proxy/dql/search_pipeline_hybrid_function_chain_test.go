@@ -188,7 +188,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRequestLimitFallback() {
 			}
 			opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 				return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-					return []any{queryResults, []string{metric.IP, metric.IP}}, nil
+					return []any{queryResults, testSearchScoreInfos(metric.IP, metric.IP)}, nil
 				}), nil
 			}
 			ops := append([]*schemapb.FunctionChainOp{{
@@ -365,7 +365,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainElementLevelPreservesNative
 
 			opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 				return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-					return []any{reduced, []string{"IP", "IP"}}, nil
+					return []any{reduced, testSearchScoreInfos("IP", "IP")}, nil
 				}), nil
 			}
 
@@ -423,7 +423,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainUsesRuntimeMetricsInSubRequ
 	}
 	opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 		return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-			return []any{reduced, []string{metric.IP, metric.L2}}, nil
+			return []any{reduced, testSearchScoreInfos(metric.IP, metric.L2)}, nil
 		}), nil
 	}
 
@@ -505,7 +505,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainOwnsSortOffsetAndRounding()
 	}
 	opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 		return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-			return []any{reduced, []string{metric.IP, metric.IP}}, nil
+			return []any{reduced, testSearchScoreInfos(metric.IP, metric.IP)}, nil
 		}), nil
 	}
 
@@ -595,7 +595,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainGroupByDoesNotOverrideFinal
 	}
 	opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 		return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-			return []any{reduced, []string{metric.IP, metric.IP}}, nil
+			return []any{reduced, testSearchScoreInfos(metric.IP, metric.IP)}, nil
 		}), nil
 	}
 
@@ -687,9 +687,9 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRuntimeInvariantErrors() {
 
 	s.Run("runtime metric count mismatch is system error", func() {
 		_, err := op.run(context.Background(), s.span,
-			[]*milvuspb.SearchResults{valid1, valid2}, []string{metric.IP})
+			[]*milvuspb.SearchResults{valid1, valid2}, testSearchScoreInfos(metric.IP))
 		s.ErrorIs(err, merr.ErrServiceInternal)
-		s.ErrorContains(err, "input count 2 != expected count 1")
+		s.ErrorContains(err, "score info length (1) does not match results length (2)")
 	})
 
 	s.Run("element index outside Int32 range is system error", func() {
@@ -699,7 +699,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRuntimeInvariantErrors() {
 			&schemapb.LongArray{Data: []int64{int64(math.MaxInt32) + 1}},
 		)
 		_, err := op.run(context.Background(), s.span,
-			[]*milvuspb.SearchResults{outOfRange, valid2}, []string{metric.IP, metric.IP})
+			[]*milvuspb.SearchResults{outOfRange, valid2}, testSearchScoreInfos(metric.IP, metric.IP))
 		s.ErrorIs(err, merr.ErrServiceInternal)
 		s.ErrorContains(err, "out of Int32 range")
 	})
@@ -707,7 +707,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRuntimeInvariantErrors() {
 	s.Run("missing id inside chain input is function failure", func() {
 		missingID := makeResult(nil, []float32{0.9}, nil)
 		_, err := op.run(context.Background(), s.span,
-			[]*milvuspb.SearchResults{missingID, valid2}, []string{metric.IP, metric.IP})
+			[]*milvuspb.SearchResults{missingID, valid2}, testSearchScoreInfos(metric.IP, metric.IP))
 		s.ErrorIs(err, merr.ErrFunctionFailed)
 		s.ErrorContains(err, "missing $id column")
 	})
@@ -715,7 +715,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainRuntimeInvariantErrors() {
 	s.Run("missing score inside chain input is function failure", func() {
 		missingScore := makeResult(testSearchResultIDs(1), nil, nil)
 		_, err := op.run(context.Background(), s.span,
-			[]*milvuspb.SearchResults{missingScore, valid2}, []string{metric.IP, metric.IP})
+			[]*milvuspb.SearchResults{missingScore, valid2}, testSearchScoreInfos(metric.IP, metric.IP))
 		s.ErrorIs(err, merr.ErrFunctionFailed)
 		s.ErrorContains(err, "missing $score column")
 	})
@@ -768,7 +768,7 @@ func (s *SearchPipelineSuite) TestHybridFunctionChainEmptyResultValidatesDownstr
 	}
 	opFactory[hybridSearchReduceOp] = func(_ *SearchTask, _ map[string]any) (operator, error) {
 		return searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
-			return []any{[]*milvuspb.SearchResults{emptyResult(), emptyResult()}, []string{metric.IP, metric.IP}}, nil
+			return []any{[]*milvuspb.SearchResults{emptyResult(), emptyResult()}, testSearchScoreInfos(metric.IP, metric.IP)}, nil
 		}), nil
 	}
 

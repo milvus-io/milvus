@@ -18,15 +18,18 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	mock "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -39,6 +42,7 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
 
 	task := NewMockTask(t)
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 	task.EXPECT().GetTaskID().Return(1)
 	task.EXPECT().GetTaskState().Return(taskcommon.Init)
 	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
@@ -68,6 +72,7 @@ func TestGlobalScheduler_GetPendingTaskCountIsScopedByTaskType(t *testing.T) {
 
 	enqueue := func(taskID int64, taskType taskcommon.Type) {
 		task := NewMockTask(t)
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 		task.EXPECT().GetTaskID().Return(taskID)
 		task.EXPECT().GetTaskState().Return(taskcommon.Init)
 		task.EXPECT().GetTaskType().Return(taskType)
@@ -98,6 +103,7 @@ func TestGlobalScheduler_GetPendingTaskCountIncludesBackoff(t *testing.T) {
 	tasks := make(map[int64]Task)
 	for taskID := int64(1); taskID <= 2; taskID++ {
 		task := NewMockTask(t)
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 		task.EXPECT().GetTaskID().Return(taskID)
 		task.EXPECT().GetTaskState().Return(taskcommon.Init)
 		task.EXPECT().GetTaskType().Return(taskcommon.Stats)
@@ -117,6 +123,7 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
 
 	task := NewMockTask(t)
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 	task.EXPECT().GetTaskID().Return(1)
 	task.EXPECT().GetTaskState().Return(taskcommon.Init)
 	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
@@ -137,6 +144,275 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
 	scheduler.AbortAndRemoveTask(2)
 	assert.Equal(t, 0, scheduler.(*globalTaskScheduler).runningTasks.Len())
+}
+
+func newFinalizeTestTask(t *testing.T, initial taskcommon.State) (*MockTask, *atomic.Int32) {
+	t.Helper()
+	state := &atomic.Int32{}
+	state.Store(int32(initial))
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskID().Return(int64(1))
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return taskcommon.State(state.Load())
+	})
+	task.EXPECT().GetTaskType().Return(taskcommon.Import)
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
+	return task, state
+}
+
+func TestGlobalScheduler_FinalizeRemovesOwnershipBeforeCleanup(t *testing.T) {
+	for _, initial := range []taskcommon.State{taskcommon.Init, taskcommon.InProgress} {
+		t.Run(initial.String(), func(t *testing.T) {
+			scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+			task, state := newFinalizeTestTask(t, initial)
+			scheduler.Enqueue(task)
+			scheduler.backoffs.Insert(1, &taskBackoff{failures: 1})
+
+			cleaned := false
+			scheduler.Finalize(1, func() {
+				assert.Nil(t, scheduler.pendingTasks.Get(1))
+				assert.False(t, scheduler.runningTasks.Contain(1))
+				assert.False(t, scheduler.backoffs.Contain(1))
+				state.Store(int32(taskcommon.Failed))
+				cleaned = true
+			})
+			assert.True(t, cleaned)
+			// Finalize leaves worker cleanup to its caller; it must not issue a
+			// separate best-effort Drop before the latest assignment is re-read.
+			task.AssertNotCalled(t, "DropTaskOnWorker", mock.Anything)
+		})
+	}
+}
+
+func TestGlobalScheduler_FinalizeWaitsForInFlightCreate(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	task.EXPECT().GetTaskSlot().Return(int64(1))
+	createStarted := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	task.EXPECT().CreateTaskOnWorker(int64(10), cluster, mock.Anything).Run(func(int64, session.Cluster, taskcommon.Resource) {
+		close(createStarted)
+		<-releaseCreate
+		state.Store(int32(taskcommon.InProgress))
+	}).Once()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-createStarted
+
+	finalizeStarted := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		close(finalizeStarted)
+		scheduler.Finalize(1, func() {
+			assert.Equal(t, taskcommon.InProgress, task.GetTaskState())
+			assert.False(t, scheduler.runningTasks.Contain(1))
+			state.Store(int32(taskcommon.Failed))
+		})
+		close(finalizeDone)
+	}()
+	<-finalizeStarted
+	select {
+	case <-finalizeDone:
+		t.Error("cleanup ran before the Create callback finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseCreate)
+	<-scheduleDone
+	<-finalizeDone
+	assert.Equal(t, taskcommon.Failed, task.GetTaskState())
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsQueuedCreate(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	task.EXPECT().GetTaskSlot().Return(int64(1))
+	callbackQueued := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	scheduler.execPool.Release()
+	scheduler.execPool = conc.NewPool[struct{}](1, conc.WithPreHandler(func() {
+		close(callbackQueued)
+		<-releaseCallback
+	}))
+	defer scheduler.execPool.Release()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-callbackQueued
+
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releaseCallback)
+	<-scheduleDone
+	task.AssertNotCalled(t, "CreateTaskOnWorker", mock.Anything, mock.Anything, mock.Anything)
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsQueuedQuery(t *testing.T) {
+	for _, replace := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replacement=%t", replace), func(t *testing.T) {
+			scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
+			task, _ := newFinalizeTestTask(t, taskcommon.InProgress)
+			callbackQueued := make(chan struct{})
+			releaseCallback := make(chan struct{})
+			scheduler.checkPool.Release()
+			scheduler.checkPool = conc.NewPool[struct{}](1, conc.WithPreHandler(func() {
+				close(callbackQueued)
+				<-releaseCallback
+			}))
+			defer scheduler.checkPool.Release()
+			scheduler.Enqueue(task)
+			checkDone := make(chan struct{})
+			go func() { scheduler.check(); close(checkDone) }()
+			<-callbackQueued
+
+			scheduler.Finalize(1, func() {})
+			var replacement *MockTask
+			if replace {
+				replacement, _ = newFinalizeTestTask(t, taskcommon.InProgress)
+				scheduler.Enqueue(replacement)
+			}
+			close(releaseCallback)
+			<-checkDone
+			task.AssertNotCalled(t, "QueryTaskOnWorker", mock.Anything)
+			task.AssertNotCalled(t, "DropTaskOnWorker", mock.Anything)
+			assert.Zero(t, scheduler.pendingTasks.TaskCount())
+			if replace {
+				current, ok := scheduler.runningTasks.Get(1)
+				require.True(t, ok)
+				assert.Same(t, replacement, current)
+			} else {
+				assert.Zero(t, scheduler.runningTasks.Len())
+			}
+		})
+	}
+}
+
+func TestGlobalScheduler_FinalizeStopsNoSlotRequeue(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	calculatingSlot := make(chan struct{})
+	releaseSlot := make(chan struct{})
+	task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		close(calculatingSlot)
+		<-releaseSlot
+		return 1
+	}).Once()
+	scheduler.Enqueue(task)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-calculatingSlot
+
+	finalizeStarted := make(chan struct{})
+	finalizeDone := make(chan struct{})
+	go func() {
+		close(finalizeStarted)
+		scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+		close(finalizeDone)
+	}()
+	<-finalizeStarted
+	// Before the fix, Finalize completes while slot calculation is outside
+	// the task lock, then the no-slot branch resurrects the task. With the
+	// lock, Finalize waits and removes the requeued task after this round.
+	select {
+	case <-finalizeDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseSlot)
+	<-scheduleDone
+	<-finalizeDone
+	assert.Nil(t, scheduler.pendingTasks.Get(1))
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsDelayedRequeue(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	task, state := newFinalizeTestTask(t, taskcommon.Init)
+	scheduler.Enqueue(task)
+	scheduler.backoffs.Insert(1, &taskBackoff{notBefore: time.Now().Add(time.Hour)})
+
+	// The second task pauses this round after task 1 has moved into delayed,
+	// before the scheduler gets to its delayed-task requeue loop.
+	secondTask := NewMockTask(t)
+	secondTask.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
+	secondTask.EXPECT().GetTaskID().Return(int64(2))
+	secondTask.EXPECT().GetTaskState().Return(taskcommon.Init)
+	secondTask.EXPECT().GetTaskType().Return(taskcommon.Import)
+	secondTask.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+	secondPopped := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	secondTask.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		close(secondPopped)
+		<-releaseSecond
+		return 1
+	}).Once()
+	scheduler.Enqueue(secondTask)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-secondPopped
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releaseSecond)
+	<-scheduleDone
+	assert.Nil(t, scheduler.pendingTasks.Get(1))
+	assert.Same(t, secondTask, scheduler.pendingTasks.Get(2))
+	assert.Zero(t, scheduler.runningTasks.Len())
+}
+
+func TestGlobalScheduler_FinalizeStopsSlotCalculationAfterPop(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{10: {AvailableSlots: 1}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	state := &atomic.Int32{}
+	state.Store(int32(taskcommon.Init))
+	var armed atomic.Bool
+	var identityReads atomic.Int32
+	taskPopped := make(chan struct{})
+	releasePopped := make(chan struct{})
+	task := NewMockTask(t)
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
+	task.EXPECT().GetTaskID().RunAndReturn(func() int64 {
+		// Pop's first identity read removes the task from its queue map.
+		// The next read happens after Pop returns, before taking its key lock.
+		if armed.Load() && identityReads.Add(1) == 2 {
+			close(taskPopped)
+			<-releasePopped
+		}
+		return 1
+	})
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return taskcommon.State(state.Load())
+	})
+	task.EXPECT().GetTaskType().Return(taskcommon.Import)
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
+	var slotCalculations atomic.Int32
+	task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+		// Real import slot calculation dereferences the job. GC has removed
+		// it by this point, so reaching this call would panic in production.
+		slotCalculations.Add(1)
+		return 1
+	}).Maybe()
+	scheduler.Enqueue(task)
+	armed.Store(true)
+	scheduleDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(scheduleDone) }()
+	<-taskPopped
+
+	scheduler.Finalize(1, func() { state.Store(int32(taskcommon.Failed)) })
+	close(releasePopped)
+	<-scheduleDone
+	assert.Zero(t, slotCalculations.Load())
+	assert.Zero(t, scheduler.pendingTasks.TaskCount())
+	assert.Zero(t, scheduler.runningTasks.Len())
 }
 
 func TestGlobalScheduler_pickNode(t *testing.T) {
@@ -283,6 +559,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskSlot().Return(1).Maybe()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 		return task
 	}
 
@@ -303,7 +580,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			return taskcommon.Retry
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // Mark that CreateTaskOnWorker was called
 		}).Maybe()
 
@@ -337,7 +614,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			}
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // CreateTaskOnWorker called
 		}).Maybe()
 
@@ -368,11 +645,12 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 		task.EXPECT().GetTaskSlot().Return(int64(0)).Once()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 
 		var dispatched atomic.Bool
 		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
 			return nodeID == 10 || nodeID == 20
-		}), mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		}), mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			dispatched.Store(true)
 		}).Once()
 
@@ -402,7 +680,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			}
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // CreateTaskOnWorker called
 		}).Maybe()
 
@@ -434,6 +712,7 @@ func TestGlobalScheduler_RecordTaskFailureBackoff(t *testing.T) {
 
 	scheduler := NewGlobalTaskScheduler(context.TODO(), nil).(*globalTaskScheduler)
 	task := NewMockTask(t)
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 	task.EXPECT().GetTaskID().Return(7).Maybe()
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
@@ -483,10 +762,11 @@ func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
 	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 	var createCalls atomic.Int32
-	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 		createCalls.Add(1)
 	}).Maybe()
 
@@ -519,6 +799,7 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
 
 	// CreateTaskOnWorker drives the task straight to a terminal state (e.g. its
 	// segment was compacted away), so it never reaches InProgress/runningTasks.
@@ -529,7 +810,7 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 		}
 		return taskcommon.Init
 	}).Maybe()
-	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 		created.Store(true)
 	}).Maybe()
 
@@ -544,4 +825,494 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 	assert.False(t, ok, "backoff entry must be removed once the task reaches a terminal state")
 	assert.Equal(t, 0, scheduler.runningTasks.Len())
 	assert.Equal(t, 0, len(scheduler.pendingTasks.TaskIDs()))
+}
+
+// TestGlobalScheduler_scheduleUnfitTask: a task that does not fit the cluster
+// right now stops worker placement, whether the cluster is short of memory for it alone
+// or has nothing free at all. Tasks behind it are not placed ahead of it, so the
+// capacity that running tasks release is held for it.
+func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
+	const giB = int64(1) << 30
+
+	// newDispatchableTask returns a task that reaches InProgress once the worker
+	// accepts it, a flag reporting whether it was dispatched, and a counter of
+	// how often the scheduler popped it and looked at its cost - zero means the
+	// scheduler did not price it.
+	newDispatchableTask := func(t *testing.T, taskID int64, req taskcommon.Resource) (*MockTask, *atomic.Bool, *atomic.Int32) {
+		task := NewMockTask(t)
+		var (
+			dispatched atomic.Bool
+			examined   atomic.Int32
+		)
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskSlot().RunAndReturn(func() int64 {
+			examined.Add(1)
+			return 1
+		}).Maybe()
+		task.EXPECT().GetTaskResource().Return(req).Maybe()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+			Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+				dispatched.Store(true)
+			}).Maybe()
+		return task, &dispatched, &examined
+	}
+
+	t.Run("task that does not fit keeps its place at the head", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			1: {NodeID: 1, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 4 * giB},
+			2: {NodeID: 2, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 4 * giB},
+		}).Once()
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+		// The head of the queue (lowest task ID) needs 12GiB: it fits an empty
+		// worker, so it is not oversized, but no worker has that much free now.
+		head, headDispatched, _ := newDispatchableTask(t, 1, taskcommon.Resource{CPU: 1, Memory: 12 * giB})
+		small, smallDispatched, smallExamined := newDispatchableTask(t, 2, taskcommon.Resource{CPU: 1, Memory: giB})
+		scheduler.Enqueue(head)
+		scheduler.Enqueue(small)
+		local := newCoordinatorTestTask(t, 3, func(_ context.Context, state *atomic.Int32) {
+			state.Store(int32(taskcommon.Finished))
+		})
+		scheduler.Enqueue(local)
+		scheduler.schedule()
+		scheduler.localWG.Wait()
+		assert.Equal(t, taskcommon.Finished, local.GetTaskState())
+
+		assert.False(t, headDispatched.Load(), "the task that does not fit must wait")
+		assert.False(t, smallDispatched.Load(), "a smaller task must not take the memory the head waits for")
+		assert.Zero(t, smallExamined.Load(), "worker pricing must stop at the head")
+		assert.ElementsMatch(t, []int64{1, 2}, scheduler.pendingTasks.TaskIDs())
+	})
+
+	for _, demandGiB := range []int64{12, 80} {
+		t.Run(fmt.Sprintf("head requiring %d GiB keeps priority across rounds", demandGiB), func(t *testing.T) {
+			cluster := session.NewMockCluster(t)
+			worker := &session.WorkerSlots{NodeID: 1, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 4 * giB}
+			cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: worker}).Times(4)
+			scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+			head, headDispatched, _ := newDispatchableTask(t, 1, taskcommon.Resource{CPU: 1, Memory: demandGiB * giB})
+			scheduler.Enqueue(head)
+			var followers []*atomic.Bool
+			for id := int64(2); id <= 3; id++ {
+				small, dispatched, examined := newDispatchableTask(t, id, taskcommon.Resource{CPU: 1, Memory: giB})
+				followers = append(followers, dispatched)
+				scheduler.Enqueue(small)
+				scheduler.schedule()
+				assert.False(t, headDispatched.Load())
+				for _, follower := range followers {
+					assert.False(t, follower.Load(), "new small tasks must not consume memory ahead of the waiting head")
+				}
+				assert.Zero(t, examined.Load())
+				assert.Equal(t, int(id), scheduler.pendingTasks.TaskCount())
+				worker.AvailableMemory = 8 * giB
+			}
+			// Free the worker without increasing its capacity. An oversized
+			// head runs alone; an ordinary head consumes all available memory.
+			worker.AvailableMemory = min(worker.TotalMemory, demandGiB*giB)
+			worker.Idle = true
+			scheduler.schedule()
+			assert.True(t, headDispatched.Load(), "the waiting head gets the released capacity first")
+			for _, follower := range followers {
+				assert.False(t, follower.Load())
+			}
+			assert.ElementsMatch(t, []int64{2, 3}, scheduler.pendingTasks.TaskIDs())
+			worker.AvailableMemory = 2 * giB
+			worker.Idle = false
+			scheduler.schedule()
+			for _, follower := range followers {
+				assert.True(t, follower.Load())
+			}
+			assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+		})
+	}
+
+	t.Run("exhausted cluster stops worker placement", func(t *testing.T) {
+		cluster := session.NewMockCluster(t)
+		// Slots to spare on both workers, and no memory at all.
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			1: {NodeID: 1, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 0},
+			2: {NodeID: 2, AvailableSlots: 10, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 0},
+		}).Once()
+		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+		head, headDispatched, _ := newDispatchableTask(t, 1, taskcommon.Resource{CPU: 1, Memory: 12 * giB})
+		small, smallDispatched, smallExamined := newDispatchableTask(t, 2, taskcommon.Resource{CPU: 1, Memory: giB})
+		scheduler.Enqueue(head)
+		scheduler.Enqueue(small)
+
+		scheduler.schedule()
+
+		// No worker has memory: neither task is dispatched and both stay queued.
+		assert.False(t, headDispatched.Load())
+		assert.False(t, smallDispatched.Load())
+		assert.ElementsMatch(t, []int64{1, 2}, scheduler.pendingTasks.TaskIDs())
+		// The round ended at the head rather than draining the queue: the second
+		// task was never even popped.
+		assert.Zero(t, smallExamined.Load())
+	})
+}
+
+// TestGlobalScheduler_scheduleBackoffDoesNotStopRound: tasks in failure backoff
+// are set aside without limit and the round goes on. During a retry storm the
+// oldest tasks are the ones failing over and over; if setting them aside could
+// end the round, a healthy task queued behind them would never be reached.
+func TestGlobalScheduler_scheduleBackoffDoesNotStopRound(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 1000},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	const inBackoff = 200
+	for i := 1; i <= inBackoff; i++ {
+		task := NewMockTask(t)
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1}).Maybe()
+		task.EXPECT().GetTaskID().Return(int64(i)).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
+		scheduler.Enqueue(task)
+		scheduler.backoffs.Insert(int64(i), &taskBackoff{failures: 7, notBefore: time.Now().Add(time.Minute)})
+	}
+
+	healthy := NewMockTask(t)
+	var dispatched atomic.Bool
+	healthy.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 1 << 30}).Maybe()
+	healthy.EXPECT().GetTaskID().Return(int64(inBackoff + 1)).Maybe()
+	healthy.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	healthy.EXPECT().GetTaskSlot().Return(1).Maybe()
+	healthy.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	healthy.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		if dispatched.Load() {
+			return taskcommon.InProgress
+		}
+		return taskcommon.Init
+	}).Maybe()
+	healthy.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) { dispatched.Store(true) }).Maybe()
+	scheduler.Enqueue(healthy)
+
+	scheduler.schedule()
+
+	assert.True(t, dispatched.Load(), "a healthy task behind the backoff tasks must be dispatched")
+	assert.True(t, scheduler.runningTasks.Contain(inBackoff+1))
+	// Every task in backoff is back in the queue: none lost, none duplicated.
+	assert.Equal(t, inBackoff, scheduler.GetPendingTaskCount(taskcommon.Index))
+	assert.Len(t, scheduler.pendingTasks.TaskIDs(), inBackoff)
+}
+
+// TestGlobalScheduler_scheduleBoundPrice: a family whose inputs are still
+// resolving answers with an upper bound. Cacheability is internal to the task;
+// the scheduler places the returned resource without waiting for exact inputs.
+// See TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices.
+func TestGlobalScheduler_scheduleBoundPrice(t *testing.T) {
+	const giB = int64(1) << 30
+
+	newTask := func(taskID int64, res taskcommon.Resource) (*MockTask, *atomic.Bool) {
+		task := NewMockTask(t)
+		var dispatched atomic.Bool
+		task.EXPECT().GetTaskID().Return(taskID).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskSlot().Return(1).Maybe()
+		task.EXPECT().GetTaskResource().Return(res).Maybe()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+			Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+				dispatched.Store(true)
+			}).Maybe()
+		return task, &dispatched
+	}
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+
+	// The head of the queue carries a conservative bound. It is still placed.
+	inexact, inexactDispatched := newTask(1, taskcommon.Resource{CPU: 1, Memory: 2 * giB})
+	exact, exactDispatched := newTask(2, taskcommon.Resource{CPU: 1, Memory: giB})
+	scheduler.Enqueue(inexact)
+	scheduler.Enqueue(exact)
+
+	scheduler.schedule()
+
+	assert.True(t, inexactDispatched.Load(), "an inexact price is an upper bound, and must not block placement")
+	assert.True(t, exactDispatched.Load(), "the task behind it must not be stalled")
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+	assert.True(t, scheduler.runningTasks.Contain(1))
+	assert.True(t, scheduler.runningTasks.Contain(2))
+}
+
+// TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices guards the reason the
+// scheduler must not wait for an exact price.
+//
+// A task whose inputs are gone -- a segment dropped by compaction, by
+// drop-collection or by drop-partition -- can never price itself exactly.
+// This Task has no coordinator-only hook: CreateTaskOnWorker retires it
+// after placement. A scheduler waiting for an exact price instead would
+// re-queue it on every round for as long as datacoord runs.
+func TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices(t *testing.T) {
+	const giB = int64(1) << 30
+
+	task := NewMockTask(t)
+	var state atomic.Value
+	state.Store(taskcommon.Init)
+	task.EXPECT().GetTaskID().Return(int64(1)).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	// The inputs are gone, so the family answers the floor and never resolves.
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 64 << 20}).Maybe()
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return state.Load().(taskcommon.State)
+	}).Maybe()
+	// This is what CreateTaskOnWorker does for an unhealthy segment: it marks
+	// the task terminal without ever sending it to a worker.
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+			state.Store(taskcommon.None)
+		}).Once()
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	scheduler.Enqueue(task)
+
+	scheduler.schedule()
+
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs(), "a task that can never price itself must not be re-queued forever")
+	assert.False(t, scheduler.runningTasks.Contain(1), "a terminal task must not enter runningTasks")
+}
+
+// Exercise the dispatch loop with both compatibility slots and CPU exhausted.
+// Only the fifth task is held back: the first four reserve all 4GiB of memory.
+func TestGlobalScheduler_schedulePricedTasksUntilMemoryIsFull(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {
+			NodeID: 1, AvailableSlots: 0, TotalCPU: 8, AvailableCPU: 0,
+			TotalMemory: 4 * pickGiB, AvailableMemory: 4 * pickGiB,
+		},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	for id := int64(1); id <= 5; id++ {
+		task := NewMockTask(t)
+		var dispatched atomic.Bool
+		task.EXPECT().GetTaskID().Return(id).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().GetTaskSlot().Return(int64(128)).Once()
+		task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 8, Memory: pickGiB}).Once()
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			if dispatched.Load() {
+				return taskcommon.InProgress
+			}
+			return taskcommon.Init
+		}).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		if id <= 4 {
+			task.EXPECT().CreateTaskOnWorker(int64(1), cluster, mock.Anything).Run(func(_ int64, _ session.Cluster, _ taskcommon.Resource) {
+				dispatched.Store(true)
+			}).Once()
+		}
+		scheduler.Enqueue(task)
+	}
+	scheduler.schedule()
+	assert.Equal(t, 4, scheduler.runningTasks.Len())
+	assert.Equal(t, []int64{5}, scheduler.pendingTasks.TaskIDs())
+}
+
+// The optional local hook must work without workers and without reading prices.
+type coordinatorTestTask struct {
+	*MockTask
+	state       *atomic.Int32
+	complete    func(context.Context)
+	needsWorker bool
+}
+
+func (t *coordinatorTestTask) CanCompleteOnCoordinator() bool { return !t.needsWorker }
+func (t *coordinatorTestTask) CompleteOnCoordinator(ctx context.Context) CoordinatorResult {
+	t.complete(ctx)
+	if t.needsWorker {
+		return LocalNeedsWorker
+	}
+	if t.GetTaskState() == taskcommon.Init {
+		return LocalRetry
+	}
+	return LocalCompleted
+}
+
+func newCoordinatorTestTask(t *testing.T, id int64, complete func(context.Context, *atomic.Int32)) *coordinatorTestTask {
+	base := NewMockTask(t)
+	var state atomic.Int32
+	state.Store(int32(taskcommon.Init))
+	base.EXPECT().GetTaskID().Return(id).Maybe()
+	base.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	base.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State { return taskcommon.State(state.Load()) }).Maybe()
+	base.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	return &coordinatorTestTask{MockTask: base, state: &state, complete: func(ctx context.Context) { complete(ctx, &state) }}
+}
+
+func TestGlobalScheduler_CoordinatorCompletionWithoutWorkers(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Times(2)
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	defer scheduler.Stop()
+	attempts := 0
+	local := newCoordinatorTestTask(t, 1, func(ctx context.Context, state *atomic.Int32) {
+		_, hasDeadline := ctx.Deadline()
+		assert.True(t, hasDeadline)
+		attempts++
+		if attempts == 2 {
+			state.Store(int32(taskcommon.Finished))
+		}
+	})
+	scheduler.Enqueue(local)
+	scheduler.schedule()
+	scheduler.localWG.Wait()
+	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs(), "metadata failure keeps the task pending")
+	assert.Equal(t, 1, attempts, "no retry loop within a round")
+	scheduler.backoffs.Remove(1)
+	scheduler.schedule()
+	scheduler.localWG.Wait()
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+	assert.False(t, scheduler.runningTasks.Contain(1))
+	assert.False(t, scheduler.localTasks.Contain(1))
+	assert.Equal(t, 2, attempts)
+	local.AssertNotCalled(t, "GetTaskResource")
+	local.AssertNotCalled(t, "CreateTaskOnWorker", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestGlobalScheduler_LocalReclassificationDoesNotBackoff(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {AvailableSlots: 10}}).Times(2)
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	defer scheduler.Stop()
+	local := newCoordinatorTestTask(t, 1, func(context.Context, *atomic.Int32) {})
+	local.complete = func(context.Context) { local.needsWorker = true }
+	resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
+	local.EXPECT().GetTaskSlot().Return(int64(1)).Once()
+	local.EXPECT().GetTaskResource().Return(resource).Once()
+	local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) {
+		local.state.Store(int32(taskcommon.InProgress))
+	}).Once()
+	scheduler.Enqueue(local)
+	scheduler.schedule()
+	scheduler.localWG.Wait()
+	require.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+	require.False(t, scheduler.taskInBackoff(local), "needing a worker after reclassification is not a failure")
+	scheduler.schedule()
+	assert.True(t, scheduler.runningTasks.Contain(1))
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+}
+
+func TestGlobalScheduler_LocalCompletionDoesNotBlockScheduling(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {AvailableSlots: 10}}).Maybe()
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer scheduler.Stop()
+	defer close(release)
+	local := newCoordinatorTestTask(t, 1, func(ctx context.Context, state *atomic.Int32) {
+		close(entered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		state.Store(int32(taskcommon.Finished))
+	})
+	scheduler.Enqueue(local)
+	roundDone := make(chan struct{})
+	go func() { scheduler.schedule(); close(roundDone) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("local completion was not submitted")
+	}
+	select {
+	case <-roundDone:
+	case <-time.After(time.Second):
+		t.Fatal("schedule awaited local metadata completion")
+	}
+	// A subsequent round must also run while the first local write is blocked.
+	follower := NewMockTask(t)
+	var dispatched atomic.Bool
+	follower.EXPECT().GetTaskID().Return(int64(2)).Maybe()
+	follower.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	follower.EXPECT().GetTaskSlot().Return(int64(1)).Once()
+	resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
+	follower.EXPECT().GetTaskResource().Return(resource).Once()
+	follower.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		if dispatched.Load() {
+			return taskcommon.Finished
+		}
+		return taskcommon.Init
+	}).Maybe()
+	follower.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	follower.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) { dispatched.Store(true) }).Once()
+	scheduler.Enqueue(follower)
+	scheduler.schedule()
+	assert.True(t, dispatched.Load())
+	assert.True(t, scheduler.localTasks.Contain(1))
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+}
+
+func TestGlobalScheduler_LocalCompletionCancellationRetries(t *testing.T) {
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	entered := make(chan struct{})
+	local := newCoordinatorTestTask(t, 1, func(ctx context.Context, _ *atomic.Int32) {
+		close(entered)
+		<-ctx.Done()
+	})
+	scheduler.Enqueue(local)
+	scheduler.schedule()
+	<-entered
+	scheduler.Stop()
+	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+	assert.False(t, scheduler.localTasks.Contain(1))
+	assert.True(t, scheduler.taskInBackoff(local))
+}
+
+func TestGlobalScheduler_LocalCompletionOwnership(t *testing.T) {
+	for _, remove := range []string{"finalize", "abort"} {
+		t.Run(remove, func(t *testing.T) {
+			scheduler := NewGlobalTaskScheduler(context.Background(), session.NewMockCluster(t)).(*globalTaskScheduler)
+			defer scheduler.Stop()
+			local := newCoordinatorTestTask(t, 1, func(context.Context, *atomic.Int32) {
+				t.Error("a removed task must not run its queued completion")
+			})
+			// Placement has retained ownership; the pool callback has not run yet.
+			scheduler.localTasks.Insert(1, local)
+			scheduler.Enqueue(local)
+			assert.Empty(t, scheduler.pendingTasks.TaskIDs(), "an in-flight local task cannot be enqueued again")
+			if remove == "finalize" {
+				scheduler.Finalize(1, func() { local.state.Store(int32(taskcommon.Finished)) })
+			} else {
+				scheduler.AbortAndRemoveTask(1)
+			}
+			scheduler.completeOnCoordinator(local, local)
+			scheduler.localWG.Wait()
+			assert.False(t, scheduler.localTasks.Contain(1))
+			assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+		})
+	}
 }

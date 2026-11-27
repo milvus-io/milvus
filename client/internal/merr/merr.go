@@ -310,6 +310,10 @@ func WrapErrServiceInternal(reason string, messages ...string) error {
 	return cloneWithMessage(ErrServiceInternal, message)
 }
 
+func WrapErrServiceUnimplemented(reason string, messages ...string) error {
+	return withDetails(ErrServiceUnimplemented, "reason", reason, messages...)
+}
+
 func WrapErrCollectionNotFound(collection any, messages ...string) error {
 	return withDetails(ErrCollectionNotFound, "collection", collection, messages...)
 }

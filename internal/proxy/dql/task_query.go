@@ -19,14 +19,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -85,10 +84,11 @@ type QueryTask struct {
 	actualChannelsMvcc *typeutil.ConcurrentMap[string, uint64]
 	preferredNodes     map[string]int64
 	fastSkip           bool
-	skipRuntimeRLS     bool
-	preserveRawFields  bool
-	node               taskmodel.TaskNode
+	// The level after applying the collection default, used for latency statistics.
+	resolvedConsistencyLevel commonpb.ConsistencyLevel
+	node                     taskmodel.TaskNode
 
+	internalTask         bool
 	reQuery              bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
@@ -152,16 +152,6 @@ func (t *QueryTask) HasRecordedChannelMvcc() bool {
 // Request returns the original query request.
 func (t *QueryTask) Request() *milvuspb.QueryRequest {
 	return t.request
-}
-
-// SetSkipRuntimeRLS prevents an internal query from resolving a second policy.
-func (t *QueryTask) SetSkipRuntimeRLS(skip bool) {
-	t.skipRuntimeRLS = skip
-}
-
-// SetPreserveRawFields keeps internal query results suitable for local policy evaluation.
-func (t *QueryTask) SetPreserveRawFields(preserve bool) {
-	t.preserveRawFields = preserve
 }
 
 // StorageCost returns the storage cost reported by the last execution.
@@ -334,10 +324,14 @@ func getValidTargetList(groupByFields []string, _ []agg.AggregateBase) []string 
 // translateOrderByFields converts ORDER BY field specifications to planpb.OrderByField messages.
 // Delegates parsing to orderby.ParseOrderByFields to ensure consistent behavior
 // (direction validation, nullsFirst defaults) between C++ segcore and Go proxy pipeline.
-func translateOrderByFields(orderByFieldSpecs []string, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
+func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*planpb.OrderByField, error) {
 	parsed, err := orderby.ParseOrderByFields(orderByFieldSpecs, schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg(err.Error())
+	}
+	parsed, err = orderby.AppendGroupByTieBreakers(parsed, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
 	}
 	if len(parsed) == 0 {
 		return nil, nil
@@ -681,7 +675,7 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 
 	// parse order by fields
-	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, groupByFieldsIDs, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
@@ -766,7 +760,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		mlog.Strings("partitionNames", t.request.GetPartitionNames()),
 		mlog.String("requestType", t.getQueryLabel()))
 
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := ValidateCollectionName(collectionName); err != nil {
 		log.Warn(ctx, "Invalid collectionName.")
 		return err
 	}
@@ -790,34 +784,10 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	log.Debug(ctx, "Get collection ID by name", mlog.Int64("collectionID", t.CollectionID))
-	canonicalDBName := colInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = t.request.GetDbName()
-	}
-
-	var principalName string
-	var enforceRLS bool
-	if !t.skipRuntimeRLS {
-		rlsEnabled := colInfo.RlsEnabled
-		if rlsEnabled && t.request.GetSkipRls() {
-			if t.node == nil {
-				return merr.WrapErrServiceInternalMsg("query task has no host node for SkipRLS authorization")
-			}
-			rlsEnabled, err = t.node.ResolveRLSEnforcement(ctx, t.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-				canonicalDBName, colInfo.Schema.GetName(), "query")
-			if err != nil {
-				return err
-			}
-		}
-		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
-		if err != nil {
-			return err
-		}
-	}
 
 	schema := colInfo.Schema
 	t.schema = schema
-	if err := validateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
+	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
@@ -838,7 +808,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 
 	for _, tag := range t.request.PartitionNames {
-		if err := validatePartitionTag(tag, false); err != nil {
+		if err := ValidatePartitionTag(tag, false); err != nil {
 			log.Warn(ctx, "invalid partition name", mlog.String("partition name", tag))
 			return err
 		}
@@ -864,8 +834,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	t.queryParams = queryParams
 
-	// ORDER BY requires explicit limit to prevent segment-level OOM.
-	// SortBuffer loads all matching rows into memory for sorting;
+	// ORDER BY requires an explicit limit so segcore can use bounded TopK
+	// storage. Without a limit, SortBuffer would retain all matching rows;
 	// MaxOutputSize only guards proxy reduce, not segment sorting.
 	if len(queryParams.orderByFields) > 0 && queryParams.limit == typeutil.Unlimited {
 		return merr.WrapErrParameterInvalidMsg("ORDER BY requires explicit limit")
@@ -896,7 +866,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		t.resolvedTimezoneStr = t.queryParams.timezone
 		log.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", t.resolvedTimezoneStr))
 	} else {
-		t.resolvedTimezoneStr = getColTimezone(colInfo)
+		t.resolvedTimezoneStr = GetColTimezone(colInfo)
 		log.Debug(ctx, "determine timezone from collection", mlog.Any("collection timezone", t.resolvedTimezoneStr))
 	}
 
@@ -906,15 +876,6 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	}
 	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)
 
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, t.CollectionID, principalName, rls.QueryAction(t.queryParams.isIterator), t.schema.SchemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
-			return err
-		}
-	}
 	t.plan.GetQuery().Limit = t.Limit
 	if t.queryParams.queryIteratorCursor != nil {
 		t.plan.GetQuery().QueryIteratorCursor = t.queryParams.queryIteratorCursor
@@ -933,8 +894,8 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	// convert partition names only when requery is false
 	if !t.reQuery {
 		partitionNames := t.request.GetPartitionNames()
-		if namespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
-			hashedPartitionNames, err := assignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, t.request.Namespace)
+		if NamespacePartitionKeyMode(t.schema.CollectionSchema) && t.request.Namespace != nil {
+			hashedPartitionNames, err := AssignNamespacePartitionKey(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, t.request.Namespace)
 			if err != nil {
 				return err
 			}
@@ -946,7 +907,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 			partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-			hashedPartitionNames, err := assignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
+			hashedPartitionNames, err := AssignPartitionKeys(ctx, t.GetMetaCache(), t.request.GetDbName(), t.request.CollectionName, t.schema.CollectionSchema, partitionKeys)
 			if err != nil {
 				return err
 			}
@@ -964,7 +925,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
 	}
-	t.plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
 	t.SerializedExprPlan, _, err = MarshalPlanWithMembershipFilterSizeLimit(t.plan, 0)
 	if err != nil {
@@ -990,7 +951,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	t.ConsistencyLevel = t.request.GetConsistencyLevel()
 	if useDefaultConsistency {
 		consistencyLevel = collectionInfo.ConsistencyLevel
-		guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+		guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 	} else {
 		consistencyLevel = t.request.GetConsistencyLevel()
 		// Compatibility logic, parse guarantee timestamp
@@ -998,12 +959,13 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 			guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 		} else {
 			// parse from guarantee timestamp and user input consistency level
-			guaranteeTs = parseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
+			guaranteeTs = ParseGuaranteeTsFromConsistency(guaranteeTs, t.BeginTs(), consistencyLevel)
 		}
 	}
 
 	// update actual consistency level
 	accesslog.SetActualConsistencyLevel(ctx, consistencyLevel)
+	t.resolvedConsistencyLevel = consistencyLevel
 
 	// use collection schema updated timestamp if it's greater than calculate guarantee timestamp
 	// this make query view updated happens before new read request happens
@@ -1054,26 +1016,33 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 		mlog.String("requestType", t.getQueryLabel()))
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
-	if namespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
+	// Built once, ahead of the namespace fast path below, so that the fast
+	// path derives its single-channel workload from the same value Execute
+	// would fan out -- every collection-level field, the resource-group scope
+	// included, reaches both paths or neither.
+	workload := shardclient.CollectionWorkLoad{
+		Db:             t.request.GetDbName(),
+		CollectionID:   t.CollectionID,
+		CollectionName: t.collectionName,
+		Nq:             1,
+		Exec:           t.queryShard,
+		SkipChannel:    t.skipRequeryChannel,
+		StatsClass:     "query/" + t.resolvedConsistencyLevel.String(),
+		Hedgeable:      true,
+		PreferredNodes: t.preferredNodes,
+	}
+	if NamespacePartitionKeyModeEnabled(t.schema.CollectionSchema) && t.request.Namespace != nil {
 		channelNames, err := t.chMgr.GetVChannels(t.CollectionID)
 		if err != nil {
 			log.Warn(ctx, "get vChannels failed", mlog.Int64("collectionID", t.CollectionID), mlog.Err(err))
 			return err
 		}
-		channelName, ok, err := namespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
+		channelName, ok, err := NamespaceShardingChannel(t.schema.CollectionSchema, t.request.Namespace, channelNames)
 		if err != nil {
 			return err
 		}
 		if ok {
-			if err := t.lb.ExecuteWithRetry(ctx, shardclient.ChannelWorkload{
-				Db:              t.request.GetDbName(),
-				CollectionName:  t.collectionName,
-				CollectionID:    t.CollectionID,
-				Channel:         channelName,
-				Nq:              1,
-				Exec:            t.queryShard,
-				PreferredNodeID: preferredNodeForChannel(t.preferredNodes, channelName),
-			}); err != nil {
+			if err := t.lb.ExecuteWithRetry(ctx, workload.ForChannel(channelName, preferredNodeForChannel(t.preferredNodes, channelName))); err != nil {
 				log.Warn(ctx, "fail to execute query", mlog.Err(err))
 				return errors.Wrap(err, "failed to query")
 			}
@@ -1082,14 +1051,7 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 			return nil
 		}
 	}
-	err := t.lb.Execute(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.request.GetDbName(),
-		CollectionID:   t.CollectionID,
-		CollectionName: t.collectionName,
-		Nq:             1,
-		Exec:           t.queryShard,
-		PreferredNodes: t.preferredNodes,
-	})
+	err := t.lb.Execute(ctx, workload)
 	if err != nil {
 		log.Warn(ctx, "fail to execute query", mlog.Err(err))
 		return errors.Wrap(err, "failed to query")
@@ -1135,12 +1097,12 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
 
-	// Parse ORDER BY fields if present
+	// Use the same complete group ordering as segcore, QN, and Delegator.
 	var orderByFields []*orderby.OrderByField
-	if len(t.queryParams.orderByFields) > 0 {
-		orderByFields, err = orderby.ParseOrderByFields(t.queryParams.orderByFields, t.schema.CollectionSchema)
+	if len(t.OrderByFields) > 0 {
+		orderByFields, err = orderby.ConvertFromPlanOrderByFields(t.OrderByFields, t.schema.CollectionSchema)
 		if err != nil {
-			log.Warn(ctx, "fail to parse order by fields", mlog.Err(err))
+			log.Warn(ctx, "fail to convert order by fields", mlog.Err(err))
 			return err
 		}
 	}
@@ -1204,7 +1166,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *QueryTask) formatTimeFields(ctx context.Context) error {
-	if t.reQuery || t.preserveRawFields {
+	if t.reQuery {
 		return nil
 	}
 	if len(t.queryParams.extractTimeFields) > 0 {
@@ -1224,8 +1186,18 @@ func (t *QueryTask) formatTimeFields(ctx context.Context) error {
 	return nil
 }
 
+// MarkInternal excludes synthesized reads from request-level phase observation.
+func (t *QueryTask) MarkInternal() { t.internalTask = true }
+
+func (t *QueryTask) IsInternalTask() bool { return t.internalTask || t.reQuery }
+
 func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery
+}
+
+func (t *QueryTask) skipRequeryChannel(channel string) bool {
+	_, present := t.channelsMvcc[channel]
+	return t.fastSkip && len(t.channelsMvcc) > 0 && !present
 }
 
 func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
@@ -1260,7 +1232,9 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	result, err := qn.Query(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode query return error", mlog.Err(err))
-		t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		if !errors.Is(ctx.Err(), context.Canceled) && !grpcclient.IsRequestNotDispatched(err) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
@@ -1278,6 +1252,9 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 
 	log.Debug(ctx, "get query result")
+	if !shardclient.CommitAttempt(ctx) {
+		return shardclient.ErrAttemptSuperseded
+	}
 	t.resultBuf.Insert(result)
 	if t.actualChannelsMvcc != nil {
 		t.actualChannelsMvcc.Insert(channel, result.GetMvccTimestamp())

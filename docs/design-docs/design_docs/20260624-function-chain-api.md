@@ -284,12 +284,49 @@ physical fields:    [metadata.fieldID]
 
 Runtime behavior:
 
-1. At rerank input construction, `$score` is initialized from the current search result score/distance.
+1. At rerank input construction, `$score` is initialized from the current stage's search result. Its sign and meaning depend on the stage and earlier score writes, as specified below.
 2. Functions can read `$score` through `col("$score")`.
 3. `map("$score", expr)` overwrites the current score register.
 4. `sort(col("$score"), desc=True)` sorts candidates by the current rewritten score.
 5. The final `$score` is serialized through existing result score/distance fields.
 6. SDK users observe it as the normal hit distance/score value.
+
+#### L2 distance and score writes
+
+Here **L2 metric** means the distance metric, not the **L2 rerank stage**.
+For an L2 metric distance `d >= 0`, segcore supplies `-d` to QueryNode so
+internal reduction can consistently select larger scores first.
+
+- **L0 input:** `$score = -d`, not the positive distance `d`.
+- **L1 input:** `$score` carries the output of L0 through cross-segment reduction.
+  If L0 did not write `$score`, it is still `-d`; otherwise it is the value
+  produced by L0. There is no distance restoration between L0 and L1.
+- **Proxy reduction output:** if neither L0 nor L1 writes `$score`, Proxy
+  restores `-d` to the positive distance `d`. If either stage writes `$score`,
+  Proxy preserves the resulting value and treats it as a larger-is-better
+  business score, regardless of the original metric.
+- **L2 rerank input:** ordinary Search receives the Proxy reduction output
+  described above. Further L2 operators can transform that value. HybridSearch
+  consumes each sub-search's score through its configured fusion/rerank steps.
+
+Writing `$score` changes this contract even when the expression only scales
+the existing value or leaves it numerically unchanged. Writing only a temporary
+column, or only sorting/limiting candidates, does not count as a score write.
+L0/L1 outputs must respect the larger-is-better convention used by downstream
+reducers; QueryNode restores score-descending order after these chains.
+
+For an original L2 distance `d = 4`, the following ordinary Search results
+assume no later score transformation:
+
+| L0/L1 operation | Score after L0/L1 | Returned hit distance/score |
+|----------------|------------------|----------------------------|
+| No write to `$score` | `-4` | `4` (distance restored) |
+| Write `$score * 1.2` once | `-4.8` | `-4.8` (rewritten score preserved) |
+| Write `$score` unchanged | `-4` | `-4` (still a score write) |
+| Replace `$score` with `2 * ts`, where `ts = 10` | `20` | `20` |
+
+The result field may still be named `distance` in the SDK, but after a score
+write it contains the rewritten score, not necessarily a metric distance.
 
 Representation:
 

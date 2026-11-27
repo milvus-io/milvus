@@ -130,6 +130,18 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	return ConsumeCStatusIntoError(&status)
 }
 
+// UpdateLoadFields replaces a legacy collection's preload hint after schema
+// evolution. The native schema is newly parsed before this method is called.
+func (c *CCollection) UpdateLoadFields(fields []int64) error {
+	var empty C.int64_t
+	fieldPtr := &empty
+	if len(fields) > 0 {
+		fieldPtr = (*C.int64_t)(unsafe.Pointer(&fields[0]))
+	}
+	status := C.UpdateLoadFields(c.ptr, fieldPtr, C.int64_t(len(fields)))
+	return ConsumeCStatusIntoError(&status)
+}
+
 // Release releases the underlying collection
 func (c *CCollection) Release() {
 	C.DeleteCollection(c.ptr)

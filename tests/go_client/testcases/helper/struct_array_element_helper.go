@@ -474,28 +474,21 @@ func L2Distance(a, b []float32) float64 {
 	return s
 }
 
-// GtElementSearchNoFilter returns the top-K (rowID, bestScore) pairs for an element-level vector
-// search with no filter. Each row contributes its best matching element's score (max for COSINE/IP,
-// min for L2). Mirrors python `gt_element_search_no_filter`.
+// GtElementSearchNoFilter returns the top-K parent row IDs for an element-level vector
+// search with no filter. Every element competes independently by its embedding: a row whose
+// struct array holds multiple near-matching elements contributes one entry per element (so the
+// same row ID may appear several times), matching how the element-level ANNS search returns one
+// hit per element rather than one per row. Mirrors python `gt_element_search_no_filter`.
 func GtElementSearchNoFilter(data []StructARow, queryVector []float32, metric string, limit int) []int64 {
 	type rowScore struct {
 		id    int64
 		score float64
 	}
 	descending := metric == "COSINE" || metric == "IP"
-	scores := make([]rowScore, 0, len(data))
+	var scores []rowScore
 	for _, row := range data {
-		var best float64
-		hasBest := false
 		for _, e := range row.StructA {
-			s := scoreFor(queryVector, e.Embedding, metric)
-			if !hasBest || (descending && s > best) || (!descending && s < best) {
-				best = s
-				hasBest = true
-			}
-		}
-		if hasBest {
-			scores = append(scores, rowScore{row.ID, best})
+			scores = append(scores, rowScore{row.ID, scoreFor(queryVector, e.Embedding, metric)})
 		}
 	}
 	// stable sort by score

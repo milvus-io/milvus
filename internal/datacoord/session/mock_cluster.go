@@ -5,6 +5,7 @@ package session
 import (
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	workerpb "github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -21,17 +22,17 @@ func (_m *MockCluster) EXPECT() *MockCluster_Expecter {
 	return &MockCluster_Expecter{mock: &_m.Mock}
 }
 
-// CreateAnalyze provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error {
-	ret := _m.Called(nodeID, in)
+// CreateAnalyze provides a mock function with given fields: nodeID, in, resource
+func (_m *MockCluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateAnalyze")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *workerpb.AnalyzeRequest) error); ok {
-		r0 = rf(nodeID, in)
+	if rf, ok := ret.Get(0).(func(int64, *workerpb.AnalyzeRequest, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -47,13 +48,14 @@ type MockCluster_CreateAnalyze_Call struct {
 // CreateAnalyze is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *workerpb.AnalyzeRequest
-func (_e *MockCluster_Expecter) CreateAnalyze(nodeID interface{}, in interface{}) *MockCluster_CreateAnalyze_Call {
-	return &MockCluster_CreateAnalyze_Call{Call: _e.mock.On("CreateAnalyze", nodeID, in)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateAnalyze(nodeID interface{}, in interface{}, resource interface{}) *MockCluster_CreateAnalyze_Call {
+	return &MockCluster_CreateAnalyze_Call{Call: _e.mock.On("CreateAnalyze", nodeID, in, resource)}
 }
 
-func (_c *MockCluster_CreateAnalyze_Call) Run(run func(nodeID int64, in *workerpb.AnalyzeRequest)) *MockCluster_CreateAnalyze_Call {
+func (_c *MockCluster_CreateAnalyze_Call) Run(run func(nodeID int64, in *workerpb.AnalyzeRequest, resource taskcommon.Resource)) *MockCluster_CreateAnalyze_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*workerpb.AnalyzeRequest))
+		run(args[0].(int64), args[1].(*workerpb.AnalyzeRequest), args[2].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -63,22 +65,22 @@ func (_c *MockCluster_CreateAnalyze_Call) Return(_a0 error) *MockCluster_CreateA
 	return _c
 }
 
-func (_c *MockCluster_CreateAnalyze_Call) RunAndReturn(run func(int64, *workerpb.AnalyzeRequest) error) *MockCluster_CreateAnalyze_Call {
+func (_c *MockCluster_CreateAnalyze_Call) RunAndReturn(run func(int64, *workerpb.AnalyzeRequest, taskcommon.Resource) error) *MockCluster_CreateAnalyze_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateCompaction provides a mock function with given fields: nodeID, in, collectionID
-func (_m *MockCluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64) error {
-	ret := _m.Called(nodeID, in, collectionID)
+// CreateCompaction provides a mock function with given fields: nodeID, in, collectionID, resource
+func (_m *MockCluster) CreateCompaction(nodeID int64, in *datapb.CompactionPlan, collectionID int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, collectionID, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCompaction")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.CompactionPlan, int64) error); ok {
-		r0 = rf(nodeID, in, collectionID)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.CompactionPlan, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, collectionID, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -95,13 +97,14 @@ type MockCluster_CreateCompaction_Call struct {
 //   - nodeID int64
 //   - in *datapb.CompactionPlan
 //   - collectionID int64
-func (_e *MockCluster_Expecter) CreateCompaction(nodeID interface{}, in interface{}, collectionID interface{}) *MockCluster_CreateCompaction_Call {
-	return &MockCluster_CreateCompaction_Call{Call: _e.mock.On("CreateCompaction", nodeID, in, collectionID)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateCompaction(nodeID interface{}, in interface{}, collectionID interface{}, resource interface{}) *MockCluster_CreateCompaction_Call {
+	return &MockCluster_CreateCompaction_Call{Call: _e.mock.On("CreateCompaction", nodeID, in, collectionID, resource)}
 }
 
-func (_c *MockCluster_CreateCompaction_Call) Run(run func(nodeID int64, in *datapb.CompactionPlan, collectionID int64)) *MockCluster_CreateCompaction_Call {
+func (_c *MockCluster_CreateCompaction_Call) Run(run func(nodeID int64, in *datapb.CompactionPlan, collectionID int64, resource taskcommon.Resource)) *MockCluster_CreateCompaction_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.CompactionPlan), args[2].(int64))
+		run(args[0].(int64), args[1].(*datapb.CompactionPlan), args[2].(int64), args[3].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -111,22 +114,22 @@ func (_c *MockCluster_CreateCompaction_Call) Return(_a0 error) *MockCluster_Crea
 	return _c
 }
 
-func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionPlan, int64) error) *MockCluster_CreateCompaction_Call {
+func (_c *MockCluster_CreateCompaction_Call) RunAndReturn(run func(int64, *datapb.CompactionPlan, int64, taskcommon.Resource) error) *MockCluster_CreateCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateCopySegment provides a mock function with given fields: nodeID, in, collectionID, external
-func (_m *MockCluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool) error {
-	ret := _m.Called(nodeID, in, collectionID, external)
+// CreateCopySegment provides a mock function with given fields: nodeID, in, collectionID, external, resource
+func (_m *MockCluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, collectionID, external, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCopySegment")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.CopySegmentRequest, int64, bool) error); ok {
-		r0 = rf(nodeID, in, collectionID, external)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.CopySegmentRequest, int64, bool, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, collectionID, external, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -144,13 +147,14 @@ type MockCluster_CreateCopySegment_Call struct {
 //   - in *datapb.CopySegmentRequest
 //   - collectionID int64
 //   - external bool
-func (_e *MockCluster_Expecter) CreateCopySegment(nodeID interface{}, in interface{}, collectionID interface{}, external interface{}) *MockCluster_CreateCopySegment_Call {
-	return &MockCluster_CreateCopySegment_Call{Call: _e.mock.On("CreateCopySegment", nodeID, in, collectionID, external)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateCopySegment(nodeID interface{}, in interface{}, collectionID interface{}, external interface{}, resource interface{}) *MockCluster_CreateCopySegment_Call {
+	return &MockCluster_CreateCopySegment_Call{Call: _e.mock.On("CreateCopySegment", nodeID, in, collectionID, external, resource)}
 }
 
-func (_c *MockCluster_CreateCopySegment_Call) Run(run func(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool)) *MockCluster_CreateCopySegment_Call {
+func (_c *MockCluster_CreateCopySegment_Call) Run(run func(nodeID int64, in *datapb.CopySegmentRequest, collectionID int64, external bool, resource taskcommon.Resource)) *MockCluster_CreateCopySegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.CopySegmentRequest), args[2].(int64), args[3].(bool))
+		run(args[0].(int64), args[1].(*datapb.CopySegmentRequest), args[2].(int64), args[3].(bool), args[4].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -160,22 +164,22 @@ func (_c *MockCluster_CreateCopySegment_Call) Return(_a0 error) *MockCluster_Cre
 	return _c
 }
 
-func (_c *MockCluster_CreateCopySegment_Call) RunAndReturn(run func(int64, *datapb.CopySegmentRequest, int64, bool) error) *MockCluster_CreateCopySegment_Call {
+func (_c *MockCluster_CreateCopySegment_Call) RunAndReturn(run func(int64, *datapb.CopySegmentRequest, int64, bool, taskcommon.Resource) error) *MockCluster_CreateCopySegment_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateImport provides a mock function with given fields: nodeID, in, taskSlot
-func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64) error {
-	ret := _m.Called(nodeID, in, taskSlot)
+// CreateImport provides a mock function with given fields: nodeID, in, taskSlot, resource
+func (_m *MockCluster) CreateImport(nodeID int64, in *datapb.ImportRequest, taskSlot int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, taskSlot, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateImport")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportRequest, int64) error); ok {
-		r0 = rf(nodeID, in, taskSlot)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportRequest, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, taskSlot, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -192,13 +196,14 @@ type MockCluster_CreateImport_Call struct {
 //   - nodeID int64
 //   - in *datapb.ImportRequest
 //   - taskSlot int64
-func (_e *MockCluster_Expecter) CreateImport(nodeID interface{}, in interface{}, taskSlot interface{}) *MockCluster_CreateImport_Call {
-	return &MockCluster_CreateImport_Call{Call: _e.mock.On("CreateImport", nodeID, in, taskSlot)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateImport(nodeID interface{}, in interface{}, taskSlot interface{}, resource interface{}) *MockCluster_CreateImport_Call {
+	return &MockCluster_CreateImport_Call{Call: _e.mock.On("CreateImport", nodeID, in, taskSlot, resource)}
 }
 
-func (_c *MockCluster_CreateImport_Call) Run(run func(nodeID int64, in *datapb.ImportRequest, taskSlot int64)) *MockCluster_CreateImport_Call {
+func (_c *MockCluster_CreateImport_Call) Run(run func(nodeID int64, in *datapb.ImportRequest, taskSlot int64, resource taskcommon.Resource)) *MockCluster_CreateImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.ImportRequest), args[2].(int64))
+		run(args[0].(int64), args[1].(*datapb.ImportRequest), args[2].(int64), args[3].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -208,22 +213,71 @@ func (_c *MockCluster_CreateImport_Call) Return(_a0 error) *MockCluster_CreateIm
 	return _c
 }
 
-func (_c *MockCluster_CreateImport_Call) RunAndReturn(run func(int64, *datapb.ImportRequest, int64) error) *MockCluster_CreateImport_Call {
+func (_c *MockCluster_CreateImport_Call) RunAndReturn(run func(int64, *datapb.ImportRequest, int64, taskcommon.Resource) error) *MockCluster_CreateImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateIndex provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error {
-	ret := _m.Called(nodeID, in)
+// CreateImportV3 provides a mock function with given fields: nodeID, in, collectionID, resource
+func (_m *MockCluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, collectionID, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateImportV3")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.ImportTaskV3Request, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, collectionID, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreateImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateImportV3'
+type MockCluster_CreateImportV3_Call struct {
+	*mock.Call
+}
+
+// CreateImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.ImportTaskV3Request
+//   - collectionID int64
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateImportV3(nodeID interface{}, in interface{}, collectionID interface{}, resource interface{}) *MockCluster_CreateImportV3_Call {
+	return &MockCluster_CreateImportV3_Call{Call: _e.mock.On("CreateImportV3", nodeID, in, collectionID, resource)}
+}
+
+func (_c *MockCluster_CreateImportV3_Call) Run(run func(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64, resource taskcommon.Resource)) *MockCluster_CreateImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.ImportTaskV3Request), args[2].(int64), args[3].(taskcommon.Resource))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreateImportV3_Call) Return(_a0 error) *MockCluster_CreateImportV3_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreateImportV3_Call) RunAndReturn(run func(int64, *datapb.ImportTaskV3Request, int64, taskcommon.Resource) error) *MockCluster_CreateImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateIndex provides a mock function with given fields: nodeID, in, resource
+func (_m *MockCluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateIndex")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *workerpb.CreateJobRequest) error); ok {
-		r0 = rf(nodeID, in)
+	if rf, ok := ret.Get(0).(func(int64, *workerpb.CreateJobRequest, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -239,13 +293,14 @@ type MockCluster_CreateIndex_Call struct {
 // CreateIndex is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *workerpb.CreateJobRequest
-func (_e *MockCluster_Expecter) CreateIndex(nodeID interface{}, in interface{}) *MockCluster_CreateIndex_Call {
-	return &MockCluster_CreateIndex_Call{Call: _e.mock.On("CreateIndex", nodeID, in)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateIndex(nodeID interface{}, in interface{}, resource interface{}) *MockCluster_CreateIndex_Call {
+	return &MockCluster_CreateIndex_Call{Call: _e.mock.On("CreateIndex", nodeID, in, resource)}
 }
 
-func (_c *MockCluster_CreateIndex_Call) Run(run func(nodeID int64, in *workerpb.CreateJobRequest)) *MockCluster_CreateIndex_Call {
+func (_c *MockCluster_CreateIndex_Call) Run(run func(nodeID int64, in *workerpb.CreateJobRequest, resource taskcommon.Resource)) *MockCluster_CreateIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*workerpb.CreateJobRequest))
+		run(args[0].(int64), args[1].(*workerpb.CreateJobRequest), args[2].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -255,22 +310,22 @@ func (_c *MockCluster_CreateIndex_Call) Return(_a0 error) *MockCluster_CreateInd
 	return _c
 }
 
-func (_c *MockCluster_CreateIndex_Call) RunAndReturn(run func(int64, *workerpb.CreateJobRequest) error) *MockCluster_CreateIndex_Call {
+func (_c *MockCluster_CreateIndex_Call) RunAndReturn(run func(int64, *workerpb.CreateJobRequest, taskcommon.Resource) error) *MockCluster_CreateIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreatePreImport provides a mock function with given fields: nodeID, in, taskSlot
-func (_m *MockCluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
-	ret := _m.Called(nodeID, in, taskSlot)
+// CreatePreImport provides a mock function with given fields: nodeID, in, taskSlot, resource
+func (_m *MockCluster) CreatePreImport(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, taskSlot, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreatePreImport")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest, int64) error); ok {
-		r0 = rf(nodeID, in, taskSlot)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, taskSlot, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -287,13 +342,14 @@ type MockCluster_CreatePreImport_Call struct {
 //   - nodeID int64
 //   - in *datapb.PreImportRequest
 //   - taskSlot int64
-func (_e *MockCluster_Expecter) CreatePreImport(nodeID interface{}, in interface{}, taskSlot interface{}) *MockCluster_CreatePreImport_Call {
-	return &MockCluster_CreatePreImport_Call{Call: _e.mock.On("CreatePreImport", nodeID, in, taskSlot)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreatePreImport(nodeID interface{}, in interface{}, taskSlot interface{}, resource interface{}) *MockCluster_CreatePreImport_Call {
+	return &MockCluster_CreatePreImport_Call{Call: _e.mock.On("CreatePreImport", nodeID, in, taskSlot, resource)}
 }
 
-func (_c *MockCluster_CreatePreImport_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest, taskSlot int64)) *MockCluster_CreatePreImport_Call {
+func (_c *MockCluster_CreatePreImport_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource)) *MockCluster_CreatePreImport_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.PreImportRequest), args[2].(int64))
+		run(args[0].(int64), args[1].(*datapb.PreImportRequest), args[2].(int64), args[3].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -303,22 +359,71 @@ func (_c *MockCluster_CreatePreImport_Call) Return(_a0 error) *MockCluster_Creat
 	return _c
 }
 
-func (_c *MockCluster_CreatePreImport_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest, int64) error) *MockCluster_CreatePreImport_Call {
+func (_c *MockCluster_CreatePreImport_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest, int64, taskcommon.Resource) error) *MockCluster_CreatePreImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateRefreshExternalCollectionTask provides a mock function with given fields: nodeID, req
-func (_m *MockCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest) error {
-	ret := _m.Called(nodeID, req)
+// CreatePreImportV3 provides a mock function with given fields: nodeID, in, taskSlot, resource
+func (_m *MockCluster) CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, taskSlot, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreatePreImportV3")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.PreImportRequest, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, taskSlot, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreatePreImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreatePreImportV3'
+type MockCluster_CreatePreImportV3_Call struct {
+	*mock.Call
+}
+
+// CreatePreImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.PreImportRequest
+//   - taskSlot int64
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreatePreImportV3(nodeID interface{}, in interface{}, taskSlot interface{}, resource interface{}) *MockCluster_CreatePreImportV3_Call {
+	return &MockCluster_CreatePreImportV3_Call{Call: _e.mock.On("CreatePreImportV3", nodeID, in, taskSlot, resource)}
+}
+
+func (_c *MockCluster_CreatePreImportV3_Call) Run(run func(nodeID int64, in *datapb.PreImportRequest, taskSlot int64, resource taskcommon.Resource)) *MockCluster_CreatePreImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.PreImportRequest), args[2].(int64), args[3].(taskcommon.Resource))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreatePreImportV3_Call) Return(_a0 error) *MockCluster_CreatePreImportV3_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreatePreImportV3_Call) RunAndReturn(run func(int64, *datapb.PreImportRequest, int64, taskcommon.Resource) error) *MockCluster_CreatePreImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateRefreshExternalCollectionTask provides a mock function with given fields: nodeID, req, resource
+func (_m *MockCluster) CreateRefreshExternalCollectionTask(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, req, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateRefreshExternalCollectionTask")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *datapb.RefreshExternalCollectionTaskRequest) error); ok {
-		r0 = rf(nodeID, req)
+	if rf, ok := ret.Get(0).(func(int64, *datapb.RefreshExternalCollectionTaskRequest, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, req, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -334,13 +439,14 @@ type MockCluster_CreateRefreshExternalCollectionTask_Call struct {
 // CreateRefreshExternalCollectionTask is a helper method to define mock.On call
 //   - nodeID int64
 //   - req *datapb.RefreshExternalCollectionTaskRequest
-func (_e *MockCluster_Expecter) CreateRefreshExternalCollectionTask(nodeID interface{}, req interface{}) *MockCluster_CreateRefreshExternalCollectionTask_Call {
-	return &MockCluster_CreateRefreshExternalCollectionTask_Call{Call: _e.mock.On("CreateRefreshExternalCollectionTask", nodeID, req)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateRefreshExternalCollectionTask(nodeID interface{}, req interface{}, resource interface{}) *MockCluster_CreateRefreshExternalCollectionTask_Call {
+	return &MockCluster_CreateRefreshExternalCollectionTask_Call{Call: _e.mock.On("CreateRefreshExternalCollectionTask", nodeID, req, resource)}
 }
 
-func (_c *MockCluster_CreateRefreshExternalCollectionTask_Call) Run(run func(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest)) *MockCluster_CreateRefreshExternalCollectionTask_Call {
+func (_c *MockCluster_CreateRefreshExternalCollectionTask_Call) Run(run func(nodeID int64, req *datapb.RefreshExternalCollectionTaskRequest, resource taskcommon.Resource)) *MockCluster_CreateRefreshExternalCollectionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*datapb.RefreshExternalCollectionTaskRequest))
+		run(args[0].(int64), args[1].(*datapb.RefreshExternalCollectionTaskRequest), args[2].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -350,22 +456,71 @@ func (_c *MockCluster_CreateRefreshExternalCollectionTask_Call) Return(_a0 error
 	return _c
 }
 
-func (_c *MockCluster_CreateRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, *datapb.RefreshExternalCollectionTaskRequest) error) *MockCluster_CreateRefreshExternalCollectionTask_Call {
+func (_c *MockCluster_CreateRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, *datapb.RefreshExternalCollectionTaskRequest, taskcommon.Resource) error) *MockCluster_CreateRefreshExternalCollectionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CreateStats provides a mock function with given fields: nodeID, in
-func (_m *MockCluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) error {
-	ret := _m.Called(nodeID, in)
+// CreateReshard provides a mock function with given fields: nodeID, in, collectionID, resource
+func (_m *MockCluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, collectionID, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateReshard")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.ReshardTaskRequest, int64, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, collectionID, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_CreateReshard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateReshard'
+type MockCluster_CreateReshard_Call struct {
+	*mock.Call
+}
+
+// CreateReshard is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.ReshardTaskRequest
+//   - collectionID int64
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateReshard(nodeID interface{}, in interface{}, collectionID interface{}, resource interface{}) *MockCluster_CreateReshard_Call {
+	return &MockCluster_CreateReshard_Call{Call: _e.mock.On("CreateReshard", nodeID, in, collectionID, resource)}
+}
+
+func (_c *MockCluster_CreateReshard_Call) Run(run func(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64, resource taskcommon.Resource)) *MockCluster_CreateReshard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.ReshardTaskRequest), args[2].(int64), args[3].(taskcommon.Resource))
+	})
+	return _c
+}
+
+func (_c *MockCluster_CreateReshard_Call) Return(_a0 error) *MockCluster_CreateReshard_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_CreateReshard_Call) RunAndReturn(run func(int64, *datapb.ReshardTaskRequest, int64, taskcommon.Resource) error) *MockCluster_CreateReshard_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateStats provides a mock function with given fields: nodeID, in, resource
+func (_m *MockCluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest, resource taskcommon.Resource) error {
+	ret := _m.Called(nodeID, in, resource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateStats")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, *workerpb.CreateStatsRequest) error); ok {
-		r0 = rf(nodeID, in)
+	if rf, ok := ret.Get(0).(func(int64, *workerpb.CreateStatsRequest, taskcommon.Resource) error); ok {
+		r0 = rf(nodeID, in, resource)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -381,13 +536,14 @@ type MockCluster_CreateStats_Call struct {
 // CreateStats is a helper method to define mock.On call
 //   - nodeID int64
 //   - in *workerpb.CreateStatsRequest
-func (_e *MockCluster_Expecter) CreateStats(nodeID interface{}, in interface{}) *MockCluster_CreateStats_Call {
-	return &MockCluster_CreateStats_Call{Call: _e.mock.On("CreateStats", nodeID, in)}
+//   - resource taskcommon.Resource
+func (_e *MockCluster_Expecter) CreateStats(nodeID interface{}, in interface{}, resource interface{}) *MockCluster_CreateStats_Call {
+	return &MockCluster_CreateStats_Call{Call: _e.mock.On("CreateStats", nodeID, in, resource)}
 }
 
-func (_c *MockCluster_CreateStats_Call) Run(run func(nodeID int64, in *workerpb.CreateStatsRequest)) *MockCluster_CreateStats_Call {
+func (_c *MockCluster_CreateStats_Call) Run(run func(nodeID int64, in *workerpb.CreateStatsRequest, resource taskcommon.Resource)) *MockCluster_CreateStats_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(*workerpb.CreateStatsRequest))
+		run(args[0].(int64), args[1].(*workerpb.CreateStatsRequest), args[2].(taskcommon.Resource))
 	})
 	return _c
 }
@@ -397,7 +553,7 @@ func (_c *MockCluster_CreateStats_Call) Return(_a0 error) *MockCluster_CreateSta
 	return _c
 }
 
-func (_c *MockCluster_CreateStats_Call) RunAndReturn(run func(int64, *workerpb.CreateStatsRequest) error) *MockCluster_CreateStats_Call {
+func (_c *MockCluster_CreateStats_Call) RunAndReturn(run func(int64, *workerpb.CreateStatsRequest, taskcommon.Resource) error) *MockCluster_CreateStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -590,6 +746,53 @@ func (_c *MockCluster_DropImport_Call) RunAndReturn(run func(int64, int64) error
 	return _c
 }
 
+// DropImportV3 provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropImportV3")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.DropImportTaskV3Request) error); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropImportV3'
+type MockCluster_DropImportV3_Call struct {
+	*mock.Call
+}
+
+// DropImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.DropImportTaskV3Request
+func (_e *MockCluster_Expecter) DropImportV3(nodeID interface{}, in interface{}) *MockCluster_DropImportV3_Call {
+	return &MockCluster_DropImportV3_Call{Call: _e.mock.On("DropImportV3", nodeID, in)}
+}
+
+func (_c *MockCluster_DropImportV3_Call) Run(run func(nodeID int64, in *datapb.DropImportTaskV3Request)) *MockCluster_DropImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.DropImportTaskV3Request))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropImportV3_Call) Return(_a0 error) *MockCluster_DropImportV3_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropImportV3_Call) RunAndReturn(run func(int64, *datapb.DropImportTaskV3Request) error) *MockCluster_DropImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropIndex provides a mock function with given fields: nodeID, taskID
 func (_m *MockCluster) DropIndex(nodeID int64, taskID int64) error {
 	ret := _m.Called(nodeID, taskID)
@@ -637,6 +840,53 @@ func (_c *MockCluster_DropIndex_Call) RunAndReturn(run func(int64, int64) error)
 	return _c
 }
 
+// DropPreImportV3 provides a mock function with given fields: nodeID, taskID
+func (_m *MockCluster) DropPreImportV3(nodeID int64, taskID int64) error {
+	ret := _m.Called(nodeID, taskID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropPreImportV3")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
+		r0 = rf(nodeID, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropPreImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPreImportV3'
+type MockCluster_DropPreImportV3_Call struct {
+	*mock.Call
+}
+
+// DropPreImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - taskID int64
+func (_e *MockCluster_Expecter) DropPreImportV3(nodeID interface{}, taskID interface{}) *MockCluster_DropPreImportV3_Call {
+	return &MockCluster_DropPreImportV3_Call{Call: _e.mock.On("DropPreImportV3", nodeID, taskID)}
+}
+
+func (_c *MockCluster_DropPreImportV3_Call) Run(run func(nodeID int64, taskID int64)) *MockCluster_DropPreImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropPreImportV3_Call) Return(_a0 error) *MockCluster_DropPreImportV3_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropPreImportV3_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropPreImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropRefreshExternalCollectionTask provides a mock function with given fields: nodeID, taskID
 func (_m *MockCluster) DropRefreshExternalCollectionTask(nodeID int64, taskID int64) error {
 	ret := _m.Called(nodeID, taskID)
@@ -680,6 +930,53 @@ func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) Return(_a0 error) 
 }
 
 func (_c *MockCluster_DropRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, int64) error) *MockCluster_DropRefreshExternalCollectionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropReshard provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropReshard")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.DropReshardTaskRequest) error); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCluster_DropReshard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropReshard'
+type MockCluster_DropReshard_Call struct {
+	*mock.Call
+}
+
+// DropReshard is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.DropReshardTaskRequest
+func (_e *MockCluster_Expecter) DropReshard(nodeID interface{}, in interface{}) *MockCluster_DropReshard_Call {
+	return &MockCluster_DropReshard_Call{Call: _e.mock.On("DropReshard", nodeID, in)}
+}
+
+func (_c *MockCluster_DropReshard_Call) Run(run func(nodeID int64, in *datapb.DropReshardTaskRequest)) *MockCluster_DropReshard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.DropReshardTaskRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_DropReshard_Call) Return(_a0 error) *MockCluster_DropReshard_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCluster_DropReshard_Call) RunAndReturn(run func(int64, *datapb.DropReshardTaskRequest) error) *MockCluster_DropReshard_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -967,6 +1264,65 @@ func (_c *MockCluster_QueryImport_Call) RunAndReturn(run func(int64, *datapb.Que
 	return _c
 }
 
+// QueryImportV3 provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error) {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryImportV3")
+	}
+
+	var r0 *datapb.QueryImportTaskV3Response
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error)); ok {
+		return rf(nodeID, in)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryImportTaskV3Request) *datapb.QueryImportTaskV3Response); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryImportTaskV3Response)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryImportTaskV3Request) error); ok {
+		r1 = rf(nodeID, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryImportV3'
+type MockCluster_QueryImportV3_Call struct {
+	*mock.Call
+}
+
+// QueryImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.QueryImportTaskV3Request
+func (_e *MockCluster_Expecter) QueryImportV3(nodeID interface{}, in interface{}) *MockCluster_QueryImportV3_Call {
+	return &MockCluster_QueryImportV3_Call{Call: _e.mock.On("QueryImportV3", nodeID, in)}
+}
+
+func (_c *MockCluster_QueryImportV3_Call) Run(run func(nodeID int64, in *datapb.QueryImportTaskV3Request)) *MockCluster_QueryImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.QueryImportTaskV3Request))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryImportV3_Call) Return(_a0 *datapb.QueryImportTaskV3Response, _a1 error) *MockCluster_QueryImportV3_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryImportV3_Call) RunAndReturn(run func(int64, *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error)) *MockCluster_QueryImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // QueryIndex provides a mock function with given fields: nodeID, in
 func (_m *MockCluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.IndexJobResults, error) {
 	ret := _m.Called(nodeID, in)
@@ -1085,6 +1441,65 @@ func (_c *MockCluster_QueryPreImport_Call) RunAndReturn(run func(int64, *datapb.
 	return _c
 }
 
+// QueryPreImportV3 provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) QueryPreImportV3(nodeID int64, in *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error) {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryPreImportV3")
+	}
+
+	var r0 *datapb.QueryPreImportV3Response
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error)); ok {
+		return rf(nodeID, in)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryPreImportV3Request) *datapb.QueryPreImportV3Response); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryPreImportV3Response)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryPreImportV3Request) error); ok {
+		r1 = rf(nodeID, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryPreImportV3_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryPreImportV3'
+type MockCluster_QueryPreImportV3_Call struct {
+	*mock.Call
+}
+
+// QueryPreImportV3 is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.QueryPreImportV3Request
+func (_e *MockCluster_Expecter) QueryPreImportV3(nodeID interface{}, in interface{}) *MockCluster_QueryPreImportV3_Call {
+	return &MockCluster_QueryPreImportV3_Call{Call: _e.mock.On("QueryPreImportV3", nodeID, in)}
+}
+
+func (_c *MockCluster_QueryPreImportV3_Call) Run(run func(nodeID int64, in *datapb.QueryPreImportV3Request)) *MockCluster_QueryPreImportV3_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.QueryPreImportV3Request))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryPreImportV3_Call) Return(_a0 *datapb.QueryPreImportV3Response, _a1 error) *MockCluster_QueryPreImportV3_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryPreImportV3_Call) RunAndReturn(run func(int64, *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error)) *MockCluster_QueryPreImportV3_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // QueryRefreshExternalCollectionTask provides a mock function with given fields: nodeID, taskID
 func (_m *MockCluster) QueryRefreshExternalCollectionTask(nodeID int64, taskID int64) (*datapb.RefreshExternalCollectionTaskResponse, error) {
 	ret := _m.Called(nodeID, taskID)
@@ -1140,6 +1555,65 @@ func (_c *MockCluster_QueryRefreshExternalCollectionTask_Call) Return(_a0 *datap
 }
 
 func (_c *MockCluster_QueryRefreshExternalCollectionTask_Call) RunAndReturn(run func(int64, int64) (*datapb.RefreshExternalCollectionTaskResponse, error)) *MockCluster_QueryRefreshExternalCollectionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryReshard provides a mock function with given fields: nodeID, in
+func (_m *MockCluster) QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error) {
+	ret := _m.Called(nodeID, in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryReshard")
+	}
+
+	var r0 *datapb.QueryReshardTaskResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error)); ok {
+		return rf(nodeID, in)
+	}
+	if rf, ok := ret.Get(0).(func(int64, *datapb.QueryReshardTaskRequest) *datapb.QueryReshardTaskResponse); ok {
+		r0 = rf(nodeID, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QueryReshardTaskResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, *datapb.QueryReshardTaskRequest) error); ok {
+		r1 = rf(nodeID, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_QueryReshard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryReshard'
+type MockCluster_QueryReshard_Call struct {
+	*mock.Call
+}
+
+// QueryReshard is a helper method to define mock.On call
+//   - nodeID int64
+//   - in *datapb.QueryReshardTaskRequest
+func (_e *MockCluster_Expecter) QueryReshard(nodeID interface{}, in interface{}) *MockCluster_QueryReshard_Call {
+	return &MockCluster_QueryReshard_Call{Call: _e.mock.On("QueryReshard", nodeID, in)}
+}
+
+func (_c *MockCluster_QueryReshard_Call) Run(run func(nodeID int64, in *datapb.QueryReshardTaskRequest)) *MockCluster_QueryReshard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*datapb.QueryReshardTaskRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_QueryReshard_Call) Return(_a0 *datapb.QueryReshardTaskResponse, _a1 error) *MockCluster_QueryReshard_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_QueryReshard_Call) RunAndReturn(run func(int64, *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error)) *MockCluster_QueryReshard_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -387,6 +387,19 @@ func FillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 // add-function-field bound-index path enforces identical rules at every DDL
 // boundary, including callers that reach rootcoord directly.
 func ValidateFieldIndexParams(field *schemapb.FieldSchema, indexParamsMap map[string]string) error {
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("indexing recursive ARRAY field %s is not supported", field.GetName())
+	}
+	if field.GetDataType() == schemapb.DataType_Array && field.GetElementNullable() {
+		return merr.WrapErrParameterInvalidMsg("indexing element-nullable ARRAY field %s is not supported yet", field.GetName())
+	}
+	if field.GetDataType() == schemapb.DataType_ArrayOfVector {
+		metricType := indexParamsMap[common.MetricTypeKey]
+		if err := ValidateArrayOfVectorMetricType(field.GetElementType(), field.GetElementNullable(), metricType); err != nil {
+			return err
+		}
+	}
+
 	if err := ValidateIndexParamsMapSize(indexParamsMap); err != nil {
 		return err
 	}

@@ -299,8 +299,7 @@ func (ds *DataSorter) Swap(i, j int) {
 			}
 		case schemapb.DataType_Array:
 			fd := singleData.(*ArrayFieldData)
-			data := fd.Data
-			data[i], data[j] = data[j], data[i]
+			fd.Data[i], fd.Data[j] = fd.Data[j], fd.Data[i]
 			swapValidData(fd.ValidData, i, j)
 		case schemapb.DataType_JSON:
 			fd := singleData.(*JSONFieldData)
@@ -333,6 +332,7 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_ArrayOfVector:
 			fieldData := singleData.(*VectorArrayFieldData)
 			fieldData.Data[i], fieldData.Data[j] = fieldData.Data[j], fieldData.Data[i]
+			swapValidData(fieldData.ValidData, i, j)
 		default:
 			errMsg := "undefined data type " + string(field.DataType)
 			panic(errMsg)

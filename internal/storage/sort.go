@@ -36,7 +36,14 @@ const (
 
 // SortTimings holds phase-level timing information from the Sort function.
 type SortTimings struct {
-	ReadCost   time.Duration
+	ReadCost time.Duration
+	// FetchCost is the part of ReadCost spent inside RecordReader.Next(), i.e.
+	// waiting for input to be downloaded and decoded. ReadCost - FetchCost is
+	// what the read loop itself costs: retaining each record and running the
+	// predicate over every row. Splitting the two tells a read that is slow
+	// because of object storage from one that is slow because of the
+	// per-row work, which no amount of read concurrency changes.
+	FetchCost  time.Duration
 	SortCost   time.Duration
 	WriteCost  time.Duration
 	NumBatches int
@@ -72,9 +79,12 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}()
 
 	phaseStart := time.Now()
+	var fetchCost time.Duration
 	for _, r := range rr {
 		for {
+			fetchStart := time.Now()
 			rec, err := r.Next()
+			fetchCost += time.Since(fetchStart)
 			if err == nil {
 				rec.Retain()
 				ri := len(records)
@@ -94,7 +104,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	readCost := time.Since(phaseStart)
 
 	if len(records) == 0 {
-		return 0, &SortTimings{ReadCost: readCost}, nil
+		return 0, &SortTimings{ReadCost: readCost, FetchCost: fetchCost}, nil
 	}
 
 	phaseStart = time.Now()
@@ -217,6 +227,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	timings := &SortTimings{
 		ReadCost:   readCost,
+		FetchCost:  fetchCost,
 		SortCost:   sortCost,
 		WriteCost:  writeCost,
 		NumBatches: len(records),
@@ -338,6 +349,9 @@ func radixSortByInt64(indices []rowIndex, keys [][]int64) {
 // sortedByFieldIDs, into a single sorted stream written through rw in batches
 // of roughly batchSize bytes. Rows for which predicate returns false are
 // skipped; predicate is evaluated exactly once per row.
+// Each record must provide every field in schema, including records whose
+// rows are all filtered out: output columns are bound before predicate runs.
+// Readers must fill absent fields with defaults or nulls as appropriate.
 //
 // Performance notes (vs. the earlier all-rows-in-the-queue approach):
 //   - The heap holds one entry per reader rather than every in-flight row, so
@@ -353,6 +367,12 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	// Fast path: no readers provided
 	if len(rr) == 0 {
 		return 0, nil
+	}
+
+	rb := NewRecordBuilder(schema)
+	outputColumns := make([][]arrow.Array, len(rr))
+	for i := range outputColumns {
+		outputColumns[i] = make([]arrow.Array, len(rb.fields))
 	}
 
 	nk := len(sortedByFieldIDs)
@@ -397,11 +417,20 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		rec, err := rr[ri].Next()
 		recs[ri] = rec // assign nil if err
 		if err != nil {
+			// Next invalidates the previous record, including on EOF.
+			clear(outputColumns[ri])
+			clear(keys[ri])
 			return err
 		}
 		pos[ri] = 0
 		recNo[ri]++
-		return extractKeys(ri)
+		if err := extractKeys(ri); err != nil {
+			return err
+		}
+		for fi, field := range rb.fields {
+			outputColumns[ri][fi] = rec.Column(field.FieldID)
+		}
+		return nil
 	}
 
 	// compareKeys orders two rows that are both currently live in the heap.
@@ -485,7 +514,6 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 	}
 
-	rb := NewRecordBuilder(schema)
 	writeRecord := func() error {
 		rec := rb.Build()
 		defer rec.Release()
@@ -556,7 +584,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		}
 		saveLast(idx)
 
-		if err := rb.Append(recs[idx.ri], int(idx.i), int(idx.i)+1); err != nil {
+		if err := rb.appendColumns(outputColumns[idx.ri], int(idx.i), int(idx.i)+1); err != nil {
 			return 0, err
 		}
 		numRows++

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -109,17 +110,29 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 			replicas := c.meta.GetByCollection(ctx, cid)
 			hasTask := false
+			unplaced := false
 			for _, r := range replicas {
-				replicaTasks := c.checkReplica(ctx, r)
+				replicaTasks, replicaUnplaced := c.checkReplica(ctx, r)
 				if len(replicaTasks) > 0 {
 					hasTask = true
 					tasks = append(tasks, replicaTasks...)
 				}
+				if replicaUnplaced {
+					unplaced = true
+				}
 			}
 
 			// Only update version cache if no tasks were generated
-			// If tasks were generated, we need to re-check next time
-			if !hasTask {
+			// If tasks were generated, we need to re-check next time.
+			//
+			// Under a form, a replica that wanted a delegator and had no node
+			// to put it on is not converged either, and must not be cached as
+			// such: a form starts a replica's nodes on demand and spawns the
+			// replica before they register, and their arrival moves neither
+			// version the cache keys on. A stock binary keeps master's answer:
+			// the unplaced shape does not hold the cache open, so a replica
+			// waiting for a node there is cached like any other empty diff.
+			if versionCacheMayUpdate(hasTask, unplaced) {
 				c.updateVersionCache(cid, currentTargetVersion, currentDistVersion)
 			}
 		}
@@ -150,6 +163,17 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 	return tasks
+}
+
+// versionCacheMayUpdate reports whether a tick may cache a collection's target
+// and channel-distribution versions as converged. A tick that produced tasks
+// is not converged. Under a form, neither is a replica that wanted a delegator
+// and had no node to put it on (unplaced): the form starts a replica's nodes
+// on demand, so the replica is spawned before they register, and their arrival
+// moves neither version the cache keys on. A stock binary keeps master's
+// answer - the unplaced shape does not hold the cache open.
+func versionCacheMayUpdate(hasTask, unplaced bool) bool {
+	return !hasTask && (!unplaced || !extension.FormInstalled())
 }
 
 // isCollectionSynced checks if target and dist versions are unchanged since last check
@@ -186,11 +210,26 @@ func (c *ChannelChecker) cleanVersionCache(activeCollections []int64) {
 	}
 }
 
-func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
+// checkReplica returns the tasks this replica needs, and whether it wanted a
+// delegator placed but no load task came out. The case this exists for is the
+// replica's read-write set being empty at this tick, so the assignment had
+// nothing to place on; but the test is on the outcome, not the cause, so it
+// also fires when the balancer produced no plan for some other reason, and
+// that collection bypasses the version cache for as long as it lasts. That is
+// accepted: the cost is one re-check per tick, and missing a replica that is
+// waiting for a node would be the worse mistake.
+//
+// The second result exists for the version cache in Check: "no task" normally
+// means converged, and caching it is what keeps the checker cheap. A replica
+// waiting for a node is the opposite of converged, and the node it waits for
+// joins the REPLICA, which moves neither the target version nor the channel
+// distribution version - so a cached entry would never be invalidated.
+func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) ([]task.Task, bool) {
 	ret := make([]task.Task, 0)
 
 	lacks, redundancies := c.getDmChannelDiff(ctx, replica.GetCollectionID(), replica.GetID())
 	tasks := c.createChannelLoadTask(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	unplaced := len(lacks) > 0 && len(tasks) == 0
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
 
@@ -205,7 +244,7 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// All channel related tasks should be with high priority
 	task.SetPriority(task.TaskPriorityHigh, tasks...)
-	return ret
+	return ret, unplaced
 }
 
 // GetDmChannelDiff get channel diff between target and dist
@@ -285,7 +324,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	groupKeys := make([]string, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
-		if streamingutil.IsStreamingServiceEnabled() {
+		if streamingutil.UseStreamingQueryNodeAsDelegator() {
 			rwNodes = replica.GetRWSQNodes()
 		} else {
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {

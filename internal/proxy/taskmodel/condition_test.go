@@ -62,4 +62,22 @@ func TestTaskCondition_OnContextDone(t *testing.T) {
 		assert.Error(t, condition.WaitToFinish())
 		assert.Equal(t, int32(1), calls.Load())
 	})
+
+	t.Run("completed result wins over cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		result := errors.New("task failed")
+		var calls atomic.Int32
+		cancel()
+
+		for i := 0; i < 50; i++ {
+			condition := NewTaskCondition(ctx)
+			condition.SetOnContextDone(func() {
+				calls.Add(1)
+			})
+			condition.Notify(result)
+			assert.Equal(t, result, condition.WaitToFinish())
+		}
+		assert.Zero(t, calls.Load())
+	})
 }

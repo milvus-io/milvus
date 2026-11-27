@@ -33,6 +33,8 @@
 #include "bitset/detail/element_wise.h"
 #include "bitset/detail/popcount.h"
 #include "common/Array.h"
+#include "common/ArrayValue.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/Geometry.h"
@@ -41,6 +43,96 @@
 #include "simdjson/padded_string.h"
 
 namespace milvus {
+
+void
+FieldData<ArrayValue>::FillFieldData(
+    const std::shared_ptr<arrow::Array> array) {
+    AssertInfo(array != nullptr,
+               "null Arrow array for native-list ARRAY field");
+    AssertInfo(array->type_id() == arrow::Type::BINARY ||
+                   array->type_id() == arrow::Type::LIST,
+               "native-list ARRAY field expects Arrow BinaryArray or "
+               "ListArray, got {}",
+               array->type()->ToString());
+    auto binary_array = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+    auto list_array = std::dynamic_pointer_cast<arrow::ListArray>(array);
+
+    const auto element_count = array->length();
+    if (element_count == 0) {
+        return;
+    }
+
+    std::vector<ArrayValue> values;
+    if (list_array != nullptr) {
+        values = ArrowListToArrayValues(*list_array, array_type_);
+    } else {
+        values.reserve(element_count);
+        for (int64_t index = 0; index < element_count; ++index) {
+            ScalarFieldProto row;
+            if (binary_array->IsValid(index)) {
+                const auto value = binary_array->GetView(index);
+                AssertInfo(row.ParseFromArray(value.data(), value.size()),
+                           "failed to parse native-list ARRAY row {}",
+                           index);
+                AssertInfo(
+                    row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                    "valid native-list ARRAY row {} has no ScalarField payload",
+                    index);
+            }
+            values.emplace_back(ArrayValue::FromProto(row, array_type_));
+        }
+    }
+
+    if (this->nullable_) {
+        this->null_count_ += array->null_count();
+        return Base::FillFieldData(values.data(),
+                                   array->null_bitmap_data(),
+                                   element_count,
+                                   array->offset());
+    }
+
+    AssertInfo(array->null_count() == 0,
+               "non-nullable native-list ARRAY field contains {} null rows",
+               array->null_count());
+    return Base::FillFieldData(values.data(), element_count);
+}
+
+void
+FieldData<ArrayValue>::FillFieldData(
+    const std::optional<DefaultValueType> default_value,
+    ssize_t element_count) {
+    AssertInfo(this->nullable_, "added nested ARRAY field must be nullable");
+    AssertInfo(!default_value.has_value(),
+               "native-list ARRAY default values are not supported");
+    if (element_count == 0) {
+        return;
+    }
+
+    ScalarFieldProto null_row;
+    const auto null_value = ArrayValue::FromProto(null_row, array_type_);
+    std::vector<ArrayValue> values(element_count, null_value);
+    std::vector<uint8_t> valid_data((element_count + 7) / 8, 0);
+    this->null_count_ += element_count;
+    Base::FillFieldData(values.data(), valid_data.data(), element_count, 0);
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize() const {
+    int64_t data_size = 0;
+    for (size_t offset = 0; offset < this->length(); ++offset) {
+        data_size += static_cast<int64_t>(this->data_[offset].byte_size());
+    }
+    return data_size;
+}
+
+int64_t
+FieldData<ArrayValue>::DataSize(ssize_t offset) const {
+    AssertInfo(offset >= 0 && offset < this->get_num_rows(),
+               "field data subscript out of range");
+    AssertInfo(static_cast<size_t>(offset) < this->length(),
+               "subscript position doesn't have a value");
+    return static_cast<int64_t>(this->data_[offset].byte_size());
+}
 
 template <typename Type, bool is_type_entire_row>
 void
@@ -333,6 +425,14 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
         case DataType::ARRAY: {
             auto array_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            if (array_array == nullptr &&
+                array->type_id() == arrow::Type::LIST) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "scalar index build on native-list ARRAY is not "
+                          "supported yet");
+            }
+            AssertInfo(array_array != nullptr,
+                       "legacy ARRAY field expects Arrow BinaryArray");
             std::vector<Array> values(element_count);
             int null_number = 0;
             for (size_t index = 0; index < element_count; ++index) {
@@ -344,6 +444,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 ScalarFieldProto field_data;
                 auto success = field_data.ParseFromString(str);
                 AssertInfo(success, "parse from string failed");
+                if (field_data.valid_data_size() != 0) {
+                    ThrowInfo(ErrorCode::NotImplemented,
+                              "scalar index build on element-nullable ARRAY "
+                              "is not supported yet");
+                }
                 values[index] = Array(field_data);
             }
             if (nullable_) {
@@ -410,6 +515,8 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 std::dynamic_pointer_cast<arrow::ListArray>(array);
             AssertInfo(list_array != nullptr,
                        "Failed to cast to ListArray for VECTOR_ARRAY");
+            AssertInfo(nullable_ || list_array->null_count() == 0,
+                       "non-nullable VECTOR_ARRAY contains null rows");
 
             auto vector_array_field =
                 dynamic_cast<FieldData<VectorArray>*>(this);
@@ -433,17 +540,28 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 case DataType::VECTOR_FLOAT16:
                 case DataType::VECTOR_BFLOAT16:
                 case DataType::VECTOR_INT8: {
-                    // All vector types use FixedSizeBinaryArray and have the same serialization logic
-                    auto binary_array =
+                    auto fixed_array =
                         std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                             values_array);
-                    AssertInfo(binary_array != nullptr,
-                               "Expected FixedSizeBinaryArray for VectorArray "
-                               "element");
+                    auto binary_array =
+                        std::dynamic_pointer_cast<arrow::BinaryArray>(
+                            values_array);
+                    AssertInfo(
+                        fixed_array != nullptr || binary_array != nullptr,
+                        "VECTOR_ARRAY expects list<FixedSizeBinary> or "
+                        "list<Binary>, got {}",
+                        array->type()->ToString());
 
                     // Calculate bytes per vector using the unified function
                     auto bytes_per_vec =
                         milvus::vector_bytes_per_element(element_type, dim);
+
+                    AssertInfo(
+                        fixed_array == nullptr ||
+                            fixed_array->byte_width() == bytes_per_vec,
+                        "VECTOR_ARRAY width mismatch: expected {}, got {}",
+                        bytes_per_vec,
+                        fixed_array == nullptr ? 0 : fixed_array->byte_width());
 
                     for (size_t index = 0; index < element_count; ++index) {
                         if (nullable_ && list_array->IsNull(index)) {
@@ -454,23 +572,73 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
-                        auto data_size = num_vectors * bytes_per_vec;
-                        auto data_ptr =
-                            data_size > 0 ? std::make_unique<char[]>(data_size)
-                                          : nullptr;
-
-                        for (int64_t i = 0; i < num_vectors; i++) {
-                            const uint8_t* binary_data =
-                                binary_array->GetValue(start_offset + i);
-                            char* dest = data_ptr.get() + i * bytes_per_vec;
-                            milvus::fastmem::FastMemcpy(
-                                dest, binary_data, bytes_per_vec);
+                        if (fixed_array != nullptr) {
+                            for (int64_t i = 0; i < num_vectors; i++) {
+                                AssertInfo(
+                                    fixed_array->IsValid(start_offset + i),
+                                    "non-element-nullable VECTOR_ARRAY "
+                                    "contains null element");
+                            }
+                            auto data_size = num_vectors * bytes_per_vec;
+                            auto data_ptr =
+                                data_size > 0
+                                    ? std::make_unique<char[]>(data_size)
+                                    : nullptr;
+                            if (data_size > 0) {
+                                milvus::fastmem::FastMemcpy(
+                                    data_ptr.get(),
+                                    fixed_array->GetValue(start_offset),
+                                    data_size);
+                            }
+                            values.emplace_back(std::move(data_ptr),
+                                                num_vectors,
+                                                dim,
+                                                element_type);
+                            continue;
                         }
 
-                        values.emplace_back(std::move(data_ptr),
-                                            num_vectors,
-                                            dim,
-                                            element_type);
+                        // The compact payload holds only the valid vectors;
+                        // size it by their count, not by the row's logical
+                        // length, so a row of null elements (such as an old
+                        // row of a sub-field added to a struct) allocates no
+                        // vector payload.
+                        int64_t valid_vectors = 0;
+                        for (int64_t i = 0; i < num_vectors; i++) {
+                            valid_vectors +=
+                                binary_array->IsValid(start_offset + i);
+                        }
+                        auto data_ptr = valid_vectors > 0
+                                            ? std::make_unique<char[]>(
+                                                  valid_vectors * bytes_per_vec)
+                                            : nullptr;
+                        std::vector<uint8_t> bitmap(
+                            (num_vectors + 7) / 8 + sizeof(uint64_t), 0);
+                        int64_t physical = 0;
+                        for (int64_t i = 0; i < num_vectors; i++) {
+                            const auto item = start_offset + i;
+                            if (binary_array->IsNull(item)) {
+                                continue;
+                            }
+                            auto value = binary_array->GetView(item);
+                            AssertInfo(value.size() == bytes_per_vec,
+                                       "VECTOR_ARRAY vector width {} "
+                                       "does not match {}",
+                                       value.size(),
+                                       bytes_per_vec);
+                            bitmap[i >> 3] |= uint8_t{1} << (i & 7);
+                            milvus::fastmem::FastMemcpy(
+                                data_ptr.get() + physical * bytes_per_vec,
+                                value.data(),
+                                bytes_per_vec);
+                            ++physical;
+                        }
+                        values.emplace_back(
+                            std::move(data_ptr),
+                            num_vectors,
+                            dim,
+                            element_type,
+                            TargetBitmapView(bitmap.data(), num_vectors),
+                            true);
                     }
                     break;
                 }
@@ -509,6 +677,7 @@ template class FieldDataImpl<std::string, true>;
 template class FieldDataImpl<Json, true>;
 template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
+template class FieldDataImpl<ArrayValue, true>;
 
 // vector data
 template class FieldDataImpl<int8_t, false>;

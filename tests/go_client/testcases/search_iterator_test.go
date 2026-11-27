@@ -231,7 +231,7 @@ func TestSearchIteratorInvalid(t *testing.T) {
 	// search iterator with not exist collection name
 	vector := entity.FloatVector(common.GenFloatVector(common.DefaultDim))
 	_, err := mc.SearchIterator(ctx, client.NewSearchIteratorOption(common.GenRandomString("c", 5), vector))
-	common.CheckErr(t, err, false, "collection not found")
+	require.ErrorIs(t, err, client.ErrCollectionNotFound)
 
 	// search iterator with not exist partition name
 	_, err = mc.SearchIterator(ctx, client.NewSearchIteratorOption(schema.CollectionName, vector).WithPartitions(common.GenRandomString("p", 5)))

@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <mutex>
+#include <regex>
+#include <cctype>
+#include <charconv>
+#include <arpa/inet.h>
+#include "arrow/util/uri.h"
+#include "arrow/util/string.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
+#include <charconv>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -23,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -32,6 +41,7 @@
 #include "arrow/status.h"
 #include "simdjson.h"
 #include "common/EasyAssert.h"
+#include "common/ExternalSpecKey.h"
 #include "log/Log.h"
 #include "common/type_c.h"
 #include "milvus-storage/common/extend_status.h"
@@ -48,6 +58,328 @@
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
+
+namespace {
+std::mutex broker_policy_mutex;
+std::optional<std::unordered_set<std::string>> broker_allowed_endpoints;
+}  // namespace
+
+std::optional<int64_t>
+TryParseCanonicalFieldID(std::string_view value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    int64_t field_id = -1;
+    const auto parsed =
+        std::from_chars(value.data(), value.data() + value.size(), field_id);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        field_id < 0 || std::to_string(field_id) != value) {
+        return std::nullopt;
+    }
+    return field_id;
+}
+
+namespace {
+int64_t
+ParseCanonicalFieldID(const std::string& value) {
+    const auto field_id = TryParseCanonicalFieldID(value);
+    if (!field_id.has_value()) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping value '{}': expected canonical "
+                  "nonnegative int64",
+                  value);
+    }
+    return *field_id;
+}
+
+json
+ParseFieldIDMappingJSON(const std::string& text) {
+    std::unordered_set<std::string> keys;
+    auto callback = [&keys](
+                        int depth, json::parse_event_t event, json& parsed) {
+        if (depth == 1 && event == json::parse_event_t::key &&
+            !keys.insert(parsed.get<std::string>()).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Duplicate field ID mapping key");
+        }
+        return true;
+    };
+    try {
+        auto result = json::parse(text, callback);
+        if (!result.is_object()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Field ID mapping must be an object");
+        }
+        return result;
+    } catch (const nlohmann::json::exception& e) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Invalid field ID mapping JSON: {}",
+                  e.what());
+    }
+}
+}  // namespace
+
+MilvusTableFieldIdMapping
+ParseMilvusTableFieldIdMapping(const std::string& encoded) {
+    const auto parsed = ParseFieldIDMappingJSON(encoded);
+    MilvusTableFieldIdMapping mapping;
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+        const auto target_id = ParseCanonicalFieldID(it.key());
+        if (!it.value().is_string()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "source field ID for target {} must be a string",
+                      it.key());
+        }
+        const auto& physical = it.value().get_ref<const std::string&>();
+        (void)ParseCanonicalFieldID(physical);
+        mapping.physical_columns.emplace(target_id, physical);
+        if (!mapping.target_fields.emplace(physical, target_id).second) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "duplicate source field ID {}",
+                      physical);
+        }
+    }
+    return mapping;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ResolveMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    if (auto mapping = ReadMilvusTableFieldIdMapping(column_groups)) {
+        return mapping;
+    }
+    auto identity = std::make_shared<MilvusTableFieldIdMapping>();
+    for (const auto& group : column_groups) {
+        for (const auto& column : group->columns) {
+            const auto id = ParseCanonicalFieldID(column);
+            identity->physical_columns.emplace(id, column);
+            identity->target_fields.emplace(column, id);
+        }
+    }
+    return identity;
+}
+
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups) {
+    std::shared_ptr<MilvusTableFieldIdMapping> mapping;
+    bool saw_unmapped_nonempty = false;
+    for (const auto& group : column_groups) {
+        if (group == nullptr) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Null column group in field ID mapping");
+        }
+        std::optional<MilvusTableFieldIdMapping> group_mapping;
+        bool any_property = false;
+        bool any_missing = false;
+        for (const auto& file : group->files) {
+            const auto property =
+                file.properties.find(kMilvusTableFieldIdMappingProperty);
+            if (property == file.properties.end()) {
+                any_missing = true;
+                continue;
+            }
+            any_property = true;
+            auto parsed = ParseMilvusTableFieldIdMapping(property->second);
+            if (group_mapping.has_value() &&
+                group_mapping->physical_columns != parsed.physical_columns) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Column group files disagree on field ID mapping");
+            }
+            group_mapping = std::move(parsed);
+        }
+        if (any_property && any_missing) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group files have incomplete field ID mapping "
+                      "properties");
+        }
+        if (!any_property) {
+            if (!group->files.empty() || !group->columns.empty()) {
+                saw_unmapped_nonempty = true;
+            }
+            continue;
+        }
+        if (group_mapping->physical_columns.empty() &&
+            !group->columns.empty()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Nonempty column group has an empty field ID mapping");
+        }
+        if (!mapping) {
+            mapping = std::make_shared<MilvusTableFieldIdMapping>();
+        }
+        std::unordered_set<std::string> mapped_group_columns;
+        for (const auto& [target_id, physical] :
+             group_mapping->physical_columns) {
+            if (physical.empty() ||
+                std::find(group->columns.begin(),
+                          group->columns.end(),
+                          physical) == group->columns.end()) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Mapped physical column '{}' is absent from its "
+                          "column group",
+                          physical);
+            }
+            mapped_group_columns.insert(physical);
+            auto [physical_it, inserted] =
+                mapping->physical_columns.emplace(target_id, physical);
+            if (!inserted && physical_it->second != physical) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Target field {} has conflicting physical columns",
+                          target_id);
+            }
+            auto [target_it, target_inserted] =
+                mapping->target_fields.emplace(physical, target_id);
+            if (!target_inserted && target_it->second != target_id) {
+                ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                          "Physical column '{}' maps to multiple target fields",
+                          physical);
+            }
+        }
+        if (mapped_group_columns.size() != group->columns.size()) {
+            ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                      "Column group field ID mapping does not cover every "
+                      "physical column");
+        }
+    }
+    if (mapping != nullptr && saw_unmapped_nonempty) {
+        ThrowInfo(milvus::ErrorCode::DataFormatBroken,
+                  "Column group has no field ID mapping");
+    }
+    return mapping;
+}
+
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw) {
+    for (unsigned char c : raw) {
+        if (c <= 32 || c >= 127 || c == '\\') {
+            return arrow::Status::Invalid(
+                "Invalid credential broker URL characters");
+        }
+    }
+    // Match Go specutil.NormalizeBrokerEndpoint without decoding the path.
+    static const std::regex pattern(
+        R"(^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(/[^?#]*)?(\?[^#]*)?$)");
+    std::smatch match;
+    if (!std::regex_match(raw, match, pattern)) {
+        return arrow::Status::Invalid("Invalid credential broker URL");
+    }
+    auto lower = [](std::string value) {
+        std::transform(
+            value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                return std::tolower(c);
+            });
+        return value;
+    };
+    auto scheme = lower(match[1]);
+    auto authority = lower(match[2]);
+    if ((scheme != "http" && scheme != "https") ||
+        authority.find_first_of("@%*") != std::string::npos) {
+        return arrow::Status::Invalid("Invalid credential broker authority");
+    }
+    std::string host, port;
+    if (authority.front() == '[') {
+        auto end = authority.find(']');
+        if (end == std::string::npos || end == 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+        host = authority.substr(0, end + 1);
+        if (end + 1 < authority.size()) {
+            if (authority[end + 1] != ':') {
+                return arrow::Status::Invalid("Invalid broker port");
+            }
+            port = authority.substr(end + 2);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    } else {
+        auto colon = authority.find(':');
+        host = authority.substr(0, colon);
+        if (colon != std::string::npos) {
+            port = authority.substr(colon + 1);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    }
+    if (!host.empty() && host.front() == '[') {
+        in6_addr parsed_address;
+        auto literal = host.substr(1, host.size() - 2);
+        if (inet_pton(AF_INET6, literal.c_str(), &parsed_address) != 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+    } else if (host.find_first_not_of(
+                   "abcdefghijklmnopqrstuvwxyz0123456789.-_") !=
+               std::string::npos) {
+        return arrow::Status::Invalid("Invalid broker hostname");
+    }
+    if (host.empty())
+        return arrow::Status::Invalid("Empty broker host");
+    if (!port.empty()) {
+        if (port.size() > 5 ||
+            port.find_first_not_of("0123456789") != std::string::npos) {
+            return arrow::Status::Invalid("Invalid broker port");
+        }
+        int value = std::stoi(port);
+        if (value < 1 || value > 65535)
+            return arrow::Status::Invalid("Invalid broker port");
+        port = (scheme == "http" && value == 80) ||
+                       (scheme == "https" && value == 443)
+                   ? ""
+                   : ":" + std::to_string(value);
+    }
+    // Arrow validates escapes and IPv6 syntax; its decoded path is never used.
+    arrow::util::Uri uri;
+    ARROW_RETURN_NOT_OK(uri.Parse(raw));
+    auto path = match[3].str();
+    if (path.empty())
+        path = "/";
+    if (path.find("//") != std::string::npos || path == "/." || path == "/.." ||
+        path.find("/./") != std::string::npos ||
+        path.find("/../") != std::string::npos ||
+        (path.size() >= 2 && path.compare(path.size() - 2, 2, "/.") == 0) ||
+        (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0) ||
+        path.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU"
+                               "VWXYZ0123456789-._~/") != std::string::npos) {
+        return arrow::Status::Invalid(
+            "Credential broker path must use unescaped unreserved characters, "
+            "without repeated separators or dot segments");
+    }
+    return scheme + "://" + host + port + path + match[4].str();
+}
+
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json) {
+    std::unordered_set<std::string> endpoints;
+    try {
+        for (const auto& value :
+             json::parse(endpoints_json).get<std::vector<std::string>>()) {
+            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                  NormalizeBrokerEndpoint(value));
+            endpoints.insert(std::move(endpoint));
+        }
+    } catch (const json::exception&) {
+        return arrow::Status::Invalid(
+            "Invalid credential broker allowlist JSON");
+    }
+    std::lock_guard lock(broker_policy_mutex);
+    if (broker_allowed_endpoints.has_value() &&
+        *broker_allowed_endpoints != endpoints) {
+        return arrow::Status::Invalid(
+            "Credential broker policy is immutable; restart required");
+    }
+    broker_allowed_endpoints = std::move(endpoints);
+    return arrow::Status::OK();
+}
+
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint) {
+    std::lock_guard lock(broker_policy_mutex);
+    if (!broker_allowed_endpoints.has_value() ||
+        broker_allowed_endpoints->count(endpoint) == 0) {
+        return arrow::Status::IOError(
+            "Credential broker endpoint denied by server policy");
+    }
+    return arrow::Status::OK();
+}
 
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
@@ -149,6 +481,12 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
             std::to_string(c_storage_config.max_connections).c_str());
     }
 
+    (*properties_map)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+        c_storage_config.crt_queue_sizes > 0
+            ? c_storage_config.crt_queue_sizes
+            : milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                  .GetS3CrtQueueSizes();
+
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
         if (!tls_ver.empty() && tls_ver != "default") {
@@ -162,6 +500,47 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
         *properties_map,
         PROPERTY_FS_USE_CRC32C_CHECKSUM,
         c_storage_config.use_crc32c_checksum ? "true" : "false");
+
+    const bool is_local =
+        c_storage_config.storage_type != nullptr &&
+        std::string_view(c_storage_config.storage_type) == "local";
+    // Default properties serve arbitrary operations. Only unrestricted policy
+    // enables their FS; load readers select their own mode and file policy later.
+    const uint32_t data_mode = (c_storage_config.talon_enabled_stages == 0 ||
+                                c_storage_config.talon_enabled_stages ==
+                                    milvus::storage::kTalonStagesAll)
+                                   ? c_storage_config.talon_mode
+                                   : 0;
+    const std::pair<const char*, uint32_t> talon_values[] = {
+        {PROPERTY_FS_TALON_MODE, data_mode},
+        {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
+         c_storage_config.talon_small_read_threshold},
+        {PROPERTY_FS_TALON_BLOCK_SIZE, c_storage_config.talon_block_size},
+        {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR,
+         c_storage_config.talon_max_idle_per_addr}};
+    // Ordinary callers retain unrestricted file behavior; a QN load copy may
+    // select the immutable open-only filesystem policy below.
+    (*properties_map)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
+    // Keep the External Table policy alongside ordinary filesystem properties.
+    // This Milvus-only key is consumed below, including for local primary storage.
+    (*properties_map)["milvus.talon.external_mode"] = std::to_string(
+        c_storage_config.talon_enable_for_external_table ? data_mode : 0);
+    for (const auto& [key, value] : talon_values) {
+        const bool is_mode = std::string_view(key) == PROPERTY_FS_TALON_MODE;
+        if (!is_mode && value == 0) {
+            continue;  // Unset in older StorageConfig messages: use storage defaults.
+        }
+        (*properties_map)[key] = is_mode && is_local ? uint32_t{0} : value;
+    }
+    if (c_storage_config.talon_coordinator != nullptr) {
+        (*properties_map)[PROPERTY_FS_TALON_COORDINATOR] =
+            std::string(c_storage_config.talon_coordinator);
+    }
+    if (c_storage_config.talon_namespace != nullptr &&
+        c_storage_config.talon_namespace[0] != '\0') {
+        (*properties_map)[PROPERTY_FS_TALON_NAMESPACE] =
+            std::string(c_storage_config.talon_namespace);
+    }
 
     // Carry the configured arrow reader prebuffer limits into every
     // freshly-built properties map. Index build (index_c.cpp) and the FFI
@@ -186,7 +565,9 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
 //
 // Any key outside this set is dropped with a warning — we do not fail the
 // request because the Go side should have rejected it already, so reaching
-// here means either a programming error or an attempted bypass.
+// here means either a programming error or an attempted bypass. A key that
+// differs from one in this set only by case, or a duplicate key, fails the
+// request instead (CheckExtfsSpecKey).
 static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "use_iam",
     "use_ssl",
@@ -209,7 +590,152 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "azure_client_id",
     "azure_tenant_id",
     "azure_credential_endpoint",
+    "credential_endpoint",
 };
+
+// kExternalSpecKeys are the top-level external_spec keys Go decodes into
+// specutil.ExternalSpec. Keep in sync with specKeys in
+// pkg/util/externalspec/specutil/spec.go.
+static const std::unordered_set<std::string> kExternalSpecKeys = {
+    "format",
+    "columns",
+    "extfs",
+    "snapshot_id",
+};
+
+// CheckTopLevelSpecKey rejects a repeated top-level key, and a second key that
+// Go's encoding/json reads as the same ExternalSpec field, such as "Extfs"
+// after "extfs". A lone non-canonical spelling such as "Format" is accepted:
+// FindSpecField reads it as the canonical key, as Go does. Other keys are
+// unknown to ExternalSpec, so only their exact repeats are rejected.
+static arrow::Status
+CheckTopLevelSpecKey(
+    const std::string& key,
+    std::unordered_set<std::string>& seen,
+    std::unordered_map<std::string, std::string>& first_by_name) {
+    if (!seen.emplace(key).second) {
+        return arrow::Status::Invalid(
+            "external_spec key '", key, "' is duplicated");
+    }
+    auto name = milvus::FoldExternalSpecKey(key);
+    if (kExternalSpecKeys.count(name) == 0) {
+        return arrow::Status::OK();
+    }
+    const auto [first, inserted] = first_by_name.emplace(name, key);
+    if (!inserted) {
+        return arrow::Status::Invalid(
+            "external_spec keys '",
+            first->second,
+            "' and '",
+            key,
+            "' differ only in case; set the key once");
+    }
+    return arrow::Status::OK();
+}
+
+// CheckExtfsSpecKey rejects a repeated extfs key, and a key that differs from
+// an allowlisted one only by case. Go keeps such a key as written and its
+// allowlist rejects it, while this file would drop it.
+static arrow::Status
+CheckExtfsSpecKey(std::string_view key, std::unordered_set<std::string>& seen) {
+    if (!seen.emplace(key).second) {
+        return arrow::Status::Invalid("extfs key '", key, "' is duplicated");
+    }
+    if (kAllowedExtfsSpecKeys.count(std::string(key)) > 0) {
+        return arrow::Status::OK();
+    }
+    const auto folded = milvus::FoldExternalSpecKey(key);
+    if (kAllowedExtfsSpecKeys.count(folded) > 0) {
+        return arrow::Status::Invalid(
+            "extfs key '", key, "' must be written as '", folded, "'");
+    }
+    return arrow::Status::OK();
+}
+
+// CheckExternalSpecKeys rejects a spec that sets one key twice. Go's
+// encoding/json reads a top-level key that equals an ExternalSpec field
+// ignoring case as that field, lets a later occurrence override an earlier one
+// and merges two extfs objects, while this file reads one occurrence, so the
+// two sides would read different settings or credentials. Go rejects these
+// specs first (specutil.CheckSpecKeys); this check covers specs persisted
+// before Go did. Keys are unescaped with allow_replacement, as encoding/json
+// unescapes them: an escaped lone surrogate such as "\ud800" becomes U+FFFD
+// instead of failing a spec Go accepts. A spec, or an extfs value, that is not
+// a JSON object has no keys to check; any other error, such as invalid UTF-8,
+// fails the request, and a parse error met while iterating throws
+// simdjson_error.
+static arrow::Status
+CheckExternalSpecKeys(const simdjson::padded_string& external_spec) {
+    // A separate parser: a failed lookup can leave a document unusable, and
+    // the caller iterates the spec again.
+    simdjson::ondemand::parser parser;
+    auto doc = parser.iterate(external_spec);
+    simdjson::ondemand::object spec;
+    if (const auto error = doc.get_object().get(spec);
+        error != simdjson::SUCCESS) {
+        if (error == simdjson::INCORRECT_TYPE) {
+            return arrow::Status::OK();
+        }
+        return arrow::Status::Invalid("external_spec cannot be parsed: ",
+                                      simdjson::error_message(error));
+    }
+    std::unordered_set<std::string> seen;
+    std::unordered_map<std::string, std::string> first_by_name;
+    for (auto field : spec) {
+        const auto key = std::string(
+            field.unescaped_key(/*allow_replacement=*/true).value());
+        ARROW_RETURN_NOT_OK(CheckTopLevelSpecKey(key, seen, first_by_name));
+        if (milvus::FoldExternalSpecKey(key) != "extfs") {
+            continue;
+        }
+        simdjson::ondemand::object extfs;
+        if (const auto error = field.value().get_object().get(extfs);
+            error != simdjson::SUCCESS) {
+            if (error == simdjson::INCORRECT_TYPE) {
+                continue;
+            }
+            return arrow::Status::Invalid(
+                "external_spec extfs cannot be parsed: ",
+                simdjson::error_message(error));
+        }
+        std::unordered_set<std::string> seen_extfs;
+        for (auto extfs_field : extfs) {
+            ARROW_RETURN_NOT_OK(CheckExtfsSpecKey(
+                extfs_field.unescaped_key(/*allow_replacement=*/true).value(),
+                seen_extfs));
+        }
+    }
+    return arrow::Status::OK();
+}
+
+// FindSpecField returns the top-level field that Go's encoding/json reads as
+// name, a key in kExternalSpecKeys: its unescaped key folds to name, so a lone
+// "Format" or "\u0065xtfs" is found as format or extfs. simdjson's find_field
+// compares raw bytes and would miss both. CheckExternalSpecKeys has rejected a
+// spec with two keys that fold to the same name, so at most one field matches.
+// doc must be freshly iterated: rewinding a document after a parse error
+// dereferences a released parser.
+static simdjson::simdjson_result<simdjson::ondemand::value>
+FindSpecField(simdjson::simdjson_result<simdjson::ondemand::document>& doc,
+              std::string_view name) {
+    simdjson::ondemand::object spec;
+    if (const auto error = doc.get_object().get(spec);
+        error != simdjson::SUCCESS) {
+        return error;
+    }
+    for (auto field : spec) {
+        std::string_view key;
+        if (const auto error =
+                field.unescaped_key(/*allow_replacement=*/true).get(key);
+            error != simdjson::SUCCESS) {
+            return error;
+        }
+        if (milvus::FoldExternalSpecKey(key) == name) {
+            return field.value();
+        }
+    }
+    return simdjson::NO_SUCH_FIELD;
+}
 
 // kExtfsFields is the contract with Go extfsFields in
 // internal/storagev2/packed/ffi_common.go. Keep in lockstep.
@@ -257,6 +783,7 @@ ExternalFsPropertyKey(const std::string& extfs_prefix,
 // milvus.yaml, not from a user-supplied external_spec.
 static const std::vector<const char*> kExtfsInheritedFsFields = {
     PROPERTY_FS_MAX_CONNECTIONS,
+    PROPERTY_FS_S3_CRT_QUEUE_SIZES,
 };
 
 // PropertyValueAsString renders a PropertyVariant back to the string form
@@ -355,9 +882,8 @@ DeriveEndpoint(const std::string& cloud_provider, const std::string& region) {
         if (r.rfind("usgov", 0) == 0 || r.rfind("usdod", 0) == 0) {
             return "core.usgovcloudapi.net";
         }
-        if (r.rfind("germany", 0) == 0) {
-            return "core.cloudapi.de";
-        }
+        // Microsoft Cloud Germany (core.cloudapi.de) closed in October 2021;
+        // germanywestcentral and germanynorth are public Azure regions.
         return "core.windows.net";
     }
     return "";
@@ -369,50 +895,45 @@ StripURIScheme(const std::string& addr) {
     return (pos != std::string::npos) ? addr.substr(pos + 3) : addr;
 }
 
-// IsCloudEndpointHost returns true when `host` matches a known cloud provider
-// domain family. Used to identify Milvus-form URIs whose host is an endpoint
-// variant (global / accelerate / dual-stack / VPC / FIPS / sovereign) that
-// DeriveEndpoint does not produce verbatim. When the host belongs to a cloud
-// family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
-// region) equals the host string. Keep list in sync with Go
-// externalspec.IsCloudEndpointHost.
+// IsAzureStorageAuthority returns true for the bare Azure Storage
+// authorities that azure://<authority>/<container>/<blob> names. An Azure
+// container name cannot contain a dot, so such a host is never a container.
 static bool
-IsCloudEndpointHost(const std::string& host) {
+IsAzureStorageAuthority(const std::string& host) {
     std::string h = host;
     std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
         return std::tolower(c);
     });
-    auto ends_with = [&](const std::string& suffix) {
-        return h.size() >= suffix.size() &&
-               h.compare(h.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
-    // AWS (global, regional, accelerate, dualstack, FIPS, VPC, China).
-    if (ends_with(".amazonaws.com") || ends_with(".amazonaws.com.cn")) {
-        return true;
+    return h == "core.windows.net" || h == "core.chinacloudapi.cn" ||
+           h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
+}
+
+// Keep the endpoint domain families in sync with Go externalspec.IsCloudEndpointHost.
+static std::string_view
+CloudEndpointProvider(const std::string& host) {
+    const auto h = arrow::internal::AsciiToLower(host);
+    if (h.ends_with(".amazonaws.com") || h.ends_with(".amazonaws.com.cn")) {
+        return "aws";
     }
-    // GCP Cloud Storage.
-    if (ends_with(".googleapis.com")) {
-        return true;
+    if (h.ends_with(".googleapis.com")) {
+        return "gcp";
     }
-    // Aliyun OSS (public, internal, accelerate, VPC).
-    if (ends_with(".aliyuncs.com")) {
-        return true;
+    if (h.ends_with(".aliyuncs.com")) {
+        return "aliyun";
     }
-    // Tencent Cloud COS.
-    if (ends_with(".myqcloud.com")) {
-        return true;
+    if (h.ends_with(".myqcloud.com")) {
+        return "tencent";
     }
-    // Huawei Cloud OBS.
-    if (ends_with(".myhuaweicloud.com")) {
-        return true;
+    if (h.ends_with(".myhuaweicloud.com")) {
+        return "huawei";
     }
-    // Azure Blob Storage (public, China, US Gov, Germany).
-    if (ends_with(".core.windows.net") || ends_with(".core.chinacloudapi.cn") ||
-        ends_with(".core.usgovcloudapi.net") ||
-        ends_with(".core.cloudapi.de")) {
-        return true;
+    if (h.ends_with(".core.windows.net") ||
+        h.ends_with(".core.chinacloudapi.cn") ||
+        h.ends_with(".core.usgovcloudapi.net") ||
+        h.ends_with(".core.cloudapi.de")) {
+        return "azure";
     }
-    return false;
+    return {};
 }
 
 static arrow::Status
@@ -425,24 +946,16 @@ InjectExternalSpecProperties(
     std::string extfs_prefix = std::string(PROPERTY_EXTFS_PREFIX) +
                                std::to_string(collection_id) + ".";
 
-    // Layer 0: zero-init bool fields only (milvus-storage rejects empty
-    // strings on enum-constrained keys like cloud_provider).
-    //
-    // "anonymous" is intentionally skipped: milvus-storage's fs.* property
-    // registry does not yet declare PROPERTY_FS_ANONYMOUS, so any SetValue
-    // on "extfs.<cid>.anonymous" hits strict "undefined key" in
-    // ExtractExternalFsProperties (iceberg explore path). Skipping the
-    // default zero-init keeps the slot absent — equivalent to anonymous=false
-    // — so the default credential path stays unaffected. Once the upstream
-    // registry adds the key, this skip can be removed without further
-    // changes (and user-supplied anonymous=true via Layer 2 will start
-    // working automatically — we deliberately do NOT drop it on Layer 2 so
-    // the future fix is a one-line revert here).
+    // Only set registered boolean defaults. Storage has no fs.anonymous key.
     for (const auto& [name, is_bool] : kExtfsFields) {
         if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
     }
+
+    // Absent keys default to minioadmin in storage and conflict with GCP tokens.
+    properties[extfs_prefix + "access_key_id"] = std::string();
+    properties[extfs_prefix + "access_key_value"] = std::string();
 
     // IOPS limiting is an External Table read policy, not an attribute of the
     // internal filesystem. Keep it out of fs.* and stamp it only into the
@@ -495,6 +1008,7 @@ InjectExternalSpecProperties(
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
+    rest = rest.substr(0, rest.find_first_of("?#"));
     auto slash_pos = rest.find('/');
     // No slash after authority (e.g. "s3://mybucket"): entire rest is host,
     // path is empty. Only assert against the pathological "scheme://" case
@@ -542,17 +1056,34 @@ InjectExternalSpecProperties(
     std::string spec_cloud_provider;
     std::string spec_region;
     std::string spec_endpoint_url;
+    std::optional<std::string> spec_bucket_name;
     bool has_spec_endpoint_url = false;
+    std::string broker_endpoint;
+    bool legacy_broker = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
             simdjson::padded_string padded(external_spec);
+            ARROW_RETURN_NOT_OK(CheckExternalSpecKeys(padded));
             auto doc = parser.iterate(padded);
-            auto extfs_obj = doc.find_field("extfs");
+            auto extfs_obj = FindSpecField(doc, "extfs");
+            // NO_SUCH_FIELD means no extfs, and INCORRECT_TYPE that the spec
+            // is not a JSON object (Go reads null as a spec without extfs).
+            // Any other error must not silently drop the spec's extfs.
+            if (const auto error = extfs_obj.error();
+                error != simdjson::SUCCESS &&
+                error != simdjson::NO_SUCH_FIELD &&
+                error != simdjson::INCORRECT_TYPE) {
+                return arrow::Status::Invalid(
+                    "external_spec extfs cannot be read: ",
+                    simdjson::error_message(error));
+            }
             if (extfs_obj.error() == simdjson::SUCCESS) {
                 for (auto field : extfs_obj.get_object()) {
                     try {
-                        auto key = std::string(field.unescaped_key().value());
+                        auto key = std::string(
+                            field.unescaped_key(/*allow_replacement=*/true)
+                                .value());
                         if (kAllowedExtfsSpecKeys.find(key) ==
                             kAllowedExtfsSpecKeys.end()) {
                             LOG_WARN(
@@ -563,14 +1094,46 @@ InjectExternalSpecProperties(
                                 collection_id);
                             continue;
                         }
-                        auto val =
-                            std::string(field.value().get_string().value());
+                        // Match Go's map[string]string: null is an empty string.
+                        auto json_value = field.value();
+                        std::string_view text;
+                        if (!json_value.is_null().value() &&
+                            json_value.get_string().get(text) !=
+                                simdjson::SUCCESS) {
+                            return arrow::Status::Invalid(
+                                "extfs.", key, " must be a JSON string");
+                        }
+                        auto val = std::string(text);
                         if (key == "endpoint_url") {
                             has_spec_endpoint_url = true;
                             spec_endpoint_url = val;
                             continue;
                         }
+                        if (key == "bucket_name") {
+                            spec_bucket_name = std::move(val);
+                            continue;
+                        }
                         if (val.empty()) {
+                            continue;
+                        }
+                        if (key == "credential_endpoint" ||
+                            key == "azure_credential_endpoint") {
+                            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                                  NormalizeBrokerEndpoint(val));
+                            if (!broker_endpoint.empty() &&
+                                broker_endpoint != endpoint) {
+                                return arrow::Status::Invalid(
+                                    "Conflicting credential broker endpoints");
+                            }
+                            broker_endpoint = std::move(endpoint);
+                            legacy_broker = legacy_broker ||
+                                            key == "azure_credential_endpoint";
+                            continue;
+                        }
+                        if (key == "anonymous" && val == "false") {
+                            // Explicit false clears the override. The storage
+                            // property registry has no fs.anonymous entry.
+                            properties.erase(extfs_prefix + key);
                             continue;
                         }
                         if (key == "cloud_provider") {
@@ -592,12 +1155,10 @@ InjectExternalSpecProperties(
                             (extfs_prefix + key).c_str(),
                             val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
-                        LOG_WARN(
-                            "extfs field parse failed, skipping "
-                            "(collection_id={}): {}",
-                            collection_id,
-                            per_field.what());
-                        continue;
+                        // A field that cannot be read would leave the spec
+                        // partially applied.
+                        return arrow::Status::Invalid(
+                            "extfs field parse failed: ", per_field.what());
                     }
                 }
             }
@@ -614,6 +1175,119 @@ InjectExternalSpecProperties(
         }
     }
 
+    const auto value = [&](const char* key) {
+        return PropertyValueAsString(properties, (extfs_prefix + key).c_str())
+            .value_or("");
+    };
+    const bool use_iam =
+        arrow::internal::AsciiEqualsCaseInsensitive(value("use_iam"), "true");
+    const bool has_target = !value("gcp_target_service_account").empty();
+    const auto validate_token_lifetime = [&](const char* mode) {
+        const auto lifetime = value("load_frequency");
+        if (lifetime.empty()) {
+            return arrow::Status::OK();
+        }
+        uint64_t seconds = 0;
+        const auto* end = lifetime.data() + lifetime.size();
+        const auto [ptr, error] =
+            std::from_chars(lifetime.data(), end, seconds);
+        if (error != std::errc{} || ptr != end) {
+            return arrow::Status::Invalid(mode,
+                                          " has an invalid token lifetime");
+        }
+        if (seconds < 900 || seconds > 3600) {
+            return arrow::Status::Invalid(
+                mode, " requires load_frequency in [900, 3600]");
+        }
+        return arrow::Status::OK();
+    };
+    if (!broker_endpoint.empty()) {
+        if (legacy_broker && spec_cloud_provider != "azure") {
+            return arrow::Status::Invalid(
+                "azure_credential_endpoint requires cloud_provider=azure");
+        }
+        if (spec_cloud_provider != "aws" && spec_cloud_provider != "aliyun" &&
+            spec_cloud_provider != "tencent" &&
+            spec_cloud_provider != "azure" && spec_cloud_provider != "gcp") {
+            return arrow::Status::Invalid(
+                "Unsupported credential broker cloud provider");
+        }
+        const auto reject_fields =
+            [&](const char* mode, std::initializer_list<const char*> keys) {
+                for (const auto* key : keys) {
+                    if (!value(key).empty()) {
+                        return arrow::Status::Invalid(
+                            "Inactive credential field in ", mode, ": ", key);
+                    }
+                }
+                return arrow::Status::OK();
+            };
+        if (spec_cloud_provider == "azure") {
+            if (value("access_key_id").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires access_key_id");
+            }
+            if (use_iam) {
+                // Existing Azure target specs may carry unused S3 session fields.
+                ARROW_RETURN_NOT_OK(reject_fields("Azure broker IAM",
+                                                  {"azure_client_id",
+                                                   "azure_tenant_id",
+                                                   "external_id",
+                                                   "session_name"}));
+                ARROW_RETURN_NOT_OK(
+                    validate_token_lifetime("Azure broker IAM"));
+            } else if (value("azure_client_id").empty() ||
+                       value("azure_tenant_id").empty() ||
+                       value("region").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires azure_client_id, azure_tenant_id "
+                    "and region without use_iam=true");
+            }
+            ARROW_RETURN_NOT_OK(reject_fields("Azure broker",
+                                              {"access_key_value",
+                                               "role_arn",
+                                               "gcp_target_service_account"}));
+            if (value("anonymous") == "true") {
+                return arrow::Status::Invalid(
+                    "anonymous conflicts with Azure broker");
+            }
+        } else if (spec_cloud_provider == "gcp" || use_iam) {
+            const bool is_gcp = spec_cloud_provider == "gcp";
+            if (is_gcp && use_iam == has_target) {
+                return arrow::Status::Invalid(
+                    "GCP broker requires exactly one of use_iam=true and "
+                    "gcp_target_service_account");
+            }
+            if (!is_gcp && has_target) {
+                return arrow::Status::Invalid(
+                    "Inactive credential field in broker IAM: "
+                    "gcp_target_service_account");
+            }
+            ARROW_RETURN_NOT_OK(
+                reject_fields(is_gcp ? "GCP broker" : "broker IAM",
+                              {"role_arn",
+                               "external_id",
+                               "session_name",
+                               "access_key_id",
+                               "access_key_value",
+                               "azure_client_id",
+                               "azure_tenant_id"}));
+        }
+        ARROW_RETURN_NOT_OK(CheckCredentialBrokerEndpoint(broker_endpoint));
+        // The legacy Azure key delegates to a target identity on storage 3.0.
+        // Broker IAM must use the generic endpoint to select the broker identity.
+        const bool azure_target = spec_cloud_provider == "azure" && !use_iam;
+        properties.erase(extfs_prefix + (azure_target
+                                             ? "credential_endpoint"
+                                             : "azure_credential_endpoint"));
+        milvus_storage::api::SetValue(
+            properties,
+            (extfs_prefix + (azure_target ? "azure_credential_endpoint"
+                                          : "credential_endpoint"))
+                .c_str(),
+            broker_endpoint.c_str());
+    }
+
     // Layer 3: resolve the effective endpoint.
     //
     // endpoint_url selects explicit-endpoint mode. In this mode
@@ -622,6 +1296,11 @@ InjectExternalSpecProperties(
     // The Go API boundary validates the full URL contract. The checks here are
     // defense in depth for corrupted metadata or callers that bypass Go.
     if (has_spec_endpoint_url) {
+        if (spec_bucket_name.has_value()) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name cannot be set with extfs.endpoint_url; "
+                "the bucket comes from external_source");
+        }
         std::string effective_endpoint = spec_endpoint_url;
         if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
             effective_endpoint.pop_back();
@@ -694,9 +1373,61 @@ InjectExternalSpecProperties(
         // regardless of whether DeriveEndpoint string-matches. This prevents
         // misclassifying `s3://s3.amazonaws.com/bucket/key` as AWS-form when
         // spec.region is a regional value.
-        bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
-        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-            StripURIScheme(derived) != host) {
+        // A bare Azure Storage authority is the endpoint the source names, so
+        // it also wins over the region-derived authority.
+        std::string spec_cp = spec_cloud_provider;
+        std::transform(spec_cp.begin(),
+                       spec_cp.end(),
+                       spec_cp.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        const auto colon = host.find(':');
+        const auto provider = CloudEndpointProvider(host.substr(0, colon));
+        bool uri_host_is_cloud_endpoint =
+            (colon == std::string::npos && !provider.empty()) ||
+            (spec_cp == "azure" && IsAzureStorageAuthority(host));
+        if (colon != std::string::npos && provider == spec_cp &&
+            (provider == "aws" || provider == "aliyun" ||
+             provider == "tencent" ||
+             (provider == "gcp" &&
+              (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
+               arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))))) {
+            // Classify the DNS hostname, but keep the complete address for
+            // matching the storage URI and connecting to its explicit port.
+            arrow::util::Uri endpoint;
+            if (!endpoint.Parse("https://" + host).ok() ||
+                endpoint.port() <= 0 || endpoint.port() > 65535 ||
+                !endpoint.username().empty() || !endpoint.password().empty()) {
+                return arrow::Status::Invalid(
+                    "Cloud endpoint requires a port between 1 and 65535");
+            }
+            uri_host_is_cloud_endpoint = true;
+        }
+        const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
+                                    !derived.empty() &&
+                                    StripURIScheme(derived) != host;
+        // StorageUri::Parse decodes the path before splitting out the bucket.
+        auto source_bucket =
+            bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
+        source_bucket = source_bucket.substr(0, source_bucket.find('/'));
+        if (spec_bucket_name && !spec_bucket_name->empty() &&
+            *spec_bucket_name != source_bucket) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name must match the bucket in "
+                "external_source");
+        }
+        if (!bucket_in_host && !path_bucket.empty()) {
+            if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
+                path_bucket != source_bucket) {
+                return arrow::Status::Invalid(
+                    "Azure broker IAM requires an unescaped source "
+                    "container");
+            }
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                source_bucket.c_str());
+        }
+        if (bucket_in_host) {
             milvus_storage::api::SetValue(
                 properties,
                 (extfs_prefix + "bucket_name").c_str(),
@@ -712,25 +1443,61 @@ InjectExternalSpecProperties(
     // `options.blob_storage_authority = ".blob." + config_.address`, so the
     // address must be a bare authority (e.g. "core.windows.net"); prepending
     // a scheme would break the concatenation.
-    auto final_cp = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "cloud_provider").c_str());
-    bool is_azure = final_cp.ok() && *final_cp == "azure";
-    auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "use_ssl").c_str());
-    auto final_address = milvus_storage::api::GetValue<std::string>(
-        properties, (extfs_prefix + "address").c_str());
-    if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
-        final_address->find("://") == std::string::npos) {
-        const char* scheme =
-            (*final_use_ssl == "true") ? "https://" : "http://";
+    auto final_address = value("address");
+    const bool use_ssl = value("use_ssl") == "true";
+    if (value("cloud_provider") != "azure" && !final_address.empty() &&
+        final_address.find("://") == std::string::npos) {
+        final_address = (use_ssl ? "https://" : "http://") + final_address;
         milvus_storage::api::SetValue(properties,
                                       (extfs_prefix + "address").c_str(),
-                                      (scheme + *final_address).c_str());
+                                      final_address.c_str());
     }
 
+    // Target impersonation and Broker tokens have the same endpoint contract
+    // in Go admission and native readers, including persisted specs. Plain IAM
+    // retains storage's operator-trusted endpoint policy.
+    if (spec_cloud_provider == "gcp" &&
+        (has_target || !broker_endpoint.empty())) {
+        arrow::util::Uri endpoint;
+        ARROW_RETURN_NOT_OK(endpoint.Parse(final_address));
+        const auto hostname = arrow::internal::AsciiToLower(endpoint.host());
+        constexpr std::string_view suffix = ".googleapis.com";
+        if (!use_ssl || endpoint.scheme() != "https" ||
+            hostname.size() <= suffix.size() || !hostname.ends_with(suffix)) {
+            return arrow::Status::Invalid(
+                "GCP Bearer credentials require HTTPS and a *.googleapis.com "
+                "endpoint");
+        }
+        ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
+    }
+
+    // Talon's S3 broker supports target roles only for AWS. Aliyun and
+    // Tencent target roles are handled by the native filesystem in 3.0.
+    const bool native_target_role =
+        !broker_endpoint.empty() && !use_iam &&
+        (spec_cloud_provider == "aliyun" || spec_cloud_provider == "tencent");
+    const bool origin_only =
+        native_target_role || value("storage_type") == "local";
+    for (const auto* key : {PROPERTY_FS_TALON_MODE,
+                            PROPERTY_FS_TALON_OPEN_ONLY,
+                            PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
+                            PROPERTY_FS_TALON_COORDINATOR,
+                            PROPERTY_FS_TALON_NAMESPACE,
+                            PROPERTY_FS_TALON_BLOCK_SIZE,
+                            PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR}) {
+        const auto* source_key = std::string_view(key) == PROPERTY_FS_TALON_MODE
+                                     ? "milvus.talon.external_mode"
+                                     : key;
+        const auto value = PropertyValueAsString(properties, source_key);
+        const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
+        if (origin_only) {
+            properties.erase(extfs_key);
+        } else if (value.has_value()) {
+            properties[extfs_key] = *value;
+        }
+    }
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
-    // (Lance version, Iceberg branch, etc.) land here.
+    // Lance and Iceberg use reader.exttable.snapshot_id.
     if (external_spec.empty()) {
         return arrow::Status::OK();
     }
@@ -739,12 +1506,14 @@ InjectExternalSpecProperties(
         simdjson::padded_string padded(external_spec);
         auto doc = parser.iterate(padded);
         std::string_view format_view;
-        if (doc.find_field("format").get_string().get(format_view) ==
+        if (FindSpecField(doc, "format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
-                // JSON fields may appear before or after "format".
-                auto snapshot_field = doc.find_field_unordered("snapshot_id");
+            if (format == "lance-table" || format == "iceberg-table") {
+                // JSON fields may appear before or after "format", so
+                // search a fresh iteration.
+                doc = parser.iterate(padded);
+                auto snapshot_field = FindSpecField(doc, "snapshot_id");
                 int64_t snapshot_id = 0;
                 auto int_err = snapshot_field.get_int64().get(snapshot_id);
                 if (int_err == simdjson::INCORRECT_TYPE) {
@@ -833,13 +1602,22 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           false,  // this field does not exist in StorageConfig
                           config.max_connections,
                           config.tls_min_version.c_str(),
-                          config.use_crc32c_checksum};
+                          config.use_crc32c_checksum,
+                          0,  // use the process-wide CRT queue size
+                          config.talon_mode,
+                          config.talon_small_read_threshold,
+                          config.talon_coordinator.c_str(),
+                          config.talon_block_size,
+                          config.talon_max_idle_per_addr,
+                          config.talon_enable_for_external_table,
+                          config.talon_enabled_stages,
+                          config.talon_namespace.c_str()};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties) {
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
     try {
         // Parse the JSON string
         json j = json::parse(path);

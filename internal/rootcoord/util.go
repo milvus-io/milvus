@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -215,13 +216,21 @@ func getQueryCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metric
 	return mixCoord.GetQueryCoordTopology(ctx, req)
 }
 
-func getDataCoordMetrics(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
+func getDataCoordTopology(ctx context.Context, mixCoord types.MixCoord) (*metricsinfo.DataCoordTopology, error) {
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	if err != nil {
 		return nil, err
 	}
 	// Use direct topology method to avoid JSON marshal/unmarshal overhead in MixCoord mode
 	return mixCoord.GetDataCoordTopology(ctx, req)
+}
+
+func getConnectedDataNodeMetrics(ctx context.Context, mixCoord types.MixCoord) ([]metricsinfo.DataNodeInfos, error) {
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	if err != nil {
+		return nil, err
+	}
+	return mixCoord.GetConnectedDataNodeMetrics(ctx, req)
 }
 
 func getProxyMetrics(ctx context.Context, proxies proxyutil.ProxyClientManagerInterface) ([]*metricsinfo.ProxyInfos, error) {
@@ -276,12 +285,12 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 
 	// get Data cluster metrics
 	group.Go(func() error {
-		dataCoordTopology, err := getDataCoordMetrics(ctx, mixcoord)
+		dataNodeMetrics, err := getConnectedDataNodeMetrics(ctx, mixcoord)
 		if err != nil {
 			return err
 		}
 
-		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+		for _, dataNodeMetric := range dataNodeMetrics {
 			dm := dataNodeMetric.QuotaMetrics
 			if dm != nil {
 				if dm.Fgm.NumFlowGraph > 0 && dm.Fgm.MinFlowGraphChannel != "" {
@@ -337,8 +346,59 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 	return nil
 }
 
+func checkNestedArrayTypeSchemaCapacity(fieldSchema *schemapb.FieldSchema) error {
+	if !typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+		return nil
+	}
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	var rootCapacity int64
+	for typeSchema := fieldSchema.GetTypeSchema(); typeSchema.GetArrayElement() != nil; typeSchema = typeSchema.GetArrayElement() {
+		maxCapacity, err := parameterutil.GetMaxCapacityFromTypeSchema(typeSchema)
+		if err != nil {
+			return err
+		}
+		if maxCapacity <= 0 || maxCapacity > maxArrayCapacity {
+			return merr.WrapErrParameterInvalidMsg(
+				"the maximum capacity specified for a Array should be in (0, %d]",
+				maxArrayCapacity)
+		}
+		if rootCapacity == 0 {
+			rootCapacity = maxCapacity
+		}
+	}
+
+	mirrorCapacity, err, hasMirror := common.GetInt64Value(
+		fieldSchema.GetTypeParams(), common.MaxCapacityKey)
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg(
+			"the value for %s of field %s must be an integer",
+			common.MaxCapacityKey, fieldSchema.GetName())
+	}
+	if hasMirror && mirrorCapacity != rootCapacity {
+		return merr.WrapErrParameterInvalidMsg(
+			"type param %s of nested array field %s must match type_schema root capacity %d",
+			common.MaxCapacityKey, fieldSchema.GetName(), rootCapacity)
+	}
+	return nil
+}
+
 func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, fieldSchema := range fieldSchemas {
+		if err := schemautil.RejectStructSubFieldOriginMarker(fieldSchema); err != nil {
+			return err
+		}
+		if err := typeutil.ValidateFieldTypeSchema(fieldSchema); err != nil {
+			return err
+		}
+		if fieldSchema.GetElementNullable() {
+			return merr.WrapErrParameterInvalidMsg("element_nullable is only supported for Array and ArrayOfVector sub-fields of a struct array field, field name = %s", fieldSchema.GetName())
+		}
+		if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+			return merr.WrapErrParameterInvalidMsg("nested array can only be in a struct array field, field name: %s", fieldSchema.GetName())
+		}
+		if err := checkNestedArrayTypeSchemaCapacity(fieldSchema); err != nil {
+			return err
+		}
 		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfStruct {
 			msg := fmt.Sprintf("Invalid field type, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -443,14 +503,90 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				panic("default value unsupport data type")
 			}
 		}
-		if err := checkDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetTypeParams(), "type"); err != nil {
 			return err
 		}
-		if err := checkDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
+		if err := typeutil.CheckDupKvPairs(fieldSchema.GetIndexParams(), "index"); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+// rejectStructSubFieldOriginMarkers rejects user-supplied sub-fields that carry
+// the internal origin marker. It is not part of checkStructArrayFieldSchema
+// because that check also runs on an existing struct merged with an added
+// sub-field, whose earlier added sub-fields carry the marker legitimately.
+// schemautil.RejectStructSubFieldTextMatch stays out of it for the same
+// reason: stored sub-fields may carry enable_match or enable_analyzer.
+func rejectStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, structField := range schemas {
+		for _, field := range structField.GetFields() {
+			if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateRestoredStructSubFieldOriginMarkers checks the internal origin marker
+// on restored struct sub-fields (including RestoreExternalSnapshot, which reads
+// schema metadata from a caller-selected URI). Every marked sub-field must be
+// element-nullable with value "true" and have a field ID greater than every
+// unmarked (original) sibling, and every non-empty struct must retain at least
+// one unmarked sub-field so CheckStructKeepsOriginalSubField and old-segment
+// sibling lookup remain valid.
+func validateRestoredStructSubFieldOriginMarkers(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, structField := range schemas {
+		fields := structField.GetFields()
+		if len(fields) == 0 {
+			continue
+		}
+		hasOriginal := false
+		maxOriginalID := int64(0)
+		var addedFields []*schemapb.FieldSchema
+		for _, field := range fields {
+			marked := false
+			for _, kv := range field.GetTypeParams() {
+				if kv.GetKey() != common.StructSubFieldAddedKey {
+					continue
+				}
+				if kv.GetValue() != "true" {
+					return merr.WrapErrParameterInvalidMsg(
+						"type param %s of field %q must be \"true\", got %q",
+						common.StructSubFieldAddedKey, field.GetName(), kv.GetValue())
+				}
+				marked = true
+			}
+			if !marked {
+				if !hasOriginal || field.GetFieldID() > maxOriginalID {
+					maxOriginalID = field.GetFieldID()
+				}
+				hasOriginal = true
+				continue
+			}
+			if !field.GetElementNullable() {
+				return merr.WrapErrParameterInvalidMsg(
+					"added sub-field %q of struct field %q must set element_nullable=true",
+					field.GetName(), structField.GetName())
+			}
+			addedFields = append(addedFields, field)
+		}
+		if !hasOriginal {
+			return merr.WrapErrParameterInvalidMsg(
+				"struct field %q must keep at least one original sub-field without %s",
+				structField.GetName(), common.StructSubFieldAddedKey)
+		}
+		for _, field := range addedFields {
+			if field.GetFieldID() <= maxOriginalID {
+				return merr.WrapErrParameterInvalidMsg(
+					"added sub-field %q of struct field %q has field ID %d, which must be greater than original sub-field ID %d",
+					field.GetName(), structField.GetName(), field.GetFieldID(), maxOriginalID)
+			}
+		}
+	}
 	return nil
 }
 
@@ -461,9 +597,38 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 		}
 
 		for _, field := range schema.GetFields() {
+			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+				return err
+			}
+			if field.GetElementNullable() && field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+				return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
+			}
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				inner := field.GetTypeSchema().GetArrayElement()
+				if _, ok := inner.GetArrayElement().GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+					return merr.WrapErrParameterInvalidMsg("nested array field %s supports exactly one nested array level", field.GetName())
+				}
+				if field.GetTypeSchema().GetNullable() != field.GetNullable() {
+					return merr.WrapErrParameterInvalidMsg("nested array field %s type_schema root nullable=%t must match field nullable=%t",
+						field.GetName(), field.GetTypeSchema().GetNullable(), field.GetNullable())
+				}
+				if inner.GetNullable() != field.GetElementNullable() {
+					return merr.WrapErrParameterInvalidMsg("nested array field %s type_schema inner nullable=%t must match element_nullable=%t",
+						field.GetName(), inner.GetNullable(), field.GetElementNullable())
+				}
+			}
+			if err := checkNestedArrayTypeSchemaCapacity(field); err != nil {
+				return err
+			}
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 				msg := fmt.Sprintf("fields in StructArrayField can only be array or array of vector, but field %s is %s", field.Name, field.DataType.String())
 				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			switch field.GetElementType() {
+			case schemapb.DataType_ArrayOfVector:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfVector is not supported for field %s", field.GetName())
+			case schemapb.DataType_ArrayOfStruct:
+				return merr.WrapErrParameterInvalidMsg("nested ArrayOfStruct is not supported for field %s", field.GetName())
 			}
 
 			if field.IsPartitionKey || field.IsPrimaryKey {
@@ -476,10 +641,10 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 					field.DataType.String(), field.ElementType.String(), field.Name)
 				return merr.WrapErrParameterInvalidMsg(msg)
 			}
-			if err := checkDupKvPairs(field.GetTypeParams(), "type"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetTypeParams(), "type"); err != nil {
 				return err
 			}
-			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
+			if err := typeutil.CheckDupKvPairs(field.GetIndexParams(), "index"); err != nil {
 				return err
 			}
 
@@ -487,6 +652,9 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 			if !schema.GetNullable() && field.GetNullable() {
 				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
 					schema.Name, field.Name)
+			}
+			if schema.GetNullable() && !field.GetNullable() {
+				return merr.WrapErrParameterInvalidMsg("sub-field %s nullable=false must match nullable struct %s", field.GetName(), schema.GetName())
 			}
 		}
 		if err := checkStructArrayFieldMaxCapacity(schema); err != nil {
@@ -497,7 +665,12 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 }
 
 func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema) (int64, error) {
-	for _, param := range field.GetTypeParams() {
+	typeParams := field.GetTypeParams()
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		typeParams = field.GetTypeSchema().GetTypeParams()
+	}
+	maxArrayCapacity := Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()
+	for _, param := range typeParams {
 		if param.GetKey() != common.MaxCapacityKey {
 			continue
 		}
@@ -506,8 +679,8 @@ func getStructSubFieldMaxCapacity(structName string, field *schemapb.FieldSchema
 			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s in struct array field %s must be an integer",
 				common.MaxCapacityKey, field.GetName(), structName)
 		}
-		if maxCapacity > defaultMaxArrayCapacity || maxCapacity <= 0 {
-			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", defaultMaxArrayCapacity)
+		if maxCapacity > maxArrayCapacity || maxCapacity <= 0 {
+			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
 		}
 		return maxCapacity, nil
 	}
@@ -536,17 +709,6 @@ func checkStructArrayFieldMaxCapacity(schema *schemapb.StructArrayFieldSchema) e
 	return nil
 }
 
-func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
-	set := typeutil.NewSet[string]()
-	for _, kv := range params {
-		if set.Contain(kv.GetKey()) {
-			return merr.WrapErrParameterInvalidMsg("duplicated %s param key \"%s\"", paramType, kv.GetKey())
-		}
-		set.Insert(kv.GetKey())
-	}
-	return nil
-}
-
 func validateFieldDataType(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, field := range fieldSchemas {
 		if _, ok := schemapb.DataType_name[int32(field.GetDataType())]; !ok || field.GetDataType() == schemapb.DataType_None {
@@ -564,10 +726,6 @@ func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldS
 		for _, subField := range field.GetFields() {
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
 				return merr.WrapErrParameterInvalidMsg("fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
-			}
-			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
-				subField.GetElementType() == schemapb.DataType_Array {
-				return merr.WrapErrParameterInvalidMsg("nested array is not supported for field %s", subField.Name)
 			}
 			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
 				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))

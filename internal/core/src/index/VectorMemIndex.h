@@ -80,6 +80,12 @@ class VectorMemIndex : public VectorIndex {
     Build(const Config& config = {}) override;
 
     void
+    Prepare(const Config& config) override;
+
+    bool
+    TryReserveBuild(const Config& config) override;
+
+    void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) override;
 
     int64_t
@@ -133,22 +139,17 @@ class VectorMemIndex : public VectorIndex {
                   bool is_cosine,
                   milvus::OpContext* op_context = nullptr) const override;
 
-    knowhere::IdMap&
-    GetIdMap() override {
-        return index_.GetIdMap();
-    }
-
-    const knowhere::IdMap&
-    GetIdMap() const override {
-        return index_.GetIdMap();
-    }
-
     void
-    SetIdMapType(knowhere::IdMap::Type type) override {
-        index_.SetIdMapType(type);
+    SetGrowingMapping() override {
+        build_options_.growing = true;
     }
 
  protected:
+    const knowhere::Index<knowhere::IndexNode>&
+    GetNativeIndex() const override {
+        return index_;
+    }
+
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
 
@@ -158,11 +159,13 @@ class VectorMemIndex : public VectorIndex {
 
     bool
     IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+        return !empty_emb_list_offsets_.empty();
     }
 
  protected:
     Config config_;
+    storage::FileManagerContext build_context_;
+    std::unique_ptr<PreparedVectorInput> build_input_;
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     // used for embedding list only
@@ -170,6 +173,7 @@ class VectorMemIndex : public VectorIndex {
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;
+    knowhere::BuildOptions build_options_;
     std::vector<size_t> empty_emb_list_offsets_;
 };
 

@@ -1,0 +1,552 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package structsubfield
+
+import (
+	"context"
+	"encoding/json"
+	"path"
+	"time"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/tests/integration"
+)
+
+func (s *StructSubFieldSuite) assertDirectChild(ctx context.Context, name string, pk int64, childName string) {
+	resp := s.query(ctx, name, pk, structName+"["+childName+"]")
+	s.Require().NotEmpty(resp.GetFieldsData())
+	found := false
+	for _, field := range resp.GetFieldsData() {
+		if field.GetFieldName() == childName || field.GetFieldName() == structName+"["+childName+"]" {
+			found = true
+		}
+		if field.GetFieldName() == structName {
+			for _, child := range field.GetStructArrays().GetFields() {
+				found = found || child.GetFieldName() == childName || child.GetFieldName() == structName+"["+childName+"]"
+			}
+		}
+	}
+	s.Require().True(found, "S[%s] missing from direct output_fields query", childName)
+}
+
+func (s *StructSubFieldSuite) TestDoubleHistoryGrowingSealedCompactionRestart() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	name := collectionName("history")
+	s.create(ctx, baseSchema(name, true, true))
+	s.Require().NoError(s.insert(ctx, name, 1, true)) // A: row predates the whole struct.
+	s.addStruct(ctx, name, true)
+	s.Require().NoError(s.insert(ctx, name, 2, true, baseChildren()...)) // B: two struct elements.
+	emptyChildren := []*schemapb.FieldData{
+		vectorChild("vec", &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}, true),
+		scalarChild("ints", longRow(nil), true),
+	}
+	s.Require().NoError(s.insert(ctx, name, 5, true, emptyChildren...)) // Non-null empty struct array.
+	s.flush(ctx, name)
+	s.indexAndLoad(ctx, name)
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.assertBackfilled(ctx, name, 1, "c", 0, false)
+	s.assertBackfilled(ctx, name, 2, "c", 2, true)
+	s.assertBackfilled(ctx, name, 5, "c", 0, true)
+	s.assertDirectChild(ctx, name, 2, "c")
+
+	s.Require().NoError(s.insert(ctx, name, 3, true, baseChildren()...)) // C, omitted c.
+	explicit := append(baseChildren(), scalarChild("c", longRow([]int64{41}, true, false), true))
+	s.Require().NoError(s.insert(ctx, name, 4, true, explicit...))
+	s.assertBackfilled(ctx, name, 3, "c", 2, true)
+	c := s.child(ctx, name, 4, "c")
+	s.Require().Equal([]bool{true}, c.GetValidData())
+	row := c.GetScalars().GetArrayData().GetData()[0]
+	s.Require().Equal([]bool{true, false}, row.GetValidData())
+	s.Require().Equal([]int64{41, 0}, row.GetLongData().GetData())
+
+	s.flush(ctx, name)
+	s.release(ctx, name)
+	s.load(ctx, name)
+	for _, pk := range []int64{2, 3} {
+		s.assertBackfilled(ctx, name, pk, "c", 2, true)
+	}
+	s.assertBackfilled(ctx, name, 1, "c", 0, false)
+	s.assertBackfilled(ctx, name, 5, "c", 0, true)
+	s.compact(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 0, false)
+	s.assertBackfilled(ctx, name, 2, "c", 2, true)
+	s.assertBackfilled(ctx, name, 5, "c", 0, true)
+	s.restartQueryNode(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 0, false)
+	s.assertBackfilled(ctx, name, 2, "c", 2, true)
+	s.assertBackfilled(ctx, name, 3, "c", 2, true)
+	s.assertBackfilled(ctx, name, 5, "c", 0, true)
+	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 4, "c").GetScalars().GetArrayData().GetData()[0].GetValidData())
+}
+
+func (s *StructSubFieldSuite) TestAddedVectorAndNestedArrayWithMmap() {
+	for _, tc := range []struct {
+		name, child string
+		field       *schemapb.FieldSchema
+		mmap        bool
+	}{
+		{name: "vector", child: "new_vectors", field: vectorSchema("new_vectors", true)},
+		{name: "nested_mmap", child: "nested", field: nestedSchema("nested"), mmap: true},
+	} {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer cancel()
+			name := collectionName(tc.name)
+			s.create(ctx, baseSchema(name, true, true))
+			s.Require().NoError(s.insert(ctx, name, 1, true))
+			s.addStruct(ctx, name, true)
+			s.Require().NoError(s.insert(ctx, name, 2, true, baseChildren()...))
+			s.flush(ctx, name)
+			if tc.mmap {
+				status, err := s.Cluster.MilvusClient.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+					CollectionName: name, Properties: []*commonpb.KeyValuePair{param(common.MmapEnabledKey, "true")},
+				})
+				s.Require().NoError(merr.CheckRPCCall(status, err))
+			}
+			s.indexAndLoad(ctx, name)
+			s.add(ctx, name, tc.field)
+			s.assertBackfilled(ctx, name, 1, tc.child, 0, false)
+			s.assertBackfilled(ctx, name, 2, tc.child, 2, true)
+			s.assertDirectChild(ctx, name, 2, tc.child)
+			s.Require().NoError(s.insert(ctx, name, 3, true, baseChildren()...))
+			s.assertBackfilled(ctx, name, 3, tc.child, 2, true)
+			s.flush(ctx, name)
+			if tc.field.GetDataType() == schemapb.DataType_ArrayOfVector {
+				// An element-nullable vector array needs an index before it is loaded again.
+				field := structName + "[" + tc.child + "]"
+				status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+					CollectionName: name, FieldName: field, IndexName: "idx_" + tc.child,
+					ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+				})
+				s.Require().NoError(merr.CheckRPCCall(status, err))
+				s.WaitForIndexBuilt(ctx, name, field)
+			}
+			s.release(ctx, name)
+			s.load(ctx, name)
+			s.assertBackfilled(ctx, name, 1, tc.child, 0, false)
+			s.assertBackfilled(ctx, name, 2, tc.child, 2, true)
+			s.compact(ctx, name)
+			s.assertBackfilled(ctx, name, 2, tc.child, 2, true)
+			s.restartQueryNode(ctx, name)
+			s.assertBackfilled(ctx, name, 2, tc.child, 2, true)
+		})
+	}
+}
+
+func (s *StructSubFieldSuite) TestDropProviderMiddleAndLastGuards() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	name := collectionName("drop")
+	schema := baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("mid", schemapb.DataType_Int64, false), scalarSchema("tail", schemapb.DataType_Int64, true))
+	s.create(ctx, schema)
+	children := []*schemapb.FieldData{
+		baseChildren()[0],
+		scalarChild("mid", longRow([]int64{11, 12}), true),
+		scalarChild("tail", longRow([]int64{21}, true, false), true),
+	}
+	s.Require().NoError(s.insert(ctx, name, 1, true, children...))
+	s.flush(ctx, name)
+	s.indexAndLoad(ctx, name)
+	s.drop(ctx, name, "S[vec]")
+	s.Require().Equal([]int64{11, 12}, s.child(ctx, name, 1, "mid").GetScalars().GetArrayData().GetData()[0].GetLongData().GetData())
+	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 1, "tail").GetScalars().GetArrayData().GetData()[0].GetValidData())
+	s.assertDirectChild(ctx, name, 1, "tail")
+	// tail is [21, NULL]: the null element is UNKNOWN, the first one matches.
+	for _, expression := range []string{"element_filter(S, $[tail] > 0)", "MATCH_ANY(S, $[tail] > 0)"} {
+		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{CollectionName: name, Expr: expression, OutputFields: []string{"pk"}})
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expression)
+		s.Require().NotEmpty(resp.GetFieldsData(), expression)
+		s.Require().Equal([]int64{1}, resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), expression)
+	}
+	s.Require().ErrorContains(s.insert(ctx, name, 2, true, children...), `sub-field "vec" does not exist in struct field "S"`)
+	s.Require().NoError(s.insert(ctx, name, 2, true, children[1:]...))
+	s.flush(ctx, name)
+	s.drop(ctx, name, "S[mid]")
+	s.Require().ErrorContains(s.alterDrop(ctx, name, "S[tail]"), `cannot drop the last sub-field "S[tail]" of struct field "S"`)
+	current := s.describe(ctx, name).GetSchema().GetStructArrayFields()[0].GetFields()
+	s.Require().Len(current, 1)
+	s.Require().Equal("tail", current[0].GetName())
+	s.Require().Equal("S[tail]", s.describeInternal(ctx, name).GetSchema().GetStructArrayFields()[0].GetFields()[0].GetName())
+	s.add(ctx, name, scalarSchema("fresh", schemapb.DataType_Int64, true))
+	s.assertBackfilled(ctx, name, 1, "fresh", 2, true)
+	s.compact(ctx, name)
+	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 1, "tail").GetScalars().GetArrayData().GetData()[0].GetValidData())
+	s.restartQueryNode(ctx, name)
+	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 1, "tail").GetScalars().GetArrayData().GetData()[0].GetValidData())
+
+	lastVector := collectionName("lastvec")
+	s.create(ctx, baseSchema(lastVector, false, true, vectorSchema("vec", false), scalarSchema("mid", schemapb.DataType_Int64, false)))
+	s.Require().ErrorContains(s.alterDrop(ctx, lastVector, "S[vec]"), "last vector field")
+}
+
+func (s *StructSubFieldSuite) TestDropAndReaddSameNameDifferentType() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	name := collectionName("readd")
+	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, true)))
+	s.Require().NoError(s.insert(ctx, name, 1, true, baseChildren()...))
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.Require().NoError(s.insert(ctx, name, 2, true, baseChildren()...))
+	s.flush(ctx, name)
+	s.drop(ctx, name, "S[c]")
+	textField := scalarSchema("c", schemapb.DataType_VarChar, true)
+	textField.TypeParams = append(textField.TypeParams, param(common.MaxLengthKey, "64"))
+	s.add(ctx, name, textField)
+	s.indexAndLoad(ctx, name)
+	for _, pk := range []int64{1, 2} {
+		s.assertBackfilled(ctx, name, pk, "c", 2, true)
+	}
+	s.Require().NoError(s.insert(ctx, name, 3, true,
+		append(baseChildren(), scalarChild("c", stringRow([]string{"new"}, true, false), true))...))
+	row := s.child(ctx, name, 3, "c").GetScalars().GetArrayData().GetData()[0]
+	s.Require().Equal([]bool{true, false}, row.GetValidData())
+	s.Require().Equal([]string{"new", ""}, row.GetStringData().GetData())
+	s.flush(ctx, name)
+	s.release(ctx, name)
+	s.load(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 2, true)
+	s.Require().Equal([]bool{true, false}, s.child(ctx, name, 3, "c").GetScalars().GetArrayData().GetData()[0].GetValidData())
+}
+
+func (s *StructSubFieldSuite) TestNonNullableStructOmittedNewChild() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	name := collectionName("required_struct")
+	s.create(ctx, baseSchema(name, true, false, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, true)))
+	s.Require().NoError(s.insert(ctx, name, 1, true, baseChildrenWithoutRowValidity()...))
+	s.flush(ctx, name)
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.indexAndLoad(ctx, name)
+	s.Require().NoError(s.insert(ctx, name, 2, true, baseChildrenWithoutRowValidity()...))
+	for _, pk := range []int64{1, 2} {
+		s.assertBackfilled(ctx, name, pk, "c", 2, true, true)
+	}
+	s.flush(ctx, name)
+	s.compact(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 2, true, true)
+	s.assertBackfilled(ctx, name, 2, "c", 2, true, true)
+}
+
+func (s *StructSubFieldSuite) TestStaleClientIncludingAllNullStructRejected() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	name := collectionName("stale")
+	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, true)))
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.drop(ctx, name, "S[c]")
+	stale := append(baseChildren(), scalarChild("c", longRow([]int64{7}, true, false), true))
+	s.Require().ErrorContains(s.insert(ctx, name, 1, true, stale...), `sub-field "c" does not exist in struct field "S"`)
+	nullChildren := []*schemapb.FieldData{
+		vectorChild("vec", &schemapb.VectorField{Dim: dim}, false),
+		scalarChild("ints", longRow(nil), false),
+		scalarChild("c", longRow(nil), false),
+	}
+	for _, child := range nullChildren {
+		if child.GetScalars() != nil {
+			child.GetScalars().GetArrayData().Data = nil
+		} else {
+			child.GetVectors().GetVectorArray().Data = nil
+		}
+	}
+	s.Require().ErrorContains(s.insert(ctx, name, 2, true, nullChildren...), `sub-field "c" does not exist in struct field "S"`)
+}
+
+func (s *StructSubFieldSuite) TestAlterSchemaAPIBoundariesAndAssignedIdentity() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	name := collectionName("api")
+	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, true)))
+	for _, tc := range []struct {
+		name, fieldName, index, want string
+		change                       func(*schemapb.FieldSchema)
+		fn                           *schemapb.FunctionSchema
+	}{
+		{name: "missing_struct", fieldName: "missing[c]", want: `struct field "missing" not found`},
+		{name: "nested_struct", fieldName: "S[inner][c]", want: `nested struct is not supported: field name "S[inner][c]" must be struct_name[sub_field_name]`},
+		{name: "empty_sub_field", fieldName: "S[]", want: `invalid struct sub-field name "S[]": must be struct_name[sub_field_name]`},
+		{name: "empty_struct", fieldName: "[c]", want: `invalid struct sub-field name "[c]": must be struct_name[sub_field_name]`},
+		{name: "unbalanced", fieldName: "S[c", want: `invalid struct sub-field name "S[c": must be struct_name[sub_field_name]`},
+		{name: "non_element_nullable", fieldName: "S[c]", want: `added sub-field "S[c]" of struct field "S" must set element_nullable=true`, change: func(f *schemapb.FieldSchema) { f.ElementNullable = false }},
+		{name: "default", fieldName: "S[c]", want: "default value is not supported for struct field, field name = c", change: func(f *schemapb.FieldSchema) {
+			f.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 1}}
+		}},
+		{name: "index", fieldName: "S[c]", index: "idx", want: "binding an index while adding a struct sub-field is not supported yet"},
+		{name: "function", fieldName: "S[c]", fn: &schemapb.FunctionSchema{Name: "fn"}, want: "adding a struct sub-field cannot be combined with a function"},
+	} {
+		s.Run(tc.name, func() {
+			field := scalarSchema(tc.fieldName, schemapb.DataType_Int64, true)
+			if tc.change != nil {
+				tc.change(field)
+			}
+			err := s.alterAdd(ctx, name, tc.index, field, tc.fn)
+			s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+			s.Require().ErrorContains(err, tc.want)
+		})
+	}
+	before := s.describe(ctx, name).GetSchema()
+	maxID := int64(0)
+	for _, field := range before.GetFields() {
+		if field.GetFieldID() > maxID {
+			maxID = field.GetFieldID()
+		}
+	}
+	for _, parent := range before.GetStructArrayFields() {
+		if parent.GetFieldID() > maxID {
+			maxID = parent.GetFieldID()
+		}
+		for _, child := range parent.GetFields() {
+			if child.GetFieldID() > maxID {
+				maxID = child.GetFieldID()
+			}
+		}
+	}
+	field := scalarSchema("c", schemapb.DataType_Int64, true)
+	field.FieldID = 99999 // The server must ignore client supplied IDs.
+	s.add(ctx, name, field)
+	after := s.describe(ctx, name).GetSchema()
+	s.Require().Equal(before.GetVersion()+1, after.GetVersion())
+	children := after.GetStructArrayFields()[0].GetFields()
+	s.Require().Equal("c", children[len(children)-1].GetName())
+	storedChildren := s.describeInternal(ctx, name).GetSchema().GetStructArrayFields()[0].GetFields()
+	s.Require().Equal("S[c]", storedChildren[len(storedChildren)-1].GetName())
+	s.Require().Equal(children[len(children)-1].GetFieldID(), storedChildren[len(storedChildren)-1].GetFieldID())
+	s.Require().Greater(children[len(children)-1].GetFieldID(), maxID)
+	s.Require().NotEqual(int64(99999), children[len(children)-1].GetFieldID())
+	s.Require().ErrorContains(s.alterDrop(ctx, name, "c"), "field not found: c")
+	beforeDrop := after.GetVersion()
+	resp, err := s.Cluster.MilvusClient.AlterCollectionSchema(ctx, &milvuspb.AlterCollectionSchemaRequest{
+		CollectionName: name,
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+			DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+				Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: children[len(children)-1].GetFieldID()},
+			},
+		}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	s.waitVersion(ctx, name, beforeDrop+1)
+	s.Require().Len(s.describe(ctx, name).GetSchema().GetStructArrayFields()[0].GetFields(), len(children)-1)
+}
+
+func (s *StructSubFieldSuite) TestLoadFieldsBeforeAndAfterReload() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	name := collectionName("loadfields")
+	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, true)))
+	s.Require().NoError(s.insert(ctx, name, 1, true, baseChildren()...))
+	s.flush(ctx, name)
+	s.indexAndLoad(ctx, name, "pk", "embedding", structName)
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.assertBackfilled(ctx, name, 1, "c", 2, true)
+	s.assertDirectChild(ctx, name, 1, "c")
+	s.Require().NoError(s.insert(ctx, name, 2, true, baseChildren()...))
+	s.assertBackfilled(ctx, name, 2, "c", 2, true)
+	s.assertDirectChild(ctx, name, 2, "c")
+	s.release(ctx, name)
+	s.load(ctx, name, "pk", "embedding", structName)
+	s.assertBackfilled(ctx, name, 1, "c", 2, true)
+	s.assertDirectChild(ctx, name, 1, "c")
+	s.assertBackfilled(ctx, name, 2, "c", 2, true)
+	s.assertDirectChild(ctx, name, 2, "c")
+}
+
+// TestBulkImportAfterAddingSubField imports a JSON file written for the schema
+// before the add: the added element-nullable sub-field reads back as one null
+// per element, and a null struct row stays null. Binlog (backup) imports are
+// still rejected, and so is a NumPy file named after the added sub-field.
+func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	name := collectionName("import")
+	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, false)))
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, PartitionName: "_default",
+		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
+		Options: []*commonpb.KeyValuePair{param("backup", "true")},
+	})
+	s.Require().NoError(err)
+	err = merr.Error(resp.GetStatus())
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Require().ErrorContains(err, "binlog import (backup restore) into a collection with element-nullable or nested Array field S.c is not supported")
+
+	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/c.npy"}}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	s.Require().Contains(s.waitImportFailed(ctx, resp.GetJobID()),
+		"numpy import does not support struct data: file 'numpy/c.npy' names struct field '"+structName+"'")
+
+	s.importJSON(ctx, name, []map[string]any{
+		{"pk": 1, "embedding": values(1), structName: []map[string]any{{"vec": values(1), "ints": 11}, {"vec": values(2), "ints": 12}}},
+		{"pk": 2, "embedding": values(2), structName: nil},
+		{"pk": 3, "embedding": values(3), structName: []map[string]any{}},
+	})
+	s.indexAndLoad(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 2, true)
+	s.assertBackfilled(ctx, name, 2, "c", 0, false)
+	s.assertBackfilled(ctx, name, 3, "c", 0, true)
+	ints := s.child(ctx, name, 1, "ints").GetScalars().GetArrayData().GetData()
+	s.Require().Len(ints, 1)
+	s.Require().Equal([]int64{11, 12}, ints[0].GetLongData().GetData())
+	vec := s.child(ctx, name, 1, "vec").GetVectors().GetVectorArray().GetData()
+	s.Require().Len(vec, 1)
+	s.Require().Equal(append(values(1), values(2)...), vec[0].GetFloatVector().GetData())
+}
+
+// waitImportFailed returns the reason of a job that must end in Failed.
+func (s *StructSubFieldSuite) waitImportFailed(ctx context.Context, jobID string) string {
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: jobID})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		switch progress.GetState() {
+		case internalpb.ImportJobState_Failed:
+			return progress.GetReason()
+		case internalpb.ImportJobState_Completed:
+			s.FailNow("import completed, want a failure", progress.GetReason())
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not fail before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func (s *StructSubFieldSuite) importJSON(ctx context.Context, name string, rows []map[string]any) {
+	data, err := json.Marshal(rows)
+	s.Require().NoError(err)
+	filePath := path.Join(s.Cluster.RootPath(), "json", name+"_"+funcutil.RandomString(8)+".json")
+	s.Require().NoError(s.Cluster.ChunkManager.Write(ctx, filePath, data))
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: resp.GetJobID()})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		s.Require().NotEqual(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
+		if progress.GetState() == internalpb.ImportJobState_Completed {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not complete before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// upsertEmbedding is a partial upsert that only sets embedding, so the struct
+// field keeps the value read back from the old rows.
+func (s *StructSubFieldSuite) upsertEmbedding(ctx context.Context, name string, pks []int64, seed float32) {
+	vectors := make([]float32, 0, len(pks)*dim)
+	for _, pk := range pks {
+		vectors = append(vectors, values(seed+float32(pk))...)
+	}
+	resp, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+		CollectionName: name, NumRows: uint32(len(pks)), PartialUpdate: true,
+		HashKeys: integration.GenerateHashKeys(len(pks)),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: pks}},
+				}},
+			},
+			{
+				FieldName: "embedding", FieldId: 101, Type: schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
+				}},
+			},
+		},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp, err))
+	s.Require().Equal(int64(len(pks)), resp.GetUpsertCnt())
+}
+
+func (s *StructSubFieldSuite) assertStructKept(ctx context.Context, name string, seed float32) {
+	for _, pk := range []int64{1, 2, 3, 5} {
+		resp := s.query(ctx, name, pk, "embedding")
+		for _, field := range resp.GetFieldsData() {
+			if field.GetFieldName() == "embedding" {
+				s.Require().Equal(values(seed+float32(pk)), field.GetVectors().GetFloatVector().GetData(), "pk %d", pk)
+			}
+		}
+	}
+	for _, pk := range []int64{2, 3} {
+		ints := s.child(ctx, name, pk, "ints").GetScalars().GetArrayData().GetData()
+		s.Require().Len(ints, 1)
+		s.Require().Equal([]bool{true, false}, ints[0].GetValidData())
+		s.Require().Equal([]int64{11, 0}, ints[0].GetLongData().GetData())
+		vec := s.child(ctx, name, pk, "vec").GetVectors().GetVectorArray().GetData()
+		s.Require().Len(vec, 1)
+		s.Require().Equal(append(values(1), values(2)...), vec[0].GetFloatVector().GetData())
+	}
+	for _, child := range []string{"c", "nested"} {
+		s.assertBackfilled(ctx, name, 1, child, 0, false)
+		s.assertBackfilled(ctx, name, 2, child, 2, true)
+		s.assertBackfilled(ctx, name, 3, child, 2, true)
+		s.assertBackfilled(ctx, name, 5, child, 0, true)
+	}
+}
+
+func (s *StructSubFieldSuite) TestPartialUpsertOmittingStructWithAddedSubFields() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	name := collectionName("partial")
+	s.create(ctx, baseSchema(name, true, true))
+	s.Require().NoError(s.insert(ctx, name, 1, true)) // The row predates the struct.
+	s.addStruct(ctx, name, true)
+	s.Require().NoError(s.insert(ctx, name, 2, true, baseChildren()...))
+	emptyChildren := []*schemapb.FieldData{
+		vectorChild("vec", &schemapb.VectorField{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}}, true),
+		scalarChild("ints", longRow(nil), true),
+	}
+	s.Require().NoError(s.insert(ctx, name, 5, true, emptyChildren...))
+	s.flush(ctx, name)
+	s.indexAndLoad(ctx, name)
+	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+	s.add(ctx, name, nestedSchema("nested"))
+	s.Require().NoError(s.insert(ctx, name, 3, true, baseChildren()...)) // Growing, omits both added sub-fields.
+	s.assertStructKept(ctx, name, 0)
+
+	// pk 3 is read from a growing segment; the others from a sealed segment
+	// written before the sub-fields were added.
+	s.upsertEmbedding(ctx, name, []int64{3, 1, 5, 2}, 100)
+	s.assertStructKept(ctx, name, 100)
+
+	s.flush(ctx, name)
+	s.release(ctx, name)
+	s.load(ctx, name)
+	s.assertStructKept(ctx, name, 100)
+	s.upsertEmbedding(ctx, name, []int64{2, 5, 3, 1}, 200)
+	s.assertStructKept(ctx, name, 200)
+	s.flush(ctx, name)
+	s.release(ctx, name)
+	s.load(ctx, name)
+	s.assertStructKept(ctx, name, 200)
+}

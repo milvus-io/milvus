@@ -282,7 +282,10 @@ rerank.
    and search iterator.
 8. `sum` and `topk_sum` collapse strategies are valid only for positively
    related metrics such as `IP` and `COSINE`. Negative distance metrics such as
-   `L2` must use `max`, `avg`, or `topk_avg`.
+   `L2` must use `max`, `avg`, or `topk_avg`. This restriction uses the original
+   search metric, even if an L0/L1 chain rewrites `$score`. PreExecute checks
+   known metrics; runtime applies the same check when the metric is resolved
+   from search results.
 
 ## Result Semantics
 

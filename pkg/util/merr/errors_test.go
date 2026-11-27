@@ -395,3 +395,16 @@ func TestWrapErrPreservesInnerChain(t *testing.T) {
 		ErrCollectionPartialUpdateConflict,
 	))
 }
+
+func TestConditionalUpsertExecutionProjection(t *testing.T) {
+	for _, cause := range []error{ErrCollectionSchemaMismatch, ErrServiceRateLimit, context.DeadlineExceeded} {
+		err := WrapErrCollectionConditionalUpsertExecutionErr(cause, "may have partially committed")
+		status := Status(err)
+		assert.EqualValues(t, 112, status.GetCode())
+		assert.NotEqual(t, commonpb.ErrorCode_SchemaMismatch, status.GetErrorCode())
+		assert.NotEqual(t, commonpb.ErrorCode_RateLimit, status.GetErrorCode())
+		assert.False(t, status.GetRetriable())
+		assert.NotEqual(t, "true", status.GetExtraInfo()["is_input_error"])
+		assert.ErrorIs(t, err, cause)
+	}
+}

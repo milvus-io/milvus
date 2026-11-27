@@ -20,11 +20,65 @@ set -e
 
 mkdir -p "$GOPATH/bin" && cp -f "$PWD/bin/milvus" "$GOPATH/bin/milvus"
 mkdir -p "$LIBRARY_PATH"
-cp $PWD"/internal/core/output/lib/"*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
-cp $PWD"/internal/core/output/lib/"*.so* "$LIBRARY_PATH" || true
-cp $PWD"/internal/core/output/lib64/"*.so* "$LIBRARY_PATH" 2>/dev/null || true
-cp -r $PWD"/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+# Preserve linker and SONAME aliases instead of duplicating their library payloads.
+cp -a "$PWD"/internal/core/output/lib/*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
+shopt -s nullglob
+svs_files=()
+for lib_dir in "$PWD/internal/core/output/lib" "$PWD/internal/core/output/lib64"; do
+    libraries=()
+    for library in "$lib_dir"/*.so*; do
+        if [[ ${library##*/} != libsvs_runtime.so* ]]; then
+            libraries+=("$library")
+        fi
+    done
+    if (( ${#libraries[@]} )); then
+        cp -a "${libraries[@]}" "$LIBRARY_PATH/"
+    fi
+    # A cached native installation may be staged without its CMake build tree.
+    if [[ -f "$lib_dir/libsvs_runtime.so" ]]; then
+        svs_files=("$lib_dir"/libsvs_runtime.so*)
+    fi
+done
+# In reused build trees, the install prefix may still contain a disabled or older SVS.
+manifest="$PWD/cmake_build/install_manifest.txt"
+if [[ -f "$manifest" ]]; then
+    svs_files=()
+    while IFS= read -r path || [[ -n "$path" ]]; do
+        case "${path##*/}" in
+            libsvs_runtime.so*) svs_files+=("$path") ;;
+        esac
+    done < "$manifest"
+fi
+rm -f -- "$LIBRARY_PATH"/libsvs_runtime.so*
+if (( ${#svs_files[@]} )); then
+    cp -a "${svs_files[@]}" "$LIBRARY_PATH/"
+fi
+shopt -u nullglob
+# The plan parser libraries exist for the C++ unit tests, which link them from
+# internal/core/output/lib. Nothing at runtime loads them, so keep them out of
+# the runtime directory, including copies left there by an older installer.
+rm -f "$LIBRARY_PATH"/libmilvus-planparser*
+cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/core/output/lib64/milvus-sanitizer"; do
+    if [[ -f "$marker" ]]; then
+        cp "$marker" "$LIBRARY_PATH/"
+    fi
+done
+for metadata in milvus-archer tsan-dependencies.json tsan.supp; do
+    if [[ -f "$PWD/internal/core/output/lib/$metadata" ]]; then
+        cp "$PWD/internal/core/output/lib/$metadata" "$LIBRARY_PATH/"
+    fi
+done
+if [[ -d "$PWD/internal/core/output/lib/tsan-symbolizer" ]]; then
+    cp -r "$PWD/internal/core/output/lib/tsan-symbolizer" "$LIBRARY_PATH/"
+    cp "$PWD/internal/core/output/lib/llvm-symbolizer" "$LIBRARY_PATH/"
+fi
 
-for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
+for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
 done
+
+if [[ -f "$LIBRARY_PATH/milvus-archer" ]]; then
+    python3 "$PWD/internal/core/milvus_tsan.py" verify "$LIBRARY_PATH"
+    python3 "$PWD/internal/core/milvus_tsan.py" verify-runtime "$LIBRARY_PATH"
+fi

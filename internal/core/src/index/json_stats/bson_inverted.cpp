@@ -152,9 +152,7 @@ BsonInvertedIndex::UploadIndex() {
             LOG_WARN("{} is a directory", file_path);
         } else {
             LOG_INFO("trying to add bson inverted index file: {}", file_path);
-            AssertInfo(disk_file_manager_->AddJsonSharedIndexLog(file_path),
-                       "failed to add bson inverted index file: {}",
-                       file_path);
+            disk_file_manager_->AddJsonSharedIndexLog(file_path);
             LOG_INFO("bson inverted index file: {} added", file_path);
         }
     }

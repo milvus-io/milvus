@@ -108,7 +108,7 @@ services:
       retries: 3
 
   pulsar:
-    image: apachepulsar/pulsar:2.8.2
+    image: apachepulsar/pulsar:3.0.7
     command: |
       /bin/bash -c \
       "bin/apply-config-from-env.py conf/standalone.conf && \

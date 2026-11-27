@@ -24,6 +24,8 @@ const (
 // Export message types
 const (
 	MessageTypeUnknown                   MessageType = MessageType(messagespb.MessageType_Unknown)
+	MessageTypeAddFileResource           MessageType = MessageType(messagespb.MessageType_AddFileResource)
+	MessageTypeRemoveFileResource        MessageType = MessageType(messagespb.MessageType_RemoveFileResource)
 	MessageTypeTimeTick                  MessageType = MessageType(messagespb.MessageType_TimeTick)
 	MessageTypeInsert                    MessageType = MessageType(messagespb.MessageType_Insert)
 	MessageTypeDelete                    MessageType = MessageType(messagespb.MessageType_Delete)
@@ -34,6 +36,7 @@ const (
 	MessageTypeDropPartition             MessageType = MessageType(messagespb.MessageType_DropPartition)
 	MessageTypeImport                    MessageType = MessageType(messagespb.MessageType_Import)
 	MessageTypeCommitImport              MessageType = MessageType(messagespb.MessageType_CommitImport)
+	MessageTypeUpdateImport              MessageType = MessageType(messagespb.MessageType_UpdateImport)
 	MessageTypeRollbackImport            MessageType = MessageType(messagespb.MessageType_RollbackImport)
 	MessageTypeCreateSegment             MessageType = MessageType(messagespb.MessageType_CreateSegment)
 	MessageTypeFlush                     MessageType = MessageType(messagespb.MessageType_Flush)
@@ -96,6 +99,10 @@ type (
 
 // Export message header and body types
 type (
+	AddFileResourceMessageHeader           = messagespb.AddFileResourceMessageHeader
+	AddFileResourceMessageBody             = messagespb.AddFileResourceMessageBody
+	RemoveFileResourceMessageHeader        = messagespb.RemoveFileResourceMessageHeader
+	RemoveFileResourceMessageBody          = messagespb.RemoveFileResourceMessageBody
 	TimeTickMessageHeader                  = messagespb.TimeTickMessageHeader
 	TimeTickMsg                            = msgpb.TimeTickMsg
 	InsertMessageHeader                    = messagespb.InsertMessageHeader
@@ -116,6 +123,8 @@ type (
 	ImportMsg                              = msgpb.ImportMsg
 	CommitImportMessageHeader              = messagespb.CommitImportMessageHeader
 	CommitImportMessageBody                = messagespb.CommitImportMessageBody
+	UpdateImportMessageHeader              = messagespb.UpdateImportMessageHeader
+	UpdateImportMessageBody                = messagespb.UpdateImportMessageBody
 	RollbackImportMessageHeader            = messagespb.RollbackImportMessageHeader
 	RollbackImportMessageBody              = messagespb.RollbackImportMessageBody
 	CreateSegmentMessageHeader             = messagespb.CreateSegmentMessageHeader
@@ -205,6 +214,90 @@ type (
 	DropRLSMetadataMessageHeader           = messagespb.DropRLSMetadataMessageHeader
 	DropRLSMetadataMessageBody             = messagespb.DropRLSMetadataMessageBody
 )
+
+// Type aliases for AddFileResourceMessageV2
+type (
+	MutableAddFileResourceMessageV2         = specializedMutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+	ImmutableAddFileResourceMessageV2       = SpecializedImmutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+	BroadcastAddFileResourceMessageV2       = SpecializedBroadcastMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+	BroadcastResultAddFileResourceMessageV2 = BroadcastResult[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+	AckResultAddFileResourceMessageV2       = AckResult[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+)
+
+// MessageTypeWithVersion for AddFileResourceMessageV2
+var MessageTypeAddFileResourceV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeAddFileResource,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for AddFileResourceMessageV2
+var SpecializedTypeAddFileResourceV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*AddFileResourceMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*AddFileResourceMessageHeader)(nil)),
+}
+
+// AsMutableAddFileResourceMessageV2 converts a BasicMessage to MutableAddFileResourceMessageV2
+var AsMutableAddFileResourceMessageV2 = asSpecializedMutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// MustAsMutableAddFileResourceMessageV2 converts a BasicMessage to MutableAddFileResourceMessageV2, panics on error
+var MustAsMutableAddFileResourceMessageV2 = mustAsSpecializedMutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// AsImmutableAddFileResourceMessageV2 converts an ImmutableMessage to ImmutableAddFileResourceMessageV2
+var AsImmutableAddFileResourceMessageV2 = asSpecializedImmutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// MustAsImmutableAddFileResourceMessageV2 converts an ImmutableMessage to ImmutableAddFileResourceMessageV2, panics on error
+var MustAsImmutableAddFileResourceMessageV2 = MustAsSpecializedImmutableMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// AsBroadcastAddFileResourceMessageV2 converts a BasicMessage to BroadcastAddFileResourceMessageV2
+var AsBroadcastAddFileResourceMessageV2 = asSpecializedBroadcastMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// MustAsBroadcastAddFileResourceMessageV2 converts a BasicMessage to BroadcastAddFileResourceMessageV2, panics on error
+var MustAsBroadcastAddFileResourceMessageV2 = MustAsSpecializedBroadcastMessage[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// NewAddFileResourceMessageBuilderV2 creates a new message builder for AddFileResourceMessageV2
+var NewAddFileResourceMessageBuilderV2 = newMutableMessageBuilder[*AddFileResourceMessageHeader, *AddFileResourceMessageBody]
+
+// Type aliases for RemoveFileResourceMessageV2
+type (
+	MutableRemoveFileResourceMessageV2         = specializedMutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+	ImmutableRemoveFileResourceMessageV2       = SpecializedImmutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+	BroadcastRemoveFileResourceMessageV2       = SpecializedBroadcastMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+	BroadcastResultRemoveFileResourceMessageV2 = BroadcastResult[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+	AckResultRemoveFileResourceMessageV2       = AckResult[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+)
+
+// MessageTypeWithVersion for RemoveFileResourceMessageV2
+var MessageTypeRemoveFileResourceV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeRemoveFileResource,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for RemoveFileResourceMessageV2
+var SpecializedTypeRemoveFileResourceV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*RemoveFileResourceMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*RemoveFileResourceMessageHeader)(nil)),
+}
+
+// AsMutableRemoveFileResourceMessageV2 converts a BasicMessage to MutableRemoveFileResourceMessageV2
+var AsMutableRemoveFileResourceMessageV2 = asSpecializedMutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// MustAsMutableRemoveFileResourceMessageV2 converts a BasicMessage to MutableRemoveFileResourceMessageV2, panics on error
+var MustAsMutableRemoveFileResourceMessageV2 = mustAsSpecializedMutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// AsImmutableRemoveFileResourceMessageV2 converts an ImmutableMessage to ImmutableRemoveFileResourceMessageV2
+var AsImmutableRemoveFileResourceMessageV2 = asSpecializedImmutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// MustAsImmutableRemoveFileResourceMessageV2 converts an ImmutableMessage to ImmutableRemoveFileResourceMessageV2, panics on error
+var MustAsImmutableRemoveFileResourceMessageV2 = MustAsSpecializedImmutableMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// AsBroadcastRemoveFileResourceMessageV2 converts a BasicMessage to BroadcastRemoveFileResourceMessageV2
+var AsBroadcastRemoveFileResourceMessageV2 = asSpecializedBroadcastMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// MustAsBroadcastRemoveFileResourceMessageV2 converts a BasicMessage to BroadcastRemoveFileResourceMessageV2, panics on error
+var MustAsBroadcastRemoveFileResourceMessageV2 = MustAsSpecializedBroadcastMessage[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
+
+// NewRemoveFileResourceMessageBuilderV2 creates a new message builder for RemoveFileResourceMessageV2
+var NewRemoveFileResourceMessageBuilderV2 = newMutableMessageBuilder[*RemoveFileResourceMessageHeader, *RemoveFileResourceMessageBody]
 
 // Type aliases for TimeTickMessageV1
 type (
@@ -625,6 +718,48 @@ var MustAsBroadcastCommitImportMessageV2 = MustAsSpecializedBroadcastMessage[*Co
 
 // NewCommitImportMessageBuilderV2 creates a new message builder for CommitImportMessageV2
 var NewCommitImportMessageBuilderV2 = newMutableMessageBuilder[*CommitImportMessageHeader, *CommitImportMessageBody]
+
+// Type aliases for UpdateImportMessageV2
+type (
+	MutableUpdateImportMessageV2         = specializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	ImmutableUpdateImportMessageV2       = SpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	BroadcastUpdateImportMessageV2       = SpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	BroadcastResultUpdateImportMessageV2 = BroadcastResult[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+	AckResultUpdateImportMessageV2       = AckResult[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+)
+
+// MessageTypeWithVersion for UpdateImportMessageV2
+var MessageTypeUpdateImportV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeUpdateImport,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for UpdateImportMessageV2
+var SpecializedTypeUpdateImportV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*UpdateImportMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*UpdateImportMessageHeader)(nil)),
+}
+
+// AsMutableUpdateImportMessageV2 converts a BasicMessage to MutableUpdateImportMessageV2
+var AsMutableUpdateImportMessageV2 = asSpecializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsMutableUpdateImportMessageV2 converts a BasicMessage to MutableUpdateImportMessageV2, panics on error
+var MustAsMutableUpdateImportMessageV2 = mustAsSpecializedMutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// AsImmutableUpdateImportMessageV2 converts an ImmutableMessage to ImmutableUpdateImportMessageV2
+var AsImmutableUpdateImportMessageV2 = asSpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsImmutableUpdateImportMessageV2 converts an ImmutableMessage to ImmutableUpdateImportMessageV2, panics on error
+var MustAsImmutableUpdateImportMessageV2 = MustAsSpecializedImmutableMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// AsBroadcastUpdateImportMessageV2 converts a BasicMessage to BroadcastUpdateImportMessageV2
+var AsBroadcastUpdateImportMessageV2 = asSpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// MustAsBroadcastUpdateImportMessageV2 converts a BasicMessage to BroadcastUpdateImportMessageV2, panics on error
+var MustAsBroadcastUpdateImportMessageV2 = MustAsSpecializedBroadcastMessage[*UpdateImportMessageHeader, *UpdateImportMessageBody]
+
+// NewUpdateImportMessageBuilderV2 creates a new message builder for UpdateImportMessageV2
+var NewUpdateImportMessageBuilderV2 = newMutableMessageBuilder[*UpdateImportMessageHeader, *UpdateImportMessageBody]
 
 // Type aliases for RollbackImportMessageV2
 type (
@@ -2455,6 +2590,7 @@ var NewDropRLSMetadataMessageBuilderV2 = newMutableMessageBuilder[*DropRLSMetada
 
 // messageTypeMap make the contriants that one header type can only be used for one message type.
 var messageTypeMap = map[reflect.Type]MessageType{
+	reflect.TypeOf(&messagespb.AddFileResourceMessageHeader{}):           MessageTypeAddFileResource,
 	reflect.TypeOf(&messagespb.AlterAliasMessageHeader{}):                MessageTypeAlterAlias,
 	reflect.TypeOf(&messagespb.AlterCollectionMessageHeader{}):           MessageTypeAlterCollection,
 	reflect.TypeOf(&messagespb.AlterDatabaseMessageHeader{}):             MessageTypeAlterDatabase,
@@ -2501,6 +2637,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):                    MessageTypeInsert,
 	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):               MessageTypeManualFlush,
 	reflect.TypeOf(&messagespb.RefreshExternalCollectionMessageHeader{}): MessageTypeRefreshExternalCollection,
+	reflect.TypeOf(&messagespb.RemoveFileResourceMessageHeader{}):        MessageTypeRemoveFileResource,
 	reflect.TypeOf(&messagespb.RestoreRBACMessageHeader{}):               MessageTypeRestoreRBAC,
 	reflect.TypeOf(&messagespb.RestoreSnapshotMessageHeader{}):           MessageTypeRestoreSnapshot,
 	reflect.TypeOf(&messagespb.RollbackImportMessageHeader{}):            MessageTypeRollbackImport,
@@ -2509,6 +2646,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.TimeTickMessageHeader{}):                  MessageTypeTimeTick,
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
+	reflect.TypeOf(&messagespb.UpdateImportMessageHeader{}):              MessageTypeUpdateImport,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -2529,6 +2667,7 @@ type MessageSpecializedType struct {
 
 // messageTypeVersionSpecializedMap maps MessageTypeWithVersion to MessageSpecializedType
 var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecializedType{
+	MessageTypeAddFileResourceV2:           SpecializedTypeAddFileResourceV2,
 	MessageTypeAlterAliasV2:                SpecializedTypeAlterAliasV2,
 	MessageTypeAlterCollectionV2:           SpecializedTypeAlterCollectionV2,
 	MessageTypeAlterDatabaseV2:             SpecializedTypeAlterDatabaseV2,
@@ -2575,6 +2714,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeInsertV1:                    SpecializedTypeInsertV1,
 	MessageTypeManualFlushV2:               SpecializedTypeManualFlushV2,
 	MessageTypeRefreshExternalCollectionV2: SpecializedTypeRefreshExternalCollectionV2,
+	MessageTypeRemoveFileResourceV2:        SpecializedTypeRemoveFileResourceV2,
 	MessageTypeRestoreRBACV2:               SpecializedTypeRestoreRBACV2,
 	MessageTypeRestoreSnapshotV2:           SpecializedTypeRestoreSnapshotV2,
 	MessageTypeRollbackImportV2:            SpecializedTypeRollbackImportV2,
@@ -2583,10 +2723,12 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeTimeTickV1:                  SpecializedTypeTimeTickV1,
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
+	MessageTypeUpdateImportV2:              SpecializedTypeUpdateImportV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
 var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWithVersion{
+	SpecializedTypeAddFileResourceV2:           MessageTypeAddFileResourceV2,
 	SpecializedTypeAlterAliasV2:                MessageTypeAlterAliasV2,
 	SpecializedTypeAlterCollectionV2:           MessageTypeAlterCollectionV2,
 	SpecializedTypeAlterDatabaseV2:             MessageTypeAlterDatabaseV2,
@@ -2633,6 +2775,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeInsertV1:                    MessageTypeInsertV1,
 	SpecializedTypeManualFlushV2:               MessageTypeManualFlushV2,
 	SpecializedTypeRefreshExternalCollectionV2: MessageTypeRefreshExternalCollectionV2,
+	SpecializedTypeRemoveFileResourceV2:        MessageTypeRemoveFileResourceV2,
 	SpecializedTypeRestoreRBACV2:               MessageTypeRestoreRBACV2,
 	SpecializedTypeRestoreSnapshotV2:           MessageTypeRestoreSnapshotV2,
 	SpecializedTypeRollbackImportV2:            MessageTypeRollbackImportV2,
@@ -2641,4 +2784,5 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeTimeTickV1:                  MessageTypeTimeTickV1,
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,
+	SpecializedTypeUpdateImportV2:              MessageTypeUpdateImportV2,
 }

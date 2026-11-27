@@ -146,6 +146,21 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 			s.Error(err)
 		})
 
+		// The RPC succeeds but its status carries the error; the iterator must
+		// return it instead of searching without a collection ID and schema.
+		s.Run("describe_status_fail", func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Status(merr.WrapErrCollectionNotFound(collectionName)),
+			}, nil).Once()
+			_, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+				return rand.Float32()
+			}))))
+			s.ErrorIs(err, merr.ErrCollectionNotFound)
+			s.NotErrorIs(err, ErrServerVersionIncompatible)
+		})
+
 		s.Run("not_v2_result", func() {
 			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -434,6 +449,91 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 	_, err = iter.Next(ctx)
 	s.Error(err)
 	s.ErrorIs(err, io.EOF, "limit reached, return EOF")
+}
+
+func (s *SearchIteratorSuite) TestNextMalformedResponse() {
+	ctx := context.Background()
+	token := fmt.Sprintf("iter_token_%s", s.randString(8))
+	idsOf := func(ids ...int64) *schemapb.IDs {
+		return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}
+	}
+
+	cases := []struct {
+		name    string
+		results *schemapb.SearchResultData
+		errMsg  string
+	}{
+		{
+			name: "element indices mismatch hit count",
+			results: &schemapb.SearchResultData{
+				NumQueries:     1,
+				TopK:           2,
+				Ids:            idsOf(1, 2),
+				Scores:         []float32{0.2, 0.1},
+				Topks:          []int64{2},
+				ElementIndices: &schemapb.LongArray{Data: []int64{0}},
+			},
+			errMsg: "1 element indices for 2 hits",
+		},
+		{
+			name: "topk missing",
+			results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				Ids:        idsOf(1),
+				Scores:     []float32{0.1},
+			},
+			errMsg: "topk not returned",
+		},
+		{
+			name: "no query",
+			results: &schemapb.SearchResultData{
+				NumQueries: 0,
+				TopK:       1,
+			},
+			errMsg: "no result set",
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+			s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionID: 1,
+				Schema:       s.schema.ProtoMessage(),
+			}, nil).Once()
+			// compatibility probe
+			s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries:              1,
+					TopK:                    1,
+					Ids:                     idsOf(1),
+					Scores:                  []float32{0.1},
+					Topks:                   []int64{1},
+					SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{Token: token},
+				},
+			}, nil).Once()
+
+			iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+				return rand.Float32()
+			}))))
+			s.Require().NoError(err)
+
+			tc.results.SearchIteratorV2Results = &schemapb.SearchIteratorV2Results{Token: token}
+			s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+				Status:  merr.Success(),
+				Results: tc.results,
+			}, nil).Once()
+
+			s.NotPanics(func() {
+				_, err = iter.Next(ctx)
+			})
+			s.Require().Error(err)
+			s.NotErrorIs(err, io.EOF)
+			s.ErrorContains(err, tc.errMsg)
+		})
+	}
 }
 
 func TestSearchIterator(t *testing.T) {

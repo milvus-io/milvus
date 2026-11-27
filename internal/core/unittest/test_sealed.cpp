@@ -49,6 +49,7 @@
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
+#include "common/Utils.h"
 #include "common/Span.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -306,8 +307,12 @@ class CancellationObservingIndexTranslator
         return uid;
     }
 
-    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+    cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<cachinglayer::cid_t>& cids) const override {
+        if (cids.empty()) {
+            return {};
+        }
         return {{0, 0}, {0, 0}};
     }
 
@@ -2599,21 +2604,21 @@ TEST(Sealed, QueryAllFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
-    EXPECT_EQ(bool_result->valid_data_size(), 0);
-    EXPECT_EQ(int8_result->valid_data_size(), 0);
-    EXPECT_EQ(int16_result->valid_data_size(), 0);
-    EXPECT_EQ(int32_result->valid_data_size(), 0);
-    EXPECT_EQ(int64_result->valid_data_size(), 0);
-    EXPECT_EQ(float_result->valid_data_size(), 0);
-    EXPECT_EQ(double_result->valid_data_size(), 0);
-    EXPECT_EQ(varchar_result->valid_data_size(), 0);
-    EXPECT_EQ(json_result->valid_data_size(), 0);
-    EXPECT_EQ(int_array_result->valid_data_size(), 0);
-    EXPECT_EQ(long_array_result->valid_data_size(), 0);
-    EXPECT_EQ(bool_array_result->valid_data_size(), 0);
-    EXPECT_EQ(string_array_result->valid_data_size(), 0);
-    EXPECT_EQ(double_array_result->valid_data_size(), 0);
-    EXPECT_EQ(float_array_result->valid_data_size(), 0);
+    EXPECT_TRUE(GetFieldDataRowValidData(*bool_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int8_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int16_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int32_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int64_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*float_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*double_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*varchar_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*json_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*int_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*long_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*bool_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*string_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*double_array_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*float_array_result).empty());
 }
 
 TEST(Sealed, QueryAllNullableFields) {
@@ -2770,21 +2775,26 @@ TEST(Sealed, QueryAllNullableFields) {
     EXPECT_EQ(float_array_result->scalars().array_data().data_size(),
               dataset_size);
 
-    EXPECT_EQ(bool_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int8_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int16_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int32_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(float_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(double_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(varchar_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(json_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(geometry_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(int_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(long_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(bool_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(string_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(double_array_result->valid_data_size(), dataset_size);
-    EXPECT_EQ(float_array_result->valid_data_size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*bool_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int8_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int16_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int32_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*float_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*double_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*varchar_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*json_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*geometry_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*int_array_result).size(), dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*long_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*bool_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*string_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*double_array_result).size(),
+              dataset_size);
+    EXPECT_EQ(GetFieldDataRowValidData(*float_array_result).size(),
+              dataset_size);
 }
 
 using VectorArrayTestParam =
@@ -2893,8 +2903,8 @@ TEST_P(SealedVectorArrayTest, QueryVectorArrayAllFields) {
         VerifyVectorResults(result_vec, expected_vec, element_type);
     }
 
-    EXPECT_EQ(int64_result->valid_data_size(), 0);
-    EXPECT_EQ(array_vector_result->valid_data_size(), 0);
+    EXPECT_TRUE(GetFieldDataRowValidData(*int64_result).empty());
+    EXPECT_TRUE(GetFieldDataRowValidData(*array_vector_result).empty());
 }
 
 TEST_P(SealedVectorArrayTest, SearchVectorArray) {
@@ -2936,7 +2946,7 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3219,7 +3229,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3331,8 +3341,8 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     }
 
     std::vector<milvus::VectorArray> vector_arrays;
-    vector_arrays.emplace_back(empty_row);
-    vector_arrays.emplace_back(single_row);
+    vector_arrays.emplace_back(empty_row, false);
+    vector_arrays.emplace_back(single_row, false);
 
     constexpr int64_t row_count = 2;
     std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
@@ -3361,9 +3371,10 @@ TEST(SealedVectorArrayNullable, BulkSubscriptEmptyThenSingleVectorArrayRows) {
     auto result = sealed->bulk_subscript(
         nullptr, array_vec, offsets.data(), offsets.size());
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), row_count);
-    EXPECT_TRUE(result->valid_data(0));
-    EXPECT_TRUE(result->valid_data(1));
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), row_count);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
 
     const auto& rows = result->vectors().vector_array().data();
     ASSERT_EQ(rows.size(), row_count);
@@ -3412,7 +3423,7 @@ TEST(SealedVectorArrayNullable,
     for (int64_t i = 0; i < dataset_size; ++i) {
         if (i % 3 != 0) {
             valid_bitmap[i >> 3] |= (1 << (i & 0x07));
-            vector_arrays.emplace_back(vec_array_col[i]);
+            vector_arrays.emplace_back(vec_array_col[i], false);
         }
     }
 
@@ -3496,13 +3507,14 @@ TEST(SealedVectorArrayNullable,
         nullptr, array_vec, offsets.data(), offsets.size());
 
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), offsets.size());
     ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
 
     for (size_t i = 0; i < offsets.size(); ++i) {
         auto logical_offset = offsets[i];
         auto expected_valid = logical_offset % 3 != 0;
-        EXPECT_EQ(result->valid_data(i), expected_valid);
+        EXPECT_EQ(valid_data[i], expected_valid);
         const auto& result_vec = result->vectors().vector_array().data(i);
         if (!expected_valid) {
             EXPECT_TRUE(result_vec.has_float_vector());
@@ -3627,10 +3639,11 @@ TEST(SealedVectorArrayNullable,
         nullptr, array_vec, offsets.data(), offsets.size());
 
     ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->valid_data_size(), offsets.size());
+    const auto& valid_data = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(valid_data.size(), offsets.size());
     ASSERT_EQ(result->vectors().vector_array().data_size(), offsets.size());
-    for (int i = 0; i < result->valid_data_size(); ++i) {
-        EXPECT_FALSE(result->valid_data(i));
+    for (int i = 0; i < valid_data.size(); ++i) {
+        EXPECT_FALSE(valid_data[i]);
         EXPECT_EQ(
             result->vectors().vector_array().data(i).float_vector().data_size(),
             0);
@@ -3675,7 +3688,7 @@ TEST(SealedVectorArrayFallback,
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -3812,7 +3825,7 @@ TEST_P(SealedVectorArrayTest, DISABLED_BulkSubscriptVectorArrayFromDiskIndex) {
     auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
     std::vector<milvus::VectorArray> vector_arrays;
     for (auto& v : vec_array_col) {
-        vector_arrays.push_back(milvus::VectorArray(v));
+        vector_arrays.push_back(milvus::VectorArray(v, false));
     }
     auto field_data = storage::CreateFieldData(
         DataType::VECTOR_ARRAY, element_type, false, dim);
@@ -4129,6 +4142,38 @@ TEST(SealedSegmentReopen, LazySchemaReopenDoesNotWaitForReopenMutex) {
 
     EXPECT_NO_THROW(sealed->LazyCheckSchema(newest_schema, nullptr));
     EXPECT_EQ(sealed->TestGetSchemaSnapshot()->get_schema_version(), 300);
+}
+
+TEST(SealedSegmentReopen, ReplayedDeletesSurviveReopen) {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+    schema->set_schema_version(100);
+    auto dataset = DataGen(schema, 10);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto pks = dataset.get_col<int64_t>(pk_id);
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->add_data(pks[0]);
+    std::vector<Timestamp> timestamps{1000};
+    LoadDeletedRecordInfo deletes = {timestamps.data(), ids.get(), 1};
+    segment->LoadDeletedRecord(deletes);
+    ASSERT_EQ(segment->get_deleted_count(), 1);
+
+    // A later reopen must retain deletes; retrying their application is idempotent.
+    auto next_schema = std::make_shared<Schema>();
+    auto next_pk = next_schema->AddDebugField("pk", DataType::INT64);
+    next_schema->set_primary_field_id(next_pk);
+    next_schema->set_schema_version(101);
+    EXPECT_NO_THROW(sealed->Reopen(next_schema));
+    segment->LoadDeletedRecord(deletes);
+    EXPECT_EQ(segment->get_deleted_count(), 1);
+    BitsetType mask(10, false);
+    auto view = BitsetTypeView(mask);
+    segment->mask_with_delete(view, 10, 2000);
+    EXPECT_EQ(mask.count(), 1);
 }
 
 TEST(SealedSegmentReopen, SchemaOnlyReopenPublishesDefaultFilledState) {
@@ -4662,7 +4707,7 @@ TEST(SealedSegmentCowState, ReopenNextStateMustNotInheritStaleFieldReadyBit) {
 
     auto next_runtime = sealed->TestCloneMutableRuntimeResourceState();
     next_runtime->fields.erase(payload);
-    next_runtime->array_offsets_map.erase(payload);
+    next_runtime->struct_element_offsets_map.erase(payload);
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.schema = current->schema;
@@ -5211,7 +5256,8 @@ TEST(SealedSegmentCowState,
                                               &warmup_started,
                                               warmup_dlist.get());
     auto warmup_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    published_cache_index->Warmup(nullptr, warmup_pool);
+    folly::coro::blockingWait(
+        published_cache_index->Warmup(nullptr, warmup_pool));
     ASSERT_EQ(warmup_started_future.wait_for(std::chrono::seconds(5)),
               std::future_status::ready);
     ASSERT_FALSE(published_warmup_token.isCancellationRequested());

@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"testing"
 
@@ -28,7 +29,28 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type importFragmentTestReader struct {
+	records []Record
+	index   int
+	closed  bool
+}
+
+func (r *importFragmentTestReader) Next() (Record, error) {
+	if r.index >= len(r.records) {
+		return nil, io.EOF
+	}
+	record := r.records[r.index]
+	r.index++
+	return record, nil
+}
+
+func (r *importFragmentTestReader) Close() error {
+	r.closed = true
+	return nil
+}
 
 // exhaustedChunkReader is a minimal RecordReader that is already at EOF and
 // records whether it was closed. It stands in for a binlog chunk that opened
@@ -107,6 +129,55 @@ func TestPackedRecordReader_CloseNilReceiverDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestImportFragmentRecordReaderChecksExactRows(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2}, nil)
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "100", Type: arrow.PrimitiveTypes.Int64}}, nil),
+		[]arrow.Array{column}, 2)
+	column.Release()
+	defer record.Release()
+
+	inner := &importFragmentTestReader{records: []Record{NewSimpleArrowRecord(record, map[int64]int{100: 0})}}
+	reader := &importFragmentRecordReader{ctx: context.Background(), reader: inner, expectedRows: 3}
+	got, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Len())
+	_, err = reader.Next()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "row count mismatch")
+	require.NoError(t, reader.Close())
+	require.True(t, inner.closed)
+}
+
+func TestImportFragmentRecordReaderHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	inner := &importFragmentTestReader{}
+	reader := &importFragmentRecordReader{ctx: ctx, reader: inner, expectedRows: 1}
+	_, err := reader.Next()
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestNewInsertDataRecordReader(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	data, err := NewInsertData(schema)
+	require.NoError(t, err)
+	require.NoError(t, data.Data[100].AppendDataRows([]int64{3, 1, 2}))
+
+	reader, err := NewInsertDataRecordReader(data, schema)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 1, 2}, record.Column(100).(*array.Int64).Int64Values())
+	_, err = reader.Next()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, reader.Close())
+}
+
 func TestCompositeBinlogRecordReaderOwnsCurrentRecord(t *testing.T) {
 	newCurrent := func(allocator *memory.CheckedAllocator) Record {
 		builder := array.NewInt64Builder(allocator)
@@ -169,6 +240,11 @@ func TestAbsentFieldFillReaderFillsDefaultAndNull(t *testing.T) {
 	require.Equal(t, []int64{42, 42, 42}, []int64{def.Value(0), def.Value(1), def.Value(2)}) // default materialized
 	require.Equal(t, 3, rec.Column(nullField).(*array.Int64).NullN())                        // no default -> null
 	require.Equal(t, int64(2), rec.Column(idField).(*array.Int64).Value(1))                  // present passthrough
+	column, ok := TryRecordColumn(rec, defField)
+	require.True(t, ok)
+	require.Same(t, def, column)
+	_, ok = TryRecordColumn(rec, 999)
+	require.False(t, ok)
 }
 
 func TestAbsentFieldFillReaderRejectsNonNullableAbsent(t *testing.T) {
@@ -341,6 +417,126 @@ func TestAbsentFieldFillReaderFillsStructChildren(t *testing.T) {
 	require.Equal(t, 2, rec.Column(202).Len())
 	require.Equal(t, 2, rec.Column(202).NullN())
 	require.Equal(t, int64(2), rec.Column(100).(*array.Int64).Value(1)) // present passthrough
+}
+
+func TestAbsentFieldFillReaderUsesStructSiblingCounts(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "required struct", true: "nullable struct"}[nullable], func(t *testing.T) {
+			builder := array.NewListBuilder(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64)
+			builder.Append(true)
+			builder.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+			builder.Append(true)
+			if nullable {
+				builder.AppendNull()
+			}
+			sibling := builder.NewArray()
+			builder.Release()
+			base := &compositeRecord{index: map[FieldID]int16{201: 0}, recs: []arrow.Array{sibling}}
+			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 200, Name: "s", Nullable: nullable, Fields: []*schemapb.FieldSchema{
+					{FieldID: 201, Name: "s[old]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, ElementNullable: true},
+					{FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: nullable, ElementNullable: true},
+				},
+			}}}
+			rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, schema, map[FieldID]struct{}{201: {}})
+			defer rr.Close()
+			rec, err := rr.Next()
+			require.NoError(t, err)
+			filled := rec.Column(202).(*array.List)
+			require.Equal(t, sibling.Len(), filled.Len())
+			for i, want := range []int64{2, 0} {
+				start, end := filled.ValueOffsets(i)
+				require.Equal(t, want, end-start)
+			}
+			if nullable {
+				require.True(t, filled.IsNull(2))
+				start, end := filled.ValueOffsets(2)
+				require.Equal(t, start, end)
+			}
+			require.True(t, filled.ListValues().IsNull(0))
+			require.True(t, filled.ListValues().IsNull(1))
+		})
+	}
+}
+
+// droppedProviderStructSchema is a struct (id 200) whose only stored sub-field
+// (201) was dropped after an element-nullable sub-field (202) was added.
+func droppedProviderStructSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{
+				{FieldID: 202, Name: "s[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true},
+			},
+		}},
+	}
+}
+
+// A segment that stores a field written after the struct appeared (the
+// dropped sub-field 201) but none of the struct's current sub-fields has lost
+// the column that gives the element counts. The fill must fail instead of
+// turning its rows into null struct rows.
+func TestAbsentFieldFillReaderErrorsWhenStructProviderDropped(t *testing.T) {
+	idb := array.NewInt64Builder(memory.DefaultAllocator)
+	defer idb.Release()
+	idb.AppendValues([]int64{1, 2}, nil)
+	idArr := idb.NewArray()
+	defer idArr.Release()
+	base := &compositeRecord{index: map[FieldID]int16{100: 0}, recs: []arrow.Array{idArr}}
+
+	rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, droppedProviderStructSchema(),
+		map[FieldID]struct{}{100: {}, 201: {}})
+	defer rr.Close()
+	_, err := rr.Next()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "s[added]")
+}
+
+// A segment that stores only fields older than the struct predates it: its
+// rows are null struct rows, and the fill keeps producing them.
+func TestAbsentFieldFillReaderWholeStructAddedLater(t *testing.T) {
+	idb := array.NewInt64Builder(memory.DefaultAllocator)
+	defer idb.Release()
+	idb.AppendValues([]int64{1, 2}, nil)
+	idArr := idb.NewArray()
+	defer idArr.Release()
+	base := &compositeRecord{index: map[FieldID]int16{100: 0}, recs: []arrow.Array{idArr}}
+
+	rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, droppedProviderStructSchema(),
+		map[FieldID]struct{}{100: {}})
+	defer rr.Close()
+	rec, err := rr.Next()
+	require.NoError(t, err)
+	require.Equal(t, 2, rec.Column(202).Len())
+	require.Equal(t, 2, rec.Column(202).NullN())
+}
+
+// The V1 binlog reader applies the same rule to the stored field set it is
+// given.
+func TestCompositeBinlogRecordReaderErrorsWhenStructProviderDropped(t *testing.T) {
+	schema := droppedProviderStructSchema()
+	added := schema.GetStructArrayFields()[0].GetFields()[0]
+	newReader := func(stored map[FieldID]struct{}) *CompositeBinlogRecordReader {
+		return &CompositeBinlogRecordReader{
+			fields:  map[FieldID]*schemapb.FieldSchema{202: added},
+			structs: map[FieldID]*schemapb.StructArrayFieldSchema{202: schema.GetStructArrayFields()[0]},
+			stored:  stored,
+			index:   map[FieldID]int16{202: 0},
+			rrs:     make([]array.RecordReader, 1),
+			brs:     make([]*BinlogReader, 1),
+		}
+	}
+
+	reader := newReader(map[FieldID]struct{}{100: {}, 201: {}})
+	_, err := reader.Next()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.NoError(t, reader.Close())
+
+	reader = newReader(map[FieldID]struct{}{100: {}})
+	rec, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 0, rec.Column(202).Len())
+	require.NoError(t, reader.Close())
 }
 
 // TestAbsentFieldFillReaderReturnsInnerWhenAllPresent pins the short-circuit: when

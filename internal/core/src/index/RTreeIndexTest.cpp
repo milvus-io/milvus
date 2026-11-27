@@ -26,6 +26,8 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
+#include <set>
 #include <new>
 #include <optional>
 #include <string>
@@ -49,6 +51,8 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "expr/ITypeExpr.h"
+#include "exec/expression/GISFunctionFilterExpr.h"
+#include "test_utils/SegcoreConfigUtils.h"
 #include "geos_c.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
@@ -2228,3 +2232,589 @@ TEST_F(RTreeIndexTest, GrowingConcurrentQueryKeepsPublishedCandidates) {
     }
     EXPECT_EQ(final_res.count(), static_cast<size_t>(kAnchor / 2 + 1));
 }
+
+// Regression for issue #54138: ST_DWITHIN through the R-Tree must return the
+// same rows as the un-indexed raw path. Two defects made them disagree:
+//  1. Geometry::dwithin accepted EMPTY rows (GEOS distance 0), but the index
+//     stores a placeholder MBR for them that no query envelope away from the
+//     origin reaches, so the raw path returned them and the indexed path did
+//     not. Now neither does (PostGIS semantics).
+//  2. The coarse envelope was sized with a fixed 111320 m/deg box that was not
+//     a superset of the exact metrics (haversine for points, scaled planar
+//     GEOS distance for other shapes), so rows near the distance boundary were
+//     pruned before refinement. The reporter's three missed points are rows
+//     here, plus a polygon and a line in the 4.49..4.91 deg band that the old
+//     box cut off at latitude 35.
+// Both segments load the SAME geometry column; only one gets the index.
+TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 100;
+    // Interior offsets, mirroring the reporter's layout (empties are never
+    // first or last so a row-count mismatch cannot mask them).
+    const std::map<int, std::string> special = {
+        {3, "POINT EMPTY"},
+        {17, "LINESTRING EMPTY"},
+        {41, "POLYGON EMPTY"},
+        {58, "MULTIPOINT EMPTY"},
+        {77, "GEOMETRYCOLLECTION EMPTY"},
+        // Boundary rows for ST_DWITHIN(geo, 'POINT (115 35)', 500000).
+        {5, "POINT (109.513509 35.327246)"},   // haversine 500000 m
+        {23, "POINT (120.490847 35.204498)"},  // haversine 499965 m
+        {61, "POINT (115.028171 30.507155)"},  // haversine 499589 m
+        {30,
+         "POLYGON ((114.9 39.8, 115.1 39.8, 115.1 39.9, 114.9 39.9, 114.9 "
+         "39.8))"},                                   // planar 4.8 deg north
+        {45, "LINESTRING (114.5 30.2, 115.5 30.2)"},  // planar 4.8 deg south
+        // Clearly outside every query below (pruning sanity).
+        {70, "POINT (125 35)"},
+        {88, "POLYGON ((-10 -10, -9 -10, -9 -9, -10 -9, -10 -10))"},
+        // South pole, queried from (0 -29) at exactly its haversine distance:
+        // the cap touches the pole only to within rounding, so the envelope
+        // must still span every longitude (review of #54294).
+        {90, "POINT (180 -90)"},
+        // Around POINT (179.999 0) with 1000 m (review of #54294): the
+        // haversine cap wraps across +-180, so rows on both sides must
+        // survive the coarse pass, which maps only the cap's overflow to the
+        // other edge instead of every longitude.
+        {92, "POINT (179.9995 0)"},  // ~56 m
+        {93, "POINT (180 0)"},       // ~111 m
+        {94, "POINT (-180 0)"},      // same meridian, ~111 m
+        {95, "POINT (-179.996 0)"},  // across +-180, ~556 m
+        {96, "LINESTRING (179.9985 -0.0005, 179.9985 0.0005)"},  // planar
+        {97, "POINT (-179.985 0)"},  // across +-180, ~1.7 km: rejected
+        {98, "POINT (0 0)"},         // antipodal, same latitude: rejected
+    };
+    constexpr int kPoleRow = 90;
+    const std::set<int> antimeridian_near = {92, 93, 94, 95, 96};
+    const std::set<int> antimeridian_far = {97, 98};
+    // Same argument order as Geometry::dwithin (row first, then query).
+    const double pole_distance =
+        Geometry::haversine_distance_meters(-90.0, 180.0, -29.0, 0.0);
+    const std::set<int> empties = {3, 17, 41, 58, 77};
+    const std::set<int> boundary_rows = {5, 23, 61, 30, 45};
+    const std::set<int> far_rows = {70, 88};
+
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    {
+        auto ctx = GEOS_init_r();
+        for (int i = 0; i < N; ++i) {
+            std::string wkt;
+            auto it = special.find(i);
+            if (it != special.end()) {
+                wkt = it->second;
+            } else if (i % 2 == 0) {
+                wkt = "POINT (" + std::to_string(10.0 + (i % 7) * 0.01) + " " +
+                      std::to_string(10.0 + (i % 5) * 0.01) + ")";
+            } else {
+                wkt = "POINT (" + std::to_string(120.0 + (i % 7) * 0.01) + " " +
+                      std::to_string(30.0 + (i % 5) * 0.01) + ")";
+            }
+            milvus::Geometry g(ctx, wkt.c_str());
+            EXPECT_TRUE(g.IsValid()) << wkt;
+            wkbs.emplace_back(g.to_wkb_string());
+        }
+        GEOS_finish_r(ctx);
+    }
+
+    auto full_ds = DataGen(schema, N);
+    auto raw =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+    auto indexed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    raw->LoadFieldData(load_info);
+    indexed->LoadFieldData(load_info);
+
+    // Build the R-Tree from the same column through the production bulk-load
+    // path (empty rows get the placeholder MBR there).
+    // Distinct field/index ids: the build temp dir is process-global and keyed
+    // by them (see QueryBadAllocIsClassifiedAsMemAllocateFailed).
+    auto remote_file = (temp_path_.get() / "rtree_dwithin.parquet").string();
+    milvus::storage::FieldDataMeta dw_field_meta{1, 1, 1, 54138};
+    dw_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    milvus::storage::IndexMeta dw_index_meta{1, 54138, 1, 1};
+    WriteGeometryInsertFile(chunk_manager_, dw_field_meta, remote_file, wkbs);
+    milvus::storage::FileManagerContext fm_ctx(
+        dw_field_meta, dw_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    nlohmann::json build_cfg;
+    build_cfg["insert_files"] = std::vector<std::string>{remote_file};
+    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->UploadUnified({});
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    ASSERT_EQ(rtree_index->Count(), N) << "every row, empties included, must "
+                                          "be in the index";
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema = proto::schema::FieldSchema();
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    info.cache_index =
+        CreateTestCacheIndex("rtree_dwithin_key", std::move(rtree_index));
+    indexed->LoadIndex(info);
+    ASSERT_TRUE(indexed->HasIndex(geo_id));
+    ASSERT_FALSE(raw->HasIndex(geo_id));
+
+    auto run = [&](const SegmentInternalInterface* seg,
+                   const std::string& wkt,
+                   double distance) {
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            wkt,
+            distance);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+        return ExecuteQueryExpr(plan, seg, N, MAX_TIMESTAMP);
+    };
+
+    struct Query {
+        std::string wkt;
+        double distance;
+        // Whether both far rows lie outside this query's radius (the pole
+        // query reaches 6783 km, which covers the polygon at (-10 -10) but
+        // not the point at (125 35); the bitwise comparison above still
+        // holds either way).
+        bool far_rows_pruned;
+    };
+    const std::vector<Query> queries = {
+        {"POINT (115 35)", 500000, true},
+        {"POINT (10 10)", 50000, true},
+        {"POINT (120 30)", 50000, true},
+        {"POINT (-60 -40)", 1, true},
+        {"POINT EMPTY", 1e12, true},
+        {"POINT (0 -29)", pole_distance, false},
+        {"POINT (179.999 0)", 1000, true},
+        {"POINT (-179.999 0)", 1000, true},
+    };
+    for (const auto& q : queries) {
+        SCOPED_TRACE("ST_DWITHIN(geo, '" + q.wkt + "', " +
+                     std::to_string(q.distance) + ")");
+        BitsetType raw_bits = run(raw.get(), q.wkt, q.distance);
+        BitsetType idx_bits = run(indexed.get(), q.wkt, q.distance);
+        ASSERT_EQ(raw_bits.size(), static_cast<size_t>(N));
+        ASSERT_EQ(idx_bits.size(), static_cast<size_t>(N));
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(bool(raw_bits[i]), bool(idx_bits[i]))
+                << "row " << i << " raw=" << bool(raw_bits[i])
+                << " indexed=" << bool(idx_bits[i]);
+        }
+        // Empty rows match nothing, on either path, at any distance.
+        for (int i : empties) {
+            EXPECT_FALSE(raw_bits[i]) << "empty row " << i << " (raw)";
+            EXPECT_FALSE(idx_bits[i]) << "empty row " << i << " (indexed)";
+        }
+        if (q.far_rows_pruned) {
+            for (int i : far_rows) {
+                EXPECT_FALSE(idx_bits[i]) << "far row " << i;
+            }
+        }
+    }
+
+    // The boundary rows are inside 500 km of (115 35) on the exact metric and
+    // must survive the coarse pass.
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT (115 35)", 500000);
+        for (int i : boundary_rows) {
+            EXPECT_TRUE(idx_bits[i])
+                << "boundary row " << i << " pruned by the coarse envelope";
+        }
+        // Cluster rows around (120 30) are ~700 km away: still pruned.
+        for (int i = 1; i < N; i += 2) {
+            if (special.count(i) == 0) {
+                EXPECT_FALSE(idx_bits[i]) << "cluster row " << i;
+            }
+        }
+    }
+    // An empty query point matches nothing (and must not throw).
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT EMPTY", 1e12);
+        EXPECT_EQ(idx_bits.count(), 0u);
+    }
+    // The pole row sits exactly on the boundary: accepted on the raw path, so
+    // the indexed path must not prune it in the coarse pass.
+    {
+        BitsetType raw_bits = run(raw.get(), "POINT (0 -29)", pole_distance);
+        BitsetType idx_bits =
+            run(indexed.get(), "POINT (0 -29)", pole_distance);
+        ASSERT_TRUE(raw_bits[kPoleRow]) << "pole row is not on the boundary";
+        EXPECT_TRUE(idx_bits[kPoleRow]) << "pole row pruned by the envelope";
+    }
+    // Next to the antimeridian, the indexed path keeps the rows on both
+    // sides of +-180 and rejects the ones past 1 km, including the antipodal
+    // row at the same latitude that a full-longitude box would make a
+    // candidate. (The line row is planar-near only to the east query.)
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT (179.999 0)", 1000);
+        for (int i : antimeridian_near) {
+            EXPECT_TRUE(idx_bits[i]) << "antimeridian row " << i;
+        }
+        for (int i : antimeridian_far) {
+            EXPECT_FALSE(idx_bits[i]) << "antimeridian row " << i;
+        }
+    }
+
+    indexed.reset();
+    raw.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS dwithin equivalence test");
+}
+
+namespace {
+using namespace milvus;
+using namespace milvus::query;
+using namespace milvus::segcore;
+
+class GeometryReadCountingSegment : public ChunkedSegmentSealedImpl {
+ public:
+    using ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl;
+
+    std::unique_ptr<DataArray>
+    bulk_subscript(OpContext* op_ctx,
+                   FieldId field_id,
+                   const int64_t* offsets,
+                   int64_t count) const override {
+        if (get_schema()[field_id].get_data_type() == DataType::GEOMETRY) {
+            geometry_reads.insert(
+                geometry_reads.end(), offsets, offsets + count);
+        }
+        return ChunkedSegmentSealedImpl::bulk_subscript(
+            op_ctx, field_id, offsets, count);
+    }
+
+    mutable std::vector<int64_t> geometry_reads;
+};
+
+// Restore the thread's previous GEOS error callback after observing parsing.
+class GeometryParseErrorCounter {
+ public:
+    GeometryParseErrorCounter()
+        : ctx_(GetThreadLocalGEOSContext()),
+          previous_(GEOSContext_setErrorHandler_r(ctx_, Count)),
+          start_(errors_) {
+    }
+
+    ~GeometryParseErrorCounter() {
+        GEOSContext_setErrorHandler_r(ctx_, previous_);
+    }
+
+    size_t
+    count() const {
+        return errors_ - start_;
+    }
+
+ private:
+    static void
+    Count(const char*, ...) {
+        ++errors_;
+    }
+
+    inline static thread_local size_t errors_ = 0;
+    GEOSContextHandle_t ctx_;
+    GEOSMessageHandler previous_;
+    size_t start_;
+};
+
+struct MaskedGISSegment {
+    SchemaPtr schema;
+    std::unique_ptr<GeometryReadCountingSegment> sealed;
+    FieldId pk_id;
+    FieldId geo_id;
+    int64_t segment_id;
+};
+
+MaskedGISSegment
+MakeGeometrySegment(const std::vector<std::string>& wkbs,
+                    const std::vector<uint8_t>& validity) {
+    static std::atomic<int64_t> next_segment{5501800};
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("id", DataType::INT64);
+    const auto geo = schema->AddDebugField("geo", DataType::GEOMETRY, true);
+    schema->set_primary_field_id(pk);
+    const auto segment_id = next_segment.fetch_add(1);
+    auto sealed = std::make_unique<GeometryReadCountingSegment>(
+        schema, empty_index_meta, SegcoreConfig::default_config(), segment_id);
+    const auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                        .GetRemoteChunkManager();
+    std::vector<int64_t> ids(wkbs.size());
+    std::iota(ids.begin(), ids.end(), 0);
+    const std::vector<int64_t> timestamps(wkbs.size(), 0);
+    for (const auto field_id : {RowFieldID, pk, TimestampFieldID}) {
+        auto data =
+            storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+        const auto& values = field_id == TimestampFieldID ? timestamps : ids;
+        data->FillFieldData(values.data(), values.size());
+        sealed->LoadFieldData(PrepareSingleFieldInsertBinlog(
+            1, 1, segment_id, field_id.get(), {data}, cm));
+    }
+    auto geometry =
+        storage::CreateFieldData(DataType::GEOMETRY, DataType::NONE, true);
+    geometry->FillFieldData(wkbs.data(), validity.data(), wkbs.size(), 0);
+    sealed->LoadFieldData(PrepareSingleFieldInsertBinlog(
+        1, 1, segment_id, geo.get(), {geometry}, cm));
+    return {schema, std::move(sealed), pk, geo, segment_id};
+}
+
+class GISBitmapCountingRTree : public index::RTreeIndex<std::string> {
+ public:
+    GISBitmapCountingRTree(const storage::FileManagerContext& context,
+                           int& queries)
+        : index::RTreeIndex<std::string>(context), queries_(queries) {
+    }
+
+    const TargetBitmap
+    Query(const DatasetPtr& dataset) override {
+        ++queries_;
+        return index::RTreeIndex<std::string>::Query(dataset);
+    }
+
+ private:
+    int& queries_;
+};
+
+void
+InstallMaskedGeometryIndex(MaskedGISSegment& segment,
+                           const std::vector<std::string>& wkbs,
+                           const std::vector<uint8_t>& validity,
+                           const storage::FileManagerContext& context,
+                           int& queries) {
+    auto rtree = std::make_unique<GISBitmapCountingRTree>(context, queries);
+    rtree->InitForBuildIndex(true);
+    for (size_t row = 0; row < wkbs.size(); ++row) {
+        rtree->AddGeometry(
+            wkbs[row], row, (validity[row / 8] & (1u << (row % 8))) != 0);
+    }
+    LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = segment.segment_id;
+    info.field_id = segment.geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.schema.set_nullable(true);
+    info.index_params["index_type"] = index::RTREE_INDEX_TYPE;
+    info.cache_index = CreateTestCacheIndex(
+        "gis_bitmap_" + std::to_string(segment.segment_id), std::move(rtree));
+    segment.sealed->LoadIndex(info);
+}
+
+TEST_F(RTreeIndexTest, BitmapInputLimitsIndexedDWithinRefinement) {
+    constexpr int N = 15;
+    const std::vector<uint8_t> validity{0xBD, 0x7F};  // NULL rows 1 and 6
+    auto wkbs = std::vector<std::string>(N, CreateWkbFromWkt("POINT(0 0)"));
+    wkbs[4] = CreateWkbFromWkt("POINT(0.01 0)");
+    // Inside the coarse box, but outside the exact 2000-metre circle.
+    wkbs[14] = CreateWkbFromWkt("POINT(0.015 0.015)");
+
+    for (const bool cache_enabled : {false, true}) {
+        SCOPED_TRACE(cache_enabled);
+        GeometryCacheFlagGuard cache_guard(cache_enabled);
+        auto segment = MakeGeometrySegment(wkbs, validity);
+        int coarse_queries = 0;
+        field_meta_.field_schema.set_nullable(true);
+        storage::FileManagerContext index_context(
+            field_meta_, index_meta_, chunk_manager_, fs_);
+        InstallMaskedGeometryIndex(
+            segment, wkbs, validity, index_context, coarse_queries);
+        auto* sealed = segment.sealed.get();
+        ASSERT_EQ(sealed->GetGeometryCache(segment.geo_id) != nullptr,
+                  cache_enabled);
+
+        auto typed = std::make_shared<expr::GISFunctionFilterExpr>(
+            expr::ColumnInfo(segment.geo_id, DataType::GEOMETRY, {}, true),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            "POINT(0 0)",
+            2000.0);
+        exec::PhyGISFunctionFilterExpr physical(
+            {}, typed, "masked-dwithin", nullptr, sealed, N, 4, 0);
+        ASSERT_TRUE(physical.UseIndexCursor());
+        exec::QueryContext query("masked-dwithin", sealed, N, MAX_TIMESTAMP);
+        exec::ExecContext execution(&query);
+        exec::EvalCtx context(&execution);
+
+        auto evaluate = [&](std::vector<bool> mask,
+                            int start,
+                            const std::vector<bool>& expected) {
+            TargetBitmap input(mask.size());
+            for (size_t row = 0; row < mask.size(); ++row) {
+                input[row] = mask[row];
+            }
+            context.set_bitmap_input(std::move(input));
+            VectorPtr result;
+            physical.Eval(context, result);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), expected.size());
+            TargetBitmapView bits(column->GetRawData(), column->size());
+            TargetBitmapView valid(column->GetValidRawData(), column->size());
+            for (size_t row = 0; row < expected.size(); ++row) {
+                EXPECT_EQ(bits[row], expected[row]) << "row " << start + row;
+                EXPECT_EQ(valid[row], start + row != 1 && start + row != 6)
+                    << "row " << start + row;
+            }
+        };
+
+        // No exact work is needed yet, including for later batches.
+        evaluate({false, false, false, false}, 0, {false, false, false, false});
+        EXPECT_TRUE(sealed->geometry_reads.empty());
+        evaluate({true, false, true, false}, 4, {true, false, false, false});
+        if (!cache_enabled) {
+            EXPECT_EQ(sealed->geometry_reads, (std::vector<int64_t>{4}));
+        }
+        // A parent that short-circuits an entire batch still advances GIS.
+        physical.MoveCursor();
+        evaluate({true, false, true}, 12, {true, false, false});
+        if (!cache_enabled) {
+            EXPECT_EQ(sealed->geometry_reads,
+                      (std::vector<int64_t>{4, 12, 14}));
+        }
+        EXPECT_EQ(coarse_queries, 1);
+
+        // NOT must still reject NULL, including the selected NULL row 6.
+        auto negated = std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, typed);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           negated);
+        const auto result = ExecuteQueryExpr(plan, sealed, N, MAX_TIMESTAMP);
+        for (int row = 0; row < N; ++row) {
+            EXPECT_EQ(result[row], row == 14) << "row " << row;
+        }
+    }
+}
+
+TEST_F(RTreeIndexTest, BitmapInputSkipsRawGeometryParsing) {
+    constexpr int N = 11;
+    const std::vector<uint8_t> validity{0xBF, 0x07};  // NULL row 6
+    auto wkbs = std::vector<std::string>(N, CreateWkbFromWkt("POINT(0 0)"));
+    wkbs[1] = "invalid wkb";
+    wkbs[9] = "invalid wkb";
+    const std::vector<std::vector<bool>> masks{{true, false, true, false},
+                                               {false, true, true, true},
+                                               {true, false, true}};
+
+    for (const bool cache_enabled : {false, true}) {
+        GeometryCacheFlagGuard cache_guard(cache_enabled);
+        for (const bool growing : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "cache=" << cache_enabled
+                                              << ", growing=" << growing);
+            auto segment = MakeGeometrySegment(wkbs, validity);
+            const auto schema = segment.schema;
+            ScopedSegcoreConfigRestore config_restore;
+            auto config = SegcoreConfig::default_config();
+            config.set_chunk_rows(3);  // Eval batches cross data chunks.
+            config.set_enable_interim_segment_index(false);
+            std::unique_ptr<SegmentGrowing> growing_segment;
+            SegmentInternalInterface* source = segment.sealed.get();
+            if (growing) {
+                growing_segment =
+                    CreateGrowingSegment(schema, empty_index_meta, 0, config);
+                auto data = DataGen(schema, N);
+                for (auto& field : *data.raw_->mutable_fields_data()) {
+                    if (field.field_id() == segment.geo_id.get()) {
+                        auto* geometry =
+                            field.mutable_scalars()->mutable_geometry_data();
+                        geometry->clear_data();
+                        field.clear_valid_data();
+                        for (int row = 0; row < N; ++row) {
+                            geometry->add_data(wkbs[row]);
+                            field.add_valid_data(row != 6);
+                        }
+                    }
+                }
+                growing_segment->PreInsert(N);
+                growing_segment->Insert(0,
+                                        N,
+                                        data.row_ids_.data(),
+                                        data.timestamps_.data(),
+                                        data.raw_);
+                source = growing_segment.get();
+            }
+            ASSERT_EQ(source->GetGeometryCache(segment.geo_id) != nullptr,
+                      cache_enabled);
+
+            for (const auto op :
+                 {proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+                  proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                  proto::plan::GISFunctionFilterExpr_GISOp_STIsValid}) {
+                SCOPED_TRACE(static_cast<int>(op));
+                auto typed = std::make_shared<expr::GISFunctionFilterExpr>(
+                    expr::ColumnInfo(
+                        segment.geo_id, DataType::GEOMETRY, {}, true),
+                    op,
+                    "POINT(0 0)",
+                    2000.0);
+                exec::PhyGISFunctionFilterExpr physical(
+                    {}, typed, "masked-raw-gis", nullptr, source, N, 4, 0);
+                ASSERT_FALSE(physical.UseIndexCursor());
+                exec::QueryContext query(
+                    "masked-raw-gis", source, N, MAX_TIMESTAMP);
+                exec::ExecContext execution(&query);
+                exec::EvalCtx context(&execution);
+                GeometryParseErrorCounter parse_errors;
+                int start = 0;
+                for (const auto& mask : masks) {
+                    TargetBitmap input(mask.size());
+                    for (size_t row = 0; row < mask.size(); ++row) {
+                        input[row] = mask[row];
+                    }
+                    context.set_bitmap_input(std::move(input));
+                    VectorPtr result;
+                    physical.Eval(context, result);
+                    auto column =
+                        std::dynamic_pointer_cast<ColumnVector>(result);
+                    ASSERT_NE(column, nullptr);
+                    ASSERT_EQ(column->size(), mask.size());
+                    TargetBitmapView bits(column->GetRawData(), column->size());
+                    TargetBitmapView valid(column->GetValidRawData(),
+                                           column->size());
+                    for (size_t row = 0; row < mask.size(); ++row) {
+                        EXPECT_EQ(bits[row], mask[row] && start + row != 6)
+                            << "row " << start + row;
+                        EXPECT_EQ(valid[row], start + row != 6)
+                            << "row " << start + row;
+                    }
+                    start += mask.size();
+                }
+                EXPECT_EQ(parse_errors.count(), 0u)
+                    << "masked corrupt WKB must not reach the GEOS parser";
+            }
+        }
+    }
+}
+
+}  // namespace

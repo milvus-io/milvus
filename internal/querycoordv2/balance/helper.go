@@ -33,7 +33,7 @@ type BalanceReplicaHelper struct {
 // When streaming service is enabled, it uses the compatibility helper;
 // otherwise it returns the replica's RW nodes directly.
 func (h *BalanceReplicaHelper) GetRWNodesForChannels(replica *meta.Replica) []int64 {
-	if streamingutil.IsStreamingServiceEnabled() {
+	if streamingutil.UseStreamingQueryNodeAsDelegator() {
 		rwNodes, _ := utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
 		return rwNodes
 	}
@@ -44,7 +44,7 @@ func (h *BalanceReplicaHelper) GetRWNodesForChannels(replica *meta.Replica) []in
 // When streaming service is enabled, it uses the compatibility helper;
 // otherwise it returns the replica's RW and RO nodes directly.
 func (h *BalanceReplicaHelper) GetRWAndRONodesForChannels(replica *meta.Replica) (rwNodes []int64, roNodes []int64) {
-	if streamingutil.IsStreamingServiceEnabled() {
+	if streamingutil.UseStreamingQueryNodeAsDelegator() {
 		return utils.GetChannelRWAndRONodesFor260(replica, h.nodeManager)
 	}
 	return replica.GetRWNodes(), replica.GetRONodes()

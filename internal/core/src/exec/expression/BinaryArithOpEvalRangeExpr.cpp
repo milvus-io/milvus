@@ -48,7 +48,10 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
     auto data_type = expr_->column_.data_type_;
-    if (expr_->column_.element_level_) {
+    const bool is_nested_array =
+        data_type == DataType::ARRAY &&
+        expr_->column_.element_type_ == DataType::ARRAY;
+    if (expr_->column_.element_level_ && !is_nested_array) {
         data_type = expr_->column_.element_type_;
     }
     switch (data_type) {
@@ -105,14 +108,51 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::ARRAY: {
+            const auto is_array_length =
+                expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength;
+            if (is_nested_array && !is_array_length) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for recursive ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    if (is_array_length) {
+                        if (is_nested_array && expr_->column_.element_level_) {
+                            result =
+                                ExecArrayLength<ArrayValueView, int64_t, true>(
+                                    input);
+                        } else if (is_native_list_array_) {
+                            result =
+                                ExecArrayLength<ArrayValueView, int64_t, false>(
+                                    input);
+                        } else {
+                            result = ExecArrayLength<ArrayView, int64_t, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<int64_t>(input);
+                    }
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForArray<double>(input);
+                    if (is_array_length) {
+                        if (is_nested_array && expr_->column_.element_level_) {
+                            result =
+                                ExecArrayLength<ArrayValueView, double, true>(
+                                    input);
+                        } else if (is_native_list_array_) {
+                            result =
+                                ExecArrayLength<ArrayValueView, double, false>(
+                                    input);
+                        } else {
+                            result = ExecArrayLength<ArrayView, double, false>(
+                                input);
+                        }
+                    } else {
+                        result = ExecRangeVisitorImplForArray<double>(input);
+                    }
                     break;
                 }
                 default: {
@@ -125,14 +165,22 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VECTOR_ARRAY: {
+            if (expr_->arith_op_type_ !=
+                proto::plan::ArithOpType::ArrayLength) {
+                ThrowInfo(UnexpectedError,
+                          "unsupported arith type for VECTOR_ARRAY: {}",
+                          expr_->arith_op_type_);
+            }
             auto value_type = expr_->value_.val_case();
             switch (value_type) {
                 case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForVectorArray<int64_t>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, int64_t, false>(input);
                     break;
                 }
                 case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForVectorArray<double>(input);
+                    result =
+                        ExecArrayLength<VectorArrayView, double, false>(input);
                     break;
                 }
                 default: {
@@ -656,6 +704,8 @@ template <typename ValueType>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     OffsetVector* input) {
+    AssertInfo(expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength,
+               "ARRAY length must use ExecArrayLength");
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
@@ -664,27 +714,21 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->value_);
-        if (expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength) {
-            right_operand_arg_.SetValue(ValueType());
-        } else {
-            right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
-        }
+        right_operand_arg_.SetValue<ValueType>(expr_->right_operand_);
         arg_inited_ = true;
     }
 
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
                                        TargetBitmap(real_batch_size, true));
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    int index = -1;
-    if (expr_->column_.nested_path_.size() > 0) {
-        index = std::stoi(expr_->column_.nested_path_[0]);
-    }
+    int index = ParseArraySubscript(expr_->column_.nested_path_);
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
     auto value = value_arg_.GetValue<ValueType>();
@@ -699,47 +743,39 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             "division or modulus by zero in Array field arithmetic expression");
     }
 
-#define BinaryArithRangeArrayCompare(cmp)                       \
-    do {                                                        \
-        for (size_t i = 0; i < size; ++i) {                     \
-            auto offset = i;                                    \
-            if constexpr (filter_type == FilterType::random) {  \
-                offset = (offsets) ? offsets[i] : i;            \
-            }                                                   \
-            if (valid_data && !valid_data[offset]) {            \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            if (index >= data[offset].length()) {               \
-                res[i] = false;                                 \
-                valid_res[i] = false;                           \
-                continue;                                       \
-            }                                                   \
-            auto value = data[offset].get_data<GetType>(index); \
-            res[i] = (cmp);                                     \
-        }                                                       \
+#define BinaryArithRangeArrayCompare(cmp)                                 \
+    do {                                                                  \
+        for (size_t i = 0; i < size; ++i) {                               \
+            auto offset = i;                                              \
+            if constexpr (filter_type == FilterType::random) {            \
+                offset = (offsets) ? offsets[i] : i;                      \
+            }                                                             \
+            if (valid_data && !valid_data[offset]) {                      \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            if (!HasArrayElementAt(data[offset], index)) {                \
+                res[i] = false;                                           \
+                valid_res[i] = false;                                     \
+                continue;                                                 \
+            }                                                             \
+            auto value =                                                  \
+                data[offset].template get_data_unchecked<GetType>(index); \
+            res[i] = (cmp);                                               \
+        }                                                                 \
     } while (false)
 
-#define BinaryArithRangeArrayLengthCompate(cmp)                \
-    do {                                                       \
-        for (size_t i = 0; i < size; ++i) {                    \
-            auto offset = i;                                   \
-            if constexpr (filter_type == FilterType::random) { \
-                offset = (offsets) ? offsets[i] : i;           \
-            }                                                  \
-            if (valid_data && !valid_data[offset]) {           \
-                res[i] = valid_res[i] = false;                 \
-                continue;                                      \
-            }                                                  \
-            res[i] = (cmp);                                    \
-        }                                                      \
-    } while (false)
-
-    auto execute_sub_batch =
-        [ op_type,
-          arith_type ]<FilterType filter_type = FilterType::sequential>(
-            const ArrayView* data,
+    if (is_nested_array_field_) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "nested ARRAY field {} does not support element "
+                  "arithmetic",
+                  field_id_.get());
+    }
+    auto make_sub_batch = [&]<typename ArrayType>() {
+        return [ op_type,
+                 arith_type ]<FilterType filter_type = FilterType::sequential>(
+            const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
@@ -748,381 +784,350 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
             ValueType val,
             ValueType right_operand,
             int index) {
-        if (arith_type != proto::plan::ArithOpType::ArrayLength) {
             AssertInfo(index >= 0,
                        "array arithmetic predicate requires nested path");
-        }
-        // If data is nullptr, this chunk was skipped by SkipIndex.
-        // Nothing to do here since the caller has already handled valid_res.
-        if (data == nullptr) {
-            return;
-        }
-        switch (op_type) {
-            case proto::plan::OpType::Equal: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand ==
-                                                     val);
+            // If data is nullptr, this chunk was skipped by SkipIndex.
+            // Nothing to do here since the caller has already handled valid_res.
+            if (data == nullptr) {
+                return;
+            }
+            switch (op_type) {
+                case proto::plan::OpType::Equal: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand == val);
 
-                        break;
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) == val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) ==
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) ==
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) ==
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand ==
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) == val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) == val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::NotEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand !=
-                                                     val);
-                        break;
+                case proto::plan::OpType::NotEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) != val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) !=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) !=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) !=
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand !=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) != val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) != val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >
-                                                     val);
-                        break;
+                case proto::plan::OpType::GreaterThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(value + right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(value - right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(value * right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(value / right_operand >
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) > val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) >
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) >
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) >
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) > val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) > val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::GreaterEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand >=
-                                                     val);
-                        break;
+                case proto::plan::OpType::GreaterEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) >= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) >=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) >=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) >=
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand >=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) >= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) >= val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessThan: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <
-                                                     val);
-                        break;
+                case proto::plan::OpType::LessThan: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(value + right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(value - right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(value * right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(value / right_operand <
+                                                         val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) < val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) <
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) <
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) <
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) < val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) < val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
-            }
-            case proto::plan::OpType::LessEqual: {
-                switch (arith_type) {
-                    case proto::plan::ArithOpType::Add: {
-                        BinaryArithRangeArrayCompare(value + right_operand <=
-                                                     val);
-                        break;
+                case proto::plan::OpType::LessEqual: {
+                    switch (arith_type) {
+                        case proto::plan::ArithOpType::Add: {
+                            BinaryArithRangeArrayCompare(
+                                value + right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Sub: {
+                            BinaryArithRangeArrayCompare(
+                                value - right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mul: {
+                            BinaryArithRangeArrayCompare(
+                                value * right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Div: {
+                            BinaryArithRangeArrayCompare(
+                                value / right_operand <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::Mod: {
+                            BinaryArithRangeArrayCompare(
+                                safe_mod(value, right_operand) <= val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitAnd: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) & int64_t(right_operand)) <=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitOr: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) | int64_t(right_operand)) <=
+                                val);
+                            break;
+                        }
+                        case proto::plan::ArithOpType::BitXor: {
+                            BinaryArithRangeArrayCompare(
+                                (int64_t(value) ^ int64_t(right_operand)) <=
+                                val);
+                            break;
+                        }
+                        default:
+                            ThrowInfo(
+                                UnexpectedError,
+                                fmt::format("unsupported arith type for binary "
+                                            "arithmetic eval expr: {}",
+                                            arith_type));
                     }
-                    case proto::plan::ArithOpType::Sub: {
-                        BinaryArithRangeArrayCompare(value - right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mul: {
-                        BinaryArithRangeArrayCompare(value * right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Div: {
-                        BinaryArithRangeArrayCompare(value / right_operand <=
-                                                     val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::Mod: {
-                        BinaryArithRangeArrayCompare(
-                            safe_mod(value, right_operand) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::ArrayLength: {
-                        BinaryArithRangeArrayLengthCompate(
-                            data[offset].length() <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitAnd: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) & int64_t(right_operand)) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitOr: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) | int64_t(right_operand)) <= val);
-                        break;
-                    }
-                    case proto::plan::ArithOpType::BitXor: {
-                        BinaryArithRangeArrayCompare(
-                            (int64_t(value) ^ int64_t(right_operand)) <= val);
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            UnexpectedError,
-                            fmt::format("unsupported arith type for binary "
-                                        "arithmetic eval expr: {}",
-                                        arith_type));
+                    break;
                 }
-                break;
+                default:
+                    ThrowInfo(UnexpectedError,
+                              "unsupported operator type for binary "
+                              "arithmetic eval expr: {}",
+                              op_type);
             }
-            default:
-                ThrowInfo(UnexpectedError,
-                          "unsupported operator type for binary "
-                          "arithmetic eval expr: {}",
-                          op_type);
-        }
+        };
     };
 
-    int64_t processed_size;
-    if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    value,
-                                                    right_operand,
-                                                    index);
-    } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(execute_sub_batch,
-                                                              std::nullptr_t{},
-                                                              res,
-                                                              valid_res,
-                                                              value,
-                                                              right_operand,
-                                                              index);
-    }
+    int64_t processed_size = ProcessArrayRows(
+        make_sub_batch, input, res, valid_res, value, right_operand, index);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",
@@ -1131,25 +1136,49 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ArrayType, typename ValueType, bool ElementLevel>
 VectorPtr
-PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
-    OffsetVector* input) {
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLength(OffsetVector* input) {
     if (expr_->arith_op_type_ != proto::plan::ArithOpType::ArrayLength) {
         ThrowInfo(UnexpectedError,
-                  "unsupported arith type for vector array field: {}",
+                  "unsupported arith type for ARRAY length expression: {}",
                   expr_->arith_op_type_);
     }
+    AssertInfo(expr_->column_.element_level_ == ElementLevel,
+               "ARRAY length element-level mismatch: plan={}, executor={}",
+               expr_->column_.element_level_,
+               ElementLevel);
+    // array_length(s[i][tags]): the length of struct element i's inner Array.
+    int nested_index = kWholeArrayOperand;
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        if (!ElementLevel && IsNestedArrayElementOperand()) {
+            nested_index = ParseArraySubscript(expr_->column_.nested_path_);
+        } else {
+            AssertInfo(
+                expr_->column_.nested_path_.empty(),
+                "recursive ARRAY length does not support nested path now");
+        }
+    }
 
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
     }
 
     if (!arg_inited_) {
         value_arg_.SetValue<ValueType>(expr_->value_);
         arg_inited_ = true;
+    }
+
+    if constexpr (std::is_same_v<ArrayType, ArrayView> && !ElementLevel) {
+        if (UseArrayChunkLengths()) {
+            return ExecArrayLengthFromChunks<ValueType>(input, real_batch_size);
+        }
     }
 
     auto res_vec =
@@ -1161,7 +1190,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
     auto op_type = expr_->op_type_;
     auto value = value_arg_.GetValue<ValueType>();
 
-    auto compare_length = [op_type, value](int length) {
+    auto compare_length = [op_type, value](int64_t length) {
         switch (op_type) {
             case proto::plan::OpType::Equal:
                 return length == value;
@@ -1177,21 +1206,22 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                 return length <= value;
             default:
                 ThrowInfo(UnexpectedError,
-                          "unsupported operator type for vector array "
-                          "length eval expr: {}",
+                          "unsupported operator type for ARRAY length "
+                          "expression: {}",
                           op_type);
         }
         return false;
     };
 
-    auto execute_sub_batch = [compare_length]<FilterType filter_type =
-                                                  FilterType::sequential>(
-        const VectorArrayView* data,
-        ValidityView valid_data,
-        const int32_t* offsets,
-        const int size,
-        TargetBitmapView res,
-        TargetBitmapView valid_res) {
+    auto execute_sub_batch =
+        [ compare_length,
+          nested_index ]<FilterType filter_type = FilterType::sequential>(
+            const ArrayType* data,
+            ValidityView valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
         if (data == nullptr) {
             return;
         }
@@ -1204,17 +1234,41 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            res[i] = compare_length(data[offset].length());
+            if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                if (nested_index >= 0) {
+                    auto inner =
+                        NestedArrayElementAt(data[offset], nested_index);
+                    if (!inner.has_value()) {
+                        res[i] = valid_res[i] = false;
+                        continue;
+                    }
+                    res[i] =
+                        compare_length(static_cast<int64_t>(inner->size()));
+                    continue;
+                }
+            }
+            res[i] = compare_length(
+                static_cast<int64_t>(GetArrayRowSize(data[offset])));
         }
     };
 
     int64_t processed_size = 0;
     if (has_offset_input_) {
-        processed_size = ProcessDataByOffsets<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessElementLevelByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        } else {
+            processed_size = ProcessDataByOffsets<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, input, res, valid_res);
+        }
     } else {
-        processed_size = ProcessDataChunks<VectorArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        } else {
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        }
     }
 
     AssertInfo(processed_size == real_batch_size,
@@ -1222,6 +1276,143 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForVectorArray(
                "expect batch size {}",
                processed_size,
                real_batch_size);
+    return res_vec;
+}
+
+bool
+PhyBinaryArithOpEvalRangeExpr::UseArrayChunkLengths() const {
+    if (use_array_chunk_lengths_.has_value()) {
+        return *use_array_chunk_lengths_;
+    }
+    const auto& column = expr_->column_;
+    bool use =
+        expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength &&
+        column.data_type_ == DataType::ARRAY &&
+        column.element_type_ != DataType::ARRAY && !column.element_level_ &&
+        column.nested_path_.empty() &&
+        segment_->type() == SegmentType::Sealed &&
+        // Native-list ARRAY columns are ColumnarArrayChunk, which has
+        // no per-row (offset, length) table; they keep the view path.
+        !(*segment_->get_schema_snapshot())[field_id_].is_native_list_array();
+    if (use) {
+        // Plain and struct-member ARRAY columns on sealed segments are made
+        // of ArrayChunk (see ChunkedArrayColumn / ProxyChunkColumn
+        // ArrayViews); keep the column for the chunk loop.
+        auto self = const_cast<PhyBinaryArithOpEvalRangeExpr*>(this);
+        self->array_length_column_ =
+            snapshot_ ? snapshot_->GetDataScanResources(field_id_)
+                      : segment_->GetChunkedColumn(field_id_);
+        use = array_length_column_ != nullptr;
+    }
+    use_array_chunk_lengths_ = use;
+    return use;
+}
+
+template <typename ValueType>
+VectorPtr
+PhyBinaryArithOpEvalRangeExpr::ExecArrayLengthFromChunks(
+    OffsetVector* input, int64_t real_batch_size) {
+    auto res_vec =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
+    const auto value = value_arg_.GetValue<ValueType>();
+    const auto& column = *array_length_column_;
+
+    // The operator is fixed per expression: select the comparison once and
+    // run a tight loop over `count` rows of one chunk starting at `first`
+    // (sequential) or at the rows named by `rows` (offset input).
+    auto fill = [&](const ArrayChunk& chunk,
+                    auto&& row_in_chunk,
+                    int64_t out_start,
+                    int64_t count) {
+        auto run = [&](auto cmp) {
+            for (int64_t i = 0; i < count; ++i) {
+                const auto row = row_in_chunk(i);
+                if (!chunk.isValid(row)) {
+                    res[out_start + i] = false;
+                    valid_res[out_start + i] = false;
+                    continue;
+                }
+                if (cmp(static_cast<int64_t>(chunk.LengthAt(row)))) {
+                    res[out_start + i] = true;
+                }
+            }
+        };
+        switch (expr_->op_type_) {
+            case proto::plan::OpType::Equal:
+                run([value](int64_t len) { return len == value; });
+                break;
+            case proto::plan::OpType::NotEqual:
+                run([value](int64_t len) { return len != value; });
+                break;
+            case proto::plan::OpType::GreaterThan:
+                run([value](int64_t len) { return len > value; });
+                break;
+            case proto::plan::OpType::GreaterEqual:
+                run([value](int64_t len) { return len >= value; });
+                break;
+            case proto::plan::OpType::LessThan:
+                run([value](int64_t len) { return len < value; });
+                break;
+            case proto::plan::OpType::LessEqual:
+                run([value](int64_t len) { return len <= value; });
+                break;
+            default:
+                ThrowInfo(UnexpectedError,
+                          "unsupported operator type for ARRAY length "
+                          "expression: {}",
+                          expr_->op_type_);
+        }
+    };
+
+    if (has_offset_input_) {
+        // Offset input (iterative filter): arbitrary rows; pin each chunk
+        // once per run of rows that fall into it.
+        std::vector<int64_t> rows(input->begin(), input->end());
+        auto [cids, offsets_in_chunk] =
+            column.GetChunkIDsByOffsets(rows.data(), real_batch_size);
+        int64_t i = 0;
+        while (i < real_batch_size) {
+            int64_t j = i + 1;
+            while (j < real_batch_size && cids[j] == cids[i]) {
+                ++j;
+            }
+            auto pw = column.GetChunk(op_ctx_, cids[i]);
+            const auto& chunk = *static_cast<const ArrayChunk*>(pw.get());
+            fill(
+                chunk,
+                [&, i](int64_t k) { return offsets_in_chunk[i + k]; },
+                i,
+                j - i);
+            i = j;
+        }
+        return res_vec;
+    }
+
+    // Sequential batch starting at the data cursor; one chunk at a time.
+    int64_t done = 0;
+    while (done < real_batch_size) {
+        auto [cid, first] =
+            column.GetChunkIDByOffset(current_data_global_pos_ + done);
+        auto pw = column.GetChunk(op_ctx_, cid);
+        const auto& chunk = *static_cast<const ArrayChunk*>(pw.get());
+        const int64_t count =
+            std::min<int64_t>(chunk.RowNums() - first, real_batch_size - done);
+        AssertInfo(count > 0,
+                   "empty chunk range at row {}",
+                   current_data_global_pos_ + done);
+        fill(
+            chunk,
+            [first = static_cast<int64_t>(first)](int64_t k) {
+                return first + k;
+            },
+            done,
+            count);
+        done += count;
+    }
+    MoveCursorForData();
     return res_vec;
 }
 

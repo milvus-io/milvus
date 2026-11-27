@@ -196,6 +196,15 @@ RTreeIndexWrapper::add_geometry(const uint8_t* wkb_data,
     // placeholder MBR and still index the row: the R-tree is only a coarse
     // filter, the exact predicate refines it out, and dropping the row here
     // would desynchronize the index row count from the segment row count.
+    //
+    // "The exact predicate refines it out" is a contract the predicates must
+    // uphold, not a property of the placeholder: an empty row's placeholder is
+    // only reachable by a query envelope covering the origin, so any predicate
+    // that accepts an empty row would match it on the raw path but not here.
+    // Geometry::dwithin therefore rejects empty operands (GEOS would report
+    // distance 0 to them, issue #54138), the spatial predicates are false for
+    // empty operands in GEOS, and ST_Equals with an empty query geometry falls
+    // back to a full candidate scan in query_candidates below.
     double minX = 0, minY = 0, maxX = 0, maxY = 0;
     if (!get_bounding_box(geos.geom, geos.ctx, minX, minY, maxX, maxY)) {
         static std::atomic<int64_t> last_envelope_log_us{0};
@@ -250,10 +259,13 @@ RTreeIndexWrapper::bulk_load_from_field_data(
     // drops a row -- so the index row count stays in lockstep with the segment
     // rows on both, and exact refinement tolerates the placeholder
     // (Geometry::TryParseFromWkb -> skip) in every configuration, cache on or
-    // off. A corrupt/empty row can never satisfy exact refinement, so the
-    // placeholder is always refined out and correctness is unaffected; the only
-    // cost is that an origin-covering query pays refinement for it (see the
-    // add_geometry tradeoff note). Genuinely null rows are still skipped below.
+    // off. A corrupt row can never satisfy exact refinement, and an empty row
+    // is rejected by every predicate (Geometry::dwithin rejects empty operands
+    // explicitly; ST_Equals with an empty query scans all candidates -- see
+    // the contract note in add_geometry), so the placeholder is always refined
+    // out and correctness is unaffected; the only cost is that an
+    // origin-covering query pays refinement for it (see the add_geometry
+    // tradeoff note). Genuinely null rows are still skipped below.
     std::vector<Value> local_values;
     local_values.reserve(1024);
     int64_t absolute_offset = 0;

@@ -515,8 +515,11 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 	// depends on the snapshot just generated.
 	d.genSnapshot()
 	if d.idfOracle != nil {
-		d.idfOracle.SetNext(d.current.Load())
+		// Mark the growing segments replaced by sealed ones before publishing the target: the sync of this
+		// target counts their sealed stats and must drop the growing ones in the same step. SetNext syncs the
+		// first target before returning and later ones may sync before a mark placed after it.
 		d.idfOracle.LazyRemoveGrowings(action.GetTargetVersion(), redundantGrowings...)
+		d.idfOracle.SetNext(d.current.Load())
 	}
 	d.updateServiceable("SyncTargetVersion")
 

@@ -110,29 +110,48 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 	if err != nil {
 		return nil, err
 	}
+	genValidData := func() ([]bool, error) {
+		if len(nullPercent) > 1 {
+			return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
+		}
+		var validData []bool
+		if len(nullPercent) == 0 || nullPercent[0] == 50 {
+			validData = testutils.GenerateBoolArray(rows)
+		} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
+			validData = make([]bool, rows)
+		} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
+			validData = make([]bool, rows)
+			for i := range validData {
+				validData[i] = true
+			}
+		} else {
+			return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent(%d)", nullPercent)
+		}
+		return validData, nil
+	}
+
+	// Struct sub-fields are generated per struct below, so that a null struct
+	// row is null in every sub-field.
+	structSubFieldIDs := make(map[int64]bool)
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			structSubFieldIDs[subField.GetFieldID()] = true
+		}
+	}
+
 	// Pre-generate validData for nullable fields to determine sparse storage size
 	validDataMap := make(map[int64][]bool)
-	allFields := typeutil.GetAllFieldSchemas(schema)
+	allFields := lo.Filter(typeutil.GetAllFieldSchemas(schema), func(f *schemapb.FieldSchema, _ int) bool {
+		return !structSubFieldIDs[f.GetFieldID()]
+	})
 	for _, f := range allFields {
 		if f.GetAutoID() || f.IsFunctionOutput {
 			continue
 		}
 		if f.GetNullable() {
-			if len(nullPercent) > 1 {
-				return nil, merr.WrapErrParameterInvalidMsg("the length of nullPercent is wrong")
-			}
-			var validData []bool
-			if len(nullPercent) == 0 || nullPercent[0] == 50 {
-				validData = testutils.GenerateBoolArray(rows)
-			} else if len(nullPercent) == 1 && nullPercent[0] == 100 {
-				validData = make([]bool, rows)
-			} else if len(nullPercent) == 1 && nullPercent[0] == 0 {
-				validData = make([]bool, rows)
-				for i := range validData {
-					validData[i] = true
-				}
-			} else {
-				return nil, merr.WrapErrParameterInvalidMsg("not support the number of nullPercent(%d)", nullPercent)
+			validData, err := genValidData()
+			if err != nil {
+				return nil, err
 			}
 			validDataMap[f.FieldID] = validData
 		}
@@ -292,7 +311,463 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 			insertData.Data[f.FieldID].AppendValidDataRows(validData)
 		}
 	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if err := fillStructArrayInsertData(insertData, structField, rows, genValidData); err != nil {
+			return nil, err
+		}
+	}
 	return insertData, nil
+}
+
+// fillStructArrayInsertData generates the sub-field columns of one struct field.
+// Row nulls are shared by all sub-fields and exist only when the struct and
+// every sub-field are nullable. Every non-null row has testutils.ElemCountOfArray elements. Legacy
+// sub-fields use the dense generators; native-list sub-fields (element-nullable
+// scalar Array, nested Array, element-nullable ArrayOfVector) follow the null
+// pattern of the nativeList* helpers, in the layout import readers produce.
+func fillStructArrayInsertData(insertData *storage.InsertData, structField *schemapb.StructArrayFieldSchema, rows int, genValidData func() ([]bool, error)) error {
+	subFields := structField.GetFields()
+	if len(subFields) == 0 {
+		return nil
+	}
+	var rowValid []bool
+	if structField.GetNullable() && lo.EveryBy(subFields, func(f *schemapb.FieldSchema) bool { return f.GetNullable() }) {
+		var err error
+		rowValid, err = genValidData()
+		if err != nil {
+			return err
+		}
+	}
+	for _, subField := range subFields {
+		fieldData, ok := insertData.Data[subField.GetFieldID()]
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("no insert data for struct sub-field %s", subField.GetName())
+		}
+		values, err := generateStructSubFieldRows(subField, rows)
+		if err != nil {
+			return err
+		}
+		for i := 0; i < rows; i++ {
+			row := values[i]
+			if rowValid != nil && !rowValid[i] {
+				row = nil
+			}
+			if err := fieldData.AppendRow(row); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// generateStructSubFieldRows returns one non-null row value per row:
+// *schemapb.ScalarField for Array, *schemapb.VectorField for ArrayOfVector.
+func generateStructSubFieldRows(subField *schemapb.FieldSchema, rows int) ([]any, error) {
+	values := make([]any, 0, rows)
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		if typeutil.IsNativeListArrayField(subField) {
+			for i := 0; i < rows; i++ {
+				row, err := nativeListArrayRow(subField, i)
+				if err != nil {
+					return nil, err
+				}
+				values = append(values, row)
+			}
+			return values, nil
+		}
+		var legacy []*schemapb.ScalarField
+		switch subField.GetElementType() {
+		case schemapb.DataType_Bool:
+			legacy = testutils.GenerateArrayOfBoolArray(rows)
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			legacy = testutils.GenerateArrayOfIntArray(rows)
+		case schemapb.DataType_Int64:
+			legacy = testutils.GenerateArrayOfLongArray(rows)
+		case schemapb.DataType_Float:
+			legacy = testutils.GenerateArrayOfFloatArray(rows)
+		case schemapb.DataType_Double:
+			legacy = testutils.GenerateArrayOfDoubleArray(rows)
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			legacy = testutils.GenerateArrayOfStringArray(rows)
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported element type %s of struct sub-field %s", subField.GetElementType(), subField.GetName())
+		}
+		for _, row := range legacy {
+			values = append(values, row)
+		}
+		return values, nil
+	case schemapb.DataType_ArrayOfVector:
+		dim, err := typeutil.GetDim(subField)
+		if err != nil {
+			return nil, err
+		}
+		if subField.GetElementNullable() {
+			for i := 0; i < rows; i++ {
+				row, err := nativeListVectorArrayRow(subField, int(dim), i)
+				if err != nil {
+					return nil, err
+				}
+				values = append(values, row)
+			}
+			return values, nil
+		}
+		var legacy []*schemapb.VectorField
+		switch subField.GetElementType() {
+		case schemapb.DataType_FloatVector:
+			legacy = testutils.GenerateArrayOfFloatVectorArray(rows, int(dim))
+		case schemapb.DataType_Float16Vector:
+			legacy = testutils.GenerateArrayOfFloat16VectorArray(rows, int(dim))
+		case schemapb.DataType_BFloat16Vector:
+			legacy = testutils.GenerateArrayOfBFloat16VectorArray(rows, int(dim))
+		case schemapb.DataType_Int8Vector:
+			legacy = testutils.GenerateArrayOfInt8VectorArray(rows, int(dim))
+		case schemapb.DataType_BinaryVector:
+			legacy = testutils.GenerateArrayOfBinaryVectorArray(rows, int(dim))
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported element type %s of struct sub-field %s", subField.GetElementType(), subField.GetName())
+		}
+		for _, row := range legacy {
+			values = append(values, row)
+		}
+		return values, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %s of struct sub-field %s", subField.GetDataType(), subField.GetName())
+	}
+}
+
+// Deterministic null pattern of the native-list struct sub-fields generated by
+// CreateInsertData, by row i, element j and leaf k. Every seventh row (i%7 == 3)
+// has all elements null; otherwise every third scalar element and every third
+// vector (with a different phase) is null. A nested Array has inner arrays of
+// length 0..3, every fifth inner array null, and every third leaf null when the
+// leaf is nullable. Null levels are only generated where the schema allows them.
+func nativeListElementIsNull(i, j int) bool { return i%7 == 3 || (i+j)%3 == 2 }
+
+func nativeListVectorIsNull(i, j int) bool { return i%7 == 3 || (i+j)%3 == 1 }
+
+func nativeListInnerIsNull(i, j int) bool { return i%7 == 3 || (i+j)%5 == 4 }
+
+func nativeListInnerLen(i, j int) int { return (i + j) % 4 }
+
+func nativeListLeafIsNull(i, j, k int) bool { return (i+j+k)%3 == 2 }
+
+func nativeListValue(i, j, k int) int { return i*31 + j*7 + k }
+
+// nativeListLeafRow builds a dense leaf payload of n slots with the zero value
+// at null slots. The element validity is set, full length, iff nullable.
+func nativeListLeafRow(leaf schemapb.DataType, n int, nullable bool, isNull func(k int) bool, value func(k int) int) (*schemapb.ScalarField, error) {
+	valid := make([]bool, n)
+	for k := range valid {
+		valid[k] = !nullable || !isNull(k)
+	}
+	row := &schemapb.ScalarField{}
+	switch leaf {
+	case schemapb.DataType_Bool:
+		data := make([]bool, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = value(k)%2 == 0
+			}
+		}
+		row.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: data}}
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		bound := math.MaxInt32
+		switch leaf {
+		case schemapb.DataType_Int8:
+			bound = math.MaxInt8 + 1
+		case schemapb.DataType_Int16:
+			bound = math.MaxInt16 + 1
+		}
+		data := make([]int32, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = int32(value(k) % bound)
+			}
+		}
+		row.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: data}}
+	case schemapb.DataType_Int64:
+		data := make([]int64, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = int64(value(k))
+			}
+		}
+		row.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: data}}
+	case schemapb.DataType_Float:
+		data := make([]float32, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = float32(value(k)) / 4
+			}
+		}
+		row.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: data}}
+	case schemapb.DataType_Double:
+		data := make([]float64, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = float64(value(k)) / 8
+			}
+		}
+		row.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		data := make([]string, n)
+		for k := range data {
+			if valid[k] {
+				data[k] = fmt.Sprintf("v%d", value(k))
+			}
+		}
+		row.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: data}}
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported native Array leaf type %s", leaf)
+	}
+	if nullable {
+		typeutil.SetArrayElementValidData(row, valid)
+	}
+	return row, nil
+}
+
+// nativeListArrayRow builds row i of an element-nullable or nested scalar Array
+// sub-field. A nested row is ArrayData{ElementType: leaf} with one child per
+// inner array; a null inner array is a typed empty leaf without validity.
+func nativeListArrayRow(field *schemapb.FieldSchema, i int) (*schemapb.ScalarField, error) {
+	leaf, leafNullable, depth, err := typeutil.GetFieldArrayLeaf(field)
+	if err != nil {
+		return nil, err
+	}
+	n := testutils.ElemCountOfArray
+	switch depth {
+	case 1:
+		return nativeListLeafRow(leaf, n, leafNullable,
+			func(k int) bool { return nativeListElementIsNull(i, k) },
+			func(k int) int { return nativeListValue(i, k, 0) })
+	case 2:
+		elementNullable := field.GetElementNullable()
+		children := make([]*schemapb.ScalarField, 0, n)
+		valid := make([]bool, 0, n)
+		for j := 0; j < n; j++ {
+			if elementNullable && nativeListInnerIsNull(i, j) {
+				child, err := nativeListLeafRow(leaf, 0, false, nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				children = append(children, child)
+				valid = append(valid, false)
+				continue
+			}
+			child, err := nativeListLeafRow(leaf, nativeListInnerLen(i, j), leafNullable,
+				func(k int) bool { return nativeListLeafIsNull(i, j, k) },
+				func(k int) int { return nativeListValue(i, j, k) })
+			if err != nil {
+				return nil, err
+			}
+			children = append(children, child)
+			valid = append(valid, true)
+		}
+		row := &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			Data:        children,
+			ElementType: leaf,
+		}}}
+		if elementNullable {
+			typeutil.SetArrayElementValidData(row, valid)
+		}
+		return row, nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported Array depth %d of field %s", depth, field.GetName())
+	}
+}
+
+// nativeListVectorArrayRow builds row i of an element-nullable ArrayOfVector
+// sub-field: the payload holds only the valid vectors (typed empty when none)
+// and the element validity is always full length.
+func nativeListVectorArrayRow(field *schemapb.FieldSchema, dim int, i int) (*schemapb.VectorField, error) {
+	n := testutils.ElemCountOfArray
+	valid := make([]bool, n)
+	count := 0
+	for j := range valid {
+		valid[j] = !nativeListVectorIsNull(i, j)
+		if valid[j] {
+			count++
+		}
+	}
+	row := &schemapb.VectorField{Dim: int64(dim)}
+	switch field.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		row.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: testutils.GenerateFloatVectors(count, dim)}}
+	case schemapb.DataType_BinaryVector:
+		row.Data = &schemapb.VectorField_BinaryVector{BinaryVector: testutils.GenerateBinaryVectors(count, dim)}
+	case schemapb.DataType_Float16Vector:
+		row.Data = &schemapb.VectorField_Float16Vector{Float16Vector: testutils.GenerateFloat16Vectors(count, dim)}
+	case schemapb.DataType_BFloat16Vector:
+		row.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: testutils.GenerateBFloat16Vectors(count, dim)}
+	case schemapb.DataType_Int8Vector:
+		row.Data = &schemapb.VectorField_Int8Vector{Int8Vector: typeutil.Int8ArrayToBytes(testutils.GenerateInt8Vectors(count, dim))}
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported element type %s of ArrayOfVector field %s", field.GetElementType(), field.GetName())
+	}
+	typeutil.SetVectorArrayElementValidData(row, valid)
+	return row, nil
+}
+
+// structSubFieldRowLen returns the logical element count of one non-null
+// struct sub-field row, counting null elements.
+func structSubFieldRowLen(subField *schemapb.FieldSchema, row any) (int, error) {
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		scalarField, ok := row.(*schemapb.ScalarField)
+		if !ok {
+			return 0, merr.WrapErrParameterInvalidMsg("expected ScalarField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			return len(scalarField.GetArrayData().GetData()), nil
+		}
+		if subField.GetElementNullable() {
+			return len(typeutil.GetArrayElementValidData(scalarField)), nil
+		}
+		return scalarFieldLen(subField.GetElementType(), scalarField), nil
+	case schemapb.DataType_ArrayOfVector:
+		vectorField, ok := row.(*schemapb.VectorField)
+		if !ok {
+			return 0, merr.WrapErrParameterInvalidMsg("expected VectorField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		if subField.GetElementNullable() {
+			return len(typeutil.GetVectorArrayElementValidData(vectorField)), nil
+		}
+		width, err := vectorElementWidth(subField)
+		if err != nil {
+			return 0, err
+		}
+		return vectorPayloadLen(subField.GetElementType(), vectorField) / width, nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported data type %s of struct sub-field %s", subField.GetDataType(), subField.GetName())
+	}
+}
+
+func scalarFieldLen(elementType schemapb.DataType, row *schemapb.ScalarField) int {
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return len(row.GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return len(row.GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		return len(row.GetLongData().GetData())
+	case schemapb.DataType_Float:
+		return len(row.GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		return len(row.GetDoubleData().GetData())
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return len(row.GetStringData().GetData())
+	}
+	return 0
+}
+
+// scalarFieldValue returns slot k of a scalar payload as the Go value the JSON
+// encoder writes: bool, int32 (Int8/Int16/Int32), int64, float32, float64 or string.
+func scalarFieldValue(elementType schemapb.DataType, row *schemapb.ScalarField, k int) (any, error) {
+	if k < 0 || k >= scalarFieldLen(elementType, row) {
+		return nil, merr.WrapErrParameterInvalidMsg("slot %d out of range of %s payload", k, elementType)
+	}
+	switch elementType {
+	case schemapb.DataType_Bool:
+		return row.GetBoolData().GetData()[k], nil
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return row.GetIntData().GetData()[k], nil
+	case schemapb.DataType_Int64:
+		return row.GetLongData().GetData()[k], nil
+	case schemapb.DataType_Float:
+		return row.GetFloatData().GetData()[k], nil
+	case schemapb.DataType_Double:
+		return row.GetDoubleData().GetData()[k], nil
+	default:
+		return row.GetStringData().GetData()[k], nil
+	}
+}
+
+// vectorElementWidth returns the payload units of one vector: float32 values
+// for FloatVector, bytes otherwise.
+func vectorElementWidth(field *schemapb.FieldSchema) (int, error) {
+	dim, err := typeutil.GetDim(field)
+	if err != nil {
+		return 0, err
+	}
+	var width int
+	switch field.GetElementType() {
+	case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+		width = int(dim)
+	case schemapb.DataType_BinaryVector:
+		width = int(dim) / 8
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		width = int(dim) * 2
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported element type %s of ArrayOfVector field %s", field.GetElementType(), field.GetName())
+	}
+	if width <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d of ArrayOfVector field %s", dim, field.GetName())
+	}
+	return width, nil
+}
+
+func vectorPayloadLen(elementType schemapb.DataType, row *schemapb.VectorField) int {
+	switch elementType {
+	case schemapb.DataType_FloatVector:
+		return len(row.GetFloatVector().GetData())
+	case schemapb.DataType_BinaryVector:
+		return len(row.GetBinaryVector())
+	case schemapb.DataType_Float16Vector:
+		return len(row.GetFloat16Vector())
+	case schemapb.DataType_BFloat16Vector:
+		return len(row.GetBfloat16Vector())
+	case schemapb.DataType_Int8Vector:
+		return len(row.GetInt8Vector())
+	}
+	return 0
+}
+
+// vectorPhysicalIndex maps logical element j of an ArrayOfVector row to its
+// index in the payload; ok is false for a null element.
+func vectorPhysicalIndex(field *schemapb.FieldSchema, row *schemapb.VectorField, j int) (int, bool) {
+	if !field.GetElementNullable() {
+		return j, true
+	}
+	valid := typeutil.GetVectorArrayElementValidData(row)
+	if j >= len(valid) || !valid[j] {
+		return 0, false
+	}
+	return lo.Count(valid[:j], true), true
+}
+
+// vectorElementValue returns vector p of an ArrayOfVector payload as the Go
+// value the JSON encoder writes: []float32 for Float/Float16/BFloat16 vectors,
+// []int for BinaryVector (a []byte would be encoded as base64) and []int8.
+func vectorElementValue(field *schemapb.FieldSchema, row *schemapb.VectorField, p int) (any, error) {
+	width, err := vectorElementWidth(field)
+	if err != nil {
+		return nil, err
+	}
+	start, end := p*width, (p+1)*width
+	if end > vectorPayloadLen(field.GetElementType(), row) {
+		return nil, merr.WrapErrParameterInvalidMsg("vector %d out of range of field %s payload", p, field.GetName())
+	}
+	switch field.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		return row.GetFloatVector().GetData()[start:end], nil
+	case schemapb.DataType_BinaryVector:
+		values := make([]int, 0, width)
+		for _, value := range row.GetBinaryVector()[start:end] {
+			values = append(values, int(value))
+		}
+		return values, nil
+	case schemapb.DataType_Float16Vector:
+		return typeutil.Float16BytesToFloat32Vector(row.GetFloat16Vector()[start:end]), nil
+	case schemapb.DataType_BFloat16Vector:
+		return typeutil.BFloat16BytesToFloat32Vector(row.GetBfloat16Vector()[start:end]), nil
+	default:
+		values := make([]int8, 0, width)
+		for _, value := range row.GetInt8Vector()[start:end] {
+			values = append(values, int8(value))
+		}
+		return values, nil
+	}
 }
 
 func CreateFieldWithDefaultValue(dataType schemapb.DataType, id int64, nullable bool) (*schemapb.FieldSchema, error) {
@@ -1027,485 +1502,372 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 
 	// Process StructArrayFields as nested list<struct> format
 	for _, structField := range schema.StructArrayFields {
-		// Build arrow fields for the struct
-		structFields := make([]arrow.Field, 0, len(structField.Fields))
-		for _, subField := range structField.Fields {
-			// Extract actual field name (remove structName[] prefix)
-			fieldName := subField.Name
-			if len(structField.Name) > 0 && len(subField.Name) > len(structField.Name)+2 {
-				fieldName = subField.Name[len(structField.Name)+1 : len(subField.Name)-1]
-			}
-
-			// Determine arrow type for the field
-			var arrType arrow.DataType
-			switch subField.DataType {
-			case schemapb.DataType_Array:
-				switch subField.ElementType {
-				case schemapb.DataType_Bool:
-					arrType = arrow.FixedWidthTypes.Boolean
-				case schemapb.DataType_Int8:
-					arrType = arrow.PrimitiveTypes.Int8
-				case schemapb.DataType_Int16:
-					arrType = arrow.PrimitiveTypes.Int16
-				case schemapb.DataType_Int32:
-					arrType = arrow.PrimitiveTypes.Int32
-				case schemapb.DataType_Int64:
-					arrType = arrow.PrimitiveTypes.Int64
-				case schemapb.DataType_Float:
-					arrType = arrow.PrimitiveTypes.Float32
-				case schemapb.DataType_Double:
-					arrType = arrow.PrimitiveTypes.Float64
-				case schemapb.DataType_String, schemapb.DataType_VarChar:
-					arrType = arrow.BinaryTypes.String
-				default:
-					// Default to string for unknown element types
-					arrType = arrow.BinaryTypes.String
-				}
-			case schemapb.DataType_ArrayOfVector:
-				// For user data, use list<float> format for vectors
-				switch subField.ElementType {
-				case schemapb.DataType_FloatVector:
-					arrType = arrow.ListOf(arrow.PrimitiveTypes.Float32)
-				case schemapb.DataType_BinaryVector:
-					arrType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
-				case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-					arrType = arrow.ListOf(arrow.PrimitiveTypes.Uint8)
-				case schemapb.DataType_Int8Vector:
-					arrType = arrow.ListOf(arrow.PrimitiveTypes.Int8)
-				default:
-					panic("unimplemented element type for ArrayOfVector")
-				}
-			default:
-				panic("unimplemented")
-			}
-
-			structFields = append(structFields, arrow.Field{
-				Name:     fieldName,
-				Type:     arrType,
-				Nullable: subField.GetNullable(),
-			})
+		column, err := buildStructArrayColumn(mem, structField, insertData)
+		if err != nil {
+			return nil, err
 		}
-
-		// Build list<struct> column
-		listBuilder := array.NewListBuilder(mem, arrow.StructOf(structFields...))
-		structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
-
-		// Get row count from first sub-field
-		var rowCount int
-		for _, subField := range structField.Fields {
-			if data, ok := insertData.Data[subField.FieldID]; ok {
-				rowCount = data.RowNum()
-				break
-			}
-		}
-
-		// row to column
-		for i := 0; i < rowCount; i++ {
-			var arrayLen int
-			subField := structField.Fields[0]
-			data := insertData.Data[subField.FieldID]
-			if data == nil {
-				panic(fmt.Sprintf("data for struct sub-field %s (ID: %d) is nil", subField.Name, subField.FieldID))
-			}
-			rowData := data.GetRow(i)
-			switch subField.DataType {
-			case schemapb.DataType_Array:
-				scalarField := rowData.(*schemapb.ScalarField)
-				switch subField.ElementType {
-				case schemapb.DataType_Bool:
-					arrayLen = len(scalarField.GetBoolData().GetData())
-				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-					arrayLen = len(scalarField.GetIntData().GetData())
-				case schemapb.DataType_Int64:
-					arrayLen = len(scalarField.GetLongData().GetData())
-				case schemapb.DataType_Float:
-					arrayLen = len(scalarField.GetFloatData().GetData())
-				case schemapb.DataType_Double:
-					arrayLen = len(scalarField.GetDoubleData().GetData())
-				case schemapb.DataType_String, schemapb.DataType_VarChar:
-					arrayLen = len(scalarField.GetStringData().GetData())
-				}
-			case schemapb.DataType_ArrayOfVector:
-				vectorField := rowData.(*schemapb.VectorField)
-				dim, _ := typeutil.GetDim(subField)
-				switch subField.ElementType {
-				case schemapb.DataType_FloatVector:
-					if vectorField.GetFloatVector() != nil {
-						arrayLen = len(vectorField.GetFloatVector().Data) / int(dim)
-					}
-				case schemapb.DataType_BinaryVector:
-					if vectorField.GetBinaryVector() != nil {
-						bytesPerVector := int(dim) / 8
-						arrayLen = len(vectorField.GetBinaryVector()) / bytesPerVector
-					}
-				case schemapb.DataType_Float16Vector:
-					if vectorField.GetFloat16Vector() != nil {
-						bytesPerVector := int(dim) * 2
-						arrayLen = len(vectorField.GetFloat16Vector()) / bytesPerVector
-					}
-				case schemapb.DataType_BFloat16Vector:
-					if vectorField.GetBfloat16Vector() != nil {
-						bytesPerVector := int(dim) * 2
-						arrayLen = len(vectorField.GetBfloat16Vector()) / bytesPerVector
-					}
-				case schemapb.DataType_Int8Vector:
-					if vectorField.GetInt8Vector() != nil {
-						arrayLen = len(vectorField.GetInt8Vector()) / int(dim)
-					}
-				}
-			}
-
-			listBuilder.Append(true)
-			// generate a struct for each array element
-			for j := 0; j < arrayLen; j++ {
-				// add data for each field at this position
-				for fieldIdx, subField := range structField.Fields {
-					data := insertData.Data[subField.FieldID]
-					fieldBuilder := structBuilder.FieldBuilder(fieldIdx)
-
-					rowData := data.GetRow(i)
-					switch subField.DataType {
-					case schemapb.DataType_Array:
-						scalarField := rowData.(*schemapb.ScalarField)
-						switch subField.ElementType {
-						case schemapb.DataType_Bool:
-							if boolData := scalarField.GetBoolData(); boolData != nil && j < len(boolData.GetData()) {
-								fieldBuilder.(*array.BooleanBuilder).Append(boolData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.BooleanBuilder).AppendNull()
-							}
-						case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-							if intData := scalarField.GetIntData(); intData != nil && j < len(intData.GetData()) {
-								fieldBuilder.(*array.Int32Builder).Append(intData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.Int32Builder).AppendNull()
-							}
-						case schemapb.DataType_Int64:
-							if longData := scalarField.GetLongData(); longData != nil && j < len(longData.GetData()) {
-								fieldBuilder.(*array.Int64Builder).Append(longData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.Int64Builder).AppendNull()
-							}
-						case schemapb.DataType_Float:
-							if floatData := scalarField.GetFloatData(); floatData != nil && j < len(floatData.GetData()) {
-								fieldBuilder.(*array.Float32Builder).Append(floatData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.Float32Builder).AppendNull()
-							}
-						case schemapb.DataType_Double:
-							if doubleData := scalarField.GetDoubleData(); doubleData != nil && j < len(doubleData.GetData()) {
-								fieldBuilder.(*array.Float64Builder).Append(doubleData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.Float64Builder).AppendNull()
-							}
-						case schemapb.DataType_String, schemapb.DataType_VarChar:
-							if stringData := scalarField.GetStringData(); stringData != nil && j < len(stringData.GetData()) {
-								fieldBuilder.(*array.StringBuilder).Append(stringData.GetData()[j])
-							} else {
-								fieldBuilder.(*array.StringBuilder).AppendNull()
-							}
-						}
-
-					case schemapb.DataType_ArrayOfVector:
-						vectorField := rowData.(*schemapb.VectorField)
-						listBuilder := fieldBuilder.(*array.ListBuilder)
-						listBuilder.Append(true)
-						dim, _ := typeutil.GetDim(subField)
-
-						switch subField.ElementType {
-						case schemapb.DataType_FloatVector:
-							if floatVectors := vectorField.GetFloatVector(); floatVectors != nil {
-								floatBuilder := listBuilder.ValueBuilder().(*array.Float32Builder)
-								start := j * int(dim)
-								end := start + int(dim)
-								if end <= len(floatVectors.Data) {
-									for k := start; k < end; k++ {
-										floatBuilder.Append(floatVectors.Data[k])
-									}
-								}
-							}
-						case schemapb.DataType_BinaryVector:
-							if binaryVectors := vectorField.GetBinaryVector(); binaryVectors != nil {
-								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
-								bytesPerVector := int(dim) / 8
-								start := j * bytesPerVector
-								end := start + bytesPerVector
-								if end <= len(binaryVectors) {
-									for k := start; k < end; k++ {
-										uint8Builder.Append(binaryVectors[k])
-									}
-								}
-							}
-						case schemapb.DataType_Float16Vector:
-							if float16Vectors := vectorField.GetFloat16Vector(); float16Vectors != nil {
-								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
-								bytesPerVector := int(dim) * 2
-								start := j * bytesPerVector
-								end := start + bytesPerVector
-								if end <= len(float16Vectors) {
-									for k := start; k < end; k++ {
-										uint8Builder.Append(float16Vectors[k])
-									}
-								}
-							}
-						case schemapb.DataType_BFloat16Vector:
-							if bfloat16Vectors := vectorField.GetBfloat16Vector(); bfloat16Vectors != nil {
-								uint8Builder := listBuilder.ValueBuilder().(*array.Uint8Builder)
-								bytesPerVector := int(dim) * 2
-								start := j * bytesPerVector
-								end := start + bytesPerVector
-								if end <= len(bfloat16Vectors) {
-									for k := start; k < end; k++ {
-										uint8Builder.Append(bfloat16Vectors[k])
-									}
-								}
-							}
-						case schemapb.DataType_Int8Vector:
-							if int8Vectors := vectorField.GetInt8Vector(); int8Vectors != nil {
-								int8Builder := listBuilder.ValueBuilder().(*array.Int8Builder)
-								start := j * int(dim)
-								end := start + int(dim)
-								if end <= len(int8Vectors) {
-									for k := start; k < end; k++ {
-										int8Builder.Append(int8(int8Vectors[k]))
-									}
-								}
-							}
-						}
-					}
-				}
-
-				structBuilder.Append(true)
-			}
-		}
-
-		columns = append(columns, listBuilder.NewArray())
+		columns = append(columns, column)
 	}
 
 	return columns, nil
 }
 
-// reconstructStructArrayForJSON reconstructs struct array data for JSON format
-// Returns an array of maps where each element represents a struct
+// structChildArrowType returns the Arrow type of a struct sub-field inside the
+// list<struct<...>> column: the scalar element type for Array, list<leaf> for a
+// nested Array (item nullable iff the leaf is nullable), and list<float32>,
+// list<uint8> or list<int8> for ArrayOfVector.
+func structChildArrowType(subField *schemapb.FieldSchema) (arrow.DataType, error) {
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			leaf, leafNullable, _, err := typeutil.GetFieldArrayLeaf(subField)
+			if err != nil {
+				return nil, err
+			}
+			leafType, err := scalarArrowType(leaf)
+			if err != nil {
+				return nil, err
+			}
+			return arrow.ListOfField(arrow.Field{Name: "item", Type: leafType, Nullable: leafNullable}), nil
+		}
+		return scalarArrowType(subField.GetElementType())
+	case schemapb.DataType_ArrayOfVector:
+		switch subField.GetElementType() {
+		case schemapb.DataType_FloatVector:
+			return arrow.ListOf(arrow.PrimitiveTypes.Float32), nil
+		case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			return arrow.ListOf(arrow.PrimitiveTypes.Uint8), nil
+		case schemapb.DataType_Int8Vector:
+			return arrow.ListOf(arrow.PrimitiveTypes.Int8), nil
+		}
+	}
+	return nil, merr.WrapErrParameterInvalidMsg("unsupported struct sub-field %s of type %s/%s", subField.GetName(), subField.GetDataType(), subField.GetElementType())
+}
+
+func scalarArrowType(dataType schemapb.DataType) (arrow.DataType, error) {
+	switch dataType {
+	case schemapb.DataType_Bool:
+		return arrow.FixedWidthTypes.Boolean, nil
+	case schemapb.DataType_Int8:
+		return arrow.PrimitiveTypes.Int8, nil
+	case schemapb.DataType_Int16:
+		return arrow.PrimitiveTypes.Int16, nil
+	case schemapb.DataType_Int32:
+		return arrow.PrimitiveTypes.Int32, nil
+	case schemapb.DataType_Int64:
+		return arrow.PrimitiveTypes.Int64, nil
+	case schemapb.DataType_Float:
+		return arrow.PrimitiveTypes.Float32, nil
+	case schemapb.DataType_Double:
+		return arrow.PrimitiveTypes.Float64, nil
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return arrow.BinaryTypes.String, nil
+	}
+	return nil, merr.WrapErrParameterInvalidMsg("unsupported scalar element type %s", dataType)
+}
+
+// buildStructArrayColumn builds one struct field as list<struct<...>>. A null
+// struct row is a null list; a struct child is nullable iff its sub-field is
+// element-nullable, and null elements, inner arrays, leaves and vectors are
+// Arrow nulls at their level.
+func buildStructArrayColumn(mem memory.Allocator, structField *schemapb.StructArrayFieldSchema, insertData *storage.InsertData) (arrow.Array, error) {
+	// Sub-fields without data in insertData get no struct child, so callers can
+	// delete a column to produce files missing that sub-field.
+	subFields := lo.Filter(structField.GetFields(), func(subField *schemapb.FieldSchema, _ int) bool {
+		data, ok := insertData.Data[subField.GetFieldID()]
+		return ok && data != nil
+	})
+	if len(subFields) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("no data for any sub-field of struct field %s", structField.GetName())
+	}
+	structFields := make([]arrow.Field, 0, len(subFields))
+	subFieldData := make([]storage.FieldData, 0, len(subFields))
+	for _, subField := range subFields {
+		fieldName, err := typeutil.ExtractStructFieldName(subField.GetName())
+		if err != nil {
+			return nil, err
+		}
+		arrType, err := structChildArrowType(subField)
+		if err != nil {
+			return nil, err
+		}
+		structFields = append(structFields, arrow.Field{
+			Name:     fieldName,
+			Type:     arrType,
+			Nullable: subField.GetElementNullable(),
+		})
+		subFieldData = append(subFieldData, insertData.Data[subField.GetFieldID()])
+	}
+
+	listBuilder := array.NewListBuilder(mem, arrow.StructOf(structFields...))
+	defer listBuilder.Release()
+	structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+
+	rowCount := subFieldData[0].RowNum()
+	for i := 0; i < rowCount; i++ {
+		rows := make([]any, len(subFields))
+		for idx, data := range subFieldData {
+			rows[idx] = data.GetRow(i)
+		}
+		if rows[0] == nil {
+			listBuilder.AppendNull()
+			continue
+		}
+		arrayLen, err := structSubFieldRowLen(subFields[0], rows[0])
+		if err != nil {
+			return nil, err
+		}
+		listBuilder.Append(true)
+		for j := 0; j < arrayLen; j++ {
+			structBuilder.Append(true)
+			for idx, subField := range subFields {
+				if err := appendStructChildValue(structBuilder.FieldBuilder(idx), subField, rows[idx], j); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return listBuilder.NewArray(), nil
+}
+
+// appendStructChildValue appends element j of one struct sub-field row to the
+// child builder of the struct.
+func appendStructChildValue(b array.Builder, subField *schemapb.FieldSchema, row any, j int) error {
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		scalarField, ok := row.(*schemapb.ScalarField)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("expected ScalarField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		valid := typeutil.GetArrayElementValidData(scalarField)
+		if subField.GetElementNullable() && j >= len(valid) {
+			return merr.WrapErrParameterInvalidMsg("element %d out of range of struct sub-field %s validity", j, subField.GetName())
+		}
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			leaf, leafNullable, _, err := typeutil.GetFieldArrayLeaf(subField)
+			if err != nil {
+				return err
+			}
+			innerBuilder := b.(*array.ListBuilder)
+			if subField.GetElementNullable() && !valid[j] {
+				innerBuilder.AppendNull()
+				return nil
+			}
+			children := scalarField.GetArrayData().GetData()
+			if j >= len(children) {
+				return merr.WrapErrParameterInvalidMsg("element %d out of range of nested struct sub-field %s", j, subField.GetName())
+			}
+			child := children[j]
+			childValid := typeutil.GetArrayElementValidData(child)
+			childLen := scalarFieldLen(leaf, child)
+			if leafNullable && len(childValid) != childLen {
+				return merr.WrapErrParameterInvalidMsg("leaf validity length %d does not match payload length %d of struct sub-field %s", len(childValid), childLen, subField.GetName())
+			}
+			innerBuilder.Append(true)
+			for k := 0; k < childLen; k++ {
+				if leafNullable && !childValid[k] {
+					innerBuilder.ValueBuilder().AppendNull()
+					continue
+				}
+				if err := appendScalarArrowValue(innerBuilder.ValueBuilder(), leaf, child, k); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if subField.GetElementNullable() && !valid[j] {
+			b.AppendNull()
+			return nil
+		}
+		return appendScalarArrowValue(b, subField.GetElementType(), scalarField, j)
+	case schemapb.DataType_ArrayOfVector:
+		vectorField, ok := row.(*schemapb.VectorField)
+		if !ok {
+			return merr.WrapErrParameterInvalidMsg("expected VectorField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		vectorBuilder := b.(*array.ListBuilder)
+		p, ok := vectorPhysicalIndex(subField, vectorField, j)
+		if !ok {
+			vectorBuilder.AppendNull()
+			return nil
+		}
+		width, err := vectorElementWidth(subField)
+		if err != nil {
+			return err
+		}
+		start, end := p*width, (p+1)*width
+		if end > vectorPayloadLen(subField.GetElementType(), vectorField) {
+			return merr.WrapErrParameterInvalidMsg("vector %d out of range of struct sub-field %s payload", p, subField.GetName())
+		}
+		vectorBuilder.Append(true)
+		switch subField.GetElementType() {
+		case schemapb.DataType_FloatVector:
+			vectorBuilder.ValueBuilder().(*array.Float32Builder).AppendValues(vectorField.GetFloatVector().GetData()[start:end], nil)
+		case schemapb.DataType_BinaryVector:
+			vectorBuilder.ValueBuilder().(*array.Uint8Builder).AppendValues(vectorField.GetBinaryVector()[start:end], nil)
+		case schemapb.DataType_Float16Vector:
+			vectorBuilder.ValueBuilder().(*array.Uint8Builder).AppendValues(vectorField.GetFloat16Vector()[start:end], nil)
+		case schemapb.DataType_BFloat16Vector:
+			vectorBuilder.ValueBuilder().(*array.Uint8Builder).AppendValues(vectorField.GetBfloat16Vector()[start:end], nil)
+		case schemapb.DataType_Int8Vector:
+			int8Builder := vectorBuilder.ValueBuilder().(*array.Int8Builder)
+			for _, value := range vectorField.GetInt8Vector()[start:end] {
+				int8Builder.Append(int8(value))
+			}
+		}
+		return nil
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported data type %s of struct sub-field %s", subField.GetDataType(), subField.GetName())
+	}
+}
+
+func appendScalarArrowValue(b array.Builder, elementType schemapb.DataType, row *schemapb.ScalarField, k int) error {
+	value, err := scalarFieldValue(elementType, row, k)
+	if err != nil {
+		return err
+	}
+	switch elementType {
+	case schemapb.DataType_Bool:
+		b.(*array.BooleanBuilder).Append(value.(bool))
+	case schemapb.DataType_Int8:
+		b.(*array.Int8Builder).Append(int8(value.(int32)))
+	case schemapb.DataType_Int16:
+		b.(*array.Int16Builder).Append(int16(value.(int32)))
+	case schemapb.DataType_Int32:
+		b.(*array.Int32Builder).Append(value.(int32))
+	case schemapb.DataType_Int64:
+		b.(*array.Int64Builder).Append(value.(int64))
+	case schemapb.DataType_Float:
+		b.(*array.Float32Builder).Append(value.(float32))
+	case schemapb.DataType_Double:
+		b.(*array.Float64Builder).Append(value.(float64))
+	default:
+		b.(*array.StringBuilder).Append(value.(string))
+	}
+	return nil
+}
+
+// reconstructStructArrayForJSON reconstructs struct array data for JSON format.
+// Returns an array of maps where each element represents a struct, keyed by the
+// raw sub-field names, or nil for a null struct row. A null element of an
+// element-nullable sub-field is written as JSON null, and its key is omitted in
+// rows with rowIndex%4 >= 2 so that both import paths for a null element
+// (explicit null and missing key) are covered. A nested Array value is a list of
+// lists with null inner arrays and null leaves.
 func reconstructStructArrayForJSON(structField *schemapb.StructArrayFieldSchema, insertData *storage.InsertData, rowIndex int) ([]map[string]any, error) {
 	subFields := structField.GetFields()
 	if len(subFields) == 0 {
 		return []map[string]any{}, nil
 	}
 
-	// Determine the array length from the first sub-field's data
-	var arrayLen int
+	// Sub-fields without data in insertData are left out of every element, so
+	// callers can delete a column to produce files missing that sub-field.
+	presentFields := make([]*schemapb.FieldSchema, 0, len(subFields))
+	rows := make([]any, 0, len(subFields))
+	names := make([]string, 0, len(subFields))
 	for _, subField := range subFields {
-		if fieldData, ok := insertData.Data[subField.GetFieldID()]; ok {
-			rowData := fieldData.GetRow(rowIndex)
-			if rowData == nil {
-				continue
-			}
-
-			switch subField.GetDataType() {
-			case schemapb.DataType_Array:
-				if scalarField, ok := rowData.(*schemapb.ScalarField); ok {
-					switch subField.GetElementType() {
-					case schemapb.DataType_Bool:
-						if data := scalarField.GetBoolData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-						if data := scalarField.GetIntData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					case schemapb.DataType_Int64:
-						if data := scalarField.GetLongData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					case schemapb.DataType_Float:
-						if data := scalarField.GetFloatData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					case schemapb.DataType_Double:
-						if data := scalarField.GetDoubleData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					case schemapb.DataType_String, schemapb.DataType_VarChar:
-						if data := scalarField.GetStringData(); data != nil {
-							arrayLen = len(data.GetData())
-						}
-					}
-				}
-			case schemapb.DataType_ArrayOfVector:
-				if vectorField, ok := rowData.(*schemapb.VectorField); ok {
-					switch subField.GetElementType() {
-					case schemapb.DataType_FloatVector:
-						if data := vectorField.GetFloatVector(); data != nil {
-							dim, _ := typeutil.GetDim(subField)
-							if dim > 0 {
-								arrayLen = len(data.GetData()) / int(dim)
-							}
-						}
-					case schemapb.DataType_BinaryVector:
-						if data := vectorField.GetBinaryVector(); data != nil {
-							dim, _ := typeutil.GetDim(subField)
-							if dim > 0 {
-								bytesPerVector := int(dim) / 8
-								arrayLen = len(data) / bytesPerVector
-							}
-						}
-					case schemapb.DataType_Float16Vector:
-						if data := vectorField.GetFloat16Vector(); data != nil {
-							dim, _ := typeutil.GetDim(subField)
-							if dim > 0 {
-								bytesPerVector := int(dim) * 2
-								arrayLen = len(data) / bytesPerVector
-							}
-						}
-					case schemapb.DataType_BFloat16Vector:
-						if data := vectorField.GetBfloat16Vector(); data != nil {
-							dim, _ := typeutil.GetDim(subField)
-							if dim > 0 {
-								bytesPerVector := int(dim) * 2
-								arrayLen = len(data) / bytesPerVector
-							}
-						}
-					case schemapb.DataType_Int8Vector:
-						if data := vectorField.GetInt8Vector(); data != nil {
-							dim, _ := typeutil.GetDim(subField)
-							if dim > 0 {
-								arrayLen = len(data) / int(dim)
-							}
-						}
-					}
-				}
-			}
-
-			if arrayLen > 0 {
-				break
-			}
+		fieldData, ok := insertData.Data[subField.GetFieldID()]
+		if !ok || fieldData == nil {
+			continue
 		}
+		name, err := typeutil.ExtractStructFieldName(subField.GetName())
+		if err != nil {
+			return nil, err
+		}
+		presentFields = append(presentFields, subField)
+		rows = append(rows, fieldData.GetRow(rowIndex))
+		names = append(names, name)
+	}
+	if len(presentFields) == 0 {
+		return []map[string]any{}, nil
+	}
+	if rows[0] == nil {
+		return nil, nil
+	}
+	arrayLen, err := structSubFieldRowLen(presentFields[0], rows[0])
+	if err != nil {
+		return nil, err
 	}
 
-	// Build the struct array
 	structArray := make([]map[string]any, arrayLen)
 	for j := 0; j < arrayLen; j++ {
-		structElem := make(map[string]any)
-
-		for _, subField := range subFields {
-			if fieldData, ok := insertData.Data[subField.GetFieldID()]; ok {
-				rowData := fieldData.GetRow(rowIndex)
-				if rowData == nil {
-					continue
-				}
-
-				// Extract the j-th element
-				switch subField.GetDataType() {
-				case schemapb.DataType_Array:
-					if scalarField, ok := rowData.(*schemapb.ScalarField); ok {
-						switch subField.GetElementType() {
-						case schemapb.DataType_Bool:
-							if data := scalarField.GetBoolData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-							if data := scalarField.GetIntData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						case schemapb.DataType_Int64:
-							if data := scalarField.GetLongData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						case schemapb.DataType_Float:
-							if data := scalarField.GetFloatData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						case schemapb.DataType_Double:
-							if data := scalarField.GetDoubleData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						case schemapb.DataType_String, schemapb.DataType_VarChar:
-							if data := scalarField.GetStringData(); data != nil && j < len(data.GetData()) {
-								structElem[subField.GetName()] = data.GetData()[j]
-							}
-						}
-					}
-				case schemapb.DataType_ArrayOfVector:
-					if vectorField, ok := rowData.(*schemapb.VectorField); ok {
-						switch subField.GetElementType() {
-						case schemapb.DataType_FloatVector:
-							if data := vectorField.GetFloatVector(); data != nil {
-								dim, _ := typeutil.GetDim(subField)
-								if dim > 0 {
-									startIdx := j * int(dim)
-									endIdx := startIdx + int(dim)
-									if endIdx <= len(data.GetData()) {
-										structElem[subField.GetName()] = data.GetData()[startIdx:endIdx]
-									}
-								}
-							}
-						case schemapb.DataType_BinaryVector:
-							if data := vectorField.GetBinaryVector(); data != nil {
-								dim, _ := typeutil.GetDim(subField)
-								if dim > 0 {
-									bytesPerVector := int(dim) / 8
-									startIdx := j * bytesPerVector
-									endIdx := startIdx + bytesPerVector
-									if endIdx <= len(data) {
-										// []byte would be encoded as base64 instead of a numeric vector.
-										values := make([]int, bytesPerVector)
-										for k, value := range data[startIdx:endIdx] {
-											values[k] = int(value)
-										}
-										structElem[subField.GetName()] = values
-									}
-								}
-							}
-						case schemapb.DataType_Float16Vector:
-							if data := vectorField.GetFloat16Vector(); data != nil {
-								dim, _ := typeutil.GetDim(subField)
-								if dim > 0 {
-									bytesPerVector := int(dim) * 2
-									startIdx := j * bytesPerVector
-									endIdx := startIdx + bytesPerVector
-									if endIdx <= len(data) {
-										structElem[subField.GetName()] = typeutil.Float16BytesToFloat32Vector(data[startIdx:endIdx])
-									}
-								}
-							}
-						case schemapb.DataType_BFloat16Vector:
-							if data := vectorField.GetBfloat16Vector(); data != nil {
-								dim, _ := typeutil.GetDim(subField)
-								if dim > 0 {
-									bytesPerVector := int(dim) * 2
-									startIdx := j * bytesPerVector
-									endIdx := startIdx + bytesPerVector
-									if endIdx <= len(data) {
-										structElem[subField.GetName()] = typeutil.BFloat16BytesToFloat32Vector(data[startIdx:endIdx])
-									}
-								}
-							}
-						case schemapb.DataType_Int8Vector:
-							if data := vectorField.GetInt8Vector(); data != nil {
-								dim, _ := typeutil.GetDim(subField)
-								if dim > 0 {
-									startIdx := j * int(dim)
-									endIdx := startIdx + int(dim)
-									if endIdx <= len(data) {
-										values := make([]int8, int(dim))
-										for k, value := range data[startIdx:endIdx] {
-											values[k] = int8(value)
-										}
-										structElem[subField.GetName()] = values
-									}
-								}
-							}
-						}
-					}
-				}
+		structElem := make(map[string]any, len(presentFields))
+		for idx, subField := range presentFields {
+			value, err := structElementValueForJSON(subField, rows[idx], j)
+			if err != nil {
+				return nil, err
 			}
+			if value == nil && rowIndex%4 >= 2 {
+				continue
+			}
+			structElem[names[idx]] = value
 		}
-
 		structArray[j] = structElem
 	}
-
 	return structArray, nil
+}
+
+// structElementValueForJSON returns element j of one struct sub-field row as a
+// JSON value; nil is a null element.
+func structElementValueForJSON(subField *schemapb.FieldSchema, row any, j int) (any, error) {
+	switch subField.GetDataType() {
+	case schemapb.DataType_Array:
+		scalarField, ok := row.(*schemapb.ScalarField)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("expected ScalarField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		valid := typeutil.GetArrayElementValidData(scalarField)
+		if subField.GetElementNullable() {
+			if j >= len(valid) {
+				return nil, merr.WrapErrParameterInvalidMsg("element %d out of range of struct sub-field %s validity", j, subField.GetName())
+			}
+			if !valid[j] {
+				return nil, nil
+			}
+		}
+		if !typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			return scalarFieldValue(subField.GetElementType(), scalarField, j)
+		}
+		leaf, leafNullable, _, err := typeutil.GetFieldArrayLeaf(subField)
+		if err != nil {
+			return nil, err
+		}
+		children := scalarField.GetArrayData().GetData()
+		if j >= len(children) {
+			return nil, merr.WrapErrParameterInvalidMsg("element %d out of range of nested struct sub-field %s", j, subField.GetName())
+		}
+		child := children[j]
+		childValid := typeutil.GetArrayElementValidData(child)
+		childLen := scalarFieldLen(leaf, child)
+		if leafNullable && len(childValid) != childLen {
+			return nil, merr.WrapErrParameterInvalidMsg("leaf validity length %d does not match payload length %d of struct sub-field %s", len(childValid), childLen, subField.GetName())
+		}
+		inner := make([]any, 0, childLen)
+		for k := 0; k < childLen; k++ {
+			if leafNullable && !childValid[k] {
+				inner = append(inner, nil)
+				continue
+			}
+			value, err := scalarFieldValue(leaf, child, k)
+			if err != nil {
+				return nil, err
+			}
+			inner = append(inner, value)
+		}
+		return inner, nil
+	case schemapb.DataType_ArrayOfVector:
+		vectorField, ok := row.(*schemapb.VectorField)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("expected VectorField row for struct sub-field %s, got %T", subField.GetName(), row)
+		}
+		p, ok := vectorPhysicalIndex(subField, vectorField, j)
+		if !ok {
+			return nil, nil
+		}
+		return vectorElementValue(subField, vectorField, p)
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %s of struct sub-field %s", subField.GetDataType(), subField.GetName())
+	}
 }
 
 func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]map[string]any, error) {
@@ -1619,12 +1981,16 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 }
 
 // reconstructStructArrayForCSV reconstructs struct array data for CSV format
-// Returns a JSON string containing an array of structs with numeric vector values.
-func reconstructStructArrayForCSV(structField *schemapb.StructArrayFieldSchema, insertData *storage.InsertData, rowIndex int) (string, error) {
+// Returns a JSON string containing an array of structs with numeric vector values,
+// in the same shape as the JSON format, or nullkey for a null struct row.
+func reconstructStructArrayForCSV(structField *schemapb.StructArrayFieldSchema, insertData *storage.InsertData, rowIndex int, nullkey string) (string, error) {
 	// Use the JSON reconstruction function to get the struct array
 	structArray, err := reconstructStructArrayForJSON(structField, insertData, rowIndex)
 	if err != nil {
 		return "", err
+	}
+	if structArray == nil {
+		return nullkey, nil
 	}
 
 	// Convert the entire struct array to JSON string
@@ -1674,7 +2040,7 @@ func CreateInsertDataForCSV(schema *schemapb.CollectionSchema, insertData *stora
 		data := make([]string, 0)
 		for _, name := range header {
 			if structArrayField, ok := structArrayFields[name]; ok {
-				structArrayData, err := reconstructStructArrayForCSV(structArrayField, insertData, i)
+				structArrayData, err := reconstructStructArrayForCSV(structArrayField, insertData, i, nullkey)
 				if err != nil {
 					return nil, err
 				}

@@ -325,36 +325,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
 }
 
-std::vector<std::string>
-split_by_wildcard(const std::string& literal) {
-    std::vector<std::string> result;
-    std::string r;
-    r.reserve(literal.size());
-    bool escape_mode = false;
-    for (char c : literal) {
-        if (escape_mode) {
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                // consider case "\\%", we should reserve %
-                escape_mode = true;
-            } else if (c == '%' || c == '_') {
-                if (r.length() > 0) {
-                    result.push_back(std::move(r));
-                    r.clear();
-                }
-            } else {
-                r += c;
-            }
-        }
-    }
-    if (r.length() > 0) {
-        result.push_back(std::move(r));
-    }
-    return result;
-}
-
 // Extract runs of literal bytes from a regex pattern that are GUARANTEED to
 // appear in any matching string.  Only these "required literals" are safe to
 // use as AND-conditions in the ngram coarse filter.

@@ -54,20 +54,23 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 element_offset, VEC_FIELD_DATA(data, int8), element_count);
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             auto& vector_array = data->vectors().vector_array().data();
+            const auto& valid_data = GetFieldDataRowValidData(*data);
             std::vector<VectorArray> data_raw{};
             if (field_meta.is_nullable() &&
-                data->valid_data_size() == element_count) {
+                valid_data.size() == element_count) {
                 ssize_t valid_count = 0;
                 for (ssize_t i = 0; i < element_count; ++i) {
-                    if (data->valid_data(i)) {
+                    if (valid_data[i]) {
                         ++valid_count;
                     }
                 }
                 data_raw.reserve(valid_count);
                 if (vector_array.size() == element_count) {
                     for (ssize_t i = 0; i < element_count; ++i) {
-                        if (data->valid_data(i)) {
-                            data_raw.emplace_back(VectorArray(vector_array[i]));
+                        if (valid_data[i]) {
+                            data_raw.emplace_back(
+                                VectorArray(vector_array[i],
+                                            field_meta.is_element_nullable()));
                         }
                     }
                 } else {
@@ -78,7 +81,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                         vector_array.size(),
                         valid_count);
                     for (auto& e : vector_array) {
-                        data_raw.emplace_back(VectorArray(e));
+                        data_raw.emplace_back(
+                            VectorArray(e, field_meta.is_element_nullable()));
                     }
                 }
             } else {
@@ -89,7 +93,8 @@ VectorBase::set_data_raw(ssize_t element_offset,
                            element_count);
                 data_raw.reserve(vector_array.size());
                 for (auto& e : vector_array) {
-                    data_raw.emplace_back(VectorArray(e));
+                    data_raw.emplace_back(
+                        VectorArray(e, field_meta.is_element_nullable()));
                 }
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
@@ -185,6 +190,98 @@ VectorBase::set_data_raw(ssize_t element_offset,
                       fmt::format("unsupported datatype {}",
                                   field_meta.get_data_type()));
         }
+    }
+}
+
+void
+ConcurrentVector<ArrayValue>::set_data_raw(ssize_t element_offset,
+                                           ssize_t element_count,
+                                           const DataArray* data,
+                                           const FieldMeta& field_meta) {
+    const auto& array_data = FIELD_DATA(data, array);
+    std::call_once(array_type_once_, [&] {
+        array_type_ = std::make_shared<const proto::schema::TypeSchema>(
+            field_meta.get_array_type_schema());
+    });
+
+    const auto& validity = GetFieldDataRowValidData(*data);
+    const bool has_validity = validity.size() == element_count;
+    ssize_t valid_count = 0;
+    if (has_validity) {
+        for (ssize_t i = 0; i < element_count; ++i) {
+            valid_count += validity.Get(i);
+        }
+    }
+    const bool compact = has_validity && array_data.size() == valid_count &&
+                         array_data.size() != element_count;
+    AssertInfo(array_data.size() == element_count || compact,
+               "native list payload has {} rows, expected {} dense or {} "
+               "compact rows",
+               array_data.size(),
+               element_count,
+               valid_count);
+    ScalarFieldProto null_row;
+    std::vector<const ScalarFieldProto*> rows;
+    rows.reserve(element_count);
+    ssize_t physical = 0;
+    for (ssize_t i = 0; i < element_count; ++i) {
+        if (compact && !validity.Get(i)) {
+            rows.push_back(&null_row);
+        } else {
+            rows.push_back(
+                &array_data.Get(static_cast<int>(compact ? physical++ : i)));
+        }
+    }
+
+    set_proto_rows(
+        element_offset,
+        std::span<const ScalarFieldProto* const>(rows.data(), rows.size()));
+}
+
+void
+ConcurrentVector<ArrayValue>::set_proto_rows(
+    ssize_t element_offset, std::span<const ScalarFieldProto* const> rows) {
+    if (rows.empty()) {
+        return;
+    }
+
+    const auto element_count = static_cast<ssize_t>(rows.size());
+    const auto end_offset = element_offset + element_count;
+
+    int64_t chunk_num;
+    int64_t allocation_chunk_size;
+    if (size_per_chunk_ == MAX_ROW_COUNT) {
+        chunk_num = 1;
+        allocation_chunk_size = end_offset;
+    } else {
+        chunk_num = upper_div(end_offset, size_per_chunk_);
+        allocation_chunk_size = size_per_chunk_;
+    }
+    chunks_ptr_->emplace_to_at_least(chunk_num, allocation_chunk_size);
+
+    using ArrayChunkVector =
+        ThreadSafeChunkVector<ArrayValue,
+                              VariableLengthChunk<ArrayValue>,
+                              true>;
+    auto* chunks = static_cast<ArrayChunkVector*>(chunks_ptr_.get());
+
+    ssize_t current_offset = element_offset;
+    size_t source_offset = 0;
+    while (source_offset < rows.size()) {
+        const auto chunk_id = current_offset / size_per_chunk_;
+        const auto chunk_offset = current_offset % size_per_chunk_;
+        const auto remaining_in_chunk =
+            static_cast<ssize_t>(size_per_chunk_ - chunk_offset);
+        const auto remaining_rows =
+            static_cast<ssize_t>(rows.size() - source_offset);
+        const auto copy_count = std::min(remaining_in_chunk, remaining_rows);
+        chunks->copy_array_rows_to_chunk(
+            chunk_id,
+            static_cast<size_t>(chunk_offset),
+            rows.subspan(source_offset, static_cast<size_t>(copy_count)),
+            array_type_);
+        current_offset += copy_count;
+        source_offset += static_cast<size_t>(copy_count);
     }
 }
 

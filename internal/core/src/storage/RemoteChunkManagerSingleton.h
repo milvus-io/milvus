@@ -33,8 +33,12 @@ class RemoteChunkManagerSingleton {
 
     static RemoteChunkManagerSingleton&
     GetInstance() {
-        static RemoteChunkManagerSingleton instance;
-        return instance;
+        // Never destroyed. The remote chunk manager lives as long as the
+        // process, since Release keeps it, and a static destructor would
+        // destroy its client after MinioChunkManager released the AWS SDK at
+        // exit, which the SDK does not allow.
+        static auto* instance = new RemoteChunkManagerSingleton();
+        return *instance;
     }
 
     void

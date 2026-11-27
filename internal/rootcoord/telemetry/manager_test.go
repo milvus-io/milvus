@@ -465,6 +465,14 @@ func TestStartStop(t *testing.T) {
 	mgr.Stop()
 }
 
+func TestStopTwice(t *testing.T) {
+	mgr := NewTelemetryManager(nil)
+	mgr.Start()
+
+	mgr.Stop()
+	assert.NotPanics(t, mgr.Stop)
+}
+
 func TestGetClientStatus(t *testing.T) {
 	mgr := NewTelemetryManager(nil)
 

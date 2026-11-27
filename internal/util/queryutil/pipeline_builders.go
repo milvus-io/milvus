@@ -17,6 +17,8 @@
 package queryutil
 
 import (
+	"slices"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
@@ -31,8 +33,8 @@ import (
 //
 //	Plain:           [ReduceByPKTS(topK)] → output
 //	ORDER BY:        [DeduplicatePK] → [OrderByLimit(topK)] → output
-//	GROUP BY:        [DeduplicateByGroups(topK)] → output
-//	GROUP BY+ORDER:  [DeduplicateByGroups(unlimited)] → [OrderByLimit(topK)] → output
+//	GROUP BY:        [DeduplicateByGroups(topK without aggregates, otherwise unlimited)] → output
+//	GROUP BY+ORDER:  [DeduplicateByGroups(unlimited)] → [OrderByLimit(topK or unlimited)] → output
 //
 // topK should be offset+limit (already set by proxy in req.Limit).
 func BuildQueryReducePipeline(
@@ -49,9 +51,28 @@ func BuildQueryReducePipeline(
 	hasOrderBy := len(orderByFields) > 0
 
 	if hasGroupBy && hasOrderBy {
-		return buildGroupByOrderByReducePipeline(name, schema, topK, orderByFields, groupByFieldIDs, aggregates)
+		// Aggregate values can change when partial results are merged, so a
+		// local topK is safe only when the ordering uses grouping keys.
+		groupTopK := topK
+		for _, field := range orderByFields {
+			if !slices.Contains(groupByFieldIDs, field.FieldID) {
+				groupTopK = -1
+				break
+			}
+		}
+		var err error
+		orderByFields, err = orderby.AppendGroupByTieBreakers(orderByFields, groupByFieldIDs, schema)
+		if err != nil {
+			return nil, err
+		}
+		return buildGroupByOrderByReducePipeline(name, schema, groupTopK, orderByFields, groupByFieldIDs, aggregates)
 	} else if hasGroupBy {
-		return buildGroupByReducePipeline(name, schema, topK, groupByFieldIDs, aggregates), nil
+		// Without aggregates, any topK distinct groups are valid for an unordered query.
+		groupLimit := topK
+		if len(aggregates) > 0 {
+			groupLimit = -1
+		}
+		return buildGroupByReducePipeline(name, schema, groupLimit, groupByFieldIDs, aggregates), nil
 	} else if hasOrderBy {
 		return buildOrderByReducePipeline(name, schema, topK, orderByFields, maxOutputSize), nil
 	}
@@ -73,10 +94,10 @@ func buildOrderByReducePipeline(name string, schema *schemapb.CollectionSchema, 
 	return b.Build()
 }
 
-// buildGroupByReducePipeline: [DeduplicateByGroups(topK)] → output
-func buildGroupByReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, groupByFieldIDs []int64, aggregates []*planpb.Aggregate) *Pipeline {
+// buildGroupByReducePipeline: [DeduplicateByGroups(groupLimit)] → output
+func buildGroupByReducePipeline(name string, schema *schemapb.CollectionSchema, groupLimit int64, groupByFieldIDs []int64, aggregates []*planpb.Aggregate) *Pipeline {
 	b := NewPipelineBuilder(name)
-	b.Add(OpReduceByGroups, pin(), pout(), NewDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, topK))
+	b.Add(OpReduceByGroups, pin(), pout(), NewDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, groupLimit))
 	return b.Build()
 }
 

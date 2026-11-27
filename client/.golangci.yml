@@ -105,6 +105,14 @@ linters:
     generated: lax
     rules:
       - linters:
+          - gocritic
+        path: .+_test\.go
+        text: do not access protobuf valid_data directly
+      - linters:
+          - gocritic
+        path: ^column/generic_base\.go$
+        text: do not access protobuf valid_data directly
+      - linters:
           - forbidigo
         path: .+_test\.go
       - path: (.+)\.go$

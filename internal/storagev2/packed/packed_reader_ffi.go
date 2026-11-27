@@ -261,26 +261,34 @@ func newCPluginContext(storagePluginContext *indexcgopb.StoragePluginContext) (*
 
 func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, func()) {
 	cStorageConfig := C.CStorageConfig{
-		address:                C.CString(storageConfig.GetAddress()),
-		bucket_name:            C.CString(storageConfig.GetBucketName()),
-		access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-		access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-		root_path:              C.CString(storageConfig.GetRootPath()),
-		storage_type:           C.CString(storageConfig.GetStorageType()),
-		cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-		iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-		log_level:              C.CString("warn"),
-		useSSL:                 C.bool(storageConfig.GetUseSSL()),
-		sslCACert:              C.CString(storageConfig.GetSslCACert()),
-		useIAM:                 C.bool(storageConfig.GetUseIAM()),
-		region:                 C.CString(storageConfig.GetRegion()),
-		useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-		requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-		gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-		use_custom_part_upload: true,
-		max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-		tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-		use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
+		address:                         C.CString(storageConfig.GetAddress()),
+		bucket_name:                     C.CString(storageConfig.GetBucketName()),
+		access_key_id:                   C.CString(storageConfig.GetAccessKeyID()),
+		access_key_value:                C.CString(storageConfig.GetSecretAccessKey()),
+		root_path:                       C.CString(storageConfig.GetRootPath()),
+		storage_type:                    C.CString(storageConfig.GetStorageType()),
+		cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
+		iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
+		log_level:                       C.CString("warn"),
+		useSSL:                          C.bool(storageConfig.GetUseSSL()),
+		sslCACert:                       C.CString(storageConfig.GetSslCACert()),
+		useIAM:                          C.bool(storageConfig.GetUseIAM()),
+		region:                          C.CString(storageConfig.GetRegion()),
+		useVirtualHost:                  C.bool(storageConfig.GetUseVirtualHost()),
+		requestTimeoutMs:                C.int64_t(storageConfig.GetRequestTimeoutMs()),
+		gcp_credential_json:             C.CString(storageConfig.GetGcpCredentialJSON()),
+		use_custom_part_upload:          true,
+		max_connections:                 C.uint32_t(storageConfig.GetMaxConnections()),
+		tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+		use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
+		talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
+		talon_enabled_stages:            C.uint32_t(storageConfig.GetTalonEnabledStages()),
+		talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
+		talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
+		talon_namespace:                 C.CString(storageConfig.GetTalonNamespace()),
+		talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
+		talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
+		talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
 	}
 	return cStorageConfig, func() {
 		C.free(unsafe.Pointer(cStorageConfig.address))
@@ -296,6 +304,8 @@ func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, 
 		C.free(unsafe.Pointer(cStorageConfig.region))
 		C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
+		C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
+		C.free(unsafe.Pointer(cStorageConfig.talon_namespace))
 	}
 }
 
@@ -410,8 +420,8 @@ func (r *FFIPackedReader) Release() {
 	r.Close()
 }
 
-func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig) (loonManifestHandle *C.LoonManifest, err error) {
-	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+func GetManifestHandle(manifestPath string, storageConfig *indexpb.StorageConfig, talonStages ...uint32) (loonManifestHandle *C.LoonManifest, err error) {
+	return GetManifestHandleWithExtfs(manifestPath, storageConfig, ExternalSpecContext{}, talonStages...)
 }
 
 // GetManifestHandleWithExtfs opens a StorageV3 manifest with optional extfs
@@ -421,6 +431,7 @@ func GetManifestHandleWithExtfs(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
@@ -429,7 +440,7 @@ func GetManifestHandleWithExtfs(
 	}
 	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
 
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
 		return cManifestHandle, err
 	}
@@ -441,7 +452,12 @@ func GetManifestHandleWithExtfs(
 	defer C.free(unsafe.Pointer(cBasePath))
 
 	var cTransactionHandle C.LoonTransactionHandle
+	// The open reads the manifest revision from storage and blocks the calling
+	// goroutine's OS thread; bound it process-wide like every other blocking
+	// manifest FFI call so concurrent commits cannot explode thread count.
+	acquireManifestFFI(context.Background())
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	releaseManifestFFI()
 	err = HandleLoonFFIResult(result)
 	if err != nil {
 		return cManifestHandle, err

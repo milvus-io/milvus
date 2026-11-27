@@ -110,3 +110,19 @@ func TestSegmentInfo_StatsCarriedByRefThroughClone(t *testing.T) {
 	// And the original sees the clone's digest: cumulative 100+100 = 200.
 	assert.Equal(t, int64(200), si.Statistics().Publish().GetInsertBinlogSize())
 }
+
+func TestSegmentRestoresSplitFromStatistics(t *testing.T) {
+	info := &datapb.SegmentInfo{StorageVersion: storage.StorageV3, Stats: &datapb.Statistics{
+		LoadResource: &datapb.LoadResourceStatistics{ColumnGroups: []*datapb.ColumnGroupStatistics{
+			{GroupId: 7, FieldIds: []int64{100, 102}},
+			{GroupId: 101, FieldIds: []int64{101}},
+		}},
+	}}
+	segment := NewSegmentInfo(info, nil, nil, nil)
+	assert.EqualValues(t, 7, segment.GetCurrentSplit()[0].GroupID)
+	assert.Equal(t, []int64{100, 102}, segment.GetCurrentSplit()[0].Fields)
+	assert.EqualValues(t, 101, segment.GetCurrentSplit()[1].GroupID)
+	assert.Empty(t, segment.GetCurrentSplit()[0].Format)
+	segment.GetCurrentSplit()[0].Fields[0] = 999
+	assert.Equal(t, []int64{100, 102}, info.GetStats().GetLoadResource().GetColumnGroups()[0].GetFieldIds())
+}

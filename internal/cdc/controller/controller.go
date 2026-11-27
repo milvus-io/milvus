@@ -18,9 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -29,8 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// listRetryInterval is how long the controller waits before listing the
+// replicate pchannels again after a transient etcd error.
+const listRetryInterval = time.Second
 
 // Controller controls and schedules the CDC process.
 // It will periodically update the replications by the replicate configuration.
@@ -103,10 +110,12 @@ func (c *controller) startWatchLoop() {
 	go func() {
 		defer c.wg.Done()
 		for {
-			m, err := meta.ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
-			if err != nil && c.ctx.Err() == nil {
-				mlog.Warn(c.ctx, "failed to list replicate pchannels", mlog.Err(err))
-				continue
+			m, err := c.listReplicatePChannels()
+			if err != nil {
+				if c.ctx.Err() != nil {
+					return
+				}
+				panic(fmt.Sprintf("failed to list replicate pchannels: %v", err))
 			}
 			c.recoverReplicatePChannelMeta(m.Channels)
 			eventCh := c.watchEvents(m.Revision + 1)
@@ -118,6 +127,27 @@ func (c *controller) startWatchLoop() {
 	}()
 }
 
+// listReplicatePChannels lists the replicate pchannels, retrying transient etcd
+// errors (e.g. leader changed while etcd restarts). Any other error, including
+// a request timeout, is returned.
+func (c *controller) listReplicatePChannels() (*meta.ReplicateChannels, error) {
+	for {
+		m, err := meta.ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
+		if err == nil {
+			return m, nil
+		}
+		if c.ctx.Err() != nil || !etcd.IsRetriableEtcdErr(err) {
+			return nil, err
+		}
+		mlog.Warn(c.ctx, "failed to list replicate pchannels, retry", mlog.Err(err))
+		select {
+		case <-time.After(listRetryInterval):
+		case <-c.ctx.Done():
+			return nil, c.ctx.Err()
+		}
+	}
+}
+
 func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 	for {
 		select {
@@ -125,6 +155,9 @@ func (c *controller) watchLoop(eventCh clientv3.WatchChan) error {
 			return nil
 		case event, ok := <-eventCh:
 			if !ok {
+				if c.ctx.Err() != nil {
+					return nil
+				}
 				panic("etcd event channel closed")
 			}
 			if err := event.Err(); err != nil {

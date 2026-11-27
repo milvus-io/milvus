@@ -19,10 +19,13 @@ package json
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -555,4 +558,51 @@ func (suite *ReaderSuite) TestAllowInsertAutoID_KeepUserPK() {
 		_, err = reader.Read()
 		suite.NoError(err)
 	}
+}
+
+// failingReader serves data, then a hard error instead of io.EOF.
+type failingReader struct {
+	data []byte
+	off  int
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.off >= len(r.data) {
+		return 0, r.err
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+
+// TestReadSurfacesReaderErrorInsteadOfEOF pins that a read failure at a record
+// boundary is reported (and classified) rather than mistaken for a clean end of
+// file, which would silently import only the prefix.
+func TestReadSurfacesReaderErrorInsteadOfEOF(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "pk",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	}
+	content := []byte(`{"rows":[{"pk": 1},`)
+	r := &reader{
+		ctx:        context.Background(),
+		schema:     schema,
+		dec:        json.NewDecoder(&failingReader{data: content, err: io.ErrUnexpectedEOF}),
+		bufferSize: math.MaxInt,
+	}
+	var err error
+	r.parser, err = NewRowParser(schema)
+	require.NoError(t, err)
+	require.NoError(t, r.Init())
+
+	_, err = r.Read()
+	require.Error(t, err)
+	require.False(t, errors.Is(err, io.EOF), "a broken tail must not look like a clean end: %v", err)
+	require.Equal(t, merr.Code(merr.ErrImportFailed), merr.Code(err),
+		"a truncated file must fail the job: %v", err)
 }

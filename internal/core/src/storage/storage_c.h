@@ -35,6 +35,9 @@ CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
 CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes);
+
+CStatus
 InitMmapManager(CMmapConfig c_mmap_config);
 
 void
@@ -55,6 +58,12 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);
 
@@ -70,6 +79,9 @@ InitIndexBuildReadWindow(int64_t window_bytes);
 
 CStatus
 InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json);
 
 // Plugin related APIs
 CStatus

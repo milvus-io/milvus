@@ -5,6 +5,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "shard"
@@ -269,11 +271,20 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// Proxy resolves an existing collection before flushing; release handoff
+		// requires an existing growing-source channel. Collection IDs are never
+		// reused, so a missing shard means Drop overtook this local flush. Append
+		// an empty best-effort WAL record. The caller's metadata/progress checks
+		// still decide completion (and release handoff rollback on failure).
+		// Historical/replicated flushes and other errors retain their behavior.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -281,7 +292,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }
@@ -339,6 +350,15 @@ func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg messa
 		// The segment can not be created at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
+
+	// The worker can start before a schema DDL. The outer VChannel lock
+	// serializes this append (including registration) with the DDL.
+	schema := impl.shardManager.GetCollectionSchemaSnapshot(h.GetCollectionId())
+	h.SchemaVersion = schema.GetVersion()
+	if typeutil.HasTextField(schema) {
+		h.StorageVersion = storage.StorageV3
+	}
+	createSegmentMsg.OverwriteHeader(h)
 
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {

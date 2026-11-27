@@ -80,9 +80,11 @@ class PhyIterativeElementFilterNode : public Operator {
     }
 
  private:
+    friend class ElementFilterBitsNodeCandidateTest;
+
     void
     CollectResults(SearchResult& search_result,
-                   const IArrayOffsets* array_offsets);
+                   const IStructElementOffsets* struct_element_offsets);
 
     std::unique_ptr<ExprSet> element_exprs_;
     QueryContext* query_context_;

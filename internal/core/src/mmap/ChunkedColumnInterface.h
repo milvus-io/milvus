@@ -16,10 +16,14 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <vector>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/ArrayValue.h"
 #include "common/Chunk.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
@@ -31,6 +35,12 @@ using namespace milvus::cachinglayer;
 class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
+
+    // Materialize lazy column-directory metadata with the caller's context
+    // before using context-free layout accessors. This does not pin raw data.
+    virtual void
+    Prepare(milvus::OpContext* op_ctx) const {
+    }
 
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
@@ -109,6 +119,14 @@ class ChunkedColumnInterface {
                int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    // ArrayValueView is non-owning. The returned PinWrapper keeps the backing
+    // ColumnarArrayChunk alive for the lifetime of the views.
+    virtual PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
     virtual PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
@@ -128,6 +146,12 @@ class ChunkedColumnInterface {
     ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(milvus::OpContext* op_ctx,
+                             int64_t chunk_id,
+                             const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>
@@ -212,6 +236,77 @@ class ChunkedColumnInterface {
                    chunk_id,
                    valid_array_offsets_per_chunk_.size());
         return valid_array_offsets_per_chunk_[chunk_id];
+    }
+
+    // Element-nullable VECTOR_ARRAY stores only valid vectors. Record the
+    // segment-wide logical element id of every stored vector so brute-force
+    // search over the compact payload filters and reports logical element
+    // ids. Null rows contribute no logical elements, matching
+    // StructElementOffsets. Built once; later calls are no-ops.
+    void
+    BuildElementPhysicalToLogicalIds(milvus::OpContext* op_ctx) {
+        if (element_p2l_ids_built_.load(std::memory_order_acquire)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(element_p2l_ids_build_mutex_);
+        if (element_p2l_ids_built_.load(std::memory_order_relaxed)) {
+            return;
+        }
+        auto chunk_pws = GetAllChunks(op_ctx);
+        element_p2l_ids_.clear();
+        physical_elements_until_chunk_.assign(1, 0);
+        physical_elements_until_chunk_.reserve(chunk_pws.size() + 1);
+        int64_t logical_begin = 0;
+        for (size_t i = 0; i < chunk_pws.size(); ++i) {
+            auto chunk = static_cast<VectorArrayChunk*>(chunk_pws[i].get());
+            AssertInfo(chunk->IsElementNullable(),
+                       "chunk {} of an element-nullable VECTOR_ARRAY column "
+                       "is not element-nullable",
+                       i);
+            const auto* validity = chunk->ElementValidity();
+            const auto logical_count = chunk->LogicalElementCount();
+            AssertInfo(logical_begin + logical_count <=
+                           std::numeric_limits<int32_t>::max(),
+                       "logical element count {} exceeds int32 range",
+                       logical_begin + logical_count);
+            for (int64_t j = 0; j < logical_count; ++j) {
+                if (validity[j >> 3] & (1 << (j & 7))) {
+                    element_p2l_ids_.push_back(
+                        static_cast<int32_t>(logical_begin + j));
+                }
+            }
+            const auto physical_count =
+                static_cast<int64_t>(element_p2l_ids_.size()) -
+                physical_elements_until_chunk_.back();
+            AssertInfo(physical_count == chunk->PhysicalElementCount(),
+                       "chunk {} element bitmap marks {} valid elements but "
+                       "stores {} vectors",
+                       i,
+                       physical_count,
+                       chunk->PhysicalElementCount());
+            logical_begin += logical_count;
+            physical_elements_until_chunk_.push_back(
+                static_cast<int64_t>(element_p2l_ids_.size()));
+        }
+        element_p2l_ids_built_.store(true, std::memory_order_release);
+    }
+
+    // Logical element ids of the vectors physically stored in chunk_id.
+    // Requires BuildElementPhysicalToLogicalIds.
+    OffsetMappingIdView
+    GetElementPhysicalToLogicalIds(int64_t chunk_id) const {
+        AssertInfo(element_p2l_ids_built_.load(std::memory_order_acquire),
+                   "element physical-to-logical ids are not built");
+        AssertInfo(
+            chunk_id >= 0 &&
+                chunk_id + 1 <
+                    static_cast<int64_t>(physical_elements_until_chunk_.size()),
+            "Chunk id {} out of range, element id chunks {}",
+            chunk_id,
+            physical_elements_until_chunk_.size() - 1);
+        const auto begin = physical_elements_until_chunk_[chunk_id];
+        const auto end = physical_elements_until_chunk_[chunk_id + 1];
+        return {element_p2l_ids_.data() + begin, end - begin};
     }
 
     virtual void
@@ -332,6 +427,16 @@ class ChunkedColumnInterface {
     }
 
     virtual void
+    BulkArrayValueAt(milvus::OpContext* op_ctx,
+                     std::function<void(ScalarFieldProto&&, size_t)> fn,
+                     const int64_t* offsets,
+                     int64_t count) const {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "BulkArrayValueAt only supported for recursive ARRAY columns");
+    }
+
+    virtual void
     BulkVectorArrayAt(milvus::OpContext* op_ctx,
                       std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,
@@ -372,6 +477,10 @@ class ChunkedColumnInterface {
     SealedOffsetMapping offset_mapping_;
     std::atomic<bool> valid_row_ids_built_{false};
     std::mutex offset_mapping_build_mutex_;
+    std::vector<int32_t> element_p2l_ids_;
+    std::vector<int64_t> physical_elements_until_chunk_;
+    std::atomic<bool> element_p2l_ids_built_{false};
+    std::mutex element_p2l_ids_build_mutex_;
 
     virtual void
     BuildValidArrayOffsetsInChunks(
@@ -384,7 +493,9 @@ class ChunkedColumnInterface {
         valid_array_offsets_per_chunk_.assign(chunk_pws.size(), {});
         for (size_t i = 0; i < chunk_pws.size(); ++i) {
             auto chunk = static_cast<VectorArrayChunk*>(chunk_pws[i].get());
-            auto logical_offsets = chunk->Offsets();
+            // Offsets() is the physical vector prefix sum. Null elements do
+            // not occupy payload slots, including in element-nullable chunks.
+            auto physical_offsets = chunk->Offsets();
             auto& valid_offsets = valid_array_offsets_per_chunk_[i];
             valid_offsets.reserve(valid_count_per_chunk_[i] + 1);
             valid_offsets.push_back(0);
@@ -395,7 +506,7 @@ class ChunkedColumnInterface {
                 if (!chunk->isValid(j)) {
                     continue;
                 }
-                total += logical_offsets[j + 1] - logical_offsets[j];
+                total += physical_offsets[j + 1] - physical_offsets[j];
                 valid_offsets.push_back(total);
             }
         }

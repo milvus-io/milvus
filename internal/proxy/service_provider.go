@@ -5,15 +5,11 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -37,35 +33,6 @@ type Response interface {
 
 type ServiceInterceptor[Req Request, Resp Response] interface {
 	Call(ctx context.Context, request Req) (Resp, error)
-}
-
-// serviceProviderMetricError lets a provider preserve a non-failure metric
-// outcome, such as "abandon" for a request that could not be enqueued, while
-// keeping the original error identity and merr code intact for the response.
-type serviceProviderMetricError struct {
-	err    error
-	status string
-	cause  string
-}
-
-func (e *serviceProviderMetricError) Error() string {
-	return e.err.Error()
-}
-
-func (e *serviceProviderMetricError) Unwrap() error {
-	return e.err
-}
-
-func withServiceProviderMetric(err error, status, cause string) error {
-	return &serviceProviderMetricError{err: err, status: status, cause: cause}
-}
-
-func serviceCallMetricLabel(err error) (string, string) {
-	var metricErr *serviceProviderMetricError
-	if errors.As(err, &metricErr) {
-		return metricErr.status, metricErr.cause
-	}
-	return failMetricLabel(err)
 }
 
 func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*InterceptorImpl[Req, Resp], error) {
@@ -103,6 +70,12 @@ type InterceptorImpl[Req Request, Resp Response] struct {
 	onError    func(err error) (Resp, error)
 }
 
+// Call runs a proxy service-layer method through the health check and
+// response finalization hooks. It deliberately does not record
+// milvus_proxy_req_count: the request is counted exactly once at the boundary
+// it entered through -- UnaryRequestStatsInterceptor for gRPC, wrapperPost for
+// REST v2 -- and a second count here would double-report every request. It
+// only owns the latency series, which no boundary covers for these methods.
 func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 ) (Resp, error) {
 	if err := merr.CheckHealthy(i.proxy.GetStateCode()); err != nil {
@@ -113,10 +86,6 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(i.method)
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-	dbName := request.GetDbName()
-	collectionName := request.GetCollectionName()
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.TotalLabel, metrics.CauseNA, dbName, collectionName).Inc()
 	defer func() {
 		metrics.ProxyReqLatency.WithLabelValues(nodeID, i.method).
 			Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -124,115 +93,20 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
-		status, cause := serviceCallMetricLabel(err)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
 		return i.onError(err)
 	}
 
 	if i.onResponse != nil && merr.Ok(resp.GetStatus()) {
 		if err := i.onResponse(resp); err != nil {
-			status, cause := serviceCallMetricLabel(err)
-			metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-				status, cause, dbName, collectionName).Inc()
 			return i.onError(err)
 		}
 	}
-
-	if !merr.Ok(resp.GetStatus()) {
-		status, cause := failMetricLabel(merr.Error(resp.GetStatus()))
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
-		return resp, nil
-	}
-
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.SuccessLabel, metrics.CauseNA, dbName, collectionName).Inc()
 
 	return resp, nil
 }
 
 type CachedProxyServiceProvider struct {
 	*Proxy
-}
-
-func describeCollectionErrorStatus(err error, database, collectionName string) *commonpb.Status {
-	// A user-facing DescribeCollection miss is an input error, but keep the
-	// precise source code: a missing database is ErrDatabaseNotFound while a
-	// missing collection is ErrCollectionNotFound. The sentinels remain system
-	// errors globally because internal refresh/retry paths also use them. The
-	// deprecated ErrorCode enum has no database-not-found value, so Code=800 is
-	// authoritative there and ErrorCode keeps merr's standard UnexpectedError
-	// compatibility fallback.
-	err = merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-	status := merr.Status(err)
-	if errors.Is(err, merr.ErrCollectionNotFound) {
-		// Preserve the established SDK-visible collection-not-found message while
-		// letting merr.Status own both the typed Code and legacy ErrorCode mapping.
-		reason := fmt.Sprintf("can't find collection[database=%s][collection=%s]", database, collectionName)
-		status.Reason = reason
-		status.Detail = reason
-	}
-	return status
-}
-
-func needsTimestamptzDefaultProjection(field *schemapb.FieldSchema) bool {
-	if field.GetDataType() != schemapb.DataType_Timestamptz || field.GetDefaultValue() == nil {
-		return false
-	}
-	_, ok := field.GetDefaultValue().GetData().(*schemapb.ValueField_TimestamptzData)
-	return ok
-}
-
-// projectDescribeCollectionSchema defines the public DescribeCollection schema
-// shape shared by cached and remote providers. sourceShared is true for
-// MetaCache-owned schemas: only fields that the public TIMESTAMPTZ rewrite will
-// mutate are cloned, keeping the canonical cached int64 representation intact.
-func projectDescribeCollectionSchema(source *schemapb.CollectionSchema, sourceShared bool) (*schemapb.CollectionSchema, error) {
-	if source == nil {
-		return nil, merr.WrapErrServiceInternalMsg("describe collection returned a nil collection schema")
-	}
-
-	projected := &schemapb.CollectionSchema{
-		Name:               source.GetName(),
-		Description:        source.GetDescription(),
-		AutoID:             source.GetAutoID(),
-		Fields:             make([]*schemapb.FieldSchema, 0, len(source.GetFields())),
-		EnableDynamicField: source.GetEnableDynamicField(),
-		Properties:         append([]*commonpb.KeyValuePair(nil), source.GetProperties()...),
-		Functions:          append([]*schemapb.FunctionSchema(nil), source.GetFunctions()...),
-		DbName:             source.GetDbName(),
-		StructArrayFields:  make([]*schemapb.StructArrayFieldSchema, 0, len(source.GetStructArrayFields())),
-		Version:            source.GetVersion(),
-		ExternalSource:     source.GetExternalSource(),
-		ExternalSpec:       source.GetExternalSpec(),
-		EnableNamespace:    source.GetEnableNamespace(),
-	}
-
-	for _, field := range source.GetFields() {
-		if field.GetIsDynamic() || field.GetName() == common.NamespaceFieldName ||
-			field.GetFieldID() < common.StartOfUserFieldID {
-			continue
-		}
-
-		outputField := field
-		if sourceShared && needsTimestamptzDefaultProjection(field) {
-			outputField = proto.Clone(field).(*schemapb.FieldSchema)
-		}
-		projected.Fields = append(projected.Fields, outputField)
-	}
-
-	// Struct field names are restored in place, so these messages must always be
-	// detached from both RootCoord's response and MetaCache's canonical schema.
-	for _, field := range source.GetStructArrayFields() {
-		projected.StructArrayFields = append(projected.StructArrayFields,
-			proto.Clone(field).(*schemapb.StructArrayFieldSchema))
-	}
-
-	if err := restoreStructFieldNames(projected); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to restore struct field names")
-	}
-	return projected, nil
 }
 
 func finalizeDescribeCollectionResponse(resp *milvuspb.DescribeCollectionResponse) error {
@@ -287,7 +161,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		// are deliberately returned uncached because their database is unknown).
 		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, "", collectionID)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 		collectionName = c.Schema.GetName()
@@ -295,7 +169,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 
 	// validate collection name, ref describeCollectionTask.PreExecute
 	if err = validateCollectionName(collectionName); err != nil {
-		resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+		resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
 		return resp, nil
 	}
 
@@ -304,12 +178,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	if !resolvedNameByID {
 		collectionID, err = node.GetMetaCache().GetCollectionID(metadataCtx, request.DbName, collectionName)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, collectionName, collectionID)
 		if err != nil {
-			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
+			resp.Status = DescribeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
 	}
@@ -330,7 +204,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		resp.CollectionName = c.Schema.Name
 	}
 
-	resp.Schema, err = projectDescribeCollectionSchema(c.Schema.CollectionSchema, true)
+	resp.Schema, err = ProjectDescribeCollectionSchema(c.Schema.CollectionSchema, true)
 	if err != nil {
 		log.Error(ctx, "failed to project collection schema", mlog.Err(err))
 		return nil, err
@@ -363,35 +237,44 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 }
 
 // checkCollectionVisibility keeps authorization out of the shared metadata
-// cache. DescribeCollection is granted to public, but the coordinator also
-// enforces object visibility. Check every response against that contract,
-// including hot cache hits and IDs resolved into another database.
+// cache. DescribeCollection is granted to public, but object visibility is a
+// separate decision. Check every response, including hot cache hits and IDs in
+// another database. The experimental local projection falls back to RC when
+// unavailable; RC remains the default until snapshot consistency is complete.
 func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Context, collection *collectionInfo) error {
+	return node.checkResolvedCollectionVisibility(ctx, collection.DBName, collection.Schema.GetName(), collection.CollID)
+}
+
+func (node *Proxy) checkResolvedCollectionVisibility(ctx context.Context, database, collection string, id int64) error {
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}
 	if err := checkDescribeCollectionUser(ctx); err != nil {
 		return err
 	}
-	if collection.DBName == "" {
+	if database == "" {
 		// Older coordinators may not return the database for an ID-only lookup.
 		// The caller's database is not evidence of the resolved object's owner.
 		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
 	}
 
+	if known, err := tryLocalCollectionVisibility(ctx, database, collection, id); known {
+		return err
+	}
+
 	// Replace an existing outgoing identity rather than appending to it: the
 	// first authorization value is what RootCoord consumes. Only the incoming
 	// identity already authenticated at the public API may select the user.
-	visible, err := node.mixCoord.DescribeCollection(describeCollectionRPCContext(ctx), &milvuspb.DescribeCollectionRequest{
+	visible, err := node.mixCoord.DescribeCollection(DescribeCollectionRPCContext(ctx), &milvuspb.DescribeCollectionRequest{
 		Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-		DbName:         collection.DBName,
-		CollectionName: collection.Schema.GetName(),
-		CollectionID:   collection.CollID,
+		DbName:         database,
+		CollectionName: collection,
+		CollectionID:   id,
 	})
 	if err := merr.CheckRPCCall(visible, err); err != nil {
 		return err
 	}
-	if visible.GetCollectionID() == collection.CollID {
+	if visible.GetCollectionID() == id {
 		return nil
 	}
 	// A rename or drop/recreate can race the cached lookup. Deny the stale
@@ -404,10 +287,6 @@ func describeCollectionMetadataContext(ctx context.Context) context.Context {
 	md = md.Copy()
 	md.Delete(util.HeaderAuthorize)
 	return metadata.NewOutgoingContext(ctx, md)
-}
-
-func describeCollectionRPCContext(ctx context.Context) context.Context {
-	return AppendUserInfoForRPC(describeCollectionMetadataContext(ctx))
 }
 
 func checkDescribeCollectionUser(ctx context.Context) error {
@@ -428,11 +307,10 @@ type RemoteProxyServiceProvider struct {
 func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (*milvuspb.DescribeCollectionResponse, error) {
-	dct := &describeCollectionTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		DescribeCollectionRequest: request,
-		mixCoord:                  node.mixCoord,
+	localVisibility := localCollectionVisibilityEnabled()
+	dct := NewDescribeCollectionTask(ctx, node, request)
+	if localVisibility {
+		dct.UseInternalMetadata()
 	}
 
 	log := mlog.With(
@@ -446,7 +324,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		log.Warn(ctx, "DescribeCollection failed to enqueue",
 			mlog.Err(err))
 
-		return nil, withServiceProviderMetric(err, metrics.AbandonLabel, metrics.CauseNA)
+		return nil, err
 	}
 
 	log.Debug(ctx, "DescribeCollection enqueued",
@@ -467,5 +345,11 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		mlog.Uint64("EndTS", dct.EndTs()),
 	)
 
-	return dct.result, nil
+	result := dct.Result()
+	if localVisibility && merr.Ok(result.GetStatus()) {
+		if err := node.checkResolvedCollectionVisibility(ctx, result.GetDbName(), result.GetSchema().GetName(), result.GetCollectionID()); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }

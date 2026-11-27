@@ -61,7 +61,7 @@ func TestReduceMultiGroupBy_CrossShardSameComposite(t *testing.T) {
 		context.Background(),
 		[]*schemapb.SearchResultData{shardA, shardB},
 		1, 5, metric.IP, schemapb.DataType_Int64,
-		0, 3, []int64{101, 102}, false,
+		0, 3, []int64{101, 102}, false, false,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, ret.GetResults())
@@ -89,7 +89,7 @@ func TestReduceMultiGroupBy_MultipleComposites(t *testing.T) {
 		context.Background(),
 		[]*schemapb.SearchResultData{shard},
 		1, 10, metric.IP, schemapb.DataType_Int64,
-		0, 2, []int64{101, 102}, false,
+		0, 2, []int64{101, 102}, false, false,
 	)
 	require.NoError(t, err)
 	require.Equal(t, []int64{4}, ret.GetResults().GetTopks(), "two groups × 2 rows each = 4")
@@ -112,7 +112,7 @@ func TestReduceMultiGroupBy_TopKTruncation(t *testing.T) {
 		context.Background(),
 		[]*schemapb.SearchResultData{shard},
 		1, 2, metric.IP, schemapb.DataType_Int64,
-		0, 1, []int64{101}, false,
+		0, 1, []int64{101}, false, false,
 	)
 	require.NoError(t, err)
 	require.Equal(t, []int64{2}, ret.GetResults().GetTopks(), "topK=2 → only top 2 groups kept (scores 0.9, 0.8)")
@@ -149,7 +149,7 @@ func TestReduceMultiGroupBy_RegroupByBucketWhenNotAggregation(t *testing.T) {
 		context.Background(),
 		[]*schemapb.SearchResultData{shard},
 		1, 10, metric.IP, schemapb.DataType_Int64,
-		0, 2, []int64{101, 102}, false,
+		0, 2, []int64{101, 102}, false, false,
 	)
 	require.NoError(t, err)
 	ids := ret.GetResults().GetIds().GetIntId().GetData()
@@ -180,7 +180,7 @@ func TestReduceMultiGroupBy_WalkOrderWhenAggregation(t *testing.T) {
 		context.Background(),
 		[]*schemapb.SearchResultData{shard},
 		1, 10, metric.IP, schemapb.DataType_Int64,
-		0, 2, []int64{101, 102}, true,
+		0, 2, []int64{101, 102}, true, false,
 	)
 	require.NoError(t, err)
 	ids := ret.GetResults().GetIds().GetIntId().GetData()

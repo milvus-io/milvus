@@ -732,3 +732,107 @@ TEST_F(SchemaTest, MilvusTableRealPKLoadsSourceTimestampColumn) {
     EXPECT_NE(std::find(columns->begin(), columns->end(), "1"), columns->end());
     EXPECT_EQ(std::find(columns->begin(), columns->end(), "0"), columns->end());
 }
+
+TEST_F(SchemaTest, BracketFieldWithoutStructKeepsLiteralPhysicalName) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("pk");
+    auto* field = source.add_fields();
+    field->set_fieldid(101);
+    field->set_name("items[score]");
+    field->set_external_field(field->name());
+    field->set_data_type(milvus::proto::schema::DataType::Array);
+    field->set_element_type(milvus::proto::schema::DataType::Int64);
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_external_field("raw_items");
+    parent->set_fieldid(200);
+    auto* registered = parent->add_fields();
+    registered->set_fieldid(201);
+    registered->set_name("items[value]");
+    registered->set_external_field("raw_items[value]");
+    registered->set_data_type(milvus::proto::schema::DataType::Array);
+    registered->set_element_type(milvus::proto::schema::DataType::Int64);
+    auto schema = Schema::ParseFrom(source);
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(101)), "items[score]");
+    EXPECT_EQ(schema->GetPhysicalColumnName(FieldId(201)), "raw_items");
+}
+
+TEST_F(SchemaTest, OrdinaryStructProjectionSelectionAndCopy) {
+    milvus::proto::schema::CollectionSchema source;
+    source.set_external_source("s3://bucket/path");
+    source.set_external_spec(R"({"format":"parquet"})");
+    auto* pk = source.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    pk->set_external_field("id_col");
+    auto* parent = source.add_struct_array_fields();
+    parent->set_name("items");
+    parent->set_fieldid(200);
+    for (int64_t id : {201, 202}) {
+        auto* child = parent->add_fields();
+        child->set_fieldid(id);
+        child->set_name(id == 201 ? "items[a]" : "items[b]");
+        child->set_external_field(child->name());
+        child->set_data_type(milvus::proto::schema::DataType::Array);
+        child->set_element_type(milvus::proto::schema::DataType::Int64);
+    }
+    auto schema = Schema::ParseFrom(source);
+    EXPECT_TRUE(schema->GetOrdinaryStructProjections({}).empty());
+    EXPECT_TRUE(schema->GetOrdinaryStructProjections({FieldId(100)}).empty());
+    auto one =
+        schema->GetOrdinaryStructProjections({FieldId(202), FieldId(202)});
+    ASSERT_EQ(one.size(), 1);
+    EXPECT_EQ(one.at("items").parent_field_id, FieldId(200));
+    EXPECT_EQ(one.at("items").child_field_ids,
+              std::vector<FieldId>{FieldId(202)});
+    auto check_all = [](const Schema& candidate) {
+        auto all =
+            candidate.GetOrdinaryStructProjections(candidate.get_field_ids());
+        ASSERT_EQ(all.size(), 1);
+        EXPECT_EQ(all.at("items").parent_field_id, FieldId(200));
+        EXPECT_EQ(all.at("items").child_field_ids,
+                  (std::vector<FieldId>{FieldId(201), FieldId(202)}));
+        EXPECT_EQ(candidate.ResolveColumnFieldId("id_col"), FieldId(100));
+    };
+    check_all(*schema);
+    Schema copied(*schema);
+    check_all(copied);
+    Schema assigned;
+    assigned = *schema;
+    check_all(assigned);
+    source.set_external_spec(R"({"format":"milvus-table"})");
+    auto table = Schema::ParseFrom(source);
+    EXPECT_TRUE(
+        table->GetOrdinaryStructProjections(table->get_field_ids()).empty());
+    source.clear_external_source();
+    source.clear_external_spec();
+    auto inner = Schema::ParseFrom(source);
+    EXPECT_TRUE(
+        inner->GetOrdinaryStructProjections(inner->get_field_ids()).empty());
+}
+
+// Go's encoding/json reads a lone "Format" as format. A spec with two keys that
+// fold to format is invalid, so it is not a milvus-table spec.
+TEST(SchemaExternalSpec, IsMilvusTableExternalSpecReadsFormatLikeGo) {
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"format":"milvus-table"})"));
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"Format":"milvus-table"})"));
+    EXPECT_TRUE(IsMilvusTableExternalSpec(R"({"\u0066ormat":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"format":"parquet"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"extfs":{}})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(
+        R"({"format":"parquet","Format":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(
+        R"({"Format":"milvus-table","FORMAT":"milvus-table"})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(R"({"format":null})"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec("[]"));
+    EXPECT_FALSE(IsMilvusTableExternalSpec(""));
+}

@@ -299,10 +299,11 @@ struct ChunkedVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column =
@@ -332,10 +333,11 @@ struct ProxyVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kVectorArrayFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),

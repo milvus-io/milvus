@@ -13,8 +13,11 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 
 #include "common/type_c.h"
+#include "milvus-storage/column_groups.h"
 #include "milvus-storage/ffi_c.h"
 #include "milvus-storage/manifest.h"
 #include "milvus-storage/properties.h"
@@ -77,7 +80,41 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config);
 std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties);
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties);
+
+// Immutable source-to-target column bindings persisted by milvus-table.
+struct MilvusTableFieldIdMapping {
+    std::unordered_map<int64_t, std::string> physical_columns;
+    std::unordered_map<std::string, int64_t> target_fields;
+};
+
+inline constexpr const char* kMilvusTableFieldIdMappingProperty =
+    "milvus_table.field_id_mapping";
+
+// Parse a canonical nonnegative int64 field ID string (no sign or leading
+// zeros except "0"). Returns std::nullopt on any non-canonical or invalid text.
+std::optional<int64_t>
+TryParseCanonicalFieldID(std::string_view value);
+
+// The shared JSON contract is {canonical nonnegative int64 target ID string:
+// canonical nonnegative int64 source ID string}, with unique IDs on both sides.
+// Invalid metadata throws DataFormatBroken; import adapters translate that at
+// their input boundary. Coverage and cross-file checks belong to the caller.
+MilvusTableFieldIdMapping
+ParseMilvusTableFieldIdMapping(const std::string& encoded);
+
+// Milvus-table only: resolve explicit bindings or validate numeric legacy
+// column names and construct identity bindings. Never use this fallback for
+// other external formats, whose physical column names need not be numeric.
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ResolveMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups);
+
+// Returns nullptr only for a fully legacy column-group set with no mapping
+// property. Corrupt or inconsistent persisted metadata is rejected.
+std::shared_ptr<const MilvusTableFieldIdMapping>
+ReadMilvusTableFieldIdMapping(
+    const milvus_storage::api::ColumnGroups& column_groups);
 
 /**
  * @brief Inject every external_spec-derived property for external collections.
@@ -103,3 +140,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                              int64_t collection_id,
                              const std::string& external_source,
                              const std::string& external_spec);
+
+// Server-owned startup policy. An uninitialized or empty policy denies brokers.
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw);
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json);
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint);

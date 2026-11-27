@@ -22,16 +22,25 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type UtilSuite struct {
@@ -71,7 +80,7 @@ func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
 	suite.Len(states, len(datapb.CompactionTaskState_name))
 	for internalType, publicType := range types {
 		for internalState, publicState := range states {
-			info := getCompactionMergeInfo(&datapb.CompactionTask{
+			info := policy.GetCompactionMergeInfo(&datapb.CompactionTask{
 				Type: internalType, State: internalState,
 				InputSegments: []int64{1, 2}, ResultSegments: []int64{3, 4},
 				FailReason: "retained failure reason",
@@ -196,7 +205,7 @@ func (f *fixedTSOAllocator) AllocN(_ context.Context, _ int64) (UniqueID, Unique
 func (suite *UtilSuite) TestGetZeroTime() {
 	n := 10
 	for i := 0; i < n; i++ {
-		timeGot := getZeroTime()
+		timeGot := meta.GetZeroTime()
 		suite.True(timeGot.IsZero())
 	}
 }
@@ -206,7 +215,7 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 		common.CollectionAutoCompactionKey: "true",
 	}
 
-	enabled, err := getCollectionAutoCompactionEnabled(properties)
+	enabled, err := policy.GetCollectionAutoCompactionEnabled(properties)
 	suite.NoError(err)
 	suite.True(enabled)
 
@@ -214,10 +223,10 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 		common.CollectionAutoCompactionKey: "bad_value",
 	}
 
-	_, err = getCollectionAutoCompactionEnabled(properties)
+	_, err = policy.GetCollectionAutoCompactionEnabled(properties)
 	suite.Error(err)
 
-	enabled, err = getCollectionAutoCompactionEnabled(map[string]string{})
+	enabled, err = policy.GetCollectionAutoCompactionEnabled(map[string]string{})
 	suite.NoError(err)
 	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
 }
@@ -231,7 +240,7 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
-		config := createStorageConfig()
+		config := meta.CreateStorageConfig()
 		suite.Equal("local", config.StorageType)
 		suite.Equal("/tmp/milvus-local", config.RootPath)
 		// An external collection can still read from s3:// while the primary
@@ -249,7 +258,7 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 		defer paramtable.Get().Reset(Params.MinioCfg.UseCRC32C.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
-		config := createStorageConfig()
+		config := meta.CreateStorageConfig()
 		suite.Equal("minio", config.StorageType)
 		suite.Equal(Params.MinioCfg.Address.GetValue(), config.Address)
 		suite.Equal("1.2", config.SslTlsMinVersion)
@@ -265,7 +274,7 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 		Binlogs: []*datapb.Binlog{{LogSize: logsize, MemorySize: logsize}},
 	}}
 
-	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
+	suite.Equal(compaction.CalculateL0SegmentSize(fields), float64(logsize))
 }
 
 func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
@@ -274,7 +283,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
 		}}
-		result := filterDuplicateFieldBinlogs(nil, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(nil, newLogs)
 		suite.Equal(newLogs, result)
 	})
 
@@ -283,7 +292,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}}
-		result := filterDuplicateFieldBinlogs(existing, nil)
+		result := meta.FilterDuplicateFieldBinlogs(existing, nil)
 		suite.Empty(result)
 	})
 
@@ -298,7 +307,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			Format:      "parquet",
 			Binlogs:     []*datapb.Binlog{{LogID: 2}, {LogID: 3}}, // 2 dup, 3 new
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(1, len(result))
 		suite.Equal(int64(102), result[0].FieldID)
 		suite.ElementsMatch([]int64{102, 103}, result[0].GetChildFields())
@@ -316,7 +325,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Empty(result)
 	})
 
@@ -329,7 +338,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 103,
 			Binlogs: []*datapb.Binlog{{LogID: 1}}, // same logID but different field
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(1, len(result))
 		suite.Equal(int64(103), result[0].FieldID)
 		suite.Equal(1, len(result[0].Binlogs))
@@ -344,7 +353,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}}}, // 1 dup, 2 new
 			{FieldID: 104, Binlogs: []*datapb.Binlog{{LogID: 10}}},            // completely new field
 		}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(2, len(result))
 		// find fieldID 102 in result
 		var fb102, fb104 *datapb.FieldBinlog
@@ -376,10 +385,117 @@ func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
 		Binlogs:     []*datapb.Binlog{{LogID: 2}},
 	}}
 
-	result := mergeFieldBinlogs(current, newLogs)
+	result := meta.MergeFieldBinlogs(current, newLogs)
 
 	suite.Len(result, 1)
 	suite.Equal([]int64{102, 103}, result[0].GetChildFields())
 	suite.Equal("parquet", result[0].GetFormat())
 	suite.Len(result[0].GetBinlogs(), 2)
+}
+
+// TestFilterInIndexedSegmentsStructVector: a segment is indexed only when the
+// index of every vector field is Finished, struct vector sub-fields included.
+// A fake-finished build (too few vectors, e.g. all null) is Finished too.
+func TestFilterInIndexedSegmentsStructVector(t *testing.T) {
+	const (
+		collectionID   = int64(1)
+		subVecFieldID  = int64(102)
+		topVecFieldID  = int64(104)
+		subVecIndexID  = int64(1002)
+		topVecIndexID  = int64(1004)
+		fakeFinishedOK = "fake finished index success"
+	)
+	structField := &schemapb.StructArrayFieldSchema{FieldID: 101, Name: "items", Fields: []*schemapb.FieldSchema{
+		{FieldID: subVecFieldID, Name: "items[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
+		{FieldID: 103, Name: "items[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+
+	type segIndex struct {
+		indexID int64
+		state   commonpb.IndexState
+		reason  string
+	}
+	run := func(t *testing.T, schema *schemapb.CollectionSchema, indexedFields []int64, segments map[int64][]segIndex, want []int64) {
+		handler := meta.NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, collectionID).Return(&meta.CollectionInfo{ID: collectionID, Schema: schema}, nil)
+		indexes := make(map[UniqueID]*model.Index)
+		for _, fieldID := range indexedFields {
+			indexID := subVecIndexID
+			if fieldID == topVecFieldID {
+				indexID = topVecIndexID
+			}
+			indexes[indexID] = &model.Index{CollectionID: collectionID, FieldID: fieldID, IndexID: indexID}
+		}
+		im := &index.IndexMeta{
+			Indexes:        map[UniqueID]map[UniqueID]*model.Index{collectionID: indexes},
+			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		}
+		var infos []*meta.SegmentInfo
+		for segmentID := int64(1); segmentID <= int64(len(segments)); segmentID++ {
+			infos = append(infos, meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: segmentID, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, NumOfRows: 10,
+			}))
+			if len(segments[segmentID]) == 0 {
+				continue
+			}
+			byIndex := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+			for _, idx := range segments[segmentID] {
+				byIndex.Insert(idx.indexID, &model.SegmentIndex{
+					CollectionID: collectionID, SegmentID: segmentID, IndexID: idx.indexID,
+					IndexState: idx.state, FailReason: idx.reason,
+				})
+			}
+			im.SegmentIndexes.Insert(segmentID, byIndex)
+		}
+		got := index.FilterInIndexedSegments(context.Background(), handler, im, false, infos...)
+		gotIDs := make([]int64, 0, len(got))
+		for _, segment := range got {
+			gotIDs = append(gotIDs, segment.GetID())
+		}
+		require.ElementsMatch(t, want, gotIDs)
+	}
+
+	t.Run("struct_vector_only", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, []int64{subVecFieldID}, map[int64][]segIndex{
+			1: {{subVecIndexID, commonpb.IndexState_Unissued, ""}},
+			2: {{subVecIndexID, commonpb.IndexState_InProgress, ""}},
+			3: {{subVecIndexID, commonpb.IndexState_Failed, "build failed"}},
+			4: {{subVecIndexID, commonpb.IndexState_Finished, ""}},
+			5: {{subVecIndexID, commonpb.IndexState_Finished, fakeFinishedOK}},
+			6: nil, // no index task yet
+		}, []int64{4, 5})
+	})
+
+	t.Run("struct_vector_without_index", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, nil, map[int64][]segIndex{1: nil}, nil)
+	})
+
+	t.Run("top_level_and_struct_vector", func(t *testing.T) {
+		top := &schemapb.FieldSchema{FieldID: topVecFieldID, Name: "embedding", DataType: schemapb.DataType_FloatVector}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, top}, StructArrayFields: []*schemapb.StructArrayFieldSchema{structField}}
+		run(t, schema, []int64{topVecFieldID, subVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_Finished, fakeFinishedOK}},
+			2: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_InProgress, ""}},
+			3: {{topVecIndexID, commonpb.IndexState_InProgress, ""}, {subVecIndexID, commonpb.IndexState_Finished, ""}},
+			4: {{topVecIndexID, commonpb.IndexState_Finished, ""}, {subVecIndexID, commonpb.IndexState_Failed, "build failed"}},
+			5: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+		}, []int64{1})
+		// A struct vector without any index keeps every segment unindexed, as
+		// for a top-level vector without an index.
+		run(t, schema, []int64{topVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+		}, nil)
+	})
+
+	t.Run("top_level_vector_only", func(t *testing.T) {
+		top := &schemapb.FieldSchema{FieldID: topVecFieldID, Name: "embedding", DataType: schemapb.DataType_FloatVector}
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk, top}}
+		run(t, schema, []int64{topVecFieldID}, map[int64][]segIndex{
+			1: {{topVecIndexID, commonpb.IndexState_Finished, ""}},
+			2: {{topVecIndexID, commonpb.IndexState_InProgress, ""}},
+		}, []int64{1})
+	})
 }

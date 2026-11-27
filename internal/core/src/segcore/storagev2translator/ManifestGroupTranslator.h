@@ -33,9 +33,11 @@
 #include "cachinglayer/Utils.h"
 #include "common/ChunkTarget.h"
 #include "common/FieldMeta.h"
+#include "common/Schema.h"
 #include "common/GroupChunk.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "storage/loon_ffi/util.h"
 #include "common/protobuf_utils.h"
 #include "milvus-storage/reader.h"
 #include "pb/common.pb.h"
@@ -103,7 +105,10 @@ class ManifestGroupTranslator
         std::optional<ColumnSizeEstimateResult> column_size_estimate =
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
-            MmapChunkWritebackMode::Disabled);
+            MmapChunkWritebackMode::Disabled,
+        std::unordered_map<std::string, FieldId> physical_column_to_field_id =
+            {},
+        OrdinaryStructProjections struct_projections = {});
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -126,17 +131,17 @@ class ManifestGroupTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
     /**
-     * @brief Estimate memory and disk usage for a cell
+     * @brief Estimate memory and disk usage for a batch of cells
      *
-     * Returns resource usage estimates for loading a specific chunk.
+     * Returns resource usage estimates for loading the requested chunks.
      * For mmap mode, reserves double the disk space for temporary files.
      *
-     * @param cid Cell ID to estimate
-     * @return Pair of (memory_usage, disk_usage) for loading and storage
+     * @param cids Cell IDs to estimate together
+     * @return Resident, private overhead, and shared overhead resource usage
      */
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     /**
      * @brief Get the cache key for this translator
@@ -202,11 +207,13 @@ class ManifestGroupTranslator
      *
      * @param tables Arrow Tables from row groups
      * @param cid Cell ID of the chunk being loaded
+     * @param priority Effective priority for this load, including mmap writes
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     milvus::cachinglayer::cid_t cid);
+                     milvus::cachinglayer::cid_t cid,
+                     milvus::proto::common::LoadPriority priority);
 
     int64_t
     loading_overhead_bytes(int64_t cell_size) const;
@@ -216,6 +223,8 @@ class ManifestGroupTranslator
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
+    std::unordered_map<std::string, FieldId> physical_column_to_field_id_;
+    OrdinaryStructProjections struct_projections_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

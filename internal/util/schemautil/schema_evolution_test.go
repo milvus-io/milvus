@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestValidateSchemaEvolutionAllowed(t *testing.T) {
@@ -180,6 +181,46 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateSchemaEvolutionMilvusTableStructAddition(t *testing.T) {
+	for _, wholeStruct := range []bool{true, false} {
+		for _, format := range []string{"milvus-table", "parquet", ""} {
+			t.Run(strconv.FormatBool(wholeStruct)+"/"+format, func(t *testing.T) {
+				oldSchema := evolutionSchemaWithStruct()
+				if format != "" {
+					oldSchema.ExternalSource = "s3://bucket/snapshot"
+					oldSchema.ExternalSpec = `{"format":"` + format + `"}`
+				}
+				newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+				child := evolutionField(109, "profile[note]", schemapb.DataType_Array, true)
+				child.ElementType = schemapb.DataType_Int64
+				child.ElementNullable = true
+				child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
+				if wholeStruct {
+					child.Name = "extra[note]"
+					newSchema.StructArrayFields = append(newSchema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+						FieldID: 108, Name: "extra", Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}},
+						Fields:     []*schemapb.FieldSchema{child},
+					})
+				} else {
+					child.TypeParams = append(child.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+					newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+				}
+				child.ExternalField = child.Name
+				setMaxFieldID(newSchema, 109)
+				err := ValidateSchemaEvolution(oldSchema, newSchema)
+				if format == "milvus-table" {
+					require.NoError(t, err)
+					child.ExternalField = "other[note]"
+					require.ErrorIs(t, ValidateSchemaEvolution(oldSchema, newSchema), merr.ErrParameterInvalid)
+				} else {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				}
+			})
+		}
+	}
+}
+
 func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -187,6 +228,7 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	}{
 		{name: "data type", mutate: func(field *schemapb.FieldSchema) { field.DataType = schemapb.DataType_Int32 }},
 		{name: "element type", mutate: func(field *schemapb.FieldSchema) { field.ElementType = schemapb.DataType_Int32 }},
+		{name: "element nullability", mutate: func(field *schemapb.FieldSchema) { field.ElementNullable = true }},
 		{name: "nullability", mutate: func(field *schemapb.FieldSchema) { field.Nullable = false }},
 		{name: "dimension", mutate: func(field *schemapb.FieldSchema) { setEvolutionTypeParam(field, common.DimKey, "256") }},
 		{name: "function output role", mutate: func(field *schemapb.FieldSchema) { field.IsFunctionOutput = true }},
@@ -198,7 +240,7 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 			var field *schemapb.FieldSchema
 			switch test.name {
-			case "element type", "nullability":
+			case "element type", "element nullability", "nullability":
 				field = evolutionFieldByID(newSchema, 105)
 			case "dimension":
 				field = evolutionFieldByID(newSchema, 103)
@@ -209,6 +251,118 @@ func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 			require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
 		})
 	}
+}
+
+func TestValidateSchemaEvolutionNestedArrayTypeSchema(t *testing.T) {
+	nestedArray := func(leafType schemapb.DataType) *schemapb.FieldSchema {
+		leafSchema := &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: leafType},
+		}
+		if leafType == schemapb.DataType_VarChar {
+			leafSchema.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "32"}}
+		}
+		return &schemapb.FieldSchema{
+			FieldID:     106,
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			Nullable:    true,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: leafSchema,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	newNestedArraySchema := func(leafType schemapb.DataType) (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
+		oldSchema := evolutionBaseSchema()
+		oldSchema.Fields = append(oldSchema.Fields, nestedArray(leafType))
+		setMaxFieldID(oldSchema, 106)
+		return oldSchema, proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	}
+
+	t.Run("allow root capacity change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		field := evolutionFieldByID(newSchema, 106)
+		field.TypeParams[0].Value = "64"
+		field.TypeSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("allow root capacity change without field mirror", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(oldSchema, 106).TypeParams = nil
+		field := evolutionFieldByID(newSchema, 106)
+		field.TypeParams = nil
+		field.TypeSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("reject unsynchronized root capacity mirror", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeParams[0].Value = "64"
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "must match type_schema root capacity")
+	})
+
+	t.Run("allow leaf max length change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_VarChar)
+		leafSchema := evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().GetArrayElement()
+		leafSchema.TypeParams[0].Value = "64"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("allow nested capacity change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().TypeParams[0].Value = "24"
+
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("reject leaf type change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema = nestedArray(schemapb.DataType_VarChar).GetTypeSchema()
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject nesting change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Kind = &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject element nullability change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().Nullable = true
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject leaf nullability change", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().GetArrayElement().Nullable = true
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot change the type schema")
+	})
+
+	t.Run("reject removing nested capacity", func(t *testing.T) {
+		oldSchema, newSchema := newNestedArraySchema(schemapb.DataType_Int64)
+		evolutionFieldByID(newSchema, 106).TypeSchema.GetArrayElement().TypeParams = nil
+
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot remove or invalidate max_capacity")
+	})
 }
 
 func TestValidateSchemaEvolutionRejectsNonMonotonicBounds(t *testing.T) {
@@ -365,23 +519,118 @@ func TestValidateSchemaEvolutionRejectsStructSubFieldReparenting(t *testing.T) {
 	require.Error(t, ValidateSchemaEvolution(oldSchema, newSchema))
 }
 
-func TestValidateSchemaEvolutionRejectsIndependentStructSubFieldMutation(t *testing.T) {
+func TestValidateSchemaEvolutionStructSubFieldMutation(t *testing.T) {
 	t.Run("add child to kept container", func(t *testing.T) {
 		oldSchema := evolutionSchemaWithStruct()
 		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
-		child := evolutionField(108, "profile[extra]", schemapb.DataType_Array, true)
-		child.ElementType = schemapb.DataType_Int64
-		child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}
+		child := evolutionStructChild(108, "profile[extra]", true)
 		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
 		setMaxFieldID(newSchema, 108)
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot add sub-field")
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
 	})
 
 	t.Run("drop child from kept container", func(t *testing.T) {
 		oldSchema := evolutionSchemaWithStruct()
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[extra]", true))
+		setMaxFieldID(oldSchema, 108)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	for _, test := range []struct {
+		name    string
+		mutate  func(*schemapb.FieldSchema)
+		message string
+	}{
+		{"non element nullable", func(f *schemapb.FieldSchema) { f.ElementNullable = false }, "must set element_nullable=true"},
+		{"default value", func(f *schemapb.FieldSchema) {
+			f.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 1}}
+		}, "default value is not supported"},
+		{"nullable differs", func(f *schemapb.FieldSchema) { f.Nullable = false }, "must match struct field"},
+		{"protected role", func(f *schemapb.FieldSchema) { f.IsPartitionKey = true }, "protected role"},
+		{"invalid type", func(f *schemapb.FieldSchema) { f.DataType = schemapb.DataType_Int64 }, "can only be array"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			oldSchema := evolutionSchemaWithStruct()
+			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+			child := evolutionStructChild(108, "profile[extra]", true)
+			test.mutate(child)
+			newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+			setMaxFieldID(newSchema, 108)
+			require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), test.message)
+		})
+	}
+
+	t.Run("non nullable parent accepts non nullable child", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		oldSchema.StructArrayFields[0].Nullable = false
+		oldSchema.StructArrayFields[0].Fields[0].Nullable = false
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[extra]", false))
+		setMaxFieldID(newSchema, 108)
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+	t.Run("nested child nullability", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		child := evolutionStructChild(108, "profile[nested]", true)
+		child.ElementType = schemapb.DataType_Array
+		child.TypeSchema = &schemapb.TypeSchema{
+			Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+				Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+				}},
+			}},
+		}
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+		setMaxFieldID(newSchema, 108)
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+		child.TypeSchema.GetArrayElement().Nullable = false
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "nullability must match")
+		child.TypeSchema.GetArrayElement().Nullable = true
+		child.TypeSchema.Nullable = false
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "nullability must match")
+	})
+	t.Run("child id must exceed allocated maximum", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		setMaxFieldID(oldSchema, 110)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[extra]", true))
+		setMaxFieldID(newSchema, 110)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "reuses an already allocated field id")
+	})
+
+	t.Run("drop last child", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
 		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 		newSchema.StructArrayFields[0].Fields = nil
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop sub-field")
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop the last sub-field")
+	})
+
+	t.Run("drop last vector child", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		oldSchema.Fields = removeEvolutionField(oldSchema.Fields, 103)
+		vector := evolutionStructChild(108, "profile[vector]", true)
+		vector.DataType = schemapb.DataType_ArrayOfVector
+		vector.ElementType = schemapb.DataType_FloatVector
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, vector)
+		setMaxFieldID(oldSchema, 108)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop the last vector field")
+	})
+
+	t.Run("drop function input child", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[extra]", true))
+		oldSchema.Functions = []*schemapb.FunctionSchema{{Name: "f", InputFieldIds: []int64{108}}}
+		setMaxFieldID(oldSchema, 108)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "still references it")
 	})
 
 	t.Run("add whole container with non-nullable child", func(t *testing.T) {
@@ -405,6 +654,98 @@ func TestValidateSchemaEvolutionRejectsIndependentStructSubFieldMutation(t *test
 		}
 		setMaxFieldID(newSchema, 106)
 		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "must contain at least one sub-field")
+	})
+}
+
+func evolutionStructChild(id int64, name string, nullable bool) *schemapb.FieldSchema {
+	child := evolutionField(id, name, schemapb.DataType_Array, nullable)
+	child.ElementType = schemapb.DataType_Int64
+	child.ElementNullable = true
+	child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	// The helper builds sub-fields added to an existing struct, which rootcoord
+	// marks as added.
+	MarkAddedStructSubField(child)
+	return child
+}
+
+// The drop rule keeps an original sub-field in every kept struct. Segments
+// written before a sub-field was added only store the original sub-fields, so
+// dropping the last of them would leave those segments without a stored
+// sibling for the added ones.
+func TestValidateSchemaEvolutionKeepsOriginalStructSubField(t *testing.T) {
+	withAdded := func() *schemapb.CollectionSchema {
+		schema := evolutionSchemaWithStruct()
+		schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[added]", true))
+		setMaxFieldID(schema, 108)
+		return schema
+	}
+
+	t.Run("drop the last original sub-field", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		err := ValidateSchemaEvolution(oldSchema, newSchema)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "every remaining sub-field was added after the struct was created")
+	})
+
+	t.Run("drop an added sub-field", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("drop an original sub-field while another original remains", func(t *testing.T) {
+		oldSchema := withAdded()
+		second := evolutionField(109, "profile[second]", schemapb.DataType_Array, true)
+		second.ElementType = schemapb.DataType_Int64
+		second.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, second)
+		setMaxFieldID(oldSchema, 109)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("drop the whole struct", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields = nil
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("unmarked sub-fields are original", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		second := evolutionField(108, "profile[second]", schemapb.DataType_Array, true)
+		second.ElementType = schemapb.DataType_Int64
+		second.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, second)
+		setMaxFieldID(oldSchema, 108)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("added sub-field without the marker", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		child := evolutionStructChild(108, "profile[extra]", true)
+		child.TypeParams = StripStructSubFieldOriginMarker(child.TypeParams)
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+		setMaxFieldID(newSchema, 108)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "has no origin marker")
+	})
+
+	t.Run("marker cannot change in place", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		added := newSchema.StructArrayFields[0].Fields[1]
+		added.TypeParams = StripStructSubFieldOriginMarker(added.TypeParams)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "origin marker")
+		MarkAddedStructSubField(newSchema.StructArrayFields[0].Fields[0])
+		added.TypeParams = oldSchema.StructArrayFields[0].Fields[1].TypeParams
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "origin marker")
 	})
 }
 

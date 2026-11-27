@@ -30,8 +30,6 @@ var (
 	RegisterTruncateCollectionV2AckCallback = registerMessageAckCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 	RegisterAlterLoadConfigV2AckCallback    = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
 	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
-	RegisterAlterRLSMetadataV2AckCallback   = registerMessageAckCallback[*message.AlterRLSMetadataMessageHeader, *message.AlterRLSMetadataMessageBody]
-	RegisterDropRLSMetadataV2AckCallback    = registerMessageAckCallback[*message.DropRLSMetadataMessageHeader, *message.DropRLSMetadataMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -68,6 +66,10 @@ var (
 	RegisterAlterResourceGroupV2AckCallback = registerMessageAckCallback[*message.AlterResourceGroupMessageHeader, *message.AlterResourceGroupMessageBody]
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
 
+	// File resources
+	RegisterAddFileResourceV2AckCallback    = registerMessageAckCallback[*message.AddFileResourceMessageHeader, *message.AddFileResourceMessageBody]
+	RegisterRemoveFileResourceV2AckCallback = registerMessageAckCallback[*message.RemoveFileResourceMessageHeader, *message.RemoveFileResourceMessageBody]
+
 	// Snapshot
 	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
 	RegisterDropSnapshotV2AckCallback              = registerMessageAckCallback[*message.DropSnapshotMessageHeader, *message.DropSnapshotMessageBody]
@@ -80,6 +82,9 @@ var (
 	// Import 2PC
 	RegisterCommitImportV2AckCallback   = registerMessageAckCallback[*message.CommitImportMessageHeader, *message.CommitImportMessageBody]
 	RegisterRollbackImportV2AckCallback = registerMessageAckCallback[*message.RollbackImportMessageHeader, *message.RollbackImportMessageBody]
+
+	// Import ID range (two-phase ID range assignment)
+	RegisterUpdateImportV2AckCallback = registerMessageAckCallback[*message.UpdateImportMessageHeader, *message.UpdateImportMessageBody]
 )
 
 // resetMessageAckCallbacks resets the message ack callbacks.
@@ -102,8 +107,6 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeAlterLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeAlterRLSMetadataV2:   syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropRLSMetadataV2:    syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),
@@ -140,6 +143,10 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
 
+		// File resources
+		message.MessageTypeAddFileResourceV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRemoveFileResourceV2: syncutil.NewFuture[messageInnerAckCallback](),
+
 		// Snapshot
 		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropSnapshotV2:              syncutil.NewFuture[messageInnerAckCallback](),
@@ -152,5 +159,8 @@ func resetMessageAckCallbacks() {
 		// Import 2PC
 		message.MessageTypeCommitImportV2:   syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeRollbackImportV2: syncutil.NewFuture[messageInnerAckCallback](),
+
+		// Import ID range (two-phase ID range assignment)
+		message.MessageTypeUpdateImportV2: syncutil.NewFuture[messageInnerAckCallback](),
 	}
 }

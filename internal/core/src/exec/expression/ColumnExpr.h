@@ -63,10 +63,9 @@ class PhyColumnExpr : public Expr {
             is_indexed_ &&
             segment->HasRawData(expr_->GetColumn().field_id_.get());
         if (segment->is_chunked()) {
-            num_chunk_ =
-                use_index_data_
-                    ? pinned_index_.size()
-                    : segment->num_chunk_data(expr_->GetColumn().field_id_);
+            num_chunk_ = use_index_data_ ? pinned_index_.size()
+                                         : segment_chunk_reader_.NumChunkData(
+                                               expr_->GetColumn().field_id_);
         } else {
             num_chunk_ = use_index_data_
                              ? pinned_index_.size()

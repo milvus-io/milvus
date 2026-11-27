@@ -131,9 +131,7 @@ TextMatchIndex::Upload(const Config& config) {
             LOG_WARN("{} is a directory", path_str);
         } else {
             LOG_INFO("trying to add text log: {}", path_str);
-            AssertInfo(disk_file_manager_->AddTextLog(path_str),
-                       "failed to add text log: {}",
-                       path_str);
+            disk_file_manager_->AddTextLog(path_str);
             LOG_INFO("text log: {} added", path_str);
         }
     }

@@ -133,7 +133,8 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    bool element_nullable) {
     if (vec_data == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Vector data is nullptr, cannot initialize iterator");
@@ -149,16 +150,25 @@ CachedSearchIterator::CachedSearchIterator(
     nq_ = query_ds.num_queries;
     Init(search_info);
 
-    // VECTOR_ARRAY element-level search: growing stores each row as a
-    // separate VectorArray with its own backing allocation, so we must
-    // flatten per-chunk into a contiguous buffer that knowhere can read.
-    // array_offsets_ != nullptr is the element-level signal (multi-search-
+    // VECTOR_ARRAY element-level search: growing stores one VectorArrayView
+    // per chunk slot, so we must flatten each chunk into a contiguous buffer
+    // that Knowhere can read.
+    // struct_element_offsets_ != nullptr is the element-level signal (multi-search-
     // multi emb-list iterator is rejected upstream, so we don't branch on
     // it here).
-    const bool is_element_level = search_info.array_offsets_ != nullptr;
+    const bool is_element_level =
+        search_info.struct_element_offsets_ != nullptr;
+    const auto* vector_array_column =
+        is_element_level
+            ? dynamic_cast<const segcore::ConcurrentVector<VectorArray>*>(
+                  vec_data)
+            : nullptr;
+    AssertInfo(!is_element_level || vector_array_column != nullptr,
+               "element-level growing iterator requires VECTOR_ARRAY storage");
     if (is_element_level) {
         chunk_buffers_.reserve(source_chunks);
     }
+    const bool has_element_id_mapping = is_element_level && element_nullable;
 
     iterators_.reserve(nq_ * source_chunks);
     chunked_heaps_.resize(nq_);
@@ -168,6 +178,7 @@ CachedSearchIterator::CachedSearchIterator(
                                     !is_element_level &&
                                     data_type != DataType::VECTOR_ARRAY;
     int64_t element_offset = 0;
+    int64_t logical_element_offset = 0;
 
     for (int64_t chunk_id = 0; chunk_id < source_chunks; ++chunk_id) {
         // Read through the caller's snapshot, not the live container: the
@@ -201,25 +212,35 @@ CachedSearchIterator::CachedSearchIterator(
             if (!is_element_level) {
                 raw_data = {range_begin, query_ds.dim, chunk_size, range_data};
             } else {
-                auto va_ptr = reinterpret_cast<const VectorArray*>(range_data);
-                int64_t total_bytes = 0;
-                int64_t total_elements = 0;
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    total_bytes += va_ptr[i].byte_size();
-                    total_elements += va_ptr[i].length();
+                auto flat = FlattenVectorArrayRows(
+                    static_cast<const VectorArrayView*>(range_data),
+                    chunk_size,
+                    false);
+                const void* flat_data = flat.payload.get();
+                raw_data = {element_offset,
+                            query_ds.dim,
+                            flat.element_count,
+                            flat_data};
+                element_offset += flat.element_count;
+                chunk_buffers_.emplace_back(std::move(flat.payload));
+                if (has_element_id_mapping) {
+                    auto& ids = element_id_buffers_.emplace_back();
+                    ids.reserve(flat.element_count);
+                    logical_element_offset += AppendVectorArrayElementIds(
+                        static_cast<const VectorArrayView*>(range_data),
+                        chunk_size,
+                        logical_element_offset,
+                        ids);
+                    AssertInfo(
+                        static_cast<int64_t>(ids.size()) == flat.element_count,
+                        "element id map has {} ids, expected {}",
+                        ids.size(),
+                        flat.element_count);
+                    chunk_bitset = AttachOffsetMappingIds(
+                        bitset,
+                        OffsetMappingIdView{ids.data(),
+                                            static_cast<int64_t>(ids.size())});
                 }
-                auto buf = std::make_unique<uint8_t[]>(total_bytes);
-                auto* ptr = buf.get();
-                for (int64_t i = 0; i < chunk_size; ++i) {
-                    milvus::fastmem::FastMemcpy(
-                        ptr, va_ptr[i].data(), va_ptr[i].byte_size());
-                    ptr += va_ptr[i].byte_size();
-                }
-                const void* flat_data = buf.get();
-                chunk_buffers_.emplace_back(std::move(buf));
-                raw_data = {
-                    element_offset, query_ds.dim, total_elements, flat_data};
-                element_offset += total_elements;
             }
             AppendChunkIterators(query_ds,
                                  search_info,
@@ -239,7 +260,8 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    milvus::OpContext* op_context) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -258,9 +280,9 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &query_ds, &search_info, &bitset](
+        [this, op_context, column, &query_ds, &search_info, &bitset](
             int64_t chunk_id, int64_t physical_begin) {
-            auto pw = column->DataOfChunk(nullptr, chunk_id)
+            auto pw = column->DataOfChunk(op_context, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
@@ -268,16 +290,21 @@ CachedSearchIterator::CachedSearchIterator(
             const auto& offset_mapping = column->GetOffsetMapping();
             const bool has_offset_mapping =
                 offset_mapping.IsEnabled() &&
-                search_info.array_offsets_ == nullptr;
+                search_info.struct_element_offsets_ == nullptr;
             if (has_offset_mapping) {
                 chunk_size = column->GetValidCountInChunk(chunk_id);
             }
             // For element-level search on vector array field, chunk_size
             // must be the element count in this chunk, not the row count.
-            if (search_info.array_offsets_ != nullptr) {
+            bool element_nullable = false;
+            if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
-                    column->VectorArrayOffsets(nullptr, chunk_id);
+                    column->VectorArrayOffsets(op_context, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];
+                auto chunk_pw = column->GetChunk(op_context, chunk_id);
+                element_nullable =
+                    static_cast<VectorArrayChunk*>(chunk_pw.get())
+                        ->IsElementNullable();
             }
             // pw guarantees chunk_data is kept alive.
             auto chunk_data = pw.get();
@@ -288,6 +315,18 @@ CachedSearchIterator::CachedSearchIterator(
                     bitset,
                     offset_mapping.GetPhysicalToLogicalIds(physical_begin,
                                                            chunk_size));
+            } else if (element_nullable) {
+                // The chunk stores only valid vectors; map them to logical
+                // element ids. The ids live on the column.
+                column->BuildElementPhysicalToLogicalIds(nullptr);
+                auto id_view = column->GetElementPhysicalToLogicalIds(chunk_id);
+                AssertInfo(id_view.count == chunk_size,
+                           "element id map of chunk {} has {} ids, expected "
+                           "{}",
+                           chunk_id,
+                           id_view.count,
+                           chunk_size);
+                chunk_bitset = AttachOffsetMappingIds(bitset, id_view);
             }
             return ChunkSearchData{
                 {physical_begin, query_ds.dim, chunk_size, chunk_data},

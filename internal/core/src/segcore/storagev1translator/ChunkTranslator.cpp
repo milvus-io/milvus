@@ -134,20 +134,18 @@ ChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-ChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    AssertInfo(cid < file_infos_.size(), "cid out of range");
-
-    int64_t memory_size = file_infos_[cid].memory_size;
-    if (use_mmap_) {
-        // For mmap, the memory is counted as disk usage
-        return {{0, memory_size}, {memory_size * 2, memory_size}};
-    } else {
-        // For non-mmap, the memory is counted as memory usage
-        return {{memory_size, 0}, {memory_size, 0}};
+milvus::cachinglayer::LoadingResourceUsage
+ChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    int64_t memory_size = 0;
+    for (const auto cid : cids) {
+        AssertInfo(cid < file_infos_.size(), "cid out of range");
+        memory_size += file_infos_[cid].memory_size;
     }
+    if (use_mmap_) {
+        return {{0, memory_size}, {memory_size * 2, memory_size}, {}};
+    }
+    return {{memory_size, 0}, {memory_size, 0}, {}};
 }
 
 const std::string&
@@ -160,6 +158,7 @@ std::vector<
 ChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    const auto priority = ResolveLoadPriority(ctx, load_priority_);
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         cells;
@@ -176,7 +175,7 @@ ChunkTranslator::get_cells(
              segment_id_,
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
-    LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
+    LoadArrowReaderFromRemote(remote_files, channel, priority);
 
     for (auto cid : cids) {
         // Check for cancellation before processing each chunk
@@ -215,7 +214,7 @@ ChunkTranslator::get_cells(
                                  array_vec,
                                  mmap_populate_,
                                  filepath.string(),
-                                 load_priority_,
+                                 priority,
                                  writeback_mode_);
         }
         cells.emplace_back(cid, std::move(chunk));

@@ -49,11 +49,21 @@ func NewMockReader(content string) storage.FileReader {
 }
 
 func CustomMockReader(reader io.Reader) storage.FileReader {
-	return &mockFileReader{
+	m := &mockFileReader{
 		Reader: reader,
 		Closer: io.NopCloser(reader),
 		size:   0,
 	}
+	// storage.FileReader embeds io.ReaderAt and io.Seeker; leaving the promoted
+	// fields nil makes random-access callers (the numpy header pre-check) panic
+	// instead of seeing the underlying reader's behavior.
+	if ra, ok := reader.(io.ReaderAt); ok {
+		m.ReaderAt = ra
+	}
+	if seeker, ok := reader.(io.Seeker); ok {
+		m.Seeker = seeker
+	}
+	return m
 }
 
 type prematureEOFReader struct {

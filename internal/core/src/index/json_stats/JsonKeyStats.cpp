@@ -76,6 +76,100 @@
 
 namespace milvus::index {
 
+std::optional<JsonKeyStats::ShreddingReader::Value>
+JsonKeyStats::ShreddingReader::Get(milvus::OpContext* op_ctx, int64_t row_id) {
+    AssertInfo(row_id >= 0 && row_id < column_->NumRows(),
+               "JSON stats row {} is outside column bounds {}",
+               row_id,
+               column_->NumRows());
+    const auto [chunk_id, offset] = column_->GetChunkIDByOffset(row_id);
+    auto it = pins_.find(chunk_id);
+    if (it == pins_.end()) {
+        auto pin = column_->GetChunk(op_ctx, chunk_id);
+        it = pins_.emplace(chunk_id, std::move(pin)).first;
+    }
+    auto* chunk = it->second.get();
+    AssertInfo(chunk != nullptr && offset < chunk->RowNums(),
+               "JSON stats chunk does not cover row {}",
+               row_id);
+    if (!chunk->isValid(offset)) {
+        return std::nullopt;
+    }
+    switch (type_) {
+        case JSONType::STRING: {
+            auto* strings = dynamic_cast<StringChunk*>(chunk);
+            AssertInfo(strings != nullptr,
+                       "JSON stats string column has an incompatible chunk");
+            return Value(std::string((*strings)[offset]));
+        }
+        case JSONType::BOOL: {
+            bool value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        case JSONType::INT64: {
+            int64_t value;
+            std::memcpy(&value, chunk->ValueAt(offset), sizeof(value));
+            return Value(value);
+        }
+        default:
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "unsupported JSON stats scalar reader type");
+    }
+}
+
+bool
+JsonKeyStats::IsShreddingReaderSupported(const std::string& pointer,
+                                         JSONType type) {
+    if (pointer.empty() || pointer.front() != '/' ||
+        (type != JSONType::STRING && type != JSONType::BOOL &&
+         type != JSONType::INT64)) {
+        return false;
+    }
+    // A numeric component may address an array position in raw JSON. Stats
+    // store arrays whole; do not infer object-only semantics from a column.
+    for (const auto& token : ParseJsonPointerPath(pointer)) {
+        if (!token.empty() &&
+            std::all_of(token.begin(), token.end(), [](unsigned char c) {
+                return c >= '0' && c <= '9';
+            })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::unique_ptr<JsonKeyStats::ShreddingReader>
+JsonKeyStats::CreateShreddingReader(const std::string& pointer,
+                                    JSONType type,
+                                    int64_t segment_rows) const {
+    if (!IsShreddingReaderSupported(pointer, type)) {
+        return nullptr;
+    }
+    auto fields = key_field_map_.find(pointer);
+    if (fields == key_field_map_.end()) {
+        return nullptr;
+    }
+    for (const auto& field : fields->second) {
+        auto field_type = shred_field_data_type_map_.find(field);
+        if (field_type == shred_field_data_type_map_.end() ||
+            field_type->second != type) {
+            continue;
+        }
+        auto column = shredding_columns_.find(field);
+        AssertInfo(column != shredding_columns_.end() && column->second,
+                   "JSON stats field {} has no column",
+                   field);
+        AssertInfo(num_rows_ == segment_rows &&
+                       column->second->NumRows() == segment_rows,
+                   "JSON stats rows do not match segment rows {}",
+                   segment_rows);
+        return std::unique_ptr<ShreddingReader>(
+            new ShreddingReader(column->second, type));
+    }
+    return nullptr;
+}
+
 namespace {
 
 struct JsonStatsParquetMetadata {
@@ -1349,6 +1443,13 @@ JsonKeyStats::LoadSharedKeyIndex(
 
 void
 JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
+    Load(ctx, config, nullptr);
+}
+
+void
+JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
+                   const Config& config,
+                   milvus::OpContext* op_ctx) {
     auto enable_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(false);
     if (enable_mmap) {
@@ -1361,6 +1462,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
                  mmap_filepath_);
     }
     load_priority_ = config[milvus::LOAD_PRIORITY];
+    const auto priority = milvus::ResolveLoadPriority(op_ctx, load_priority_);
     LOG_INFO("load json stats for segment {} with load priority: {}",
              segment_id_,
              static_cast<int>(load_priority_));
@@ -1415,7 +1517,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
             segment_id_,
             field_id_);
         auto local_meta_file = disk_file_manager_->CacheJsonStatsMetaToDisk(
-            meta_files[0], load_priority_);
+            meta_files[0], priority);
         LoadMetaFile(local_meta_file);
     }
 
@@ -1437,10 +1539,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    AssertInfo(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path),
-               "failed to upload meta file: {} for segment {}",
-               meta_file_path,
-               segment_id_);
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

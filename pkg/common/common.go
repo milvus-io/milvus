@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/binary"
+	"math"
 	"math/bits"
 	"strconv"
 	"strings"
@@ -129,9 +130,15 @@ const (
 	//   cannot load a nested STL_SORT physical index
 	//   (see MinScalarIndexVersionForNestedHybridStlSort)
 	// - On-disk file format is unchanged from v3
+	//
+	// Scalar index engine version 5:
+	// - FMINDEX scalar index (exact LIKE prefix/infix/suffix on VARCHAR).
+	//   An older QueryNode does not recognize FMINDEX and would fail to load
+	//   such a segment, so creation is gated on the whole cluster reporting >= 5
+	//   (see MinScalarIndexVersionForFMINDEX).
 	MinimalScalarIndexEngineVersion = int32(0)
-	CurrentScalarIndexEngineVersion = int32(3)
-	MaximumScalarIndexEngineVersion = int32(4)
+	CurrentScalarIndexEngineVersion = int32(5)
+	MaximumScalarIndexEngineVersion = int32(5)
 
 	// MinScalarIndexVersionForJsonPathMultiType is the minimum scalar index
 	// engine version that supports STL_SORT / BITMAP / HYBRID on JSON fields.
@@ -145,6 +152,11 @@ const (
 	// cardinality so that an older reader (e.g. 2.6, whose ScalarIndexSort
 	// predates nested-index support) can still load the index.
 	MinScalarIndexVersionForNestedHybridStlSort = int32(4)
+
+	// MinScalarIndexVersionForFMINDEX is the minimum scalar index engine version
+	// that recognizes FMINDEX. Creating an FMINDEX while any node still reports a
+	// lower version would break rolling upgrade (old QueryNodes cannot load it).
+	MinScalarIndexVersionForFMINDEX = int32(5)
 )
 
 // ClampScalarIndexVersion clamps the given scalar index version to MaximumScalarIndexEngineVersion.
@@ -317,6 +329,38 @@ const (
 	JSONStatsDataFormatVersion = 3
 )
 
+const (
+	// TalonStageLoadOpen selects QueryNode format-reader open metadata.
+	TalonStageLoadOpen uint32 = 1 << 0
+	// TalonStageManifest selects QueryNode segment-manifest reads during load.
+	TalonStageManifest uint32 = 1 << 1
+	// TalonStagesAll enables every Talon read stage.
+	TalonStagesAll uint32 = math.MaxUint32
+)
+
+// ParseTalonEnabledStages parses comma-separated stage names into a mask.
+// Invalid names or combinations return zero and false, never a partial mask.
+func ParseTalonEnabledStages(value string) (uint32, bool) {
+	stages := strings.Split(value, ",")
+	var mask uint32
+	for _, stage := range stages {
+		switch strings.TrimSpace(stage) {
+		case "all":
+			if len(stages) != 1 {
+				return 0, false
+			}
+			mask = TalonStagesAll
+		case "load_open":
+			mask |= TalonStageLoadOpen
+		case "manifest":
+			mask |= TalonStageManifest
+		default:
+			return 0, false
+		}
+	}
+	return mask, true
+}
+
 // Search, Index parameter keys
 const (
 	TopKKey                             = "topk"
@@ -374,6 +418,7 @@ const (
 const (
 	EnableAnalyzerKey = `enable_analyzer`
 	AnalyzerParamKey  = `analyzer_params`
+	EnableMatchKey    = `enable_match`
 )
 
 //  Collection properties key
@@ -457,6 +502,13 @@ const (
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 	MaxFieldIDKey           = "max_field_id"
 
+	// StructSubFieldAddedKey is an internal type param of a struct sub-field
+	// that was added after its struct appeared (AlterCollectionSchema with a
+	// field named s[b]). Rootcoord writes it; users cannot set or delete
+	// it, and DescribeCollection does not return it. See
+	// internal/util/schemautil/struct_subfield_origin.go.
+	StructSubFieldAddedKey = "__struct_sub_field_added__"
+
 	// query mode
 	QueryModeKey       = "query_mode"
 	QueryModeLargeTopK = "large_topk"
@@ -466,10 +518,6 @@ const (
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
 
 	// row level security
-	RLSEnabledKey       = "rls.enabled"
-	RLSForceKey         = "rls.force"
-	RLSPrincipalNameKey = "rls.principal_name"
-	RLSClearAllCacheKey = "rls.clear_all_cache"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -775,34 +823,6 @@ func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValueP
 	return nil
 }
 
-// IsRLSEnabled extracts rls.enabled from collection properties.
-// Returns false if not set.
-func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := getProperty(kvs, RLSEnabledKey)
-	if !ok {
-		return false, nil
-	}
-	enabled, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSEnabledKey, value)
-	}
-	return enabled, nil
-}
-
-// IsRLSForce extracts rls.force from collection properties.
-// Returns false if not set.
-func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := getProperty(kvs, RLSForceKey)
-	if !ok {
-		return false, nil
-	}
-	force, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
-	}
-	return force, nil
-}
-
 func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 	var value string
 	found := false
@@ -813,57 +833,6 @@ func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 		}
 	}
 	return value, found
-}
-
-// ValidateRLSProperties validates collection-level RLS properties.
-// Returns nil if the values are valid or if RLS properties are not set. Also
-// rejects case-variant keys that would be silently ignored.
-func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
-	seen := make(map[string]struct{}, 2)
-	for _, kv := range kvs {
-		switch kv.GetKey() {
-		case RLSEnabledKey:
-			if _, ok := seen[RLSEnabledKey]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
-			}
-			seen[RLSEnabledKey] = struct{}{}
-			if _, err := IsRLSEnabled(kv); err != nil {
-				return err
-			}
-		case RLSForceKey:
-			if _, ok := seen[RLSForceKey]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
-			}
-			seen[RLSForceKey] = struct{}{}
-			if _, err := IsRLSForce(kv); err != nil {
-				return err
-			}
-		default:
-			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-				if strings.EqualFold(kv.GetKey(), key) {
-					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// ValidateRLSForceRequiresEnabled rejects an effective collection property set
-// that enables rls.force without enabling RLS itself.
-func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
-	force, err := IsRLSForce(kvs...)
-	if err != nil || !force {
-		return err
-	}
-	enabled, err := IsRLSEnabled(kvs...)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
-	}
-	return nil
 }
 
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {

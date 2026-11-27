@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -95,6 +97,10 @@ func (s *RLSSuite) TestOptions() {
 	s.NotNil(listPrincipalsReq.GetBase())
 	s.Equal("db", listPrincipalsReq.GetDbName())
 	s.Equal("collection", listPrincipalsReq.GetCollectionName())
+	s.False(listPrincipalsReq.GetCount())
+	listOption := NewListRLSPrincipalsOption("collection")
+	s.True(listOption.WithCountOnly(true).Request().GetCount())
+	s.False(listOption.WithCountOnly(false).Request().GetCount())
 
 	deleteReq := NewDeleteRLSPrincipalTagsOption("collection", "alice", "department", "region").WithDbName("db").Request()
 	s.NotNil(deleteReq.GetBase())
@@ -156,13 +162,27 @@ func (s *RLSSuite) TestAPIs() {
 	s.NoError(err)
 	s.Equal(`{"department":"sales"}`, tags)
 
-	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
+	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
+		return !req.GetCount() && req.GetCollectionName() == "collection"
+	})).Return(&milvuspb.ListRLSPrincipalsResponse{
 		Status:         merr.Success(),
 		PrincipalNames: []string{"alice", "bob"},
+		PrincipalCnt:   2,
 	}, nil).Once()
 	principals, err := s.client.ListRLSPrincipals(ctx, NewListRLSPrincipalsOption("collection"))
-	s.NoError(err)
-	s.Equal([]string{"alice", "bob"}, principals)
+	s.Require().NoError(err)
+	s.Require().NotNil(principals)
+	s.Equal([]string{"alice", "bob"}, principals.PrincipalNames)
+	s.Equal(int64(2), principals.PrincipalCount)
+
+	s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.MatchedBy(func(req *milvuspb.ListRLSPrincipalsRequest) bool {
+		return req.GetCount() && req.GetDbName() == "db" && req.GetCollectionName() == "collection"
+	})).Return(&milvuspb.ListRLSPrincipalsResponse{Status: merr.Success(), PrincipalCnt: 5000000000}, nil).Once()
+	principals, err = s.client.ListRLSPrincipals(ctx, NewListRLSPrincipalsOption("collection").WithDbName("db").WithCountOnly(true))
+	s.Require().NoError(err)
+	s.Require().NotNil(principals)
+	s.Empty(principals.PrincipalNames)
+	s.Equal(int64(5000000000), principals.PrincipalCount)
 
 	s.mock.EXPECT().DeleteRLSPrincipalTags(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
@@ -215,6 +235,23 @@ func (s *RLSSuite) TestErrors() {
 		s.Error(err)
 		s.Nil(policies)
 	})
+}
+
+func (s *RLSSuite) TestListRLSPrincipalsErrors() {
+	ctx := context.Background()
+	for _, countOnly := range []bool{false, true} {
+		option := NewListRLSPrincipalsOption("collection").WithCountOnly(countOnly)
+		s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded).Once()
+		result, err := s.client.ListRLSPrincipals(ctx, option)
+		s.Equal(codes.DeadlineExceeded, status.Code(err))
+		s.Nil(result)
+		s.mock.EXPECT().ListRLSPrincipals(mock.Anything, mock.Anything).Return(&milvuspb.ListRLSPrincipalsResponse{
+			Status: merr.Status(merr.ErrParameterInvalid),
+		}, nil).Once()
+		result, err = s.client.ListRLSPrincipals(ctx, option)
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.Nil(result)
+	}
 }
 
 func TestRLS(t *testing.T) {

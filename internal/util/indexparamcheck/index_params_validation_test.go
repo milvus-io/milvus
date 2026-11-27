@@ -224,6 +224,31 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("recursive array rejected", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			FieldID:     103,
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+		params := map[string]string{common.IndexTypeKey: IndexINVERTED}
+
+		err := ValidateFieldIndexParams(field, params)
+
+		assert.ErrorContains(t, err, "indexing recursive ARRAY field nested_array is not supported")
+	})
+
 	t.Run("unknown index type rejected", func(t *testing.T) {
 		params := map[string]string{common.IndexTypeKey: "NOT_A_REAL_INDEX"}
 		err := ValidateFieldIndexParams(sparseField, params)
@@ -251,6 +276,43 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "exceeds limit")
 	})
+}
+
+func TestElementNullableArrayOfVectorMetrics(t *testing.T) {
+	paramtable.Init()
+	scalar := &schemapb.FieldSchema{
+		Name: "scores", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, ElementNullable: true,
+	}
+	assert.ErrorContains(t, ValidateFieldIndexParams(scalar, map[string]string{common.IndexTypeKey: IndexINVERTED}),
+		"indexing element-nullable ARRAY field scores is not supported yet")
+
+	field := &schemapb.FieldSchema{
+		Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+	}
+	for _, metricType := range EmbListMetrics {
+		err := ValidateArrayOfVectorMetricType(field.GetElementType(), field.GetElementNullable(), metricType)
+		assert.ErrorContains(t, err, "only support element-level metrics")
+		err = ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType})
+		assert.ErrorContains(t, err, "only support element-level metrics")
+	}
+	for _, metricType := range []string{"COSINE", "L2", "IP"} {
+		field := &schemapb.FieldSchema{
+			Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		}
+		params := map[string]string{
+			common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType,
+			"M": "16", "efConstruction": "64",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(field, params), metricType)
+	}
+	err := ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: "UNKNOWN"})
+	assert.ErrorContains(t, err, "does not support metric type")
+	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), true, "COSINE"))
+	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), false, "MAX_SIM_COSINE"))
 }
 
 func TestValidateIndexName(t *testing.T) {

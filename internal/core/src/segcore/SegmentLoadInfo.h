@@ -37,6 +37,7 @@
 #include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/Types.h"
+#include "storage/loon_ffi/util.h"
 
 namespace milvus::segcore {
 
@@ -443,6 +444,7 @@ class SegmentLoadInfo {
           field_index_has_raw_data_(other.field_index_has_raw_data_),
           fields_filled_with_default_(other.fields_filled_with_default_),
           column_groups_(other.column_groups_),
+          field_id_mapping_(other.field_id_mapping_),
           created_text_indexes_(other.created_text_indexes_) {
         BuildFieldBinlogCache();
     }
@@ -462,6 +464,7 @@ class SegmentLoadInfo {
               std::move(other.fields_filled_with_default_)),
           field_binlog_cache_(std::move(other.field_binlog_cache_)),
           column_groups_(std::move(other.column_groups_)),
+          field_id_mapping_(std::move(other.field_id_mapping_)),
           created_text_indexes_(std::move(other.created_text_indexes_)) {
     }
 
@@ -480,6 +483,7 @@ class SegmentLoadInfo {
             json_index_path_cache_ = other.json_index_path_cache_;
             field_index_has_raw_data_ = other.field_index_has_raw_data_;
             column_groups_ = other.column_groups_;
+            field_id_mapping_ = other.field_id_mapping_;
             fields_filled_with_default_ = other.fields_filled_with_default_;
             created_text_indexes_ = other.created_text_indexes_;
             BuildFieldBinlogCache();
@@ -505,6 +509,7 @@ class SegmentLoadInfo {
                 std::move(other.fields_filled_with_default_);
             field_binlog_cache_ = std::move(other.field_binlog_cache_);
             column_groups_ = std::move(other.column_groups_);
+            field_id_mapping_ = std::move(other.field_id_mapping_);
             created_text_indexes_ = std::move(other.created_text_indexes_);
         }
         return *this;
@@ -517,6 +522,8 @@ class SegmentLoadInfo {
     Set(const ProtoType& info, SchemaPtr schema) {
         info_ = info;
         schema_ = std::move(schema);
+        column_groups_.reset();
+        field_id_mapping_.reset();
         BuildCache();
     }
 
@@ -527,6 +534,8 @@ class SegmentLoadInfo {
     Set(ProtoType&& info, SchemaPtr schema) {
         info_ = std::move(info);
         schema_ = std::move(schema);
+        column_groups_.reset();
+        field_id_mapping_.reset();
         BuildCache();
     }
 
@@ -602,13 +611,30 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    // Field IDs of the segment's row columns (binlogs and column groups of
+    // the manifest), including fields that are no longer in the schema.
+    // Unlike CollectDataFields it leaves out fields that only an index with
+    // raw data provides: such an index can be built from a field's default
+    // for a segment that has no row column of it, so it does not show when
+    // the segment's rows were written.
+    [[nodiscard]] std::set<FieldId>
+    GetRowColumnFieldIds() const {
+        return CollectRowColumnFields();
+    }
+
+    // Whether an index of the field provides its raw data.
+    [[nodiscard]] bool
+    FieldIndexHasRawData(FieldId field_id) const {
+        return field_index_has_raw_data_.count(field_id) > 0;
+    }
+
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||
-               schema_->get_fields().find(field_id) !=
-                   schema_->get_fields().end();
+               (schema_->get_fields().find(field_id) !=
+                    schema_->get_fields().end() &&
+                HasManifestBinding(field_id));
     }
-
     [[nodiscard]] int64_t
     GetEstimatedBytesPerRow() const {
         return info_.estimated_bytes_per_row();
@@ -794,6 +820,76 @@ class SegmentLoadInfo {
     [[nodiscard]] std::shared_ptr<milvus_storage::api::ColumnGroups>
     GetColumnGroups() const;
 
+    // Bind the logical schema to this immutable manifest revision before
+    // diffing or publishing its reader. Legacy manifests keep identity mapping.
+    void
+    BindManifestFields();
+
+    [[nodiscard]] bool
+    HasManifestBinding(FieldId field_id) const {
+        return !field_id_mapping_ || !schema_->IsExternalDataField(field_id) ||
+               field_id_mapping_->physical_columns.count(field_id.get()) != 0;
+    }
+
+    [[nodiscard]] std::string
+    GetStorageColumnName(FieldId field_id) const {
+        if (field_id_mapping_ &&
+            schema_->IsExternalManifestStoredField(field_id)) {
+            auto it = field_id_mapping_->physical_columns.find(field_id.get());
+            if (it == field_id_mapping_->physical_columns.end()) {
+                ThrowInfo(FieldNotLoaded,
+                          "external field {} has no binding in the loaded "
+                          "manifest; refresh the collection",
+                          field_id.get());
+            }
+            return it->second;
+        }
+        return schema_->get_storage_column_name(field_id);
+    }
+
+    [[nodiscard]] FieldId
+    ResolveColumnFieldId(const std::string& column_name) const {
+        if (field_id_mapping_) {
+            auto it = field_id_mapping_->target_fields.find(column_name);
+            if (it != field_id_mapping_->target_fields.end()) {
+                return FieldId(it->second);
+            }
+            return FieldId(-1);
+        }
+        return schema_->ResolveColumnFieldId(column_name);
+    }
+
+    [[nodiscard]] std::shared_ptr<std::vector<std::string>>
+    GetExternalColumnNames() const {
+        if (!field_id_mapping_) {
+            return schema_->GetExternalColumnNames();
+        }
+        auto external_columns = std::make_shared<std::vector<std::string>>();
+        std::unordered_set<std::string> seen;
+        for (const auto& field_id : schema_->get_field_ids()) {
+            if (!schema_->IsExternalManifestStoredField(field_id) ||
+                !HasManifestBinding(field_id)) {
+                continue;
+            }
+            auto name = GetStorageColumnName(field_id);
+            if (seen.emplace(name).second) {
+                external_columns->push_back(std::move(name));
+            }
+        }
+        return external_columns;
+    }
+
+    [[nodiscard]] bool
+    HasFieldInLoadedManifest(FieldId field_id) const {
+        if (!HasManifestPath()) {
+            return true;
+        }
+        if (!schema_->has_field(field_id) || !HasManifestBinding(field_id)) {
+            return false;
+        }
+        return HasManifestColumn(GetStorageColumnName(field_id));
+    }
+
     // Checks the already cached manifest column groups. It intentionally does
     // not parse the manifest on demand because query paths call this method.
     [[nodiscard]] bool
@@ -806,8 +902,18 @@ class SegmentLoadInfo {
         if (source.HasManifestPath() &&
             source.GetManifestPath() == GetManifestPath()) {
             column_groups_ = source.column_groups_;
+            field_id_mapping_ = source.field_id_mapping_;
         }
     }
+
+    // StorageV2 binlogs written by 2.6.0/2.6.1 carry no child_fields and key a
+    // multi-field column group by a group id below START_USER_FIELDID, so the
+    // fields it stores are known only from its packed file footer. Every load
+    // diff keys fields by child_fields, so fill them in from the footer before
+    // computing one. A group whose files match one already resolved in
+    // `known` reuses its child_fields instead of reading the footer again.
+    void
+    ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest
@@ -818,6 +924,7 @@ class SegmentLoadInfo {
     SetColumnGroupsForTesting(
         std::shared_ptr<milvus_storage::api::ColumnGroups> cg) {
         column_groups_ = std::move(cg);
+        field_id_mapping_.reset();
     }
 
     // ==================== Stats & Delta Logs ====================
@@ -1238,6 +1345,10 @@ class SegmentLoadInfo {
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
 
+    // Binlog and manifest column-group fields, without index raw data.
+    [[nodiscard]] std::set<FieldId>
+    CollectRowColumnFields() const;
+
     ProtoType info_;
 
     SchemaPtr schema_;
@@ -1270,6 +1381,10 @@ class SegmentLoadInfo {
     // GetColumnGroups() can be const — the cache is a memoization of an
     // immutable manifest path.
     mutable std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups_;
+
+    // Immutable source-to-target column bindings resolved from the loaded
+    // manifest for milvus-table external collections.
+    mutable std::shared_ptr<const MilvusTableFieldIdMapping> field_id_mapping_;
 
     // Field IDs where text indexes were created from raw data (not loaded from files)
     // These should NOT be re-loaded in diff computation

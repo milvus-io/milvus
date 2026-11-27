@@ -347,7 +347,9 @@ message ListPolicyResponse {
   repeated string policy_infos = 2;
   repeated string user_roles = 3;
   repeated milvus.PrivilegeGroupInfo privilege_groups = 4;
+  CollectionVisibilitySnapshot collection_visibility = 5;
 }
+
 
 message ShowConfigurationsRequest {
   common.MsgBase base = 1;
@@ -397,6 +399,9 @@ enum ImportJobState {
   Sorting = 7;
   Uncommitted = 8;
   Committing  = 9;
+  AssigningIDRange = 10;
+  Planning = 11;
+  Resharding = 12;
 }
 
 // Immutable, coordinator-expanded input for typed snapshot jobs.
@@ -418,6 +423,10 @@ message SnapshotImportSource {
   // Versions 5-8 use a task-shared L0 inventory instead of fields 4/5.
   string source_channel = 7;
   int64 source_partition_id = 8;
+  // Versions 10-17 preserve the capabilities of versions 1-8 and permit
+  // StorageV2 Avro references. Mutually exclusive with manifest_path.
+  // A mixed job uses these versions for every segment, including StorageV3.
+  SnapshotImportV2Reference v2_reference = 9;
 }
 
 // Stored once per source scope in the job after Pending preparation.
@@ -437,14 +446,34 @@ message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
   repeated string paths = 2;
-  // Primary-allocated autoID PK range for this file, carried from the replicated
-  // ImportMsg so the secondary derives identical primary keys. Same name and type
-  // as msgpb.ImportFile.pre_allocated_auto_ids, which it is copied from. Unset on
-  // legacy / non-autoID / backup imports.
-  common.IDRange pre_allocated_auto_ids = 3;
+  // Reserved: this number was `pre_allocated_auto_ids` on 3.0, an over-reserved autoID PK
+  // range (rows * dataCoord.import.preAllocateIDExpansionFactor). A job persisted before
+  // the upgrade must not decode that value into a range with different semantics, so the
+  // number is retired rather than reused; such a job decodes with `id_range` unset and
+  // re-enters the range assignment.
+  reserved 3;
+  // The primary-allocated exact per-file ID range: the autoID PK range on an autoID
+  // collection, or the RowID range on an explicit-PK one. The range is always sized to
+  // the file's exact post-preimport row count, so its size IS the primary's count and is
+  // the cross-cluster divergence authority each cluster checks its local count against.
+  // Unset on backup / L0 / legacy imports.
+  common.IDRange id_range = 4;
   // Mutually exclusive with paths. Empty legacy paths make old consumers fail
   // closed instead of importing rows without the snapshot's L0 deletes.
   SnapshotImportSource snapshot_source = 5;
+}
+
+// ImportVersion is the single execution-version number shared by the internal
+// import request (DataCoord's selection input), the WAL message
+// (msg.ImportMsg.version) and the persisted ImportJob. One number per
+// execution path, so no boundary has to translate between a "request version"
+// and a "job version".
+enum ImportVersion {
+  // In a request: DataCoord selects V2 or V3 from dataCoord.import.enableImportV3.
+  // In a WAL message or a stored job: written before this field existed, runs as V2.
+  ImportVersionUnspecified = 0;
+  ImportVersionV2 = 2; // PreImportTask + ImportTaskV2
+  ImportVersionV3 = 3; // count-only preimport + ReshardTask + ImportTaskV3
 }
 
 message ImportRequestInternal {
@@ -460,6 +489,9 @@ message ImportRequestInternal {
   int64 jobID = 10;
   string rls_principal = 11;
   bool skip_rls = 12;
+  // Internal import execution version. Direct requests may leave
+  // ImportVersionUnspecified for DataCoord to select V2 or V3.
+  ImportVersion version = 13;
 }
 
 message ImportRequest {
@@ -502,6 +534,8 @@ message GetImportProgressResponse {
   int64 imported_rows = 8;
   int64 total_rows = 9;
   string create_time = 10;
+  // Persisted job identity. Names alone cannot identify the authorization resource.
+  int64 collection_id = 11;
 }
 
 message ListImportsRequestInternal {
@@ -521,6 +555,8 @@ message ListImportsResponse {
   repeated string reasons = 4;
   repeated int64 progresses = 5;
   repeated string collection_names = 6;
+  // Aligned with jobIDs; required for resource authorization at Proxy.
+  repeated int64 collection_ids = 7;
 }
 
 message GetSegmentsInfoRequest {
@@ -582,4 +618,31 @@ message BackupEzkRequest {
 message BackupEzkResponse {
   common.Status status = 1;
   string ezk = 2;
+}
+
+// A projection of raw grants, independent of expanded action policies. An
+// empty version-1 snapshot is supported and denies visibility to ordinary roles.
+message CollectionVisibilitySnapshot {
+  uint32 format_version = 1;
+  repeated RoleCollectionVisibility roles = 2;
+}
+
+// Replaces all visibility rules for this role, including when rules is empty.
+message RoleCollectionVisibility {
+  string role = 1;
+  repeated CollectionVisibilityRule rules = 2;
+}
+
+message CollectionVisibilityRule {
+  string db_name = 1;
+  string collection_name = 2;
+}
+
+message SnapshotImportV2Reference {
+  int64 segment_id = 1;
+  string snapshot_manifest_path = 2;
+  int32 snapshot_format_version = 3;
+  // Original self-contained bundle key prefix for rebasing Avro paths.
+  // Present but empty means the original bundle occupied the bucket root.
+  optional string original_key_prefix = 4;
 }

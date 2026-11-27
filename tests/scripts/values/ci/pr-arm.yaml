@@ -204,4 +204,3 @@ standalone:
       memory: "3.5Gi"
     limits:
       cpu: "4"
-

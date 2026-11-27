@@ -142,6 +142,15 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
                   "ArrayViews not supported for VirtualPKChunkedColumn");
     }
 
+    PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViews not supported for VirtualPKChunkedColumn");
+    }
+
     PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
     VectorArrayViews(
         milvus::OpContext* op_ctx,
@@ -175,6 +184,16 @@ class VirtualPKChunkedColumn : public ChunkedColumnInterface {
         ThrowInfo(
             ErrorCode::Unsupported,
             "ArrayViewsByOffsets not supported for VirtualPKChunkedColumn");
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "ArrayValueViewsByOffsets not supported for "
+                  "VirtualPKChunkedColumn");
     }
 
     std::pair<size_t, size_t>

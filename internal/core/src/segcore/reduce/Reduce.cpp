@@ -20,6 +20,7 @@
 #include <queue>
 #include <vector>
 
+#include "cachinglayer/Manager.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -34,7 +35,7 @@
 #include "log/Log.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
-#include "storage/ThreadPools.h"
+#include "futures/Executor.h"
 
 namespace milvus::segcore {
 
@@ -202,21 +203,32 @@ void
 ReduceHelper::FillPrimaryKey() {
     tracer::AutoSpan span("ReduceHelper::FillPrimaryKey",
                           tracer::GetRootSpan());
-    // Second pass: fill primary keys
+    // Bound inline PK work before reduction; strings can be costly even when resident.
+    bool fanout = false;
     if (num_segments_ > 1) {
-        // Parallel execution using MIDDLE thread pool for multiple segments
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        const auto pk_field_id = plan_->schema_->get_primary_field_id();
+        fanout =
+            cachinglayer::Manager::GetInstance().isEvictionEnabled() ||
+            (pk_field_id.has_value() &&
+             plan_->schema_->GetFieldType(*pk_field_id) == DataType::VARCHAR);
+        if (!fanout) {
+            size_t remaining_rows = kSearchFanoutMinRows;
+            for (const auto* search_result : search_results_) {
+                const auto rows = search_result->seg_offsets_.size();
+                if (rows >= remaining_rows) {
+                    fanout = true;
+                    break;
+                }
+                remaining_rows -= rows;
+            }
+        }
+    }
+    if (fanout) {
+        // Isolate search fanout from background field and index loading.
+        auto* executor = milvus::futures::getSearchFanoutCPUExecutor();
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
-        for (auto& search_result : search_results_) {
-            auto future = pool.Submit([this, search_result] {
-                auto segment =
-                    static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
-            });
-            futures.emplace_back(std::move(future));
-        }
+        // Drain accepted tasks even if a later submission throws.
         auto futures_guard = folly::makeGuard([&futures]() {
             for (auto& f : futures) {
                 if (f.valid()) {
@@ -227,13 +239,25 @@ ReduceHelper::FillPrimaryKey() {
                 }
             }
         });
+        for (auto& search_result : search_results_) {
+            auto task = std::make_shared<std::packaged_task<void()>>(
+                [this, search_result] {
+                    auto segment =
+                        static_cast<SegmentInterface*>(search_result->segment_);
+                    segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+                });
+            futures.emplace_back(task->get_future());
+            executor->add([task] { (*task)(); });
+        }
         for (auto& future : futures) {
             future.get();
         }
-    } else if (num_segments_ == 1) {
-        auto segment =
-            static_cast<SegmentInterface*>(search_results_[0]->segment_);
-        segment->FillPrimaryKeys(plan_, *search_results_[0], op_ctx_);
+    } else {
+        for (auto* search_result : search_results_) {
+            auto* segment =
+                static_cast<SegmentInterface*>(search_result->segment_);
+            segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+        }
     }
 }
 
@@ -453,32 +477,10 @@ ReduceHelper::RefineDistances() {
     auto dense_blob = static_cast<const char*>(placeholder.get_blob());
 
     if (num_segments_ > 1) {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        auto* executor = milvus::futures::getSearchFanoutCPUExecutor();
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
-        for (auto& search_result : search_results_) {
-            if (!IsSearchResultRefineEnabled(search_result)) {
-                continue;
-            }
-            auto future = pool.Submit([this,
-                                       search_result,
-                                       field_id,
-                                       is_cosine,
-                                       is_negated,
-                                       dim,
-                                       element_size,
-                                       dense_blob] {
-                RefineOneSegment(search_result,
-                                 field_id,
-                                 is_cosine,
-                                 is_negated,
-                                 dim,
-                                 element_size,
-                                 dense_blob);
-            });
-            futures.emplace_back(std::move(future));
-        }
+        // Drain accepted tasks even if a later submission throws.
         auto futures_guard = folly::makeGuard([&futures]() {
             for (auto& f : futures) {
                 if (f.valid()) {
@@ -489,6 +491,30 @@ ReduceHelper::RefineDistances() {
                 }
             }
         });
+        for (auto& search_result : search_results_) {
+            if (!IsSearchResultRefineEnabled(search_result)) {
+                continue;
+            }
+            auto task =
+                std::make_shared<std::packaged_task<void()>>([this,
+                                                              search_result,
+                                                              field_id,
+                                                              is_cosine,
+                                                              is_negated,
+                                                              dim,
+                                                              element_size,
+                                                              dense_blob] {
+                    RefineOneSegment(search_result,
+                                     field_id,
+                                     is_cosine,
+                                     is_negated,
+                                     dim,
+                                     element_size,
+                                     dense_blob);
+                });
+            futures.emplace_back(task->get_future());
+            executor->add([task] { (*task)(); });
+        }
         for (auto& future : futures) {
             future.get();
         }

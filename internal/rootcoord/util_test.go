@@ -17,18 +17,36 @@
 package rootcoord
 
 import (
+	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestCheckTimeTickLagExceededUsesConnectedDataNodeMetrics(t *testing.T) {
+	mixCoord := mocks.NewMixCoord(t)
+	mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).
+		Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+	mixCoord.EXPECT().GetConnectedDataNodeMetrics(mock.Anything, mock.Anything).
+		Return([]metricsinfo.DataNodeInfos{}, nil).Once()
+
+	require.NoError(t, CheckTimeTickLagExceeded(context.Background(), mixCoord, time.Second))
+}
 
 func Test_EncodeMsgPositions(t *testing.T) {
 	mp := &msgstream.MsgPosition{
@@ -665,6 +683,39 @@ func TestCheckStructArrayFieldSchema_NullableValidation(t *testing.T) {
 	})
 }
 
+// checkStructArrayFieldSchema also runs on stored structs, whose sub-fields may
+// carry enable_match or enable_analyzer from an earlier version; the callers
+// check only user input with schemautil.RejectStructSubFieldTextMatch.
+func TestCheckStructArrayFieldSchemaAcceptsStoredTextMatch(t *testing.T) {
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "s", Fields: []*schemapb.FieldSchema{{
+				Name: "s[tag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: "4"},
+					{Key: common.MaxLengthKey, Value: "16"},
+					{Key: key, Value: "true"},
+				},
+			}},
+		}}))
+	}
+}
+
+func TestCheckStructArrayFieldSchemaMaxCapacityFollowsProxyConfig(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name: "s[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "5000"}},
+	}
+	schemas := []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{field}}}
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxArrayCapacity.Key, "8192")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxArrayCapacity.Key)
+	require.NoError(t, checkStructArrayFieldSchema(schemas))
+
+	paramtable.Get().Save(Params.ProxyCfg.MaxArrayCapacity.Key, "4096")
+	require.ErrorContains(t, checkStructArrayFieldSchema(schemas), "should be in (0, 4096]")
+}
+
 func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 	t.Run("missing max_capacity is rejected", func(t *testing.T) {
 		schemas := []*schemapb.StructArrayFieldSchema{
@@ -717,6 +768,38 @@ func TestCheckStructArrayFieldSchema_MaxCapacityValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "my_struct")
 		assert.Contains(t, err.Error(), "sub_b")
 	})
+
+	t.Run("nested array is supported", func(t *testing.T) {
+		schemas := []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "my_struct",
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:        "nested",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Array,
+						TypeSchema: &schemapb.TypeSchema{
+							TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+							Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+								Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+									Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+								}},
+							}},
+						},
+					},
+					{
+						Name:        "legacy",
+						DataType:    schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int32,
+						TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+					},
+				},
+			},
+		}
+
+		require.NoError(t, checkStructArrayFieldSchema(schemas))
+	})
 }
 
 func Test_updateMaxFieldIDProperty(t *testing.T) {
@@ -759,4 +842,109 @@ func Test_updateMaxFieldIDProperty(t *testing.T) {
 		assert.Equal(t, common.MaxFieldIDKey, result[1].Key)
 		assert.Equal(t, "103", result[1].Value)
 	})
+}
+
+func TestCheckFieldSchemaNestedArrayTypeRepresentation(t *testing.T) {
+	nestedField := func(rootCapacity, elementCapacity string) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: rootCapacity}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: elementCapacity}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{nestedField("32", "16")}), "nested array can only be in a struct array field")
+	checkNested := func(field *schemapb.FieldSchema) error {
+		return checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "items", Fields: []*schemapb.FieldSchema{field},
+		}})
+	}
+	require.NoError(t, checkNested(nestedField("32", "16")))
+
+	matchingMirror := nestedField("32", "16")
+	matchingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	require.NoError(t, checkNested(matchingMirror))
+
+	conflictingMirror := nestedField("32", "16")
+	conflictingMirror.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
+	err := checkNested(conflictingMirror)
+	require.ErrorContains(t, err, "must match type_schema root capacity")
+
+	invalidRepresentation := nestedField("32", "16")
+	invalidRepresentation.DataType = schemapb.DataType_None
+	invalidRepresentation.ElementType = schemapb.DataType_None
+	err = checkNested(invalidRepresentation)
+	require.ErrorContains(t, err, "must specify data_type Array and element_type Array")
+
+	tooLarge := strconv.FormatInt(Params.ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10)
+	err = checkNested(nestedField(tooLarge, "16"))
+	require.ErrorContains(t, err, "maximum capacity")
+
+	err = checkNested(nestedField("32", tooLarge))
+	require.ErrorContains(t, err, "maximum capacity")
+}
+
+func TestCheckStructArrayFieldSchemaNestedNullable(t *testing.T) {
+	newField := func(row, element, leaf bool) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+			Nullable: row, ElementNullable: element,
+			TypeSchema: &schemapb.TypeSchema{
+				Nullable: row, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable: element, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Nullable: leaf, Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+	}
+	check := func(row bool, field *schemapb.FieldSchema) error {
+		return checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+			Name: "items", Nullable: row, Fields: []*schemapb.FieldSchema{field},
+		}})
+	}
+	for _, row := range []bool{false, true} {
+		for _, element := range []bool{false, true} {
+			for _, leaf := range []bool{false, true} {
+				require.NoError(t, check(row, newField(row, element, leaf)))
+			}
+		}
+	}
+	field := newField(true, true, true)
+	field.TypeSchema.Nullable = false
+	require.ErrorContains(t, check(true, field), "root nullable=false must match field nullable=true")
+	field = newField(true, true, true)
+	field.TypeSchema.GetArrayElement().Nullable = false
+	require.ErrorContains(t, check(true, field), "inner nullable=false must match element_nullable=true")
+	field = newField(true, true, true)
+	field.TypeSchema.GetArrayElement().GetArrayElement().Kind = &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}}}
+	require.ErrorContains(t, check(true, field), "supports exactly one nested array level")
+	field = newField(true, true, true)
+	field.Nullable = false
+	require.ErrorContains(t, check(true, field), "root nullable=true must match field nullable=false")
+
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}}), "element_nullable is only supported")
+	require.ErrorContains(t, checkFieldSchema([]*schemapb.FieldSchema{{Name: "top", DataType: schemapb.DataType_ArrayOfVector}}), "ArrayOfVector is only supported")
+	require.NoError(t, checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{{
+		Name: "items", Fields: []*schemapb.FieldSchema{{
+			Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}, {Key: common.DimKey, Value: "4"}},
+		}},
+	}}))
 }

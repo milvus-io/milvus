@@ -13,6 +13,9 @@ FROM ubuntu:focal-20240530
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+ARG MILVUS_ARCHER_LIB
+ARG MILVUS_TSAN_OPTIONS=halt_on_error=1:exitcode=66
+ARG MILVUS_JEMALLOC_LIB=/milvus/lib/libjemalloc.so
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
@@ -20,7 +23,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y openssl libssl1.1 && \
+    apt-get upgrade -y --no-install-recommends openssl libssl1.1 curl libcurl4 tar zlib1g libc6 libc-bin && \
     apt-get install -y --no-install-recommends gpgv curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -42,8 +45,12 @@ COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
+ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:${MILVUS_JEMALLOC_LIB}
+ENV TSAN_OPTIONS=${MILVUS_TSAN_OPTIONS}
+ENV OMP_TOOL_LIBRARIES=${MILVUS_ARCHER_LIB}
 ENV MALLOC_CONF=background_thread:true
+# Milvus provides task-level parallelism; keep BLAS calls single-threaded by default.
+ENV OPENBLAS_NUM_THREADS=1
 
 # protobuf 5.x RepeatedField adds container annotations that trigger ASAN
 # container-overflow false positives during static initialization, disable it.

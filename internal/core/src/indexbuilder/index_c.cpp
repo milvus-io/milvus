@@ -14,12 +14,14 @@
 #include <exception>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "common/CGoCatch.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -100,6 +102,9 @@ CreateIndexForUT(enum CDataType dtype,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
+    } catch (std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -129,6 +134,16 @@ get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
     storage_config.max_connections = config.max_connections();
     storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
     storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
+    storage_config.talon_mode = config.talon_mode();
+    storage_config.talon_enabled_stages = config.talon_enabled_stages();
+    storage_config.talon_small_read_threshold =
+        config.talon_small_read_threshold();
+    storage_config.talon_coordinator = config.talon_coordinator();
+    storage_config.talon_namespace = config.talon_namespace();
+    storage_config.talon_block_size = config.talon_block_size();
+    storage_config.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
+    storage_config.talon_enable_for_external_table =
+        config.talon_enable_for_external_table();
     return storage_config;
 }
 
@@ -281,9 +296,9 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
 }
 
 CStatus
-CreateIndex(CIndex* res_index,
-            const uint8_t* serialized_build_index_info,
-            const uint64_t len) {
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -371,8 +386,6 @@ CreateIndex(CIndex* res_index,
                 field_type, config, fileManagerContext);
         LOG_INFO("create index instance success, build_id: {}",
                  build_index_info->buildid());
-        index->Build();
-        LOG_INFO("build index done, build_id: {}", build_index_info->buildid());
         *res_index = index.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -383,12 +396,66 @@ CreateIndex(CIndex* res_index,
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
         return status;
+    } catch (std::bad_alloc& e) {
+        auto status = CStatus();
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
+        return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
         return status;
     }
+}
+
+CStatus
+CreateIndex(CIndex* res_index, const uint8_t* data, const uint64_t len) {
+    auto status = CreateIndexBuilder(res_index, data, len);
+    if (status.error_code != Success) {
+        return status;
+    }
+    status = LoadIndexData(*res_index);
+    if (status.error_code == Success) {
+        status = BuildIndex(*res_index);
+    }
+    if (status.error_code != Success) {
+        delete static_cast<milvus::indexbuilder::IndexCreatorBase*>(*res_index);
+        *res_index = nullptr;
+    }
+    return status;
+}
+
+CStatus
+LoadIndexData(CIndex index) {
+    try {
+        static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)->LoadData();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted) {
+    try {
+        *admitted = static_cast<milvus::indexbuilder::IndexCreatorBase*>(index)
+                        ->TryReserveBuild();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+BuildIndex(CIndex index) {
+    try {
+        auto* builder =
+            static_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        AssertInfo(builder != nullptr && builder->InputPrepared(),
+                   "index build requires prepared input");
+        builder->Build();
+        return CStatus{Success, ""};
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -1068,6 +1135,12 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
             reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
+    } catch (const SegcoreError& e) {
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+    } catch (const std::bad_alloc& e) {
+        status.error_code = MemAllocateFailed;
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());

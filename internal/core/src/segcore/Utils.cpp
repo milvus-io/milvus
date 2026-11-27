@@ -97,6 +97,97 @@ InitEmptyVectorArrayRow(proto::schema::VectorField* row,
     }
 }
 
+// Keep the existing ARRAY resource-estimation contract: count leaf payload,
+// but not protobuf wire bytes or container metadata.
+int64_t
+GetArrayLeafRawDataSize(
+    const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
+    DataType element_type,
+    bool native_width = false) {
+    int64_t result = 0;
+    switch (element_type) {
+        case DataType::BOOL:
+            for (const auto& row : rows) {
+                result += row.bool_data().data_size() * sizeof(bool);
+            }
+            break;
+        case DataType::INT8:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int8_t) : sizeof(int));
+            }
+            break;
+        case DataType::INT16:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int16_t) : sizeof(int));
+            }
+            break;
+        case DataType::INT32:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() * sizeof(int);
+            }
+            break;
+        case DataType::INT64:
+            for (const auto& row : rows) {
+                result += row.long_data().data_size() * sizeof(int64_t);
+            }
+            break;
+        case DataType::FLOAT:
+            for (const auto& row : rows) {
+                result += row.float_data().data_size() * sizeof(float);
+            }
+            break;
+        case DataType::DOUBLE:
+            for (const auto& row : rows) {
+                result += row.double_data().data_size() * sizeof(double);
+            }
+            break;
+        case DataType::TIMESTAMPTZ:
+            for (const auto& row : rows) {
+                result += row.timestamptz_data().data_size() * sizeof(int64_t);
+            }
+            break;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+        case DataType::TEXT:
+            for (const auto& row : rows) {
+                for (const auto& value : row.string_data().data()) {
+                    result += value.size();
+                }
+            }
+            break;
+        default:
+            ThrowInfo(DataTypeInvalid,
+                      "unsupported element type {} for array",
+                      element_type);
+    }
+    return result;
+}
+
+int64_t
+GetNestedArrayRawDataSize(
+    const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
+    const proto::schema::TypeSchema& type_schema) {
+    const auto offsets_size = (rows.size() + 1) * sizeof(ArrayOffset);
+    int64_t result = static_cast<int64_t>(offsets_size);
+    const auto& element_schema = type_schema.array_element();
+    if (element_schema.has_leaf_type()) {
+        return result + GetArrayLeafRawDataSize(
+                            rows,
+                            static_cast<DataType>(element_schema.leaf_type()),
+                            true);
+    }
+
+    for (const auto& row : rows) {
+        if (row.data_case() != ScalarFieldProto::DATA_NOT_SET) {
+            result += GetNestedArrayRawDataSize(row.array_data().data(),
+                                                element_schema);
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 void
@@ -231,72 +322,15 @@ GetRawDataSizeOfDataArray(const DataArray* data,
             }
             case DataType::ARRAY: {
                 auto& array_data = FIELD_DATA(data, array);
-                switch (field_meta.get_element_type()) {
-                    case DataType::BOOL: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.bool_data().data_size() *
-                                      sizeof(bool);
-                        }
-                        break;
-                    }
-                    case DataType::INT8:
-                    case DataType::INT16:
-                    case DataType::INT32: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.int_data().data_size() *
-                                      sizeof(int);
-                        }
-                        break;
-                    }
-                    case DataType::INT64: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.long_data().data_size() *
-                                      sizeof(int64_t);
-                        }
-                        break;
-                    }
-                    case DataType::FLOAT: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.float_data().data_size() *
-                                      sizeof(float);
-                        }
-                        break;
-                    }
-                    case DataType::DOUBLE: {
-                        for (auto& array_bytes : array_data) {
-                            result += array_bytes.double_data().data_size() *
-                                      sizeof(double);
-                        }
-                        break;
-                    }
-                    case DataType::TIMESTAMPTZ: {
-                        for (auto& array_bytes : array_data) {
-                            result +=
-                                array_bytes.timestamptz_data().data_size() *
-                                sizeof(int64_t);
-                        }
-                        break;
-                    }
-                    case DataType::VARCHAR:
-                    case DataType::STRING:
-                    case DataType::TEXT: {
-                        for (auto& array_bytes : array_data) {
-                            auto element_num =
-                                array_bytes.string_data().data_size();
-                            for (int i = 0; i < element_num; ++i) {
-                                result +=
-                                    array_bytes.string_data().data(i).size();
-                            }
-                        }
-                        break;
-                    }
-                    default:
-                        ThrowInfo(
-                            DataTypeInvalid,
-                            fmt::format("unsupported element type for array",
-                                        field_meta.get_element_type()));
+                if (field_meta.is_nested_array()) {
+                    result += GetNestedArrayRawDataSize(
+                        array_data, field_meta.get_array_type_schema());
+                } else {
+                    result += GetArrayLeafRawDataSize(
+                        array_data,
+                        field_meta.get_element_type(),
+                        field_meta.is_native_list_array());
                 }
-
                 break;
             }
             case DataType::VECTOR_SPARSE_U32_F32: {
@@ -367,14 +401,112 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
 
-    if (field_meta.is_nullable()) {
-        data_array->mutable_valid_data()->Resize(count, false);
-    }
-
     auto scalar_array = data_array->mutable_scalars();
     SetUpScalarFieldData(
         scalar_array, data_type, field_meta.get_element_type(), count);
+    if (field_meta.is_nullable()) {
+        scalar_array->mutable_valid_data()->Resize(count, false);
+    }
     return data_array;
+}
+
+std::unique_ptr<DataArray>
+CreateNullStructSubFieldDataArray(
+    const FieldMeta& field_meta,
+    const int32_t* lengths,
+    int64_t count,
+    const std::function<bool(int64_t)>& row_valid) {
+    AssertInfo(field_meta.is_native_list_array(),
+               "struct sub-field {} must be a native list",
+               field_meta.get_id().get());
+    // Rows are dense and match what reading a stored column of this sub-field
+    // returns (ColumnarArrayChunk::output_data, VectorArray::output_data,
+    // CreateEmptyVectorDataArray): every row has an entry, a null struct row
+    // is an empty placeholder whose row validity is false, and a valid row
+    // holds lengths[i] null elements.
+    auto result = std::make_unique<DataArray>();
+    result->set_field_id(field_meta.get_id().get());
+    result->set_type(
+        static_cast<proto::schema::DataType>(field_meta.get_data_type()));
+    auto check_row = [&](int64_t i, bool valid) {
+        AssertInfo(
+            lengths[i] >= 0, "struct sub-field row {} has negative length", i);
+        AssertInfo(field_meta.is_nullable() || valid,
+                   "non-nullable struct sub-field has null row {}",
+                   i);
+        AssertInfo(valid || lengths[i] == 0,
+                   "null struct row {} has {} elements",
+                   i,
+                   lengths[i]);
+    };
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        auto* vectors = result->mutable_vectors();
+        vectors->set_dim(field_meta.get_dim());
+        auto* rows = vectors->mutable_vector_array();
+        rows->set_dim(field_meta.get_dim());
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        rows->mutable_data()->Reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            check_row(i, valid);
+            if (field_meta.is_nullable()) {
+                vectors->add_valid_data(valid);
+            }
+            // A null element has no physical vector, so every row is an
+            // empty typed payload; a valid row carries its logical length in
+            // valid_data.
+            auto* row = rows->add_data();
+            row->set_dim(field_meta.get_dim());
+            InitEmptyVectorArrayRow(row, field_meta.get_element_type());
+            if (valid) {
+                row->mutable_valid_data()->Resize(lengths[i], false);
+            }
+        }
+    } else {
+        auto* scalars = result->mutable_scalars();
+        auto* rows = scalars->mutable_array_data();
+        rows->set_element_type(static_cast<proto::schema::DataType>(
+            field_meta.get_element_type()));
+        rows->mutable_data()->Reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            const bool valid = row_valid(i);
+            check_row(i, valid);
+            if (field_meta.is_nullable()) {
+                scalars->add_valid_data(valid);
+            }
+            // A null struct row stays an unset ScalarField.
+            auto* row = rows->add_data();
+            if (!valid) {
+                continue;
+            }
+            if (field_meta.is_nested_array()) {
+                // A null inner Array is an empty ScalarField of the leaf type.
+                auto leaf_type =
+                    static_cast<DataType>(field_meta.get_array_type_schema()
+                                              .array_element()
+                                              .array_element()
+                                              .leaf_type());
+                auto* inner_arrays = row->mutable_array_data();
+                inner_arrays->set_element_type(
+                    static_cast<proto::schema::DataType>(leaf_type));
+                inner_arrays->mutable_data()->Reserve(lengths[i]);
+                for (int32_t j = 0; j < lengths[i]; ++j) {
+                    auto* inner = inner_arrays->add_data();
+                    SetUpScalarFieldData(inner, leaf_type, leaf_type, 0);
+                }
+            } else {
+                // A null scalar element is a zero value.
+                auto* typed_row = row;
+                SetUpScalarFieldData(typed_row,
+                                     field_meta.get_element_type(),
+                                     field_meta.get_element_type(),
+                                     lengths[i]);
+            }
+            row->mutable_valid_data()->Resize(lengths[i], false);
+        }
+    }
+    return result;
 }
 
 void
@@ -385,11 +517,11 @@ CreateScalarDataArray(DataArray& data_array,
                       bool nullable) {
     data_array.set_type(
         static_cast<milvus::proto::schema::DataType>(data_type));
-    if (nullable) {
-        data_array.mutable_valid_data()->Resize(count, false);
-    }
     auto scalar_array = data_array.mutable_scalars();
     SetUpScalarFieldData(scalar_array, data_type, element_type, count);
+    if (nullable) {
+        scalar_array->mutable_valid_data()->Resize(count, false);
+    }
 }
 
 void
@@ -564,7 +696,7 @@ CreateEmptyVectorDataArray(int64_t count,
                              : count;
     auto data_array = CreateEmptyVectorDataArray(data_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -581,18 +713,17 @@ CreateScalarDataArrayFrom(const void* data_raw,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    auto scalar_array = data_array->mutable_scalars();
     if (field_meta.is_nullable() && valid_data != nullptr) {
         auto valid_data_ = reinterpret_cast<const bool*>(valid_data);
-        auto obj = data_array->mutable_valid_data();
+        auto obj = scalar_array->mutable_valid_data();
         obj->Add(valid_data_, valid_data_ + count);
     } else {
         FixedVector<bool> always_valid(count, true);
-        auto obj = data_array->mutable_valid_data();
+        auto obj = scalar_array->mutable_valid_data();
         obj->Add(reinterpret_cast<const bool*>(always_valid.data()),
                  reinterpret_cast<const bool*>(always_valid.data()) + count);
     }
-
-    auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
             auto data = reinterpret_cast<const bool*>(data_raw);
@@ -829,7 +960,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
     auto data_array =
         CreateVectorDataArrayFrom(data_raw, valid_count, field_meta);
     if (field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -851,7 +982,7 @@ CreateDataArrayFrom(const void* data_raw,
     auto data_array = CreateVectorDataArrayFrom(data_raw, count, field_meta);
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
         field_meta.is_nullable() && valid_data != nullptr) {
-        auto obj = data_array->mutable_valid_data();
+        auto obj = MutableFieldDataRowValidData(data_array.get());
         auto valid_data_bool = reinterpret_cast<const bool*>(valid_data);
         obj->Add(valid_data_bool, valid_data_bool + count);
     }
@@ -871,11 +1002,22 @@ std::unique_ptr<DataArray>
 MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
-    auto data_array = std::make_unique<DataArray>();
+    // Initialize vector metadata even if all selected rows are null. Later
+    // shard reduction can use this column as its output-field template.
+    auto data_array = field_meta.is_vector()
+                          ? CreateEmptyVectorDataArray(0, field_meta)
+                          : std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
     auto nullable = field_meta.is_nullable();
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    if (field_meta.is_vector()) {
+        data_array->mutable_vectors();
+    } else {
+        data_array->mutable_scalars();
+    }
+    auto* dst_valid_data =
+        nullable ? MutableFieldDataRowValidData(data_array.get()) : nullptr;
 
     for (auto& merge_base : merge_bases) {
         auto src_field_data = merge_base.get_field_data(field_meta.get_id());
@@ -885,10 +1027,9 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
         if (field_meta.is_vector()) {
             bool is_valid = true;
             if (nullable) {
-                auto data = src_field_data->valid_data().data();
-                auto obj = data_array->mutable_valid_data();
+                const auto& data = GetFieldDataRowValidData(*src_field_data);
                 is_valid = data[src_offset];
-                *(obj->Add()) = is_valid;
+                *(dst_valid_data->Add()) = is_valid;
             }
 
             if (!is_valid) {
@@ -974,9 +1115,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
         }
 
         if (nullable) {
-            auto data = src_field_data->valid_data().data();
-            auto obj = data_array->mutable_valid_data();
-            *(obj->Add()) = data[src_offset];
+            const auto& data = GetFieldDataRowValidData(*src_field_data);
+            *(dst_valid_data->Add()) = data[src_offset];
         }
 
         auto scalar_array = data_array->mutable_scalars();
@@ -1295,8 +1435,8 @@ ReverseDataFromIndex(const index::IndexBase* index,
     }
 
     if (nullable) {
-        *(data_array->mutable_valid_data()) = {valid_data.begin(),
-                                               valid_data.end()};
+        *(MutableFieldDataRowValidData(data_array.get())) = {valid_data.begin(),
+                                                             valid_data.end()};
     }
 
     return data_array;
@@ -1328,12 +1468,17 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
                          FieldDataChannelPtr channel,
-                         milvus::proto::common::LoadPriority priority) {
+                         milvus::proto::common::LoadPriority priority,
+                         std::optional<proto::schema::TypeSchema> array_type) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto codec_futures = storage::GetObjectData(
-            rcm.get(), remote_files, milvus::PriorityForLoad(priority));
+        auto codec_futures =
+            storage::GetObjectData(rcm.get(),
+                                   remote_files,
+                                   milvus::PriorityForLoad(priority),
+                                   true,
+                                   std::move(array_type));
         storage::ProcessFuturesInOrder(
             codec_futures, [&](std::unique_ptr<storage::DataCodec> codec) {
                 channel->push(codec->GetFieldData());
@@ -1461,6 +1606,12 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         AssertInfo(index_params.find("metric_type") != index_params.end(),
                    "metric type is empty for vector index");
         index_info.metric_type = index_params.at("metric_type");
+        // Element nullability decides the domain of persisted VECTOR_ARRAY
+        // validity; index_params do not carry it.
+        if (field_type == DataType::VECTOR_ARRAY) {
+            config[milvus::index::ELEMENT_NULLABLE] =
+                load_index_info->schema.element_nullable();
+        }
     }
 
     if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
@@ -1483,6 +1634,16 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                            config, milvus::index::MAX_GRAM)
                            .value());
         index_info.ngram_params = std::make_optional(ngram_params);
+    }
+
+    if (index_info.index_type == milvus::index::FMINDEX_INDEX_TYPE) {
+        milvus::index::FMIndexParams fmindex_params{};
+        // Load-time query behavior must come from the persisted FM blob. In
+        // particular, sa_sample_rate is part of the blob format and is validated
+        // by LoadView/Deserialize; reparsing an external index param here creates
+        // a second source of truth and can fail an otherwise valid load on stale
+        // metadata. The constructor defaults are build-only placeholders.
+        index_info.fmindex_params = std::make_optional(fmindex_params);
     }
 
     // init file manager

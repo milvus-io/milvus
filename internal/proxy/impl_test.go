@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -59,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -1385,6 +1382,20 @@ func TestProxyDescribeCollection(t *testing.T) {
 	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
 		return req.DbName == "db_not_exists"
 	})).Return(nil, merr.WrapErrDatabaseNotFound("db_not_exists")).Maybe()
+	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+		return req.CollectionName == "" && req.CollectionID == 1
+	})).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Success(),
+		CollectionID:   1,
+		CollectionName: "test_collection",
+		DbName:         "test_1",
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil).Maybe()
 	mixCoord.On("ShowPartitions", mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionNames:       []string{"default"},
@@ -1456,6 +1467,22 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("batch describe collection by ID", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionID: []int64{1, 1000},
+		})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, 2, len(resp.GetResponses()))
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, int64(1), resp.GetResponses()[0].GetCollectionID())
+		assert.Equal(t, "test_collection", resp.GetResponses()[0].GetCollectionName())
+		assert.Equal(t, "test_1", resp.GetResponses()[0].GetDbName())
+		// a missing collection comes back as a status, and keeps its ID
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[1].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, int64(1000), resp.GetResponses()[1].GetCollectionID())
+	})
+
 	t.Run("batch describe collection ok", func(t *testing.T) {
 		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
 			DbName:         "test_1",
@@ -1466,6 +1493,115 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetResponses()))
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetResponses()[0].GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxyBatchDescribeCollection(t *testing.T) {
+	ctx := context.Background()
+	node := &Proxy{}
+
+	// The per-collection describe answers a known name or ID, and fails
+	// everything else the way DescribeCollection reports a missing collection.
+	var described []*milvuspb.DescribeCollectionRequest
+	mockDescribe := mockey.Mock((*Proxy).DescribeCollection).To(
+		func(_ *Proxy, _ context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			described = append(described, req)
+			switch {
+			case req.GetCollectionName() == "docs" || req.GetCollectionID() == 100:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionName: "docs", CollectionID: 100}, nil
+			case req.GetCollectionID() == 999:
+				return nil, errors.New("rpc failed")
+			case req.GetCollectionName() == "partial":
+				// a failed entry that already names a collection keeps it
+				return &milvuspb.DescribeCollectionResponse{
+					Status:         merr.Status(merr.WrapErrCollectionNotFound("other")),
+					CollectionName: "other",
+				}, nil
+			default:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID()))}, nil
+			}
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	t.Run("by ID", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:       "db1",
+			CollectionID: []int64{100, 200},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 2)
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, "docs", resp.GetResponses()[0].GetCollectionName())
+		// One missing collection does not fail the others, and is reported
+		// under the ID it was requested by.
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[1].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, int64(200), resp.GetResponses()[1].GetCollectionID())
+
+		require.Len(t, described, 2)
+		for i, id := range []int64{100, 200} {
+			assert.Equal(t, "db1", described[i].GetDbName())
+			assert.Equal(t, id, described[i].GetCollectionID())
+			assert.Empty(t, described[i].GetCollectionName())
+		}
+	})
+
+	t.Run("by name", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:         "db1",
+			CollectionName: []string{"docs"},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Equal(t, int64(100), resp.GetResponses()[0].GetCollectionID())
+		require.Len(t, described, 1)
+		assert.Equal(t, "docs", described[0].GetCollectionName())
+		assert.Zero(t, described[0].GetCollectionID())
+	})
+
+	t.Run("a missing name is reported under that name", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionName: []string{"missing", "partial"},
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.GetResponses(), 2)
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[0].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, "missing", resp.GetResponses()[0].GetCollectionName())
+		assert.Equal(t, "other", resp.GetResponses()[1].GetCollectionName())
+	})
+
+	t.Run("a failed describe is reported under its ID", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionID: []int64{999},
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Error(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, int64(999), resp.GetResponses()[0].GetCollectionID())
+	})
+
+	t.Run("neither names nor IDs", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{DbName: "db1"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterMissing)
+	})
+
+	t.Run("names take precedence over IDs", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionName: []string{"docs"},
+			CollectionID:   []int64{200},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 1)
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		require.Len(t, described, 1)
+		assert.Equal(t, "docs", described[0].GetCollectionName())
+		assert.Zero(t, described[0].GetCollectionID())
 	})
 }
 
@@ -1869,7 +2005,7 @@ func TestProxy_ImportV2(t *testing.T) {
 
 		// normal case
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().GetImportProgress(mock.Anything, mock.Anything).Return(&internalpb.GetImportProgressResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{})
 		assert.NoError(t, err)
@@ -1890,7 +2026,7 @@ func TestProxy_ImportV2(t *testing.T) {
 		mc.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(0, nil)
 		node.setMetaCache(mc)
 		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(nil, nil)
+		mixCoord.EXPECT().ListImports(mock.Anything, mock.Anything).Return(&internalpb.ListImportsResponse{Status: merr.Success()}, nil)
 		node.mixCoord = mixCoord
 		rsp, err = node.ListImports(ctx, &internalpb.ListImportsRequest{
 			CollectionName: "col",
@@ -1898,18 +2034,6 @@ func TestProxy_ImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
 	})
-}
-
-func TestConvertToV2ImportRequestPreservesRLSContext(t *testing.T) {
-	options := []*commonpb.KeyValuePair{
-		{Key: "rls_principal", Value: "alice"},
-		{Key: "skip_rls", Value: "true"},
-	}
-	req := convertToV2ImportRequest(&milvuspb.ImportRequest{
-		Options: options,
-	})
-
-	assert.Equal(t, options, req.GetOptions())
 }
 
 func TestGetCollectionRateSubLabel(t *testing.T) {
@@ -2595,213 +2719,16 @@ func TestHandleIfSearchByPKRejectsHybridSearch(t *testing.T) {
 		SubReqs: []*milvuspb.SubSearchRequest{{}},
 	}
 
-	_, _, err := handleIfSearchByPKForTest(context.Background(), &Proxy{}, req)
+	_, err := handleIfSearchByPKForTest(context.Background(), &Proxy{}, req)
 	require.ErrorContains(t, err, "search by IDs is not supported for hybrid search")
 }
 
-func handleIfSearchByPKForTest(ctx context.Context, node *Proxy, request *milvuspb.SearchRequest) ([]bool, *planpb.Expr, error) {
+func handleIfSearchByPKForTest(ctx context.Context, node *Proxy, request *milvuspb.SearchRequest) ([]bool, error) {
 	preflight, err := node.preflightSearchByPK(ctx, request)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	return node.transformSearchByPK(ctx, request, preflight)
-}
-
-func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *testing.T) {
-	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity", t, func() {
-		paramtable.Init()
-		ctx := context.Background()
-		const collectionID = int64(987654321)
-		const aliasName = "test_collection_alias"
-		const sourceDBName = "source_db"
-		const canonicalDBName = "target_db"
-		rls.InvalidatePolicies(collectionID, 0)
-		defer rls.InvalidatePolicies(collectionID, 0)
-
-		namespace := "tenant_a"
-		schema := &schemapb.CollectionSchema{
-			Name:            "test_collection",
-			EnableNamespace: true,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-				{
-					FieldID:    101,
-					Name:       "vec",
-					DataType:   schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
-				},
-			},
-		}
-
-		cache := NewMockCache(t)
-		cache.EXPECT().
-			GetCollectionInfo(mock.Anything, sourceDBName, aliasName, int64(0)).
-			Return(&collectionInfo{CollID: collectionID, DBName: canonicalDBName, Schema: mustNewSchemaInfo(schema), RlsEnabled: true}, nil)
-		node := &Proxy{metaCache: cache}
-
-		mixCoord := mocks.NewMockMixCoordClient(t)
-		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
-			Status:       merr.Success(),
-			CollectionId: collectionID,
-			Policies: []*rootcoordpb.RLSPolicyInfo{
-				{
-					CollectionId: collectionID,
-					PolicyId:     1,
-					PolicyName:   "search_by_pk",
-					PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
-					Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Search},
-					UsingExpr:    "id == 1",
-				},
-			},
-		}, nil).Once()
-		require.NoError(t, rls.Init(ctx, mixCoord))
-
-		var capturedNamespace *string
-		var capturedDBName string
-		var setSkipRuntimeRLS func(*queryTask, bool)
-		skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
-			To(func(task *queryTask, skip bool) {
-				require.True(t, skip)
-				setSkipRuntimeRLS(task, skip)
-			}).Origin(&setSkipRuntimeRLS).Build()
-		defer skipRuntimeRLSPatch.UnPatch()
-
-		var attachPredicateToRequeryPlan func(*planpb.PlanNode, *planpb.Expr) error
-		attachPredicatePatch := mockey.Mock(rls.AttachPredicateToRequeryPlan).
-			To(func(plan *planpb.PlanNode, predicate *planpb.Expr) error {
-				require.NotNil(t, plan)
-				require.NotNil(t, predicate)
-				return attachPredicateToRequeryPlan(plan, predicate)
-			}).Origin(&attachPredicateToRequeryPlan).Build()
-		defer attachPredicatePatch.UnPatch()
-
-		var capturedCollectionName string
-		var capturedCollectionID string
-		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-			capturedNamespace = qt.Request().Namespace
-			capturedDBName = qt.Request().GetDbName()
-			capturedCollectionName = qt.Request().GetCollectionName()
-			capturedCollectionID, _ = funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, qt.Request().GetQueryParams())
-			return &milvuspb.QueryResults{
-				Status: merr.Success(),
-				FieldsData: []*schemapb.FieldData{
-					{
-						FieldName: "id",
-						FieldId:   100,
-						Type:      schemapb.DataType_Int64,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{Data: []int64{1}},
-								},
-							},
-						},
-					},
-					{
-						FieldName: "vec",
-						FieldId:   101,
-						Type:      schemapb.DataType_FloatVector,
-						Field: &schemapb.FieldData_Vectors{
-							Vectors: &schemapb.VectorField{
-								Dim: 2,
-								Data: &schemapb.VectorField_FloatVector{
-									FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}},
-								},
-							},
-						},
-					},
-				},
-			}, segcore.StorageCost{}, nil
-		}).Build()
-
-		req := &milvuspb.SearchRequest{
-			DbName:         sourceDBName,
-			CollectionName: aliasName,
-			Namespace:      &namespace,
-			RlsPrincipal:   "alice",
-			SearchInput: &milvuspb.SearchRequest_Ids{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
-				},
-			},
-			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
-		}
-		mismatchedIDReq := proto.Clone(req).(*milvuspb.SearchRequest)
-		mismatchedIDReq.SearchParams = append(mismatchedIDReq.SearchParams,
-			&commonpb.KeyValuePair{Key: CollectionID, Value: "0"})
-
-		_, predicate, err := handleIfSearchByPKForTest(ctx, node, req)
-		assert.NoError(t, err)
-		require.NotNil(t, predicate)
-		require.NotNil(t, capturedNamespace)
-		assert.Equal(t, namespace, *capturedNamespace)
-		assert.Equal(t, 1, skipRuntimeRLSPatch.Times())
-		assert.Equal(t, 1, attachPredicatePatch.Times())
-		assert.Equal(t, canonicalDBName, capturedDBName)
-		assert.Equal(t, schema.GetName(), capturedCollectionName)
-		assert.Equal(t, strconv.FormatInt(collectionID, 10), capturedCollectionID)
-		assert.Equal(t, canonicalDBName, req.GetDbName())
-		assert.Equal(t, schema.GetName(), req.GetCollectionName())
-		pinnedCollectionID, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, req.GetSearchParams())
-		require.NoError(t, err)
-		assert.Equal(t, strconv.FormatInt(collectionID, 10), pinnedCollectionID)
-
-		_, _, err = handleIfSearchByPKForTest(ctx, node, mismatchedIDReq)
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	})
-}
-
-func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
-	mockey.PatchConvey("TestHandleIfSearchByPK_RLSForceRejectsSkip", t, func() {
-		paramtable.Init()
-		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
-		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-
-		ctx := context.Background()
-		const canonicalName = "test_collection"
-		const aliasName = "test_collection_alias"
-
-		schema := &schemapb.CollectionSchema{
-			Name: canonicalName,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-				{
-					FieldID:    101,
-					Name:       "vec",
-					DataType:   schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
-				},
-			},
-		}
-		cache := NewMockCache(t)
-		cache.EXPECT().
-			GetCollectionInfo(mock.Anything, "default", aliasName, int64(0)).
-			Return(&collectionInfo{
-				CollID:     987654322,
-				Schema:     mustNewSchemaInfo(schema),
-				RlsEnabled: true,
-				RlsForce:   true,
-			}, nil)
-		node := &Proxy{metaCache: cache}
-
-		req := &milvuspb.SearchRequest{
-			DbName:         "default",
-			CollectionName: aliasName,
-			SkipRls:        true,
-			SearchInput: &milvuspb.SearchRequest_Ids{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
-				},
-			},
-			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
-		}
-
-		_, _, err := handleIfSearchByPKForTest(ctx, node, req)
-		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		assert.Contains(t, err.Error(), "rls.force")
-		assert.Contains(t, err.Error(), canonicalName)
-		assert.NotContains(t, err.Error(), aliasName)
-	})
 }
 
 // searchByPKTestSchema builds a two-field schema: int64 PK "id" and a
@@ -2896,7 +2823,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 
 		// caller asks in a different order
 		req := searchByPKRequest([]int64{3, 1, 2})
-		_, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		_, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2950,7 +2877,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"c", "a", "b"}}},
 			},
 		}
-		_, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		_, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2990,7 +2917,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -3033,7 +2960,7 @@ func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false, false}, validData)
@@ -3136,7 +3063,7 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 
 		req := searchByPKRequest([]int64{3, 1, 2})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -3171,7 +3098,7 @@ func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
 
 		req := searchByPKRequest([]int64{2, 1})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, _, err := handleIfSearchByPKForTest(context.Background(), node, req)
+		validData, err := handleIfSearchByPKForTest(context.Background(), node, req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false}, validData)
@@ -3209,71 +3136,10 @@ func TestProxy_Search_SearchByPKCopiesRequestPerAttempt(t *testing.T) {
 	})
 }
 
-func TestProxy_Search_ReusesRLSSnapshotAcrossAttempts(t *testing.T) {
-	mockey.PatchConvey("TestProxy_Search_ReusesRLSSnapshotAcrossAttempts", t, func() {
-		predicate := &planpb.Expr{}
-		preflight := &searchByPKPreflight{}
-		snapshot := &searchRLSSnapshot{
-			resolved:       true,
-			collectionID:   101,
-			dbName:         "canonical_db",
-			collectionName: "canonical_collection",
-			predicate:      predicate,
-			searchByPK:     preflight,
-		}
-		node := &Proxy{}
-		mockey.Mock((*Proxy).preflightSearchByPK).To(func(*Proxy, context.Context, *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
-			return nil, errors.New("later attempts must not resolve search-by-primary-key RLS again")
-		}).Build()
-
-		request := searchByPKRequest([]int64{3, 1, 2})
-		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: "9"})
-		attempt, gotPreflight, err := node.prepareSearchAttempt(context.Background(), request, snapshot)
-		require.NoError(t, err)
-		assert.Same(t, preflight, gotPreflight)
-		assert.NotSame(t, request, attempt)
-		assert.Equal(t, "canonical_db", attempt.GetDbName())
-		assert.Equal(t, "canonical_collection", attempt.GetCollectionName())
-		collectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, attempt.GetSearchParams())
-		require.True(t, ok)
-		assert.Equal(t, "101", collectionID)
-		originalCollectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.GetSearchParams())
-		require.True(t, ok)
-		assert.Equal(t, "9", originalCollectionID)
-
-		task := &searchTask{}
-		require.True(t, snapshot.presetTask(task))
-		assert.Same(t, predicate, task.ResolvedRLSSnapshot().Predicate)
-
-		hybrid := &milvuspb.SearchRequest{
-			DbName:         "alias_db",
-			CollectionName: "alias_collection",
-			SubReqs: []*milvuspb.SubSearchRequest{
-				{PlaceholderGroup: []byte("vectors"), Nq: 7, SearchParams: []*commonpb.KeyValuePair{{Key: CollectionID, Value: "9"}}},
-				{SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}}},
-			},
-		}
-		pinnedHybrid := snapshot.pinRequest(hybrid)
-		assert.NotSame(t, hybrid, pinnedHybrid)
-		assert.NotSame(t, hybrid.GetSubReqs()[0], pinnedHybrid.GetSubReqs()[0])
-		assert.True(t, &hybrid.GetSubReqs()[0].PlaceholderGroup[0] == &pinnedHybrid.GetSubReqs()[0].PlaceholderGroup[0])
-		assert.Equal(t, "canonical_db", pinnedHybrid.GetDbName())
-		assert.Equal(t, "canonical_collection", pinnedHybrid.GetCollectionName())
-		for _, subRequest := range pinnedHybrid.GetSubReqs() {
-			collectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, subRequest.GetSearchParams())
-			require.True(t, ok)
-			assert.Equal(t, "101", collectionID)
-		}
-		assert.Equal(t, "9", hybrid.GetSubReqs()[0].GetSearchParams()[0].GetValue())
-		pinnedHybrid.GetSubReqs()[0].Nq = 99
-		assert.Equal(t, int64(7), hybrid.GetSubReqs()[0].GetNq())
-	})
-}
-
 func TestProxy_Search_SearchByPKRejectsBeforeCopy(t *testing.T) {
 	mockey.PatchConvey("TestProxy_Search_SearchByPKRejectsBeforeCopy", t, func() {
 		node := &Proxy{}
-		expected := merr.WrapErrPrivilegeNotPermitted("missing RLS principal")
+		expected := merr.WrapErrCollectionNotFound("test_collection")
 		mockey.Mock((*Proxy).preflightSearchByPK).Return(nil, expected).Build()
 
 		request := searchByPKRequest([]int64{3, 1, 2})
@@ -3546,8 +3412,8 @@ func TestProxy_AddCollectionField_ExternalCollection(t *testing.T) {
 	mockEnqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, queued taskmodel.Task) error {
 		_ = queued.OnEnqueue()
 		addTask := queued.(*addCollectionFieldTask)
-		assert.Equal(t, externalSchema, addTask.oldSchema)
-		addTask.result = merr.Success()
+		assert.Equal(t, externalSchema, addTask.OldSchema())
+		addTask.SetResult(merr.Success())
 		return nil
 	}).Build()
 	defer mockEnqueue.UnPatch()
@@ -3651,9 +3517,9 @@ func TestProxy_AddCollectionField_TextValidation(t *testing.T) {
 				addTask := queued.(*addCollectionFieldTask)
 				err := addTask.PreExecute(context.Background())
 				if err != nil {
-					addTask.result = merr.Status(err)
+					addTask.SetResult(merr.Status(err))
 				} else {
-					addTask.result = merr.Success()
+					addTask.SetResult(merr.Success())
 				}
 				addTask.Notify(err)
 				return nil
@@ -3696,7 +3562,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 			mockey.Mock((*TaskCondition).WaitToFinish).Return(nil).Build()
@@ -3725,7 +3591,7 @@ func TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion(t *testing.T) {
 			mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(_ *scheduler.DdTaskQueue, t taskmodel.Task) error {
 				_ = t.OnEnqueue()
 				addTask := t.(*addCollectionFieldTask)
-				addTask.result = merr.Success()
+				addTask.SetResult(merr.Success())
 				return nil
 			}).Build()
 
@@ -3980,6 +3846,135 @@ func TestProxy_BatchUpdateManifest(t *testing.T) {
 	})
 }
 
+func TestProxyAdmitsMilvusTableStructSubField(t *testing.T) {
+	node := createTestProxy()
+	defer node.sched.Close()
+	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Name: "external", ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, ExternalField: "id", DataType: schemapb.DataType_Int64}},
+		},
+	}, nil).Build()
+	defer describe.UnPatch()
+	boundary := merr.WrapErrServiceUnavailableMsg("reached DDL queue")
+	enqueueCalls := 0
+	enqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(*scheduler.DdTaskQueue, taskmodel.Task) error {
+		enqueueCalls++
+		return boundary
+	}).Build()
+	defer enqueue.UnPatch()
+	resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+		CollectionName: "external",
+		Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+			Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+				AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+					FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+						FieldSchema: &schemapb.FieldSchema{
+							Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
+						},
+					}},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), merr.ErrServiceUnavailable)
+	require.Equal(t, 1, enqueueCalls)
+}
+
+func TestProxy_AlterCollectionSchemaMilvusTableValidation(t *testing.T) {
+	node := createTestProxy()
+	defer node.sched.Close()
+	describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+		Status: merr.Success(),
+		Schema: &schemapb.CollectionSchema{
+			Name: "external", ExternalSource: "s3://bucket/snapshot", ExternalSpec: `{"format":"milvus-table"}`,
+			Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, ExternalField: "id", DataType: schemapb.DataType_Int64}},
+		},
+	}, nil).Build()
+	defer describe.UnPatch()
+	enqueue := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).Return(merr.WrapErrServiceUnavailableMsg("reached DDL queue")).Build()
+	defer enqueue.UnPatch()
+
+	for _, tc := range []struct {
+		name   string
+		action *milvuspb.AlterCollectionSchemaRequest_Action
+		code   error
+		reason string
+	}{
+		{
+			name:   "missing action",
+			code:   merr.ErrParameterInvalid,
+			reason: "action is nil",
+		},
+		{
+			name:   "missing operation",
+			action: &milvuspb.AlterCollectionSchemaRequest_Action{},
+			code:   merr.ErrParameterInvalid,
+			reason: "unknown action type",
+		},
+		{
+			name: "empty Add request",
+			action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{},
+				},
+			},
+			code:   merr.ErrParameterInvalid,
+			reason: "fieldInfos and function schema are both empty",
+		},
+		{
+			name: "missing field schema",
+			action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{}},
+					},
+				},
+			},
+			code:   merr.ErrParameterInvalid,
+			reason: "fieldSchema is nil in fieldInfos",
+		},
+		{
+			name: "Drop request",
+			action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
+					DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
+						Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldName{FieldName: "id"},
+					},
+				},
+			},
+			code:   merr.ErrOperationNotSupported,
+			reason: "only mapped milvus-table field additions",
+		},
+		{
+			name: "mapped field reaches the DDL queue",
+			action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+							FieldSchema: &schemapb.FieldSchema{Name: "extra", DataType: schemapb.DataType_Int64, Nullable: true, ExternalField: "extra"},
+						}},
+					},
+				},
+			},
+			code:   merr.ErrServiceUnavailable,
+			reason: "reached DDL queue",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+				CollectionName: "external",
+				Action:         tc.action,
+			})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(resp.GetAlterStatus()), tc.code)
+			require.Contains(t, resp.GetAlterStatus().GetReason(), tc.reason)
+		})
+	}
+}
+
 func TestProxy_AlterCollectionSchema(t *testing.T) {
 	t.Run("unhealthy node", func(t *testing.T) {
 		proxy := &Proxy{}
@@ -4006,28 +4001,38 @@ func TestProxy_AlterCollectionSchema(t *testing.T) {
 		})
 	})
 
-	t.Run("external collection rejected", func(t *testing.T) {
-		mockey.PatchConvey("external collection", t, func() {
-			node := createTestProxy()
-			defer node.sched.Close()
+	t.Run("parquet add field preserves SDK fallback", func(t *testing.T) {
+		node := createTestProxy()
+		defer node.sched.Close()
 
-			mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(),
-				Schema: &schemapb.CollectionSchema{
-					Name: "ext_col",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
+		describe := mockey.Mock((*Proxy).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{
+				Name: "ext_col", ExternalSource: "s3://bucket/table", ExternalSpec: `{"format":"parquet"}`,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "ext_id"},
+				},
+			},
+		}, nil).Build()
+		defer describe.UnPatch()
+
+		resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
+			CollectionName: "ext_col",
+			Action: &milvuspb.AlterCollectionSchemaRequest_Action{
+				Op: &milvuspb.AlterCollectionSchemaRequest_Action_AddRequest{
+					AddRequest: &milvuspb.AlterCollectionSchemaRequest_AddRequest{
+						FieldInfos: []*milvuspb.AlterCollectionSchemaRequest_FieldInfo{{
+							FieldSchema: &schemapb.FieldSchema{
+								Name: "score", DataType: schemapb.DataType_Double, Nullable: true, ExternalField: "score",
+							},
+						}},
 					},
 				},
-			}, nil).Build()
-
-			resp, err := node.AlterCollectionSchema(context.Background(), &milvuspb.AlterCollectionSchemaRequest{
-				CollectionName: "ext_col",
-			})
-			assert.NoError(t, err)
-			assert.Error(t, merr.Error(resp.GetAlterStatus()))
-			assert.Contains(t, resp.GetAlterStatus().GetReason(), "external collection")
+			},
 		})
+		require.NoError(t, err)
+		require.EqualValues(t, 1100, resp.GetAlterStatus().GetCode())
+		require.Contains(t, resp.GetAlterStatus().GetReason(), "alter collection schema operation is not supported for external collection ext_col")
 	})
 
 	t.Run("does not query schema version stats before enqueue", func(t *testing.T) {

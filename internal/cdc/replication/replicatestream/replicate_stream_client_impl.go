@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -36,7 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var ErrReplicationRemoved = errors.New("replication removed")
@@ -49,6 +52,10 @@ type replicateStreamClient struct {
 	channel         *meta.ReplicateChannel
 	pendingMessages MsgQueue
 	metrics         ReplicateMetrics
+	// connConfirmed records whether the target confirmed at least one message
+	// on the current connection. It decides whether the reconnect backoff is
+	// reset once the connection ends.
+	connConfirmed atomic.Bool
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -81,6 +88,16 @@ func NewReplicateStreamClient(ctx context.Context, c cluster.MilvusClient, chann
 	return rs
 }
 
+// newReconnectBackOff builds the backoff that paces reconnects of a replicate
+// stream. It is a variable so tests can observe when the backoff is reset.
+var newReconnectBackOff = func() backoff.BackOff {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = 100 * time.Millisecond
+	b.MaxInterval = 10 * time.Second
+	b.MaxElapsedTime = 0
+	return b
+}
+
 func (r *replicateStreamClient) startInternal() {
 	defer func() {
 		mlog.Info(r.ctx, "replicate stream client closed",
@@ -90,10 +107,7 @@ func (r *replicateStreamClient) startInternal() {
 		close(r.finishedCh)
 	}()
 
-	backoff := backoff.NewExponentialBackOff()
-	backoff.InitialInterval = 100 * time.Millisecond
-	backoff.MaxInterval = 10 * time.Second
-	backoff.MaxElapsedTime = 0
+	backoff := newReconnectBackOff()
 
 	for {
 		restart := r.startReplicating(backoff)
@@ -125,7 +139,7 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 
 	logger.Info(r.ctx, "replicate stream client service started")
 	r.metrics.OnConnect()
-	backoff.Reset()
+	r.connConfirmed.Store(false)
 
 	// reset client and pending messages
 	r.client = client
@@ -144,6 +158,16 @@ func (r *replicateStreamClient) startReplicating(backoff backoff.BackOff) (needR
 	connCancel() // Cancel the connection context
 	<-sendCh
 	<-recvCh // wait for send/recv loops to exit
+
+	// The backoff is reset only once this connection has proven healthy: the
+	// target confirmed at least one message, or the stream was closed by the
+	// idle timeout because there was nothing to send. Resetting right after
+	// CreateReplicateStream would pin the retry interval at its initial value
+	// against a target that accepts the stream but rejects every message, such
+	// as a secondary that has not been given its replicate configuration yet.
+	if r.connConfirmed.Load() || isStreamIdleTimeout(chErr) {
+		backoff.Reset()
+	}
 
 	if r.ctx.Err() != nil {
 		logger.Info(r.ctx, "close replicate stream client due to ctx done")
@@ -232,7 +256,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				// send txn messages
+				// Preserve source body order and IDs on every replay.
 				err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
 					return r.sendMessage(msg)
 				})
@@ -240,7 +264,7 @@ func (r *replicateStreamClient) sendLoop(ctx context.Context) (err error) {
 					return err
 				}
 
-				// send txn commit message
+				// Forward the source Commit unchanged, including historical zero body count.
 				commitMsg := txnMsg.Commit()
 				err = r.sendMessage(commitMsg)
 				if err != nil {
@@ -311,6 +335,7 @@ func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
 			}
 			lastConfirmedMessageInfo := resp.GetReplicateConfirmedMessageInfo()
 			if lastConfirmedMessageInfo != nil {
+				r.connConfirmed.Store(true)
 				messages := r.pendingMessages.CleanupConfirmedMessages(lastConfirmedMessageInfo.GetConfirmedTimeTick())
 				for _, msg := range messages {
 					r.metrics.OnConfirmed(msg)
@@ -344,7 +369,16 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
 		// so we need to remove the replicate pchannel and stop replicate.
 		etcdCli := resource.Resource().ETCD()
-		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+		// Retry transient etcd errors (e.g. leader changed during an etcd restart).
+		// The delete is guarded by the channel's revision, so retrying after an
+		// attempt that was applied despite the error just finds the revision
+		// changed; the replication is removed either way.
+		var ok bool
+		err := retry.Do(r.ctx, func() error {
+			var err error
+			ok, err = meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+			return err
+		}, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableEtcdErr))
 		if err != nil {
 			logger.Warn(r.ctx, "failed to remove replicate pchannel", mlog.Err(err))
 			// When performing delete operation on etcd, the context may be canceled by the delete event
@@ -352,7 +386,7 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 			// Since the delete event is generated after the delete operation is committed in etcd,
 			// the delete is guaranteed to have succeeded on the server side.
 			// So we can ignore the context canceled error here.
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.Canceled) && r.ctx.Err() == nil {
 				panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
 			}
 		}

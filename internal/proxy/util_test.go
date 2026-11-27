@@ -17,7 +17,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -57,33 +56,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type proxyLogBuffer struct {
-	bytes.Buffer
+func testArrayTypeSchema(element *schemapb.TypeSchema, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
+	return &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		TypeParams: params,
+	}
 }
 
-func (*proxyLogBuffer) Sync() error {
-	return nil
-}
-
-func captureProxyLogs(t *testing.T) *proxyLogBuffer {
+func captureProxyLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
-	oldLogger := mlog.L()
-	oldLevel := mlog.GetAtomicLevel()
-	logs := &proxyLogBuffer{}
-	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+	return mlog.CaptureGlobalLogs(t, &mlog.Config{
 		Level:             "debug",
 		Format:            "text",
 		DisableCaller:     true,
 		DisableTimestamp:  true,
 		DisableStacktrace: true,
-	}, logs)
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, props)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel})
 	})
-	return logs
 }
 
 func TestValidateCollectionName(t *testing.T) {
@@ -165,6 +154,8 @@ func TestValidateResourceGroupName(t *testing.T) {
 	assert.Nil(t, ValidateResourceGroupName("abc"))
 	assert.Nil(t, ValidateResourceGroupName("_123abc"))
 	assert.Nil(t, ValidateResourceGroupName("abc123_"))
+	assert.Nil(t, ValidateResourceGroupName("rg-01"))
+	assert.Nil(t, ValidateResourceGroupName("a-b_c-"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -179,6 +170,9 @@ func TestValidateResourceGroupName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"-rg",
+		"-",
+		"a b-c",
 	}
 
 	for _, name := range invalidNames {
@@ -344,40 +338,6 @@ func TestValidatePartitionTag(t *testing.T) {
 	assert.Nil(t, validatePartitionTag("ab*", false))
 }
 
-func TestValidateFieldName(t *testing.T) {
-	assert.Nil(t, validateFieldName("abc"))
-	assert.Nil(t, validateFieldName("_123abc"))
-	assert.Nil(t, validateFieldName("abc123_"))
-
-	longName := make([]byte, 256)
-	for i := 0; i < len(longName); i++ {
-		longName[i] = 'a'
-	}
-	invalidNames := []string{
-		"123abc",
-		"$abc",
-		"abc$",
-		"_12 ac",
-		" ",
-		"",
-		string(longName),
-		"中文",
-		"True",
-		"null",
-		"Null",
-		"NULL",
-		"nUlL",
-		"NuLL",
-		"array_contains",
-		"json_contains_any",
-		"ARRAY_LENGTH",
-	}
-
-	for _, name := range invalidNames {
-		assert.NotNil(t, validateFieldName(name))
-	}
-}
-
 // Regression for #49314: user-supplied field named __virtual_pk__ (or
 // RowID / Timestamp) must be rejected at CreateCollection to keep the
 // system namespace clean. Covers regular fields and struct-array
@@ -422,108 +382,6 @@ func TestValidateReservedFieldNames(t *testing.T) {
 		},
 	}
 	assert.Error(t, validateReservedFieldNames(s2))
-}
-
-func TestValidateDimension(t *testing.T) {
-	fieldSchema := &schemapb.FieldSchema{
-		DataType: schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: "1",
-			},
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
-	fieldSchema = &schemapb.FieldSchema{
-		DataType: schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: "2",
-			},
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: Params.ProxyCfg.MaxDimension.GetValue(),
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-
-	// invalid dim
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "-1",
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
-
-	fieldSchema.DataType = schemapb.DataType_BinaryVector
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "8",
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt()),
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "9",
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
-
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "262145",
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
-
-	fieldSchema.DataType = schemapb.DataType_Int8Vector
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "200",
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "201",
-		},
-	}
-	assert.Nil(t, validateDimension(fieldSchema))
-
-	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
-		},
-	}
-	assert.NotNil(t, validateDimension(fieldSchema))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {
@@ -803,21 +661,25 @@ func TestValidateFieldType(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestValidateFieldAllowsAnalyzerParamsWithoutEnableAnalyzer(t *testing.T) {
-	field := &schemapb.FieldSchema{
-		Name:     "text_field",
-		DataType: schemapb.DataType_VarChar,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: common.MaxLengthKey, Value: "100"},
-			{Key: common.AnalyzerParamKey, Value: `{"tokenizer":"standard"}`},
-		},
-	}
-	schema := &schemapb.CollectionSchema{Name: "test_collection"}
-
-	err := ValidateField(field, schema)
-	require.NoError(t, err)
+	t.Run("top-level nested array with type schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Array,
+					TypeSchema: testArrayTypeSchema(
+						testArrayTypeSchema(&schemapb.TypeSchema{
+							Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+						}, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "32"}),
+						&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "32"},
+					),
+				},
+			},
+		}
+		err := validateFieldType(sch)
+		require.ErrorContains(t, err, "nested array can only be in a struct array field")
+	})
 }
 
 func TestValidateMultipleVectorFields(t *testing.T) {
@@ -854,67 +716,6 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 	} else {
 		assert.Error(t, validateMultipleVectorFields(schema3))
 	}
-}
-
-func TestFillFieldIDBySchema(t *testing.T) {
-	t.Run("column count mismatch", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{}
-		schema := mustNewSchemaInfo(collSchema)
-		columns := []*schemapb.FieldData{
-			{
-				FieldName: "TestFillFieldIDBySchema",
-			},
-		}
-		// Validation should fail due to column count mismatch
-		assert.Error(t, validateFieldDataColumns(columns, schema))
-	})
-
-	t.Run("successful validation and fill", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "TestFillFieldIDBySchema",
-					DataType: schemapb.DataType_Int64,
-					FieldID:  1,
-				},
-			},
-		}
-		schema := mustNewSchemaInfo(collSchema)
-		columns := []*schemapb.FieldData{
-			{
-				FieldName: "TestFillFieldIDBySchema",
-			},
-		}
-		// Validation should succeed
-		assert.NoError(t, validateFieldDataColumns(columns, schema))
-		// Fill properties should succeed
-		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
-		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
-		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-		assert.Equal(t, int64(1), columns[0].FieldId)
-	})
-
-	t.Run("field not in schema", func(t *testing.T) {
-		collSchema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "FieldA",
-					DataType: schemapb.DataType_Int64,
-					FieldID:  1,
-				},
-			},
-		}
-		schema := mustNewSchemaInfo(collSchema)
-		columns := []*schemapb.FieldData{
-			{
-				FieldName: "FieldB",
-			},
-		}
-		// Validation should fail because FieldB is not in schema
-		err := validateFieldDataColumns(columns, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not exist in collection schema")
-	})
 }
 
 func TestValidateUsername(t *testing.T) {
@@ -1408,726 +1209,6 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	})
 }
 
-func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
-	paramtable.Init()
-	mlog.Info(context.TODO(), "InsertTaskcheckFieldsDataBySchema", mlog.Bool("enable", Params.ProxyCfg.SkipAutoIDCheck.GetAsBool()))
-	var err error
-
-	t.Run("schema is empty, though won't happen in system", func(t *testing.T) {
-		// won't happen in system
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields:      []*schemapb.FieldSchema{},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					DbName:         "TestInsertTask_checkFieldsDataBySchema",
-					CollectionName: "TestInsertTask_checkFieldsDataBySchema",
-					PartitionName:  "TestInsertTask_checkFieldsDataBySchema",
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.Equal(t, nil, err)
-		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
-	})
-
-	t.Run("miss field", func(t *testing.T) {
-		// schema has field, msg has no field.
-		// schema is not Nullable or has set default_value
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:     "a",
-						AutoID:   false,
-						DataType: schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("miss field is nullable or set default_value", func(t *testing.T) {
-		// schema has fields, msg has no field.
-		// schema is Nullable or set default_value
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:     "a",
-						AutoID:   false,
-						DataType: schemapb.DataType_Int64,
-						Nullable: true,
-					},
-					{
-						Name:     "b",
-						AutoID:   false,
-						DataType: schemapb.DataType_Int64,
-						DefaultValue: &schemapb.ValueField{
-							Data: &schemapb.ValueField_LongData{
-								LongData: 1,
-							},
-						},
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.Equal(t, nil, err)
-		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
-	})
-
-	t.Run("schema has autoid pk", func(t *testing.T) {
-		// schema has autoid pk
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.Equal(t, nil, err)
-		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
-	})
-
-	t.Run("schema pk is not autoid, but not pass pk", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       false,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("pass more data field", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "c",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("duplicate field datas", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("not pk field, but autoid == true", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:         "b",
-						AutoID:       true,
-						IsPrimaryKey: false,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("has more than one pk", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:         "b",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-
-	t.Run("pk can not set default value", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_checkFieldsDataBySchema",
-				Description: "TestInsertTask_checkFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       false,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-						DefaultValue: &schemapb.ValueField{
-							Data: &schemapb.ValueField_LongData{
-								LongData: 1,
-							},
-						},
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-	})
-	t.Run("normal when upsert", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "Test_CheckFieldsDataBySchema",
-				Description: "Test_CheckFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       false,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:         "b",
-						AutoID:       false,
-						IsPrimaryKey: false,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-						{
-							FieldName: "b",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, err)
-
-		task = insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "Test_CheckFieldsDataBySchema",
-				Description: "Test_CheckFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:         "b",
-						AutoID:       false,
-						IsPrimaryKey: false,
-						DataType:     schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-						{
-							FieldName: "b",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, err)
-	})
-
-	t.Run("skip the auto id", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_fillFieldsDataBySchema",
-				Description: "TestInsertTask_fillFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:     "b",
-						AutoID:   false,
-						DataType: schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-						{
-							FieldName: "b",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
-		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
-
-		paramtable.Get().Save(Params.ProxyCfg.SkipAutoIDCheck.Key, "true")
-		task = insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestInsertTask_fillFieldsDataBySchema",
-				Description: "TestInsertTask_fillFieldsDataBySchema",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "a",
-						AutoID:       true,
-						IsPrimaryKey: true,
-						DataType:     schemapb.DataType_Int64,
-					},
-					{
-						Name:     "b",
-						AutoID:   false,
-						DataType: schemapb.DataType_Int64,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "a",
-							Type:      schemapb.DataType_Int64,
-						},
-						{
-							FieldName: "b",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-
-		err = checkFieldsDataBySchema(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.NoError(t, err)
-		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
-		paramtable.Get().Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
-	})
-}
-
-func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
-	// schema is empty, though won't happen in system
-	// num_rows(0) should be greater than 0
-	case1 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{},
-		},
-		insertMsg: &BaseInsertTask{
-			InsertRequest: &msgpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				DbName:         "TestInsertTask_checkPrimaryFieldData",
-				CollectionName: "TestInsertTask_checkPrimaryFieldData",
-				PartitionName:  "TestInsertTask_checkPrimaryFieldData",
-			},
-		},
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-		},
-	}
-
-	_, err := checkPrimaryFieldData(context.TODO(), case1.schema.Fields, case1.schema, case1.insertMsg)
-	assert.NotEqual(t, nil, err)
-
-	// the num of passed fields is less than needed
-	case2 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-			},
-		},
-		insertMsg: &BaseInsertTask{
-			InsertRequest: &msgpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				RowData: []*commonpb.Blob{
-					{},
-					{},
-				},
-				FieldsData: []*schemapb.FieldData{
-					{
-						Type: schemapb.DataType_Int64,
-					},
-				},
-				Version: msgpb.InsertDataVersion_RowBased,
-			},
-		},
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-		},
-	}
-	_, err = checkPrimaryFieldData(context.TODO(), case2.schema.Fields, case2.schema, case2.insertMsg)
-	assert.NotEqual(t, nil, err)
-
-	// autoID == false, no primary field schema
-	// primary field is not found
-	case3 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					DataType: schemapb.DataType_Float,
-				},
-			},
-		},
-		insertMsg: &BaseInsertTask{
-			InsertRequest: &msgpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				RowData: []*commonpb.Blob{
-					{},
-					{},
-				},
-				FieldsData: []*schemapb.FieldData{
-					{},
-					{},
-				},
-			},
-		},
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-		},
-	}
-	_, err = checkPrimaryFieldData(context.TODO(), case3.schema.Fields, case3.schema, case3.insertMsg)
-	assert.NotEqual(t, nil, err)
-
-	// autoID == true, has primary field schema, but primary field data exist
-	// can not assign primary field data when auto id enabled int64Field
-	case4 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkPrimaryFieldData",
-			Description: "TestInsertTask_checkPrimaryFieldData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "int64Field",
-					FieldID:  1,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					Name:     "floatField",
-					FieldID:  2,
-					DataType: schemapb.DataType_Float,
-				},
-			},
-		},
-		insertMsg: &BaseInsertTask{
-			InsertRequest: &msgpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				RowData: []*commonpb.Blob{
-					{},
-					{},
-				},
-				FieldsData: []*schemapb.FieldData{
-					{
-						Type:      schemapb.DataType_Int64,
-						FieldName: "int64Field",
-					},
-				},
-			},
-		},
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-		},
-	}
-	case4.schema.Fields[0].IsPrimaryKey = true
-	case4.schema.Fields[0].AutoID = true
-	case4.insertMsg.FieldsData[0] = newScalarFieldData(case4.schema.Fields[0], case4.schema.Fields[0].Name, 10)
-	_, err = checkPrimaryFieldData(context.TODO(), case4.schema.Fields, case4.schema, case4.insertMsg)
-	assert.NotEqual(t, nil, err)
-
-	// autoID == true, has primary field schema, but DataType don't match
-	// the data type of the data not matches the schema
-	case4.schema.Fields[0].IsPrimaryKey = false
-	case4.schema.Fields[1].IsPrimaryKey = true
-	case4.schema.Fields[1].AutoID = true
-	_, err = checkPrimaryFieldData(context.TODO(), case4.schema.Fields, case4.schema, case4.insertMsg)
-	assert.NotEqual(t, nil, err)
-}
-
-func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
-	for _, autoID := range []bool{false, true} {
-		for _, tc := range []struct {
-			name     string
-			numRows  uint64
-			field    *schemapb.FieldData
-			nullable bool
-			noPK     bool
-			valid    bool
-		}{
-			{name: "preserve without non-PK fields", numRows: 1, field: partialUpdateCASPKFieldData([]int64{10}), valid: true},
-			{name: "zero rows", field: partialUpdateCASPKFieldData([]int64{10})},
-			{name: "no primary key schema", numRows: 1, noPK: true},
-			{name: "nullable primary key", numRows: 1, nullable: true},
-			{name: "missing primary key", numRows: 1},
-			{name: "missing scalar payload", numRows: 1, field: &schemapb.FieldData{FieldName: "id", Type: schemapb.DataType_Int64}},
-			{name: "empty primary key", numRows: 1, field: partialUpdateCASPKFieldData([]int64{})},
-			{name: "row count mismatch", numRows: 2, field: partialUpdateCASPKFieldData([]int64{10})},
-			{name: "wrong primary key type", numRows: 1, field: partialUpdateCASStringPKFieldData([]string{"10"})},
-		} {
-			t.Run(fmt.Sprintf("autoID=%t/%s", autoID, tc.name), func(t *testing.T) {
-				collection := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: !tc.noPK, AutoID: autoID, Nullable: tc.nullable},
-					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
-				}}
-				helper, err := typeutil.CreateSchemaHelper(collection)
-				require.NoError(t, err)
-				schema := &schemaInfo{CollectionSchema: collection, SchemaHelper: helper}
-				var fields []*schemapb.FieldData
-				if tc.field != nil {
-					fields = []*schemapb.FieldData{tc.field}
-				}
-
-				ids, err := checkUpsertPrimaryFieldData(schema, fields, tc.numRows, nil)
-				if !tc.valid {
-					require.Error(t, err)
-					require.Nil(t, ids)
-					return
-				}
-				require.NoError(t, err)
-				require.Equal(t, []int64{10}, ids.GetIntId().GetData())
-				require.Len(t, fields, 1, "PK validation must not fill omitted non-PK fields")
-				require.Same(t, tc.field, fields[0])
-				require.Equal(t, []int64{10}, fields[0].GetScalars().GetLongData().GetData())
-			})
-		}
-	}
-}
-
 func Test_ParseGuaranteeTs(t *testing.T) {
 	strongTs := typeutil.Timestamp(0)
 	boundedTs := typeutil.Timestamp(2)
@@ -2353,93 +1434,6 @@ func Test_CheckDynamicFieldData(t *testing.T) {
 			},
 		}
 		err := checkDynamicFieldData(schema, insertMsg)
-		assert.NoError(t, err)
-	})
-}
-
-func Test_validateMaxCapacityPerRow(t *testing.T) {
-	paramtable.Init()
-
-	t.Run("normal case", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxLengthKey,
-					Value: "100",
-				},
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "10",
-				},
-			},
-		}
-
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.NoError(t, err)
-	})
-
-	t.Run("no max capacity", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-		}
-
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.Error(t, err)
-	})
-
-	t.Run("max capacity not int", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "six",
-				},
-			},
-		}
-
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.Error(t, err)
-	})
-
-	t.Run("max capacity exceed max", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "4097",
-				},
-			},
-		}
-
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.Error(t, err)
-	})
-
-	t.Run("custom max capacity", func(t *testing.T) {
-		paramtable.Init()
-		err := paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key, "5000")
-		assert.NoError(t, err)
-		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxArrayCapacity.Key)
-
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "5000",
-				},
-			},
-		}
-
-		err = validateMaxCapacityPerRow("collection", arrayField)
 		assert.NoError(t, err)
 	})
 }
@@ -4174,316 +3168,6 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 	})
 }
 
-func TestValidateFieldsInStruct(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-	}
-
-	t.Run("valid array field", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "valid_array",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int32,
-			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.NoError(t, err)
-	})
-
-	t.Run("valid array of vector field", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "valid_array_vector",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "128"},
-				{Key: common.MaxCapacityKey, Value: "100"},
-			},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.NoError(t, err)
-	})
-
-	t.Run("invalid field name", func(t *testing.T) {
-		testCases := []struct {
-			name     string
-			expected string
-		}{
-			{"", "field name should not be empty"},
-			{"123abc", "The first character of a field name must be an underscore or letter"},
-			{"abc-def", "Field name can only contain numbers, letters, and underscores"},
-		}
-
-		for _, tc := range testCases {
-			field := &schemapb.FieldSchema{
-				Name:        tc.name,
-				DataType:    schemapb.DataType_Array,
-				ElementType: schemapb.DataType_Int32,
-			}
-			err := ValidateFieldsInStruct(field, schema)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tc.expected)
-		}
-	})
-
-	t.Run("invalid data type", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:     "invalid_type",
-			DataType: schemapb.DataType_Int32, // Not array or array of vector
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "fields in StructArrayField can only be array or array of struct")
-	})
-
-	t.Run("JSON not supported in struct", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "json_field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_JSON,
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "is not supported")
-	})
-
-	t.Run("nested array not supported", func(t *testing.T) {
-		testCases := []struct {
-			elementType schemapb.DataType
-		}{
-			{schemapb.DataType_ArrayOfStruct},
-			{schemapb.DataType_ArrayOfVector},
-			{schemapb.DataType_Array},
-		}
-
-		for _, tc := range testCases {
-			field := &schemapb.FieldSchema{
-				Name:        "nested_array",
-				DataType:    schemapb.DataType_Array,
-				ElementType: tc.elementType,
-			}
-			err := ValidateFieldsInStruct(field, schema)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "nested array is not supported")
-		}
-	})
-
-	t.Run("array field with vector element type", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "array_with_vector",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_FloatVector,
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "element type FloatVector is not supported")
-	})
-
-	t.Run("array of vector field with non-vector element type", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "array_vector_with_scalar",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: schemapb.DataType_Int32,
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "only fixed dimension vector types are supported")
-	})
-
-	t.Run("array of vector missing dimension", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "array_vector_no_dim",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: schemapb.DataType_FloatVector,
-			TypeParams:  []*commonpb.KeyValuePair{}, // No dimension specified
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "dimension is not defined in field")
-	})
-
-	t.Run("array of vector with invalid dimension", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "array_vector_invalid_dim",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "not_a_number"},
-			},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-	})
-
-	t.Run("varchar array without max_length", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "varchar_array_no_max_length",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_VarChar,
-			TypeParams:  []*commonpb.KeyValuePair{}, // No max_length specified
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "type param(max_length) should be specified")
-	})
-
-	t.Run("varchar array with valid max_length", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "varchar_array_valid",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.MaxLengthKey, Value: "100"},
-				{Key: common.MaxCapacityKey, Value: "100"},
-			},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.NoError(t, err)
-	})
-
-	t.Run("varchar array with invalid max_length", func(t *testing.T) {
-		// Test with max_length exceeding limit
-		field := &schemapb.FieldSchema{
-			Name:        "varchar_array_invalid_length",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.MaxLengthKey, Value: "99999999"}, // Exceeds limit
-			},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "the maximum length specified for the field")
-	})
-
-	t.Run("nullable field in struct is allowed", func(t *testing.T) {
-		field := &schemapb.FieldSchema{
-			Name:        "nullable_field",
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int32,
-			Nullable:    true,
-			TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
-		}
-		err := ValidateFieldsInStruct(field, schema)
-		assert.NoError(t, err)
-	})
-
-	// t.Run("sparse float vector in array of vector", func(t *testing.T) {
-	// 	// Note: ArrayOfVector with sparse vector element type still requires dimension
-	// 	// because validateDimension checks the field's DataType (ArrayOfVector), not ElementType
-	// 	field := &schemapb.FieldSchema{
-	// 		Name:        "sparse_vector_array",
-	// 		DataType:    schemapb.DataType_ArrayOfVector,
-	// 		ElementType: schemapb.DataType_SparseFloatVector,
-	// 		TypeParams:  []*commonpb.KeyValuePair{},
-	// 	}
-	// 	err := ValidateFieldsInStruct(field, schema)
-	// 	assert.Error(t, err)
-	// 	assert.Contains(t, err.Error(), "dimension is not defined")
-	// })
-
-	t.Run("array with various scalar element types", func(t *testing.T) {
-		validScalarTypes := []schemapb.DataType{
-			schemapb.DataType_Bool,
-			schemapb.DataType_Int8,
-			schemapb.DataType_Int16,
-			schemapb.DataType_Int32,
-			schemapb.DataType_Int64,
-			schemapb.DataType_Float,
-			schemapb.DataType_Double,
-		}
-
-		for _, dt := range validScalarTypes {
-			field := &schemapb.FieldSchema{
-				Name:        "array_" + dt.String(),
-				DataType:    schemapb.DataType_Array,
-				ElementType: dt,
-				TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
-			}
-			err := ValidateFieldsInStruct(field, schema)
-			assert.NoError(t, err)
-		}
-	})
-
-	t.Run("array of vector with various vector types", func(t *testing.T) {
-		validVectorTypes := []schemapb.DataType{
-			schemapb.DataType_FloatVector,
-			// schemapb.DataType_BinaryVector,
-			// schemapb.DataType_Float16Vector,
-			// schemapb.DataType_BFloat16Vector,
-			// Note: SparseFloatVector is excluded because validateDimension checks
-			// the field's DataType (ArrayOfVector), not ElementType, so it still requires dimension
-		}
-
-		for _, vt := range validVectorTypes {
-			field := &schemapb.FieldSchema{
-				Name:        "vector_array_" + vt.String(),
-				DataType:    schemapb.DataType_ArrayOfVector,
-				ElementType: vt,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: common.DimKey, Value: "128"},
-					{Key: common.MaxCapacityKey, Value: "100"},
-				},
-			}
-			err := ValidateFieldsInStruct(field, schema)
-			assert.NoError(t, err)
-		}
-	})
-}
-
-func TestValidateStructArrayField_MaxCapacity(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-	}
-
-	t.Run("missing max_capacity is rejected", func(t *testing.T) {
-		structField := &schemapb.StructArrayFieldSchema{
-			Name: "my_struct",
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "sub_a",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Int32,
-				},
-			},
-		}
-
-		err := ValidateStructArrayField(structField, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "type param(max_capacity) should be specified")
-		assert.Contains(t, err.Error(), "sub_a")
-	})
-
-	t.Run("different max_capacity values in same struct are rejected", func(t *testing.T) {
-		structField := &schemapb.StructArrayFieldSchema{
-			Name: "my_struct",
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "sub_a",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Int32,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
-				},
-				{
-					Name:        "sub_b",
-					DataType:    schemapb.DataType_ArrayOfVector,
-					ElementType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: common.DimKey, Value: "128"},
-						{Key: common.MaxCapacityKey, Value: "200"},
-					},
-				},
-			},
-		}
-
-		err := ValidateStructArrayField(structField, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "same max_capacity")
-		assert.Contains(t, err.Error(), "my_struct")
-		assert.Contains(t, err.Error(), "sub_b")
-	})
-}
-
 func TestLackOfFieldsDataBySchema(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -5072,81 +3756,6 @@ func TestMinHashFunction(t *testing.T) {
 	})
 }
 
-func TestValidateStructArrayField_NullablePropagation(t *testing.T) {
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		},
-	}
-
-	t.Run("nullable struct propagates to sub-fields", func(t *testing.T) {
-		structField := &schemapb.StructArrayFieldSchema{
-			Name:     "my_struct",
-			Nullable: true,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "sub_a",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Int32,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
-				},
-				{
-					Name:        "sub_b",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_VarChar,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}, {Key: "max_length", Value: "256"}},
-				},
-			},
-		}
-
-		err := ValidateStructArrayField(structField, schema)
-		require.NoError(t, err)
-
-		for _, subField := range structField.Fields {
-			assert.True(t, subField.GetNullable(), "sub-field %s should be nullable after propagation", subField.Name)
-		}
-	})
-
-	t.Run("non-nullable struct rejects nullable sub-fields", func(t *testing.T) {
-		structField := &schemapb.StructArrayFieldSchema{
-			Name:     "my_struct",
-			Nullable: false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "sub_a",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Int32,
-					Nullable:    true,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
-				},
-			},
-		}
-
-		err := ValidateStructArrayField(structField, schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot be nullable individually")
-	})
-
-	t.Run("non-nullable struct with non-nullable sub-fields passes", func(t *testing.T) {
-		structField := &schemapb.StructArrayFieldSchema{
-			Name:     "my_struct",
-			Nullable: false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:        "sub_a",
-					DataType:    schemapb.DataType_Array,
-					ElementType: schemapb.DataType_Int32,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "100"}},
-				},
-			},
-		}
-
-		err := ValidateStructArrayField(structField, schema)
-		assert.NoError(t, err)
-	})
-}
-
 func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 	structName := "my_struct"
 	subFieldName := "sub_a"
@@ -5200,9 +3809,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 									FieldName: subFieldName,
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: validData,
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: validData,
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5231,7 +3840,8 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 	for _, fd := range insertMsg.GetFieldsData() {
 		if fd.FieldName == transformedName {
 			found = true
-			assert.Equal(t, validData, fd.GetValidData(), "ValidData should be preserved in flattened sub-field")
+			assert.Equal(t, validData, fd.GetValidData(), "flattened sub-field should carry legacy ValidData")
+			assert.Equal(t, validData, fd.GetScalars().GetValidData(), "flattened sub-field should carry field-specific ValidData")
 			break
 		}
 	}
@@ -5395,9 +4005,9 @@ func TestCheckAndFlattenStructFieldData_RequiredMissingButNullablePresent(t *tes
 									FieldName: "sub_b",
 									FieldId:   301,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5480,16 +4090,18 @@ func TestCheckAndFlattenStructFieldData_AllNullWithInitializedVectorsOneof(t *te
 									FieldName: "tag",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, false},
+									Field: &schemapb.FieldData_Scalars{
+										Scalars: &schemapb.ScalarField{ValidData: []bool{false, false}},
+									},
 								},
 								{
 									FieldName: "vec",
 									FieldId:   202,
 									Type:      schemapb.DataType_ArrayOfVector,
-									ValidData: []bool{false, false},
 									Field: &schemapb.FieldData_Vectors{
 										Vectors: &schemapb.VectorField{
-											Dim: 4,
+											ValidData: []bool{false, false},
+											Dim:       4,
 										},
 									},
 								},
@@ -5751,9 +4363,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5769,9 +4381,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataMaskMismatch(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{false, true},
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{false, true},
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5840,9 +4452,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "a",
 									Type:      schemapb.DataType_Array,
-									ValidData: nil, // no ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: nil, // no ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5858,9 +4470,9 @@ func TestCheckAndFlattenStructFieldData_ValidDataNilVsNonNil(t *testing.T) {
 								{
 									FieldName: "b",
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // has ValidData
 									Field: &schemapb.FieldData_Scalars{
 										Scalars: &schemapb.ScalarField{
+											ValidData: []bool{true, false}, // has ValidData
 											Data: &schemapb.ScalarField_ArrayData{
 												ArrayData: &schemapb.ArrayArray{
 													Data: []*schemapb.ScalarField{
@@ -5930,8 +4542,10 @@ func TestCheckAndFlattenStructFieldData_ValidDataWithoutPayload(t *testing.T) {
 									FieldName: "a",
 									FieldId:   201,
 									Type:      schemapb.DataType_Array,
-									ValidData: []bool{true, false}, // claims row 0 is valid
-									// but no Field/payload
+									Field: &schemapb.FieldData_Scalars{
+										// Claims row 0 is valid, but provides no payload.
+										Scalars: &schemapb.ScalarField{ValidData: []bool{true, false}},
+									},
 								},
 							},
 						},
@@ -6037,4 +4651,31 @@ func TestFailMetricLabel(t *testing.T) {
 	// client cancellation is neither party's failure
 	assertLabels(metrics.CauseCancel, context.Canceled)
 	assertLabels(metrics.CauseCancel, errors.Wrap(context.Canceled, "rpc aborted"))
+}
+
+// newTestSchema builds a schema exercising every supported data type. It used
+// to live in the task index tests; kept in the root package for root tests.
+func newTestSchema() *schemapb.CollectionSchema {
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "FieldID", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_Int64},
+	}
+
+	for name, value := range schemapb.DataType_value {
+		dataType := schemapb.DataType(value)
+		if !typeutil.IsIntegerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) && !typeutil.IsStringType(dataType) {
+			continue
+		}
+		newField := &schemapb.FieldSchema{
+			FieldID: int64(100 + value), Name: name + "Field", IsPrimaryKey: false, Description: "", DataType: dataType,
+		}
+		fields = append(fields, newField)
+	}
+
+	return &schemapb.CollectionSchema{
+		Name:               "test",
+		Description:        "schema for test used",
+		AutoID:             true,
+		Fields:             fields,
+		EnableDynamicField: true,
+	}
 }

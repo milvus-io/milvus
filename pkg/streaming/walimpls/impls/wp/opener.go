@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/zilliztech/woodpecker/woodpecker"
+	wp "github.com/zilliztech/woodpecker/woodpecker/log"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 )
@@ -35,12 +37,15 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		mlog.Error(ctx, "failed to open log", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
 		return nil, err
 	}
-	p, err := l.OpenLogWriter(ctx)
-	if err != nil {
-		mlog.Error(ctx, "failed to open log writer", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
-		return nil, err
+	var p wp.LogWriter
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		p, err = l.OpenLogWriter(ctx)
+		if err != nil {
+			mlog.Error(ctx, "failed to open log writer", mlog.String("log_name", opt.Channel.Name), mlog.Err(err))
+			return nil, err
+		}
+		mlog.Info(ctx, "finish to open log writer", mlog.String("log_name", opt.Channel.Name))
 	}
-	mlog.Info(ctx, "finish to open log writer", mlog.String("log_name", opt.Channel.Name))
 	return &walImpl{
 		WALHelper: helper.NewWALHelper(opt),
 		p:         p,

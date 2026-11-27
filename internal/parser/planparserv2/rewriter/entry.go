@@ -11,19 +11,6 @@ func RewriteExpr(e *planpb.Expr) *planpb.Expr {
 	return RewriteExprWithConfig(e, optimizeEnabled)
 }
 
-// MergeNormalizedAnd combines two expressions that have already passed
-// RewriteExpr. It preserves cross-branch AND optimizations without walking or
-// mutating either input tree again.
-func MergeNormalizedAnd(left, right *planpb.Expr) *planpb.Expr {
-	v := &visitor{optimizeEnabled: paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool()}
-	if !v.optimizeEnabled {
-		return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
-			Left: left, Right: right, Op: planpb.BinaryExpr_LogicalAnd,
-		}}}
-	}
-	return v.mergeAnd(left, right)
-}
-
 func RewriteExprWithConfig(e *planpb.Expr, optimizeEnabled bool) *planpb.Expr {
 	if e == nil {
 		return nil

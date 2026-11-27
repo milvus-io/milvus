@@ -43,7 +43,7 @@
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "indexbuilder/IndexCreatorBase.h"
 #include "indexbuilder/IndexFactory.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -343,7 +343,7 @@ class ArrayBitmapIndexTest : public testing::Test {
         for (size_t i = 0; i < data_.size() && s.size() < max_vals; i++) {
             auto& array = data_[i];
             for (size_t j = 0; j < array.length() && s.size() < max_vals; ++j) {
-                auto val = array.template get_data<T>(j);
+                auto val = array.template get_data_unchecked<T>(j);
                 if (s.insert(val).second) {
                     test_data.push_back(val);
                 }
@@ -373,7 +373,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         return true;
                     }
@@ -406,7 +406,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     return false;
                 }
                 for (size_t j = 0; j < array.length(); ++j) {
-                    auto val = array.template get_data<T>(j);
+                    auto val = array.template get_data_unchecked<T>(j);
                     if (s.find(val) != s.end()) {
                         // contains a queried value -> excluded from NotIn
                         return false;
@@ -1326,7 +1326,8 @@ TEST(BitmapIndexArrayNestedTest, NullableNullsBeforeValidUnifiedLoad) {
     boost::filesystem::remove_all(root_path);
 }
 
-// Bug #2: int8/int16 elements are physically stored as int32. get_data<T> must
+// Bug #2: int8/int16 elements are physically stored as int32.
+// get_data_unchecked<T> must
 // take the 4-byte-stride-then-narrow branch; the old code fell through to a
 // 1-byte reinterpret for int8_t/int16_t and produced garbage values during the
 // nested build. Build a typed nested bitmap and confirm element values index
@@ -1536,14 +1537,15 @@ TEST(BitmapIndexLoadResourceTest,
     EXPECT_EQ(request.max_disk_cost, 0);
 }
 
-// Bug #4: ArrayOffsetsSealed::BuildAllZeros is used in the add-field /
+// Bug #4: StructElementOffsetsSealed::BuildAllZeros is used in the add-field /
 // schema-evolution path to materialize empty (all-zeros) offsets for old rows.
 // It must charge the caching layer so the destructor's refund is balanced, and
 // must present every old row as an empty array (so MATCH/element_filter treats
 // them as zero-element rows rather than crashing on missing offsets).
-TEST(ArrayOffsetsSealedTest, BuildAllZerosEmptyArraysAndBalancedResource) {
+TEST(StructElementOffsetsSealedTest,
+     BuildAllZerosEmptyArraysAndBalancedResource) {
     constexpr int64_t kRowCount = 1000;
-    auto offsets = milvus::ArrayOffsetsSealed::BuildAllZeros(kRowCount);
+    auto offsets = milvus::StructElementOffsetsSealed::BuildAllZeros(kRowCount);
     ASSERT_NE(offsets, nullptr);
 
     EXPECT_EQ(offsets->GetRowCount(), kRowCount);
@@ -1562,7 +1564,7 @@ TEST(ArrayOffsetsSealedTest, BuildAllZerosEmptyArraysAndBalancedResource) {
     // left this memory untracked); an underflowing refund would assert/crash in
     // the caching layer dlist. Surviving the loop guards the charge/refund pair.
     for (int i = 0; i < 256; ++i) {
-        auto tmp = milvus::ArrayOffsetsSealed::BuildAllZeros(500);
+        auto tmp = milvus::StructElementOffsetsSealed::BuildAllZeros(500);
         ASSERT_EQ(tmp->GetRowCount(), 500);
         ASSERT_EQ(tmp->GetTotalElementCount(), 0);
     }
