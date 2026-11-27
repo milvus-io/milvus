@@ -88,7 +88,7 @@ mod tests {
             r#"{"type":"english"}"#,
             r#"{"tokenizer":"standard","filter":["lowercase",{"type":"stemmer","language":"english"}]}"#,
         ] {
-            let analyzer = create_analyzer(params).unwrap();
+            let analyzer = create_analyzer(params, "").unwrap();
             for mut analyzer in [analyzer.clone(), analyzer] {
                 for _ in 0..2 {
                     let mut stream =
@@ -138,7 +138,7 @@ mod tests {
         let reader = IndexReaderWrapper::load(path, true, set_bitset).unwrap();
         reader.register_tokenizer(
             "milvus_tokenizer".to_string(),
-            create_analyzer(r#"{"type":"english"}"#).unwrap(),
+            create_analyzer(r#"{"type":"english"}"#, "").unwrap(),
         );
         let mut result = HashSet::<u32>::new();
         reader

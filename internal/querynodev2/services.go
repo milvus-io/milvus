@@ -1681,7 +1681,7 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 }
 
 func (node *QueryNode) runAnalyzer(req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
-	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams())
+	tokenizer, err := analyzer.NewAnalyzer(req.GetAnalyzerParams(), `{"check_file_access":true}`)
 	if err != nil {
 		return nil, err
 	}

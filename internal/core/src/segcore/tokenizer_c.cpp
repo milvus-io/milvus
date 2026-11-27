@@ -31,11 +31,11 @@ set_tokenizer_option(const char* params) {
 
 CStatus
 create_tokenizer(const char* params,
-                 CTokenizer* tokenizer,
-                 bool file_access_admitted) {
+                 const char* extra_info,
+                 CTokenizer* tokenizer) {
     try {
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(
-            params, file_access_admitted);
+        auto impl =
+            std::make_unique<milvus::tantivy::Tokenizer>(params, extra_info);
         *tokenizer = impl.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -69,7 +69,8 @@ create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
 CStatus
 validate_tokenizer(const char* params) {
     try {
-        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
+        auto impl = std::make_unique<milvus::tantivy::Tokenizer>(
+            params, R"({"check_file_access":true})");
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -84,7 +85,8 @@ validate_text_schema(const uint8_t* field_schema, uint64_t length) {
                    "failed to create field schema");
 
         auto type_params = milvus::RepeatedKeyValToMap(schema->type_params());
-        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params));
+        milvus::tantivy::Tokenizer _(milvus::ParseTokenizerParams(type_params),
+                                     R"({"check_file_access":true})");
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

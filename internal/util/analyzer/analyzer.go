@@ -26,13 +26,8 @@ type (
 	TokenStream interfaces.TokenStream
 )
 
-func NewAnalyzer(param string) (Analyzer, error) {
-	return canalyzer.NewAnalyzer(param)
-}
-
-// RestoreAnalyzer accepts only analyzer parameters from a persisted schema.
-func RestoreAnalyzer(param string) (Analyzer, error) {
-	return canalyzer.RestoreAnalyzer(param)
+func NewAnalyzer(param string, extraInfo string) (Analyzer, error) {
+	return canalyzer.NewAnalyzer(param, extraInfo)
 }
 
 func ValidateAnalyzer(param string) error {

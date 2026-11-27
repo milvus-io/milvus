@@ -2,7 +2,7 @@ use libc::{c_char, c_void};
 use tantivy::tokenizer::TextAnalyzer;
 
 use crate::{
-    analyzer::{create_analyzer, restore_analyzer, set_options},
+    analyzer::{create_analyzer, set_options},
     array::RustResult,
     log::init_log,
     string_c::c_str_to_str,
@@ -12,15 +12,12 @@ use crate::{
 #[no_mangle]
 pub extern "C" fn tantivy_create_analyzer(
     analyzer_params: *const c_char,
-    file_access_admitted: bool,
+    extra_info: *const c_char,
 ) -> RustResult {
     init_log();
     let params = unsafe { c_str_to_str(analyzer_params).to_string() };
-    let analyzer = if file_access_admitted {
-        restore_analyzer(&params)
-    } else {
-        create_analyzer(&params)
-    };
+    let extra_info = unsafe { c_str_to_str(extra_info) };
+    let analyzer = create_analyzer(&params, extra_info);
     match analyzer {
         Ok(text_analyzer) => RustResult::from_ptr(create_binding(text_analyzer)),
         Err(err) => RustResult::from_error(format!("create tokenizer failed with error: {}", err,)),

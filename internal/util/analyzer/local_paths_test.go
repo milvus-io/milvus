@@ -17,7 +17,6 @@
 package analyzer
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 
@@ -49,19 +48,4 @@ func TestResolveLocalPathsPreservesNestedUnchangedInput(t *testing.T) {
 	resolved, err := ResolveLocalPaths(params, "/credentials")
 	require.NoError(t, err)
 	require.Equal(t, params, resolved)
-}
-
-func BenchmarkResolveLocalPathsNested(b *testing.B) {
-	for _, depth := range []int{1, 512} {
-		b.Run(strconv.Itoa(depth), func(b *testing.B) {
-			params := strings.Repeat(`{"unused":`, depth) + `"` + strings.Repeat("x", 1<<20) + `"` + strings.Repeat("}", depth)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				if _, err := ResolveLocalPaths(params, "/credentials"); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
 }

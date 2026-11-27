@@ -100,21 +100,15 @@ func updateParams() error {
 	return HandleCStatus(&status, "failed to init segcore analyzer option")
 }
 
-func NewAnalyzer(param string) (interfaces.Analyzer, error) {
-	return newAnalyzer(param, false)
-}
-
-// RestoreAnalyzer is only for definitions obtained from a persisted collection schema.
-func RestoreAnalyzer(param string) (interfaces.Analyzer, error) {
-	return newAnalyzer(param, true)
-}
-
-func newAnalyzer(param string, admitted bool) (interfaces.Analyzer, error) {
+func NewAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
+	extraInfoPtr := C.CString(extraInfo)
+	defer C.free(unsafe.Pointer(extraInfoPtr))
+
 	var ptr C.CTokenizer
-	status := C.create_tokenizer(paramPtr, &ptr, C.bool(admitted))
+	status := C.create_tokenizer(paramPtr, extraInfoPtr, &ptr)
 	if err := HandleCStatus(&status, "failed to create analyzer"); err != nil {
 		return nil, err
 	}

@@ -36,7 +36,7 @@ fn bench_lindua_language_identifier_tokenizer(c: &mut Criterion) {
             }
         }
     "#;
-    let mut analyzer = create_analyzer(params);
+    let mut analyzer = create_analyzer(params, "");
     assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
 
     c.bench_function("test", |b| {
@@ -68,7 +68,7 @@ fn bench_whatlang_language_identifier_tokenizer(c: &mut Criterion) {
             }
         }
     "#;
-    let mut analyzer = create_analyzer(params);
+    let mut analyzer = create_analyzer(params, "");
     assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
 
     c.bench_function("test", |b| {
@@ -85,7 +85,7 @@ fn bench_jieba_tokenizer_clone(c: &mut Criterion) {
             }
         }
     "#;
-    let mut analyzer = create_analyzer(params);
+    let mut analyzer = create_analyzer(params, "");
     assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
 
     c.bench_function("test", |b| {
@@ -102,7 +102,7 @@ fn bench_lindera_tokenizer_clone(c: &mut Criterion) {
             }
         }
     "#;
-    let mut analyzer = create_analyzer(params);
+    let mut analyzer = create_analyzer(params, "");
     assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
 
     c.bench_function("test", |b| {

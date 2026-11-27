@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions};
 use tantivy::Index;
 
-use crate::analyzer::restore_analyzer;
+use crate::analyzer::create_analyzer;
 use crate::error::Result;
 
 use super::IndexWriterWrapperImpl;
@@ -38,7 +38,7 @@ impl IndexWriterWrapperImpl {
             field_name
         );
 
-        let tokenizer = restore_analyzer(tokenizer_params)?;
+        let tokenizer = create_analyzer(tokenizer_params, "")?;
 
         let (schema, field) = build_text_schema(field_name, tokenizer_name);
         let index = if in_ram {

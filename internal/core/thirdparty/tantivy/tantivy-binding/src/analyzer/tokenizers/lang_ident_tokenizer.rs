@@ -164,7 +164,8 @@ impl<'a> LangIdentTokenizer<'a> {
 
     pub fn from_json<'b>(
         params: &'b json::Map<String, json::Value>,
-        fc: fn(&json::Map<String, json::Value>) -> Result<TextAnalyzer>,
+        fc: fn(&json::Map<String, json::Value>, bool) -> Result<TextAnalyzer>,
+        enforce_file_access: bool,
     ) -> Result<LangIdentTokenizer<'a>> {
         // init identfier for tokenizer
         let identifier = params
@@ -188,12 +189,15 @@ impl<'a> LangIdentTokenizer<'a> {
         for (name, params) in sub_analyzers {
             analyzer.add(
                 name,
-                fc(params.as_object().ok_or_else(|| {
-                    TantivyBindingError::InvalidArgument(format!(
-                        "sub analyzer \"{}\" params must be dict",
-                        name
-                    ))
-                })?)?,
+                fc(
+                    params.as_object().ok_or_else(|| {
+                        TantivyBindingError::InvalidArgument(format!(
+                            "sub analyzer \"{}\" params must be dict",
+                            name
+                        ))
+                    })?,
+                    enforce_file_access,
+                )?,
             );
         }
 
@@ -275,8 +279,8 @@ mod tests {
 
         let mut analyzer = LangIdentTokenizer::new(BoxIdentifier::default());
         let result = || -> Result<()> {
-            analyzer.add("default", create_analyzer(standard_params)?);
-            analyzer.add("Mandarin", create_analyzer(jieba_params)?);
+            analyzer.add("default", create_analyzer(standard_params, "")?);
+            analyzer.add("Mandarin", create_analyzer(jieba_params, "")?);
             Ok(())
         }();
 
@@ -304,6 +308,7 @@ mod tests {
             LangIdentTokenizer::from_json(
                 json_params.as_object().unwrap(),
                 create_analyzer_by_json,
+                true,
             );
         assert!(builder.is_ok(), "error: {}", builder.err().unwrap());
 
@@ -337,6 +342,7 @@ mod tests {
             LangIdentTokenizer::from_json(
                 json_params.as_object().unwrap(),
                 create_analyzer_by_json,
+                true,
             );
         assert!(builder.is_ok(), "error: {}", builder.err().unwrap());
 
@@ -372,6 +378,7 @@ mod tests {
             LangIdentTokenizer::from_json(
                 json_params.as_object().unwrap(),
                 create_analyzer_by_json,
+                true,
             );
         assert!(builder.is_ok(), "error: {}", builder.err().unwrap());
 

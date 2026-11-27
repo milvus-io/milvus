@@ -28,8 +28,8 @@ set_tokenizer_option(const char* params);
 
 CStatus
 create_tokenizer(const char* params,
-                 CTokenizer* tokenizer,
-                 bool file_access_admitted);
+                 const char* extra_info,
+                 CTokenizer* tokenizer);
 
 CStatus
 clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst);
