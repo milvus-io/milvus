@@ -19,6 +19,7 @@ package storage
 import (
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -46,8 +47,6 @@ func (r snapshotRootRebaser) rebasePath(src string) string {
 	if src == "" {
 		return src
 	}
-	// Root relocation is prefix-only: it supports moving the whole exported
-	// bundle while preserving its internal layout, not arbitrary path rewrites.
 	normalized := NormalizeSnapshotObjectPath(src)
 	if r.oldRoot == r.newRoot {
 		if r.originalIdentity != nil {
@@ -61,22 +60,9 @@ func (r snapshotRootRebaser) rebasePath(src string) string {
 		// A bucket-only move still needs to discard the original URI identity.
 		return normalized
 	}
-	// Prefix relocation retains its existing object-key rewrite semantics.
-	if r.oldRoot == "" {
-		if normalized == "" {
-			return r.newRoot
-		}
-		return r.newRoot + "/" + strings.TrimLeft(normalized, "/")
-	}
-	if normalized == r.oldRoot {
-		return r.newRoot
-	}
-	if strings.HasPrefix(normalized, r.oldRoot+"/") {
-		relativePath := strings.TrimPrefix(normalized, r.oldRoot+"/")
-		if r.newRoot == "" {
-			return relativePath
-		}
-		return r.newRoot + "/" + relativePath
+	rebased := snapshotio.RebaseObjectPath(normalized, r.oldRoot, r.newRoot)
+	if rebased != normalized {
+		return rebased
 	}
 	return src
 }
@@ -136,7 +122,13 @@ func RebaseSelfContainedSnapshotData(
 		return merr.WrapErrDataIntegrityMsg("snapshot cannot be nil")
 	}
 
-	rebaser := newSnapshotRootRebaser(oldRoot, newRoot, snapshot.SnapshotInfo.GetS3Location())
+	// Metadata-only reads expose the current location before shard Avro reads.
+	// Keep the original identity when rebasing those deferred segment contents.
+	originalLocation := snapshot.originalLocation
+	if originalLocation == "" {
+		originalLocation = snapshot.SnapshotInfo.GetS3Location()
+	}
+	rebaser := newSnapshotRootRebaser(oldRoot, newRoot, originalLocation)
 	for i, segment := range snapshot.Segments {
 		if segment == nil {
 			return merr.WrapErrDataIntegrityMsg("snapshot segment at index %d cannot be nil", i)

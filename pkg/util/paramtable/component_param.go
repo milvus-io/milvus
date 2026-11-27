@@ -6905,10 +6905,10 @@ type dataCoordConfig struct {
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
-	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
+	SnapshotTaskSlotUsage                  ParamItem `refreshable:"true"`
+	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"` // Deprecated: No longer used.
 	SnapshotExportJobTimeout               ParamItem `refreshable:"true"`
 	SnapshotExportJobRetention             ParamItem `refreshable:"true"`
-	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -6996,6 +6996,7 @@ type dataCoordConfig struct {
 	TaskResourceAnalyzeMemoryFactor      ParamItem `refreshable:"true"`
 	TaskResourceImportMemoryFactor       ParamItem `refreshable:"true"`
 	TaskResourceMinTaskMemory            ParamItem `refreshable:"true"`
+	TaskResourceCopySegmentMemory        ParamItem `refreshable:"true"`
 	TaskResourceExternalRefreshMemory    ParamItem `refreshable:"true"`
 
 	EnableSortCompaction       ParamItem `refreshable:"true"`
@@ -8130,12 +8131,27 @@ Only in-memory manifest-resident records are migrated. Untracked manifest entrie
 	}
 	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
 
+	p.SnapshotTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.snapshot.taskSlotUsage",
+		Version:      "3.0.7",
+		DefaultValue: "1",
+		Doc:          "Scheduler slots per snapshot export/restore task, frozen at creation.",
+		Formatter: func(v string) string {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotTaskSlotUsage.Init(base.mgr)
+
 	p.SnapshotExportCopyConcurrency = ParamItem{
 		Key:          "dataCoord.snapshot.exportCopyConcurrency",
 		Version:      "2.6.15",
 		DefaultValue: "16",
-		Doc: "Maximum concurrent provider-side object copy requests for ExportSnapshot. " +
-			"Invalid or non-positive values are coerced to the default value 16.",
+		Doc:          "Deprecated: No longer used. Use dataNode.snapshot.copyConcurrencyPerCPUCore for node-wide snapshot copy concurrency.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.Atoi(v)
 			if err != nil || parsed <= 0 {
@@ -8178,22 +8194,6 @@ Only in-memory manifest-resident records are migrated. Untracked manifest entrie
 		Export: true,
 	}
 	p.SnapshotExportJobRetention.Init(base.mgr)
-
-	p.SnapshotExportMaxConcurrentJobs = ParamItem{
-		Key:          "dataCoord.snapshot.exportMaxConcurrentJobs",
-		Version:      "2.6.15",
-		DefaultValue: "1",
-		Doc:          "Maximum number of snapshot export jobs executed concurrently by DataCoord.",
-		Formatter: func(v string) string {
-			parsed, err := strconv.Atoi(v)
-			if err != nil || parsed <= 0 {
-				return "1"
-			}
-			return v
-		},
-		Export: true,
-	}
-	p.SnapshotExportMaxConcurrentJobs.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
@@ -8751,7 +8751,7 @@ raise this for files written with small row groups, many columns, or untruncated
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
 		Version:      "2.5.0",
-		Doc:          "Maximum number of segments that can be grouped into a single copy task during snapshot restore.",
+		Doc:          "Maximum segments per snapshot export or restore copy task, including TEXT snapshots; must be positive.",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -9079,6 +9079,15 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	}
 	p.TaskResourceMinTaskMemory.Init(base.mgr)
 
+	p.TaskResourceCopySegmentMemory = ParamItem{
+		Key:          "dataCoord.taskResource.copySegmentMemory",
+		Version:      "3.0.7",
+		DefaultValue: "1g",
+		Doc:          "Memory budget per snapshot export or restore copy task.",
+		Export:       false,
+	}
+	p.TaskResourceCopySegmentMemory.Init(base.mgr)
+
 	p.TaskResourceExternalRefreshMemory = ParamItem{
 		Key:          "dataCoord.taskResource.externalRefreshMemory",
 		Version:      "3.0.1",
@@ -9253,16 +9262,17 @@ type dataNodeConfig struct {
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
 	// import
-	ImportConcurrencyPerCPUCore     ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB           ParamItem `refreshable:"true"`
-	ImportBaseBufferSize            ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize          ParamItem `refreshable:"true"`
-	ReshardSpillMaxStreams          ParamItem `refreshable:"false"`
-	ImportMemoryLimitPercentage     ParamItem `refreshable:"true"`
-	ImportMaxWriteRetryAttempts     ParamItem `refreshable:"true"`
-	ImportWriteRetryInitialInterval ParamItem `refreshable:"true"`
-	ImportWriteRetryMaxInterval     ParamItem `refreshable:"true"`
-	ImportCopyObjectTimeout         ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore       ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB             ParamItem `refreshable:"true"`
+	ImportBaseBufferSize              ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize            ParamItem `refreshable:"true"`
+	ReshardSpillMaxStreams            ParamItem `refreshable:"false"`
+	ImportMemoryLimitPercentage       ParamItem `refreshable:"true"`
+	ImportMaxWriteRetryAttempts       ParamItem `refreshable:"true"`
+	ImportWriteRetryInitialInterval   ParamItem `refreshable:"true"`
+	ImportWriteRetryMaxInterval       ParamItem `refreshable:"true"`
+	ImportCopyObjectTimeout           ParamItem `refreshable:"true"`
+	SnapshotCopyConcurrencyPerCPUCore ParamItem `refreshable:"false"`
 
 	// Compaction
 	L0BatchMemoryRatio        ParamItem `refreshable:"true"`
@@ -9660,6 +9670,22 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		},
 	}
 	p.ImportCopyObjectTimeout.Init(base.mgr)
+
+	p.SnapshotCopyConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.snapshot.copyConcurrencyPerCPUCore",
+		Version:      "3.0.7",
+		DefaultValue: "8",
+		Doc:          "Node-wide concurrent snapshot export/restore copy permits per CPU core.",
+		Formatter: func(v string) string {
+			n, err := strconv.ParseInt(v, 10, 32)
+			if err != nil || n <= 0 {
+				return "8"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotCopyConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",

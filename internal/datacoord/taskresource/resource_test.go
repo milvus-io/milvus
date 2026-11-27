@@ -81,6 +81,18 @@ func testResourceSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func TestCopySegmentMemory(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	key := params.DataCoordCfg.TaskResourceCopySegmentMemory.Key
+	t.Cleanup(func() { params.Reset(key) })
+
+	params.Save(key, "2g")
+	assert.EqualValues(t, 2*testGiB, CopySegment().Memory)
+	params.Save(key, "1")
+	assert.Equal(t, params.DataCoordCfg.TaskResourceMinTaskMemory.GetAsSize(), CopySegment().Memory)
+}
+
 func TestTaskResource_Formulas(t *testing.T) {
 	paramtable.Init()
 	defaultCPU := paramtable.Get().DataCoordCfg.TaskResourceDefaultCPU.GetAsInt64()
@@ -94,7 +106,7 @@ func TestTaskResource_Formulas(t *testing.T) {
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 2 * testGiB}, L0Compaction(testGiB, 0))
 	// The targets' stats logs are loaded in full on top of the scaled deltas.
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 2*testGiB + 100*testMiB}, L0Compaction(testGiB, 100*testMiB))
-	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: minMem}, Lightweight())
+	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: testGiB}, CopySegment())
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: 1 << 30}, ExternalRefresh())
 	assert.Equal(t, taskcommon.Resource{CPU: defaultCPU, Memory: minMem}, Default())
 

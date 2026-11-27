@@ -90,28 +90,7 @@ func (c chunkManagerCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcO
 }
 
 func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectstorage.Config {
-	cfg := objectstorage.NewDefaultConfig()
-	if config == nil {
-		return cfg
-	}
-
-	cfg.Address = config.GetAddress()
-	cfg.BucketName = config.GetBucketName()
-	cfg.AccessKeyID = config.GetAccessKeyID()
-	cfg.SecretAccessKeyID = config.GetSecretAccessKey()
-	cfg.UseSSL = config.GetUseSSL()
-	cfg.SslCACert = config.GetSslCACert()
-	cfg.SslTLSMinVersion = config.GetSslTlsMinVersion()
-	cfg.CreateBucket = true
-	cfg.RootPath = config.GetRootPath()
-	cfg.UseIAM = config.GetUseIAM()
-	cfg.CloudProvider = config.GetCloudProvider()
-	cfg.IAMEndpoint = config.GetIAMEndpoint()
-	cfg.UseVirtualHost = config.GetUseVirtualHost()
-	cfg.Region = config.GetRegion()
-	cfg.RequestTimeoutMs = config.GetRequestTimeoutMs()
-	cfg.GcpCredentialJSON = config.GetGcpCredentialJSON()
-	return cfg
+	return snapshotstorage.ObjectStorageConfigFromIndexConfig(config)
 }
 
 func firstExternalSourceURI(sources []*datapb.CopySegmentSource) (string, error) {
@@ -696,6 +675,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 
 	task := importv2.NewCopySegmentTask(
 		node.ctx,
+		node.getSnapshotCopyPermits(req.GetCopyConcurrency()),
 		req,
 		node.importTaskMgr,
 		sourceCM,
@@ -804,7 +784,11 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	)
 	importUsed := importV2Used + importV3Used
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed
+	exportUsed := int64(0)
+	if node.snapshotExportExecutor != nil {
+		exportUsed = node.snapshotExportExecutor.slots()
+	}
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed - exportUsed
 	// Queue capacity limits new intake; it does not reserve execution resources
 	// or gate tasks that have already been dispatched.
 	availableSlots = min(availableSlots, totalSlots-indexStatsQueued)
@@ -818,6 +802,9 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		Add(node.importScheduler.Resource()).
 		Add(node.importV3Scheduler.Resource()).
 		Add(node.externalCollectionManager.Resource())
+	if node.snapshotExportExecutor != nil {
+		used = used.Add(node.snapshotExportExecutor.resource())
+	}
 	available := total.Sub(used)
 
 	mlog.Info(ctx, "query slots done",
@@ -832,6 +819,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Stringer("totalResource", total),
 		mlog.Stringer("usedResource", used),
 		mlog.Stringer("availableResource", available),
+		mlog.Int64("exportUsed", exportUsed),
 	)
 
 	nodeID := fmt.Sprint(node.GetNodeID())
@@ -845,6 +833,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "cpu", "available").Set(float64(available.CPU))
 	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "total").Set(float64(total.Memory))
 	metrics.DataNodeTaskResource.WithLabelValues(nodeID, "memory", "available").Set(float64(available.Memory))
+	metrics.DataNodeSlot.WithLabelValues(nodeID, "exportUsed").Set(float64(exportUsed))
 
 	return &datapb.QuerySlotResponse{
 		Status:                   merr.Success(),
@@ -1025,6 +1014,23 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			req.ClusterID = clusterID
 		}
 		return node.createRefreshExternalCollectionTask(ctx, req, resource)
+	case taskcommon.SnapshotExportCopy:
+		req := &datapb.SnapshotExportCopyRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		taskID, err := properties.GetTaskID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if req.GetTaskId() != taskID || req.GetClusterId() != clusterID {
+			return merr.Status(merr.WrapErrServiceInternalMsg("snapshot export task identity mismatch")), nil
+		}
+		return node.createSnapshotExportCopy(ctx, req, resource)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -1201,6 +1207,12 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(info.State)
 		resProperties.AppendReason(info.FailReason)
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.SnapshotExportCopy:
+		resp := node.querySnapshotExportCopy(clusterID, taskID)
+		resProperties := taskcommon.NewProperties(nil)
+		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
+		resProperties.AppendReason(resp.GetReason())
+		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		resp, err := node.QueryCopySegment(ctx, &datapb.QueryCopySegmentRequest{
 			ClusterID: clusterID,
@@ -1258,6 +1270,12 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		return node.dropPreImportTaskV3(taskID)
 	case taskcommon.Reshard, taskcommon.ImportV3:
 		return node.dropImportV3WorkerTask(taskID, properties.GetTaskVersion())
+	case taskcommon.SnapshotExportCopy:
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.dropSnapshotExportCopy(ctx, clusterID, taskID)
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:

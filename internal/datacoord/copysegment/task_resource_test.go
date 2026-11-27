@@ -21,16 +21,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Copy tasks stream objects and hold little of them: the lightweight price.
 func TestTaskResource_CopySegment(t *testing.T) {
 	paramtable.Init()
 	copyTask := &Task{Times: taskcommon.NewTimes()}
 	copyTask.Task.Store(&datapb.CopySegmentTask{TaskId: 1, JobId: 2})
-	assert.Equal(t, taskresource.Lightweight(), copyTask.GetTaskResource())
+	assert.EqualValues(t, 1<<30, copyTask.GetTaskResource().Memory)
 }

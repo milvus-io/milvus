@@ -334,10 +334,12 @@ func ImportV3(workingSet int64) taskcommon.Resource {
 	}
 }
 
-// Lightweight prices copy-segment tasks, which stream data and hold
-// little of it.
-func Lightweight() taskcommon.Resource {
-	return Default()
+// CopySegment returns the shared scheduling budget for export and restore copies.
+func CopySegment() taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    DefaultCPU(),
+		Memory: ClampMemory(paramtable.Get().DataCoordCfg.TaskResourceCopySegmentMemory.GetAsSize()),
+	}
 }
 
 // ExternalRefresh prices a refresh-external-collection task at a fixed

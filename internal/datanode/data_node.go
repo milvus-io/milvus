@@ -79,11 +79,13 @@ type DataNode struct {
 	Role     string
 	lifetime lifetime.Lifetime[commonpb.StateCode]
 
-	syncMgr           syncmgr.SyncManager
-	importTaskMgr     importv2.TaskManager
-	importScheduler   importv2.Scheduler
-	importV3Scheduler *importv3.Scheduler
-	importV3Metrics   *importv3.Metrics
+	syncMgr                syncmgr.SyncManager
+	importTaskMgr          importv2.TaskManager
+	importScheduler        importv2.Scheduler
+	importV3Scheduler      *importv3.Scheduler
+	importV3Metrics        *importv3.Metrics
+	snapshotCopyPermits    chan struct{}
+	snapshotExportExecutor *snapshotExportExecutor
 
 	// indexnode related
 	storageFactory StorageFactory
@@ -216,6 +218,8 @@ func (node *DataNode) Init() error {
 			fileresource.InitManager(nil, fileMode)
 		}
 
+		node.snapshotCopyPermits = newNodeSnapshotCopyPermits()
+		node.snapshotExportExecutor = newSnapshotExportExecutor(node.ctx, node.snapshotCopyPermits)
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 		node.importV3Metrics = importv3.NewMetrics(serverID)
@@ -310,6 +314,9 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
+		if node.snapshotExportExecutor != nil {
+			node.snapshotExportExecutor.close()
+		}
 
 		if node.importV3Scheduler != nil {
 			node.importV3Scheduler.Close()
