@@ -117,6 +117,11 @@ message FieldIndexInfo {
   index.IndexStorePathVersion index_store_path_version = 14;
 }
 
+message FieldLogicalSize {
+  uint64 payload_bytes = 1;
+  uint64 validity_bits = 2;
+}
+
 message SegmentLoadInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
@@ -146,6 +151,7 @@ message SegmentLoadInfo {
   // MVCC/TTL/delete logic uses the commit time instead of raw row timestamps.
   uint64 commit_timestamp = 24;
   repeated int64 field_hints = 25; // Preload preferences within the explicit query scope; empty means all scope fields.
-  // Verified payload bytes for the loaded growing manifest's num_of_rows.
-  map<int64, uint64> field_logical_payload_bytes = 26;
+  reserved 26; // Previously carried payload bytes alone.
+  // Verified logical sizes for the loaded growing manifest's num_of_rows.
+  map<int64, FieldLogicalSize> field_logical_sizes = 27;
 }

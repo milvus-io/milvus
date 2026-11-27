@@ -45,6 +45,7 @@
 
 #include "NamedType/named_type_impl.hpp"
 #include "arrow/api.h"
+#include "arrow/util/bitmap_ops.h"
 #include "bitset/bitset.h"
 #include "boost/iterator/iterator_facade.hpp"
 #include "cachinglayer/CacheSlot.h"
@@ -345,6 +346,232 @@ GetVectorArrayLength(const proto::schema::VectorField& vec_field,
                       element_type);
     }
     return 0;
+}
+
+void
+AddLogicalSize(CFieldLogicalSize& total, CFieldLogicalSize size) {
+    total.payload_bytes += size.payload_bytes;
+    total.validity_bits += size.validity_bits;
+}
+
+// Insert data can be dense with NULL placeholders or compact with just
+// the present values. Only dense data uses the mask to index its payload.
+template <typename Values, typename Visit>
+void
+VisitPresentValues(const Values& values,
+                   const google::protobuf::RepeatedField<bool>& valid,
+                   Visit visit) {
+    const bool dense = values.size() == valid.size();
+    for (int i = 0; i < values.size(); ++i) {
+        if (!dense || valid[i]) {
+            visit(values.Get(i));
+        }
+    }
+}
+
+uint64_t
+RowValidityBits(const FieldMeta& field, uint64_t rows) {
+    // For a flattened StructArray, the parent owns the shared row mask.
+    return field.is_nullable() && !IsStructSubField(field.get_name().get())
+               ? rows
+               : 0;
+}
+
+void
+AddScalarArraySize(CFieldLogicalSize& size,
+                   const ScalarFieldProto& array,
+                   DataType element_type,
+                   bool nullable,
+                   const proto::schema::TypeSchema* element_schema) {
+    const auto& valid = array.valid_data();
+    if (element_type == DataType::ARRAY) {
+        const auto& values = array.array_data().data();
+        if (nullable) {
+            size.validity_bits += std::max(values.size(), valid.size());
+        }
+        const auto& child = element_schema->array_element();
+        const auto child_type = child.has_array_element()
+                                    ? DataType::ARRAY
+                                    : static_cast<DataType>(child.leaf_type());
+        VisitPresentValues(values, valid, [&](const auto& value) {
+            AddScalarArraySize(
+                size, value, child_type, child.nullable(), &child);
+        });
+        return;
+    }
+
+    if (IsStringDataType(element_type)) {
+        const auto& values = array.string_data().data();
+        if (nullable) {
+            size.validity_bits += std::max(values.size(), valid.size());
+        }
+        VisitPresentValues(values, valid, [&](const auto& value) {
+            size.payload_bytes += value.size();
+        });
+        return;
+    }
+
+    const auto count =
+        element_type == DataType::TIMESTAMPTZ
+            ? static_cast<size_t>(array.timestamptz_data().data_size())
+            : GetLeafElementCount(array, element_type);
+    if (nullable) {
+        size.validity_bits +=
+            std::max(count, static_cast<size_t>(valid.size()));
+    }
+    const auto present =
+        valid.empty() ? count : std::count(valid.begin(), valid.end(), true);
+    size.payload_bytes += present * GetDataTypeSize(element_type);
+}
+
+void
+AddScalarArraySize(CFieldLogicalSize& size,
+                   const ScalarFieldProto& array,
+                   const FieldMeta& field) {
+    const auto* element = field.is_native_list_array()
+                              ? &field.get_array_type_schema().array_element()
+                              : nullptr;
+    AddScalarArraySize(size,
+                       array,
+                       field.get_element_type(),
+                       field.is_element_nullable(),
+                       element);
+}
+
+std::optional<CFieldLogicalSize>
+MeasureInsertField(const DataArray& data,
+                   const FieldMeta& field,
+                   uint64_t rows) {
+    const auto type = field.get_data_type();
+    const auto& valid = GetFieldDataRowValidData(data);
+    CFieldLogicalSize size{0, RowValidityBits(field, rows)};
+    if (!IsVariableDataType(type)) {
+        const auto present =
+            valid.empty() ? rows : std::count(valid.begin(), valid.end(), true);
+        size.payload_bytes = field.get_sizeof() * present;
+        return size;
+    }
+
+    auto add_bytes = [&](const auto& values) {
+        VisitPresentValues(values, valid, [&](const auto& value) {
+            size.payload_bytes += value.size();
+        });
+    };
+
+    switch (type) {
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            add_bytes(data.scalars().string_data().data());
+            break;
+        case DataType::JSON:
+            add_bytes(data.scalars().json_data().data());
+            break;
+        case DataType::GEOMETRY:
+            add_bytes(data.scalars().geometry_data().data());
+            break;
+        case DataType::VECTOR_SPARSE_U32_F32:
+            add_bytes(data.vectors().sparse_float_vector().contents());
+            break;
+        case DataType::ARRAY:
+            VisitPresentValues(
+                data.scalars().array_data().data(),
+                valid,
+                [&](const auto& row) { AddScalarArraySize(size, row, field); });
+            break;
+        case DataType::VECTOR_ARRAY: {
+            const auto dim = field.get_dim();
+            const auto element_type = field.get_element_type();
+            VisitPresentValues(
+                data.vectors().vector_array().data(),
+                valid,
+                [&](const auto& row) {
+                    const auto length =
+                        GetVectorArrayLength(row, element_type, dim);
+                    const auto& element_valid = row.valid_data();
+                    const auto present = element_valid.empty()
+                                             ? length
+                                             : std::count(element_valid.begin(),
+                                                          element_valid.end(),
+                                                          true);
+                    size.payload_bytes +=
+                        present * GetDataTypeSize(element_type, dim);
+                    if (field.is_element_nullable()) {
+                        size.validity_bits += length;
+                    }
+                });
+            break;
+        }
+        default:
+            return std::nullopt;
+    }
+    return size;
+}
+
+std::optional<CFieldLogicalSize>
+MeasureLoadedField(const std::vector<FieldDataPtr>& batches,
+                   const FieldMeta& field,
+                   size_t rows,
+                   bool text_is_remote_lob_ref) {
+    CFieldLogicalSize size{0, RowValidityBits(field, rows)};
+    const auto type = field.get_data_type();
+    for (const auto& data : batches) {
+        const auto length = data->get_num_rows();
+        if (!IsVariableDataType(type)) {
+            // Some FieldData readers populate validity without caching a null count.
+            const auto present = data->IsNullable() && length > 0
+                                     ? arrow::internal::CountSetBits(
+                                           data->ValidData(), 0, length)
+                                     : length;
+            size.payload_bytes += field.get_sizeof() * present;
+            continue;
+        }
+        if (type == DataType::VECTOR_SPARSE_U32_F32) {
+            // Sparse FieldData stores only present rows and DataSize() sums
+            // their index/value bytes.
+            size.payload_bytes += data->DataSize();
+            continue;
+        }
+        int64_t physical = 0;
+        for (int64_t row = 0; row < length; ++row) {
+            if (data->IsNullable() && !data->is_valid(row)) {
+                continue;
+            }
+            if (type == DataType::ARRAY) {
+                // The decoded ARRAY column preserves the element validity.
+                if (field.is_native_list_array()) {
+                    const auto& value =
+                        static_cast<const ArrayValue*>(data->Data())[row];
+                    AddScalarArraySize(size, value.output_data(), field);
+                } else {
+                    const auto& value =
+                        static_cast<const Array*>(data->Data())[row];
+                    AddScalarArraySize(size, value.output_data(), field);
+                }
+            } else if (type == DataType::VECTOR_ARRAY) {
+                // Nullable vector-array FieldData compacts the present rows.
+                const auto& value =
+                    static_cast<const VectorArray*>(data->Data())[physical++];
+                size.payload_bytes += value.byte_size();
+                if (field.is_element_nullable()) {
+                    size.validity_bits += value.length();
+                }
+            } else if (type == DataType::TEXT && text_is_remote_lob_ref) {
+                const auto& ref =
+                    static_cast<const std::string*>(data->Data())[row];
+                if (ref.empty() ||
+                    !milvus_storage::lob_column::IsInlineData(
+                        reinterpret_cast<const uint8_t*>(ref.data()))) {
+                    // External references do not carry the original length.
+                    return std::nullopt;
+                }
+                size.payload_bytes += ref.size() - 1;
+            } else {
+                size.payload_bytes += data->DataSize(row);
+            }
+        }
+    }
+    return size;
 }
 
 void
@@ -1834,8 +2061,13 @@ SegmentGrowingImpl::Insert(
         }
 
         stats_.mem_size += field_data_size;
-        RecordFieldMemoryBytes(
-            field_id, reserved_offset, num_rows, field_data_size);
+        RecordFieldLogicalSize(
+            field_id,
+            reserved_offset,
+            num_rows,
+            MeasureInsertField(insert_record_proto->fields_data(data_offset),
+                               field_meta,
+                               num_rows));
     }
 
     // step 4: set pks to offset
@@ -2012,51 +2244,57 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 }
 
 void
-SegmentGrowingImpl::RecordFieldMemoryBytes(FieldId field_id,
-                                           int64_t begin,
-                                           int64_t rows,
-                                           uint64_t bytes) {
+SegmentGrowingImpl::RecordFieldLogicalSize(
+    FieldId field_id,
+    int64_t begin,
+    int64_t rows,
+    std::optional<CFieldLogicalSize> size) {
     if (rows == 0) {
         return;
     }
-    std::lock_guard lock(field_memory_mutex_);
-    auto& usage = field_memory_usage_[field_id];
+    std::lock_guard lock(field_usage_mutex_);
+    auto& usage = field_usage_[field_id];
     if (usage.unknown || begin < usage.end) {
         return;
     }
+    if (!size) {
+        usage.unknown = true;
+        usage.pending.clear();
+        return;
+    }
     if (begin != usage.end) {
-        usage.pending.try_emplace(begin, begin + rows, bytes);
+        usage.pending.try_emplace(begin, begin + rows, *size);
         return;
     }
     usage.end = begin + rows;
-    usage.bytes += bytes;
+    AddLogicalSize(usage.size, *size);
     while (!usage.pending.empty() &&
            usage.pending.begin()->first == usage.end) {
-        const auto [end, range_bytes] = usage.pending.begin()->second;
+        const auto [end, range_size] = usage.pending.begin()->second;
         usage.end = end;
-        usage.bytes += range_bytes;
+        AddLogicalSize(usage.size, range_size);
         usage.pending.erase(usage.pending.begin());
     }
 }
 
 int64_t
-SegmentGrowingImpl::GetFieldMemoryBytes(const int64_t* fields,
-                                        int64_t field_count,
-                                        uint64_t* bytes) const {
-    std::lock_guard lock(field_memory_mutex_);
+SegmentGrowingImpl::GetFieldLogicalSizes(const int64_t* fields,
+                                         int64_t field_count,
+                                         CFieldLogicalSize* sizes) const {
+    std::lock_guard lock(field_usage_mutex_);
     const auto visible_rows = get_row_count();
     for (int64_t index = 0; index < field_count; ++index) {
         if (visible_rows == 0) {
-            bytes[index] = 0;
+            sizes[index] = {};
             continue;
         }
-        const auto it = field_memory_usage_.find(FieldId(fields[index]));
-        if (it == field_memory_usage_.end() || it->second.unknown ||
+        const auto it = field_usage_.find(FieldId(fields[index]));
+        if (it == field_usage_.end() || it->second.unknown ||
             it->second.end < visible_rows) {
             return index;
         }
         // Batches can already be resident while the index is publishing them.
-        bytes[index] = it->second.bytes;
+        sizes[index] = it->second.size;
     }
     return field_count;
 }
@@ -2069,7 +2307,7 @@ SegmentGrowingImpl::load_field_data_common(
     FieldId primary_field_id,
     size_t num_rows,
     bool text_is_remote_lob_ref,
-    std::optional<uint64_t> persisted_payload_bytes) {
+    std::optional<CFieldLogicalSize> persisted_size) {
     if (field_id == TimestampFieldID) {
         // step 2: sort timestamp
         // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
@@ -2208,44 +2446,11 @@ SegmentGrowingImpl::load_field_data_common(
     }
 
     stats_.mem_size += storage::GetByteSizeOfFieldDatas(field_data);
-    uint64_t payload_bytes = persisted_payload_bytes.value_or(0);
-    bool payload_known = true;
-    if (!persisted_payload_bytes.has_value()) {
-        for (const auto& data : field_data) {
-            if (field_meta.get_data_type() != DataType::TEXT ||
-                !text_is_remote_lob_ref) {
-                payload_bytes += data->DataSize();
-                continue;
-            }
-            const auto* values = static_cast<const std::string*>(data->Data());
-            for (int64_t row = 0; row < data->get_num_rows(); ++row) {
-                if (field_meta.is_nullable() && !data->is_valid(row)) {
-                    continue;
-                }
-                const auto& value = values[row];
-                if (value.empty() ||
-                    !milvus_storage::lob_column::IsInlineData(
-                        reinterpret_cast<const uint8_t*>(value.data()))) {
-                    // A remote reference does not contain the original length.
-                    payload_known = false;
-                    break;
-                }
-                payload_bytes += value.size() - 1;
-            }
-            if (!payload_known) {
-                break;
-            }
-        }
+    if (!persisted_size) {
+        persisted_size = MeasureLoadedField(
+            field_data, field_meta, num_rows, text_is_remote_lob_ref);
     }
-    if (payload_known) {
-        RecordFieldMemoryBytes(
-            field_id, reserved_offset, num_rows, payload_bytes);
-    } else {
-        std::lock_guard lock(field_memory_mutex_);
-        auto& usage = field_memory_usage_[field_id];
-        usage.unknown = true;
-        usage.pending.clear();
-    }
+    RecordFieldLogicalSize(field_id, reserved_offset, num_rows, persisted_size);
 
     LOG_INFO("segment {} loads field {} done",
              this->get_segment_id(),
@@ -4449,14 +4654,15 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         stats_.mem_size += num_rows * sizeof(int64_t);
     }
 
-    const auto& field_payloads = load_info_.field_logical_payload_bytes();
+    const auto& field_sizes = load_info_.field_logical_sizes();
     for (auto& column_group_result : column_group_results) {
         for (auto& [field_id, field_data] : column_group_result) {
-            std::optional<uint64_t> persisted_payload_bytes;
+            std::optional<CFieldLogicalSize> persisted_size;
             if (reserved_offset == 0) {
-                if (auto it = field_payloads.find(field_id.get());
-                    it != field_payloads.end()) {
-                    persisted_payload_bytes = it->second;
+                if (auto it = field_sizes.find(field_id.get());
+                    it != field_sizes.end()) {
+                    persisted_size = CFieldLogicalSize{
+                        it->second.payload_bytes(), it->second.validity_bits()};
                 }
             }
             load_field_data_common(field_id,
@@ -4465,7 +4671,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                                    primary_field_id,
                                    num_rows,
                                    /*text_is_remote_lob_ref=*/true,
-                                   persisted_payload_bytes);
+                                   persisted_size);
             // Build geometry cache for GEOMETRY fields
             if (schema->operator[](field_id).get_data_type() ==
                     DataType::GEOMETRY &&
@@ -4787,8 +4993,12 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
                     spillover->WriteAndEncode(value.data(), value.size()));
             }
             text_column->set_data_raw(offset, refs.data(), count);
-            RecordFieldMemoryBytes(
-                field_id, offset, count, count * value.size());
+            RecordFieldLogicalSize(
+                field_id,
+                offset,
+                count,
+                CFieldLogicalSize{count * value.size(),
+                                  RowValidityBits(field_meta, count)});
         }
     } else {
         std::shared_ptr<StructElementOffsetsGrowing> struct_offsets;
@@ -4886,11 +5096,10 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
             segcore_config_.get_enable_geometry_cache() && missing > 0) {
             BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
         }
-        RecordFieldMemoryBytes(
-            field_id,
-            filled,
-            missing,
-            GetRawDataSizeOfDataArray(data.get(), field_meta, missing));
+        RecordFieldLogicalSize(field_id,
+                               filled,
+                               missing,
+                               MeasureInsertField(*data, field_meta, missing));
     }
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",

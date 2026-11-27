@@ -40,6 +40,7 @@
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/type_c.h"
 #include "segcore/TextLobSpillover.h"
 #include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
@@ -149,7 +150,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         FieldId primary_field_id,
         size_t num_rows,
         bool text_is_remote_lob_ref = false,
-        std::optional<uint64_t> persisted_payload_bytes = std::nullopt);
+        std::optional<CFieldLogicalSize> persisted_size = std::nullopt);
 
     // Test-only: inject TEXT LOB base path.
     void
@@ -283,9 +284,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // Returns the index of the first unknown field, or field_count.
     int64_t
-    GetFieldMemoryBytes(const int64_t* fields,
-                        int64_t field_count,
-                        uint64_t* bytes) const;
+    GetFieldLogicalSizes(const int64_t* fields,
+                         int64_t field_count,
+                         CFieldLogicalSize* sizes) const;
 
     int64_t
     get_row_count() const override {
@@ -1000,21 +1001,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SegmentStats stats_{};
 
     void
-    RecordFieldMemoryBytes(FieldId field_id,
+    RecordFieldLogicalSize(FieldId field_id,
                            int64_t begin,
                            int64_t rows,
-                           uint64_t bytes);
+                           std::optional<CFieldLogicalSize> size);
 
     // Keep one total per column. Only out-of-order batches need per-range
     // state. The total must cover exactly the published row prefix.
-    struct FieldMemoryUsage {
+    struct FieldLogicalUsage {
         int64_t end = 0;
-        uint64_t bytes = 0;
+        CFieldLogicalSize size{};
         bool unknown = false;
-        std::map<int64_t, std::pair<int64_t, uint64_t>> pending;
+        std::map<int64_t, std::pair<int64_t, CFieldLogicalSize>> pending;
     };
-    mutable std::mutex field_memory_mutex_;
-    std::unordered_map<FieldId, FieldMemoryUsage> field_memory_usage_;
+    mutable std::mutex field_usage_mutex_;
+    std::unordered_map<FieldId, FieldLogicalUsage> field_usage_;
 
     // milvus storage internal api reader instance
     std::unique_ptr<milvus_storage::api::Reader> reader_;

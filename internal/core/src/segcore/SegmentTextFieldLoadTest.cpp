@@ -367,8 +367,9 @@ TEST(SegmentTextFieldLoadTest,
         }
     }
     constexpr int64_t text_field_id = 101;
-    (*info.mutable_field_logical_payload_bytes())[text_field_id] =
-        persisted_payload_bytes;
+    auto& persisted_size = (*info.mutable_field_logical_sizes())[text_field_id];
+    persisted_size.set_payload_bytes(persisted_payload_bytes);
+    persisted_size.set_validity_bits(rows);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 3);
     segment->SetLoadInfo(info);
     tracer::TraceContext trace;
@@ -386,9 +387,10 @@ TEST(SegmentTextFieldLoadTest,
 
     const auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing, nullptr);
-    uint64_t bytes = 0;
-    ASSERT_EQ(growing->GetFieldMemoryBytes(&text_field_id, 1, &bytes), 1);
-    EXPECT_EQ(bytes, persisted_payload_bytes);
+    CFieldLogicalSize size{};
+    ASSERT_EQ(growing->GetFieldLogicalSizes(&text_field_id, 1, &size), 1);
+    EXPECT_EQ(size.payload_bytes, persisted_payload_bytes);
+    EXPECT_EQ(size.validity_bits, rows);
 
     const std::string replay_text = "wal replay";
     auto replay = DataGen(schema, 1, 42, rows);
@@ -403,8 +405,9 @@ TEST(SegmentTextFieldLoadTest,
                     replay.row_ids_.data(),
                     replay.timestamps_.data(),
                     replay.owner);
-    ASSERT_EQ(growing->GetFieldMemoryBytes(&text_field_id, 1, &bytes), 1);
-    EXPECT_EQ(bytes, persisted_payload_bytes + replay_text.size());
+    ASSERT_EQ(growing->GetFieldLogicalSizes(&text_field_id, 1, &size), 1);
+    EXPECT_EQ(size.payload_bytes, persisted_payload_bytes + replay_text.size());
+    EXPECT_EQ(size.validity_bits, rows + 1);
 }
 
 }  // namespace

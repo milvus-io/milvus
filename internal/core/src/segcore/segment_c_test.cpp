@@ -1136,13 +1136,81 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
     const int64_t field_id = schema->get_primary_field_id()->get();
     const int64_t fields[] = {field_id, field_id, 123456};
-    uint64_t bytes[3] = {};
-    EXPECT_EQ(GetGrowingFieldMemoryBytes(segment, fields, 3, bytes), 2);
-    EXPECT_EQ(bytes[0], N * sizeof(int64_t));
-    EXPECT_EQ(bytes[0], bytes[1]);
+    CFieldLogicalSize sizes[3] = {};
+    EXPECT_EQ(GetGrowingFieldLogicalSizes(segment, fields, 3, sizes), 2);
+    EXPECT_EQ(sizes[0].payload_bytes, N * sizeof(int64_t));
+    EXPECT_EQ(sizes[0].payload_bytes, sizes[1].payload_bytes);
+    EXPECT_EQ(sizes[0].validity_bits, 0);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, GrowingFieldLogicalSizesCountValuesAndValiditySeparately) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto nullable = schema->AddDebugField("nullable", DataType::INT64, true);
+    auto sparse = schema->AddDebugField(
+        "sparse", DataType::VECTOR_SPARSE_U32_F32, 0, knowhere::metric::IP);
+
+    constexpr int64_t rows = 3;
+    auto dataset = DataGen(schema, rows);
+    uint64_t sparse_bytes = 0;
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == nullable.get()) {
+            auto* validity = data.mutable_valid_data();
+            validity->Resize(rows, false);
+            validity->Set(0, false);
+            validity->Set(1, true);
+            validity->Set(2, false);
+            data.mutable_scalars()->mutable_long_data()->set_data(1, 0);
+        } else if (data.field_id() == sparse.get()) {
+            for (const auto& payload :
+                 data.vectors().sparse_float_vector().contents()) {
+                sparse_bytes += payload.size();
+            }
+        }
+    }
+    ASSERT_GT(sparse_bytes, 0);
+
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 100);
+    auto offset = segment->PreInsert(rows);
+    segment->Insert(offset,
+                    rows,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.SharedRaw());
+
+    const int64_t fields[] = {nullable.get(), sparse.get()};
+    CFieldLogicalSize sizes[2] = {};
+    ASSERT_EQ(GetGrowingFieldLogicalSizes(segment.get(), fields, 2, sizes), 2);
+    EXPECT_EQ(sizes[0].payload_bytes, sizeof(int64_t));
+    EXPECT_EQ(sizes[0].validity_bits, rows);
+    EXPECT_EQ(sizes[1].payload_bytes, sparse_bytes);
+    EXPECT_EQ(sizes[1].validity_bits, 0);
+
+    auto manager =
+        storage::CreateChunkManager(get_default_local_storage_config());
+    auto load_info = PrepareInsertBinlog(1, 2, 100, dataset, manager);
+    auto recovered = CreateGrowingSegment(schema, empty_index_meta, 100);
+    const auto status = LoadFieldData(recovered.get(), &load_info);
+    ASSERT_EQ(status.error_code, Success);
+    CFieldLogicalSize recovered_sizes[2] = {};
+    ASSERT_EQ(GetGrowingFieldLogicalSizes(
+                  recovered.get(), fields, 2, recovered_sizes),
+              2);
+    for (size_t i = 0; i < 2; ++i) {
+        EXPECT_EQ(recovered_sizes[i].payload_bytes, sizes[i].payload_bytes);
+        EXPECT_EQ(recovered_sizes[i].validity_bits, sizes[i].validity_bits);
+    }
 }
 
 TEST(CApiTest, GetDeletedCountTest) {

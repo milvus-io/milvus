@@ -12,7 +12,7 @@ AgentBase uses a distribution-installed reporter to record one `bytes` value at 
 
 Filtering, MVCC and the number of groups do not reduce the planned column sizes.
 
-AgentBase read metering applies to QueryView. DataView publishes verified sealed column statistics with its segment and manifest revision. The StreamingNode uses the chosen QueryView, partitions, and segment selections to return totals for the requested columns in `GetQueryPlan`. Growing statistics use the loaded values. Recovery uses persisted payload totals when the accounting version, manifest revision, and row count match, then adds subsequent WAL inserts. Missing statistics for a planned column fail the request. A known zero remains valid.
+AgentBase read metering applies to QueryView. DataView publishes verified sealed column statistics with its segment and manifest revision. The StreamingNode uses the chosen QueryView, partitions, and segment selections to return totals for the requested columns in `GetQueryPlan`. Growing and sealed columns both report logical payload bytes and validity bits. A NULL contributes no value bytes. Recovery reuses both persisted counters when the accounting version, manifest revision, and row count match, then adds subsequent WAL inserts using the same measurement rules. Missing statistics for a planned column fail the request. A known zero remains valid.
 
 Proxy uses the plan for each successful shard to count column references and adds the returned values. It reports once after the request succeeds. A failed or canceled request emits no usage. Empty results retain their planned usage. Each successful QueryIterator page is measured independently. Metered requests use the unary QueryView client path.
 

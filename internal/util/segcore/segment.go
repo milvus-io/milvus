@@ -81,7 +81,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		}
 		segLoadInfo.FieldHints = req.FieldHints
 		if req.SegmentType == SegmentTypeGrowing {
-			segLoadInfo.FieldLogicalPayloadBytes = growingFieldLogicalPayloadBytes(req.LoadInfo)
+			segLoadInfo.FieldLogicalSizes = growingFieldLogicalSizes(req.LoadInfo)
 		}
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
 		if err != nil {
@@ -117,9 +117,8 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	return seg, nil
 }
 
-// growingFieldLogicalPayloadBytes returns the persisted prefix of growing usage.
-// Growing usage counts value payloads and does not include validity bits.
-func growingFieldLogicalPayloadBytes(info *querypb.SegmentLoadInfo) map[int64]uint64 {
+// growingFieldLogicalSizes returns the verified persisted prefix of growing usage.
+func growingFieldLogicalSizes(info *querypb.SegmentLoadInfo) map[int64]*segcorepb.FieldLogicalSize {
 	if info.GetStorageVersion() != storage.StorageV3 {
 		return nil
 	}
@@ -127,13 +126,16 @@ func growingFieldLogicalPayloadBytes(info *querypb.SegmentLoadInfo) map[int64]ui
 	if !storage.FieldLogicalSizesCoverManifest(sizes, info.GetNumOfRows(), info.GetFieldLogicalSizesManifest(), info.GetManifestPath()) {
 		return nil
 	}
-	bytes := make(map[int64]uint64, len(sizes.GetFields()))
+	result := make(map[int64]*segcorepb.FieldLogicalSize, len(sizes.GetFields()))
 	for fieldID, size := range sizes.GetFields() {
 		if size != nil {
-			bytes[fieldID] = size.GetPayloadBytes()
+			result[fieldID] = &segcorepb.FieldLogicalSize{
+				PayloadBytes: size.GetPayloadBytes(),
+				ValidityBits: size.GetValidityBits(),
+			}
 		}
 	}
-	return bytes
+	return result
 }
 
 // cSegmentImpl is a wrapper for cSegmentImplInterface.
@@ -175,17 +177,28 @@ func (s *cSegmentImpl) MemSize() int64 {
 	return int64(cMemSize)
 }
 
-// GrowingFieldMemoryBytes reads a single snapshot for all requested fields.
-func GrowingFieldMemoryBytes(segment CSegment, fields []int64) []uint64 {
+// GrowingFieldLogicalSizes reads a single snapshot for all requested fields.
+func GrowingFieldLogicalSizes(segment CSegment, fields []int64) (payloadBytes, validityBits map[int64]uint64) {
 	s, ok := segment.(*cSegmentImpl)
 	if !ok || s == nil || len(fields) == 0 {
-		return nil
+		return nil, nil
 	}
-	bytes := make([]uint64, len(fields))
-	read := C.GetGrowingFieldMemoryBytes(
-		s.ptr, (*C.int64_t)(unsafe.Pointer(&fields[0])), C.int64_t(len(fields)), (*C.uint64_t)(unsafe.Pointer(&bytes[0])),
+	sizes := make([]C.CFieldLogicalSize, len(fields))
+	read := C.GetGrowingFieldLogicalSizes(
+		s.ptr, (*C.int64_t)(unsafe.Pointer(&fields[0])), C.int64_t(len(fields)), &sizes[0],
 	)
-	return bytes[:read]
+	payloadBytes = make(map[int64]uint64, int(read))
+	for i, size := range sizes[:read] {
+		fieldID := fields[i]
+		payloadBytes[fieldID] = uint64(size.payload_bytes)
+		if size.validity_bits != 0 {
+			if validityBits == nil {
+				validityBits = make(map[int64]uint64)
+			}
+			validityBits[fieldID] = uint64(size.validity_bits)
+		}
+	}
+	return payloadBytes, validityBits
 }
 
 // HasRawData checks if the segment has raw data.

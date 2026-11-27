@@ -192,10 +192,9 @@ func addGrowingColumns(read *viewpb.PlannedColumnRead, handle snview.GrowingSegm
 	if len(fields) == 0 {
 		return nil
 	}
-	values := segcore.GrowingFieldMemoryBytes(handle.Segment(), fields)
-	memory := &viewpb.FieldLogicalBytes{PayloadBytes: make(map[int64]uint64, len(values))}
-	for i, value := range values {
-		memory.PayloadBytes[fields[i]] = value
-	}
-	return addPlannedColumns(read, memory)
+	payload, validity := segcore.GrowingFieldLogicalSizes(handle.Segment(), fields)
+	return addPlannedColumns(read, &viewpb.FieldLogicalBytes{
+		PayloadBytes: payload,
+		ValidityBits: validity,
+	})
 }
