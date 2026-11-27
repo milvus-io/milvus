@@ -18,17 +18,14 @@ package storage
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/binary"
 	"io"
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -111,32 +108,6 @@ func (reader *BinlogReader) Close() {
 
 type BinlogReaderOption func(base *BinlogReader) error
 
-func decryptBinlogBuffer(base *BinlogReader, ezID, collectionID int64, decryptor hook.Decryptor) error {
-	cipherText := make([]byte, base.buffer.Len())
-	if err := binary.Read(base.buffer, common.Endian, cipherText); err != nil {
-		return err
-	}
-
-	log.Debug("Binlog reader starts to decypt cipher text",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("fieldID", base.FieldID),
-		zap.Int("cipher size", len(cipherText)),
-	)
-	decrypted, err := decryptor.Decrypt(cipherText)
-	if err != nil {
-		log.Error("failed to decrypt", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
-		return err
-	}
-	log.Debug("Binlog reader decrypted cipher text",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("fieldID", base.FieldID),
-		zap.Int("cipher size", len(cipherText)),
-		zap.Int("plain size", len(decrypted)),
-	)
-	base.buffer = bytes.NewBuffer(decrypted)
-	return nil
-}
-
 func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {
 		edek, ok := base.GetEdek()
@@ -150,53 +121,29 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 			return err
 		}
 
-		return decryptBinlogBuffer(base, ezID, collectionID, decryptor)
-	}
-}
-
-func WithReaderDecryptionPluginContext(pluginContext *indexcgopb.StoragePluginContext) BinlogReaderOption {
-	return func(base *BinlogReader) error {
-		if pluginContext == nil {
-			return nil
-		}
-		edek, ok := base.GetEdek()
-		if !ok {
-			return nil
-		}
-		cipher := hookutil.GetCipher()
-		if cipher == nil {
-			return merr.WrapErrServiceUnavailable("cipher plugin is not enabled")
-		}
-
-		ezID, hasEzID := base.GetEzID()
-		if !hasEzID {
-			ezID = pluginContext.GetEncryptionZoneId()
-		}
-		collectionID := base.CollectionID
-
-		var (
-			decryptor hook.Decryptor
-			err       error
-		)
-		if ezID == pluginContext.GetEncryptionZoneId() {
-			if backupCipher, ok := cipher.(hookutil.EZBackupCipher); ok {
-				rawKeyset, decodeErr := base64.StdEncoding.DecodeString(pluginContext.GetEncryptionKey())
-				if decodeErr != nil || len(rawKeyset) == 0 {
-					return merr.WrapErrParameterInvalidMsg("invalid reader encryption keyset for ezID=%d", ezID)
-				}
-				decryptor, err = backupCipher.GetDecryptorForKeyset(ezID, collectionID, rawKeyset, []byte(edek))
-			} else {
-				decryptor, err = cipher.GetDecryptor(ezID, collectionID, []byte(edek))
-			}
-		} else {
-			decryptor, err = cipher.GetDecryptor(ezID, collectionID, []byte(edek))
-		}
-		if err != nil {
-			log.Error("failed to get decryptor", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
+		cipherText := make([]byte, base.buffer.Len())
+		if err := binary.Read(base.buffer, common.Endian, cipherText); err != nil {
 			return err
 		}
 
-		return decryptBinlogBuffer(base, ezID, collectionID, decryptor)
+		log.Debug("Binlog reader starts to decypt cipher text",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("fieldID", base.FieldID),
+			zap.Int("cipher size", len(cipherText)),
+		)
+		decrypted, err := decryptor.Decrypt(cipherText)
+		if err != nil {
+			log.Error("failed to decrypt", zap.Int64("ezID", ezID), zap.Int64("collectionID", collectionID), zap.Error(err))
+			return err
+		}
+		log.Debug("Binlog reader decrypted cipher text",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("fieldID", base.FieldID),
+			zap.Int("cipher size", len(cipherText)),
+			zap.Int("plain size", len(decrypted)),
+		)
+		base.buffer = bytes.NewBuffer(decrypted)
+		return nil
 	}
 }
 

@@ -17,9 +17,7 @@
 package storage
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"io"
 	"math"
 	"strconv"
@@ -30,11 +28,9 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
@@ -43,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/github.com/milvus-io/milvus-proto/go-api/v2/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -692,216 +687,4 @@ func TestRwOptionValidate(t *testing.T) {
 			}
 		})
 	}
-}
-
-type suffixCrypto struct {
-	suffix []byte
-}
-
-func (c suffixCrypto) Encrypt(plainText []byte) ([]byte, error) {
-	return append(append([]byte(nil), plainText...), c.suffix...), nil
-}
-
-func (c suffixCrypto) Decrypt(cipherText []byte) ([]byte, error) {
-	return bytes.TrimSuffix(cipherText, c.suffix), nil
-}
-
-type statelessBackupCipher struct {
-	*mock_hook.MockCipher
-	decryptForKeyset func(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error)
-}
-
-func (*statelessBackupCipher) Backup(int64) (string, error) {
-	panic("unexpected Backup call")
-}
-
-func (*statelessBackupCipher) ResolveImportEZ(string) (int64, []byte, error) {
-	panic("unexpected ResolveImportEZ call")
-}
-
-func (c *statelessBackupCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
-	return c.decryptForKeyset(ezID, collectionID, keyset, safeKey)
-}
-
-func TestV1ReaderStatelessDecryptWithPluginContext(t *testing.T) {
-	const (
-		sourceEzID   int64 = 457975852966809057 // 64-bit snowflake ID (> 2^53)
-		sourceCollID int64 = 101
-		targetCollID int64 = 202
-		partitionID  int64 = 303
-		segmentID    int64 = 404
-	)
-	rawKeyset := []byte("raw-backup-keyset")
-	encodedKeyset := base64.StdEncoding.EncodeToString(rawKeyset)
-	edek := []byte("wrapped-source-edek")
-	crypto := suffixCrypto{suffix: []byte(":source-cipher")}
-
-	schema := &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: "row_id", DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: "ts", DataType: schemapb.DataType_Int64},
-			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		},
-	}
-
-	writeV1Binlogs := func(t *testing.T, encrypt bool) ([]*datapb.FieldBinlog, map[string][]byte) {
-		t.Helper()
-		uploaded := make(map[string][]byte)
-		var writerOpts []StreamWriterOption
-		if encrypt {
-			writerOpts = GetEncryptionOptions(sourceEzID, edek, crypto)
-		}
-		alloc := allocator.NewLocalAllocator(1, math.MaxInt64)
-		w, err := newCompositeBinlogRecordWriter(sourceCollID, partitionID, segmentID, schema,
-			func(blobs []*Blob) error {
-				for _, b := range blobs {
-					uploaded[b.Key] = b.Value
-				}
-				return nil
-			}, alloc, 1024, "/tmp", 100, writerOpts...)
-		require.NoError(t, err)
-		v := &Value{
-			PK:        NewInt64PrimaryKey(42),
-			Timestamp: 1000,
-			Value: map[int64]any{
-				common.RowIDField:     int64(1),
-				common.TimeStampField: int64(1000),
-				100:                   int64(42),
-			},
-		}
-		rec, err := ValueSerializer([]*Value{v}, schema)
-		require.NoError(t, err)
-		require.NoError(t, w.Write(rec))
-		require.NoError(t, w.Close())
-		fieldBinlogs, _, _, _ := w.GetLogs()
-		return SortFieldBinlogs(fieldBinlogs), uploaded
-	}
-
-	binlogs, uploaded := writeV1Binlogs(t, true)
-	plainBinlogs, plainUploaded := writeV1Binlogs(t, false)
-
-	readFirstPK := func(t *testing.T, fbs []*datapb.FieldBinlog, data map[string][]byte, pluginCtx *indexcgopb.StoragePluginContext) (int64, error) {
-		t.Helper()
-		rr, err := NewBinlogRecordReader(context.Background(), fbs, schema,
-			WithVersion(StorageV1),
-			WithCollectionID(targetCollID),
-			WithPluginContext(pluginCtx),
-			WithDownloader(func(_ context.Context, paths []string) ([][]byte, error) {
-				res := make([][]byte, len(paths))
-				for i, p := range paths {
-					res[i] = data[p]
-				}
-				return res, nil
-			}),
-		)
-		if err != nil {
-			return 0, err
-		}
-		defer rr.Close()
-		dr := NewDeserializeReader(rr, func(r Record, v []*Value) error {
-			return ValueDeserializerWithSchema(r, v, schema, true)
-		})
-		val, err := dr.NextValue()
-		if err != nil {
-			return 0, err
-		}
-		return (*val).Value.(map[int64]any)[100].(int64), nil
-	}
-
-	t.Run("stateless_decrypt_matching_zone_without_global_cache", func(t *testing.T) {
-		var calls int
-		cipher := &statelessBackupCipher{
-			MockCipher: mock_hook.NewMockCipher(t),
-			decryptForKeyset: func(ezID, collID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
-				calls++
-				require.Equal(t, sourceEzID, ezID)
-				require.Equal(t, sourceCollID, collID)
-				require.Equal(t, rawKeyset, keyset)
-				require.Equal(t, edek, safeKey)
-				return crypto, nil
-			},
-		}
-		t.Cleanup(hookutil.SetTestCipher(cipher))
-
-		pk, err := readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			CollectionId:     0,
-			EncryptionKey:    encodedKeyset,
-		})
-		require.NoError(t, err)
-		require.Equal(t, int64(42), pk)
-		require.Positive(t, calls)
-		cipher.AssertNotCalled(t, "GetDecryptor", mock.Anything, mock.Anything, mock.Anything)
-		cipher.AssertNotCalled(t, "Init", mock.Anything)
-		cipher.AssertNotCalled(t, "GetUnsafeKey", mock.Anything, mock.Anything)
-	})
-
-	t.Run("fallback_to_get_decryptor_on_zone_mismatch", func(t *testing.T) {
-		cipher := &statelessBackupCipher{
-			MockCipher: mock_hook.NewMockCipher(t),
-			decryptForKeyset: func(int64, int64, []byte, []byte) (hook.Decryptor, error) {
-				t.Fatal("GetDecryptorForKeyset must not be called when header ezID differs")
-				return nil, nil
-			},
-		}
-		cipher.EXPECT().GetDecryptor(sourceEzID, sourceCollID, edek).Return(crypto, nil)
-		t.Cleanup(hookutil.SetTestCipher(cipher))
-
-		pk, err := readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID + 1,
-			CollectionId:     0,
-			EncryptionKey:    encodedKeyset,
-		})
-		require.NoError(t, err)
-		require.Equal(t, int64(42), pk)
-	})
-
-	t.Run("fallback_to_get_decryptor_for_legacy_cipher", func(t *testing.T) {
-		cipher := mock_hook.NewMockCipher(t)
-		cipher.EXPECT().GetDecryptor(sourceEzID, sourceCollID, edek).Return(crypto, nil)
-		t.Cleanup(hookutil.SetTestCipher(cipher))
-
-		pk, err := readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			CollectionId:     0,
-			EncryptionKey:    encodedKeyset,
-		})
-		require.NoError(t, err)
-		require.Equal(t, int64(42), pk)
-	})
-
-	t.Run("invalid_keyset_and_missing_cipher_rejected", func(t *testing.T) {
-		cipher := &statelessBackupCipher{MockCipher: mock_hook.NewMockCipher(t)}
-		t.Cleanup(hookutil.SetTestCipher(cipher))
-
-		_, err := readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			EncryptionKey:    "not-valid-base64!",
-		})
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-
-		_, err = readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			EncryptionKey:    "",
-		})
-		require.ErrorIs(t, err, merr.ErrParameterInvalid)
-
-		restore := hookutil.SetTestCipher(nil)
-		_, err = readFirstPK(t, binlogs, uploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			EncryptionKey:    encodedKeyset,
-		})
-		restore()
-		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	})
-
-	t.Run("plaintext_binlog_skips_cipher", func(t *testing.T) {
-		t.Cleanup(hookutil.SetTestCipher(nil))
-		pk, err := readFirstPK(t, plainBinlogs, plainUploaded, &indexcgopb.StoragePluginContext{
-			EncryptionZoneId: sourceEzID,
-			EncryptionKey:    encodedKeyset,
-		})
-		require.NoError(t, err)
-		require.Equal(t, int64(42), pk)
-	})
 }
