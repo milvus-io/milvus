@@ -201,6 +201,13 @@ func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialO
 	if !c.config.DisableConn {
 		err = c.connectInternal(ctx)
 		if err != nil {
+			// The dialed connection must be closed here: New() returns nil on
+			// error, so callers never get a handle to Close it and the conn
+			// (with its keepalive and reconnect goroutines) would leak.
+			_ = conn.Close()
+			c.conn = nil
+			c.service = nil
+			c.telemetryService = nil
 			return err
 		}
 	}
