@@ -113,6 +113,7 @@ func (s *EventStream) Subscribe(ctx context.Context, opt wal.TransformLogSubscri
 				Vchannel:           opt.VChannel,
 				StartAfterTimeTick: opt.StartAfterTimeTick,
 				EndTimeTick:        opt.EndTimeTick,
+				RequireExactStart:  opt.RequireExactStart,
 			},
 		},
 	}); err != nil {
@@ -293,6 +294,11 @@ func (s *EventStream) handleCreate(resp *streamingpb.CreateTransformSubscription
 		return
 	}
 	if sub := s.getSubscription(resp.GetSubscriptionId()); sub != nil {
+		if sub.requireExactStart && !resp.GetRequireExactStart() {
+			sub.markReady(status.NewUnrecoverableError("peer does not support strict transform history replay"))
+			return
+		}
+		sub.strictConfirmed.Store(resp.GetRequireExactStart())
 		sub.markReady(nil)
 		mlog.Debug(s.ctx, "handler transform log event stream subscription created",
 			mlog.FieldPChannel(s.pchannel),

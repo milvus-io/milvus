@@ -6,6 +6,11 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 
 - **WALCheckpoint** (etcd): safe `LastConfirmedMessageID` and logical `TimeTick`, publisher term, and replication configuration/progress. The old AlterWAL state field is deprecated. Publication is bounded by both AckTracker's successful continuous prefix and WALSummary's `LastAcked`.
 - **VChannel metadata** (etcd): Per-VChannel collection info, partition list, schema history, state (NORMAL / DROPPED).
+  Schema GC retains both segment encoding references and every registered QueryView
+  read-schema version, including Preparing and recovered Up views. Registration
+  and GC share the VChannel owner lock; startup restores persisted view references
+  before cleanup begins. This protects an empty split target's g1 schema while g2
+  is prepared after a WAL ALTER.
 - **Segment assignments** (etcd): Per-segment growing/flushed status with row count and binary size stats.
 - **Segment data** (object storage): SegmentView writes L1 binlogs and statistics; [L0Materializer](../../../design-docs/design_docs/wal/l0_materializer.md) owns Delete-to-L0 materialization. Index building is outside RecoveryStorage.
 - **WALSummary** (object storage): PChannel-scoped immutable chunks and term manifests, storing keyed-write summaries and Delete records independently of source-message handles.
@@ -108,3 +113,19 @@ StreamingNode catalog once per PChannel per sweep, reusing the value for all
 its segments. Missing checkpoints and read failures prevent reclamation for
 that PChannel. Native RecoveryStorage checkpoint persistence, replay and
 truncation remain independent.
+
+
+### Bounded split deletion replay
+
+QueryNode caches and StreamingNode residual queues do not own historical retention.
+They may evict replayable entries and refill bounded pages from Summary. Exact-start
+subscriptions fail on a truncated required interval instead of silently fast-forwarding;
+remote peers must explicitly acknowledge this capability. A VChannel's recovered
+creation timestamp proves an empty pre-genesis interval, separately from a GC floor.
+The recovery module installs that origin before serving dependent views. See the
+[r5 shard split protocol](../../../design-docs/design_docs/20261113-shard_split_on_queryview_r5.md).
+
+Cache/queue budgets exclude the transient decode/application of a single logical
+entry (which may contain every Delete block of a committed transaction) and engine
+delete indexes. Collection-history retention remains conservative; bounded RAM
+is not evidence that precise distributed Summary GC has been implemented.

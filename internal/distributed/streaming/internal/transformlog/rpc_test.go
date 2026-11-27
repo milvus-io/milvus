@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
+	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -33,7 +34,7 @@ import (
 func rpcClient(t *testing.T, server streamingpb.StreamingNodeHandlerServiceServer) streamingpb.StreamingNodeHandlerServiceClient {
 	t.Helper()
 	listener := bufconn.Listen(64 * 1024)
-	rpc := grpc.NewServer()
+	rpc := grpc.NewServer(grpc.StreamInterceptor(interceptor.NewServiceStreamServerInterceptor()))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(rpc, server)
 	go func() { _ = rpc.Serve(listener) }()
 	conn, err := grpc.NewClient("passthrough:///transform-rpc",
@@ -336,4 +337,29 @@ func TestTransformRPCReusesStreamAfterLastSubscription(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("logical Close did not release the server owner")
 	}
+}
+
+func TestStrictTransformHistoryGapSurvivesRealRPCAndResumer(t *testing.T) {
+	client, manager, _ := summaryRPC(t)
+	// A restored checkpoint above the requested baseline certifies that this
+	// earlier interval is unavailable from Summary, not that it was applied.
+	manager.InitLastAcked(15)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	stream := resumable.NewResumableStream(ctx, "p", func(ctx context.Context, _ string) (wal.TransformLogStream, error) {
+		return remote.CreateEventStream(ctx, rpcOptions(1), client)
+	})
+	defer stream.Close()
+	h := newRecordingHandler()
+	sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "p_1v0", StartAfterTimeTick: 0, EndTimeTick: 20, RequireExactStart: true, Handler: h})
+	if err == nil {
+		defer sub.Close()
+	}
+	select {
+	case <-stream.Done():
+	case <-ctx.Done():
+		t.Fatal("strict missing history was retried instead of reported")
+	}
+	require.True(t, streamingstatus.AsStreamingError(stream.Error()).IsUnrecoverable())
+	require.Empty(t, h.events, "no Delete or progress can cross a strict history gap")
 }

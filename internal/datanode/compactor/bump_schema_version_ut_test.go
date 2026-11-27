@@ -362,6 +362,7 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 	plan := &datapb.CompactionPlan{
 		EnableManifestDelta:    true,
 		PlanID:                 999,
+		StartTime:              time.Now().Unix(),
 		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
 		SegmentBinlogs:         []*datapb.CompactionSegmentBinlogs{segment},
 		Schema:                 targetSchema,
@@ -450,7 +451,7 @@ func (f *bumpFixture) computeKept(spec *fixtureSpec) {
 			}
 		}
 	}
-	now := time.Now()
+	now := time.Unix(f.task.plan.GetStartTime(), 0)
 	for i := range f.rows {
 		row := &f.rows[i]
 		effective := row.ts

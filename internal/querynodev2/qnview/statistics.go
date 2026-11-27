@@ -18,11 +18,8 @@ func (h *QNQueryViewHandler) Statistics(ctx context.Context, req *viewpb.Statist
 	}
 	defer lease.Release()
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
-	if err := h.segMgr.WaitTransformVisible(ctx, key, req.GetMvcc().GetTransformingTimetick()); err != nil {
-		return 0, err
-	}
 	view := filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIds())
-	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, req.GetMvcc().GetTransformingTimetick())
+	handles, err := h.acquireVisibleSealedHandles(ctx, key, lease.Meta, view, req.GetMvcc())
 	if err != nil {
 		return 0, err
 	}

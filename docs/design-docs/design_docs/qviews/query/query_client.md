@@ -82,6 +82,17 @@ The request is cloned for each worker. Empty successful retrieve responses do
 not enter reduction, but the successful shard plan is retained even for an empty
 worker set or an empty result. CAS consumers use the retained Strong snapshot too.
 
+A serving list may contain a shard with lineage: a split source shard that is
+still served next to the shards it was split into (see
+`20261109-shard_split_on_queryview.md`, section 6.3). Such a group does not run
+shard by shard. The client samples each target's published prefix with
+`GetMVCCTimestamp(prefix_only)`, fixes one read point `B`, plans the targets with
+`barrier_mvcc = B`, and then plans the source with a proxy-provided
+`QueryPlanMVCC` whose pair is the split tick and which also carries
+`read_timetick = B` and each target's transform frontier at `B`. On the source's
+QueryNodes the legacy request timestamp is `read_timetick`. Shards outside a
+group, and every list without lineage, keep the per-shard path above unchanged.
+
 A retryable View error restarts the shard from Phase 1. The client first cancels
 and joins all workers in that attempt, then clears the shard's partial results.
 A response completing after cancellation therefore cannot leak into the next

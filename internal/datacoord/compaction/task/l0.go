@@ -413,6 +413,10 @@ func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datap
 }
 
 func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
+	if l0Suspended(t.meta, t.GetTaskProto().GetChannel()) {
+		return nil, merr.WrapErrServiceNotReadyMsg("L0 compaction on split target is suspended")
+	}
+
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
 	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
@@ -526,6 +530,9 @@ func (t *L0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 
 func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
+	if l0Suspended(t.meta, t.GetTaskProto().GetChannel()) {
+		return merr.WrapErrServiceNotReadyMsg("L0 compaction on split target is suspended")
+	}
 	cursorUpdates, err := t.transformCursorUpdates(ctx, outputSegs)
 	if err != nil {
 		return err
@@ -729,4 +736,9 @@ func (t *L0CompactionTask) context() context.Context {
 
 func (t *L0CompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
+}
+
+func l0Suspended(mt meta.CompactionMeta, channel string) bool {
+	guard, ok := mt.(interface{ IsL0CompactionSuspended(string) bool })
+	return ok && guard.IsL0CompactionSuspended(channel)
 }

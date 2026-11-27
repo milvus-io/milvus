@@ -83,7 +83,7 @@ func partialUpdateJSONTestTask(t *testing.T, requestFields ...*schemapb.FieldDat
 		partialUpdateOriginalFields: cloneFieldDataList(fields),
 	}
 	task.SetTs(12345)
-	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
+	setPartialUpdateCASTestChannels(t, task, partialUpdateCASTestVChannels)
 	return task
 }
 

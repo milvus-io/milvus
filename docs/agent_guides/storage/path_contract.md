@@ -234,6 +234,19 @@ behavior.
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
 
+## Split DataView metadata pages
+
+After a collection declares split shards, DataCoord stores each DataView root at
+`coord/dv/<collection>/versions/<streaming>/<compact>/root`. A large view owns
+immutable pages under
+`datacoord-meta/pages/<collection>/views/<streaming>/<compact>/<hash>/`.
+Single-version GC waits for the DataView references to drain, then removes its
+root directory and page directory in one metadata transaction. A failed prepare
+for the same version can leave a different hash in that directory; version GC
+removes it too. Pages of a version that was never published can survive until
+the version is reused and collected or the collection is dropped. Split adoption
+move lists have a separate collection-scoped lifetime.
+
 ## Historical index migration
 
 Backfill copies the explicit index files from path version 0/1 into the existing

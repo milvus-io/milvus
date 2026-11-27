@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -17,11 +18,14 @@ func (h *SNQueryViewHandler) Statistics(ctx context.Context, req *viewpb.Statist
 		return 0, err
 	}
 	defer lease.Release()
+	if mismatch := qviews.LineageMVCCMismatch(lease.Meta.GetLineage(), req.GetMvcc()); mismatch != "" {
+		return 0, viewerror.NewViewInvalidated("%s", mismatch)
+	}
 	runtime, err := h.queryRuntime(qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version})
 	if err != nil {
 		return 0, err
 	}
-	if err := runtime.WaitMVCCVisible(ctx, req.GetMvcc().GetGrowingTimetick(), req.GetMvcc().GetTransformingTimetick()); err != nil {
+	if err := WaitQueryMVCCVisible(ctx, runtime, req.GetMvcc()); err != nil {
 		return 0, err
 	}
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIds()))

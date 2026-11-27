@@ -2,7 +2,9 @@ package streaming
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -53,7 +56,139 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
-	return s.appendReplicateMessageToWAL(ctx, msg)
+	msg, err = s.waitAppendFirstCopies(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.appendReplicateMessageToWAL(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	s.reportAppendFirstCopy(ctx, msg, result)
+	return result, nil
+}
+
+// reportAppendFirstCopy tells the streaming coord of this cluster the local
+// time tick of an append-first copy as soon as it is appended, so that the
+// copies waiting for it (waitAppendFirstCopies) need not wait for its
+// acknowledgement. For the fence of a shard split the acknowledgement comes
+// only after the residual of the source has flushed; what the genesis of a
+// target needs is a barrier above the local time tick of the fence, which
+// the append result gives now.
+//
+// The report is best effort: if it fails, or the coordinator loses it, the
+// waiting copies are released by the acknowledgement as before. A copy the
+// replicate interceptor dropped as a duplicate returns an error and is not
+// reported; its first append was.
+func (s replicateService) reportAppendFirstCopy(ctx context.Context, msg message.MutableMessage, result *types.AppendResult) {
+	bh := msg.BroadcastHeader()
+	if bh == nil || result == nil || result.TimeTick == 0 || !slices.Contains(bh.AppendFirstVChannels, msg.VChannel()) {
+		return
+	}
+	if err := s.streamingCoordClient.Broadcast().ReportVChannelAppended(ctx, bh.BroadcastID, msg.VChannel(), result.TimeTick); err != nil {
+		mlog.Warn(ctx, "report of an appended append-first copy failed, the copies waiting for it wait for its acknowledgement",
+			mlog.Uint64("broadcastID", bh.BroadcastID), mlog.String("vchannel", msg.VChannel()),
+			mlog.Uint64("timeTick", result.TimeTick), mlog.Err(err))
+	}
+}
+
+// waitAppendFirstCopies is the append gate of a secondary cluster.
+//
+// A broadcast that names an append-first vchannel is ordered on the primary
+// by its broadcaster: that copy is appended and acknowledged before any other
+// copy. Replication carries the copies as independent per-pchannel streams and
+// restores no order between them. For a shard split that order is what keeps
+// every event of a target above the fence of its source, so it must hold in
+// the WAL of this cluster too.
+//
+// A copy that is not append-first therefore waits here until the append-first
+// copies are appended on this cluster, and is then appended with their local
+// time tick as its barrier, so its own time tick is above it. The replicate
+// stream of an append-first copy reports its local time tick to the streaming
+// coord once it is appended (reportAppendFirstCopy); without that report the
+// wait ends at the acknowledgement of the copy, with the acknowledged time
+// tick. Either is the time tick of a persisted copy, at or above the first.
+// The replicate stream of a pchannel appends in order and waits for each
+// append, so everything behind the gated copy on that stream waits with it.
+// Only the streams of those copies wait; an append-first copy and the copy on
+// the control channel never do.
+//
+// The wait cannot form a cycle. On the primary every append-first copy has a
+// time tick below every other copy of its broadcast, and each stream delivers
+// its pchannel in time tick order. Take the stream head with the smallest
+// primary time tick: if it is gated, its append-first copy has a smaller time
+// tick still, so that copy is already appended here or is itself a stream
+// head, which contradicts the choice.
+//
+// It runs after the vchannels were renamed, so every name is a name of this
+// cluster.
+func (s replicateService) waitAppendFirstCopies(ctx context.Context, msg message.MutableMessage) (message.MutableMessage, error) {
+	bh := msg.BroadcastHeader()
+	if bh == nil || len(bh.AppendFirstVChannels) == 0 {
+		return msg, nil
+	}
+	if slices.Contains(bh.AppendFirstVChannels, msg.VChannel()) {
+		// This is the copy the others wait for.
+		return msg, nil
+	}
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		// The copy on the control channel has no effect on a WAL; it orders the
+		// ack callback, which runs only after every copy is acknowledged. Its
+		// stream carries the control copy of every DDL of the cluster, so a
+		// wait here would hold all of them.
+		return msg, nil
+	}
+	// A copy this cluster already appended is dropped by the replicate
+	// interceptor as a duplicate. It must not wait: its broadcast task may be
+	// collected by now.
+	covered, err := s.coveredByReplicateCheckpoint(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if covered {
+		return msg, nil
+	}
+
+	logger := mlog.With(
+		mlog.Uint64("broadcastID", bh.BroadcastID),
+		mlog.String("vchannel", msg.VChannel()),
+		mlog.Strings("appendFirstVChannels", bh.AppendFirstVChannels),
+		mlog.String("messageType", msg.MessageType().String()))
+	logger.Info(ctx, "replicated append waits for the append-first copies of its broadcast")
+	start := time.Now()
+	timeTick, err := s.streamingCoordClient.Broadcast().WaitVChannelsAcked(ctx, msg.MessageType(), bh.BroadcastID, bh.AppendFirstVChannels)
+	if err != nil {
+		// The stream appends the message again from its checkpoint and waits again.
+		logger.Warn(ctx, "wait for the append-first copies failed, the replicate stream retries",
+			mlog.Duration("waited", time.Since(start)), mlog.Err(err))
+		return nil, err
+	}
+	logger.Info(ctx, "append-first copies are acknowledged, the replicated append proceeds",
+		mlog.Duration("waited", time.Since(start)), mlog.Uint64("barrierTimeTick", timeTick))
+	if msg.BarrierTimeTick() == 0 {
+		msg = msg.WithBarrierTimeTick(timeTick)
+	}
+	return msg, nil
+}
+
+// coveredByReplicateCheckpoint reports whether the WAL of this cluster already
+// appended the message, judged the way the replicate interceptor judges a
+// duplicate: by the replicate checkpoint of its pchannel. The checkpoint only
+// moves forward, so a message that is covered now is still covered when it
+// reaches the interceptor.
+func (s replicateService) coveredByReplicateCheckpoint(ctx context.Context, msg message.MutableMessage) (bool, error) {
+	rh := msg.ReplicateHeader()
+	if rh == nil {
+		return false, nil
+	}
+	checkpoint, err := s.handlerClient.GetReplicateCheckpoint(ctx, funcutil.ToPhysicalChannel(msg.VChannel()))
+	if err != nil {
+		return false, err
+	}
+	if checkpoint == nil || checkpoint.ClusterID != rh.ClusterID {
+		return false, nil
+	}
+	return rh.TimeTick <= checkpoint.TimeTick, nil
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
@@ -168,6 +303,16 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 			}
 			targetBroadcastVChannels = append(targetBroadcastVChannels, targetBroadcastVChannel)
 		}
+		// The header was written by another cluster. An append-first vchannel
+		// that is not a vchannel of the broadcast cannot be renamed; refuse the
+		// message instead of failing the process on it.
+		for _, vchannel := range bh.AppendFirstVChannels {
+			if !slices.Contains(bh.VChannels, vchannel) {
+				return nil, status.NewReplicateViolation(
+					"malformed broadcast header of replicated %s message %d: append-first vchannel %s is not one of its vchannels",
+					msg.MessageType(), bh.BroadcastID, vchannel)
+			}
+		}
 		msg.OverwriteReplicateVChannel(targetVChannel, targetBroadcastVChannels)
 	} else {
 		msg.OverwriteReplicateVChannel(targetVChannel)
@@ -185,6 +330,10 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		}
 	case message.MessageTypeAlterLoadConfig:
 		s.overwriteAlterLoadConfigMessage(msg)
+	case message.MessageTypeSplitShard:
+		if err := s.overwriteSplitShardMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -222,6 +371,42 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 		body.VirtualChannelNames[idx] = strings.Replace(body.VirtualChannelNames[idx], sourcePChannel, targetPChannel, 1)
 	}
 	createCollectionMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteSplitShardMessage renames every vchannel a SplitShard message names
+// into the vchannels of this cluster: the source and the targets in the
+// header, and the shards of the routing in the body.
+//
+// Nothing else is changed. The collection id, the partition ids, the split
+// task id, the residues and the modulus are the same facts in both clusters.
+// The message carries no value local to the source cluster.
+func (s replicateService) overwriteSplitShardMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	splitMsg := message.MustAsMutableSplitShardMessageV2(msg)
+	header := splitMsg.Header()
+	source, err := s.getTargetVChannel(sourceCluster, header.GetSourceVchannel())
+	if err != nil {
+		return err
+	}
+	header.SourceVchannel = source
+	for idx, vchannel := range header.GetTargetVchannels() {
+		target, err := s.getTargetVChannel(sourceCluster, vchannel)
+		if err != nil {
+			return err
+		}
+		header.TargetVchannels[idx] = target
+	}
+	splitMsg.OverwriteHeader(header)
+
+	body := splitMsg.MustBody()
+	for _, shard := range body.GetRouting().GetShards() {
+		vchannel, err := s.getTargetVChannel(sourceCluster, shard.GetVchannelName())
+		if err != nil {
+			return err
+		}
+		shard.VchannelName = vchannel
+	}
+	splitMsg.OverwriteBody(body)
 	return nil
 }
 

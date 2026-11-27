@@ -321,9 +321,11 @@ func addReadyDMLCollection(t *testing.T, env *dmlAutoLoadEnv) {
 	schema, err := newSchemaInfo(collection)
 	require.NoError(t, err)
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "ready").Return(int64(200), nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "ready", mock.Anything).Return(&collectionInfo{
+	info := &collectionInfo{
 		CollID: 200, VChannels: []string{"v1"}, Schema: schema,
-	}, nil).Maybe()
+	}
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "ready", mock.Anything).Return(info, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "", "", int64(200)).Return(info, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, "db", "ready").Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitionInfo(mock.Anything, "db", "ready", "").Return(&partitionInfo{Name: "_default", PartitionID: 21}, nil).Maybe()
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "ready", "_default").Return(int64(21), nil).Maybe()

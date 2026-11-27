@@ -375,3 +375,38 @@ func TestCollectionAndVChannelMetricInventoryIsCardinalityControlled(t *testing.
 		"QueryNodeLevelZeroSize",
 	}, overlapMetrics)
 }
+
+func TestShardSplitResidualWaitMetricLifecycle(t *testing.T) {
+	for _, mode := range []string{CollectionLevelMetricsModeFull, CollectionLevelMetricsModeAggregate} {
+		t.Run(mode, func(t *testing.T) {
+			setCollectionMetricsModeForTest(t, mode)
+			gauge := DataCoordShardSplitResidualWaitSeconds
+			gauge.Reset()
+			t.Cleanup(gauge.Reset)
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(gauge)
+			gauge.WithLabelValues("1").Set(7)
+			gauge.WithLabelValues("2").Set(9)
+			families, err := registry.Gather()
+			require.NoError(t, err)
+			if mode == CollectionLevelMetricsModeAggregate {
+				require.Empty(t, families, "per-collection wait ages have no truthful shared Set value")
+				require.False(t, gauge.DeleteLabelValues("1"))
+				return
+			}
+			require.Len(t, families, 1)
+			require.Len(t, families[0].Metric, 2)
+			require.True(t, gauge.DeleteLabelValues("1"))
+			families, err = registry.Gather()
+			require.NoError(t, err)
+			require.Len(t, families, 1)
+			require.Len(t, families[0].Metric, 1)
+			require.Equal(t, "2", families[0].Metric[0].Label[0].GetValue())
+			require.Equal(t, float64(9), families[0].Metric[0].GetGauge().GetValue())
+			require.True(t, gauge.DeleteLabelValues("2"))
+			families, err = registry.Gather()
+			require.NoError(t, err)
+			require.Empty(t, families)
+		})
+	}
+}

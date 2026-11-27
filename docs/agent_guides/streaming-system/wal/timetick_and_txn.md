@@ -2,7 +2,7 @@
 
 ## TimeTick
 
-PChannel-level monotonically increasing log sequence number assigned to every WAL message. Defines total order within a PChannel and serves as the MVCC visibility boundary. **Only comparable within the same PChannel.**
+PChannel-level monotonically increasing log sequence number assigned to every WAL message. Defines total order within a PChannel and serves as the MVCC visibility boundary. TimeTicks allocated by the same cluster's TSO are comparable across PChannels. Each PChannel confirms and publishes its own complete prefix independently: a confirmed TimeTick on one PChannel does not prove another PChannel has consumed through that timestamp. Cross-PChannel reads must wait for the required prefix on every participating PChannel. Ticks from different clusters are not interchangeable; replication uses the receiving cluster's local ticks.
 
 See [TimeTick Message Semantic](../message/message-semantic-time-tick.md) for the TimeTick message itself.
 

@@ -37,7 +37,9 @@ type TransformBatch struct {
 	ReadableThrough uint64
 	// FastForwardTimeTick explicitly identifies retired history skipped by this read.
 	FastForwardTimeTick uint64
-	Changed             <-chan struct{}
+	// OriginTimeTick proves the vchannel had no event before its genesis.
+	OriginTimeTick uint64
+	Changed        <-chan struct{}
 	// TransformChanged is captured with the same snapshot when WatchTransform
 	// is active for this VChannel. It omits unrelated PChannel coverage updates.
 	TransformChanged <-chan struct{}
@@ -94,10 +96,15 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	}
 	terminal := m.terminalErr
 	fastForward := m.manifest.GetTransformFastForwardTimeTick()[vchannel]
+	batch.OriginTimeTick = m.transformOrigins[vchannel]
 	// The initial checkpoint is a replay floor, not readable stored history.
 	// Once published, coverage preserves that lower boundary across restarts.
 	if coverage := m.manifest.GetCoverage(); coverage == nil {
-		fastForward = max(fastForward, m.restoredTimeTick)
+		initial := m.restoredTimeTick // conservative compatibility for legacy empty manifests
+		if m.manifest.InitialReplayTimeTick != nil {
+			initial = m.manifest.GetInitialReplayTimeTick()
+		}
+		fastForward = max(fastForward, initial)
 	} else if coverage.GetStartTimeTick() > 0 {
 		fastForward = max(fastForward, coverage.GetStartTimeTick()-1)
 	}

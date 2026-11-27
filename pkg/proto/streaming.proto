@@ -139,6 +139,24 @@ service StreamingCoordBroadcastService {
 
     // Ack acknowledge broadcast message is consumed.
     rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
+
+    // WaitVChannelsAcked blocks until every named vchannel of a broadcast is
+    // acknowledged on this cluster, or until the context ends.
+    //
+    // A secondary cluster uses it to order the copies of a replicated
+    // broadcast that names append-first vchannels: a copy on another vchannel
+    // is appended to the local WAL only after the append-first copies are
+    // acknowledged here. The broadcast task need not exist when the call
+    // arrives; the wait covers its creation.
+    rpc WaitVChannelsAcked(WaitVChannelsAckedRequest) returns (WaitVChannelsAckedResponse) {}
+
+    // ReportVChannelAppended records that a copy of a replicated broadcast was
+    // appended to the WAL of this cluster, and at which time tick. A
+    // secondary cluster reports its append-first copies, so that
+    // WaitVChannelsAcked can answer with that time tick before the copy is
+    // acknowledged by its consumer. The record is kept in memory only; a
+    // coordinator that lost it answers from the acknowledgement.
+    rpc ReportVChannelAppended(ReportVChannelAppendedRequest) returns (ReportVChannelAppendedResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -159,6 +177,32 @@ message BroadcastAckRequest {
 }
 
 message BroadcastAckResponse {
+}
+
+// WaitVChannelsAckedRequest is the request of the WaitVChannelsAcked RPC.
+message WaitVChannelsAckedRequest {
+    uint64 broadcast_id       = 1; // the broadcast to wait on.
+    repeated string vchannels = 2; // the vchannels of the broadcast that must be acknowledged, named as on this cluster.
+    messages.MessageType message_type = 3; // the type of the broadcast message.
+}
+
+// WaitVChannelsAckedResponse is the response of the WaitVChannelsAcked RPC.
+message WaitVChannelsAckedResponse {
+    // The greatest time tick of the named vchannels, in the WAL of this
+    // cluster: the time tick a copy was acknowledged at, or, before its
+    // acknowledgement, the time tick it was reported appended at.
+    uint64 time_tick = 1;
+}
+
+// ReportVChannelAppendedRequest is the request of the ReportVChannelAppended RPC.
+message ReportVChannelAppendedRequest {
+    uint64 broadcast_id = 1; // the broadcast the copy belongs to.
+    string vchannel     = 2; // the vchannel of the copy, named as on this cluster.
+    uint64 time_tick    = 3; // the time tick of the copy in the WAL of this cluster.
+}
+
+// ReportVChannelAppendedResponse is the response of the ReportVChannelAppended RPC.
+message ReportVChannelAppendedResponse {
 }
 
 //
@@ -343,6 +387,7 @@ enum StreamingCode {
     STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 15; // wrong schema version
     STREAMING_CODE_RATE_LIMIT_REJECTED    = 16; // rate limit rejected
     STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE = 17; // Proxy must re-query, merge, and retry.
+    STREAMING_CODE_SHARD_FENCED           = 18; // The vchannel is the source of a shard split and accepts no DML. The caller refreshes its routing and retries on the new shards.
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
@@ -640,6 +685,9 @@ message PChannelSummaryManifest {
     SummaryCoverage coverage = 2;
     // Readers before this boundary explicitly fast-forward past retired Deletes.
     map<string, uint64> transform_fast_forward_time_tick = 3;
+    // Immutable unknown-prefix boundary, including when no chunk exists yet.
+    // Presence distinguishes a valid zero origin from a legacy empty manifest.
+    optional uint64 initial_replay_time_tick = 4;
 }
 
 // SummaryCoverage describes the complete WAL prefix accounted for by Summary.
@@ -865,6 +913,20 @@ message VChannelMeta {
     view.DataVersion segment_data_version_summary = 6;
     // Immutable per-VChannel collection creation TimeTick.
     uint64 create_collection_time_tick = 7;
+    // Set once, when the vchannel is the source of a shard split. The vchannel
+    // accepts no DML after split_lineage.switch_time_tick. Its state stays
+    // NORMAL, so local unreplicable messages are still observed.
+    VChannelSplitLineage split_lineage = 8;
+    // Immutable origin of a target registered by SplitShard.
+    string split_source_vchannel = 9;
+    int64 split_genesis_task_id = 10;
+}
+
+// VChannelSplitLineage records that a vchannel was split, and into which vchannels.
+message VChannelSplitLineage {
+    int64 split_task_id = 1; // the id of the split.
+    repeated string target_vchannels = 2; // the vchannels that take the DML of this vchannel after the split.
+    uint64 switch_time_tick = 3; // the time tick of the first SplitShard message observed on this vchannel.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -894,7 +956,7 @@ enum VChannelState {
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
     VCHANNEL_STATE_TOMBSTONED = 3; // vchannel data has caught up and this retained meta is a replay filter.
-    // VCHANNEL_STATE_SPLITTED = 4; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+    VCHANNEL_STATE_SPLITTED = 4; // local serving is retired; lineage remains a write fence.
 }
 
 // PartitionState is the state of partition
@@ -1107,6 +1169,8 @@ message CreateTransformSubscriptionRequest {
     // start_after_time_tick.
     uint64 start_after_time_tick = 3;
     uint64 end_time_tick = 4;
+    // Fail rather than skip a garbage-collected delete interval.
+    bool require_exact_start = 5;
 }
 
 message CloseTransformSubscriptionRequest {
@@ -1140,6 +1204,8 @@ message CreateTransformSubscriptionResponse {
     // Current SN TransformLog truncation cursor.
     uint64 truncate_time_tick = 4;
     uint64 end_time_tick = 5;
+    // Confirms enforcement; an old peer must not silently ignore strict replay.
+    bool require_exact_start = 6;
 }
 
 message CloseTransformSubscriptionResponse {

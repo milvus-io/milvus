@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -81,6 +82,31 @@ type QueryRuntime interface {
 	ResolvePartitions(loadInfoVersion uint64, requested []int64) ([]int64, error)
 	WaitMVCCVisible(ctx context.Context, growingTimetick uint64, transformingTimetick uint64) error
 	AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]GrowingSegmentHandle, error)
+}
+
+// LineageQueryRuntime is a QueryRuntime that can wait for the TransformLog
+// streams of the targets of a split source. Only a plan of a lineage group
+// carries such ticks; every other plan never asks for this interface.
+type LineageQueryRuntime interface {
+	WaitLineageVisible(ctx context.Context, ticks map[string]uint64) error
+}
+
+// WaitQueryMVCCVisible waits for the plan MVCC on runtime: the growing and
+// transform frontiers of the vchannel, and, for a split source read in a
+// lineage group, the applied position of every target stream.
+func WaitQueryMVCCVisible(ctx context.Context, runtime QueryRuntime, mvcc *viewpb.QueryPlanMVCC) error {
+	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+		return err
+	}
+	ticks := mvcc.GetLineageTransformingTimeticks()
+	if len(ticks) == 0 {
+		return nil
+	}
+	waiter, ok := runtime.(LineageQueryRuntime)
+	if !ok {
+		return viewerror.NewViewInvalidated("plan carries lineage ticks but the query runtime cannot wait for them")
+	}
+	return waiter.WaitLineageVisible(ctx, ticks)
 }
 
 type GrowingSegmentHandle interface {

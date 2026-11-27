@@ -126,13 +126,14 @@ func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, req *datap
 
 func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *datapb.AllocSegmentRequest {
 	return &datapb.AllocSegmentRequest{
-		CollectionId:         meta.GetCollectionId(),
-		PartitionId:          meta.GetPartitionId(),
-		SegmentId:            meta.GetSegmentId(),
-		Vchannel:             meta.GetVchannel(),
-		StorageVersion:       meta.GetStorageVersion(),
-		SchemaVersion:        meta.GetSchemaVersion(),
-		IsCreatedByStreaming: true,
+		CollectionId:          meta.GetCollectionId(),
+		PartitionId:           meta.GetPartitionId(),
+		SegmentId:             meta.GetSegmentId(),
+		Vchannel:              meta.GetVchannel(),
+		StorageVersion:        meta.GetStorageVersion(),
+		SchemaVersion:         meta.GetSchemaVersion(),
+		IsCreatedByStreaming:  true,
+		CreateSegmentTimeTick: meta.GetStat().GetCreateSegmentTimeTick(),
 	}
 }
 

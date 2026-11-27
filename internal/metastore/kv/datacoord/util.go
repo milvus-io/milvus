@@ -273,6 +273,10 @@ func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) 
 	return key, string(valueBytes), nil
 }
 
+func buildSplitShardTaskPath(task *datapb.SplitShardTask) string {
+	return fmt.Sprintf("%s/%d/%d", SplitShardTaskPrefix, task.GetCollectionId(), task.GetTaskId())
+}
+
 func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
 }

@@ -47,6 +47,13 @@ type VChannelWALView struct {
 	SegmentSnapshot                VisibleSegmentSnapshot
 	TransformLogStream             wal.TransformLogStream
 	DeleteReplayStartAfterTimeTick uint64
+
+	// SplitLineage is the record of the shard split this vchannel is the
+	// source of, or nil. LineageStreams opens the TransformLog streams of the
+	// split targets, wherever their pchannels are served; it is used only when
+	// a lineage exists.
+	SplitLineage   *streamingpb.VChannelSplitLineage
+	LineageStreams wal.TransformLogStreamManager
 }
 
 // VisibleSegmentSnapshot is the historical growing-side insert state captured at a WAL observe point.

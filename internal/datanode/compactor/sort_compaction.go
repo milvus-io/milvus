@@ -93,7 +93,7 @@ func NewSortCompactionTask(
 		cm:               cm,
 		plan:             plan,
 		tr:               timerecord.NewTimeRecorder("sort compaction"),
-		currentTime:      time.Now(),
+		currentTime:      compactionTTLTime(plan, time.Now()),
 		done:             make(chan struct{}, 1),
 		compactionParams: compactionParams,
 		sortByFieldIDs:   sortByFieldIDs,

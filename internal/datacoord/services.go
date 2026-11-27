@@ -273,13 +273,14 @@ func (s *Server) AllocSegment(ctx context.Context, req *datapb.AllocSegmentReque
 	segmentInfo, err := s.segmentManager.AllocNewGrowingSegment(
 		ctx,
 		segment.AllocNewGrowingSegmentRequest{
-			CollectionID:         req.GetCollectionId(),
-			PartitionID:          req.GetPartitionId(),
-			SegmentID:            req.GetSegmentId(),
-			ChannelName:          req.GetVchannel(),
-			StorageVersion:       req.GetStorageVersion(),
-			IsCreatedByStreaming: req.GetIsCreatedByStreaming(),
-			SchemaVersion:        req.GetSchemaVersion(),
+			CollectionID:          req.GetCollectionId(),
+			PartitionID:           req.GetPartitionId(),
+			SegmentID:             req.GetSegmentId(),
+			ChannelName:           req.GetVchannel(),
+			StorageVersion:        req.GetStorageVersion(),
+			IsCreatedByStreaming:  req.GetIsCreatedByStreaming(),
+			SchemaVersion:         req.GetSchemaVersion(),
+			CreateSegmentTimeTick: req.GetCreateSegmentTimeTick(),
 		},
 	)
 	if err != nil {
@@ -654,6 +655,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 
 		operators = append(operators, meta.ValidateSaveBinlogStorageVersion(req.GetSegmentID(), incomingStorageVersion))
+
+		// Before any side effect: the final flush of a segment of a shard split
+		// target waits until the split is recorded (see the function).
+		if s.dataViewManager != nil && req.GetFlushed() && !req.GetDropped() {
+			if err := s.checkFlushOfUndeclaredShard(seg.GetCollectionID(), seg.GetInsertChannel()); err != nil {
+				mlog.Warn(ctx, "refuse the final flush of a segment of a shard that is not declared yet",
+					mlog.Int64("segmentID", seg.GetID()), mlog.Err(err))
+				return merr.Status(err), nil
+			}
+		}
 
 		// Set segment state
 		if req.GetDropped() {
@@ -2379,6 +2390,12 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	mlog.Info(ctx, "receive DropSegmentsByTime request",
 		mlog.Int64("collectionID", collectionID))
 
+	// A split source is not in the broadcast of the truncate; its segments
+	// are truncated with the collection.
+	if err := s.truncateSplitSources(ctx, collectionID, flushTsList); err != nil {
+		mlog.Warn(ctx, "truncate the split sources of the collection failed", mlog.Err(err))
+		return err
+	}
 	for channelName, flushTs := range flushTsList {
 		// Truncate's consuming-side Acks already guarantee L1/L0 persistence and
 		// registration. Recovery checkpoint publication is independent of completion.
@@ -2460,6 +2477,13 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	if !s.meta.GetCollection(req.GetCollectionId()).IsCreated() {
 		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
+	}
+
+	// Under the collection resource key: a shard split holds it from its
+	// broadcast until its record exists, so the record is seen here.
+	if err := s.checkSplitWindow(req.GetCollectionId(), "CreateSnapshot"); err != nil {
+		mlog.Warn(ctx, "CreateSnapshot refused", mlog.Err(err))
+		return merr.Status(err), nil
 	}
 
 	// Double-check after acquiring lock — another goroutine may have created it.
