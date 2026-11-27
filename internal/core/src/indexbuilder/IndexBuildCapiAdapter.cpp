@@ -415,6 +415,11 @@ proto::cgo::IndexStats
 AdaptArtifactStats(const storage::ArtifactStats& stats) {
     proto::cgo::IndexStats result;
     result.set_mem_size(stats.MemSize());
+    if (const auto encrypted = stats.IsEncrypted(); encrypted.has_value()) {
+        result.set_encryption_state(
+            *encrypted ? proto::index::INDEX_ENCRYPTION_ENCRYPTED
+                       : proto::index::INDEX_ENCRYPTION_PLAIN);
+    }
     for (const auto& file : stats.Files()) {
         auto* output = result.add_serialized_index_infos();
         output->set_file_name(file.file_name);

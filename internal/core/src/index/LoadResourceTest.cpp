@@ -1081,6 +1081,39 @@ TEST(ScalarIndexV3ResourceTest, BitmapFrozenScratchIsBoundedForRunPayloads) {
               2 * kBitmapFrozenBatchBytes + 3 * frozen_bytes);
 }
 
+TEST(ScalarIndexV3ResourceTest, KnownPlainIgnoresInstalledCipherPlugin) {
+    auto cipher =
+        std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(1);
+    auto& plugins = storage::PluginLoader::GetInstance();
+    plugins.registerPluginForTest(cipher);
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto old_bytes = budget.CapacityBytes();
+    auto restore = folly::makeGuard([&] {
+        budget.SetCapacityBytes(old_bytes);
+        plugins.unregisterPluginForTest("CipherPlugin");
+    });
+    budget.SetCapacityBytes(0);
+    constexpr uint64_t bytes = 64 * 1024 * 1024;
+    for (bool mmap : {false, true}) {
+        auto estimate = [&](std::optional<bool> encrypted) {
+            return ScalarIndexLoadResource(DataType::INT64,
+                                           0,
+                                           bytes,
+                                           V3Params(ASCENDING_SORT),
+                                           mmap,
+                                           1000,
+                                           encrypted);
+        };
+        const auto plain = estimate(false);
+        const auto encrypted = estimate(true);
+        const auto unknown = estimate(std::nullopt);
+        EXPECT_LT(plain.max_memory_cost, encrypted.max_memory_cost);
+        EXPECT_EQ(unknown.max_memory_cost, encrypted.max_memory_cost);
+        EXPECT_EQ(plain.final_memory_cost, encrypted.final_memory_cost);
+        EXPECT_EQ(plain.final_disk_cost, encrypted.final_disk_cost);
+    }
+}
+
 TEST(ScalarIndexV3ResourceTest, EncryptedEstimatesRetainFullScratch) {
     ResourceFixture fixture;
     auto cipher =

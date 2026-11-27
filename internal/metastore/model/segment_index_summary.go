@@ -3,11 +3,13 @@ package model
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 // SegmentIndexSummary describes index inventory and task state without file metadata.
 // Completed indexes and active or pending-cleanup tasks share this read contract.
 type SegmentIndexSummary struct {
+	EncryptionState           indexpb.IndexEncryptionState
 	CollectionID              int64
 	PartitionID               int64
 	SegmentID                 int64
@@ -32,7 +34,7 @@ func SummarizeSegmentIndex(record *SegmentIndex) *SegmentIndexSummary {
 		HasArtifact:  record.HasArtifact(),
 		IndexVersion: record.IndexVersion, IndexSerializedSize: record.IndexSerializedSize, IndexMemSize: record.IndexMemSize,
 		CurrentIndexVersion: record.CurrentIndexVersion, CurrentScalarIndexVersion: record.CurrentScalarIndexVersion,
-		IndexType: record.IndexType,
+		IndexType: record.IndexType, EncryptionState: record.EncryptionState,
 	}
 }
 
@@ -43,7 +45,7 @@ func SegmentIndexSummaryFromProto(segment *datapb.SegmentInfo, summary *datapb.S
 		HasArtifact: summary.GetHasArtifact(), IndexVersion: summary.GetIndexVersion(),
 		IndexSerializedSize: summary.GetSerializedSize(), IndexMemSize: summary.GetMemSize(),
 		CurrentIndexVersion: summary.GetVectorEngineVersion(), CurrentScalarIndexVersion: summary.GetScalarEngineVersion(),
-		IndexType: summary.GetIndexType(),
+		IndexType: summary.GetIndexType(), EncryptionState: summary.GetEncryptionState(),
 	}
 }
 
@@ -53,6 +55,6 @@ func MarshalSegmentIndexSummary(record *SegmentIndexSummary, fieldID int64) *dat
 		HasArtifact: record.HasArtifact, IndexVersion: record.IndexVersion,
 		SerializedSize: record.IndexSerializedSize, MemSize: record.IndexMemSize,
 		VectorEngineVersion: record.CurrentIndexVersion, ScalarEngineVersion: record.CurrentScalarIndexVersion,
-		IndexType: record.IndexType,
+		IndexType: record.IndexType, EncryptionState: record.EncryptionState,
 	}
 }

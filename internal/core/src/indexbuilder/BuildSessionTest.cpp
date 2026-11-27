@@ -121,6 +121,7 @@ class BuildSessionTest : public ::testing::Test {
             const auto stats = session.Publish();
             EXPECT_EQ(stats.MemSize(), 0);
             EXPECT_TRUE(stats.Files().empty());
+            EXPECT_FALSE(stats.IsEncrypted().has_value());
             const auto wire_stats = AdaptArtifactStats(stats);
             EXPECT_EQ(wire_stats.mem_size(), 0);
             EXPECT_EQ(wire_stats.serialized_index_infos_size(), 0);
@@ -342,6 +343,9 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
         ASSERT_NO_THROW(session.BuildFromSource());
         const auto stats = session.Publish();
         ASSERT_EQ(stats.Files().size(), 1);
+        EXPECT_EQ(stats.IsEncrypted(), std::optional<bool>{false});
+        EXPECT_EQ(AdaptArtifactStats(stats).encryption_state(),
+                  milvus::proto::index::INDEX_ENCRYPTION_PLAIN);
         EXPECT_GT(stats.MemSize(), 0);
         EXPECT_EQ(stats.Files()[0].file_name, packed_name);
         EXPECT_EQ(stats.Files()[0].file_size, stats.MemSize());

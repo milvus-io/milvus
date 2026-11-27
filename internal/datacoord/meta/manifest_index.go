@@ -76,7 +76,7 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 		indexType = segIdx.IndexType
 	}
 	// Collection parameters describe the current definition, not this build.
-	// Leave Properties empty rather than persisting them as artifact metadata.
+	// Persist only facts reported by the artifact writer.
 
 	fieldID := m.IndexCatalog.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
@@ -93,6 +93,7 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 		MemSize:                   int64(segIdx.IndexMemSize),
 		CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+		Properties:                packed.IndexEncryptionProperties(segIdx.EncryptionState),
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 		IndexFileKeys:             common.CloneStringList(segIdx.IndexFileKeys),
 	}, nil
@@ -173,6 +174,7 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		NumRows:                   manifestIndex.NumRows,
 		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
+		EncryptionState:           manifestIndex.EncryptionState(),
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
 	}, true
 }
@@ -402,6 +404,7 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		IndexMemSize:              uint64(manifestIndex.MemSize),
 		CurrentIndexVersion:       manifestIndex.CurrentIndexVersion,
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
+		EncryptionState:           manifestIndex.EncryptionState(),
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
 		ManifestPublished:         true,

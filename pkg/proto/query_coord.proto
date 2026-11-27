@@ -520,6 +520,7 @@ message FieldIndexInfo {
     int64 index_store_version = 12 [deprecated = true];
     int32 current_scalar_index_version = 13;
     index.IndexStorePathVersion index_store_path_version = 14;
+  index.IndexEncryptionState encryption_state = 15;
 }
 
 message JsonStatsInfo {

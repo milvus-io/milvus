@@ -475,6 +475,7 @@ func (m *IndexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskIn
 	updated.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 	updated.FinishedUTCTime = uint64(time.Now().Unix())
 	updated.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+	updated.EncryptionState = taskInfo.GetEncryptionState()
 	updated.IndexStorePathVersion = actualPathVersion
 	return updated, nil
 }

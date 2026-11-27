@@ -161,6 +161,7 @@ func (s *Server) packQueryViewFieldIndexInfos(segment *datapb.SegmentInfo, segme
 			NumRows:                   segmentIndex.NumRows,
 			CurrentIndexVersion:       segmentIndex.CurrentIndexVersion,
 			CurrentScalarIndexVersion: segmentIndex.CurrentScalarIndexVersion,
+			EncryptionState:           segmentIndex.EncryptionState,
 			IndexStorePathVersion:     segmentIndex.IndexStorePathVersion,
 		})
 	}

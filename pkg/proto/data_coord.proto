@@ -517,6 +517,7 @@ message SegmentIndexSummary {
   int32 vector_engine_version = 8;
   int32 scalar_engine_version = 9;
   string index_type = 10;
+  index.IndexEncryptionState encryption_state = 11;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -1396,6 +1397,7 @@ message VectorScalarIndexInfo {
   index.IndexStorePathVersion index_store_path_version = 10;
   string index_type = 11;
   optional uint64 mem_size = 12;  // Estimated memory size, independent of index_size.
+  index.IndexEncryptionState encryption_state = 13;
 }
 
 // CopySegmentResult contains the complete result of a copy segment operation

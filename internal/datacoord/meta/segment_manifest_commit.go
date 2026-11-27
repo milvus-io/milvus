@@ -995,6 +995,7 @@ func validateManifestIndexRecordProjection(entry packed.ManifestIndexInfo, segId
 		entry.SerializedSize != int64(segIdx.IndexSerializedSize) || entry.MemSize != int64(segIdx.IndexMemSize) ||
 		entry.CurrentIndexVersion != segIdx.CurrentIndexVersion ||
 		entry.CurrentScalarIndexVersion != segIdx.CurrentScalarIndexVersion ||
+		entry.EncryptionState() != segIdx.EncryptionState ||
 		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion ||
 		!slices.Equal(entry.IndexFileKeys, segIdx.IndexFileKeys) {
 		return merr.WrapErrServiceInternalMsg(

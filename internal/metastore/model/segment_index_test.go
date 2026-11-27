@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
@@ -103,4 +105,21 @@ func TestSegmentIndex_ManifestPublishedIsProcessLocal(t *testing.T) {
 	restored := UnmarshalSegmentIndexModel(MarshalSegmentIndexModel(original))
 	assert.Equal(t, original.BuildID, restored.BuildID)
 	assert.False(t, restored.ManifestPublished, "catalog reload must not inherit manifest placement")
+}
+
+func TestSegmentIndexEncryptionPersistence(t *testing.T) {
+	for _, state := range []indexpb.IndexEncryptionState{indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED} {
+		t.Run(state.String(), func(t *testing.T) {
+			original := &SegmentIndex{BuildID: 10, EncryptionState: state}
+			wire, err := proto.Marshal(MarshalSegmentIndexModel(original))
+			assert.NoError(t, err)
+			decoded := &indexpb.SegmentIndex{}
+			assert.NoError(t, proto.Unmarshal(wire, decoded))
+			restored := UnmarshalSegmentIndexModel(decoded)
+			assert.Equal(t, state, CloneSegmentIndex(restored).EncryptionState)
+			summary := MarshalSegmentIndexSummary(SummarizeSegmentIndex(restored), 100)
+			assert.Equal(t, state, SegmentIndexSummaryFromProto(&datapb.SegmentInfo{}, summary).EncryptionState)
+		})
+	}
+	assert.Equal(t, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, UnmarshalSegmentIndexModel(&indexpb.SegmentIndex{BuildID: 10}).EncryptionState)
 }

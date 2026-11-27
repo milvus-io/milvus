@@ -61,6 +61,8 @@ struct LoadIndexInfo {
     DataType index_value_type{DataType::NONE};
     index::ReaderCaps index_caps;
     std::string uri;
+    // Missing historical metadata preserves the compatibility estimate.
+    std::optional<bool> encrypted;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
     // Remote pre-compression file size is a loading estimate, not a measurement

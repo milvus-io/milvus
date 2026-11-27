@@ -80,6 +80,11 @@ traversal and external namespaces are errors. Existing entries are not migrated.
 Builds retain their creation-time publication mode across switch changes and
 restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
 Readers and cleanup use each artifact's persisted version.
+Index encryption state describes the completed artifact. Catalog records and
+segment summaries store its tri-state enum; manifest index properties store
+`milvus.index.encryption_state` as `plain` or `encrypted`. Missing or unknown
+values retain conservative admission estimates. Copy/restore and metadata
+migration preserve this fact without inspecting file contents.
 Resolving v2 index files requires the owning segment's manifest base; load and
 snapshot consumers report missing or invalid metadata instead of guessing the
 canonical base. Snapshot generation uses its selected segment metadata.
