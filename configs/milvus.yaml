@@ -1535,10 +1535,10 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
-  collectionStatsCacheEnabled: false # Cache per-collection DataCoord quota statistics.
-  localQuotaCalculationEnabled: false # Recompute changed and previously limited collections in MixCoord. Requires collectionStatsCacheEnabled.
-  versionedRatesEnabled: false # Negotiate versioned quota snapshots at startup on coordinators and proxies.
-  incrementalRatesEnabled: false # Send the latest delta to a Proxy that has its base version.
+  collectionStatsCacheEnabled: false # DataCoord: cache per-collection quota statistics and recompute only changed collections; disable to use the full-scan reference.
+  localQuotaCalculationEnabled: false # MixCoord: recompute quota policies from changed local metadata and statistics. Requires collectionStatsCacheEnabled.
+  versionedRatesEnabled: false # Startup setting on coordinators and proxies: negotiate versioned quota snapshots and enforce their ordering. Enable everywhere before enabling deltas.
+  incrementalRatesEnabled: false # Send the latest quota delta when a proxy is at its base version, otherwise a full snapshot. Validate full snapshot capacity first.
   # FactorChangeThreshold defines the minimum relative change in factor to trigger an update.
   # If the factor change is less than this threshold (e.g., 5%), the update is skipped
   # to reduce unnecessary proxy updates. Range: (0, 1]
