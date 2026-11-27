@@ -2546,8 +2546,14 @@ class TestCreateImportJob(TestBase):
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
 
-    def test_import_parquet_array_float_nan_validation(self):
-        """Test Parquet import with Array<Float> containing NaN - should fail"""
+    @pytest.mark.parametrize(
+        "element, expected_reason",
+        [
+            pytest.param(None, "array element is not allowed to be null value for field 'float_array'", id="null"),
+            pytest.param(float("nan"), "value 'nan' is not a number or infinity", id="nan"),
+        ],
+    )
+    def test_import_parquet_array_float_validation(self, tmp_path, element, expected_reason):
         name = gen_collection_name()
         dim = 128
 
@@ -2573,47 +2579,27 @@ class TestCreateImportJob(TestBase):
         self.collection_client.collection_create(payload)
         self.wait_load_completed(name)
 
-        # Create DataFrame with NaN in float array
         data = {
             "id": [1, 2],
             "vector": [[random.random() for _ in range(dim)] for _ in range(2)],
-            "float_array": [[1.0, 2.0, 3.0], [4.0, None, 6.0]],  # Second row has None
+            "float_array": [[1.0, 2.0, 3.0], [4.0, element, 6.0]],
         }
-        df = pd.DataFrame(data)
-
-        # Save to Parquet
-        file_name = f"test_parquet_nan_{uuid4()}.parquet"
-        file_path = f"/tmp/{file_name}"
-
-        # Create parquet schema with proper array type
         pa_schema = pa.schema(
             [("id", pa.int64()), ("vector", pa.list_(pa.float32())), ("float_array", pa.list_(pa.float32()))]
         )
-        table = pa.Table.from_pandas(df, schema=pa_schema)
-        logger.info(f"table: {table}")
+        table = pa.Table.from_pydict(data, schema=pa_schema)
+        file_name = f"float_array_{uuid4()}.parquet"
+        file_path = tmp_path / file_name
         pq.write_table(table, file_path)
-
         self.storage_client.upload_file(file_path, file_name)
 
-        # Import should fail due to NaN
         payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         job_id = rsp["data"]["jobId"]
-
-        # Wait and verify import fails
-        finished = False
-        t0 = time.time()
-        while not finished:
-            rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp["data"]["state"] == "Failed":
-                reason = rsp["data"].get("reason", "").lower()
-                assert "nan" in reason or "infinite" in reason or "invalid" in reason
-                finished = True
-            elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to NaN value"
-            time.sleep(5)
-            if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+        rsp, failed = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_TIMEOUT)
+        assert failed, rsp
+        assert expected_reason in rsp["data"]["reason"].lower(), rsp
 
     def test_import_csv_extra_columns_without_dynamic(self):
         """Test CSV import with extra columns when dynamic field is disabled - should be ignored"""
