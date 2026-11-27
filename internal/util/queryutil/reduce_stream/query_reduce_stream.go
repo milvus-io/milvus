@@ -19,6 +19,7 @@ package reducestream
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -240,6 +242,11 @@ func NewReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
+	if hasGroupBy && !hasCompleteGroupKeyOrder(request.GetOrderByFields(), request.GetGroupByFieldIds()) {
+		// Early LIMIT exit is unsafe unless the request guarantees a complete
+		// group-key order across workers; otherwise drain all contributions.
+		return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
+	}
 
 	stream := &OrderedReduceStream{
 		childStreams:  reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
@@ -248,7 +255,7 @@ func NewReduceStream(
 		reduceType:    reduce.ToReduceType(request.GetReduceType()),
 		orderByFields: request.GetOrderByFields(),
 	}
-	if len(request.GetGroupByFieldIds()) > 0 {
+	if hasGroupBy {
 		groups, err := newOrderedGroups(request, schema)
 		if err != nil {
 			return nil, err
@@ -258,6 +265,21 @@ func NewReduceStream(
 		stream.seenPKs = make(map[any]struct{})
 	}
 	return stream, nil
+}
+
+func hasCompleteGroupKeyOrder(orderByFields []*planpb.OrderByField, groupByFieldIDs []int64) bool {
+	if len(groupByFieldIDs) == 0 || len(orderByFields) == 0 {
+		return false
+	}
+	seen := make(map[int64]struct{}, len(groupByFieldIDs))
+	for _, field := range orderByFields {
+		fieldID := field.GetFieldId()
+		if !slices.Contains(groupByFieldIDs, fieldID) {
+			return false
+		}
+		seen[fieldID] = struct{}{}
+	}
+	return len(seen) == len(groupByFieldIDs)
 }
 
 // NewShardReduceStream resolves worker duplicate PKs by timestamp.
@@ -545,12 +567,13 @@ func buildRetrieveChunk(units []queryReduceUnit) (*internalpb.RetrieveResults, e
 	return chunk, nil
 }
 
-// UnOrderedReduceStream merges global aggregates without depending on child arrival order.
+// UnOrderedReduceStream merges aggregates without depending on child arrival order.
 type UnOrderedReduceStream struct {
 	recvMu       sync.Mutex                                        // Serializes Recv and cleanup after cancellation.
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults] // Receives and closes child streams.
 	childBuffers []*internalpb.RetrieveResults                     // Holds available partial results, one Chunk per child.
 	reducer      *agg.GroupAggReducer                              // Decodes, merges and encodes aggregate partials.
+	outputBuffer *agg.GroupAggBuffer                               // Accumulates global or unordered grouped partials.
 	chunkBytes   int                                               // Reducible-payload byte threshold for output Chunks.
 
 	outputChunks []*internalpb.RetrieveResults // Partial aggregate Chunks prepared after all children drain.
@@ -575,11 +598,45 @@ func newUnOrderedReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
-	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), typeutil.Unlimited, schema)
+	groupByFieldIDs := request.GetGroupByFieldIds()
+	groupLimit := typeutil.Unlimited
+	var keyOrder []agg.GroupKeyOrder
+	if len(groupByFieldIDs) > 0 && request.GetLimit() > 0 {
+		explicitOrder, err := orderby.ConvertFromPlanOrderByFields(request.GetOrderByFields(), schema)
+		if err != nil {
+			return nil, err
+		}
+		fullOrder, err := orderby.GroupKeyOrder(explicitOrder, groupByFieldIDs, schema)
+		if err != nil {
+			return nil, err
+		}
+		groupLimit = request.GetLimit()
+		keyOrder = make([]agg.GroupKeyOrder, 0, len(fullOrder))
+		for _, field := range fullOrder {
+			col := slices.Index(groupByFieldIDs, field.FieldID)
+			if col < 0 {
+				keyOrder = nil
+				groupLimit = typeutil.Unlimited
+				break
+			}
+			keyOrder = append(keyOrder, agg.GroupKeyOrder{
+				ColIndex:   col,
+				DataType:   field.DataType,
+				Ascending:  field.Ascending,
+				NullsFirst: field.NullsFirst,
+			})
+		}
+	}
+	reducer := agg.NewOrderedGroupAggReducer(groupByFieldIDs, request.GetAggregates(), groupLimit, schema, keyOrder)
+	var outputBuffer *agg.GroupAggBuffer
+	if len(groupByFieldIDs) > 0 {
+		outputBuffer = reducer.NewBuffer()
+	}
 	return &UnOrderedReduceStream{
 		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
 		childBuffers: make([]*internalpb.RetrieveResults, len(childStreams)),
 		reducer:      reducer,
+		outputBuffer: outputBuffer,
 		chunkBytes:   chunkBytes,
 	}, nil
 }
@@ -596,8 +653,11 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 
 	if s.outputChunks == nil {
-		// Global aggregation retains one mergeable partial, not a map of groups.
-		reduced := &agg.PartialAggregationResult{}
+		// Global aggregation retains one mergeable partial; grouped fallback uses GroupAggBuffer.
+		var reduced *agg.PartialAggregationResult
+		if s.outputBuffer == nil {
+			reduced = &agg.PartialAggregationResult{}
+		}
 		for {
 			readyBuffers, err := s.getReadyBuffers()
 			if err != nil {
@@ -615,16 +675,29 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 				}
 				partialResults[i] = partial
 			}
-			partialResults = append(partialResults, reduced)
-			reduced, err = s.reducer.Merge(context.Background(), partialResults)
-			if err != nil {
-				return nil, s.fail(err)
+			if s.outputBuffer != nil {
+				if err := s.outputBuffer.Merge(partialResults); err != nil {
+					return nil, s.fail(err)
+				}
+			} else {
+				partialResults = append(partialResults, reduced)
+				reduced, err = s.reducer.Merge(context.Background(), partialResults)
+				if err != nil {
+					return nil, s.fail(err)
+				}
 			}
 			for i := range s.childBuffers {
 				s.childBuffers[i] = nil
 			}
 		}
 
+		if s.outputBuffer != nil {
+			var err error
+			reduced, err = s.outputBuffer.Result()
+			if err != nil {
+				return nil, s.fail(err)
+			}
+		}
 		result, err := s.reducer.EncodePartial(reduced)
 		if err != nil {
 			return nil, s.fail(err)
@@ -635,6 +708,7 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		if err != nil {
 			return nil, s.fail(err)
 		}
+		s.outputBuffer = nil
 		s.reducer = nil
 	}
 
@@ -748,6 +822,7 @@ func (s *UnOrderedReduceStream) closeChildren() error {
 	for i := range s.outputChunks {
 		s.outputChunks[i] = nil
 	}
+	s.outputBuffer = nil
 	s.reducer = nil
 	s.metadata = nil
 	return s.closeErr

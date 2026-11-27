@@ -383,6 +383,11 @@ func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64,
 		return nil, err
 	}
 
+	result := toPlanOrderByFields(parsed)
+	return result, nil
+}
+
+func toPlanOrderByFields(parsed []*orderby.OrderByField) []*planpb.OrderByField {
 	result := make([]*planpb.OrderByField, len(parsed))
 	for i, f := range parsed {
 		result[i] = &planpb.OrderByField{
@@ -391,7 +396,7 @@ func translateOrderByFields(orderByFieldSpecs []string, groupByFieldIDs []int64,
 			NullsFirst: f.NullsFirst,
 		}
 	}
-	return result, nil
+	return result
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -721,6 +726,16 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, groupByFieldsIDs, t.schema.CollectionSchema)
 	if err != nil {
 		return err
+	}
+	if len(orderByFields) == 0 && len(groupByFieldsIDs) > 0 && t.queryParams.limit > 0 {
+		// Bounded GROUP BY queries without explicit ORDER BY default to
+		// group-key order so both legacy and upgraded workers emit matching
+		// top-K prefixes for OrderedReduceStream.
+		defaultOrder, err := orderby.GroupKeyOrder(nil, groupByFieldsIDs, t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		orderByFields = toPlanOrderByFields(defaultOrder)
 	}
 	t.plan.GetQuery().OrderByFields = orderByFields
 	// Also populate on RetrieveRequest so QN/Delegator can read directly
