@@ -4531,11 +4531,15 @@ func TestRefreshExternalCollectionMilvusTableMappedFieldIDsAndAddField(t *testin
 	// successfully indexing synthesized NULLs. Reuse this task after refresh.
 	scoreIndex, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(externalName, "score", index.NewSortedIndex()))
 	require.NoError(t, err)
-	beforeRefreshCtx, cancelBeforeRefresh := context.WithTimeout(ctx, 30*time.Second)
-	indexErr := scoreIndex.Await(beforeRefreshCtx)
-	require.Error(t, indexErr)
-	require.ErrorIs(t, beforeRefreshCtx.Err(), context.DeadlineExceeded)
-	cancelBeforeRefresh()
+	pendingStates := []index.IndexState{common.IndexStateUnissued, common.IndexStateInProgress, common.IndexStateRetry}
+	for until := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+		desc, err := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(externalName, "score"))
+		require.NoError(t, err)
+		require.Contains(t, pendingStates, desc.State, "score index must remain pending before refresh")
+		if !time.Now().Before(until) {
+			break
+		}
+	}
 	// Keep the collection loaded and explicitly import the expanded projection.
 	refresh, err = mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(externalName))
 	require.NoError(t, err)
