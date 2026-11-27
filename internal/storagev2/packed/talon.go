@@ -43,11 +43,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// URI schemes understood by the raw Talon client. Azure uses "az" in the
-// Talon protocol, independently of the cloud provider name.
+// URI schemes used by the Talon protocol.
 const (
-	TalonSchemeS3    = "s3"
-	TalonSchemeAzure = "az"
+	TalonSchemeS3      = "s3"
+	TalonSchemeAliyun  = "ali"
+	TalonSchemeTencent = "tc"
+	TalonSchemeGCS     = "gcs"
+	TalonSchemeAzure   = "az"
 )
 
 // TalonReadRequest describes an object range. A nil ObjectSize asks Talon to

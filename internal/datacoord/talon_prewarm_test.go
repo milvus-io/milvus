@@ -37,17 +37,23 @@ import (
 
 func TestManifestPrewarmURI(t *testing.T) {
 	descriptor := packed.MarshalManifestPath("files//literal/../insert_log/1/2/3/", 17)
-	for _, provider := range []string{"aws", "aliyun", "tencent", "huawei", "gcp", "azure"} {
-		t.Run(provider, func(t *testing.T) {
-			scheme := "s3"
-			if provider == "azure" {
-				scheme = "az"
-			}
-			resolve, err := manifestPrewarmResolver(provider, "bucket///")
+	for _, tc := range []struct {
+		provider string
+		scheme   string
+	}{
+		{"aws", "s3"},
+		{"aliyun", "ali"},
+		{"tencent", "tc"},
+		{"huawei", "s3"},
+		{"gcp", "gcs"},
+		{"azure", "az"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			resolve, err := manifestPrewarmResolver(tc.provider, "bucket///")
 			require.NoError(t, err)
 			uri, err := resolve(descriptor)
 			require.NoError(t, err)
-			require.Equal(t, scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
+			require.Equal(t, tc.scheme+"://bucket/files//literal/../insert_log/1/2/3//_metadata/manifest-17.avro", uri)
 			// Growing V3 metadata starts at ManifestEarliest before any physical file.
 			uri, err = resolve(packed.MarshalManifestPath("files/insert_log/1/2/3", 0))
 			require.NoError(t, err)
