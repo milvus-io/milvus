@@ -16,9 +16,12 @@
 
 package paramtable
 
+import "strings"
+
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
 	EnableV1              ParamItem `refreshable:"false"`
+	V2UnknownFieldPolicy  ParamItem `refreshable:"false"`
 	DebugMode             ParamItem `refreshable:"false"`
 	Port                  ParamItem `refreshable:"false"`
 	AcceptTypeAllowInt64  ParamItem `refreshable:"true"`
@@ -61,6 +64,28 @@ WebUI data and telemetry commands require these console APIs; disable proxy.http
 		Export: true,
 	}
 	p.EnableV1.Init(base.mgr)
+
+	p.V2UnknownFieldPolicy = ParamItem{
+		Key:          "proxy.http.v2UnknownFieldPolicy",
+		DefaultValue: "ignore",
+		Version:      "3.0.1",
+		Forbidden:    true,
+		Export:       true,
+		Doc: `Default REST v2 unknown request field policy: ignore (compatible default), warn (continue with an
+X-Milvus-Warning response header), or strict (reject before executing the handler). A request-level
+unknownFieldPolicy query parameter overrides this default. Only fixed API structures are checked;
+entity data and open parameter maps keep their existing validation. Requires restart.`,
+		Formatter: func(value string) string {
+			value = strings.ToLower(strings.TrimSpace(value))
+			switch value {
+			case "ignore", "warn", "strict":
+				return value
+			default:
+				panic("proxy.http.v2UnknownFieldPolicy must be ignore, warn, or strict")
+			}
+		},
+	}
+	p.V2UnknownFieldPolicy.Init(base.mgr)
 
 	p.DebugMode = ParamItem{
 		Key:          "proxy.http.debug_mode",

@@ -72,3 +72,28 @@ func TestHTTPConfig_V1Override(t *testing.T) {
 	assert.False(t, cfg.EnableV1.GetAsBool())
 	assert.True(t, cfg.Enabled.GetAsBool(), "the route switch must not disable the HTTP listener")
 }
+
+func TestHTTPConfig_V2UnknownFieldPolicy(t *testing.T) {
+	for _, tc := range []struct{ value, want string }{
+		{"", "ignore"}, {"ignore", "ignore"}, {" WARN ", "warn"}, {"STRICT", "strict"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(base.mgr.Close)
+			if tc.value != "" {
+				require.NoError(t, base.Save("proxy.http.v2UnknownFieldPolicy", tc.value))
+			}
+			cfg := httpConfig{}
+			cfg.init(base)
+			require.Equal(t, tc.want, cfg.V2UnknownFieldPolicy.GetValue())
+		})
+	}
+	for _, value := range []string{"", "warning", "false", " ", "strict,warn"} {
+		t.Run("invalid/"+value, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(base.mgr.Close)
+			require.NoError(t, base.Save("proxy.http.v2UnknownFieldPolicy", value))
+			require.Panics(t, func() { cfg := httpConfig{}; cfg.init(base) }, "bad operator configuration must fail startup")
+		})
+	}
+}
