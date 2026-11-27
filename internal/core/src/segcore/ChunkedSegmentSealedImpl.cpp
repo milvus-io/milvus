@@ -3439,7 +3439,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 packing.force_one_row_group_per_cell,
                 std::move(packing.skip_metrics_by_field));
         auto chunked_column_group =
-            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+            std::make_shared<ChunkedColumnGroup>(std::move(translator), op_ctx);
 
         for (const auto& field_id : milvus_field_ids) {
             const auto& field_meta = field_metas.at(field_id);
@@ -9910,7 +9910,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             /*enable_async_load=*/enable_async_load,
             std::move(struct_projections));
     const auto chunked_column_group =
-        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+        std::make_shared<ChunkedColumnGroup>(std::move(translator), op_ctx);
 
     for (const auto& field_id : milvus_field_ids) {
         const auto& field_meta = field_metas.at(field_id);

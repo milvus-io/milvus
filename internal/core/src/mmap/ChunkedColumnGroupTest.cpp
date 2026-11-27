@@ -167,6 +167,44 @@ class ChunkedColumnGroupTest : public ::testing::Test {
     std::shared_ptr<Chunk> string_chunk;
 };
 
+TEST_F(ChunkedColumnGroupTest, EagerWarmupPreservesLoadContext) {
+    class ObservingTranslator : public TestGroupChunkTranslator {
+     public:
+        using TestGroupChunkTranslator::TestGroupChunkTranslator;
+        OpContext* observed = nullptr;
+
+        std::vector<std::pair<cid_t, std::unique_ptr<GroupChunk>>>
+        get_cells(OpContext* ctx, const std::vector<cid_t>& cids) override {
+            observed = ctx;
+            return TestGroupChunkTranslator::get_cells(ctx, cids);
+        }
+    };
+    std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
+    chunks[FieldId(1)] = int64_chunk;
+    std::vector<std::unique_ptr<GroupChunk>> groups;
+    groups.push_back(std::make_unique<GroupChunk>(chunks));
+    auto translator = std::make_unique<ObservingTranslator>(
+        1, std::vector<int64_t>{5}, "eager-warmup-context", std::move(groups));
+    translator->meta()->cache_warmup_policy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    auto* observer = translator.get();
+    OpContext ctx;
+    ChunkedColumnGroup group(std::move(translator), &ctx);
+    ASSERT_EQ(observer->observed, &ctx);
+    EXPECT_EQ(observer->observed->sequence_id, ctx.sequence_id);
+    EXPECT_EQ(group.NumRows(), 5);
+}
+
+TEST_F(ChunkedColumnGroupTest, EagerWarmupHonorsPreCancelledContext) {
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+    OpContext ctx(cancellation.getToken());
+    auto translator = MakeGroupTranslator("eager-warmup-cancelled");
+    translator->meta()->cache_warmup_policy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+    EXPECT_THROW(ChunkedColumnGroup(std::move(translator), &ctx), SegcoreError);
+}
+
 TEST_F(ChunkedColumnGroupTest, GroupChunk) {
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     chunks[FieldId(1)] = int64_chunk;

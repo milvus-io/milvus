@@ -38,6 +38,7 @@
 #include "index/scalar/fmindex/FmIndexArtifact.h"
 #include "index/scalar/fmindex/FmIndexBuilder.h"
 #include "common/EasyAssert.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSourceUtils.h"
 #include "index/contracts/Registry.h"
 #include "index/fmindex/FMIndex.h"
@@ -383,10 +384,7 @@ folly::coro::Task<std::unique_ptr<FmIndexStorage>>
 FmIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                    const storage::LoadOptions& opts,
                                    bool use_async) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     const auto state =
         std::any_cast<std::shared_ptr<PackedFmState>>(plan.load_context);
     if (state->nullable && state->total_rows % 8 != 0) {

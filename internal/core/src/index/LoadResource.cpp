@@ -40,6 +40,7 @@
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadAdmissionController.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "folly/coro/BlockingWait.h"
@@ -266,10 +267,7 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
         return {};
     }
     try {
-        const auto priority =
-            op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH;
+        const auto priority = milvus::ResolveLoadPriority(op_ctx);
         auto read_type = [&]() -> folly::coro::Task<std::vector<uint8_t>> {
             storage::LoadOptions options;
             options.op_ctx = op_ctx;
@@ -284,7 +282,8 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
         };
         const auto type =
             folly::coro::blockingWait(folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor({}, priority), read_type()));
+                storage::ResolveAsyncLoadExecutor({}, op_ctx, priority),
+                read_type()));
         storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
         if (type.size() != sizeof(uint8_t)) {
             LOG_WARN(

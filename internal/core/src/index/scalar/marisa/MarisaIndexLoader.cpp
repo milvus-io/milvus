@@ -45,6 +45,7 @@
 #include "index/ParamUtils.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
 #include "index/Families.h"
@@ -111,10 +112,7 @@ ReadEntryVector(bool use_async,
                 std::string_view entry_name,
                 const std::string& staging_dir,
                 std::optional<size_t> expected_bytes = std::nullopt) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto run_io = [&]() -> folly::coro::Task<std::shared_ptr<std::vector<T>>> {
         if (!source.HasEntry(entry_name)) {
             ThrowInfo(DataFormatBroken,
@@ -170,7 +168,11 @@ ReadEntryVector(bool use_async,
         co_return co_await run_io();
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(), priority),
+            storage::LocalFileIOPool::GetInstance().GetExecutor(),
+            storage::ResolveAsyncLoadPriority(
+                co_await folly::coro::co_current_executor, priority),
+            storage::GetAsyncLoadSequence(
+                co_await folly::coro::co_current_executor)),
         run_io());
 }
 
@@ -306,10 +308,7 @@ folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     if (ParseNested(opts.params)) {
         ThrowInfo(DataTypeInvalid,
                   "marisa indexes support row-domain strings only");
@@ -768,10 +767,7 @@ folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
 MarisaIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                        const storage::LoadOptions& opts,
                                        bool use_async) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     const auto& state =
         std::any_cast<const std::shared_ptr<PackedMarisaState>&>(
             plan.load_context);

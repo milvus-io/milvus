@@ -33,6 +33,7 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
+#include "storage/ThreadPools.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -135,11 +136,7 @@ BsonInvertedIndex::LoadIndex(storage::FileSource& source,
                              const storage::LoadOptions& options,
                              bool use_async) {
     if (is_load_) {
-        const auto priority =
-            options.op_ctx &&
-                    options.op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH;
+        const auto priority = milvus::ResolveLoadPriority(options.op_ctx);
         const auto token = options.op_ctx ? options.op_ctx->cancellation_token
                                           : folly::CancellationToken{};
         storage::ThrowIfCancelled(token, "load BSON index");

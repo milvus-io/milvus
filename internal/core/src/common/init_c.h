@@ -124,6 +124,10 @@ SetLoadAsyncReadEnabled(bool enabled);
 CStatus
 SetLoadExecutorThreads(int threads);
 
+// Startup POC CPU task weights; non-positive values restore 32:8:1.
+void
+SetLoadSchedulingWeights(int urgent, int high, int low);
+
 // Returns the effective worker limit, including before first executor use.
 int
 GetLoadExecutorThreads();

@@ -1656,9 +1656,7 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
                               "load JSON stats metadata");
     std::string content;
     if (*file_manager_context_.use_async_load) {
-        const auto priority = ctx->runtime_load_priority.value_or(0) != 0
-                                  ? proto::common::LoadPriority::LOW
-                                  : proto::common::LoadPriority::HIGH;
+        const auto priority = milvus::ResolveLoadPriority(ctx);
         auto read = [&]() -> folly::coro::Task<void> {
             auto metadata_lease =
                 co_await storage::AcquireMetadataLoadSlotAsync(
@@ -1678,7 +1676,7 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
                 ctx->cancellation_token);
         };
         folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor({}, priority), read()));
+            storage::ResolveAsyncLoadExecutor({}, ctx, priority), read()));
     } else {
         content.resize(rcm_->Size(remote_path));
         rcm_->Read(remote_path, content.data(), content.size());
@@ -1927,9 +1925,7 @@ JsonKeyStats::LoadShreddingMeta(
     }
     const auto properties = GetJsonStatsReadProperties();
     const auto& token = ctx->cancellation_token;
-    const auto priority = ctx->runtime_load_priority.value_or(0) != 0
-                              ? proto::common::LoadPriority::LOW
-                              : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(ctx);
     std::vector<JsonStatsParquetMetadata> metadata;
     if (*file_manager_context_.use_async_load) {
         auto inspect =
@@ -1953,7 +1949,7 @@ JsonKeyStats::LoadShreddingMeta(
             co_return std::move(result).value();
         };
         metadata = folly::coro::blockingWait(folly::coro::co_withExecutor(
-            storage::ResolveAsyncLoadExecutor({}, priority), inspect()));
+            storage::ResolveAsyncLoadExecutor({}, ctx, priority), inspect()));
     } else {
         auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
         metadata.resize(files.size());
@@ -2024,7 +2020,7 @@ JsonKeyStats::LoadShreddingMeta(
         };
         if (*file_manager_context_.use_async_load) {
             folly::coro::blockingWait(folly::coro::co_withExecutor(
-                storage::ResolveAsyncLoadExecutor({}, priority),
+                storage::ResolveAsyncLoadExecutor({}, ctx, priority),
                 read_layout()));
         } else {
             folly::coro::blockingWait(read_layout());
@@ -2146,10 +2142,7 @@ JsonKeyStats::LoadColumnGroup(
     const bool eager_load =
         resolved_warmup_policy != CacheWarmupPolicy::CacheWarmupPolicy_Disable;
     const bool enable_async_load = *file_manager_context_.use_async_load;
-    const auto preparation_priority =
-        ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto preparation_priority = milvus::ResolveLoadPriority(ctx);
 
     if (eager_load) {
         const auto needed_columns =
@@ -2212,7 +2205,7 @@ JsonKeyStats::LoadColumnGroup(
             /*enable_async_load=*/enable_async_load);
 
         const auto chunked_column_group =
-            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+            std::make_shared<ChunkedColumnGroup>(std::move(translator), ctx);
 
         for (const auto& inner_field_id : milvus_field_ids) {
             const auto& field_meta = field_meta_map.at(inner_field_id);
@@ -2331,7 +2324,7 @@ JsonKeyStats::LoadColumnGroup(
             /*enable_async_load=*/enable_async_load);
 
         const auto chunked_column_group =
-            std::make_shared<ChunkedColumnGroup>(std::move(translator));
+            std::make_shared<ChunkedColumnGroup>(std::move(translator), ctx);
         const auto column = std::make_shared<ProxyChunkColumn>(
             chunked_column_group, inner_field_id, field_meta);
 

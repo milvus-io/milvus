@@ -294,13 +294,6 @@ struct EntryState {
     std::atomic<bool> failed{false};
 };
 
-LoadAdmissionPriority
-BudgetPriority(proto::common::LoadPriority priority) {
-    return priority == proto::common::LoadPriority::LOW
-               ? LoadAdmissionPriority::Low
-               : LoadAdmissionPriority::High;
-}
-
 void
 ValidatePlan(const IndexEntryDirectory& directory,
              const std::vector<EntryLoadPlan>& entries) {
@@ -466,7 +459,11 @@ PrepareTargetsAsync(const std::vector<EntryLoadPlan>& entries,
                          "AsyncIndexEntryReader::PrepareTarget");
         co_await folly::coro::co_withExecutor(
             ResolveAsyncLoadExecutor(
-                LocalFileIOPool::GetInstance().GetExecutor(), priority),
+                LocalFileIOPool::GetInstance().GetExecutor(),
+                ResolveAsyncLoadPriority(
+                    co_await folly::coro::co_current_executor, priority),
+                GetAsyncLoadSequence(
+                    co_await folly::coro::co_current_executor)),
             PrepareFileTargetAsync(target, priority, cancellation_token));
         ThrowIfCancelled(cancellation_token,
                          "AsyncIndexEntryReader::PrepareTarget");
@@ -523,7 +520,11 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     ThrowIfCancelled(operation_cancellation_token,
                      "AsyncIndexEntryReader::PlanValidation");
     ValidatePlan(Directory(), entries);
-    auto work_executor = ResolveAsyncLoadExecutor({}, priority);
+    auto work_executor = ResolveAsyncLoadExecutor(
+        {},
+        ResolveAsyncLoadPriority(co_await folly::coro::co_current_executor,
+                                 priority),
+        GetAsyncLoadSequence(co_await folly::coro::co_current_executor));
     AssertInfo(static_cast<bool>(work_executor),
                "Shared LoadExecutor is unavailable");
     co_await PrepareTargetsAsync(
@@ -544,7 +545,8 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     auto effective_cancellation_token = folly::cancellation_token_merge(
         operation_cancellation_token, failure_state->Token());
     auto& budget = LoadAdmissionController::GetInstance();
-    auto budget_priority = BudgetPriority(priority);
+    auto budget_priority =
+        ResolveAsyncLoadPriority(work_executor.get(), priority);
     // This closure stays alive until every slice has joined below.
     auto read_slice = [this, priority](
                           std::shared_ptr<EntryState> state,
@@ -638,10 +640,11 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
         auto [entry_index, slice_index] = *next;
         const auto& slice = states[entry_index]->slices[slice_index];
         try {
-            auto lease =
-                co_await budget.AcquireAsync({slice.admission_bytes, 1},
-                                             budget_priority,
-                                             effective_cancellation_token);
+            auto lease = co_await budget.AcquireAsync(
+                {slice.admission_bytes, 1},
+                budget_priority,
+                effective_cancellation_token,
+                GetAsyncLoadSequence(work_executor.get()));
             if (failure_state->FirstError() != nullptr) {
                 break;
             }
@@ -685,7 +688,11 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     if (!cleanup_targets.empty()) {
         co_await folly::coro::co_withExecutor(
             ResolveAsyncLoadExecutor(
-                LocalFileIOPool::GetInstance().GetExecutor(), priority),
+                LocalFileIOPool::GetInstance().GetExecutor(),
+                ResolveAsyncLoadPriority(
+                    co_await folly::coro::co_current_executor, priority),
+                GetAsyncLoadSequence(
+                    co_await folly::coro::co_current_executor)),
             FinishFileTargetsAsync(cleanup_targets,
                                    operation_cancellation_token));
     }

@@ -103,14 +103,22 @@ PriorityForLoad(const std::string& priority_str) {
     return milvus::proto::common::LoadPriority::HIGH;
 }
 
-// A query override applies only to this load; warmup retains its configured priority.
+// Internal OpContext value for Search demand loads. Never send it as a proto priority.
+inline constexpr int32_t kUrgentRuntimeLoadPriority = 2;
+
+// Two-class readers service Urgent as High.
 inline milvus::proto::common::LoadPriority
 ResolveLoadPriority(const milvus::OpContext* ctx,
-                    milvus::proto::common::LoadPriority configured_priority) {
-    return ctx == nullptr
-               ? configured_priority
-               : static_cast<milvus::proto::common::LoadPriority>(
-                     ctx->runtime_load_priority.value_or(configured_priority));
+                    milvus::proto::common::LoadPriority configured_priority =
+                        milvus::proto::common::LoadPriority::HIGH) {
+    if (ctx == nullptr || !ctx->runtime_load_priority) {
+        return configured_priority;
+    }
+    const auto priority = *ctx->runtime_load_priority;
+    return priority == milvus::proto::common::LoadPriority::HIGH ||
+                   priority == kUrgentRuntimeLoadPriority
+               ? milvus::proto::common::LoadPriority::HIGH
+               : milvus::proto::common::LoadPriority::LOW;
 }
 
 class ThreadPools {

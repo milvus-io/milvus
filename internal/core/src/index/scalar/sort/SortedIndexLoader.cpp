@@ -45,6 +45,7 @@
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "index/scalar/ScalarIndexUtils.h"
+#include "storage/ThreadPools.h"
 #include "storage/artifact/LocalFileUtils.h"
 #include "index/Families.h"
 #include "index/Utils.h"
@@ -316,10 +317,7 @@ ReadEntryVector(bool use_async,
                 std::string_view name,
                 size_t expected_bytes,
                 const std::string& staging_dir) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto run_io = [&]() -> folly::coro::Task<std::shared_ptr<std::vector<T>>> {
         if (!source.HasEntry(name)) {
             ThrowInfo(
@@ -365,7 +363,11 @@ ReadEntryVector(bool use_async,
         co_return co_await run_io();
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(), priority),
+            storage::LocalFileIOPool::GetInstance().GetExecutor(),
+            storage::ResolveAsyncLoadPriority(
+                co_await folly::coro::co_current_executor, priority),
+            storage::GetAsyncLoadSequence(
+                co_await folly::coro::co_current_executor)),
         run_io());
 }
 
@@ -378,10 +380,7 @@ MapEntry(bool use_async,
          std::string_view name,
          const std::string& staging_dir,
          std::optional<size_t> expected_bytes = std::nullopt) {
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     auto run_io = [&]() -> folly::coro::Task<std::shared_ptr<SortedMmapOwner>> {
         if (!source.HasEntry(name)) {
             ThrowInfo(
@@ -432,7 +431,11 @@ MapEntry(bool use_async,
         co_return co_await run_io();
     co_return co_await folly::coro::co_withExecutor(
         storage::ResolveAsyncLoadExecutor(
-            storage::LocalFileIOPool::GetInstance().GetExecutor(), priority),
+            storage::LocalFileIOPool::GetInstance().GetExecutor(),
+            storage::ResolveAsyncLoadPriority(
+                co_await folly::coro::co_current_executor, priority),
+            storage::GetAsyncLoadSequence(
+                co_await folly::coro::co_current_executor)),
         run_io());
 }
 
@@ -666,9 +669,7 @@ PlanSortedFile(IndexLoadPlan& plan,
     auto file =
         std::make_shared<storage::IndexFileTarget>(local.Path(), bytes, true);
     file->Prepare(storage::io::GetPriorityFromLoadPriority(
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH));
+        milvus::ResolveLoadPriority(opts.op_ctx)));
     static_cast<void>(local.Release());
     plan.entries.push_back(
         {std::string(name), storage::FileEntryTarget{file, 0, bytes}});
@@ -1088,10 +1089,7 @@ SortedIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
                                        bool use_async) {
     const auto state =
         std::any_cast<std::shared_ptr<PackedSortedState>>(plan.load_context);
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
+    const auto priority = milvus::ResolveLoadPriority(opts.op_ctx);
     std::shared_ptr<SortedMmapOwner> data_mapping;
     std::shared_ptr<SortedMmapOwner> offsets_mapping;
     if (state->data_file || state->offsets_file) {

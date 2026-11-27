@@ -16,8 +16,14 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "folly/Executor.h"
 #include "pb/common.pb.h"
+
+namespace milvus {
+struct OpContext;
+}  // namespace milvus
 
 namespace milvus::storage {
 
@@ -31,11 +37,48 @@ SetAsyncLoadThreadPoolSize(int threads);
 [[nodiscard]] int
 GetAsyncLoadThreadPoolSize();
 
-// Returns a priority-aware keep-alive for the supplied executor, or for the
-// process-wide async-load executor when executor is empty.
-// Default Linux workers use nice 19 independently of their HIGH/LOW task queue.
+// Sets CPU task-count and admission request-count weights in URGENT/HIGH/LOW
+// order without creating the pool. Both schedulers reset their quota rounds.
+// Non-positive values restore 32:8:1. Existing queues start a fresh quota round.
+void
+SetAsyncLoadSchedulingWeights(int urgent, int high, int low);
+
+// Reads the immutable sequence bound to a coroutine's current executor; 0 if absent.
+[[nodiscard]] uint64_t
+GetAsyncLoadSequence(const folly::Executor* executor) noexcept;
+
+// Local CPU and admission classes; the wire enum remains High/Low.
+enum class AsyncLoadPriority { Urgent, High, Low };
+
+// Preserves a local Urgent binding, including on custom executors. Otherwise
+// respects the explicit wire High/Low argument, including deliberate demotion.
+// Use the AsyncLoadPriority overload to explicitly demote a bound Urgent task.
+[[nodiscard]] AsyncLoadPriority
+ResolveAsyncLoadPriority(const folly::Executor* executor,
+                         milvus::proto::common::LoadPriority fallback) noexcept;
+
+// Binds priority and sequence_id to every submission/resumption. The default pool
+// uses configured URGENT:HIGH:LOW task quotas (default 32:8:1), skipping empty classes.
+// Within a class: sequence_id, then FIFO; 0 follows numbered loads.
+// Custom executors keep their own queue discipline but retain the bound sequence.
+// An already bound executor retains its sequence when sequence_id is omitted.
+// Quotas count task reservations, not CPU time; running tasks are not preempted.
+// Default Linux workers use nice 19 independently of their task priority.
 [[nodiscard]] folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
+                         AsyncLoadPriority priority,
+                         uint64_t sequence_id = 0);
+
+// Existing wire priorities map to High/Low.
+[[nodiscard]] folly::Executor::KeepAlive<>
+ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
+                         milvus::proto::common::LoadPriority load_priority,
+                         uint64_t sequence_id = 0);
+
+// Bind the operation's sequence and preserve its local Urgent override.
+[[nodiscard]] folly::Executor::KeepAlive<>
+ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
+                         const OpContext* ctx,
                          milvus::proto::common::LoadPriority load_priority);
 
 }  // namespace milvus::storage

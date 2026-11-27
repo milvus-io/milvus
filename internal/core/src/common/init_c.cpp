@@ -259,6 +259,11 @@ SetLoadExecutorThreads(const int threads) {
     }
 }
 
+void
+SetLoadSchedulingWeights(int urgent, int high, int low) {
+    milvus::storage::SetAsyncLoadSchedulingWeights(urgent, high, low);
+}
+
 int
 GetLoadExecutorThreads() {
     return milvus::storage::GetAsyncLoadThreadPoolSize();
