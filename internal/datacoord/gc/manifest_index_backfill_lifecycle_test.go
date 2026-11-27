@@ -21,9 +21,11 @@ import (
 	"path"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -44,20 +47,20 @@ func TestManifestIndexBackfillGCRechecksLegacyObservation(t *testing.T) {
 	index.SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 	observed := m.GetSegment(ctx, meta.RestartSegID)
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
-	item := segmentIndexGCItem{segIdx: record, files: gc.GetAllIndexFilesOfIndex(record)}
-	for file := range item.files {
+	files := recordedIndexFiles(t, gc, record)
+	for file := range files {
 		require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 		t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
 	}
 	// Backfill passed its live-definition check before DDL retired the index.
 	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
 	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
-	gc.recycleRecordOnlySegmentIndex(ctx, observed, item)
+	gc.recycleRecordOnlySegmentIndex(ctx, observed, record)
 	_, exists := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, exists, "stale GC must preserve the driver of manifest retraction")
-	for file := range item.files {
+	for file := range files {
 		present, err := m.ChunkManager.Exist(ctx, file)
 		require.NoError(t, err)
 		assert.True(t, present, "recheck precedes deletion")
@@ -111,6 +114,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, initial)))
 			first, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+			first = indexRecordWithFiles(t, m, first)
 			first.IndexStorePathVersion = layout
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AlterSegmentIndexesForTest([]*model.SegmentIndex{first}))
 			definition := model.CloneIndex(m.IndexCatalog.(*index.IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
@@ -121,17 +125,23 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			second.IndexID++
 			second.BuildID++
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AddSegmentIndex(ctx, second))
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 			t.Cleanup(gc.Close)
 			for _, record := range []*model.SegmentIndex{first, second} {
-				for file := range gc.GetAllIndexFilesOfIndex(record) {
+				for file := range recordedIndexFiles(t, gc, record) {
 					require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 				}
 			}
+			legacySegment := m.GetSegment(ctx, first.SegmentID)
+			legacyIndex, ok := m.IndexCatalog.GetIndexJob(first.BuildID)
+			require.True(t, ok)
+			legacyFiles, err := m.SegmentIndexFilePaths(ctx, legacyIndex, legacySegment.SegmentInfo)
+			require.NoError(t, err)
 			meta.WithSegmentIndexManifestWrites(t, true)
 			inspector := index.NewMigrationBackfillInspector(ctx, m)
 			inspector.RunOnceForTest(ctx)
-			published := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
+			beforeStats := m.GetSegment(ctx, meta.RestartSegID)
+			published := beforeStats.GetManifestPath()
 			require.NotEqual(t, initial, published)
 			_, initialVersion, err := packed.UnmarshalManifestPath(initial)
 			require.NoError(t, err)
@@ -158,17 +168,85 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			require.Empty(t, rows)
 			inspector.RunOnceForTest(ctx)
 			assert.Equal(t, published, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+			// A stats commit keeps both builds in the new revision. Reclaim the
+			// publication revision while the original DataCoord is still running.
+			require.NoError(t, m.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+				SegmentID:     meta.RestartSegID,
+				StorageConfig: cfg,
+				Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+					Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}},
+				}},
+			}))
+			current := m.GetSegment(ctx, meta.RestartSegID)
+			require.NotEqual(t, published, current.GetManifestPath())
+			// An object-store commit alone does not advance the segment record.
+			unpublished, err := packed.CommitManifestUpdates(current.GetManifestPath(), cfg, &packed.ManifestUpdates{
+				DropIndexes: []packed.DropIndexEntry{{IndexID: first.IndexID, ExpectedBuildID: first.BuildID}},
+			})
+			require.NoError(t, err)
+			require.NotEqual(t, current.GetManifestPath(), unpublished)
+			orphanEntries, err := packed.GetManifestIndexInfos(unpublished, cfg)
+			require.NoError(t, err)
+			require.Len(t, orphanEntries, 1)
+			oldFile, err := packed.ManifestFilePath(published)
+			require.NoError(t, err)
+			require.NoError(t, m.ChunkManager.Remove(ctx, oldFile))
+			exists, err := m.ChunkManager.Exist(ctx, oldFile)
+			require.NoError(t, err)
+			require.False(t, exists)
+			// A warm native manifest cache can still serve the deleted object.
+			// Make that one revision a cache miss while reading all others normally.
+			missing := mockey.Mock((*meta.Meta).ReadManifestIndexesWithIO).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) bool {
+				return manifest == published
+			}).Return([]packed.ManifestIndexInfo(nil), merr.ErrIoKeyNotFound).Build()
+			t.Cleanup(func() { missing.UnPatch() })
+			for _, entry := range entries {
+				build, ok := m.IndexCatalog.GetIndexJob(entry.BuildID)
+				require.True(t, ok)
+				require.Empty(t, build.IndexFileKeys)
+				keys, err := m.ResolveIndexFileKeys(ctx, nil, build)
+				require.NoError(t, err)
+				require.Equal(t, entry.IndexFileKeys, keys)
+				paths, err := m.SegmentIndexFilePaths(ctx, build, current.SegmentInfo)
+				require.NoError(t, err)
+				require.Len(t, paths, len(entry.IndexFileKeys))
+				for i, key := range entry.IndexFileKeys {
+					require.Equal(t, path.Join(entry.Path, key), paths[i])
+				}
+			}
+			// A reader holding the old catalog record uses its original layout
+			// across backfill, even after the source row and publication revision are gone.
+			files, err := m.SegmentIndexFilePaths(ctx, legacyIndex, legacySegment.SegmentInfo)
+			require.NoError(t, err)
+			require.Equal(t, legacyFiles, files)
+			assert.Zero(t, missing.MockTimes())
+			build, ok := m.IndexCatalog.GetIndexJob(first.BuildID)
+			require.True(t, ok)
+			_, err = m.SegmentIndexFilePaths(ctx, build, beforeStats.SegmentInfo)
+			require.ErrorIs(t, err, meta.ErrSegmentManifestStale, "a snapshot must recapture its segment instead of mixing revisions")
+			require.Equal(t, 1, missing.MockTimes(), "try the captured revision before requesting fresh segment metadata")
 			meta.WithSegmentIndexManifestWrites(t, false)
 			restarted := boot()
 			for _, record := range []*model.SegmentIndex{first, second} {
 				recovered, ok := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
 				require.True(t, ok)
+				require.Empty(t, recovered.IndexFileKeys)
+				require.Equal(t, len(record.IndexFileKeys), recovered.NumIndexFiles())
+				recovered = indexRecordWithFiles(t, restarted, recovered)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, recovered.IndexStorePathVersion)
 				assert.True(t, index.IndexManifestPublished(t, restarted.IndexCatalog.(*index.IndexMeta), record.BuildID))
 			}
 			_, pending := index.NewMigrationBackfillInspector(ctx, restarted).ScanForTest(ctx)
 			assert.Zero(t, pending)
+			// GC must retry a failed read of an existing dropped-segment manifest,
+			// even when the old publication revision has already disappeared.
+			require.NoError(t, m.SetState(ctx, meta.RestartSegID, commonpb.SegmentState_Dropped))
+			throttled := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrIoTooManyRequests).Build()
+			t.Cleanup(func() { throttled.UnPatch() })
+			_, _, blocked := gc.GetDroppedSegmentIndexes(ctx, NewGCManifestReadIO(t), build.SegmentID)
+			require.Equal(t, gcBlockedByManifest, blocked)
+			require.Equal(t, 1, throttled.MockTimes())
 		})
 	}
 }

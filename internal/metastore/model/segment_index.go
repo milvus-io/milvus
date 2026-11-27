@@ -22,6 +22,8 @@ type SegmentIndex struct {
 	IsDeleted       bool
 	CreatedUTCTime  uint64
 	IndexFileKeys   []string
+	// IndexFileCount preserves the cardinality when the cache releases the file names.
+	IndexFileCount int
 	// The byte size of serialized index data at oos. (compressed)
 	IndexSerializedSize uint64
 	// The byte size of index data in memory. (uncompressed)
@@ -46,6 +48,19 @@ type SegmentIndex struct {
 	// keep it even after their entry leaves the current manifest. The zero value
 	// conservatively treats a record as catalog-backed. It is not serialized.
 	ManifestPublished bool
+}
+
+func (s *SegmentIndex) NumIndexFiles() int {
+	if s.IndexFileCount != 0 {
+		return s.IndexFileCount
+	}
+	return len(s.IndexFileKeys)
+}
+
+// CompactFileKeys releases the cached file names after publication to a manifest.
+func (s *SegmentIndex) CompactFileKeys() {
+	s.IndexFileCount = s.NumIndexFiles()
+	s.IndexFileKeys = nil
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -108,31 +123,9 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 }
 
 func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
-	return &SegmentIndex{
-		ArtifactPresent:           segIndex.ArtifactPresent,
-		SegmentID:                 segIndex.SegmentID,
-		CollectionID:              segIndex.CollectionID,
-		PartitionID:               segIndex.PartitionID,
-		NumRows:                   segIndex.NumRows,
-		IndexID:                   segIndex.IndexID,
-		BuildID:                   segIndex.BuildID,
-		NodeID:                    segIndex.NodeID,
-		IndexState:                segIndex.IndexState,
-		FailReason:                segIndex.FailReason,
-		IndexVersion:              segIndex.IndexVersion,
-		IsDeleted:                 segIndex.IsDeleted,
-		CreatedUTCTime:            segIndex.CreatedUTCTime,
-		IndexFileKeys:             common.CloneStringList(segIndex.IndexFileKeys),
-		IndexSerializedSize:       segIndex.IndexSerializedSize,
-		IndexMemSize:              segIndex.IndexMemSize,
-		WriteHandoff:              segIndex.WriteHandoff,
-		CurrentIndexVersion:       segIndex.CurrentIndexVersion,
-		FinishedUTCTime:           segIndex.FinishedUTCTime,
-		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
-		IndexType:                 segIndex.IndexType,
-		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
-		ManifestPublished:         segIndex.ManifestPublished,
-	}
+	cloned := *segIndex
+	cloned.IndexFileKeys = common.CloneStringList(segIndex.IndexFileKeys)
+	return &cloned
 }
 
-func (s *SegmentIndex) HasArtifact() bool { return s.ArtifactPresent || len(s.IndexFileKeys) > 0 }
+func (s *SegmentIndex) HasArtifact() bool { return s.ArtifactPresent || s.NumIndexFiles() > 0 }

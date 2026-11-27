@@ -1421,6 +1421,24 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	// and rejected before publication if it still carries foreign entries.
 	if manifestPath := result.GetManifestPath(); manifestPath != "" {
 		operators = append(operators, meta.UpdateManifest(result.GetSegmentId(), manifestPath))
+		stats := &datapb.SegmentInfo{
+			StorageVersion: segment.GetStorageVersion(), ManifestPath: manifestPath,
+			TextStatsLogs: result.GetTextIndexInfos(), JsonKeyStats: result.GetJsonKeyIndexInfos(),
+		}
+		meta.CompactCopiedStats(stats)
+		if len(stats.TextStatsLogs) > 0 || len(stats.JsonKeyStats) > 0 {
+			operators = append(operators, func(pack *meta.UpdateSegmentPack) bool {
+				target := pack.Get(result.GetSegmentId())
+				meta.SetTextIndexLogs(stats.TextStatsLogs)(target)
+				meta.SetJSONKeyIndexLogs(stats.JsonKeyStats)(target)
+				return true
+			})
+		}
+		// Snapshot registration installed the source statistics. A V3 copy
+		// preserves its manifest data and may report no legacy binlogs.
+		if segment.GetStats().GetInsertBinlogCount() > 0 || segment.GetStats().GetDeltaBinlogCount() > 0 {
+			operators = append(operators, meta.UpdateSegmentStats(result.GetSegmentId(), segment.GetStats()))
+		}
 		if result.GetFieldLogicalSizes() != nil {
 			operators = append(operators, copiedFieldSizesOperator(task, result))
 		}

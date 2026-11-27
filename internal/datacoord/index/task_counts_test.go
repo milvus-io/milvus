@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -57,7 +58,7 @@ func (c *taskCountsCatalog) ListSegmentIndexes(_ context.Context, collectionID i
 	var tasks []*model.SegmentIndex
 	for _, task := range c.tasks {
 		if task.CollectionID == collectionID {
-			tasks = append(tasks, task)
+			tasks = append(tasks, model.CloneSegmentIndex(task))
 		}
 	}
 	return tasks, c.err
@@ -277,8 +278,8 @@ func TestIndexTaskCountsLifecycle(t *testing.T) {
 	// Replacing field metadata must re-activate retained counts.
 	require.NoError(t, m.AlterIndex(ctx, &model.Index{CollectionID: 1, IndexID: 10}))
 	assertIndexTaskCounts(t, m)
-	require.NoError(t, m.DeleteTask(30))
-	require.NoError(t, m.DeleteTask(30))
+	require.NoError(t, m.DeleteTask(30, storage.StorageV2))
+	require.NoError(t, m.DeleteTask(30, storage.StorageV2))
 	require.NoError(t, m.RemoveSegmentIndex(ctx, 30))
 	require.NoError(t, m.RemoveSegmentIndex(ctx, 30))
 	assertIndexTaskCounts(t, m)
@@ -305,16 +306,25 @@ func TestIndexTaskCountsLifecycle(t *testing.T) {
 
 func TestIndexTaskCountsRecoveryReplacement(t *testing.T) {
 	metrics.DataCoordStoredIndexFilesSize.Reset()
+	fileKeys := []string{"0", "1"}
+	finished := &model.SegmentIndex{
+		CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30,
+		IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 300, IndexFileKeys: fileKeys,
+	}
 	catalog := &taskCountsCatalog{
 		indexes: []*model.Index{{CollectionID: 1, IndexID: 10}},
 		tasks: []*model.SegmentIndex{
 			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Unissued, IndexSerializedSize: 100},
 			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 200},
-			{CollectionID: 1, IndexID: 10, SegmentID: 20, BuildID: 30, IndexState: commonpb.IndexState_Finished, IndexSerializedSize: 300},
+			finished,
 		},
 	}
 	m, err := NewIndexMeta(context.Background(), catalog, []int64{1, 2, 3})
 	require.NoError(t, err)
+	recovered, ok := m.SegmentBuildInfo.Get(finished.BuildID)
+	require.True(t, ok)
+	require.Equal(t, fileKeys, recovered.IndexFileKeys)
+	require.Equal(t, len(fileKeys), recovered.NumIndexFiles())
 	assertIndexTaskCounts(t, m)
 	require.Equal(t, indexTaskStateCounts{0, 0, 0, 1}, m.indexTaskCountsSnapshot())
 	require.Equal(t, map[int64]int64{1: 300}, storedIndexSizeSeries(t))
@@ -336,7 +346,7 @@ func TestIndexTaskCountsPersistenceFailures(t *testing.T) {
 		"finish": func(m *IndexMeta) error {
 			return m.FinishTask(&workerpb.IndexTaskInfo{BuildID: 30, State: commonpb.IndexState_Finished, SerializedSize: 700})
 		},
-		"delete-task":  func(m *IndexMeta) error { return m.DeleteTask(30) },
+		"delete-task":  func(m *IndexMeta) error { return m.DeleteTask(30, storage.StorageV2) },
 		"mark-deleted": func(m *IndexMeta) error { return m.MarkIndexAsDeleted(ctx, 1, nil) },
 		"remove-task":  func(m *IndexMeta) error { return m.RemoveSegmentIndex(ctx, 30) },
 		"remove-index": func(m *IndexMeta) error { return m.RemoveIndex(ctx, 1, 10) },
@@ -385,7 +395,7 @@ func TestIndexTaskCountsRandomized(t *testing.T) {
 				require.NoError(t, m.UpdateIndexState(buildID, commonpb.IndexState(rng.Intn(7)), ""))
 			}
 		case 3:
-			require.NoError(t, m.DeleteTask(buildID))
+			require.NoError(t, m.DeleteTask(buildID, storage.StorageV2))
 		case 4:
 			require.NoError(t, m.RemoveSegmentIndex(ctx, buildID))
 		case 5:

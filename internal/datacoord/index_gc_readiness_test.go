@@ -129,12 +129,12 @@ func patchIndexGCReadinessExternalIO(t *testing.T, s *Server, catalog *indexGCRe
 	t.Helper()
 	// Keep the real collector and real index metadata methods. Only storage
 	// discovery/removal is substituted so failures are deterministic.
-	discovery := mockey.Mock((*gc.GarbageCollector).GetDroppedSegmentIndexFiles).To(func(_ *gc.GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, map[string]struct{}, gc.GcBlockReason) {
+	discovery := mockey.Mock((*gc.GarbageCollector).GetDroppedSegmentIndexes).To(func(_ *gc.GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndexSummary, gc.DroppedSegmentIndexes, gc.GcBlockReason) {
 		indexes := s.indexMeta.GetAllSegmentIndexSummaries(segmentID)
 		sort.Slice(indexes, func(i, j int) bool { return indexes[i].IndexID < indexes[j].IndexID })
-		return indexes, map[string]struct{}{"index-artifact": {}}, gc.GcNotBlocked
+		return indexes, gc.DroppedSegmentIndexes{}, gc.GcNotBlocked
 	}).Build()
-	files := mockey.Mock((*gc.GarbageCollector).RemoveDroppedSegmentFiles).To(func(_ *gc.GarbageCollector, _ context.Context, _ *meta.SegmentInfo, _ map[string]struct{}) error {
+	files := mockey.Mock((*gc.GarbageCollector).RemoveDroppedSegmentFiles).To(func(_ *gc.GarbageCollector, _ context.Context, _ *meta.SegmentInfo, _ gc.DroppedSegmentIndexes) error {
 		catalog.mu.Lock()
 		catalog.events = append(catalog.events, "files")
 		catalog.mu.Unlock()

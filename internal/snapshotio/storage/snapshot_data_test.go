@@ -3329,6 +3329,7 @@ func TestSnapshotReader_ReadSnapshot_WithStorageV2Manifest(t *testing.T) {
 	snapshotData := createTestSnapshotData()
 	snapshotData.Segments[0].ManifestPath = "s3://bucket/collection/partition/segment1/manifest.json"
 
+	snapshotData.Segments[0].Stats = &datapb.Statistics{InsertBinlogCount: 1, InsertBinlogSize: 320, Formats: []string{"parquet"}}
 	metadataPath, err := writer.Save(context.Background(), snapshotData)
 	assert.NoError(t, err)
 
@@ -3337,7 +3338,8 @@ func TestSnapshotReader_ReadSnapshot_WithStorageV2Manifest(t *testing.T) {
 	readData, err := reader.ReadSnapshot(context.Background(), metadataPath, true)
 	assert.NoError(t, err)
 	assert.NotNil(t, readData)
-	assert.Len(t, readData.Segments, 1)
+	require.Len(t, readData.Segments, 1)
+	require.True(t, proto.Equal(snapshotData.Segments[0].Stats, readData.Segments[0].Stats))
 
 	// Verify manifest_path is restored
 	assert.Equal(t, int64(1001), readData.Segments[0].GetSegmentId())

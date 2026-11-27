@@ -84,7 +84,7 @@ func TestMigrateDoubleRootPackedReferencesAndGCRetry(t *testing.T) {
 	dropped := proto.Clone(f.Segment).(*datapb.SegmentInfo)
 	dropped.State = commonpb.SegmentState_Dropped
 	for range 2 {
-		require.NoError(t, gc.RemoveDroppedSegmentFiles(context.Background(), &meta.SegmentInfo{SegmentInfo: dropped}, nil))
+		require.NoError(t, gc.RemoveDroppedSegmentFiles(context.Background(), &meta.SegmentInfo{SegmentInfo: dropped}, DroppedSegmentIndexes{}))
 	}
 	canonicalBase, _, err := packed.UnmarshalManifestPath(f.Segment.GetManifestPath())
 	require.NoError(t, err)

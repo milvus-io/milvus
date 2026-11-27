@@ -518,6 +518,13 @@ func (s *StorageVersionUpgradePolicySuite) TestSegmentColumnGroupFormatsAllEqual
 		s.True(strings.Contains(logs.String(), substr), logs.String())
 	}
 
+	summary := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		StorageVersion: storage.StorageV3, Stats: &datapb.Statistics{Formats: []string{"vortex"}},
+	}}
+	s.True(segmentColumnGroupFormatsAllEqual(summary, "vortex"))
+	s.False(segmentColumnGroupFormatsAllEqual(summary, "parquet"))
+	summary.Stats.Formats = []string{"vortex", "parquet"}
+	s.False(segmentColumnGroupFormatsAllEqual(summary, "vortex"))
 	s.True(segmentColumnGroupFormatsAllEqual(
 		newStorageVersionPolicyTestSegment(collID, 101, storage.StorageV3, "vortex"),
 		"vortex",

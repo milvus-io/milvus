@@ -332,20 +332,20 @@ func TestBuildJSONKeyStatsPathsV3(t *testing.T) {
 		collectionID: 1,
 		partitionID:  2,
 		segmentID:    3,
-		manifestPath: `{"ver":7,"base_path":"files/insert_log/1/2/3"}`,
+		manifestPath: `{"ver":7,"base_path":"files//insert_log/1/2/3"}`,
 	}
 	stats := map[int64]*datapb.JsonKeyStats{
 		100: {
-			FieldID: 100,
-			Files:   []string{"meta.json", "shared_key_index/.managed.json_0"},
+			FieldID: 100, FilesInManifest: true,
+			Files: []string{"meta.json", "shared_key_index//.managed.json_0"},
 		},
 	}
 
 	BuildJSONKeyStatsPaths("files", seg, stats)
 
 	wantFiles := []string{
-		"files/insert_log/1/2/3/_stats/json_stats.100/meta.json",
-		"files/insert_log/1/2/3/_stats/json_stats.100/shared_key_index/.managed.json_0",
+		"files//insert_log/1/2/3/_stats/json_stats.100/meta.json",
+		"files//insert_log/1/2/3/_stats/json_stats.100/shared_key_index//.managed.json_0",
 	}
 	if !reflect.DeepEqual(stats[100].Files, wantFiles) {
 		t.Errorf("BuildJSONKeyStatsPaths() V3 Files = %v, want %v", stats[100].Files, wantFiles)

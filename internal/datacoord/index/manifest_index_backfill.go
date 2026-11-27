@@ -283,10 +283,9 @@ func (i *ManifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 }
 
 func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
-	return segIdx != nil && !segIdx.IsDeleted &&
+	return segIdx != nil && !segIdx.ManifestPublished && !segIdx.IsDeleted &&
 		segIdx.IndexState == commonpb.IndexState_Finished &&
-		len(segIdx.IndexFileKeys) > 0 &&
-		!segIdx.ManifestPublished
+		len(segIdx.IndexFileKeys) > 0
 }
 
 func countManifestIndexBackfillRecords(work []segmentManifestIndexBackfill) int {
@@ -374,9 +373,9 @@ func (i *ManifestIndexBackfillInspector) backfillIndexes(ctx context.Context, se
 			!i.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			return meta.ErrSegmentIndexBackfillSkipped
 		}
-		destination := model.CloneSegmentIndex(segIdx)
-		destination.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
-		manifestIndex, err := meta.BuildManifestIndexInfo(i.mt, segment, destination)
+		// GetIndexJob returns a private copy of the catalog record, including its keys.
+		segIdx.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+		manifestIndex, err := meta.BuildManifestIndexInfo(i.mt, segment, segIdx)
 		if err != nil {
 			return err
 		}

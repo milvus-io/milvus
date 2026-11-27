@@ -1334,9 +1334,9 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			}
 			if testCase.expectCommit {
 				s.Equal(1, catalogWrites)
-				// The SegmentInfo dual-write keeps paths relative; only the manifest
-				// entry carries the reconstructed absolute form.
-				s.Equal(relativeFiles, segment.GetJsonKeyStats()[500].GetFiles())
+				s.Empty(segment.GetJsonKeyStats()[500].GetFiles())
+				s.True(segment.GetJsonKeyStats()[500].GetFilesInManifest())
+				s.Equal(relativeFiles, testCase.logs[500].GetFiles())
 			} else {
 				s.Equal(0, catalogWrites)
 			}
@@ -1453,6 +1453,8 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				s.Empty(segment.GetTextStatsLogs())
 			}
 			if testCase.expectCommit {
+				s.Empty(segment.GetTextStatsLogs()[500].GetFiles())
+				s.True(segment.GetTextStatsLogs()[500].GetFilesInManifest())
 				s.Equal(1, catalogWrites)
 			} else {
 				s.Equal(0, catalogWrites)

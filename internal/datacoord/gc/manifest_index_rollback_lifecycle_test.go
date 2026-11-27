@@ -26,6 +26,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -81,6 +83,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(meta.RestartSegID, initial)))
 			first, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
+			first = indexRecordWithFiles(t, m, first)
 			first.IndexStorePathVersion = layout
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AlterSegmentIndexesForTest([]*model.SegmentIndex{first}))
 			records := []*model.SegmentIndex{first}
@@ -95,11 +98,11 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 				require.NoError(t, m.IndexCatalog.(*index.IndexMeta).AddSegmentIndex(ctx, record))
 				records = append(records, record)
 			}
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 			t.Cleanup(gc.Close)
 			files := make(map[string]struct{})
 			for _, record := range records {
-				for file := range gc.GetAllIndexFilesOfIndex(record) {
+				for file := range recordedIndexFiles(t, gc, record) {
 					files[file] = struct{}{}
 					require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("artifact")))
 				}
@@ -155,7 +158,8 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			for _, record := range records {
 				recovered, found := restarted.IndexCatalog.(*index.IndexMeta).GetIndexJob(record.BuildID)
 				require.True(t, found)
-				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
+				require.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
+				require.Equal(t, len(record.IndexFileKeys), recovered.NumIndexFiles())
 				assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, recovered.IndexStorePathVersion)
 				for _, file := range meta.MigrationIndexPaths(root, restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath(), recovered) {
 					data, err := restarted.ChunkManager.Read(ctx, file)
@@ -267,16 +271,22 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	patch := mockey.Mock(meta.CommitManifestMutationForTest).When(func(_ *meta.Meta, _ context.Context, _ *packed.ManifestIOContext, _ string, _ meta.SegmentManifestCommit) bool {
-		close(entered)
+	local := localIndexGCStorage(m)
+	source := m.ChunkManager
+	copying := mocks.NewChunkManager(t)
+	copying.EXPECT().RootPath().Return(source.RootPath()).Maybe()
+	var copyingStarted sync.Once
+	copying.EXPECT().Copy(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, from, to string) error {
+		copyingStarted.Do(func() { close(entered) })
 		<-release
-		return false
-	}).Build()
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
+		return source.Copy(ctx, from, to)
+	})
+	m.ChunkManager = copying
+	gc := NewGarbageCollector(m, nil, GcOption{Cli: local, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
 	t.Cleanup(gc.Close)
 	deleted := make(chan string, 1)
 	deletePatch := mockey.Mock((*GarbageCollector).RemoveDroppedSegmentFiles).To(
-		func(_ *GarbageCollector, _ context.Context, segment *meta.SegmentInfo, _ map[string]struct{}) error {
+		func(_ *GarbageCollector, _ context.Context, segment *meta.SegmentInfo, _ DroppedSegmentIndexes) error {
 			deleted <- segment.GetManifestPath()
 			return merr.ErrIoTooManyRequests
 		}).Build()
@@ -291,13 +301,12 @@ func TestManifestIndexRollbackDroppedGCWaitsForPublication(t *testing.T) {
 	t.Cleanup(func() {
 		once.Do(func() { close(release) })
 		workers.Wait()
-		patch.UnPatch()
 		deletePatch.UnPatch()
 	})
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("rollback did not enter manifest I/O")
+		t.Fatal("rollback did not start its index copy")
 	}
 	workers.Add(1)
 	go func() {
@@ -338,7 +347,8 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			definition := model.CloneIndex(m.IndexCatalog.(*index.IndexMeta).GetIndexesForCollection(meta.RestartCollID, "")[0])
 			definition.IndexID++
 			definition.IndexName = "live_index"
-			live := model.CloneSegmentIndex(retired)
+			live := indexRecordWithFiles(t, m, retired)
+			live.ManifestPublished = false
 			live.IndexID = definition.IndexID
 			live.BuildID++
 			liveCount := 0
@@ -358,9 +368,9 @@ func TestManifestIndexRollbackAfterDroppedIndexGC(t *testing.T) {
 			require.False(t, sm.IsBuildIDGCBlocked(meta.RestartCollID, meta.RestartBuildID))
 			require.NoError(t, m.SetState(ctx, meta.RestartSegID, commonpb.SegmentState_Dropped))
 			require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
-			gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta), SnapshotMeta: sm})
+			gc := NewGarbageCollector(m, nil, GcOption{Cli: localIndexGCStorage(m), IndexMeta: m.IndexCatalog.(*index.IndexMeta), SnapshotMeta: sm})
 			t.Cleanup(gc.Close)
-			files := gc.GetAllIndexFilesOfIndex(retired)
+			files := recordedIndexFiles(t, gc, retired)
 			for file := range files {
 				require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("retired artifact")))
 				t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })

@@ -72,6 +72,32 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
+func TestAsyncManifestReturnsReplacedIndex(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	base := path.Join(cfg.RootPath, "replacement")
+	old := ManifestIndexInfo{
+		ColumnName: "100", IndexName: "idx", IndexType: "FLAT", Path: "1/1",
+		FieldID: 100, IndexID: 9, BuildID: 1, IndexVersion: 1, IndexFileKeys: []string{"old-a", "old-b"},
+	}
+	first, err := CommitManifestUpdatesWithResultAsync(t.Context(), io, MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{old}})
+	require.NoError(t, err)
+	require.Empty(t, first.ReplacedIndexes)
+	prior, err := GetManifestIndexInfos(first.ManifestPath, cfg)
+	require.NoError(t, err)
+	replacement := old
+	replacement.Path, replacement.BuildID, replacement.IndexFileKeys = "2/1", 2, []string{"new-a", "new-b"}
+	second, err := CommitManifestUpdatesWithResultAsync(t.Context(), io, first.ManifestPath, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{replacement}})
+	require.NoError(t, err)
+	require.Equal(t, prior, second.ReplacedIndexes)
+	current, err := GetManifestIndexInfos(second.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.Len(t, current, 1)
+	require.Equal(t, replacement.BuildID, current[0].BuildID)
+	require.Equal(t, replacement.IndexFileKeys, current[0].IndexFileKeys)
+}
+
 // On object storage an async commit records the size of the manifest object it
 // wrote, like CommitManifestUpdates, and every async open passes the size a
 // manifest path records. loon reads exactly the recorded number of bytes, so a

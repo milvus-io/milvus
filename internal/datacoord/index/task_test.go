@@ -673,6 +673,24 @@ func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForIndexBuild_Manife
 	s.NoError(err)
 	s.True(estimate.manifestBacked)
 	s.False(estimate.emptyOnStaleSchema)
+
+	segment.NumOfRows = 3
+	segment.Binlogs = []*datapb.FieldBinlog{{
+		FieldID: field.GetFieldID(), Binlogs: []*datapb.Binlog{{EntriesNum: 3, MemorySize: 3*4 + 5*128*4}},
+	}}
+	segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.Binlogs, nil, nil, nil)
+	before, err := estimateVectorArrayElementCountForIndexBuild(segment, schema, field)
+	s.Require().NoError(err)
+	segment.Binlogs = nil
+	after, err := estimateVectorArrayElementCountForIndexBuild(segment, schema, field)
+	s.Require().NoError(err)
+	s.EqualValues(5, after.vectorCount)
+	s.Equal(before, after)
+
+	segment.Stats.ValidElementCounts = map[int64]int64{field.GetFieldID(): 2}
+	count, exact := exactVectorArrayValidElementCount(meta.NewSegmentInfo(segment), field)
+	s.True(exact)
+	s.EqualValues(2, count)
 }
 
 func (s *indexTaskSuite) TestFieldSchemaForIndexBuildFollowsStructNullability() {
@@ -714,6 +732,15 @@ func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
 	s.NoError(err)
 	s.True(estimate.emptyOnStaleSchema)
 	s.Zero(estimate.vectorCount)
+
+	retained := &datapb.SegmentInfo{
+		SchemaVersion: stale.GetSchemaVersion(), ManifestPath: "manifest",
+		Stats: &datapb.Statistics{NullCounts: map[int64]int64{child.GetFieldID(): 0}},
+	}
+	estimate, err = estimateVectorArrayElementCountForIndexBuild(retained, schema, child)
+	s.Require().NoError(err)
+	s.True(estimate.manifestBacked)
+	s.False(estimate.emptyOnStaleSchema)
 
 	current := &datapb.SegmentInfo{SchemaVersion: 2}
 	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, current, schema, child))

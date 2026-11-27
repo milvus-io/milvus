@@ -134,10 +134,12 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	persisted, err = catalog.ListSegmentIndexes(ctx, meta.RestartCollID)
 	require.NoError(t, err)
 	assert.Empty(t, persisted, "the manifest pointer and row deletion must commit together")
-	_, ok = m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
-	assert.True(t, ok, "backfill changes durable placement, not the live DataCoord view")
-	assert.True(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
+	cached, ok := m.IndexCatalog.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	require.True(t, cached.ManifestPublished)
+	require.Empty(t, cached.IndexFileKeys)
 	assert.False(t, beforePublication.ManifestPublished, "publication must not mutate a reader's snapshot")
+	requireIndexFiles(t, m, beforePublication, "0", "1")
 
 	// Convergence is process-local immediately; a second tick creates no new
 	// revision and reports no remaining catalog row.
@@ -151,7 +153,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	recovered, ok := restarted.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
-	assert.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
+	requireIndexFiles(t, restarted, recovered, "0", "1")
 	assert.True(t, IndexManifestPublished(t, restarted.IndexCatalog.(*IndexMeta), meta.RestartBuildID))
 	_, pending := NewMigrationBackfillInspector(ctx, restarted).scan(ctx)
 	assert.Zero(t, pending)
@@ -331,7 +333,10 @@ func TestManifestIndexBackfillCatalogFailureKeepsRowAndPointer(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, persisted, 3)
 	for _, record := range records {
-		assert.False(t, IndexManifestPublished(t, m.IndexCatalog.(*IndexMeta), record.BuildID))
+		cached, ok := m.IndexCatalog.GetIndexJob(record.BuildID)
+		require.True(t, ok)
+		require.False(t, cached.ManifestPublished)
+		require.Equal(t, record.IndexFileKeys, cached.IndexFileKeys)
 	}
 	_, pending := inspector.scan(ctx)
 	assert.Equal(t, 3, pending)
@@ -386,6 +391,7 @@ func TestBackfillMutationRejectsMismatchedSegmentIdentity(t *testing.T) {
 
 	corrupt, ok := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
+	corrupt = materializedTestIndex(t, m, corrupt)
 	corrupt.PartitionID++
 	m.IndexCatalog.(*IndexMeta).updateSegmentIndex(corrupt)
 
@@ -410,6 +416,7 @@ func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
 			SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 			segment := m.GetSegment(ctx, meta.RestartSegID)
 			record, _ := m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
+			record = materializedTestIndex(t, m, record)
 			record.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 			entry, err := meta.BuildManifestIndexInfo(m, segment, record)
 			require.NoError(t, err)

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -527,6 +528,12 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			channelCPs[vchannel] = s.meta.GetChannelCheckpoint(vchannel)
 		}
 	}
+	for _, info := range infos {
+		if err := meta.ResolveSegmentStatsFiles(info); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+	}
 	resp.Infos = infos
 	resp.ChannelCheckpoint = channelCPs
 	return resp, nil
@@ -693,6 +700,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// manifest from this same mutation, not the pre-lock segment view.
 		meta.UpdateSaveBinlogStats(req),
 	)
+	if req.GetFlushed() && !req.GetDropped() && req.GetManifestPath() != "" && req.GetStats() != nil {
+		operators = append(operators, meta.ReleaseFlushedL1Binlogs(req.GetSegmentID()))
+	}
 
 	// Update segment info in memory and meta. Stale updates (segment already
 	// flushed / outdated time tick) are swallowed inside UpdateSegmentsInfo as
@@ -1147,7 +1157,15 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
 		}
 
-		segment2TextStatsLogs[id] = seg.GetTextStatsLogs()
+		text := &datapb.SegmentInfo{
+			ID: seg.ID, StorageVersion: seg.GetStorageVersion(), ManifestPath: seg.GetManifestPath(),
+			TextStatsLogs: maps.Clone(seg.GetTextStatsLogs()),
+		}
+		if err := meta.ResolveSegmentStatsFiles(text); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		segment2TextStatsLogs[id] = text.TextStatsLogs
 
 		if seg.EnsureStats().GetDeltaBinlogCount() > 0 {
 			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], seg.GetDeltalogs()...)

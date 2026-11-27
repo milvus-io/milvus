@@ -19,6 +19,7 @@ package index
 import (
 	"context"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -638,7 +639,10 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 // vectors, so the recorded count replaces it whenever it exists. Segments
 // written before the count was recorded have no entry and keep the estimate.
 func exactVectorArrayValidElementCount(segment *meta.SegmentInfo, field *schemapb.FieldSchema) (int64, bool) {
-	if segment == nil || !typeutil.IsVectorArrayType(field.GetDataType()) || !field.GetElementNullable() {
+	if segment == nil || !typeutil.IsVectorArrayType(field.GetDataType()) {
+		return 0, false
+	}
+	if !field.GetElementNullable() && (segment.GetManifestPath() == "" || len(segment.GetBinlogs()) > 0) {
 		return 0, false
 	}
 	count, ok := segment.EnsureStats().GetValidElementCounts()[field.GetFieldID()]
@@ -712,6 +716,23 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 		}
 	}
 
+	if len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() != "" {
+		// The group aggregates the same payload and rows across flushes.
+		// Keep the byte estimate for old writers without exact element counts.
+		for _, group := range segment.GetStats().GetLoadResource().GetColumnGroups() {
+			if group.GetGroupId() != field.GetFieldID() && !slices.Contains(group.GetFieldIds(), field.GetFieldID()) {
+				continue
+			}
+			if group.GetMemorySize() > 0 {
+				headerSize := int64(4)
+				if field.GetNullable() {
+					headerSize++
+				}
+				totalPayloadBytes += max(int64(0), group.GetMemorySize()-segment.GetNumOfRows()*headerSize)
+				seenFieldLog = true
+			}
+		}
+	}
 	if !seenFieldLog {
 		return 0, merr.WrapErrServiceInternalErr(errVectorArrayFieldBinlogNotFound, "fieldID=%d", field.GetFieldID())
 	}
@@ -720,6 +741,12 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 
 func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
 	if !errors.Is(err, errVectorArrayFieldBinlogNotFound) || segment == nil || schema == nil || field == nil || segment.GetSchemaVersion() >= schema.GetVersion() {
+		return false
+	}
+	// An older schema version can still contain this field. The collector
+	// records a null-count entry for each physically present field, including
+	// non-nullable fields with zero nulls.
+	if _, present := segment.GetStats().GetNullCounts()[field.GetFieldID()]; present {
 		return false
 	}
 	for _, structField := range schema.GetStructArrayFields() {

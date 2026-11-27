@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
@@ -35,7 +36,7 @@ func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
 		BuildID: 5100, IndexState: commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"from-etcd"},
 	}))
-	require.NoError(t, im.DeleteTask(5100))
+	require.NoError(t, im.DeleteTask(5100, storage.StorageV3))
 	var err error
 	im, err = NewIndexMeta(context.Background(), m.Catalog, []int64{100})
 	require.NoError(t, err)
@@ -47,6 +48,8 @@ func TestIndexGCManifestReadinessDeletedRecordWinsOnReload(t *testing.T) {
 	record, ok := im.GetIndexJob(records[0].BuildID)
 	require.True(t, ok)
 	require.Equal(t, []string{"from-etcd"}, record.IndexFileKeys)
+	require.False(t, record.ManifestPublished)
+	require.Equal(t, int64(5100), record.BuildID)
 	require.Empty(t, im.GetSegmentIndexes(100, 5001))
 	require.Nil(t, im.GetSegmentsIndexStates(100, []int64{5001})[5001][500])
 }

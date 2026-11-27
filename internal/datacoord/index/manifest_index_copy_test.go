@@ -94,7 +94,7 @@ func TestManifestIndexMigrationCopyFailureAndRetry(t *testing.T) {
 			copied.Store(0)
 			fail.Store(false)
 			require.NoError(t, migrate())
-			assert.Equal(t, int32(len(source.IndexFileKeys)), copied.Load())
+			assert.Equal(t, int32(source.NumIndexFiles()), copied.Load())
 			current, _ = m.IndexCatalog.(*IndexMeta).GetIndexJob(meta.RestartBuildID)
 			targetVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 			if rollback {

@@ -110,7 +110,10 @@ func (m *Meta) RollbackSegmentIndexes(ctx context.Context, io *packed.ManifestIO
 		if entry != nil {
 			drops = append(drops, packed.DropIndexEntry{IndexID: entry.IndexID, ExpectedBuildID: buildID})
 		}
-		mutations = append(mutations, SegmentIndexMutation{Type: SegmentIndexRollback, BuildID: buildID, rollbackEntry: entry})
+		mutations = append(mutations, SegmentIndexMutation{
+			Type: SegmentIndexRollback, BuildID: buildID,
+			rollbackEntry: entry,
+		})
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, err

@@ -278,6 +278,7 @@ func (w *SnapshotWriter) writeManifestsAndMarshalMetadata(
 			storagev2Manifests = append(storagev2Manifests, &datapb.StorageV2SegmentManifest{
 				SegmentId: segment.GetSegmentId(),
 				Manifest:  segment.GetManifestPath(),
+				Stats:     segment.GetStats(),
 			})
 		}
 	}
@@ -565,6 +566,7 @@ func applyStorageManifestPaths(
 		}
 		seen[segmentID] = struct{}{}
 		segment.ManifestPath = mapping.GetManifest()
+		segment.Stats = mapping.GetStats()
 	}
 	return nil
 }

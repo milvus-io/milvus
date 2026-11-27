@@ -66,6 +66,11 @@ func RestoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partit
 	if dmlPos != nil {
 		dmlPos.ChannelName = channel
 	}
+	stats := source.GetStats()
+	if stats.GetFieldLogicalSizes() != nil {
+		stats = proto.CloneOf(stats)
+		stats.FieldLogicalSizes = nil
+	}
 	return meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: segmentID, CollectionID: collectionID, PartitionID: partitionID,
 		InsertChannel: channel, NumOfRows: source.GetNumOfRows(),
@@ -74,6 +79,7 @@ func RestoredSegmentInfo(source *datapb.SegmentDescription, collectionID, partit
 		Level:     source.GetSegmentLevel(), LastExpireTime: math.MaxUint64,
 		StartPosition: startPos, DmlPosition: dmlPos,
 		StorageVersion: source.GetStorageVersion(), IsSorted: source.GetIsSorted(),
+		Stats:           stats,
 		CommitTimestamp: source.GetCommitTimestamp(), TransformStartAfterTimetick: start,
 	})
 }

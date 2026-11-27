@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -568,6 +569,15 @@ func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error)
 // - Point-in-time restore for data rollback
 // - Collection cloning to different database/cluster
 func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
+	data, err := h.genSnapshot(ctx, collectionID, channelSeekPositions)
+	if errors.Is(err, meta.ErrSegmentManifestStale) && ctx.Err() == nil {
+		// Recapture the segment descriptors at the same snapshot boundary.
+		return h.genSnapshot(ctx, collectionID, channelSeekPositions)
+	}
+	return data, err
+}
+
+func (h *ServerHandler) genSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	// get coll info
 	collInfo, err := h.s.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
@@ -661,12 +671,18 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 				mlog.Err(err))
 			return
 		}
+		if segInfo.GetStorageVersion() == storage.StorageV3 && segInfo.GetManifestPath() != "" && segInfo.GetStats() != nil {
+			storage.AccumulateDeltalogStats(segInfo.Stats, deltalogs)
+		}
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 	})
 
 	segDescList := make([]*datapb.SegmentDescription, 0, len(segmentInfos))
 	for _, segInfo := range segmentInfos {
-		indexesFiles, err := uncompressIndexFiles(h, segInfo)
+		if err := meta.ResolveSegmentStatsFiles(segInfo); err != nil {
+			return nil, err
+		}
+		indexesFiles, err := uncompressIndexFiles(ctx, h, segInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -674,6 +690,15 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
 			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
+		var snapshotStats *datapb.Statistics
+		if segInfo.GetStorageVersion() == storage.StorageV3 && segInfo.GetManifestPath() != "" {
+			snapshotStats = segInfo.GetStats()
+			if snapshotStats.GetFieldLogicalSizes() != nil {
+				snapshotStats = proto.CloneOf(snapshotStats)
+				snapshotStats.FieldLogicalSizes = nil
+			}
+		}
+
 		var fieldSizes *datapb.FieldLogicalSizes
 		if !collInfo.IsExternal() {
 			fieldSizes = meta.SegmentFieldLogicalSizes(segInfo)
@@ -698,6 +723,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
+			Stats:             snapshotStats,
 			FieldLogicalSizes: fieldSizes,
 		})
 	}
@@ -738,17 +764,16 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 	return uncompressedJSONStats
 }
 
-func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
-	segIdxes := h.s.indexMeta.GetSegmentIndexesUnsafe(segment.GetCollectionID(), segment.GetID())
+func uncompressIndexFiles(ctx context.Context, h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
+	segIdxes := h.s.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
 			fieldID := h.s.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			// Use the segment already selected for this snapshot, rather than
-			// looking it up again while metadata may be changing.
-			indexFilePaths, err := meta.SegmentIndexFilePaths(h.s.meta.ChunkManager.RootPath(), segIdx, segment)
+			// Never combine a snapshot descriptor with index files from a different revision.
+			indexFilePaths, err := h.s.meta.SegmentIndexFilePaths(ctx, segIdx, segment)
 			if err != nil {
 				return nil, err
 			}

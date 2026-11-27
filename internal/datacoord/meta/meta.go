@@ -247,6 +247,9 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Install the index catalog and compaction protection after all goroutines complete
 	mt.IndexCatalog = indexCatalog
+	if indexCatalog != nil {
+		indexCatalog.SetIndexFileResolver(mt)
+	}
 	if protection != nil {
 		mt.CompactionProtection = protection
 	}
@@ -324,7 +327,7 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 			clone()
 			ClearFieldLogicalSizes(normalized)
 		}
-		if !localStorage || segment.GetStorageVersion() != storage.StorageV3 {
+		if !localStorage || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
 			return normalized, nil
 		}
 		manifestPath, err := NormalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
@@ -1159,19 +1162,7 @@ func addDeltalogsToSegment(modPack *UpdateSegmentPack, segmentID int64, segment 
 	if segment.Stats == nil {
 		segment.Stats = &datapb.Statistics{}
 	}
-	for _, fb := range deltalogs {
-		for _, l := range fb.GetBinlogs() {
-			segment.Stats.DeltaBinlogSize += l.GetMemorySize()
-			segment.Stats.DeleteNumRows += l.GetEntriesNum()
-			segment.Stats.DeltaBinlogCount++
-			if from := l.GetTimestampFrom(); from > 0 && (segment.Stats.DeltaTimestampFrom == 0 || from < segment.Stats.DeltaTimestampFrom) {
-				segment.Stats.DeltaTimestampFrom = from
-			}
-			if to := l.GetTimestampTo(); to > segment.Stats.DeltaTimestampTo {
-				segment.Stats.DeltaTimestampTo = to
-			}
-		}
-	}
+	storage.AccumulateDeltalogStats(segment.Stats, deltalogs)
 	modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 		Segment: segment.SegmentInfo,
 		UpdateMask: metastore.BinlogsUpdateMask{
@@ -1447,6 +1438,36 @@ func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) Update
 	}
 }
 
+// ReleaseFlushedL1Binlogs runs after the final checkpoint, manifest and writer
+// statistics have been applied to the transaction's private segment copy.
+func ReleaseFlushedL1Binlogs(segmentID int64) UpdateOperator {
+	return func(pack *UpdateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil || segment.GetLevel() != datapb.SegmentLevel_L1 ||
+			segment.GetState() != commonpb.SegmentState_Flushed || segment.GetIsImporting() || segment.GetIsFake() {
+			return false
+		}
+		committed, _ := HasCommittedManifest(segment)
+		if !committed {
+			return false
+		}
+		stats := segment.GetStats()
+		if stats.GetInsertBinlogCount() == 0 || len(stats.GetFormats()) == 0 || len(stats.GetLoadResource().GetColumnGroups()) == 0 {
+			return false // Older writers may omit the summaries needed by compaction and task sizing.
+		}
+		for _, group := range segment.GetBinlogs() {
+			if group.GetFormat() == "" {
+				return false // A partial format summary cannot describe this legacy group.
+			}
+		}
+		segment.Binlogs = nil
+		segment.Deltalogs = nil
+		segment.Statslogs = nil
+		segment.Bm25Statslogs = nil
+		return true
+	}
+}
+
 func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
 		modPack.fromSaveBinlogPathSegmentID = segmentID
@@ -1605,7 +1626,7 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, schema *sch
 			segment.SchemaVersion = newSchemaVersion
 		}
 
-		segment.Stats = addStatsDelta(modPack.Meta.Ctx, segment, result, schema)
+		segment.Stats = addMaterializationStats(modPack.Meta.Ctx, segment, result, schema)
 		bindFieldLogicalSizes(segment.SegmentInfo)
 
 		// Bump DataVersion so querynodes with the segment loaded Reopen and pick
@@ -2849,6 +2870,7 @@ func (m *Meta) completeMixCompactionMutation(
 		if err := m.installReportedStats(compactToProto, compactToSegment.GetStats()); err != nil {
 			return nil, err
 		}
+		CompactManifestStats(compactToProto)
 		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -3395,6 +3417,7 @@ func (m *Meta) CompleteSortCompactionMutation(
 	if err := m.installReportedStats(segmentInfo, resultSegment.GetStats()); err != nil {
 		return nil, err
 	}
+	CompactManifestStats(segmentInfo)
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() == 0 {
@@ -3575,7 +3598,7 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 	if !replay {
 		// Validate retained columns against the original revision before
 		// binding the new projection to the adopted revision.
-		cloned.Stats = addStatsDelta(m.Ctx, cloned, resultSegment, t.GetSchema())
+		cloned.Stats = addMaterializationStats(m.Ctx, cloned, resultSegment, t.GetSchema())
 		cloned.ManifestPath = resultManifest
 		bindFieldLogicalSizes(cloned.SegmentInfo)
 		if delta := resultSegment.GetStats(); delta != nil {
@@ -3671,6 +3694,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 	if err := m.installReportedStats(segmentInfo, resultSegment.GetStats()); err != nil {
 		return nil, err
 	}
+	CompactManifestStats(segmentInfo)
 	newSegment := NewSegmentInfo(segmentInfo)
 	if newSegment.GetNumOfRows() <= 0 {
 		newSegment.State = commonpb.SegmentState_Dropped

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1787,6 +1788,7 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
 		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
+		assert.Equal(t, 2, segIdx.NumIndexFiles())
 	})
 
 	t.Run("actual higher than requested returns error and leaves metadata unchanged", func(t *testing.T) {
@@ -1854,7 +1856,7 @@ func TestUpdateSegmentIndexNotExists(t *testing.T) {
 func TestMeta_DeleteTask_Error(t *testing.T) {
 	m := NewSegmentIndexMeta(nil)
 	t.Run("segment index not found", func(t *testing.T) {
-		err := m.DeleteTask(meta.BuildID)
+		err := m.DeleteTask(meta.BuildID, storage.StorageV2)
 		assert.NoError(t, err)
 	})
 
@@ -1873,7 +1875,7 @@ func TestMeta_DeleteTask_Error(t *testing.T) {
 			CollectionID: meta.CollID,
 		})
 
-		err := m.DeleteTask(meta.BuildID)
+		err := m.DeleteTask(meta.BuildID, storage.StorageV2)
 		assert.Error(t, err)
 	})
 }

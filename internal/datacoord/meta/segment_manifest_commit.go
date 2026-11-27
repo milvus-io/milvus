@@ -147,6 +147,22 @@ type SegmentIndexMutation struct {
 	rollbackEntry *packed.ManifestIndexInfo
 }
 
+// RollbackFileKeys runs under the segment and build locks. A replacement
+// captures the old keys before it publishes the new segment revision.
+func (mut SegmentIndexMutation) RollbackFileKeys(record *model.SegmentIndex) ([]string, error) {
+	if entry := mut.rollbackEntry; entry != nil {
+		if record.BuildID != entry.BuildID || record.IndexID != entry.IndexID || record.IndexVersion != entry.IndexVersion ||
+			record.IndexStorePathVersion != entry.IndexStorePathVersion || record.NumIndexFiles() != len(entry.IndexFileKeys) {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "rollback source disagrees with index build %d", record.BuildID)
+		}
+		return entry.IndexFileKeys, nil
+	}
+	if len(record.IndexFileKeys) != 0 || record.IndexFileCount == 0 {
+		return record.IndexFileKeys, nil
+	}
+	return nil, merr.Wrapf(merr.ErrDataIntegrity, "no file list for displaced index build %d", record.BuildID)
+}
+
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
 // under keyLock to the in-memory install that follows a successful catalog
 // write. action is nil when the mutation resolves to no catalog write at all;
@@ -449,6 +465,11 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 	}
 
 	manifestPath := result.ManifestPath
+	for _, replaced := range result.ReplacedIndexes {
+		if _, valid := ManifestIndexFilePathInfoForSegment(m.ChunkManager.RootPath(), segment.SegmentInfo, replaced); !valid {
+			return nil, merr.Wrapf(merr.ErrDataIntegrity, "invalid file metadata for replaced index build %d", replaced.BuildID)
+		}
+	}
 	// A rollback Noop already proved index presence in its locked source read.
 	// A structured mutation instead supplies the marker of its committed result.
 	if result.HasIndexes != nil {
@@ -610,6 +631,9 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 		// same writer lock still excludes competing full-record writers.
 		if segment.GetManifestPath() != updated.GetManifestPath() {
 			manifestUpdates = append(manifestUpdates, updated)
+		}
+		for _, replaced := range result.ReplacedIndexes {
+			m.IndexCatalog.RetainReplacedIndexFiles(commit.SegmentID, replaced)
 		}
 		m.Segments.SetSegment(commit.SegmentID, updated)
 		for _, stagedIndex := range stagedIndexes {
@@ -1175,8 +1199,10 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 	// A nil entry value retires the field's stats instead of installing one,
 	// so a commit that drops a column can invalidate its text/json-key stats
 	// atomically with the manifest pointer (see CommitSegmentManifest).
-	if mutation.TextStats != nil {
-		for fieldID, stats := range mutation.TextStats {
+	summaries := &datapb.SegmentInfo{TextStatsLogs: mutation.TextStats, JsonKeyStats: mutation.JSONKeyStats}
+	compactStatsFiles(summaries, nil)
+	if summaries.TextStatsLogs != nil {
+		for fieldID, stats := range summaries.TextStatsLogs {
 			if stats == nil {
 				delete(segment.TextStatsLogs, fieldID)
 				continue
@@ -1187,8 +1213,8 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 			segment.TextStatsLogs[fieldID] = proto.Clone(stats).(*datapb.TextIndexStats)
 		}
 	}
-	if mutation.JSONKeyStats != nil {
-		for fieldID, stats := range mutation.JSONKeyStats {
+	if summaries.JsonKeyStats != nil {
+		for fieldID, stats := range summaries.JsonKeyStats {
 			if stats == nil {
 				delete(segment.JsonKeyStats, fieldID)
 				continue

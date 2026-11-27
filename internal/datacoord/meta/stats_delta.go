@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"cmp"
 	"context"
 	"slices"
 
@@ -173,6 +174,44 @@ func addFileStatsDelta(ctx context.Context, segmentID int64, base, delta *datapb
 		}
 	}
 
+	return out
+}
+
+// An in-place schema bump adds whole column groups. Retain their layout and
+// size alongside the base groups so projected reads still work after reload.
+func addMaterializationStats(ctx context.Context, segment *SegmentInfo, result *datapb.CompactionSegment, schema *schemapb.CollectionSchema) *datapb.Statistics {
+	out := addStatsDelta(ctx, segment, result, schema)
+	newGroups := result.GetInsertLogs()
+	if result.GetStats() == nil || len(newGroups) == 0 || out == nil {
+		return out
+	}
+	if len(out.GetLoadResource().GetColumnGroups()) > 0 {
+		byID := make(map[int64]*datapb.ColumnGroupStatistics)
+		for _, group := range out.LoadResource.ColumnGroups {
+			byID[group.GetGroupId()] = group
+		}
+		for _, group := range storage.BuildLoadResourceStatistics(newGroups).GetColumnGroups() {
+			byID[group.GetGroupId()] = group
+		}
+		out.LoadResource.ColumnGroups = out.LoadResource.ColumnGroups[:0]
+		for _, group := range byID {
+			out.LoadResource.ColumnGroups = append(out.LoadResource.ColumnGroups, group)
+		}
+		slices.SortFunc(out.LoadResource.ColumnGroups, func(a, b *datapb.ColumnGroupStatistics) int {
+			return cmp.Compare(a.GetGroupId(), b.GetGroupId())
+		})
+	}
+	if len(out.GetFormats()) > 0 {
+		for _, group := range newGroups {
+			if group.GetFormat() == "" {
+				out.Formats = nil
+				break
+			}
+			out.Formats = append(out.Formats, group.GetFormat())
+		}
+		slices.Sort(out.Formats)
+		out.Formats = slices.Compact(out.Formats)
+	}
 	return out
 }
 

@@ -271,6 +271,11 @@ func NewFakeManifestStore(t *testing.T) *fakeManifestStore {
 			s.CommitCount++
 			// A revision is a full snapshot resolved onto the one it opens at.
 			current := s.Revisions[baseManifest]
+			base, _, err := packed.UnmarshalManifestPath(baseManifest)
+			if err != nil {
+				return packed.ManifestUpdateResult{}, err
+			}
+			var replaced []packed.ManifestIndexInfo
 			next := make([]packed.ManifestIndexInfo, 0, len(current)+len(updates.Indexes))
 			for _, entry := range current {
 				dropped := false
@@ -280,6 +285,14 @@ func NewFakeManifestStore(t *testing.T) *fakeManifestStore {
 						break
 					}
 				}
+				for _, added := range updates.Indexes {
+					if added.IndexID == entry.IndexID {
+						dropped = true
+						if added.BuildID != entry.BuildID {
+							replaced = append(replaced, resolveFakeManifestIndexPath(base, entry))
+						}
+					}
+				}
 				if !dropped {
 					next = append(next, entry)
 				}
@@ -287,7 +300,7 @@ func NewFakeManifestStore(t *testing.T) *fakeManifestStore {
 			next = append(next, updates.Indexes...)
 			s.Revisions[published] = next
 			hasIndexes := len(next) > 0
-			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes}, nil
+			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes, ReplacedIndexes: replaced}, nil
 		}).Build()
 	t.Cleanup(func() { commit.UnPatch() })
 
@@ -305,15 +318,19 @@ func NewFakeManifestStore(t *testing.T) *fakeManifestStore {
 				return nil, err
 			}
 			for i := range entries {
-				if strings.HasPrefix(entries[i].Path, "..") ||
-					(metautil.IsSegmentRooted(entries[i].IndexStorePathVersion) && !path.IsAbs(entries[i].Path)) {
-					entries[i].Path = path.Join(basePath, "_index", entries[i].Path)
-				}
+				entries[i] = resolveFakeManifestIndexPath(basePath, entries[i])
 			}
 			return entries, nil
 		}).Build()
 	t.Cleanup(func() { read.UnPatch() })
 	return s
+}
+
+func resolveFakeManifestIndexPath(base string, entry packed.ManifestIndexInfo) packed.ManifestIndexInfo {
+	if strings.HasPrefix(entry.Path, "..") || (metautil.IsSegmentRooted(entry.IndexStorePathVersion) && !path.IsAbs(entry.Path)) {
+		entry.Path = path.Join(base, "_index", entry.Path)
+	}
+	return entry
 }
 
 const RestartCollID = UniqueID(300)
