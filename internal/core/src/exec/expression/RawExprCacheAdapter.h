@@ -87,7 +87,6 @@ class RawExprCacheAdapter final : public Expr {
     struct State {
         LookupState lookup_state{LookupState::Unchecked};
         std::optional<ExprResCacheManager::Key> key;
-        ExprResCacheManager::ReadHandle reader;
 
         std::shared_ptr<TargetBitmap> result;
         std::shared_ptr<TargetBitmap> valid_result;

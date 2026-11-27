@@ -270,10 +270,9 @@ containers are copied, array containers set their positions, and run containers
 set their ranges. It never expands all set positions into a temporary row-id
 array. Roaring payloads use the portable serialization format. Each immutable
 EntryPool payload validates its bytes once and retains a read-only container
-index pointing into the serialized buffer. Both full decode and sparse gathering
-reuse this index without constructing CRoaring objects or copying containers.
-Array/run membership uses binary search; bitset membership reads one word with
-unaligned-safe loads. View vector capacities are charged to memory.maxBytes,
+index pointing into the serialized buffer. Full decode reuses this index without
+constructing CRoaring objects or copying containers. Serialized container values
+use unaligned-safe loads. View vector capacities are charged to memory.maxBytes,
 and remain charged with the payload through its last reader. The materialization
 budget reserves only the produced result/validity bitmaps.
 
@@ -339,12 +338,14 @@ can occupy distinct slots. Disk files are temporary and never restored.
 Config rebuild detaches current
 files and cleans abandoned files outside manager locks. Unique process/file
 identities prevent delayed cleanup from deleting a replacement file; files
-retained by in-flight readers are closed and unlinked by their last owner.
+retained by in-flight readers are closed and deletion is attempted by their last
+owner. Unlink failure is logged with the path and errno, without retry; destruction
+still releases the reservation. Leftovers therefore fall outside the cache budget.
 
 Never-used slots are allocated incrementally with a cursor. The free-slot list
 stores only recycled IDs, so its memory does not scale with the file's maximum
-slot count. Allocation reuses a recycled ID first and runs Clock eviction only
-when no recycled or never-used slots remain.
+slot count. Allocation reuses a recycled ID first. Clock eviction supplies a slot
+when the file is full, or when the global budget cannot charge a new slot.
 
 If the same segment later appears with a different row count, the fixed slot file no longer matches the bitmap shape. The manager removes the file and marks the segment ineligible for disk caching until the segment or config is reset.
 
@@ -357,9 +358,14 @@ Within one `DiskSlotFile`, slot eviction uses Clock. Across segment files, `Get`
 hits and `Put` writes touch a segment-level Clock usage counter. Before writing a
 header or previously uncharged slot, the writer reserves capacity from a shared
 budget. On exhaustion the manager detaches Clock victims other than the writing
-segment, destroys them outside its locks, and retries. Reader-held victims keep
-their reservations; when these prevent reclaiming enough capacity, the write is
-skipped. Partial/failed writes keep their slot reservation until file destruction.
+segment, destroys them outside its locks, and retries. Reader/writer-held files
+are skipped and keep their reservations. If growth still fails, the writing file
+reuses a free charged slot, or evicts a local Clock victim for a new expression.
+This reuse neither grows nor releases the reservation. The file's exclusive lock
+waits for active reads before unpublishing a victim; its slot is overwritten only
+afterward. An update to an existing expression is skipped if no charged staging
+slot is available, preserving its old result. Partial/failed writes keep their
+slot reservation until file destruction and return the slot for reuse.
 The shared budget survives Clear, retirement and backend/configuration rebuilds.
 Shrinking below retained usage blocks growth until enough owners release it.
 
@@ -402,17 +408,18 @@ adapter evaluates normally one batch at a time but neither decodes a cache hit
 nor captures a full-segment miss. Allocation and exception paths destroy the
 buffers before releasing the reservation.
 
-Returned bitmaps own their materialization reservation. Raw adapters may also
-retain a compressed read handle for later offset batches. Exceptions release the
-lookup's payload reference and materialization reservation through ownership
+Returned bitmaps own their materialization reservation. Raw adapters retain the
+complete decoded pair for later batches, releasing the backend handle after
+materialization. Exceptions release the lookup's payload reference and materialization reservation through ownership
 cleanup. The storage reservation remains while the payload is still indexed
 or held by another reader. Neither reservation's release path acquires the
 manager or pool lock.
 
-For offset inputs, reservation size is based on the requested row count. Raw
-payloads are read by bit, Roaring payloads by membership lookup, and disk slots
-by touched words; caller order and duplicates are preserved. A sequential batch
-covering the entire segment moves the private pair into its output, retaining
+Offset inputs also require a complete cached pair and its full materialization
+reservation. Subsequent batches gather positions from the private in-memory
+bitmaps, preserving caller order and duplicates. Disk reads fetch the header
+and both complete bitmaps once; no per-word disk read path remains. A sequential
+batch covering the entire segment moves the private pair into its output, retaining
 the lease with that output rather than copying the bitmap buffers.
 
 ### 5. Admission Control
@@ -993,7 +1000,9 @@ and file destruction happen after both cache locks and the PublishLease are
 released. Reader-held payloads remain charged until their last owner releases
 them. Disk reservations likewise survive detachment until file cleanup finishes.
 Generation-specific filenames keep delayed cleanup from deleting a new file.
-Failed unlinks leave disposable files for directory cleanup on rebuild.
+Failed unlinks are logged without retry. Rebuild skips all current-process files,
+so it does not reclaim current-process leftovers. A later process using the same
+directory may clean them up; successful reclamation is not guaranteed.
 
 The tradeoffs are extra per-entry list links/index metadata, a shared token per
 snapshot, and cache warming after every publication. Retiring a heavily cached
@@ -1018,8 +1027,9 @@ is acquired or released. Clear, rebuild, config failure, and switching to disk
 do not reset charges for payloads still held by readers. `GetMemoryBytes()`
 exposes this counter even when the current backend is disk.
 The shared disk budget increments its gauge on reservation and decrements it
-when the owning file is destroyed after close/unlink. Index detachment and backend
-switches do not reset this gauge.
+when the owning file is destroyed after close/unlink is attempted, including when
+unlink fails. Index detachment and backend switches do not reset this gauge.
+Failed-unlink leftovers are not charged; this is not a strict physical disk cap.
 
 `internal_expr_cache_hit_total` increments exactly once when
 `ExprResCacheManager::ReadWithStatus` returns `Hit`. Metadata lookup alone does
@@ -1200,8 +1210,8 @@ The feature does not change client-facing API or query semantics.
 - RawData disabled-path structural, allocation, and CPU equivalence tests.
 - Two-stage requests preserve whole-filter reuse, dynamic TTL keys and snapshot
   invalidation, while ordinary requests retain leaf caching.
-- TTL evaluation, typed IN normalization, sparse hit budgets, moved-output leases,
-  staging failures and retirement during blocked disk I/O.
+- TTL evaluation, typed IN normalization, full-pair offset-hit budgets,
+  moved-output leases, staging failures and retirement during blocked disk I/O.
 
 ## Known Limitations and Follow-Ups
 

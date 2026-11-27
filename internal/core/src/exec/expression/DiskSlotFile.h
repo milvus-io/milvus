@@ -23,7 +23,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <span>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -144,8 +143,7 @@ class DiskSlotFile {
         int64_t active_count,
         TargetBitmap& out_result,
         TargetBitmap& out_valid,
-        const std::function<bool()>& before_materialize = {},
-        const std::span<const int32_t>* offsets = nullptr);
+        const std::function<bool()>& before_materialize = {});
 
     bool
     Contains(ExprCacheSignature signature, int64_t active_count) const;

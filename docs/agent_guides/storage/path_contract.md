@@ -93,13 +93,19 @@ Sealed expression caches are disposable local files under
 The generation belongs to a published sealed snapshot; the process/file suffix
 also distinguishes replacement files after eviction or reconfiguration.
 Retirement and eviction detach shared file owners. The last owner closes and
-unlinks its exact original path outside publication/cache locks, so outstanding
+attempts to unlink its exact original path outside publication/cache locks, so outstanding
 reads/writes can finish without deleting a newer file. File headers and allocated
 slot reservations remain charged through this last-owner cleanup, including
-retired files held by offset readers; detachment does not reclaim disk budget.
+retired files held by in-flight reads/writes; detachment does not reclaim disk
+budget. Unlink failures other than an already absent file emit a warning with
+the path and errno. Cleanup is best-effort: destruction still releases the
+reservation, with no retry queue, so leftover files are no longer charged.
+Offset batches retain decoded bitmaps, not file owners.
 Missing generations and
-growing segments are ineligible. Rebuild cleans abandoned `.cache` files while
-excluding this process's still-live files. Cache files are never restored across
+growing segments are ineligible. Rebuild cleans old-process `.cache` files while
+excluding all files tagged with the current process, including failed-unlink
+leftovers. Reclamation of those leftovers is not guaranteed during that process's
+lifetime. Cache files are never restored across
 restarts and are not manifests or DataCoord GC objects.
 
 ## Local upgrade compatibility

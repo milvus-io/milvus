@@ -833,40 +833,172 @@ TEST_F(RawExprCacheAdapterTest, WholeHitKeepsLeaseWithMovedOutput) {
     EXPECT_EQ(manager.GetMaterializationBytes(), 0);
 }
 
-TEST_F(RawExprCacheAdapterTest, OffsetPrefetchNeverMaterializesWholePair) {
-    auto& manager = ExprResCacheManager::Instance();
-    CacheConfig config;
-    config.mode = CacheMode::Memory;
-    config.admission_threshold = 1;
-    config.mem_min_eval_duration_us = 0;
-    config.materialization_max_bytes = 16;
-    ASSERT_TRUE(manager.SetConfig(config));
-    auto [input, hit] = MakeAdapter("raw:sparse-prefetch");
-    ExprResCacheManager::Value value;
-    value.active_count = kActiveCount;
-    value.result = std::make_shared<TargetBitmap>(kActiveCount, true);
-    value.valid_result = std::make_shared<TargetBitmap>(kActiveCount, true);
-    manager.Put(RawCacheKey(*input), value);
-    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
-    hit->PrefetchAsync(pool);
-    hit->WaitPrefetch();
-    EXPECT_EQ(input->prefetch_count, 0);
-    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+TEST_F(RawExprCacheAdapterTest, OffsetRequestAfterWholeMoveFallsBack) {
     QueryContext query(
-        "sparse-hit", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+        "whole-then-offset", segment_.get(), kActiveCount, MAX_TIMESTAMP);
     query.set_read_snapshot(segment_->CaptureReadSnapshot());
     ExecContext exec(&query);
-    OffsetVector offsets{2499, 0, 64, 64};
-    EvalCtx context(&exec, &offsets);
+    EvalCtx sequential(&exec);
+    auto [miss_input, miss] = MakeAdapter("raw:whole-then-offset");
+    EvalSequential(miss, sequential);
+    auto [input, hit] = MakeAdapter("raw:whole-then-offset");
+    hit->SetExecuteAllAtOnce();
+    VectorPtr whole;
+    hit->Eval(sequential, whole);
+    ASSERT_NE(whole, nullptr);
+    ASSERT_EQ(whole->size(), kActiveCount);
+    ASSERT_EQ(input->eval_count, 0);
+    OffsetVector offsets{17, 0, 17};
+    EvalCtx selected(&exec, &offsets);
     VectorPtr output;
-    hit->Eval(context, output);
-    ASSERT_NE(output, nullptr);
-    EXPECT_EQ(output->size(), 4);
-    EXPECT_EQ(input->eval_count, 0);
-    EXPECT_EQ(manager.GetMaterializationBytes(), 16);
-    hit.reset();
-    output.reset();
-    EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+    hit->Eval(selected, output);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), offsets.size());
+    EXPECT_EQ(input->eval_count, 1);
+    TargetBitmapView result(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(result[i],
+                  CountingRawExpr::IsValid(offsets[i]) &&
+                      CountingRawExpr::Matches(offsets[i]));
+        EXPECT_EQ(valid[i], CountingRawExpr::IsValid(offsets[i]));
+    }
+}
+
+TEST_F(RawExprCacheAdapterTest, OffsetBatchesReuseFullPairAndReleaseBackend) {
+    auto& manager = ExprResCacheManager::Instance();
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("raw_full_pair_" + std::to_string(getpid()) + "_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto cleanup = folly::makeGuard([&] {
+        manager.Clear();
+        std::filesystem::remove_all(path);
+    });
+    const auto pair_bytes = 2 * ((kActiveCount + 63) / 64) * 8;
+    for (auto mode : {CacheMode::Memory, CacheMode::Disk}) {
+        SCOPED_TRACE(static_cast<int>(mode));
+        CacheConfig config;
+        config.mode = mode;
+        config.disk_base_path = path.string();
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = config.disk_min_eval_duration_us = 0;
+        config.materialization_max_bytes = pair_bytes;
+        ASSERT_TRUE(manager.SetConfig(config));
+        auto [input, hit] = MakeAdapter("raw:full-offset-hit");
+        ExprResCacheManager::Value value;
+        value.active_count = kActiveCount;
+        value.result = std::make_shared<TargetBitmap>(kActiveCount, false);
+        value.valid_result =
+            std::make_shared<TargetBitmap>(kActiveCount, false);
+        for (int64_t i = 0; i < kActiveCount; ++i) {
+            (*value.result)[i] =
+                CountingRawExpr::IsValid(i) && CountingRawExpr::Matches(i);
+            (*value.valid_result)[i] = CountingRawExpr::IsValid(i);
+        }
+        const auto key = RawCacheKey(*input);
+        manager.Put(key, value);
+        const auto file_path = mode == CacheMode::Disk
+                                   ? test::CacheFile(path, key.segment_id)
+                                   : std::filesystem::path{};
+        auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+        hit->PrefetchAsync(pool);
+        hit->WaitPrefetch();
+        EXPECT_EQ(input->prefetch_count, 0);
+        EXPECT_EQ(manager.GetMaterializationBytes(), pair_bytes);
+        QueryContext query(
+            "full-offset-hit", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+        query.set_read_snapshot(segment_->CaptureReadSnapshot());
+        ExecContext exec(&query);
+        const std::vector<OffsetVector> batches{{2499, 0, 64, 64},
+                                                {7, 1024, 8, 7}};
+        for (size_t batch = 0; batch < batches.size(); ++batch) {
+            auto offsets = batches[batch];
+            EvalCtx context(&exec, &offsets);
+            VectorPtr output;
+            hit->Eval(context, output);
+            auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+            ASSERT_NE(column, nullptr);
+            ASSERT_EQ(column->size(), offsets.size());
+            TargetBitmapView result(column->GetRawData(), column->size());
+            TargetBitmapView valid(column->GetValidRawData(), column->size());
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                EXPECT_EQ(result[i], (*value.result)[offsets[i]]);
+                EXPECT_EQ(valid[i], (*value.valid_result)[offsets[i]]);
+            }
+            EXPECT_EQ(input->eval_count, 0);
+            EXPECT_EQ(manager.GetMaterializationBytes(), pair_bytes);
+            // The next batch must need neither a backend read nor a second
+            // materialization reservation: the cache and file are gone.
+            manager.Clear();
+            EXPECT_EQ(manager.GetCurrentBytes(), 0);
+            if (mode == CacheMode::Disk) {
+                EXPECT_FALSE(std::filesystem::exists(file_path));
+            }
+        }
+        hit.reset();
+        EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+    }
+}
+
+TEST_F(RawExprCacheAdapterTest,
+       OffsetHitWithSmallBudgetFallsBackWithoutCapture) {
+    auto& manager = ExprResCacheManager::Instance();
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("raw_offset_budget_" + std::to_string(getpid()) + "_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto cleanup = folly::makeGuard([&] {
+        manager.Clear();
+        std::filesystem::remove_all(path);
+    });
+    for (auto mode : {CacheMode::Memory, CacheMode::Disk}) {
+        SCOPED_TRACE(static_cast<int>(mode));
+        CacheConfig config;
+        config.mode = mode;
+        config.disk_base_path = path.string();
+        config.admission_threshold = 1;
+        config.mem_min_eval_duration_us = config.disk_min_eval_duration_us = 0;
+        // Enough for the requested offsets, but not the complete cached pair.
+        config.materialization_max_bytes = 16;
+        ASSERT_TRUE(manager.SetConfig(config));
+        auto [input, hit] = MakeAdapter("raw:offset-budget");
+        ExprResCacheManager::Value value;
+        value.active_count = kActiveCount;
+        value.result = std::make_shared<TargetBitmap>(kActiveCount, true);
+        value.valid_result = std::make_shared<TargetBitmap>(kActiveCount, true);
+        manager.Put(RawCacheKey(*input), value);
+        auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+        hit->PrefetchAsync(pool);
+        hit->WaitPrefetch();
+        EXPECT_EQ(input->prefetch_count, 1);
+        QueryContext query(
+            "offset-budget", segment_.get(), kActiveCount, MAX_TIMESTAMP);
+        query.set_read_snapshot(segment_->CaptureReadSnapshot());
+        ExecContext exec(&query);
+        OffsetVector offsets{2499, 0, 64, 64};
+        EvalCtx context(&exec, &offsets);
+        VectorPtr output;
+        hit->Eval(context, output);
+        auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+        ASSERT_NE(column, nullptr);
+        ASSERT_EQ(column->size(), offsets.size());
+        TargetBitmapView result(column->GetRawData(), column->size());
+        TargetBitmapView valid(column->GetValidRawData(), column->size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(result[i],
+                      CountingRawExpr::IsValid(offsets[i]) &&
+                          CountingRawExpr::Matches(offsets[i]));
+            EXPECT_EQ(valid[i], CountingRawExpr::IsValid(offsets[i]));
+        }
+        EXPECT_EQ(input->eval_count, 1);
+        EXPECT_EQ(manager.GetEntryCount(), 1);
+        EXPECT_EQ(manager.GetMaterializationBytes(), 0);
+        hit.reset();
+    }
 }
 
 TEST_F(RawExprCacheAdapterTest, CacheHitSkipsWrappedRawPrefetch) {

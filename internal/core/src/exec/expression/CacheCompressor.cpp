@@ -380,50 +380,6 @@ CacheCompressor::ReadView::BitmapView::Init(const char* data,
     return cursor == size;
 }
 
-bool
-CacheCompressor::ReadView::BitmapView::Contains(uint32_t offset) const {
-    if (encoding == kCompTypeRaw) {
-        uint64_t word;
-        std::memcpy(&word, raw + (offset / 64) * 8, 8);
-        return (word >> (offset % 64)) & 1;
-    }
-    const auto key = static_cast<uint16_t>(offset >> 16);
-    const auto it = std::lower_bound(
-        containers.begin(),
-        containers.end(),
-        key,
-        [](const Container& c, uint16_t k) { return c.key < k; });
-    bool found = false;
-    if (it != containers.end() && it->key == key) {
-        const uint32_t low = offset & 0xffff;
-        if (it->type == ContainerType::Bitset) {
-            found =
-                (ReadLE<uint64_t>(it->data + (low / 64) * 8) >> (low % 64)) & 1;
-        } else {
-            const size_t stride = it->type == ContainerType::Run ? 4 : 2;
-            uint32_t first = 0, last = it->count;
-            // upper_bound for both sorted array values and run starts.
-            while (first < last) {
-                const auto mid = first + (last - first) / 2;
-                if (ReadLE<uint16_t>(it->data + mid * stride) <= low) {
-                    first = mid + 1;
-                } else {
-                    last = mid;
-                }
-            }
-            if (first != 0) {
-                const char* position = it->data + (first - 1) * stride;
-                const uint32_t start = ReadLE<uint16_t>(position);
-                const uint32_t length = it->type == ContainerType::Run
-                                            ? ReadLE<uint16_t>(position + 2)
-                                            : 0;
-                found = low <= start + length;
-            }
-        }
-    }
-    return found != (encoding == kCompTypeRoaringInv);
-}
-
 TargetBitmap
 CacheCompressor::ReadView::BitmapView::Decode(uint32_t rows) const {
     TargetBitmap result(rows, false);
@@ -518,29 +474,6 @@ size_t
 CacheCompressor::ReadView::HeapBytes() const {
     return (result_.containers.capacity() + validity_.containers.capacity()) *
            sizeof(Container);
-}
-
-bool
-CacheCompressor::ReadView::Gather(std::span<const int32_t> offsets,
-                                  TargetBitmap& result,
-                                  TargetBitmap& valid) const {
-    if (!valid_) {
-        return false;
-    }
-    for (auto offset : offsets) {
-        if (offset < 0 || static_cast<uint32_t>(offset) >= rows_) {
-            return false;
-        }
-    }
-    TargetBitmap selected(offsets.size(), false),
-        selected_valid(offsets.size(), false);
-    for (size_t i = 0; i < offsets.size(); ++i) {
-        selected[i] = result_.Contains(offsets[i]);
-        selected_valid[i] = all_valid_ || validity_.Contains(offsets[i]);
-    }
-    result = std::move(selected);
-    valid = std::move(selected_valid);
-    return true;
 }
 
 bool

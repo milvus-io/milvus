@@ -825,7 +825,7 @@ TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
 }  // namespace milvus::test
 
 namespace milvus::test {
-TEST_F(JsonFlatExpressionTest, ExprCacheOffsetRangeOwnsOnlySelectedPair) {
+TEST_F(JsonFlatExpressionTest, ExprCacheOffsetRangeReusesFullPair) {
     auto& cache = exec::ExprResCacheManager::Instance();
     exec::CacheConfig config;
     config.mode = exec::CacheMode::Memory;
@@ -880,12 +880,17 @@ TEST_F(JsonFlatExpressionTest, ExprCacheOffsetRangeOwnsOnlySelectedPair) {
         EXPECT_EQ(actual[i], expected_bits[offsets[i]]);
         EXPECT_EQ(valid[i], expected_valid[offsets[i]]);
     }
-    // Repeated offsets deliberately produce 65 rows from a 19-row segment:
-    // the lease must charge the selected pair (32 bytes), not a retained
-    // full-segment pair (16 bytes), and end with the output's lifetime.
-    EXPECT_EQ(cache.GetMaterializationBytes(), 32);
+    // Offset outputs are gathered from the private full-segment pair retained
+    // by the evaluator. Releasing an output must not release that pair early.
+    const auto pair_bytes = 2 * ((json_data_.size() + 63) / 64) * 8;
+    EXPECT_EQ(cache.GetMaterializationBytes(), pair_bytes);
     output.reset();
     column.reset();
+    cache.Clear();
+    compiled[0]->Eval(evaluation, output);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(cache.GetMaterializationBytes(), pair_bytes);
+    compiled.clear();
     EXPECT_EQ(cache.GetMaterializationBytes(), 0);
 }
 }  // namespace milvus::test

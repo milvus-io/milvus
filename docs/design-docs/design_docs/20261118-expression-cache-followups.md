@@ -42,7 +42,9 @@ Global locks protect lookup, registration, configuration and detachment only.
 Readers and writers retain a shared file owner before releasing global locks.
 Retirement removes discoverability immediately; operations already holding the
 file can finish without recreating a retired generation. The last owner closes
-and removes that file before returning its shared disk reservation. File identities must distinguish replacement files so
+and attempts to remove that file before returning its shared disk reservation.
+Deletion failures are logged without retry, and destruction still returns the
+reservation. File identities must distinguish replacement files so
 delayed cleanup cannot unlink a newer file for the same snapshot.
 
 Per-file readers hold a shared lock. Writers serialize with one another, reserve
@@ -61,8 +63,13 @@ skips files retained by readers or writers and detaches only directory-owned
 files. Ownership is checked without copying the shared pointer, under the same
 exclusive directory lock used for detachment; all production acquisitions from
 the directory also take that lock, and there are no weak file owners. The scan
-remains bounded when every file is pinned. Admission retries only after releasing
-victims outside manager locks, and is rejected when no reclaimable victim exists.
+remains bounded when every file is pinned. Growth retries only after releasing
+victims outside manager locks. If growth still fails, reuse an already charged
+free slot in the writing file; otherwise, a new expression can evict a local
+Clock victim and reuse its charged slot. Active reads finish before that victim
+is unpublished. Reuse preserves the reservation, and a failed write returns the
+charged slot for retry without publishing partial data. An existing expression
+keeps its old result if no charged staging slot is available.
 This does not make admission transactional: an unpinned victim may be reclaimed
 before a later reservation or write fails. Clear, retirement, rebuild, shrinking
 and backend switches reuse the same disk budget; gauges follow reservation
@@ -149,7 +156,7 @@ Charging once across entries is a separate accounting optimization. The disk
 budget continues to measure file bytes, not all in-memory slot-index metadata.
 
 The signature correction adds forced full-hash-collision regressions for memory
-and disk lookup, replacement and sparse reads, as well as exact domain identity,
+and disk lookup and replacement, as well as exact domain identity,
 shared input storage and retained-key budget accounting. These cases passed
 in the combined-tree C++ cloud run below; that run still had seven failures
 in other cases.
@@ -160,24 +167,21 @@ Transfer a private full-segment decoded pair to a single output batch without
 copying. Preserve its materialization reservation for the output's lifetime.
 This also applies to TextMatch: the result and validity pointers alias the same
 lease owner, so their reference count does not imply shared bitmap data.
-Sequential adapters release their cache read handle after full decoding;
-offset adapters keep it for subsequent gathers.
-Offset reads produce only the requested bits in request order, including
-duplicates; raw, Roaring and inverted Roaring payloads must agree with full
-decode. Disk gathers read only touched words while retaining file/slot lifetime.
-Validate offsets before any read and charge only the produced bitmap pair.
-Prefetch must not force full materialization before the offset input is known.
+Both sequential and offset adapters retain a complete private decoded pair and
+release the backend read handle after materialization. Offset batches gather
+from this pair in caller order, including duplicate positions; they never read
+selected words from a disk slot or gather directly from compressed bytes.
+The materialization budget charges the complete pair. If that reservation fails,
+the raw adapter falls back to normal evaluation without starting miss capture.
+Prefetch may perform the complete cache read once; later batches reuse its pair.
 
 Roaring payloads use portable serialization and an immutable read view prepared
 before EntryPool publication. The view indexes array, bitset and run containers
 by pointers into the retained byte buffer; it validates lengths, sorted keys and
-positions, cardinalities, runs and snapshot bounds once. Queries reuse the view
-across offset batches and full decodes. No CRoaring deserialization, container
-copy or container allocation runs on either cache-hit path. Views use unaligned-safe
-loads, so portable bytes embedded behind the entry header need no extra aligned
-buffer. Container-index vector capacities are included in the entry charge and
-released after the view and backing buffer are destroyed. This is a disposable
-in-memory encoding change; disk slots continue to hold raw bitmaps.
+positions, cardinalities, runs and snapshot bounds once. Full decode reuses this
+view without CRoaring deserialization or container allocation. View metadata
+remains charged with the payload. This is a disposable in-memory encoding;
+disk slots continue to hold raw bitmaps.
 
 
 ## Validation
@@ -391,7 +395,78 @@ Optional asynchronous disk writes are not included. Writes remain synchronous
 on their calling query thread, but no manager lock covers their I/O. No claim
 of measured production hit-rate or latency improvement is made.
 
-Coalescing disk offset reads is explicitly deferred. The offset path still
-issues two 8-byte reads per distinct touched word, plus the slot header read.
-Contiguous-range/page reads and a dense-selection fallback remain a performance
-follow-up; sequential full-bitmap reads are unchanged.
+The offset-selective backend read optimization has been withdrawn. Both
+backends materialize the full result/validity pair; disk hits read the slot
+header and the two complete bitmaps. Raw offset batches reuse the decoded pair
+without retaining a file handle between batches. The backend offset APIs and
+compressed membership/gather path have been removed. Whole-output moves,
+portable full decoding, exact signatures and disk ownership accounting remain.
+
+The historical test results above describe their respective source versions,
+including the now-withdrawn selective read path. The final withdrawal source on
+`337d6473ac` was uploaded with `-b master --allow-dirty` as Dev CLI cloud task
+`cpp-ut-local-lu-zhang-fix-expr-337d647-ad11f9ddc8443815-u59677`.
+Its completed test log reports **242 passed, 3 skipped and 0 failed**, out of
+245 tests across 35 suites. The skips are memory variants of disk-only tests;
+the corresponding disk variants passed. This is cloud C++ validation, not a
+local run or PR Jenkins result. No sanitizer or performance result is claimed.
+
+Regression coverage includes multi-batch reuse after backend cleanup and actual
+file deletion, full-pair budget rejection with raw fallback in both backends,
+offset fallback after a whole-output move, indexed offset evaluation, full
+codec decoding and the existing concurrency/lifecycle cases. The prior source
+without the additional post-move guard passed 241 tests with the same 3 skips
+in task `cpp-ut-local-lu-zhang-fix-expr-337d647-685d8f208a50e991-u59677`.
+The known charged-slot reuse and failed-unlink retry gaps are separate follow-ups,
+not fixed by this withdrawal.
+
+### Charged-slot reuse on budget exhaustion
+
+The subsequent correction retains global growth admission and adds a local
+fallback when it fails. It reuses charged free slots or an existing Clock victim
+without limiting the file capacity to the total budget. This also permits
+replacement when other files occupy the budget and are pinned by readers.
+The uncharged slot ID remains free for later growth; reused slots do not alter
+the charged high-water mark. Same-expression updates retain their old result
+when a separate charged staging slot is unavailable.
+
+Regressions cover repeated replacement in a single file, cold-versus-hot victim
+selection, multiple reader-held files, preservation of an existing expression,
+write failure followed by reuse, and active reads during replacement. The
+failed-unlink behavior is governed by the best-effort decision below.
+
+Validation on 2026-11-26 used Dev CLI cloud C++ tasks with `-b master
+--allow-dirty`. Before the correction, task
+`cpp-ut-local-lu-zhang-fix-expr-337d647-2599f5dbdcf2ae93-u59677` compiled and
+failed all six targeted regression cases on missing replacement/admission.
+After the correction, task
+`cpp-ut-local-lu-zhang-fix-expr-337d647-f5e17024650e8e99-u59677` succeeded:
+**247 passed, 3 skipped, 0 failed**, across 250 tests in 35 suites. All six
+targeted cases passed, including the active-reader case with an additional
+assertion that the writer remains blocked while the read holds the slot.
+The three skips are memory variants of disk-only lifecycle tests; their disk
+variants passed. The broader run includes the prior full-bitmap/offset-withdrawal
+regressions. Post-upload C++ edits were formatting only. This is cloud C++
+validation, not PR Jenkins, local execution, sanitizer or performance validation.
+
+### Best-effort unlink decision (2026-11-27)
+
+Keep failed file deletion simple: warn with the exact path, errno and error text,
+then continue cleanup. An already absent file (`ENOENT`) is not a warning.
+Construction rollback and normal last-owner cleanup use the same non-throwing
+helper. No retry queue, background worker or retained reservation is added.
+
+This explicitly accepts residual disk usage: reservation destruction releases
+the logical charge even if unlink failed. Current-process leftovers are skipped
+by rebuild cleanup and may remain for the process lifetime. A later process can
+attempt cleanup in the same directory, but there is no guaranteed reclamation.
+The PR must not claim strict physical disk accounting or automatic unlink retry.
+
+Dev CLI cloud task
+`cpp-ut-local-lu-zhang-fix-expr-337d647-d34ca0447e078be0-u59677` compiled this
+change and ran the targeted DiskSlotFile, DiskCache and ExprCacheGeneration
+regressions: **68 passed, 3 skipped, 0 failed**, across 71 tests in 7 suites.
+The skips are memory variants of disk-only cases; their disk variants passed.
+This logging-only change adds no tests or unlink-fault injection. The failure
+branch was traced in source; this run is regression coverage, not a claim that
+failed-file reclamation or runtime warning output was fault-injection verified.

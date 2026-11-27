@@ -69,8 +69,7 @@ DefaultRoaringAlignedMalloc(size_t alignment, size_t size) {
     return posix_memalign(&pointer, alignment, size) == 0 ? pointer : nullptr;
 }
 
-TEST(ExprCacheReadViewTest,
-     SparseBatchesReuseChargedViewWithoutRoaringAllocations) {
+TEST(ExprCacheReadViewTest, FullHitsReuseChargedViewWithoutRoaringAllocations) {
     auto& manager = ExprResCacheManager::Instance();
     const auto cleanup = folly::makeGuard([&] {
         manager.Clear();
@@ -81,7 +80,7 @@ TEST(ExprCacheReadViewTest,
     config.mode = CacheMode::Memory;
     config.admission_threshold = 1;
     config.mem_min_eval_duration_us = 0;
-    config.materialization_max_bytes = 16;
+    config.materialization_max_bytes = 2 * ((16777217 + 63) / 64) * 8;
     ASSERT_TRUE(manager.SetConfig(config));
     ExprResCacheManager::SetEnabled(true);
     constexpr int64_t rows = 16777217;
@@ -126,18 +125,19 @@ TEST(ExprCacheReadViewTest,
                                             65535,
                                             rows - 1,
                                             batch * 1000};
-        const std::span<const int32_t> offsets(selected);
         ExprResCacheManager::Value output;
-        ASSERT_EQ(manager.ReadWithStatus(reader, output, &offsets),
+        ASSERT_EQ(manager.ReadWithStatus(reader, output),
                   ExprResCacheManager::LookupResult::Hit);
         for (size_t i = 0; i < selected.size(); ++i) {
-            EXPECT_EQ((*output.result)[i], (*value.result)[selected[i]]);
-            EXPECT_EQ((*output.valid_result)[i],
+            EXPECT_EQ((*output.result)[selected[i]],
+                      (*value.result)[selected[i]]);
+            EXPECT_EQ((*output.valid_result)[selected[i]],
                       (*value.valid_result)[selected[i]]);
         }
-        EXPECT_EQ(manager.GetMaterializationBytes(), 16u);
+        EXPECT_EQ(manager.GetMaterializationBytes(),
+                  config.materialization_max_bytes);
         ExprResCacheManager::Value blocked;
-        EXPECT_EQ(manager.ReadWithStatus(reader, blocked, &offsets),
+        EXPECT_EQ(manager.ReadWithStatus(reader, blocked),
                   ExprResCacheManager::LookupResult::ResourceLimit);
         EXPECT_EQ(reader.memory.get(), payload);
         EXPECT_EQ(manager.GetMemoryBytes(), charge);
@@ -177,18 +177,6 @@ TEST(CacheCompressorTest, ReadViewHandlesUnalignedMixedContainersAndInversion) {
     for (size_t i = 0; i < 10000; i += 2) original[i] = true;
     for (size_t i = 65536 + 63; i < 65536 + 1000; ++i) original[i] = true;
     original[2 * 65536 + 17] = original[rows - 1] = true;
-    const std::vector<int32_t> selected{0,
-                                        1,
-                                        9998,
-                                        9999,
-                                        65536 + 62,
-                                        65536 + 63,
-                                        65536 + 999,
-                                        65536 + 1000,
-                                        2 * 65536 + 17,
-                                        3 * 65536,
-                                        rows - 1,
-                                        rows - 1};
     for (bool inverted : {false, true}) {
         auto result = original.clone();
         if (inverted)
@@ -204,13 +192,8 @@ TEST(CacheCompressorTest, ReadViewHandlesUnalignedMixedContainersAndInversion) {
             CacheCompressor::ReadView view(
                 unaligned.data() + shift, bytes.size(), encoding, rows);
             ASSERT_TRUE(view.IsValid());
-            TargetBitmap subset, subset_valid, full, full_valid;
-            ASSERT_TRUE(view.Gather(selected, subset, subset_valid));
+            TargetBitmap full, full_valid;
             ASSERT_TRUE(view.Decode(full, full_valid));
-            for (size_t i = 0; i < selected.size(); ++i) {
-                EXPECT_EQ(subset[i], result[selected[i]]);
-                EXPECT_EQ(subset_valid[i], valid[selected[i]]);
-            }
             for (size_t i = 0; i < rows; ++i) {
                 ASSERT_EQ(full[i], result[i]) << i;
                 ASSERT_EQ(full_valid[i], valid[i]) << i;
@@ -246,10 +229,10 @@ TEST(CacheCompressorTest, ReadViewHandlesOptionalPortableOffsetTable) {
             bytes.data(), bytes.size(), encoding, rows);
         ASSERT_TRUE(view.IsValid()) << count;
         TargetBitmap selected, selected_valid;
-        ASSERT_TRUE(view.Gather(offsets, selected, selected_valid));
+        ASSERT_TRUE(view.Decode(selected, selected_valid));
         for (size_t i = 0; i < offsets.size(); ++i) {
-            EXPECT_EQ(selected[i], bits[offsets[i]]);
-            EXPECT_TRUE(selected_valid[i]);
+            EXPECT_EQ(selected[offsets[i]], bits[offsets[i]]);
+            EXPECT_TRUE(selected_valid[offsets[i]]);
         }
     }
 }
@@ -269,7 +252,7 @@ class ExprCacheFollowupsTest : public ::testing::TestWithParam<CacheMode> {
         config_.admission_threshold = 1;
         config_.mem_min_eval_duration_us = config_.disk_min_eval_duration_us =
             0;
-        // Enough for eight selected rows, deliberately too small for the segment.
+        // Some tests deliberately start below the full-pair materialization size.
         config_.materialization_max_bytes = 16;
         ASSERT_TRUE(manager_.SetConfig(config_));
         ExprResCacheManager::SetEnabled(true);
@@ -287,10 +270,11 @@ class ExprCacheFollowupsTest : public ::testing::TestWithParam<CacheMode> {
     std::filesystem::path path_;
 };
 
-TEST_P(ExprCacheFollowupsTest, SparseHitsRespectOrderDuplicatesAndSmallBudget) {
+TEST_P(ExprCacheFollowupsTest, FullHitsDecodeAllCodecsAndKeepMovedOutputLease) {
     constexpr int64_t rows = 131073;
-    const std::vector<int32_t> selected{rows - 1, 64, 0, 63, 64, 65536, 1};
-    const std::span<const int32_t> offsets(selected);
+    const auto pair_bytes = 2 * ((rows + 63) / 64) * 8;
+    config_.materialization_max_bytes = pair_bytes;
+    ASSERT_TRUE(manager_.SetConfig(config_));
     // Exercise raw, sparse Roaring, and inverted Roaring independently for
     // result/validity, including omitted all-valid payloads and partial words.
     for (int result_kind = 0; result_kind < 3; ++result_kind) {
@@ -314,19 +298,12 @@ TEST_P(ExprCacheFollowupsTest, SparseHitsRespectOrderDuplicatesAndSmallBudget) {
             auto reader = manager_.Lookup(key, rows);
             ASSERT_TRUE(reader);
             EXPECT_EQ(manager_.GetMaterializationBytes(), 0);
-            ExprResCacheManager::Value full, subset;
-            full.active_count = rows;
-            EXPECT_EQ(manager_.GetWithStatus(key, full),
-                      ExprResCacheManager::LookupResult::ResourceLimit);
-            ASSERT_EQ(manager_.ReadWithStatus(reader, subset, &offsets),
+            ExprResCacheManager::Value subset;
+            ASSERT_EQ(manager_.ReadWithStatus(reader, subset),
                       ExprResCacheManager::LookupResult::Hit);
-            ASSERT_EQ(subset.result->size(), selected.size());
-            for (size_t i = 0; i < selected.size(); ++i) {
-                EXPECT_EQ((*subset.result)[i], (*value.result)[selected[i]]);
-                EXPECT_EQ((*subset.valid_result)[i],
-                          (*value.valid_result)[selected[i]]);
-            }
-            EXPECT_EQ(manager_.GetMaterializationBytes(), 16);
+            EXPECT_TRUE(*subset.result == *value.result);
+            EXPECT_TRUE(*subset.valid_result == *value.valid_result);
+            EXPECT_EQ(manager_.GetMaterializationBytes(), pair_bytes);
             const auto* result_buffer = subset.result->data();
             const auto* valid_buffer = subset.valid_result->data();
             auto output = ExprCacheHelper::MoveToColumn(
@@ -335,14 +312,15 @@ TEST_P(ExprCacheFollowupsTest, SparseHitsRespectOrderDuplicatesAndSmallBudget) {
             EXPECT_EQ(output->GetValidRawData(), valid_buffer);
             reader = {};
             manager_.Clear();
-            EXPECT_EQ(manager_.GetMaterializationBytes(), 16);
+            EXPECT_EQ(manager_.GetMaterializationBytes(), pair_bytes);
             output.reset();
             EXPECT_EQ(manager_.GetMaterializationBytes(), 0);
         }
     }
 }
 
-TEST_P(ExprCacheFollowupsTest, InvalidOffsetsAndMissingGenerationCannotHit) {
+TEST_P(ExprCacheFollowupsTest,
+       FullHitsRequireWholePairBudgetAndLiveGeneration) {
     test::ExprCacheKey key{81002, "offsets"};
     ExprResCacheManager::Value value;
     value.active_count = 128;
@@ -351,18 +329,12 @@ TEST_P(ExprCacheFollowupsTest, InvalidOffsetsAndMissingGenerationCannotHit) {
     manager_.Put(key, value);
     auto reader = manager_.Lookup(key, 128);
     ASSERT_TRUE(reader);
-    for (int32_t offset : {-1, 128}) {
-        const std::span<const int32_t> selected(&offset, 1);
-        ExprResCacheManager::Value output;
-        EXPECT_EQ(manager_.ReadWithStatus(reader, output, &selected),
-                  ExprResCacheManager::LookupResult::Miss);
-        EXPECT_EQ(manager_.GetMaterializationBytes(), 0);
-    }
-    const std::span<const int32_t> empty;
     ExprResCacheManager::Value output;
-    ASSERT_EQ(manager_.ReadWithStatus(reader, output, &empty),
-              ExprResCacheManager::LookupResult::Hit);
-    EXPECT_EQ(output.result->size(), 0);
+    EXPECT_EQ(manager_.ReadWithStatus(reader, output),
+              ExprResCacheManager::LookupResult::ResourceLimit);
+    EXPECT_EQ(manager_.GetMaterializationBytes(), 0);
+    EXPECT_EQ(output.result, nullptr);
+    EXPECT_EQ(output.valid_result, nullptr);
     ExprResCacheManager::Key invalid{key.segment_id, key.signature, nullptr};
     manager_.Put(invalid, value);
     EXPECT_FALSE(manager_.Lookup(invalid, 128));
@@ -441,14 +413,6 @@ TEST_P(ExprCacheFollowupsTest, HashCollisionsCannotAliasResultsOrDerivedKeys) {
                 ASSERT_TRUE(manager_.Get(key, found));
                 EXPECT_EQ(found.result->count(), result ? 64 : 0);
                 EXPECT_EQ(found.valid_result->count(), valid ? 64 : 0);
-                found = {};
-                const auto reader = manager_.Lookup(key, 64);
-                const std::array<int32_t, 3> positions{63, 0, 63};
-                const std::span<const int32_t> offsets(positions);
-                ASSERT_EQ(manager_.ReadWithStatus(reader, found, &offsets),
-                          ExprResCacheManager::LookupResult::Hit);
-                EXPECT_EQ(found.result->count(), result ? 3 : 0);
-                EXPECT_EQ(found.valid_result->count(), valid ? 3 : 0);
             };
         manager_.Put(left_key, make_value(true, true));
         EXPECT_FALSE(manager_.Lookup(right_key, 64));

@@ -18,6 +18,8 @@
 
 #include <folly/ScopeGuard.h>
 #include <sys/stat.h>
+#include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <cassert>
 
@@ -28,6 +30,26 @@
 
 namespace milvus {
 namespace exec {
+
+namespace {
+void
+UnlinkBestEffort(const std::string& path) noexcept {
+    if (::unlink(path.c_str()) == 0) {
+        return;
+    }
+    const int error = errno;
+    if (error != ENOENT) {
+        try {
+            LOG_WARN("DiskSlotFile: failed to unlink {}, errno={}: {}",
+                     path,
+                     error,
+                     std::strerror(error));
+        } catch (...) {
+            // Cleanup must not throw from destruction or exception unwinding.
+        }
+    }
+}
+}  // namespace
 
 ExprCacheDiskBudget::ExprCacheDiskBudget(size_t capacity)
     : capacity_(capacity),
@@ -126,7 +148,7 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
             ::close(fd_);
             fd_ = -1;
         }
-        ::unlink(path_.c_str());
+        UnlinkBestEffort(path_);
     });
 
     // Allocate file space
@@ -183,8 +205,7 @@ DiskSlotFile::Get(ExprCacheSignature signature,
                   int64_t active_count,
                   TargetBitmap& out_result,
                   TargetBitmap& out_valid,
-                  const std::function<bool()>& before_materialize,
-                  const std::span<const int32_t>* offsets) {
+                  const std::function<bool()>& before_materialize) {
     std::shared_lock lock(mutex_);
 
     if (fd_ < 0) {
@@ -238,38 +259,6 @@ DiskSlotFile::Get(ExprCacheSignature signature,
             "DiskSlotFile::Get: active_count mismatch on disk for slot_id={}",
             meta.slot_id);
         return false;
-    }
-
-    if (offsets != nullptr) {
-        for (auto position : *offsets) {
-            if (position < 0 || position >= row_count_) {
-                return false;
-            }
-        }
-        // Read each touched word once even for unsorted or repeated offsets.
-        std::unordered_map<uint32_t, std::pair<uint64_t, uint64_t>> words;
-        TargetBitmap selected(offsets->size(), false);
-        TargetBitmap selected_valid(offsets->size(), false);
-        for (size_t i = 0; i < offsets->size(); ++i) {
-            const auto position = (*offsets)[i];
-            const uint32_t word_id = position / 64;
-            auto [word, inserted] = words.try_emplace(word_id);
-            if (inserted) {
-                const auto word_offset = offset + kSlotHeaderSize + word_id * 8;
-                if (::pread(fd_, &word->second.first, 8, word_offset) != 8 ||
-                    ::pread(fd_,
-                            &word->second.second,
-                            8,
-                            word_offset + bitset_bytes_) != 8) {
-                    return false;
-                }
-            }
-            selected[i] = (word->second.first >> (position % 64)) & 1;
-            selected_valid[i] = (word->second.second >> (position % 64)) & 1;
-        }
-        out_result = std::move(selected);
-        out_valid = std::move(selected_valid);
-        return true;
     }
 
     out_result = TargetBitmap(row_count_);
@@ -333,7 +322,7 @@ DiskSlotFile::Put(ExprCacheSignature signature,
     }
     free_slots_.reserve(free_slots_.size() + 2);
     auto meta = std::make_unique<SlotMeta>();
-    const auto slot_id = AllocateSlot();
+    auto slot_id = AllocateSlot();
     if (slot_id >= num_slots_) {
         return;
     }
@@ -365,9 +354,32 @@ DiskSlotFile::Put(ExprCacheSignature signature,
     if (reservation_ && slot_id >= reserved_slots_) {
         const auto slots = slot_id + 1 - reserved_slots_;
         if (!reservation_->Grow(static_cast<size_t>(slots) * slot_size_)) {
-            return;
+            lock.lock();
+            const auto find_charged = [&] {
+                return std::find_if(
+                    free_slots_.begin(), free_slots_.end(), [&](uint32_t id) {
+                        return id < reserved_slots_;
+                    });
+            };
+            auto charged = find_charged();
+            if (charged == free_slots_.end() &&
+                slot_index_.find(signature) == slot_index_.end()) {
+                // Budget exhaustion must not freeze a file with cold entries.
+                // Wait for active reads, unpublish a victim, then reuse its
+                // charged slot. Never evict the result we are replacing.
+                EvictOne();
+                charged = find_charged();
+            }
+            if (charged == free_slots_.end()) {
+                return;
+            }
+            // Keep the unused ID available for a future budget increase.
+            std::swap(slot_id, *charged);
+            meta->slot_id = slot_id;
+            lock.unlock();
+        } else {
+            reserved_slots_ = slot_id + 1;
         }
-        reserved_slots_ = slot_id + 1;
     }
     const off_t offset =
         kFileHeaderSize + static_cast<off_t>(slot_id) * slot_size_;
@@ -504,9 +516,9 @@ DiskSlotFile::RebuildClockKeys() {
 void
 DiskSlotFile::Remove() noexcept {
     Close();
-    // Deletion is best effort; a leftover file has no lookup metadata and is
-    // removed by the existing cache-directory cleanup on backend rebuild.
-    ::unlink(path_.c_str());
+    // Failed deletion is logged without retry. Destruction still releases the
+    // reservation, so an orphan can outlive its charge.
+    UnlinkBestEffort(path_);
 }
 
 void

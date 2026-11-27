@@ -3384,33 +3384,6 @@ class SegmentExpr : public Expr {
                    num_index_chunk_);
         const auto* predicate = PredicateReader<T>();
 
-        // Offset consumers need no full private pair on a cache hit. Leave the
-        // sequential index-result state untouched so later offset batches can
-        // independently gather from the immutable cache payload.
-        if (offsets != nullptr && cached_index_chunk_id_ != 0 &&
-            (!selected_element_level_result_ || func_returns_row_level) &&
-            ExprResCacheManager::IsEnabled() && HasExprCacheIdentity()) {
-            ColumnVectorPtr selected;
-            RunExprCacheBestEffort([&] {
-                auto& manager = ExprResCacheManager::Instance();
-                const auto reader = manager.Lookup(
-                    MakeExprCacheKey(CacheSignature()), active_count_);
-                const std::span<const int32_t> positions(offsets->data(),
-                                                         offsets->size());
-                ExprResCacheManager::Value cached;
-                if (manager.ReadWithStatus(reader, cached, &positions) ==
-                    ExprResCacheManager::LookupResult::Hit) {
-                    selected = ExprCacheHelper::MoveToColumn(
-                        std::move(cached.result),
-                        std::move(cached.valid_result));
-                }
-            });
-            if (selected) {
-                MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
-                return selected;
-            }
-        }
-
         // Cache index result (execute only once)
         if (cached_index_chunk_id_ != 0) {
             const auto json_pointer = field_type_ == DataType::JSON

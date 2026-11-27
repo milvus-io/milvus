@@ -90,10 +90,25 @@ RawExprCacheAdapter::EnsureLookup() {
 
             state_.key.emplace(input_->MakeExprCacheKey(
                 input_->GetSignatureForRawExprCache()));
-            state_.reader =
-                manager.Lookup(*state_.key, input_->GetActiveCount());
-            if (state_.reader) {
+            ExprResCacheManager::Value cached;
+            cached.active_count = input_->GetActiveCount();
+            const auto lookup = manager.GetWithStatus(*state_.key, cached);
+            if (lookup == ExprResCacheManager::LookupResult::Hit &&
+                cached.result != nullptr && cached.valid_result != nullptr &&
+                cached.result->size() ==
+                    static_cast<size_t>(cached.active_count) &&
+                cached.valid_result->size() ==
+                    static_cast<size_t>(cached.active_count)) {
+                state_.result = std::move(cached.result);
+                state_.valid_result = std::move(cached.valid_result);
                 state_.lookup_state = LookupState::Hit;
+                return;
+            }
+            if (lookup == ExprResCacheManager::LookupResult::ResourceLimit) {
+                // Cache materialization is optional. Run the wrapped evaluator
+                // batch by batch without turning pressure into a cache miss and
+                // allocating another full-segment capture pair.
+                state_.lookup_state = LookupState::Ineligible;
                 return;
             }
             state_.lookup_state = LookupState::Miss;
@@ -116,7 +131,6 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
     const auto abandon_hit = [this]() {
         state_.result.reset();
         state_.valid_result.reset();
-        state_.reader = {};
         state_.lookup_state = LookupState::Ineligible;
     };
 
@@ -126,18 +140,14 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
             result = nullptr;
             return true;
         }
+        if (!state_.result || !state_.valid_result) {
+            // A preceding whole-segment output may have taken the pair.
+            abandon_hit();
+            return false;
+        }
         try {
-            ExprResCacheManager::Value cached;
-            const std::span<const int32_t> selected(offsets->data(),
-                                                    offsets->size());
-            if (ExprResCacheManager::Instance().ReadWithStatus(
-                    state_.reader, cached, &selected) !=
-                ExprResCacheManager::LookupResult::Hit) {
-                abandon_hit();
-                return false;
-            }
-            result = ExprCacheHelper::MoveToColumn(
-                std::move(cached.result), std::move(cached.valid_result));
+            result = input_->GatherCachedResultByOffsets(
+                *state_.result, *state_.valid_result, *offsets);
             MarkFeature(input_->feature_recorder(), FeatureBit::ExprCacheHit);
             return true;
         } catch (...) {
@@ -157,20 +167,6 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
 
     ColumnVectorPtr sliced_result;
     try {
-        if (!state_.result) {
-            ExprResCacheManager::Value cached;
-            if (ExprResCacheManager::Instance().ReadWithStatus(state_.reader,
-                                                               cached) !=
-                ExprResCacheManager::LookupResult::Hit) {
-                abandon_hit();
-                return false;
-            }
-            state_.result = std::move(cached.result);
-            state_.valid_result = std::move(cached.valid_result);
-            // Sequential batches now own a complete private pair. Do not pin
-            // the compressed payload or disk file for the remaining batches.
-            state_.reader = {};
-        }
         if (state_.sequential_pos == 0 && actual_rows == active_count) {
             sliced_result = ExprCacheHelper::MoveToColumn(
                 std::move(state_.result), std::move(state_.valid_result));
@@ -362,8 +358,8 @@ RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
         return;
     }
     if (had_hit) {
-        // A vanished/corrupt entry or exhausted budget falls back to the real
-        // evaluator. Prefetch was skipped for the metadata hit.
+        // Serving the private cached pair failed. Prefetch was skipped for
+        // the hit, so prepare the real evaluator before falling back.
         input_->PrefetchOnCurrentThread();
     }
 

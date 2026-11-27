@@ -3977,7 +3977,7 @@ TEST_F(DiskCacheRegistrationTest, WriteFailureRemovesNewFileAndRegistration) {
     ExpectRetryEvictsResident();
 }
 
-TEST_F(DiskCacheRegistrationTest, PinnedOffsetReaderPreservesLookupAndBudget) {
+TEST_F(DiskCacheRegistrationTest, PinnedReaderPreservesLookupAndBudget) {
     auto& gauge = milvus::cachinglayer::monitor::cache_loaded_bytes(
         milvus::cachinglayer::CellDataType::OTHER,
         milvus::cachinglayer::StorageType::DISK);
@@ -3998,16 +3998,14 @@ TEST_F(DiskCacheRegistrationTest, PinnedOffsetReaderPreservesLookupAndBudget) {
         EXPECT_DOUBLE_EQ(gauge.Value(), gauge_base + charge);
         EXPECT_TRUE(std::filesystem::exists(path));
         // A failed admission must preserve discoverability for new queries,
-        // not merely keep an old reader's file alive for later offset batches.
+        // not merely keep an in-flight reader's file alive.
         ExpectHit(resident);
         Peer::AssertDiskState(manager, 1);
-        const std::vector<int32_t> positions{1023, 0, 17, 17};
-        const std::span<const int32_t> offsets(positions);
         ExprResCacheManager::Value got;
-        ASSERT_EQ(manager.ReadWithStatus(reader, got, &offsets),
+        ASSERT_EQ(manager.ReadWithStatus(reader, got),
                   ExprResCacheManager::LookupResult::Hit);
-        EXPECT_EQ(got.result->count(), positions.size());
-        EXPECT_EQ(got.valid_result->count(), positions.size());
+        AssertBitsEqual(*got.result, *value.result);
+        AssertBitsEqual(*got.valid_result, *value.valid_result);
     }
     reader = {};
     EXPECT_EQ(manager.GetCurrentBytes(), charge);
@@ -4274,18 +4272,170 @@ TEST_F(DiskCacheRegistrationTest, RecycledStagingSlotsStayCharged) {
     EXPECT_EQ(manager.GetCurrentBytes(), 0u);
 }
 
-TEST_F(DiskCacheRegistrationTest, SlotGrowthCannotExceedBudget) {
+TEST_F(DiskCacheRegistrationTest, SlotGrowthFailureReusesChargedSlots) {
     manager.Put(resident, value);
-    const milvus::test::ExprCacheKey another{resident.segment_id, "another"};
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    const auto path = milvus::test::CacheFile(directory, resident.segment_id);
+    const auto file_size = std::filesystem::file_size(path);
+    auto previous = resident;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const milvus::test::ExprCacheKey another{
+            resident.segment_id, "another_" + std::to_string(attempt)};
         manager.Put(another, value);
         EXPECT_EQ(manager.GetCurrentBytes(), 345u);
         EXPECT_EQ(manager.GetEntryCount(), 1u);
+        EXPECT_EQ(std::filesystem::file_size(path), file_size);
+        ExpectHit(another);
+        EXPECT_FALSE(manager.Lookup(previous, value.active_count));
+        previous = another;
+    }
+}
+
+TEST_F(DiskCacheRegistrationTest, SlotGrowthFailureReusesColdSlot) {
+    config.disk_max_bytes = 64 + 2 * 281;
+    ASSERT_TRUE(manager.SetConfig(config));
+    const milvus::test::ExprCacheKey hot{resident.segment_id, "hot"};
+    const milvus::test::ExprCacheKey another{resident.segment_id, "another"};
+    manager.Put(resident, value);
+    manager.Put(hot, value);
+    for (int i = 0; i < 5; ++i) {
+        ExpectHit(hot);
+    }
+    manager.Put(another, value);
+    EXPECT_EQ(manager.GetCurrentBytes(), 626u);
+    EXPECT_EQ(manager.GetEntryCount(), 2u);
+    EXPECT_FALSE(manager.Lookup(resident, value.active_count));
+    ExpectHit(hot);
+    ExpectHit(another);
+}
+
+TEST_F(DiskCacheRegistrationTest, SlotGrowthFailureWithPinnedOtherFiles) {
+    // Each file is smaller than the total budget: clamping maxFileSize to
+    // maxBytes would not help when the other files cannot be reclaimed.
+    config.disk_max_bytes = 3 * 345;
+    ASSERT_TRUE(manager.SetConfig(config));
+    const milvus::test::ExprCacheKey third{532, "third"};
+    manager.Put(resident, value);
+    manager.Put(candidate, value);
+    manager.Put(third, value);
+    auto second_reader = manager.Lookup(candidate, value.active_count);
+    auto third_reader = manager.Lookup(third, value.active_count);
+    ASSERT_TRUE(second_reader);
+    ASSERT_TRUE(third_reader);
+    auto previous = resident;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        const milvus::test::ExprCacheKey another{
+            resident.segment_id, "another_" + std::to_string(attempt)};
+        manager.Put(another, value);
+        EXPECT_EQ(manager.GetCurrentBytes(), 1035u);
+        EXPECT_EQ(manager.GetEntryCount(), 3u);
+        Peer::AssertDiskState(manager, 3);
+        ExpectHit(another);
+        EXPECT_FALSE(manager.Lookup(previous, value.active_count));
+        ExpectHit(candidate);
+        ExpectHit(third);
+        previous = another;
+    }
+}
+
+TEST_F(DiskCacheRegistrationTest,
+       SlotGrowthFailurePreservesExistingExpression) {
+    manager.Put(resident, value);
+    auto replacement = value;
+    replacement.result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(1024, false));
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        manager.Put(resident, replacement);
         ExpectHit(resident);
+        EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+        EXPECT_EQ(manager.GetEntryCount(), 1u);
+    }
+    const milvus::test::ExprCacheKey another{resident.segment_id, "another"};
+    manager.Put(another, value);
+    ExpectHit(another);
+    EXPECT_FALSE(manager.Lookup(resident, value.active_count));
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+}
+
+TEST_F(DiskCacheRegistrationTest,
+       SlotGrowthFailureWriteFailureRecyclesChargedSlot) {
+    using Access = milvus::exec::DiskSlotFileTestAccess;
+    manager.Put(resident, value);
+    auto reader = manager.Lookup(resident, value.active_count);
+    ASSERT_TRUE(reader);
+    const auto path = milvus::test::CacheFile(directory, resident.segment_id);
+    const milvus::test::ExprCacheKey another{resident.segment_id, "another"};
+    const int read_only_fd = ::open(path.c_str(), O_RDONLY);
+    ASSERT_GE(read_only_fd, 0);
+    {
+        const int original_fd =
+            Access::SwapFileDescriptor(*reader.disk, read_only_fd);
+        auto restore = folly::makeGuard([&] {
+            Access::SwapFileDescriptor(*reader.disk, original_fd);
+            ::close(read_only_fd);
+        });
+        manager.Put(another, value);
+        EXPECT_FALSE(manager.Lookup(another, value.active_count));
+        EXPECT_FALSE(manager.Lookup(resident, value.active_count));
+        EXPECT_EQ(manager.GetEntryCount(), 0u);
+        EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+    }
+    manager.Put(another, value);
+    ExpectHit(another);
+    EXPECT_EQ(manager.GetEntryCount(), 1u);
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
+}
+
+TEST_F(DiskCacheRegistrationTest, SlotGrowthFailureWaitsForActiveRead) {
+    manager.Put(resident, value);
+    const milvus::test::ExprCacheKey another{resident.segment_id, "another"};
+    auto replacement = value;
+    replacement.result =
+        std::make_shared<milvus::TargetBitmap>(MakeBits(1024, false));
+    std::promise<void> writing, reading, resume_writer, resume_reader;
+    auto write_ready = writing.get_future();
+    auto read_ready = reading.get_future();
+    auto writer_resumed = resume_writer.get_future().share();
+    auto reader_resumed = resume_reader.get_future().share();
+    std::future<bool> writer, reader;
+    auto release_writer = folly::makeGuard([&] { resume_writer.set_value(); });
+    auto release_reader = folly::makeGuard([&] { resume_reader.set_value(); });
+    writer = std::async(std::launch::async, [&] {
+        return Peer::Put(manager, another, replacement, [&](Stage stage) {
+            if (stage == Stage::SlotWrite) {
+                writing.set_value();
+                writer_resumed.wait();
+            }
+        });
+    });
+    ASSERT_EQ(write_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    reader = std::async(std::launch::async, [&] {
         ExprResCacheManager::Value got;
         got.active_count = value.active_count;
-        EXPECT_FALSE(manager.Get(another, got));
-    }
+        const auto status = Peer::Get(manager, resident, got, [&] {
+            reading.set_value();
+            reader_resumed.wait();
+        });
+        return status == ExprResCacheManager::LookupResult::Hit &&
+               got.result->all() && got.valid_result->all();
+    });
+    ASSERT_EQ(read_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    resume_writer.set_value();
+    release_writer.dismiss();
+    EXPECT_EQ(writer.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    resume_reader.set_value();
+    release_reader.dismiss();
+    EXPECT_TRUE(reader.get());
+    EXPECT_TRUE(writer.get());
+    ExprResCacheManager::Value got;
+    got.active_count = value.active_count;
+    ASSERT_TRUE(manager.Get(another, got));
+    EXPECT_TRUE(got.result->none());
+    EXPECT_TRUE(got.valid_result->all());
+    EXPECT_FALSE(manager.Lookup(resident, value.active_count));
+    EXPECT_EQ(manager.GetCurrentBytes(), 345u);
 }
 
 TEST(ExprResCacheManagerV2Test, DiskModeGlobalCapacityEvictsSegments) {

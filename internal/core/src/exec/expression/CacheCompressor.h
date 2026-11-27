@@ -18,7 +18,6 @@
 
 #include <cstdint>
 #include <vector>
-#include <span>
 
 #include "common/Types.h"
 
@@ -113,7 +112,7 @@ class CacheCompressor {
                TargetBitmap& out_valid);
 
     // Immutable view into an EntryPool payload. Parse and validate once before
-    // publication; Gather/Decode never deserialize Roaring containers. The owner
+    // publication; Decode never deserializes Roaring containers. The owner
     // must keep the byte buffer alive and unchanged for the view's lifetime.
     class ReadView {
      public:
@@ -124,10 +123,6 @@ class CacheCompressor {
         }
         size_t
         HeapBytes() const;
-        bool
-        Gather(std::span<const int32_t> offsets,
-               TargetBitmap& result,
-               TargetBitmap& valid) const;
         bool
         Decode(TargetBitmap& result, TargetBitmap& valid) const;
 
@@ -145,8 +140,6 @@ class CacheCompressor {
             std::vector<Container> containers;
             bool
             Init(const char* data, size_t size, uint8_t codec, uint32_t rows);
-            bool
-            Contains(uint32_t offset) const;
             TargetBitmap
             Decode(uint32_t rows) const;
         };

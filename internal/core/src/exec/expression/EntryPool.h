@@ -130,12 +130,6 @@ class EntryPool {
         bool
         Decode(TargetBitmap& result, TargetBitmap& valid) const;
 
-        bool
-        Gather(std::span<const int32_t> offsets,
-               TargetBitmap& result,
-               TargetBitmap& valid) const {
-            return view_.Gather(offsets, result, valid);
-        }
         size_t
         ReadViewBytes() const {
             return view_.HeapBytes();

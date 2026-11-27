@@ -25,7 +25,6 @@
 #include <optional>
 #include <shared_mutex>
 #include <string>
-#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -278,8 +277,8 @@ class ExprResCacheManager {
     GetWithStatus(const Key& key, Value& out_value);
 
     // A metadata-only lookup retains the backend, never a materialized pair.
-    // Prefetch can avoid source I/O while deferring bitmap allocation until
-    // the evaluator knows whether it needs a whole segment or a few offsets.
+    // Retain it only while materializing the complete bitmap pair; batched
+    // consumers keep that private pair rather than the backend handle.
     struct ReadHandle {
         EntryPool::Handle memory;
         std::shared_ptr<DiskSlotFile> disk;
@@ -294,7 +293,6 @@ class ExprResCacheManager {
     LookupResult
     ReadWithStatus(const ReadHandle& handle,
                    Value& out_value,
-                   const std::span<const int32_t>* offsets = nullptr,
                    const std::function<void()>& before_decode = {});
 
     // Insert or update cache entry. The provided value.result must be non-null.

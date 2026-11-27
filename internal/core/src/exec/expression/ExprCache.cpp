@@ -497,7 +497,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
                                    Value& out_value,
                                    const std::function<void()>& before_decode) {
     return ReadWithStatus(
-        Lookup(key, out_value.active_count), out_value, nullptr, before_decode);
+        Lookup(key, out_value.active_count), out_value, before_decode);
 }
 
 ExprResCacheManager::ReadHandle
@@ -538,7 +538,6 @@ ExprResCacheManager::LookupResult
 ExprResCacheManager::ReadWithStatus(
     const ReadHandle& handle,
     Value& out_value,
-    const std::span<const int32_t>* offsets,
     const std::function<void()>& before_decode) {
     out_value.result.reset();
     out_value.valid_result.reset();
@@ -546,19 +545,11 @@ ExprResCacheManager::ReadWithStatus(
     if (!handle) {
         return LookupResult::Miss;
     }
-    if (offsets) {
-        for (auto offset : *offsets) {
-            if (offset < 0 || offset >= handle.active_count) {
-                return LookupResult::Miss;
-            }
-        }
-    }
-    const auto output_rows = offsets ? offsets->size() : handle.active_count;
     std::shared_ptr<MaterializedBitmapPair> materialized;
     TargetBitmap result, valid;
     auto failure = LookupResult::Miss;
     const auto reserve = [&]() {
-        auto lease = TryAcquireMaterialization(output_rows);
+        auto lease = TryAcquireMaterialization(handle.active_count);
         if (!lease) {
             failure = LookupResult::ResourceLimit;
             return false;
@@ -575,8 +566,7 @@ ExprResCacheManager::ReadWithStatus(
             return failure;
         }
         const auto& payload = *handle.memory;
-        const bool decoded = offsets ? payload.Gather(*offsets, result, valid)
-                                     : payload.Decode(result, valid);
+        const bool decoded = payload.Decode(result, valid);
         if (!decoded) {
             return LookupResult::Miss;
         }
@@ -584,11 +574,11 @@ ExprResCacheManager::ReadWithStatus(
                                  handle.active_count,
                                  result,
                                  valid,
-                                 reserve,
-                                 offsets)) {
+                                 reserve)) {
         return failure;
     }
-    if (result.size() != output_rows || valid.size() != output_rows) {
+    if (result.size() != handle.active_count ||
+        valid.size() != handle.active_count) {
         return LookupResult::Miss;
     }
     materialized->result = std::move(result);
@@ -598,7 +588,7 @@ ExprResCacheManager::ReadWithStatus(
         std::shared_ptr<TargetBitmap>(materialized, &materialized->result);
     out_value.valid_result =
         std::shared_ptr<TargetBitmap>(materialized, &materialized->valid);
-    out_value.bytes = FullBitmapPairBytes(output_rows).value_or(0);
+    out_value.bytes = FullBitmapPairBytes(handle.active_count).value_or(0);
     ::milvus::monitor::internal_expr_cache_hit_total.Increment();
     return LookupResult::Hit;
 }
