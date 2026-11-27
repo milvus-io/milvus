@@ -461,7 +461,7 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 // tryAcquireUpViewForSchema returns a notification only when a matching view
 // is recovering and no matching Up view can serve. Inspecting state and taking
 // the notification under the same mutex prevents a lost recovery wakeup.
-func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
+func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int32, identities ...servingIdentity) (*QueryViewLease, <-chan struct{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -476,6 +476,10 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 	recovering := false
 	for version, entry := range s.views {
 		s.advancePendingDownLocked(version, entry)
+		if len(identities) > 0 && (!identities[0].matches(entry.sm.Meta()) ||
+			(identities[0].loadVersion > 0 && entry.pendingDown)) {
+			continue
+		}
 		if schema != nil && entry.sm.Meta().GetSchemaVersion() != *schema {
 			continue
 		}
@@ -597,4 +601,18 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 
 func collectionIDForEntry(entry *snViewEntry) int64 {
 	return entry.sm.Meta().GetCollectionId()
+}
+
+// Zero identity belongs only to the master non-split request path.
+// A published identity always carries a positive exact load version.
+type servingIdentity struct {
+	epoch       uint64
+	loadVersion uint64
+}
+
+func (identity servingIdentity) matches(meta *viewpb.QueryViewMeta) bool {
+	if identity.loadVersion == 0 {
+		return identity.epoch == 0 && meta.GetShardSetEpoch() == 0
+	}
+	return identity.epoch == meta.GetShardSetEpoch() && identity.loadVersion == meta.GetLoadInfoVersion()
 }

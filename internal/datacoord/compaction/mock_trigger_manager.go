@@ -214,6 +214,54 @@ func (_c *MockTriggerManager_Stop_Call) RunAndReturn(run func()) *MockTriggerMan
 	return _c
 }
 
+// TriggerL0Segments provides a mock function with given fields: ctx, collectionID, segmentIDs
+func (_m *MockTriggerManager) TriggerL0Segments(ctx context.Context, collectionID int64, segmentIDs []int64) error {
+	ret := _m.Called(ctx, collectionID, segmentIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TriggerL0Segments")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64) error); ok {
+		r0 = rf(ctx, collectionID, segmentIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockTriggerManager_TriggerL0Segments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TriggerL0Segments'
+type MockTriggerManager_TriggerL0Segments_Call struct {
+	*mock.Call
+}
+
+// TriggerL0Segments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - segmentIDs []int64
+func (_e *MockTriggerManager_Expecter) TriggerL0Segments(ctx interface{}, collectionID interface{}, segmentIDs interface{}) *MockTriggerManager_TriggerL0Segments_Call {
+	return &MockTriggerManager_TriggerL0Segments_Call{Call: _e.mock.On("TriggerL0Segments", ctx, collectionID, segmentIDs)}
+}
+
+func (_c *MockTriggerManager_TriggerL0Segments_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64)) *MockTriggerManager_TriggerL0Segments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_TriggerL0Segments_Call) Return(_a0 error) *MockTriggerManager_TriggerL0Segments_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTriggerManager_TriggerL0Segments_Call) RunAndReturn(run func(context.Context, int64, []int64) error) *MockTriggerManager_TriggerL0Segments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockTriggerManager creates a new instance of MockTriggerManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockTriggerManager(t interface {

@@ -270,7 +270,7 @@ func (h *SNQueryViewHandler) AcquireUpViewAtSchema(ctx context.Context, shardID 
 	return h.acquireUpViewForSchema(ctx, shardID, &schema)
 }
 
-func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32) (*QueryViewLease, error) {
+func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID qviews.ShardID, schema *int32, identities ...servingIdentity) (*QueryViewLease, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -295,7 +295,7 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 		// hide an already servable one. Never nest shard locks under h.mu.
 		waits := []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())}}
 		for _, candidate := range candidates {
-			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema)
+			lease, changed, err := candidate.tryAcquireUpViewForSchema(ctx, schema, identities...)
 			if lease != nil {
 				return lease, nil
 			}
@@ -318,4 +318,12 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 // AcquireReplicaWatchStream observes local eligibility without a View lease.
 func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
 	return h.replicas.AcquireStream(ctx, pchannel, unavailable)
+}
+
+// AcquireUpViewAtGeneration binds Phase 1 to an exact published read identity.
+func (h *SNQueryViewHandler) AcquireUpViewAtGeneration(ctx context.Context, shard qviews.ShardID, schema *int32, epoch uint64, loadVersion uint64) (*QueryViewLease, error) {
+	if epoch > 0 && loadVersion == 0 {
+		return nil, viewerror.NewViewInvalidated("split query plan request misses load identity")
+	}
+	return h.acquireUpViewForSchema(ctx, shard, schema, servingIdentity{epoch: epoch, loadVersion: loadVersion})
 }

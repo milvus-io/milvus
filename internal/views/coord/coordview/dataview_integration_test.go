@@ -57,6 +57,8 @@ func publishInterfaceDataView(t *testing.T, m dataview.Manager, id, rows int64) 
 func newInterfaceRegistry(t *testing.T, m dataview.Manager, recovered []*viewpb.QueryViewOfShard, save func(context.Context, []*viewpb.QueryViewOfShard) error) *ShardViewRegistry {
 	t.Helper()
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
+	t.Cleanup(func() { generations.UnPatch() })
 	list := mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return(recovered, nil).Build()
 	t.Cleanup(func() { list.UnPatch() })
 	saver := mockey.Mock(mockey.GetMethod(catalog, "SaveQueryViews"))

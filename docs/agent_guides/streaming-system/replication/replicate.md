@@ -17,6 +17,26 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 2. **ChannelReplicator** → **Secondary Proxy** via `CreateReplicateStream` gRPC bidirectional stream: sends each message with its original `MessageID`, `Properties`, and `Payload`, along with the `SourceClusterID`.
 3. **Secondary Proxy** → **Secondary WAL**: the Proxy remaps VChannel names and appends to the local WAL. The **Replicate Interceptor** validates the incoming message (cluster ID match, TimeTick deduplication) and tracks checkpoint.
 
+## Shard Split
+
+`SplitShard` is replicated. The secondary Proxy renames every VChannel the
+message names (source and targets in the header, the shards of the routing in
+the body, and the append-first VChannel of the broadcast header). The message
+carries no segment ID or other value local to the primary. The same consumers then
+run on the secondary: the fence on the source, the genesis of the targets, and
+the ack callback.
+
+The barrier TimeTick a primary broadcaster puts on a message is dropped when
+the message is replicated. The secondary keeps the order of the primary
+itself: the Proxy does not append the genesis of a target until the copy on
+the source is appended on the secondary (its replicate stream reports the
+local TimeTick to StreamingCoord; without the report, until the copy is
+acknowledged), and then appends it with the local TimeTick of that copy as
+its barrier. Everything behind the genesis on
+the same PChannel stream waits with it. On every cluster the genesis of a
+target is therefore above the local switch TimeTick of the source. See
+[Append-First Copy](../coordination/broadcaster.md#append-first-copy).
+
 ## Message-Level Replication Skip
 
 Some DDL/control messages cannot be safely replayed on a SECONDARY until their replay contract is deterministic across clusters. Producers mark those concrete WAL messages with the `Unreplicable` (`_ur`) message property. The CDC sender treats them like ignored messages and advances replication progress without sending them. The SECONDARY replicate interceptor also ignores replicated messages that carry `_ur`, which protects mixed-version or already-forwarded traffic.
@@ -68,7 +88,7 @@ On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `Replicat
 All topology changes are triggered by `AlterReplicateConfig` broadcast messages, which require **ExclusiveCluster** [resource lock](../coordination/broadcaster.md) — acting as a global barrier across all PChannels.
 
 - **AddNewMember**: Add a new cluster and topology edge. Replication starts from the current WAL position of new incoming `AlterReplicateConfig` message. Existing cluster attributes are immutable.
-- **AddNewPChannel**: Not supported via config change — all clusters must have equal PChannel count set at initial configuration.
+- **AddNewPChannel**: Configuration changes may append PChannels to the end of every cluster's list. All clusters must retain equal counts, and every existing channel must stay at its original index. Shrinking or reordering is rejected. The assignment service marks an increase so the replication machinery creates the added channel mappings; a split still requires its selected target WALs to be ready and eligible for replication before fencing the source.
 - **SwitchOver**: Update topology edges to reverse roles (e.g., PRIMARY A → SECONDARY B becomes PRIMARY B → SECONDARY A). On the new primary, `SwitchReplicateMode` drops the secondary state. On the old primary, which becomes a secondary, it creates a new secondary state that points to the new source. A secondary also creates a new secondary state when its source cluster changes.
 - **FailOver**: Remove the failed primary from topology edges and designate a secondary as the new primary by updating the topology. The CDC ChannelReplicator on the old primary stops when it detects its topology edge is removed.
 - **RemoveMember**: Remove topology edges pointing to the target cluster. The CDC ChannelReplicator detects the edge removal via `AlterReplicateConfig` message and cleans up the replicate PChannel metadata from etcd.

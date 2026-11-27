@@ -288,10 +288,14 @@ func GetCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	if len(task.GetResultSegments()) > 0 {
 		target = task.GetResultSegments()[0]
 	}
-	// Restore is a Coordinator execution mode; workers and public APIs use the ordinary L0 type.
-	typ := task.GetType()
-	if typ == datapb.CompactionType_RestoreLevel0DeleteCompaction {
-		typ = datapb.CompactionType_Level0DeleteCompaction
+	typ := commonpb.CompactionType(task.GetType())
+	switch task.GetType() {
+	case datapb.CompactionType_RestoreLevel0DeleteCompaction:
+		// Restore is a Coordinator execution mode; the public operation is L0 deletion.
+		typ = commonpb.CompactionType_CompactionTypeLevel0Delete
+	case datapb.CompactionType_SplitShardRewriteCompaction:
+		// Split rewrite has no named public type. Keep its internal execution type intact.
+		typ = commonpb.CompactionType_CompactionTypeUndefined
 	}
 	return &milvuspb.CompactionMergeInfo{
 		Sources:       task.GetInputSegments(),
@@ -301,7 +305,7 @@ func GetCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 		CollectionId:  task.GetCollectionID(),
 		PartitionId:   task.GetPartitionID(),
 		Channel:       task.GetChannel(),
-		Type:          commonpb.CompactionType(typ),
+		Type:          typ,
 		State:         commonpb.CompactionTaskState(task.GetState()),
 		FailureReason: task.GetFailReason(),
 		Targets:       task.GetResultSegments(),

@@ -3,6 +3,7 @@ package querycoordv2
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -186,4 +188,54 @@ func TestReconcileSchemaVersionProvider(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLateSchemaPublicationRemainsTrackedForDropGC(t *testing.T) {
+	registry, err := coordview.RecoverShardViewRegistry(t.Context(), &fakeQueryViewCatalog{}, &handoverSilentSyncer{})
+	require.NoError(t, err)
+	t.Cleanup(registry.Close)
+	const id int64 = 100
+	registry.PublishCollectionSchema(id, 0)
+	store := metacachetest.NewMetaStore()
+	store.PutCollection(&metacache.CollectionInfo{ID: id, State: etcdpb.CollectionState_CollectionCreated, Schema: &schemapb.CollectionSchema{Version: 0}})
+	collections := meta.NewCollectionManager(nil, store)
+	patch := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
+	defer patch.UnPatch()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	captured, publish := make(chan struct{}), make(chan struct{})
+	read := reconcileSchemaVersionProvider(func(id int64) (*metacache.CollectionInfo, error) {
+		info, err := collections.GetCollectionInfo(id)
+		close(captured)
+		select {
+		case <-publish:
+			return info, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}, registry.PublishCollectionSchema)
+	done := make(chan error, 1)
+	go func() {
+		_, err := read(ctx, id)
+		done <- err
+	}()
+	select {
+	case <-captured:
+	case <-ctx.Done():
+		t.Fatal("schema provider did not capture the pre-drop collection")
+	}
+	store.PutCollection(&metacache.CollectionInfo{ID: id, State: etcdpb.CollectionState_CollectionDropping, Schema: &schemapb.CollectionSchema{Version: 0}})
+	require.NoError(t, registry.RemoveServingGeneration(ctx, id))
+	close(publish)
+	require.NoError(t, <-done)
+
+	// The independent GC loop must still discover a schema callback that
+	// completes after logical deletion removed the serving publication.
+	require.Equal(t, []int64{id}, registry.ServingCollectionIDs())
+	_, err = collections.GetCollectionInfo(id)
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	for _, dropped := range registry.ServingCollectionIDs() {
+		require.NoError(t, registry.RemoveServingGeneration(ctx, dropped))
+	}
+	require.Empty(t, registry.ServingCollectionIDs())
 }

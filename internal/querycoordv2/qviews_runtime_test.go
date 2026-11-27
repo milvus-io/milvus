@@ -180,9 +180,22 @@ func testAlterLoadConfigResult() message.BroadcastResultAlterLoadConfigMessageV2
 }
 
 type fakeQueryViewCatalog struct {
+	emptyServingCatalog
 	views []*viewpb.QueryViewOfShard
 	saves [][]*viewpb.QueryViewOfShard
 }
+
+type emptyServingCatalog struct{}
+
+func (*emptyServingCatalog) ListServingGenerations(context.Context) ([]*viewpb.ServingGeneration, error) {
+	return nil, nil
+}
+
+func (*emptyServingCatalog) SaveServingGeneration(context.Context, *viewpb.ServingGeneration) error {
+	return nil
+}
+
+func (*emptyServingCatalog) RemoveServingGeneration(context.Context, int64) error { return nil }
 
 func (c *fakeQueryViewCatalog) ListQueryViews(context.Context) ([]*viewpb.QueryViewOfShard, error) {
 	return c.views, nil

@@ -510,6 +510,19 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 		return err
 	}
 	resources := qvresource.Resource()
+	if len(published.SplitLineages) > 0 {
+		release, err := qvresource.AcquireSplitLifecycle(ctx, id)
+		if err != nil {
+			return err
+		}
+		defer release()
+		if resources == nil || resources.FinishSplitAdoptionBeforeSchema == nil {
+			return merr.WrapErrServiceNotReadyMsg("split adoption recovery is not ready")
+		}
+		if err := resources.FinishSplitAdoptionBeforeSchema(ctx, id); err != nil {
+			return err
+		}
+	}
 	// Publication may have succeeded before a cache invalidation failed. Replaying
 	// that callback must not wait for a retired schema or overwrite newer metadata.
 	if published.UpdateTimestamp >= result.GetMaxTimeTick() {
@@ -520,6 +533,9 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 		return err
 	}
 	updates := result.Message.MustBody().GetUpdates()
+	if err := forwardSchemaToSplitSources(ctx, resources, published, updates.GetSchema()); err != nil {
+		return err
+	}
 	if err := resources.PrepareSchema(ctx, id, published.ToCollectionSchemaPB(), updates.GetSchema()); err != nil {
 		return merr.Wrap(err, "prepare collection schema QueryViews")
 	}

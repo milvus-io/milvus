@@ -172,7 +172,16 @@ func TestCollectionCreationPreservesSchemaVersionOnReplay(t *testing.T) {
 				state := etcdpb.CollectionState_CollectionCreated
 				if restore {
 					msg := message.NewRestoreSnapshotMessageBuilderV2().WithHeader(&message.RestoreSnapshotMessageHeader{}).
-						WithBody(&messagespb.RestoreSnapshotMessageBody{CollectionHeader: result.Message.Header(), Collection: result.Message.MustBody()}).
+						WithBody(&messagespb.RestoreSnapshotMessageBody{
+							CollectionHeader: result.Message.Header(), Collection: result.Message.MustBody(),
+							Routing: &message.SplitShardRouting{RoutingModulus: 4, ShardBy: "hash(pk)", Shards: []*schemapb.CollectionShardInfo{{
+								VchannelName: result.Message.MustBody().VirtualChannelNames[0],
+								Routing:      &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 2}}},
+							}, {
+								VchannelName: result.Message.MustBody().VirtualChannelNames[1],
+								Routing:      &schemapb.CollectionShardInfo_HashRouting{HashRouting: &schemapb.HashRouting{Buckets: []uint64{1, 3}}},
+							}}},
+						}).
 						WithBroadcast(result.Message.MustBody().VirtualChannelNames).MustBuildBroadcast()
 					apply = func() error {
 						return core.ApplyRestoreCollection(ctx, message.BroadcastResultRestoreSnapshotMessageV2{
@@ -205,6 +214,11 @@ func TestCollectionCreationPreservesSchemaVersionOnReplay(t *testing.T) {
 					coll, err := kvrootcoord.NewCatalog(store).GetCollectionByID(ctx, 1, typeutil.MaxTimestamp, 100)
 					require.NoError(t, err)
 					require.Equal(t, info.GetSchema().GetVersion(), coll.SchemaVersion)
+					if restore {
+						require.EqualValues(t, 4, coll.RoutingModulus, "same creation persists the routing post-image")
+						require.Equal(t, []uint64{0, 2}, coll.ShardInfos[coll.VirtualChannelNames[0]].Buckets)
+						require.Empty(t, coll.SplitLineages)
+					}
 					return coll
 				}
 				require.Equal(t, version, readPersisted().SchemaVersion)

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -43,7 +44,7 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 			result.CostAggregation = mergeLegacyCosts(costs)
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
-		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
+		result.MvccTimestamp = qviews.PlanSnapshotTimestamp(plan.Mvcc)
 		results = append(results, result)
 	}
 	return results, nil
@@ -65,7 +66,7 @@ func (c *legacySearchCollector) Reduce(ctx context.Context, req *internalpb.Sear
 			return nil, err
 		}
 		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
-		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())}
+		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: qviews.PlanSnapshotTimestamp(plan.Mvcc)}
 		results = append(results, result)
 	}
 	return results, nil

@@ -39,6 +39,7 @@ type TransformLogSubscriptionOption struct {
 	// cursors to their retained lower bound; skipped history is not replayed.
 	StartAfterTimeTick uint64
 	EndTimeTick        uint64
+	RequireExactStart  bool
 	Handler            TransformLogEventHandler
 }
 

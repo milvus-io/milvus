@@ -29,6 +29,9 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if mismatch := qviews.LineageMVCCMismatch(lease.Meta.GetLineage(), mvcc); mismatch != "" {
+		return nil, viewerror.NewViewInvalidated("%s", mismatch)
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
@@ -47,7 +50,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 	)
-	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+	if err := WaitQueryMVCCVisible(ctx, runtime, mvcc); err != nil {
 		return nil, err
 	}
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))
@@ -88,6 +91,9 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, err
 	}
 	defer lease.Release()
+	if mismatch := qviews.LineageMVCCMismatch(lease.Meta.GetLineage(), mvcc); mismatch != "" {
+		return nil, viewerror.NewViewInvalidated("%s", mismatch)
+	}
 	if req.GetSchemaVersion() != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
@@ -106,7 +112,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		mlog.Uint64("growingTimeTick", mvcc.GetGrowingTimetick()),
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 	)
-	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+	if err := WaitQueryMVCCVisible(ctx, runtime, mvcc); err != nil {
 		return nil, err
 	}
 	partitions, err := runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), selectedPartitionIDs(req.GetPartitionIDs()))

@@ -20,7 +20,11 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 		r.eventCond.Wait()
 	}
 	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
-		stage.pending = append(stage.pending, event)
+		if stage.live != nil {
+			stage.live.applyEvent(ctx, event)
+		} else {
+			stage.pending = append(stage.pending, event)
+		}
 	}
 	r.applyEvent(ctx, event)
 }
@@ -55,6 +59,11 @@ func (r *Runtime) applyLiveMessage(ctx context.Context, msg message.ImmutableMes
 	}
 	if applyTransform {
 		r.markTransformTimeTick(timeTick)
+	}
+	if applyGrowing && messageutil.IsSplitShardFence(msg) {
+		// From the fence on, deletes of the residual's rows are written to
+		// the targets of the split.
+		r.observeSplitLineage(lineageSpecFromFence(msg))
 	}
 	mlog.Debug(ctx, "applied live message to growing runtime",
 		mlog.FieldVChannel(msg.VChannel()),

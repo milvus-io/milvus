@@ -325,7 +325,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.clusteringKeyField = clusteringKeyField
 	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
-	t.currentTime = time.Now()
+	t.currentTime = compactionTTLTime(t.plan, time.Now())
 	t.memoryLimit = t.getMemoryLimit()
 	t.bufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
 	workerPoolSize := t.getWorkerPoolSize()

@@ -125,6 +125,20 @@ func TestBroadcaster(t *testing.T) {
 		return appended.Load() == 9 && len(done.Collect()) == 6
 	}, 30*time.Second, 10*time.Millisecond)
 
+	// A consumer ack observer sees every acknowledgement of a task that is not
+	// a tombstone, and an observer that fails leaves the copy unacknowledged:
+	// the first acknowledgement below is sent twice.
+	var observed atomic.Int32
+	registry.ResetConsumerAckObservers(message.MessageTypeDropCollection)
+	t.Cleanup(func() { registry.ResetConsumerAckObservers() })
+	registry.RegisterConsumerAckObserver(message.MessageTypeDropCollection, func(_ context.Context, msg message.ImmutableMessage, _ bool) error {
+		assert.Equal(t, uint64(7), msg.BroadcastHeader().BroadcastID)
+		if observed.Add(1) == 1 {
+			return errors.New("observer is not ready")
+		}
+		return nil
+	})
+
 	// only task 7 is not done.
 	ack(t, bc, 7, "v1")
 	ack(t, bc, 7, "v1") // test already acked, make the idempotent.
@@ -137,6 +151,11 @@ func TestBroadcaster(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return appended.Load() == 9 && len(done.Collect()) == 7
 	}, 30*time.Second, 10*time.Millisecond)
+	assert.EqualValues(t, 7, observed.Load())
+	// The acknowledgement of a tombstone is ignored, by the observer as well.
+	ack(t, bc, 7, "v1")
+	assert.EqualValues(t, 7, observed.Load())
+	registry.ResetConsumerAckObservers()
 
 	// Test broadcast here.
 	broadcastWithSameRK := func() {
@@ -1307,4 +1326,90 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts to exit on cancel")
 		}
 	})
+}
+
+func TestForcePromoteSplitSourceProvenance(t *testing.T) {
+	const source = "p0_100v0"
+	const target = "p1_100v1"
+	const control = "p2_vcchan"
+	const broadcastID = 73
+	base := message.NewSplitShardMessageBuilderV2().WithHeader(&message.SplitShardMessageHeader{
+		CollectionId: 100, SplitTaskId: 7, SourceVchannel: source, TargetVchannels: []string{target},
+	}).WithBody(&message.SplitShardMessageBody{}).WithBroadcast([]string{source, target, control}, message.OptBuildBroadcastAppendFirst(source)).MustBuildBroadcast().WithBroadcastID(broadcastID)
+	id := walimplstest.NewTestMessageID(7)
+	immutable := func(m message.MutableMessage) message.ImmutableMessage {
+		return m.WithTimeTick(17).WithLastConfirmed(id).IntoImmutableMessage(id)
+	}
+	copies := map[string]message.ImmutableMessage{}
+	for _, m := range base.SplitIntoMutableMessage() {
+		original := immutable(m)
+		replica := message.MustNewReplicateMessage("A", message.ImmutableMessageToMilvusMessage("", original))
+		copies[m.VChannel()] = immutable(replica)
+	}
+	metrics := newBroadcasterMetrics()
+	task := newBroadcastTaskFromImmutableMessage(copies[control], metrics, nil)
+	task.copyAndSetAckedCheckpoints(copies[control])
+	require.True(t, task.isControlChannelAcked())
+	require.True(t, task.HasPendingMessagesInIncompleteState(), "the other streams are missing immediately after the control ACK clones the protobuf")
+	raw, err := proto.Marshal(task.task)
+	require.NoError(t, err)
+	stored := &streamingpb.BroadcastTask{}
+	require.NoError(t, proto.Unmarshal(raw, stored))
+	task = newBroadcastTaskFromProto(stored, metrics, nil)
+	task.copyAndSetAckedCheckpoints(copies[control]) // duplicate consumer ACK after restart
+	require.Len(t, task.PendingBroadcastMessages(), 2)
+	require.True(t, task.HasPendingMessagesInIncompleteState())
+	require.Equal(t, "A", task.BroadcastMessage().ReplicateHeader().ClusterID)
+	require.Equal(t, control, task.BroadcastMessage().ReplicateHeader().VChannel)
+	pending := newPendingBroadcastTask(task)
+	for _, m := range pending.pendingMessages {
+		supplemental := forcePromoteSupplement(m)
+		require.Nil(t, supplemental.ReplicateHeader())
+		forwarded := message.MustNewReplicateMessage("B", message.ImmutableMessageToMilvusMessage("", immutable(supplemental)))
+		require.Equal(t, m.VChannel() == source, message.MustAsMutableSplitShardMessageV2(forwarded).Header().GetSupplementalSourceFence())
+	}
+	require.Equal(t, control, task.BroadcastMessage().ReplicateHeader().VChannel)
+	require.False(t, message.MustAsBroadcastSplitShardMessageV2(task.BroadcastMessage()).Header().GetSupplementalSourceFence())
+	// A genuine source copy was already appended from A but its consumer ACK
+	// reaches the coordinator after the supplemented broadcast completed.
+	task.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+	bm := &broadcastTaskManager{ctx: t.Context(), lifetime: typeutil.NewLifetime(), mu: &sync.Mutex{}, tasks: map[uint64]*broadcastTask{broadcastID: task}}
+	registry.ResetConsumerAckObservers()
+	t.Cleanup(func() { registry.ResetConsumerAckObservers() })
+	observed := 0
+	registry.RegisterConsumerAckObserver(message.MessageTypeSplitShard, func(_ context.Context, m message.ImmutableMessage, completed bool) error {
+		require.True(t, completed)
+		require.Equal(t, source, m.ReplicateHeader().VChannel)
+		observed++
+		return nil
+	})
+	require.Error(t, bm.LegacyAck(t.Context(), broadcastID, source))
+	require.NoError(t, bm.Ack(t.Context(), copies[target]))
+	require.NoError(t, bm.Ack(t.Context(), copies[control]))
+	require.Zero(t, observed)
+	require.NoError(t, bm.Ack(t.Context(), copies[source]))
+	require.Equal(t, 1, observed)
+}
+
+func TestBroadcastEmptyControlCheckpointAfterDataAck(t *testing.T) {
+	const control = "p2_vcchan"
+	msg := createNewBroadcastMsg([]string{"a", control}).WithBroadcastID(70)
+	task := newBroadcastTaskFromBroadcastMessage(msg, newBroadcasterMetrics(), nil)
+	id := walimplstest.NewTestMessageID(1)
+	for _, m := range msg.SplitIntoMutableMessage() {
+		if m.VChannel() != "a" {
+			continue
+		}
+		task.copyAndSetAckedCheckpoints(m.WithTimeTick(300).WithLastConfirmed(id).IntoImmutableMessage(id))
+	}
+	require.False(t, task.isControlChannelAcked(), "the nonnil empty repeated message is still pending")
+	require.Zero(t, task.ControlChannelTimeTick())
+	bitmap := make([]byte, len(msg.BroadcastHeader().VChannels))
+	bitmap[findIdxOfVChannel(control, msg.BroadcastHeader().VChannels)] = 1
+	legacy := createNewWaitAckBroadcastTaskFromMessage(msg, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, bitmap)
+	legacy.AckedCheckpoints = nil
+	task = newBroadcastTaskFromProto(legacy, newBroadcasterMetrics(), nil)
+	require.Len(t, task.PendingBroadcastMessages(), 1)
+	require.True(t, task.isControlChannelAcked())
+	require.Zero(t, task.ControlChannelTimeTick(), "legacy bitmap establishes ACK but no WAL position")
 }

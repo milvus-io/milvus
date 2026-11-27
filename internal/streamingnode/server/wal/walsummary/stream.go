@@ -71,6 +71,9 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 		if err != nil {
 			return err
 		}
+		if opt.RequireExactStart && batch.FastForwardTimeTick > max(after, batch.OriginTimeTick) {
+			return wal.ErrTransformLogStartPointTruncated
+		}
 		for _, entry := range batch.Entries {
 			if err := ctx.Err(); err != nil {
 				return err

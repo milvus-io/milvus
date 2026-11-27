@@ -127,6 +127,18 @@ complete summarized WAL interval. It is progress metadata, not an object
 reference. Removing even every retained chunk leaves coverage intact. An empty
 manifest is authoritative; it must never resurrect an older retained set.
 
+`initial_replay_time_tick` preserves the first recovery checkpoint's exclusive
+unknown-prefix boundary, including when no record has created a chunk. The
+boundary is published before Summary permits a later checkpoint to advance.
+Reopening an empty manifest retains this original boundary; a newer WAL
+checkpoint proves completed consumption, not truncation of an empty interval.
+The first eventual chunk covers the complete interval after the original
+boundary, including intervening payload-free messages. A legacy manifest without
+this field uses its existing coverage start, or conservatively uses the current
+checkpoint when coverage is also absent. VChannel genesis and actual GC
+fast-forward watermarks remain separate evidence: genesis cannot excuse a GC
+gap after creation.
+
 All persisted Summary ranges use inclusive endpoints. Chunk footer and chunk
 index `start_time_tick/end_timetick` describe complete WAL coverage `[start,end]`,
 including keyless inserts and payload-free barriers. A new chunk starts at the

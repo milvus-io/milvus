@@ -30,6 +30,9 @@ type PChannelManagerConfig struct {
 	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
+	// LineageTransformLogStreams opens the TransformLog streams of the targets
+	// of a split source, on this or another StreamingNode.
+	LineageTransformLogStreams wal.TransformLogStreamManager
 
 	PChannel string
 
@@ -304,8 +307,12 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
+	// A vchannel comes into existence by a CreateCollection message, by a
+	// RestoreSnapshot message that creates its collection, or as the target of
+	// a shard split.
 	createsCollection := msg.MessageType() == message.MessageTypeCreateCollection ||
-		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil)
+		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil) ||
+		messageutil.IsSplitShardGenesis(msg)
 	if module != nil || !createsCollection {
 		return module
 	}
@@ -331,6 +338,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		QueryStatsChunkManager:     m.config.QueryStatsChunkManager,
 		QueryDispatcher:            m.queryDispatcher,
 		TransformLogStream:         m.queryTransformLogStream,
+		LineageTransformLogStreams: m.config.LineageTransformLogStreams,
 		SummaryManager:             m.config.SummaryManager,
 		PChannel:                   m.pchannel,
 		VChannel:                   vchannel,

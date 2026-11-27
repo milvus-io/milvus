@@ -313,3 +313,27 @@ func TestMarshalForPersistence_ClearsReadySegmentIds(t *testing.T) {
 	// Verify segment_ids are preserved
 	assert.Equal(t, []int64{1001, 1002, 1003}, restored.QueryNode[0].Partitions[0].SegmentIds)
 }
+
+func TestServingGenerationCatalogIsSeparateFromQueryViewCleanup(t *testing.T) {
+	catalog, _ := newTestCatalog(t)
+	var serving ServingGenerationCatalog = catalog
+	generation := &viewpb.ServingGeneration{CollectionId: 100, LoadInfoVersion: 10, ReadSchemaVersion: 7, ShardSetEpoch: 2, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_100v0", Lineage: &viewpb.QueryViewLineage{Vchannels: []string{"p_100v1", "p_100v2"}, SwitchTimetick: 100}}}}
+	require.NoError(t, serving.SaveServingGeneration(t.Context(), generation))
+	views, err := catalog.ListQueryViews(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, views, "serving records must never decode as per-view state machines")
+	recovered, err := serving.ListServingGenerations(t.Context())
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
+	require.True(t, proto.Equal(generation, recovered[0]))
+	generation.ShardSetEpoch = 3
+	require.NoError(t, serving.SaveServingGeneration(t.Context(), generation))
+	recovered, err = serving.ListServingGenerations(t.Context())
+	require.NoError(t, err)
+	require.Len(t, recovered, 1)
+	require.EqualValues(t, 3, recovered[0].ShardSetEpoch)
+	require.NoError(t, serving.RemoveServingGeneration(t.Context(), 100))
+	recovered, err = serving.ListServingGenerations(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, recovered)
+}

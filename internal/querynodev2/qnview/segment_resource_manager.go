@@ -76,6 +76,7 @@ type segmentBinding struct {
 }
 
 type preparedSegmentRead struct {
+	vchannel string
 	schema   int32
 	load     uint64
 	manifest int64
@@ -95,6 +96,9 @@ type segmentBase struct {
 	caughtUp       bool
 	catchupRunning bool
 	catchupErr     error
+	// One registration per lineage stream, created on demand by the first
+	// binding whose view carries that lineage. Nil for every other segment.
+	lineage map[string]*lineageCatchup
 }
 
 // A resource remains in the registry through Closing. Bindings arriving during
@@ -384,10 +388,12 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		}
 		obsolete := r.pruneReadsLocked()
 		anchors := append([]*preparedSegmentRead(nil), r.reads...)
+		unwanted := r.pruneLineageLocked()
 		retired := r.pruneBasesLocked()
 		if b == nil {
 			r.retryAtLocked(retryAt)
 			m.mu.Unlock()
+			releaseLineage(unwanted)
 			r.retainBaseReads(anchors)
 			for _, read := range obsolete {
 				read.ReleaseReadState()
@@ -407,6 +413,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		for _, read := range obsolete {
 			read.ReleaseReadState()
 		}
+		releaseLineage(unwanted)
 		r.releaseBases(retired)
 		ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 		result, err := r.prepare(ctx, b, collection, snapshot)
@@ -452,9 +459,19 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 			go m.failView(b.view, b.prepared.base.catchupErr)
 			continue
 		}
+		if b.prepared != nil {
+			if err := r.lineageIntactLocked(b.prepared.base, b.view); err != nil {
+				go m.failView(b.view, err)
+				continue
+			}
+		}
 		if b.prepared == nil {
 			for _, read := range r.reads {
-				if readMatchesBinding(read, b) && read.base.caughtUp && read.base.catchupErr == nil {
+				if !readMatchesBinding(read, b) {
+					continue
+				}
+				// Starts the registrations on the view's lineage streams, if any.
+				if lineageReady := r.lineageReadyLocked(read.base, b.view); read.base.caughtUp && read.base.catchupErr == nil && lineageReady {
 					b.prepared = read
 					b.resetRetryLocked()
 					break
@@ -520,6 +537,9 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	if read.vchannel != "" && read.vchannel != b.view.req.Meta.GetVchannel() {
+		return false
+	}
 	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
 		return false
 	}
@@ -604,7 +624,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	if err != nil {
 		return nil, err
 	}
-	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
+	return &preparedSegmentRead{vchannel: b.view.req.Meta.GetVchannel(), schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
 }
 
 func (r *segmentResource) catchup(base *segmentBase) {
@@ -654,6 +674,9 @@ func (r *segmentResource) close() {
 	for _, base := range r.bases {
 		if base.registration != nil {
 			base.registration.Unregister()
+		}
+		for _, lineage := range base.lineage {
+			lineage.release()
 		}
 	}
 	for _, read := range r.reads {
@@ -924,7 +947,7 @@ func (r *segmentResource) pruneBasesLocked() []*segmentBase {
 				break
 			}
 		}
-		if used[base] || base.operationRefs > 0 || base.catchupRunning || pending {
+		if used[base] || base.operationRefs > 0 || base.catchupRunning || base.lineageRunning() || pending {
 			kept = append(kept, base)
 		} else {
 			retired = append(retired, base)
@@ -940,6 +963,9 @@ func (r *segmentResource) releaseBases(bases []*segmentBase) {
 		base.cancel()
 		if base.registration != nil {
 			base.registration.Unregister()
+		}
+		for _, lineage := range base.lineage {
+			lineage.release()
 		}
 		_ = base.segment.Release(context.WithoutCancel(r.ctx))
 	}

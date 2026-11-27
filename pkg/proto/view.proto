@@ -76,6 +76,18 @@ message DataViewOfCollection {
     DataVersion data_version = 3;
     // Read schema supported by this exact snapshot; advanced only by schema DDL.
     int32 schema_version = 4;
+    // Zero is the legacy initial generation; changes only with the shard set.
+    uint64 shard_set_epoch = 5;
+}
+
+// Cluster-local published read identity. Shards retain membership and lineage
+// only; their physical segment snapshots are owned by DataViews.
+message ServingGeneration {
+    int64 collection_id = 1;
+    uint64 load_info_version = 2;
+    int32 read_schema_version = 3;
+    uint64 shard_set_epoch = 4;
+    repeated DataViewOfShard shards = 5;
 }
 
 // DataViewOfShard groups loadable segments by partition for one vchannel.
@@ -88,6 +100,9 @@ message DataViewOfShard {
     // A: minimum cursor of the exact Segment bases selected by this view.
     // Recomputed for every membership/base change, including Flush. Empty shards use W.
     uint64 compacted_transform_start_after_timetick = 4;
+    QueryViewLineage lineage = 5;
+    // Earliest fixed read certified after replacing physical segment bases.
+    uint64 snapshot_history_floor = 6;
 }
 
 message DataViewOfPartition {
@@ -138,6 +153,11 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
+    // Present only on a view of a split source shard while the shard is still
+    // served. Absent lineage keeps the single-stream behaviour unchanged.
+    QueryViewLineage lineage = 10;
+    uint64 shard_set_epoch = 11;
+    uint64 snapshot_history_floor = 12;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -300,6 +320,15 @@ message QueryPlanMVCC {
     // Latest timetick of the transforming stream. StreamingNode and QueryNode
     // wait for transform visibility up to this timetick before execution.
     uint64 transforming_timetick = 2;
+    // Common read point of a lineage group. Set only for a view with lineage:
+    // its segments are then read at this timestamp instead of the frontiers
+    // above, which only bound the waits on the view's own stream. Zero keeps
+    // the frontier-based read timestamps.
+    uint64 read_timetick = 3;
+    // Transform frontier of each lineage vchannel at read_timetick. A node that
+    // holds rows of the view waits for every listed stream to reach its tick
+    // before reading. Keys equal the view's lineage vchannels.
+    map<string, uint64> lineage_transforming_timeticks = 4;
 }
 
 // QueryPlanService generates shard-level query plans.
@@ -318,6 +347,9 @@ service QueryPlanService {
 }
 
 message GetQueryPlanRequest {
+    uint64 shard_set_epoch = 10;
+    uint64 load_info_version = 11;
+    int32 read_schema_version = 12;
     int64 collection_id = 1;
     ShardID shard_id = 2;
     // Mutually exclusive MVCC source:
@@ -346,10 +378,20 @@ message GetQueryPlanRequest {
 
 message GetMVCCTimestampRequest {
     string vchannel = 1;
+    // Sample the published state without waiting for the Strong minimum prefix
+    // and without triggering a sync. The caller fixes its own read point from
+    // through and strong_minimum, then establishes it with barrier_mvcc.
+    bool prefix_only = 2;
 }
 
 message GetMVCCTimestampResponse {
     QueryPlanMVCC mvcc = 1;
+    // Complete published prefix of the vchannel's PChannel: no event at or
+    // below it can still appear on this WAL.
+    uint64 through = 2;
+    // Prefix a Strong read of the vchannel must cover: through, raised by
+    // writes that completed but are not published yet.
+    uint64 strong_minimum = 3;
 }
 
 message GetQueryPlanResponse {
@@ -581,4 +623,16 @@ message QueryOnViewStreamResponse {
         internal.RetrieveResults chunk = 1;
         internal.RetrieveResults metadata = 2;
     }
+}
+
+// QueryViewLineage names the TransformLog streams, other than the view's own,
+// whose deletes apply to the segments of this view. A split source shard no
+// longer receives the deletes of its rows: they are written to the shards its
+// key range was split into.
+message QueryViewLineage {
+    // Lineage vchannels (the split targets). Never contains the view's own vchannel.
+    repeated string vchannels = 1;
+    // Tick of the split on the source shard. Every segment of the view replays
+    // each lineage stream from this tick; the source's own stream ends at it.
+    uint64 switch_timetick = 2;
 }

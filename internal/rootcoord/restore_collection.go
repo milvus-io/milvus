@@ -93,7 +93,7 @@ func (c *Core) ApplyRestoreCollection(ctx context.Context, result message.Broadc
 	callback := &DDLCallback{Core: c}
 	return callback.applyCollectionCreation(ctx, message.BroadcastResultCreateCollectionMessageV1{
 		Message: message.MustAsBroadcastCreateCollectionMessageV1(creation), Results: result.Results,
-	}, etcdpb.CollectionState_CollectionRestoring)
+	}, etcdpb.CollectionState_CollectionRestoring, body.GetRouting())
 }
 
 func (c *Core) CompleteRestoreCollection(ctx context.Context, collectionID int64) error {

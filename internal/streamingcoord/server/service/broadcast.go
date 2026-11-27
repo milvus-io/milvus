@@ -137,6 +137,34 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 	}, nil
 }
 
+// WaitVChannelsAcked blocks until every named vchannel of the broadcast is
+// acknowledged on this cluster. It has no deadline of its own: the caller is
+// the replicate stream of a secondary, and its context bounds the wait.
+func (s *broadcastServceImpl) WaitVChannelsAcked(ctx context.Context, req *streamingpb.WaitVChannelsAckedRequest) (*streamingpb.WaitVChannelsAckedResponse, error) {
+	broadcaster, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	timeTick, err := broadcaster.WaitVChannelsAcked(ctx, message.MessageType(req.GetMessageType()), req.GetBroadcastId(), req.GetVchannels())
+	if err != nil {
+		return nil, err
+	}
+	return &streamingpb.WaitVChannelsAckedResponse{TimeTick: timeTick}, nil
+}
+
+// ReportVChannelAppended records that a copy of a broadcast was appended to
+// the WAL of this cluster. The caller is the replicate stream of a secondary.
+func (s *broadcastServceImpl) ReportVChannelAppended(ctx context.Context, req *streamingpb.ReportVChannelAppendedRequest) (*streamingpb.ReportVChannelAppendedResponse, error) {
+	broadcaster, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := broadcaster.ReportVChannelAppended(ctx, req.GetBroadcastId(), req.GetVchannel(), req.GetTimeTick()); err != nil {
+		return nil, err
+	}
+	return &streamingpb.ReportVChannelAppendedResponse{}, nil
+}
+
 // Ack acknowledges the message at the specified vchannel.
 func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.BroadcastAckRequest) (*streamingpb.BroadcastAckResponse, error) {
 	broadcaster, err := broadcast.GetWithContext(ctx)

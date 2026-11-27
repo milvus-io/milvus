@@ -41,6 +41,7 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	r.writeSchema = writeView.Schema
 	// Retain only the recapture hooks, not the snapshot payload and WAL tail.
 	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext}
+	r.lineageStreams = view.LineageStreams
 	if view.PartitionIDs != nil {
 		r.loadedPartitions = make(map[int64]struct{}, len(view.PartitionIDs))
 		for _, id := range view.PartitionIDs {
@@ -58,6 +59,9 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	if err := r.prepareSegments(ctx, view); err != nil {
 		return err
 	}
+	// A rebuilt runtime of a split source resubscribes to the targets from
+	// T_switch: the residual it rebuilt from the WAL has none of their deletes.
+	r.observeSplitLineage(lineageSpecFromMeta(view.SplitLineage))
 	prepared = true
 	return nil
 }

@@ -286,6 +286,15 @@ func (c *Callbacks) BroadcastImport(ctx context.Context,
 	if err := c.ValidateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
 		return 0, false, err
 	}
+	// Also under the collection resource key: a shard split holds it from its
+	// broadcast until its record exists, so the record is seen here. Only an
+	// import this cluster originates is refused; a replicated import message
+	// is consumed by its ack callback whatever the window.
+	if c.CheckSplitWindow != nil {
+		if err := c.CheckSplitWindow(collectionID, "Import"); err != nil {
+			return 0, false, err
+		}
+	}
 
 	coll, err := c.Meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {

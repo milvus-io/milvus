@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -100,6 +101,7 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			svrCatalog := datacoord.NewCatalog(kv, cm.RootPath(), "")
 			server := &Server{
 				ctx: ctx, kv: kv, broker: b, catalog: svrCatalog,
+				allocator: allocator.NewMockAllocator(t),
 				metaStore: meta.NewMetaStoreWithCollections(svrCatalog, 100),
 			}
 			server.SetDataViewCollectionRecoveryValidator(func(context.Context, int64) (bool, error) {

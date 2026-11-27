@@ -75,6 +75,8 @@ const (
 	// CompactionTaskKey request for get compaction tasks from the datacoord
 	CompactionTaskKey = "compaction_tasks"
 
+	SplitRetirementKey = "shard_split_retirement"
+
 	// BuildIndexTaskKey request for get building index tasks from the datacoord
 	BuildIndexTaskKey = "build_index_tasks"
 

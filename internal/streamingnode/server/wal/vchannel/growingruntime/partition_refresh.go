@@ -15,7 +15,9 @@ type partitionRefresh struct {
 	timeTick uint64
 	version  qviews.DataVersion
 	pending  []walview.VChannelResourceEvent
-	err      error
+	// After catching up to the source fence, its live suffix is applied directly.
+	live *Runtime
+	err  error
 }
 
 func (s *partitionRefresh) includes(event walview.VChannelResourceEvent) bool {
@@ -85,6 +87,7 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 		return merr.WrapErrServiceNotReadyMsg("growing partition snapshot is not ready")
 	}
 	next := newRuntime()
+	next.stage = true
 	next.collection, next.loadedPartitions = collection, missing
 	next.writeSchema = view.WriteSchema
 	if next.writeSchema == nil {
@@ -124,9 +127,35 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 			}
 			continue
 		}
+		unlockLineage := func() {}
+		r.mu.RLock()
+		fenced := r.lineage != nil
+		r.mu.RUnlock()
+		if fenced {
+			// Every source event through the fence is in next. Later source
+			// events cannot insert rows. Forward barriers and seal notifications
+			// directly while target history and its live suffix reach these rows.
+			segments := next.segmentsSnapshot()
+			stage.live = next
+			r.eventMu.Unlock()
+			var err error
+			unlockLineage, err = r.replayLineageInto(ctx, segments)
+			r.eventMu.Lock()
+			stage.live = nil
+			if err != nil {
+				r.eventMu.Unlock()
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				unlockLineage()
+				r.eventMu.Unlock()
+				return err
+			}
+		}
 		r.mu.Lock()
 		if r.closed {
 			r.mu.Unlock()
+			unlockLineage()
 			r.eventMu.Unlock()
 			return context.Canceled
 		}
@@ -140,7 +169,9 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 		next.segments = nil
 		next.segmentIDs = nil
 		r.refresh = nil
+		r.restartLineageIfResidualReturnedLocked()
 		r.mu.Unlock()
+		unlockLineage()
 		r.eventMu.Unlock()
 		return nil
 	}

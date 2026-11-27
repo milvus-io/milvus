@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -72,26 +73,39 @@ func (c *DDLCallback) dropCollectionV1AckCallback(ctx context.Context, result me
 	msg := result.Message
 	header := msg.Header()
 	body := msg.MustBody()
+	// WAL consumption may already have dropped the split targets. Withdraw
+	// their load requirements before waiting for adoption's lifecycle guard:
+	// adoption cannot publish those targets, but can finish an unloaded handoff.
+	// The ordinary release callback waits for serving views to be withdrawn;
+	// physical and metadata teardown still run under the lifecycle guard below.
+	for vchannel, appendResult := range result.Results {
+		if !funcutil.IsControlChannel(vchannel) {
+			continue
+		}
+		dropLoadConfigMsg := message.NewDropLoadConfigMessageBuilderV2().
+			WithHeader(&message.DropLoadConfigMessageHeader{
+				DbId:         header.DbId,
+				CollectionId: header.CollectionId,
+			}).
+			WithBody(&message.DropLoadConfigMessageBody{}).
+			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+			MustBuildBroadcast().
+			WithBroadcastID(msg.BroadcastHeader().BroadcastID)
+		if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
+			streaming.WAL().ControlChannel(): appendResult,
+		}); err != nil {
+			return merr.Wrap(err, "failed to release collection")
+		}
+	}
+	releaseLifecycle, err := qvresource.AcquireSplitLifecycle(ctx, header.CollectionId)
+	if err != nil {
+		return err
+	}
+	defer releaseLifecycle()
 	for vchannel, result := range result.Results {
 		collectionID := msg.Header().CollectionId
 		if funcutil.IsControlChannel(vchannel) {
 			// when the control channel is acknowledged, we should do the following steps:
-
-			// 1. release the collection from querycoord first.
-			dropLoadConfigMsg := message.NewDropLoadConfigMessageBuilderV2().
-				WithHeader(&message.DropLoadConfigMessageHeader{
-					DbId:         msg.Header().DbId,
-					CollectionId: collectionID,
-				}).
-				WithBody(&message.DropLoadConfigMessageBody{}).
-				WithBroadcast([]string{streaming.WAL().ControlChannel()}).
-				MustBuildBroadcast().
-				WithBroadcastID(msg.BroadcastHeader().BroadcastID)
-			if err := registry.CallMessageAckCallback(ctx, dropLoadConfigMsg, map[string]*message.AppendResult{
-				streaming.WAL().ControlChannel(): result,
-			}); err != nil {
-				return merr.Wrap(err, "failed to release collection")
-			}
 
 			// 2. drop the collection index.
 			dropIndexMsg := message.NewDropIndexMessageBuilderV2().

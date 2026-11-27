@@ -146,8 +146,8 @@ func TestToMilvusErrorCancellationAndTransport(t *testing.T) {
 func TestPublicQueryEntrypointsNormalizeEarlyErrors(t *testing.T) {
 	mockey.PatchConvey("resolver failures cross every public query boundary", t, func() {
 		mockey.Mock((*legacyResolver).ResolveVChannels).Return(nil, viewerror.NewViewNotFound("no view")).Build()
-		legacy := &legacyClient{shardResolver: &legacyResolver{}}
-		generic := &viewQueryClientImpl{shardResolver: &legacyResolver{}}
+		legacy := newLegacyClient(ViewQueryClientConfig{}, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{}, &legacyResolver{})
+		generic := NewViewQueryClient(ViewQueryClientConfig{}, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{}, &legacyResolver{}, NewDefaultFieldFetchPlanner(), retryRerankerBuilder{}, retryRendererBuilder{}, retrySearchReducerBuilder{}, retryRetrieveReducerBuilder{}, nil)
 		calls := []func() error{
 			func() error {
 				_, err := legacy.Search(t.Context(), &LegacySearchRequest{Req: &internalpb.SearchRequest{}})

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -52,6 +53,16 @@ type Runtime struct {
 	queryRefs                int
 	appliedGrowingTimeTick   atomic.Uint64
 	appliedTransformTimeTick atomic.Uint64
+
+	// Split lineage of the vchannel, guarded by mu. lineageSpec is set once,
+	// from the vchannel meta at Prepare or from the fence when it is applied
+	// live; lineage is the residual subscription it started.
+	lineageStreams wal.TransformLogStreamManager
+	lineageSpec    *lineageSpec
+	lineage        *residualLineage
+	// stage marks a partition refresh runtime, whose segments are merged into
+	// the serving runtime and never subscribe themselves.
+	stage bool
 }
 
 func newRuntime() *Runtime {
@@ -151,6 +162,9 @@ func (r *Runtime) collectSegmentsToReleaseLocked() []*growingSegment {
 			r.removeSegmentMetadataLocked(segmentID)
 		}
 	}
+	if len(segmentsToRelease) > 0 {
+		r.finishLineageIfResidualGoneLocked()
+	}
 	return segmentsToRelease
 }
 
@@ -162,6 +176,12 @@ func (r *Runtime) Close() {
 		r.mu.Lock()
 		r.closed = true
 		r.mvccCond.Broadcast()
+		lineage := r.lineage
+		r.mu.Unlock()
+		// Stop applying target deletes before the segments are released. No
+		// subscription starts once the runtime is closed.
+		lineage.stop()
+		r.mu.Lock()
 		segments := make([]*growingSegment, 0, len(r.segments))
 		for _, segment := range r.segments {
 			segments = append(segments, segment)

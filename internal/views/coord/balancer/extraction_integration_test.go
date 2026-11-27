@@ -66,6 +66,8 @@ func TestCoordinatorComponentsSixQNAndTwoSN(t *testing.T) {
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	catalog := queryview.NewQueryViewCatalog(nil, "coord")
+	generations := mockey.Mock(mockey.GetMethod(catalog, "ListServingGenerations")).Return([]*viewpb.ServingGeneration(nil), nil).Build()
+	t.Cleanup(func() { generations.UnPatch() })
 	var mu sync.Mutex
 	held := true
 	var pending []syncer.SyncView

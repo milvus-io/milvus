@@ -613,9 +613,17 @@ func validateRecoveredViewMeta(
 		switch vchannel.GetState() {
 		case streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			streamingpb.VChannelState_VCHANNEL_STATE_DROPPED,
-			streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:
+			streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
+			streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED:
 		default:
 			return merr.WrapErrDataIntegrityMsg("unknown vchannel state in recovery meta: %s", vchannelName)
+		}
+		if vchannel.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED {
+			lineage := vchannel.GetSplitLineage()
+			if lineage.GetSplitTaskId() == 0 || lineage.GetSwitchTimeTick() == 0 ||
+				len(lineage.GetTargetVchannels()) != 2 || lineage.GetSwitchTimeTick() >= vchannel.GetCheckpointTimeTick() {
+				return merr.WrapErrDataIntegrityMsg("retired vchannel %s has invalid split lineage", vchannelName)
+			}
 		}
 		for _, partition := range vchannel.GetCollectionInfo().GetPartitions() {
 			if partition.GetPartitionId() == 0 {
@@ -748,6 +756,8 @@ func validateTombstonedOwnerCoveredSegments(
 
 func closedVChannelState(vchannel *streamingpb.VChannelMeta) (string, uint64, bool) {
 	switch vchannel.GetState() {
+	case streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED:
+		return "split", vchannel.GetSplitLineage().GetSwitchTimeTick(), true
 	case streamingpb.VChannelState_VCHANNEL_STATE_DROPPED:
 		return "dropped", vchannel.GetCheckpointTimeTick(), true
 	case streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED:

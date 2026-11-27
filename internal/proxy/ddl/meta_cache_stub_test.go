@@ -156,6 +156,12 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID type
 	return nil
 }
 
+func (m *MetaCache) RefreshCollectionByID(ctx context.Context, collectionID typeutil.UniqueID) {
+	if m.pad(int(collectionID)) > 0 {
+		return
+	}
+}
+
 func (m *MetaCache) InvalidateCollectionMeta(ctx context.Context, database, collectionName string, collectionID typeutil.UniqueID, removeAlias bool) []string {
 	if m.pad(len(database)) > 0 {
 		return nil

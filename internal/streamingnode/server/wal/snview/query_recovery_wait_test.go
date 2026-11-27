@@ -209,10 +209,10 @@ func TestSNHandler_RecoveryWaitDoesNotMissStateChanges(t *testing.T) {
 		mgr := newMockResourceManager()
 		h := recoverSNQueryViewHandler(context.Background(), testPChannel, newMockCatalog(), mgr, []*viewpb.QueryViewOfShard{view.IntoProto()})
 		recovery, _ := mgr.getAcquired(view.QueryViewKey())
-		var original func(*snShardView, context.Context, *int32) (*QueryViewLease, <-chan struct{}, error)
+		var original func(*snShardView, context.Context, *int32, ...servingIdentity) (*QueryViewLease, <-chan struct{}, error)
 		attempts := 0
-		mockey.Mock((*snShardView).tryAcquireUpViewForSchema).Origin(&original).To(func(s *snShardView, ctx context.Context, schema *int32) (*QueryViewLease, <-chan struct{}, error) {
-			lease, changed, err := original(s, ctx, schema)
+		mockey.Mock((*snShardView).tryAcquireUpViewForSchema).Origin(&original).To(func(s *snShardView, ctx context.Context, schema *int32, identities ...servingIdentity) (*QueryViewLease, <-chan struct{}, error) {
+			lease, changed, err := original(s, ctx, schema, identities...)
 			attempts++
 			if attempts == 1 {
 				// Recovery completes after the scan released the shard lock but

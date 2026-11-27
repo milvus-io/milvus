@@ -4,11 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -93,4 +100,43 @@ func TestQueryViewLoadConfigFeedsAdmissionChecks(t *testing.T) {
 	require.Equal(t, map[string]int{"rg1": 1, "rg2": 1}, current.GetReplicaNumber())
 	require.Equal(t, commonpb.LoadPriority_LOW, current.Replicas[4].LoadPriority())
 	require.Nil(t, qviewsCurrentLoadConfig(nil).Collection)
+}
+
+func TestServingLoadInfoUsesOnePublicationSnapshot(t *testing.T) {
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	require.NoError(t, store.Put(t.Context(), &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}}))
+	oldVersion := store.GetConfigVersion(1)
+	provider := &fakeRuntimeDataViewProvider{}
+	data := &viewpb.DataViewOfCollection{CollectionId: 1, ShardSetEpoch: 2, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_1v0"}}}
+	get := mockey.Mock((*fakeRuntimeDataViewProvider).Get).To(func(_ *fakeRuntimeDataViewProvider, ctx context.Context, _ int64, _ *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		// Load changes after the first latest-load lookup but before publication.
+		require.NoError(t, store.Put(ctx, &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{20}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 3}}}))
+		return &runtimeDataViewRef{view: data}, nil
+	}).Build()
+	defer get.UnPatch()
+	resolve := mockey.Mock((*coordview.ShardViewRegistry).ResolveServingGeneration).To(func(_ *coordview.ShardViewRegistry, _ context.Context, got *viewpb.DataViewOfCollection, version uint64, replicas []int64) (*viewpb.ServingGeneration, error) {
+		require.Same(t, data, got)
+		require.Greater(t, version, oldVersion)
+		require.Equal(t, []int64{3}, replicas)
+		return &viewpb.ServingGeneration{CollectionId: 1, LoadInfoVersion: version, ReadSchemaVersion: 0, ShardSetEpoch: 2, Shards: data.Shards}, nil
+	}).Build()
+	defer resolve.UnPatch()
+	balance := cache.New(balancer.DefaultBalanceConfig())
+	balance.PublishDataView(1, api.PrepareCollectionDataView(&api.CollectionDataView{CollectionID: 1, DataVersion: qviews.DataVersion{StreamingVersion: 1}, ShardSetEpoch: 2, Shards: []*api.ShardDataView{{VChannel: "p_1v0"}}}))
+	runtime := &qviewsRuntime{loadConfigStore: store, balanceCache: balance, shardViewRegistry: &coordview.ShardViewRegistry{}, resources: &qvresource.Resources{DataViews: provider}}
+	server := &Server{qviewsRuntime: runtime}
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	response, err := server.GetQueryViewLoadInfo(t.Context(), &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(response.Status))
+	require.Greater(t, response.Version, oldVersion)
+	require.Equal(t, []int64{20}, response.PartitionIDs)
+	require.EqualValues(t, 2, response.ShardSetEpoch)
+	require.Zero(t, response.ReadSchemaVersion)
+	require.Equal(t, data.Shards, response.ServingShards)
+	cfg := store.GetConfig(1)
+	store.StopPlanning(1)
+	_, err = runtime.resolveServingGeneration(t.Context(), data, cfg)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable, "Release invalidates the captured load config before publication")
 }

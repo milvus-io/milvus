@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -111,4 +112,56 @@ func TestRestoreCallbackPersistsJobBeforeSegments(t *testing.T) {
 		require.EqualValues(t, 77, id)
 		require.Equal(t, 1, allocated.Times())
 	})
+}
+
+func TestRemapSnapshotResidueRouting(t *testing.T) {
+	source := routing.Routing{Modulus: 4, ShardBy: "hash(pk)", Shards: []routing.Shard{
+		{VChannel: "z", Buckets: []uint64{0}}, {VChannel: "a", Buckets: []uint64{1, 3}}, {VChannel: "m", Buckets: []uint64{2}},
+	}}
+	collection := &datapb.CollectionDescription{RoutingModulus: 4, ShardBy: source.ShardBy, ShardInfos: source.ShardInfos(), VirtualChannelNames: source.VChannels()}
+	targets := []string{"t2", "t0", "t1"}
+	postImage, err := remapSnapshotRouting(collection, targets)
+	require.NoError(t, err)
+	r, err := routing.RoutingFromShardInfos(postImage.GetRoutingModulus(), postImage.GetShardBy(), postImage.GetShards())
+	require.NoError(t, err)
+	require.Equal(t, targets, r.VChannels(), "recipe order follows target CreateCollection")
+	table, err := r.Table()
+	require.NoError(t, err)
+	for residue, owner := range []string{"t2", "t0", "t1", "t0"} {
+		actual, ok := table.Lookup(uint64(residue))
+		require.True(t, ok)
+		require.Equal(t, owner, actual)
+	}
+	encoded, err := proto.Marshal(&messagespb.RestoreSnapshotMessageBody{Routing: postImage})
+	require.NoError(t, err)
+	var replayed messagespb.RestoreSnapshotMessageBody
+	require.NoError(t, proto.Unmarshal(encoded, &replayed))
+	require.True(t, proto.Equal(postImage, replayed.GetRouting()), "restart reads the same durable routing post-image")
+	require.Equal(t, []uint64{1, 3}, collection.GetShardInfos()[1].GetHashRouting().GetBuckets(), "source snapshot is immutable")
+}
+
+func TestRestoreSnapshotRoutingCompatibilityAndCorruption(t *testing.T) {
+	legacy, err := remapSnapshotRouting(&datapb.CollectionDescription{}, nil)
+	require.NoError(t, err)
+	require.Nil(t, legacy, "old snapshots retain modulo-N placement")
+	base := &datapb.CollectionDescription{RoutingModulus: 4, ShardBy: "hash(pk)", VirtualChannelNames: []string{"s0", "s1"}, ShardInfos: (routing.Routing{Modulus: 4, Shards: []routing.Shard{{VChannel: "s0", Buckets: []uint64{0, 2}}, {VChannel: "s1", Buckets: []uint64{1, 3}}}}).ShardInfos()}
+	for name, mutate := range map[string]func(*datapb.CollectionDescription){
+		"missing modulus":           func(c *datapb.CollectionDescription) { c.RoutingModulus = 0 },
+		"missing shards":            func(c *datapb.CollectionDescription) { c.ShardInfos = nil },
+		"overlapping residue":       func(c *datapb.CollectionDescription) { c.ShardInfos[1].GetHashRouting().Buckets[0] = 0 },
+		"unowned residue":           func(c *datapb.CollectionDescription) { c.ShardInfos[1].GetHashRouting().Buckets = []uint64{1} },
+		"out of bound residue":      func(c *datapb.CollectionDescription) { c.ShardInfos[1].GetHashRouting().Buckets[0] = 4 },
+		"foreign channel":           func(c *datapb.CollectionDescription) { c.ShardInfos[1].VchannelName = "other" },
+		"repeated channel":          func(c *datapb.CollectionDescription) { c.ShardInfos[1].VchannelName = "s0" },
+		"repeated snapshot channel": func(c *datapb.CollectionDescription) { c.VirtualChannelNames[1] = "s0" },
+		"modulus budget":            func(c *datapb.CollectionDescription) { c.RoutingModulus = routing.MaxModulus + 1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			collection := proto.Clone(base).(*datapb.CollectionDescription)
+			mutate(collection)
+			_, err := remapSnapshotRouting(collection, []string{"t1", "t0"})
+			require.Error(t, err)
+			require.NotEqual(t, merr.InputError, merr.GetErrorType(err), "stored routing corruption is not the user's request")
+		})
+	}
 }

@@ -112,6 +112,15 @@ func (e *StreamingError) IsPartialUpdateRetryableCAS() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE
 }
 
+// IsShardFenced returns true if the vchannel is the source of a shard split and
+// refuses DML. The error is not unrecoverable: the rows belong to a shard that
+// exists, and the caller's routing is one split behind. The caller refreshes
+// its routing and sends the refused rows to the new shards. Appending to the
+// same vchannel again never succeeds.
+func (e *StreamingError) IsShardFenced() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED
+}
+
 // NewOnShutdownError creates a new StreamingError with code STREAMING_CODE_ON_SHUTDOWN.
 func NewOnShutdownError(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, format, args...)
@@ -191,6 +200,11 @@ func NewWALNameMismatchError(expectedWALName string, actualWALName string) *Stre
 // NewResourceAcquired creates a new StreamingError with code STREAMING_CODE_RESOURCE_ACQUIRED.
 func NewResourceAcquired(format string, args ...interface{}) *StreamingError {
 	return New(streamingpb.StreamingCode_STREAMING_CODE_RESOURCE_ACQUIRED, format, args...)
+}
+
+// NewShardFenced creates a new StreamingError with code STREAMING_CODE_SHARD_FENCED.
+func NewShardFenced(vchannel string) *StreamingError {
+	return New(streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, "vchannel %s is fenced by a shard split", vchannel)
 }
 
 // NewRateLimitRejected creates a new StreamingError with code STREAMING_CODE_RATE_LIMIT_REJECTED.

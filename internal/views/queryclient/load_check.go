@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -33,18 +35,37 @@ type collectionLoadCheck struct {
 	collectionID int64
 	refs         int // protected by owner.mu
 	inflight     *loadStateCall
-	nextCheck    time.Time // only successful checks are cached
+	last         *loadStateCall // only successful checks are cached
 }
 
 type loadStateCall struct {
+	info          *querypb.GetQueryViewLoadInfoResponse
 	done          chan struct{}
 	err           error
 	ownerCanceled bool
+	invalidated   bool
 	nextCheck     time.Time
 }
 
 func newCollectionLoadChecks(client LoadInfoClient) *collectionLoadChecks {
 	return &collectionLoadChecks{client: client, collections: make(map[int64]*collectionLoadCheck)}
+}
+
+func (s *collectionLoadChecks) invalidate(collectionID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, state := range s.collections {
+		if collectionID != 0 && id != collectionID {
+			continue
+		}
+		state.mu.Lock()
+		state.last = nil
+		if state.inflight != nil {
+			state.inflight.invalidated = true
+			state.inflight = nil
+		}
+		state.mu.Unlock()
+	}
 }
 
 func (s *collectionLoadChecks) acquire(collectionID int64) *collectionLoadCheck {
@@ -84,16 +105,16 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			case <-call.done:
 				// The caller owning the RPC can be canceled independently of
 				// other queries sharing this probe. Let those queries try again.
-				if call.ownerCanceled {
+				if call.ownerCanceled || call.invalidated {
 					continue
 				}
-				return call.nextCheck, call.err
+				return s.result(ctx, call)
 			}
 		}
-		if time.Now().Before(s.nextCheck) {
-			next := s.nextCheck
+		if s.last != nil && time.Now().Before(s.last.nextCheck) {
+			call := s.last
 			s.mu.Unlock()
-			return next, nil
+			return s.result(ctx, call)
 		}
 		call := &loadStateCall{done: make(chan struct{})}
 		s.inflight = call
@@ -103,6 +124,7 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			call.err = merr.WrapErrServiceInternalMsg("query client requires a Coordinator load-info client")
 		} else {
 			info, err := s.owner.client.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: s.collectionID})
+			call.info = info
 			call.err = merr.CheckRPCCall(info, err)
 		}
 		// Use the RPC owner's context, not the transport's error representation,
@@ -112,13 +134,57 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			call.err = err
 		}
 		s.mu.Lock()
-		if call.err == nil {
-			s.nextCheck = time.Now().Add(loadStateCheckInterval)
+		if call.err == nil && !call.invalidated {
+			call.nextCheck = time.Now().Add(loadStateCheckInterval)
+			s.last = call
 		}
-		call.nextCheck = s.nextCheck
-		s.inflight = nil
+		if s.inflight == call {
+			s.inflight = nil
+		}
 		close(call.done)
 		s.mu.Unlock()
+		if call.invalidated {
+			continue
+		}
+		return s.result(ctx, call)
+	}
+}
+
+func (s *collectionLoadCheck) result(ctx context.Context, call *loadStateCall) (time.Time, error) {
+	next, err := call.result(ctx)
+	if err != nil && viewerror.AsViewError(err).IsViewInvalidated() {
+		// A shared probe can predate this caller's publication. Do not let
+		// its cached identity reject every subsequent whole-request retry.
+		s.mu.Lock()
+		if s.last == call {
+			s.last = nil
+		}
+		s.mu.Unlock()
+	}
+	return next, err
+}
+
+// Interpret the shared publication separately for each waiting shard.
+func (call *loadStateCall) result(ctx context.Context) (time.Time, error) {
+	shard, planned := ctx.Value(servingShardContextKey{}).(resolver.Shard)
+	if call.err != nil || !planned || len(call.info.GetServingShards()) == 0 {
 		return call.nextCheck, call.err
 	}
+	if shard.LoadInfoVersion != 0 && (call.info.GetVersion() != shard.LoadInfoVersion || call.info.GetReadSchemaVersion() != shard.ReadSchemaVersion) {
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s serving load/schema identity changed", shard.VChannel)
+	}
+	published := call.info.GetShardSetEpoch()
+	if published > shard.ShardSetEpoch {
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s was planned at epoch %d, published epoch is %d", shard.VChannel, shard.ShardSetEpoch, published)
+	}
+	// A shared probe may predate another caller's newer plan.
+	if published == shard.ShardSetEpoch {
+		for _, member := range call.info.GetServingShards() {
+			if member.GetVchannel() == shard.VChannel {
+				return call.nextCheck, nil
+			}
+		}
+		return time.Time{}, viewerror.NewViewInvalidated("shard %s is absent from published epoch %d", shard.VChannel, published)
+	}
+	return call.nextCheck, nil
 }

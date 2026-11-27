@@ -240,6 +240,7 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			CollectionID:         g.CollectionID,
 			NewSegments:          loadable,
 			SupersededSegmentIDs: retired,
+			PublishTimestamp:     commitTs,
 		})
 		if err != nil {
 			// Monotonicity conflict: the manifest version was pushed higher by a

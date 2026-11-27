@@ -89,3 +89,19 @@ func TestPartialUpdateCASErrors(t *testing.T) {
 	require.False(t, unrecoverable.IsPartialUpdateRetryableCAS())
 	require.True(t, unrecoverable.IsUnrecoverable())
 }
+
+func TestShardFencedError(t *testing.T) {
+	fenced := NewShardFenced("v1")
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_SHARD_FENCED, fenced.Code)
+	require.True(t, fenced.IsShardFenced())
+	require.Contains(t, fenced.Error(), "v1")
+	// A fence refusal is transient for the caller: its routing is one split
+	// behind. It must not be classified with the terminal errors.
+	require.False(t, fenced.IsUnrecoverable())
+	require.False(t, fenced.IsFenced())
+	require.False(t, fenced.IsWrongStreamingNode())
+	require.False(t, fenced.IsSkippedOperation())
+
+	require.False(t, NewUnrecoverableError("bad").IsShardFenced())
+	require.False(t, NewChannelFenced("v1").IsShardFenced())
+}

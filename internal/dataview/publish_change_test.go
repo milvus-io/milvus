@@ -22,7 +22,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -307,4 +309,81 @@ func TestManagerPublishChangePublishErrorKeepsState(t *testing.T) {
 	requireVersion(t, ref.Version(), 2, 0)
 	require.Equal(t, before, catalog.saveCall)
 	require.NotNil(t, commit)
+}
+
+func TestFixedReadFloorSurvivesEmptyCompactionAndAdoption(t *testing.T) {
+	for _, grouped := range []bool{true, false} {
+		ctx := t.Context()
+		catalog := &fakeDataViewCatalog{}
+		bounds := func(context.Context, int64) (map[string]uint64, error) {
+			return map[string]uint64{"s": 40, "t-1": 100, "t-2": 100}, nil
+		}
+		calls := 0
+		allocate := func(context.Context) (uint64, error) { calls++; return 200, nil }
+		mgr := newManager(ctx, catalog, nil, WithQueryViewFrontiers(allocate, bounds))
+		var native *api.CollectionDataView
+		stop := mgr.RegisterDataViewListener(func(_ int64, published *api.CollectionDataView) { native = published })
+		defer stop()
+		_, err := mgr.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"s"}, TransformStarts: map[string]uint64{"s": 40}})
+		require.NoError(t, err)
+		slow := LoadableSegment{SegmentID: 10, VChannel: "s", PartitionID: 1, ManifestVersion: 1, TransformStartAfterTimetick: 40}
+		victim := LoadableSegment{SegmentID: 11, VChannel: "s", PartitionID: 2, ManifestVersion: 1, TransformStartAfterTimetick: 60}
+		flushAndCommit(t, mgr, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{slow, victim}})
+		declaration := declareTargets(100)
+		declaration.Source = "s"
+		declaration.Lineage = &viewpb.QueryViewLineage{SwitchTimetick: 100, Vchannels: declaration.VChannels}
+		_, err = mgr.DeclareShards(ctx, declaration)
+		require.NoError(t, err)
+		old, err := mgr.Latest(ctx, 1)
+		require.NoError(t, err)
+		defer old.Deref()
+		// Materializing L0 advances only the victim's delete cursor. Its rows
+		// remain historically readable until mix removes its last row.
+		victim.ManifestVersion++
+		victim.TransformStartAfterTimetick = 180
+		_, err = mgr.RecomputeNow(ctx, 1, projectSegments(slow, victim))
+		require.NoError(t, err)
+		if grouped {
+			event := ChangeGroupDataViewEvent{CollectionID: 1, SupersededSegmentIDs: []int64{11}, PublishTimestamp: 200}
+			publishAndCommit(t, mgr, event)
+			event.PublishTimestamp = 300
+			publishAndCommit(t, mgr, event)
+			require.Zero(t, calls)
+		} else {
+			for i := 0; i < 2; i++ {
+				_, err = mgr.RecomputeNow(ctx, 1, projectSegments(slow))
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, calls)
+		}
+		require.Zero(t, shardOf(old.DataView(), "s").GetSnapshotHistoryFloor())
+		current, err := mgr.Latest(ctx, 1)
+		require.NoError(t, err)
+		shard := shardOf(current.DataView(), "s")
+		current.Deref()
+		require.EqualValues(t, 40, shard.GetCompactedTransformStartAfterTimetick())
+		require.EqualValues(t, 200, shard.GetSnapshotHistoryFloor())
+		require.EqualValues(t, 200, native.Shards[0].SnapshotHistoryFloor)
+		view, _, abort, err := mgr.PrepareAdoptSplit(ctx, AdoptSplitDataViewEvent{CollectionID: 1, Source: "s", Moves: []SplitAdoptionMove{{SegmentID: 10, VChannel: "t-1", TransformStartAfterTimetick: 100}}})
+		require.NoError(t, err)
+		for _, target := range declaration.VChannels {
+			require.EqualValues(t, 200, shardOf(view, target).GetSnapshotHistoryFloor())
+		}
+		abort()
+	}
+}
+
+func TestHistoryFloorAllocationFailureLeavesPublishedViewIntact(t *testing.T) {
+	errClock := errors.New("TSO unavailable")
+	mgr := newManager(t.Context(), &fakeDataViewCatalog{}, nil, WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 0, errClock }, func(context.Context, int64) (map[string]uint64, error) { return nil, nil }))
+	_, err := mgr.OnCreateCollection(t.Context(), CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"s"}, TransformStarts: map[string]uint64{"s": 40}})
+	require.NoError(t, err)
+	original := flushAndCommit(t, mgr, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{{SegmentID: 10, VChannel: "s", PartitionID: 1, TransformStartAfterTimetick: 40}}})
+	_, err = mgr.RecomputeNow(t.Context(), 1, projectSegments())
+	require.ErrorIs(t, err, errClock)
+	current, err := mgr.Latest(t.Context(), 1)
+	require.NoError(t, err)
+	defer current.Deref()
+	require.True(t, proto.Equal(original, current.Version()))
+	require.Equal(t, []int64{10}, shardOf(current.DataView(), "s").Partitions[0].SegmentIds)
 }

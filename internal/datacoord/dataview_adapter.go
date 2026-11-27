@@ -64,6 +64,11 @@ func (s *Server) DropCollectionDataView(ctx context.Context, collectionID int64)
 	if s.dataViewManager == nil {
 		return merr.WrapErrServiceInternalMsg("DataView manager is not initialized")
 	}
+	// The split sources of the collection are in no DropCollection broadcast:
+	// drop their data here, before the DataViews that still name them.
+	if err := s.dropSplitSourcesOfCollection(ctx, collectionID); err != nil {
+		return err
+	}
 	_, err := s.dataViewManager.OnDropCollection(ctx, collectionID)
 	return err
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -213,9 +214,11 @@ func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
 
 // ControlChannelTimeTick returns the time tick of the control channel.
 func (b *broadcastTask) ControlChannelTimeTick() uint64 {
-	for idx, vc := range b.Header().VChannels {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for idx, vc := range b.header().VChannels {
 		if funcutil.IsControlChannel(vc) {
-			return b.task.AckedCheckpoints[idx].TimeTick
+			return b.task.AckedCheckpoints[idx].GetTimeTick()
 		}
 	}
 	return 0
@@ -245,12 +248,19 @@ func (b *broadcastTask) pendingBroadcastMessages() []message.MutableMessage {
 	// filter out the vchannel that has been acked.
 	pendingMessages := make([]message.MutableMessage, 0, len(msgs))
 	for i, msg := range msgs {
-		if b.task.AckedVchannelBitmap[i] != 0 || (b.task.AckedCheckpoints != nil && b.task.AckedCheckpoints[i] != nil) {
+		if b.channelAcked(i) {
 			continue
 		}
 		pendingMessages = append(pendingMessages, msg)
 	}
 	return pendingMessages
+}
+
+// channelAcked reads the legacy bitmap or a real WAL checkpoint. Cloning or
+// unmarshalling a repeated message field materializes its empty slots.
+// Caller holds b.mu.
+func (b *broadcastTask) channelAcked(idx int) bool {
+	return b.task.AckedVchannelBitmap[idx] != 0 || b.task.AckedCheckpoints[idx].GetTimeTick() != 0
 }
 
 // HasPendingMessagesInIncompleteState atomically checks whether this task is
@@ -466,7 +476,7 @@ func (b *broadcastTask) isControlChannelAcked() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for idx, vc := range b.header().VChannels {
-		if funcutil.IsControlChannel(vc) && b.task.AckedCheckpoints[idx] != nil {
+		if funcutil.IsControlChannel(vc) && b.channelAcked(idx) {
 			return true
 		}
 	}
@@ -578,6 +588,74 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel]))
 	}
 	return b.ack(ctx, callback, msgs...)
+}
+
+// AckAppendFirst acknowledges the append-first copies of the broadcast as soon
+// as they are appended, before the other copies are. The acked checkpoint is
+// persisted, so the copy is not appended again after a coordinator restart and
+// AppendFirstTimeTick survives one.
+//
+// A broadcast with ack sync up is acknowledged by the consuming side only, so
+// nothing is persisted here for it. OptBuildBroadcastAppendFirst refuses that
+// combination; only a header from another cluster can carry it.
+func (b *broadcastTask) AckAppendFirst(ctx context.Context, results map[string]*types.AppendResult) error {
+	// Callback registration may depend on coordinator startup. Never wait for
+	// that future while holding the task lock.
+	callback, err := registry.ResolveMessageAckOnceCallback(ctx, b.messageTypeWithVersion)
+	if err != nil {
+		return err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.header().AckSyncUp {
+		return nil
+	}
+	msgs := make([]message.ImmutableMessage, 0, len(results))
+	for vchannel, result := range results {
+		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, result))
+	}
+	return b.ack(ctx, callback, msgs...)
+}
+
+// AppendFirstTimeTick returns the greatest acked time tick of the append-first
+// vchannels of the broadcast. It returns zero if the broadcast has none, or if
+// one of them is not acked yet.
+func (b *broadcastTask) AppendFirstTimeTick() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	header := b.header()
+	var timetick uint64
+	for _, vchannel := range header.AppendFirstVChannels {
+		idx := findIdxOfVChannel(vchannel, header.VChannels)
+		if idx < 0 || idx >= len(b.task.AckedCheckpoints) || b.task.AckedCheckpoints[idx].GetTimeTick() == 0 {
+			return 0
+		}
+		timetick = max(timetick, b.task.AckedCheckpoints[idx].GetTimeTick())
+	}
+	return timetick
+}
+
+// AckedTimeTick returns the greatest time tick the given vchannels of the
+// broadcast were acknowledged at. acked is false if one of them is not
+// acknowledged yet. It fails if a vchannel is not a vchannel of the broadcast.
+func (b *broadcastTask) AckedTimeTick(vchannels []string) (timeTick uint64, acked bool, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	header := b.header()
+	for _, vchannel := range vchannels {
+		idx := findIdxOfVChannel(vchannel, header.VChannels)
+		if idx < 0 {
+			return 0, false, status.NewReplicateViolation("vchannel %s is not a vchannel of broadcast %d", vchannel, header.BroadcastID)
+		}
+		if idx >= len(b.task.AckedCheckpoints) || b.task.AckedCheckpoints[idx].GetTimeTick() == 0 {
+			return 0, false, nil
+		}
+		timeTick = max(timeTick, b.task.AckedCheckpoints[idx].GetTimeTick())
+	}
+	return timeTick, true, nil
 }
 
 // canDropTombstone requires every local broadcast copy to be strictly behind

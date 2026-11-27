@@ -33,7 +33,7 @@ func TestSchemaPublicationRetry(t *testing.T) {
 		mockey.PatchConvey(scenario, t, func() {
 			previous := qvresource.Resource()
 			defer qvresource.Init(previous)
-			qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
+			qvresource.Init(&qvresource.Resources{ShardViews: newSchemaViewRegistry(t)})
 			published := &model.Collection{CollectionID: 1, SchemaVersion: 1, UpdateTimestamp: 50}
 			switch scenario {
 			case "published replay":

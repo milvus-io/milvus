@@ -43,7 +43,7 @@ type AckedCheckpoint struct {
 func (a *AckedResult) Ack(cp AckedCheckpoint) bool {
 	for idx, v := range a.Channels {
 		if v == cp.Channel {
-			if a.AckedCheckpoints[idx] == nil {
+			if a.AckedCheckpoints[idx].GetTimeTick() == 0 {
 				a.AckedCheckpoints[idx] = &streamingpb.AckedCheckpoint{
 					MessageId:              cp.MessageID.IntoProto(),
 					LastConfirmedMessageId: cp.LastConfirmedMessageID.IntoProto(),
@@ -60,7 +60,7 @@ func (a *AckedResult) Ack(cp AckedCheckpoint) bool {
 // IsAllAcked returns true if all the channels are acked.
 func (a *AckedResult) IsAllAcked() bool {
 	for _, v := range a.AckedCheckpoints {
-		if v == nil {
+		if v.GetTimeTick() == 0 {
 			return false
 		}
 	}

@@ -77,6 +77,51 @@ var (
 			collectionIDLabelName,
 		})
 
+	// DataCoordShardSplitTasks is the number of shard splits this cluster
+	// records, by local state.
+	DataCoordShardSplitTasks = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_num",
+			Help:      "number of shard split tasks recorded on this cluster, by state",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitTriggered counts the splits the trigger issued, by
+	// result.
+	DataCoordShardSplitTriggered = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_triggered_total",
+			Help:      "number of shard splits issued by the trigger, by result",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitResidualFlushSeconds is the time from the record of a
+	// split to the flush of the residual of its source, during which the split
+	// keeps the broadcast resource key of the collection.
+	DataCoordShardSplitResidualFlushSeconds = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_residual_flush_seconds",
+			Help:      "seconds a shard split waited for the residual of its source to flush",
+			Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 1800},
+		})
+
+	// DataCoordShardSplitResidualWaitSeconds is how long the SplitShard ack
+	// callback of a collection has been waiting for the consumer ack of the
+	// copy on the source, while it keeps the broadcast resource key of the
+	// collection. The series exists only while a callback waits in full mode;
+	// aggregate mode suppresses it because independent wait ages cannot share Set.
+	DataCoordShardSplitResidualWaitSeconds = newCollectionGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_residual_wait_seconds",
+			Help:      "seconds the shard split callback of a collection has waited so far for the residual of its source to flush",
+		}, []string{collectionIDLabelName}, collectionGaugeAggregateDisabled)
+
 	DataCoordL0DeleteEntriesNum = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -613,6 +658,10 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTaskLatency)
 	registry.MustRegister(DataCoordSizeStoredL0Segment)
 	registry.MustRegister(DataCoordL0DeleteEntriesNum)
+	registry.MustRegister(DataCoordShardSplitTasks)
+	registry.MustRegister(DataCoordShardSplitTriggered)
+	registry.MustRegister(DataCoordShardSplitResidualFlushSeconds)
+	registry.MustRegister(DataCoordShardSplitResidualWaitSeconds)
 	registry.MustRegister(DataCoordL0DeltalogFileNum)
 	registry.MustRegister(DataCoordSegmentDeltalogFileCount)
 	registry.MustRegister(DataCoordSegmentDeltalogSize)

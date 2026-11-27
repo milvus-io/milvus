@@ -100,7 +100,8 @@ func TestStatisticsCollectionAggregatesAndPropagatesFailure(t *testing.T) {
 	setupTestReplicaRouting(t)
 	mockey.PatchConvey("collection statistics combine one result per shard and return no partial count", t, func() {
 		var shardErr error
-		mockey.Mock((*shardViewQueryClient).statistics).To(func(_ *shardViewQueryClient, _ context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
+		mockey.Mock((*shardViewQueryClient).statisticsAt).To(func(_ *shardViewQueryClient, _ context.Context, collectionID int64, req *viewpb.StatisticsRequest, read shardReadPoint, _ []error) (int64, error) {
+			channel, barrierMVCC := read.vchannel, read.barrierMVCC
 			require.EqualValues(t, 1, collectionID)
 			require.EqualValues(t, 99, barrierMVCC)
 			if channel == "b" {
@@ -109,7 +110,7 @@ func TestStatisticsCollectionAggregatesAndPropagatesFailure(t *testing.T) {
 			return 5, nil
 		}).Build()
 		resolver := &legacyResolver{vchannels: []string{"a", "b"}}
-		client := &legacyClient{shardClient: &shardViewQueryClient{}, shardResolver: resolver}
+		client := newLegacyClient(ViewQueryClientConfig{}, &fakeQueryPlanClient{}, &fakeViewQueryServiceClient{}, resolver)
 		req := &viewpb.StatisticsRequest{}
 		rows, err := client.Statistics(t.Context(), 1, req, 99)
 		require.NoError(t, err)

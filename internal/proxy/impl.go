@@ -59,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -166,6 +167,11 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
+	if msgType == commonpb.MsgType_DropDatabase {
+		queryclient.InvalidateServingGeneration(node.viewQueryClient, 0)
+	} else if collectionID > 0 {
+		queryclient.InvalidateServingGeneration(node.viewQueryClient, collectionID)
+	}
 	var aliasName []string
 	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
 	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
@@ -2374,7 +2380,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success && len(it.Result().GetErrIndex()) == 0 {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
@@ -4445,6 +4451,9 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
+	if metricType == metricsinfo.SplitRetirementKey {
+		return node.mixCoord.GetMetrics(ctx, req)
+	}
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := node.metricsCacheManager.GetSystemInfoMetrics()
 		if err != nil {

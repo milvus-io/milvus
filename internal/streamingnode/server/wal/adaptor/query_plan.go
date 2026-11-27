@@ -9,7 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -105,16 +105,28 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		schemaVersion = request.LegacyRetrieveRequest.GetSchemaVersion()
 	}
-	var lease *snview.QueryViewLease
-	if req.GetStatisticsRequest() != nil {
-		lease, err = w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
-	} else {
-		lease, err = w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
+	var schema *int32
+	if req.GetLoadInfoVersion() > 0 {
+		if req.GetStatisticsRequest() == nil && schemaVersion != req.GetReadSchemaVersion() {
+			return nil, viewerror.NewViewInvalidated("query request schema %d differs from published read schema %d", schemaVersion, req.GetReadSchemaVersion())
+		}
+		schemaVersion = req.GetReadSchemaVersion()
+		schema = &schemaVersion
+	} else if req.GetStatisticsRequest() == nil {
+		schema = &schemaVersion
 	}
+	lease, err := w.queryViewHandler.AcquireUpViewAtGeneration(ctx, shardID, schema, req.GetShardSetEpoch(), req.GetLoadInfoVersion())
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
+	fenced := false
+	if w.param != nil {
+		fenced = shards.IsSplitFenced(w.param.ShardManager, shardID.VChannel)
+	}
+	if err := requireSplitReadLineage(fenced, lease.Meta); err != nil {
+		return nil, err
+	}
 	if req.GetStatisticsRequest() == nil && schemaVersion != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewNotFound("query view schema is not ready")
 	}
@@ -133,6 +145,18 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, err
 	}
 
+	// A fixed barrier can race the first fence check. If the fence was assigned
+	// at or below B, its acker must complete before through covers B, and its
+	// append-side flag was installed before that acknowledgment. Conversely a
+	// fence installed after this check is allocated above the completed barrier.
+	if w.param != nil {
+		if err := requireSplitReadLineage(shards.IsSplitFenced(w.param.ShardManager, shardID.VChannel), lease.Meta); err != nil {
+			return nil, err
+		}
+	}
+	if err := requireSplitReadSnapshot(lease.Meta, mvcc, req); err != nil {
+		return nil, err
+	}
 	var readRuntime *queryresource.ReadRuntime
 	if w.viewResourceManager != nil {
 		readRuntime, _ = w.viewResourceManager.GetQueryReadRuntime(qviews.QueryViewKey{
@@ -288,11 +312,36 @@ func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMV
 	if w.Channel().AccessMode != types.AccessModeRW {
 		return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
 	}
+	if req.GetPrefixOnly() {
+		return w.getQueryMVCCPrefix(req.GetVchannel())
+	}
 	mvcc, err := w.GetLatestQueryPlanMVCC(ctx, req.GetVchannel())
 	if err != nil {
 		return nil, err
 	}
-	return &viewpb.GetMVCCTimestampResponse{Mvcc: mvcc}, nil
+	// Sampled after the wait above: through already covers the Strong minimum
+	// that wait was fixed on, and strong_minimum reflects writes completed since.
+	through, strongMinimum, _ := w.param.MVCCManager.QueryMVCC().Prefix(req.GetVchannel())
+	return &viewpb.GetMVCCTimestampResponse{Mvcc: mvcc, Through: through, StrongMinimum: strongMinimum}, nil
+}
+
+// getQueryMVCCPrefix answers without waiting and without triggering a sync. The
+// caller derives a read point from through and strong_minimum, possibly of
+// several vchannels, and establishes it with a barrier_mvcc query plan.
+func (w *walAdaptorImpl) getQueryMVCCPrefix(vchannel string) (*viewpb.GetMVCCTimestampResponse, error) {
+	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
+	}
+	defer w.lifetime.Done()
+	through, strongMinimum, current := w.param.MVCCManager.QueryMVCC().Prefix(vchannel)
+	if current.GrowingTimetick == 0 && current.TransformingTimetick == 0 {
+		return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
+	}
+	return &viewpb.GetMVCCTimestampResponse{
+		Mvcc:          &viewpb.QueryPlanMVCC{GrowingTimetick: current.GrowingTimetick, TransformingTimetick: current.TransformingTimetick},
+		Through:       through,
+		StrongMinimum: strongMinimum,
+	}, nil
 }
 
 func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.GetQueryPlanRequest, vchannel string) (*viewpb.QueryPlanMVCC, error) {
@@ -535,4 +584,16 @@ func queryPlanSealedSegmentCount(plan *viewpb.QueryPlan, view *viewpb.QueryViewO
 		}
 	}
 	return count
+}
+
+// Target replication may run before the source consumer/callback has built
+// g1. The append-side fence is installed before persistence and survives
+// recovery, so an old g0 view must stop planning immediately on every cluster.
+// A plan may survive only if its MVCC resolution finishes before the fence;
+// the caller checks again after resolution to close explicit-barrier races.
+func requireSplitReadLineage(fenced bool, meta *viewpb.QueryViewMeta) error {
+	if fenced && meta.GetLineage() == nil {
+		return viewerror.NewViewInvalidated("split source read generation has not attached target delete streams")
+	}
+	return nil
 }

@@ -13,10 +13,10 @@ import (
 
 func TestDualFrontiersOutOfOrderFlushCompactionAndRecovery(t *testing.T) {
 	m := newPublicationTestManager(t)
-	m.frontierProjector = func(context.Context, int64) (map[string]uint64, error) {
+	WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 		t.Fatal("native snapshots must not read legacy checkpoint/collection metadata")
 		return nil, nil
-	}
+	})(m)
 	_, err := m.OnCreateCollection(t.Context(), CreateCollectionDataViewEvent{
 		CollectionID: 1, VChannels: []string{"v1", "v2"}, TransformStarts: map[string]uint64{"v1": 10, "v2": 20},
 	})
@@ -86,10 +86,10 @@ func TestDualFrontierRecoveryRejectsInconsistentCoverage(t *testing.T) {
 
 func TestRecomputeDoesNotCreateInitialTransformView(t *testing.T) {
 	m := newPublicationTestManager(t)
-	m.frontierProjector = func(context.Context, int64) (map[string]uint64, error) {
+	WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 		t.Fatal("unexpected legacy lookup")
 		return nil, nil
-	}
+	})(m)
 	version, err := m.RecomputeNow(t.Context(), 1, projectSegments())
 	require.NoError(t, err)
 	require.Nil(t, version)
@@ -119,10 +119,10 @@ func TestDualFrontierPendingPublicationFences(t *testing.T) {
 	}
 	require.ErrorIs(t, m.advanceTransformFrontiers(t.Context(), view, nil), context.Canceled)
 	m.pendingTransformProjector = nil
-	m.frontierProjector = func(context.Context, int64) (map[string]uint64, error) {
+	WithQueryViewFrontiers(func(context.Context) (uint64, error) { return 123, nil }, func(context.Context, int64) (map[string]uint64, error) {
 		t.Fatal("unexpected checkpoint lookup")
 		return nil, nil
-	}
+	})(m)
 	require.ErrorIs(t, m.advanceTransformFrontiers(t.Context(), transformTestView(1), map[string]uint64{"v1": 0}), merr.ErrServiceNotReady)
 }
 

@@ -547,7 +547,7 @@ func newCCPartialUpdate(t *testing.T, children []ccChild, rowNullable bool, pks 
 		partialUpdateOriginalFields: cloneFieldDataList(fields),
 	}
 	task.SetTs(12345)
-	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
+	setPartialUpdateCASTestChannels(t, task, partialUpdateCASTestVChannels)
 	p := &ccPartialUpdate{
 		t: t, children: children, rows: ccRows(rowNullable), task: task,
 		original: cloneFieldDataList(fields),

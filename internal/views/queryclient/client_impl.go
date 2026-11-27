@@ -3,8 +3,6 @@ package queryclient
 import (
 	"context"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/queryclient/renderer"
@@ -62,7 +60,7 @@ func NewViewQueryClient(
 	return &viewQueryClientImpl{
 		shardClient:            legacy.shardClient,
 		legacyClient:           legacy,
-		shardResolver:          shardResolver,
+		shardResolver:          legacy.shardResolver,
 		fieldFetchPlanner:      fieldFetchPlanner,
 		rerankerBuilder:        rerankerBuilder,
 		rendererBuilder:        rendererBuilder,
@@ -77,12 +75,11 @@ func (c *viewQueryClientImpl) Legacy() LegacyClient {
 }
 
 // Search implements ViewQueryClient.Search.
-func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
-	defer func() { err = ToMilvusError(err) }()
+func (c *viewQueryClientImpl) search(ctx context.Context, req *SearchRequest, retryErrors []error) (result *SearchResult, err error) {
 	// === Stage: Plan ===
 
-	// Resolve vchannels first — the provider reports the collection's shard layout;
-	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
+	// Resolve shards first — the provider reports the collection's shard layout;
+	shards, err := resolver.ResolveShards(ctx, c.shardResolver, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +131,7 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (r
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	// (requires field name → ID resolution from collection schema).
 	_ = fieldPlan
-	shardPlans, err := c.searchAllShards(ctx, vchannels, req.Req, req.MVCC, req.BarrierMVCC, searchReducer)
+	shardPlans, err := c.searchAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, searchReducer, retryErrors)
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +174,11 @@ func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (r
 }
 
 // Query implements ViewQueryClient.Query.
-func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
-	defer func() { err = ToMilvusError(err) }()
+func (c *viewQueryClientImpl) query(ctx context.Context, req *QueryRequest, retryErrors []error) (result *QueryResult, err error) {
 	// === Stage: Plan ===
 
-	// Resolve vchannels first — the provider reports the collection's shard layout;
-	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
+	// Resolve shards first — the provider reports the collection's shard layout;
+	shards, err := resolver.ResolveShards(ctx, c.shardResolver, req.Req.CollectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +209,7 @@ func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (res
 	// === Stage: Search/Query (per-shard pipelined) ===
 	// TODO: set fieldPlan.SearchFields into req.Req.OutputFieldsId
 	_ = fieldPlan
-	shardPlans, err := c.queryAllShards(ctx, vchannels, req.Req, req.MVCC, req.BarrierMVCC, retrieveReducer)
+	shardPlans, err := c.queryAllShards(ctx, shards, req.Req, req.MVCC, req.BarrierMVCC, retrieveReducer, retryErrors)
 	if err != nil {
 		return nil, err
 	}
@@ -243,33 +239,35 @@ func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (res
 // searchAllShards dispatches Search to all shards concurrently via shardViewQueryClient.
 func (c *viewQueryClientImpl) searchAllShards(
 	ctx context.Context,
-	vchannels []string,
+	shards []resolver.Shard,
 	req *internalpb.SearchRequest,
 	mvcc *viewpb.QueryPlanMVCC,
 	barrierMVCC uint64,
 	searchReducer reducer.SearchResultReducer,
+	retryErrors []error,
 ) ([]ShardPlan, error) {
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				TotalChannelNum: int32(len(vchannels)),
-				VChannel:        vchannels[i],
-				Req:             req,
-				MVCC:            mvcc,
-				BarrierMVCC:     barrierMVCC,
-				Reducer:         searchReducer,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans := make([]ShardPlan, len(shards))
+	err := c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
+		consistencyLevel: req.GetConsistencyLevel(), guaranteeTimestamp: req.GetGuaranteeTimestamp(), mvcc: mvcc, barrierMVCC: barrierMVCC,
+	}, func(ctx context.Context, i int, read shardReadPoint) error {
+		plan, err := c.shardClient.Search(ctx, &ShardSearchRequest{
+			TotalChannelNum: int32(len(shards)),
+			VChannel:        read.vchannel,
+			Req:             req,
+			MVCC:            read.mvcc,
+			BarrierMVCC:     read.barrierMVCC,
+			OnPlan:          read.onPlan,
+			awaitPlans:      read.awaitPlans,
+			retryErrors:     retryErrors,
+			Reducer:         searchReducer,
 		})
-	}
-	if err := g.Wait(); err != nil {
+		if err != nil {
+			return err
+		}
+		shardPlans[i] = *plan
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return shardPlans, nil
@@ -278,32 +276,34 @@ func (c *viewQueryClientImpl) searchAllShards(
 // queryAllShards dispatches Query to all shards concurrently via shardViewQueryClient.
 func (c *viewQueryClientImpl) queryAllShards(
 	ctx context.Context,
-	vchannels []string,
+	shards []resolver.Shard,
 	req *internalpb.RetrieveRequest,
 	mvcc *viewpb.QueryPlanMVCC,
 	barrierMVCC uint64,
 	retrieveReducer reducer.RetrieveResultReducer,
+	retryErrors []error,
 ) ([]ShardPlan, error) {
-	shardPlans := make([]ShardPlan, len(vchannels))
-	g, gCtx := errgroup.WithContext(ctx)
-	for i := range vchannels {
-		i := i
-		g.Go(func() error {
-			plan, err := c.shardClient.Query(gCtx, &ShardQueryRequest{
-				VChannel:    vchannels[i],
-				Req:         req,
-				MVCC:        mvcc,
-				BarrierMVCC: barrierMVCC,
-				Reducer:     retrieveReducer,
-			})
-			if err != nil {
-				return err
-			}
-			shardPlans[i] = *plan
-			return nil
+	shardPlans := make([]ShardPlan, len(shards))
+	err := c.shardClient.fanOutShards(ctx, shards, requestReadPoint{
+		consistencyLevel: req.GetConsistencyLevel(), guaranteeTimestamp: req.GetGuaranteeTimestamp(), mvcc: mvcc, barrierMVCC: barrierMVCC,
+	}, func(ctx context.Context, i int, read shardReadPoint) error {
+		plan, err := c.shardClient.Query(ctx, &ShardQueryRequest{
+			VChannel:    read.vchannel,
+			Req:         req,
+			MVCC:        read.mvcc,
+			BarrierMVCC: read.barrierMVCC,
+			OnPlan:      read.onPlan,
+			awaitPlans:  read.awaitPlans,
+			retryErrors: retryErrors,
+			Reducer:     retrieveReducer,
 		})
-	}
-	if err := g.Wait(); err != nil {
+		if err != nil {
+			return err
+		}
+		shardPlans[i] = *plan
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return shardPlans, nil
@@ -311,4 +311,30 @@ func (c *viewQueryClientImpl) queryAllShards(
 
 func (c *viewQueryClientImpl) Close() {
 	c.shardClient.replicas.Close()
+}
+
+func (c *viewQueryClientImpl) Search(ctx context.Context, req *SearchRequest) (result *SearchResult, err error) {
+	attempts := c.shardClient.maxRetries
+	var retryErrors []error
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.search(ctx, req, retryErrors)
+		if err != nil {
+			retryErrors = append(retryErrors, err)
+		}
+		return err
+	})
+	return result, ToMilvusError(err)
+}
+
+func (c *viewQueryClientImpl) Query(ctx context.Context, req *QueryRequest) (result *QueryResult, err error) {
+	attempts := c.shardClient.maxRetries
+	var retryErrors []error
+	err = retryServingGeneration(ctx, c.shardResolver, attempts, req.Req.CollectionID, func() error {
+		result, err = c.query(ctx, req, retryErrors)
+		if err != nil {
+			retryErrors = append(retryErrors, err)
+		}
+		return err
+	})
+	return result, ToMilvusError(err)
 }

@@ -5,18 +5,21 @@ import (
 	"math"
 	"sort"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 type allocationResult struct {
-	collectionID int64
-	shard        *ShardDataView
-	entries      []*SegmentDataView
-	assignments  map[int64]int64
-	rowsByNode   map[int64]int64
-	more         bool
+	shardSetEpoch uint64
+	collectionID  int64
+	shard         *ShardDataView
+	entries       []*SegmentDataView
+	assignments   map[int64]int64
+	rowsByNode    map[int64]int64
+	more          bool
 }
 
 // allocate produces a complete candidate for shardID against the supplied
@@ -61,6 +64,9 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		return nil
 	}
 	original := currentSegmentNodes(p, shardID)
+	if collection.DataView() != nil && collection.DataView().ShardSetEpoch > 1 {
+		original = seedAdoptedPlacements(collection, shardID, entries, original, ctx.nodes)
+	}
 	eligible := make(map[int64]bool, len(ctx.nodes))
 	for _, node := range ctx.nodes {
 		eligible[node] = true
@@ -112,7 +118,13 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 			}
 		}
 	}
-	return &allocationResult{collectionID: desired.CollectionID, shard: shard, entries: entries, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
+	var epoch uint64
+	if retained {
+		epoch = p.recovery.shardSetEpoch
+	} else {
+		epoch = collection.DataView().ShardSetEpoch
+	}
+	return &allocationResult{shardSetEpoch: epoch, collectionID: desired.CollectionID, shard: shard, entries: entries, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
 }
 
 // materialize is called only for submitted candidates. The private sorted slice
@@ -135,8 +147,10 @@ func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardI
 	dataVersion, _ := p.DataVersionForCollection(r.collectionID)
 	return qviews.NewQueryViewAtCoordBuilderFromMetadata(shardID, qviews.QueryViewBuilderMetadata{
 		CollectionID: r.collectionID, DataVersion: dataVersion,
+		ShardSetEpoch: r.shardSetEpoch, Lineage: r.shard.Lineage,
 		SchemaVersion:               p.SchemaVersion(r.collectionID),
 		TransformStartAfterTimetick: r.shard.TransformStartAfterTimetick(),
+		SnapshotHistoryFloor:        r.shard.SnapshotHistoryFloor,
 		SegmentManifestVersions:     manifests, PartitionStatsVersions: stats,
 	}).SetAssignments(assignments).SetLoadInfoVersion(p.ConfigVersion(r.collectionID)).
 		SetPreparationPriority(p.preparationPriority(shardID))
@@ -187,6 +201,8 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 		return nil
 	}
 	protoShard := &viewpb.DataViewOfShard{
+		Lineage:                              shard.Lineage,
+		SnapshotHistoryFloor:                 shard.SnapshotHistoryFloor,
 		Vchannel:                             shard.VChannel,
 		GrowingTransformStartAfterTimetick:   shard.GrowingTransformStartAfterTimetick,
 		CompactedTransformStartAfterTimetick: shard.CompactedTransformStartAfterTimetick,
@@ -206,4 +222,39 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 		protoShard.Partitions = append(protoShard.Partitions, protoPartition)
 	}
 	return protoShard
+}
+
+// Seed newly adopted IDs from their resident source placement in this replica.
+// Physical segment resources are node-local, so choosing that same node is
+// what makes the QueryNode's shared-base registration handover avoid a reload.
+func seedAdoptedPlacements(collection *balancercache.CollectionEntry, id qviews.ShardID, segments []*SegmentDataView, current map[int64]int64, eligibleNodes []int64) map[int64]int64 {
+	eligible := make(map[int64]bool, len(eligibleNodes))
+	for _, node := range eligibleNodes {
+		eligible[node] = true
+	}
+	result := maps.Clone(current)
+	if result == nil {
+		result = make(map[int64]int64)
+	}
+	collection.RangeShards(func(shard *balancercache.ShardEntry) bool {
+		if shard.ID().ReplicaID != id.ReplicaID || shard.ID() == id || shard.Stats() == nil {
+			return true
+		}
+		for _, segment := range segments {
+			if _, ok := current[segment.SegmentID]; ok {
+				continue
+			}
+			if resident := shard.Stats().Segments[segment.SegmentID]; resident != nil {
+				for node, state := range resident.Nodes {
+					if state >= coordview.SegmentStateReady && eligible[node] {
+						if old, ok := result[segment.SegmentID]; !ok || node < old {
+							result[segment.SegmentID] = node
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+	return result
 }

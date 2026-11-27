@@ -206,8 +206,16 @@ func TestSearchReturnsAutoLoadFailureAfterFirstAttempt(t *testing.T) {
 	}
 }
 
+func newAutoLoadMetaCache(t *testing.T) *MetaCache {
+	t.Helper()
+	cache, err := NewMetaCache(mocks.NewMockMixCoordClient(t))
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+	return cache
+}
+
 func mockSearchCollectionMeta(t *testing.T, collectionID int64, vchannels []string) *MetaCache {
-	metaCache := &MetaCache{}
+	metaCache := newAutoLoadMetaCache(t)
 	getCollectionInfoMock := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 		CollID:    collectionID,
 		VChannels: vchannels,
@@ -254,9 +262,12 @@ func newAutoLoadSchedulingProxy(t *testing.T) (*Proxy, *mocks.MockMixCoordClient
 	remove := mockey.Mock((*MockCache).RemoveCollection).Return().Build()
 	t.Cleanup(func() { remove.UnPatch() })
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(100), nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "collection", mock.Anything).Return(&collectionInfo{
+	collection := &collectionInfo{
 		CollID: 100, VChannels: []string{"v0"}, Schema: schema,
-	}, nil).Maybe()
+	}
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "collection", mock.Anything).Return(collection, nil).Maybe()
+	// DML routing reads the same metadata snapshot through the collection ID.
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "", "", int64(100)).Return(collection, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, "db", "collection").Return(schema, nil).Maybe()
 
 	coordinator := mocks.NewMockMixCoordClient(t)
@@ -844,7 +855,7 @@ func TestDQLAutoLoadUsesConfigAtRequestStart(t *testing.T) {
 
 func TestDQLAutoLoadRetryQueryCreatesFreshTask(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{metaCache: &MetaCache{}}
+	node := &Proxy{metaCache: newAutoLoadMetaCache(t)}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	oldRateCol := rateCol
 	require.NoError(t, node.initRateCollector())
@@ -898,7 +909,7 @@ func TestDQLAutoLoadRetryHonorsDeadline(t *testing.T) {
 
 func TestDQLAutoLoadRetryPreservesLatestReadinessTimeout(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{metaCache: &MetaCache{}}
+	node := &Proxy{metaCache: newAutoLoadMetaCache(t)}
 	readinessCalls := 0
 	ready := mockey.Mock((*Proxy).ensureCollectionReady).To(
 		func(_ *Proxy, ctx context.Context, _, _ string) error {
@@ -933,7 +944,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 			previous := Params.AutoIndexConfig.EnableResultLimitCheck.GetValue()
 			require.NoError(t, Params.Save(key, "true"))
 			t.Cleanup(func() { require.NoError(t, Params.Save(key, previous)) })
-			node := &Proxy{metaCache: &MetaCache{}}
+			node := &Proxy{metaCache: newAutoLoadMetaCache(t)}
 			checks := 0
 			ready := mockey.Mock((*Proxy).ensureCollectionReady).To(func(*Proxy, context.Context, string, string) error {
 				checks++
@@ -968,7 +979,7 @@ func TestDQLAutoLoadRetryPreservesSearchFallbackAndRecall(t *testing.T) {
 func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 	require.NoError(t, Params.Save(Params.ProxyCfg.EnableAutoLoad.Key, "false"))
 	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.ProxyCfg.EnableAutoLoad.Key)) })
-	node := &Proxy{metaCache: &MetaCache{}}
+	node := &Proxy{metaCache: newAutoLoadMetaCache(t)}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	calls := 0
 	search := mockey.Mock((*Proxy).hybridSearch).To(func(*Proxy, context.Context, *milvuspb.HybridSearchRequest, bool, bool) (*milvuspb.SearchResults, bool, bool, error) {
@@ -987,7 +998,7 @@ func TestDQLAutoLoadRetryPreservesInconsistentRequery(t *testing.T) {
 
 func TestDQLQueryRetryCountsRequestOnce(t *testing.T) {
 	enableAutoLoad(t)
-	node := &Proxy{metaCache: &MetaCache{}}
+	node := &Proxy{metaCache: newAutoLoadMetaCache(t)}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	previous := rateCol
 	require.NoError(t, node.initRateCollector())

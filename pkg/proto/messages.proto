@@ -74,6 +74,15 @@ enum MessageType {
     UpdateImport                 = 49;
     AddFileResource              = 50;
     RemoveFileResource           = 51;
+    // SplitShard is the single WAL message of an online shard split. It is
+    // broadcast to the source vchannel, the target vchannels and the control
+    // channel. A consumer decides what its copy means by where its own vchannel
+    // appears in the header: the copy on the source fences DML (its time tick
+    // is T_switch), a copy on a target is the genesis of that vchannel, and the
+    // copy on the control channel only orders the ack callback.
+    SplitShard                   = 52;
+    // Cluster-local retirement after this cluster publishes the adopted views.
+    RetireSplitShard             = 53;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -273,6 +282,44 @@ message ManualFlushMessageHeader {
     int64 collection_id = 1;
     uint64 flush_ts     = 2;
     repeated int64 segment_ids   = 3; // the segment ids to be flushed, will be filled by wal shard manager.
+}
+
+// SplitShardMessageHeader is the header of the split shard message.
+// The same header is carried by every copy of the broadcast.
+message SplitShardMessageHeader {
+    int64 collection_id = 1;
+    // The id of the split, allocated by the issuer before the broadcast and
+    // never zero. It makes a redelivered copy recognizable.
+    int64 split_task_id = 2;
+    // The vchannel that stops accepting DML at this message.
+    string source_vchannel = 3;
+    // The vchannels created by this message.
+    repeated string target_vchannels = 4;
+    // ForcePromote appended this source copy locally. Replication preserves this marker.
+    bool supplemental_source_fence = 5;
+}
+
+// SplitShardMessageBody is the body of the split shard message.
+message SplitShardMessageBody {
+    // The creation payload of a target vchannel, in the shape CreateCollection
+    // uses, so that the genesis of a target reuses the CreateCollection
+    // consumers. The channel name lists of the request are left empty.
+    CreateCollectionMessageHeader genesis_header = 1;
+    msg.CreateCollectionRequest genesis = 2;
+    // The routing of the collection after the split.
+    SplitShardRouting routing = 3;
+}
+
+// SplitShardRouting is the routing of a collection after a shard split.
+// It is carried whole, so that applying it never depends on mutable metadata.
+message SplitShardRouting {
+    // The modulus every residue below is taken against.
+    uint64 routing_modulus = 1;
+    // The routing key expression, "hash(<field>)".
+    string shard_by = 2;
+    // Every shard that accepts DML after the split, with its vchannel name and
+    // the residues it owns. The source of the split is not listed.
+    repeated schema.CollectionShardInfo shards = 3;
 }
 
 // CreateCollectionMessageHeader is the header of create collection message.
@@ -724,6 +771,8 @@ message RestoreSnapshotMessageBody {
     CreateCollectionMessageHeader collection_header = 1;
     msg.CreateCollectionRequest collection = 2;
     repeated index.FieldIndex indexes = 3;
+    // Full restored placement, using newly allocated target VChannel names.
+    SplitShardRouting routing = 4;
 }
 
 message AlterWALMessageHeader {
@@ -879,6 +928,13 @@ message BroadcastHeader {
     // the fast ack operation can not be applied to speed up the broadcast operation, because the ack operation need to be synced up with streaming node.
     // e.g. if truncate collection operation want to call ack once callback after the all segment are flushed at current vchannel,
     // it should set the ack_sync_up to be true.
+
+    // The vchannels whose copy the broadcaster appends and persists before it
+    // appends any other copy. The other copies then take a time tick greater
+    // than the time tick of these. Empty for every broadcast except a shard
+    // split, which names its source vchannel here. It is a subset of vchannels
+    // and never contains the control channel.
+    repeated string append_first_vchannels = 5;
 }
 
 // ReplicateHeader is the header of replicate message.
@@ -1035,3 +1091,10 @@ message RemoveFileResourceMessageBody {
     int64 resource_id = 1;
     string name = 2;
 }
+
+// This message must carry Unreplicable and target the fenced source.
+message RetireSplitShardMessageHeader {
+    int64 collection_id = 1;
+    int64 split_task_id = 2;
+}
+message RetireSplitShardMessageBody {}
