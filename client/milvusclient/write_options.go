@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 	"github.com/milvus-io/milvus/client/v3/row"
@@ -52,6 +53,39 @@ var (
 	_ InsertOption = (*columnBasedDataOption)(nil)
 )
 
+// WriteConditionOp specifies the comparison operator for a conditional upsert.
+type WriteConditionOp = milvuspb.WriteCondition_Op
+
+const (
+	WriteConditionOpGT  WriteConditionOp = milvuspb.WriteCondition_GT
+	WriteConditionOpGTE WriteConditionOp = milvuspb.WriteCondition_GTE
+)
+
+// MissingRowPolicy specifies how a conditional upsert handles rows whose primary key
+// does not exist yet.
+type MissingRowPolicy = milvuspb.WriteCondition_MissingRowPolicy
+
+const (
+	InsertIfMissing MissingRowPolicy = milvuspb.WriteCondition_INSERT_IF_MISSING
+	SkipIfMissing   MissingRowPolicy = milvuspb.WriteCondition_SKIP_IF_MISSING
+	ErrorIfMissing  MissingRowPolicy = milvuspb.WriteCondition_ERROR_IF_MISSING
+)
+
+// WriteCondition specifies a business-version guard for conditional upsert.
+// When configured, Proxy compares the incoming integer version in Field against
+// the stored version using Op and writes only qualifying rows.
+//
+// Upgrade all serving Proxies before using a condition. Older Proxies can
+// ignore the condition and perform an unconditional upsert.
+// With streaming.partialUpdate.enableCAS disabled, a concurrent write can
+// invalidate the version comparison before commit. Each channel commits
+// independently, so a request spanning channels can partially commit.
+type WriteCondition struct {
+	Field     string
+	Op        WriteConditionOp
+	OnMissing MissingRowPolicy
+}
+
 type columnBasedDataOption struct {
 	collName      string
 	partitionName string
@@ -61,6 +95,10 @@ type columnBasedDataOption struct {
 	columns       []column.Column
 	partialUpdate bool
 
+	// writeCondition is only honored by Upsert. Insert rejects a configured
+	// writeCondition rather than silently dropping it.
+	writeCondition *WriteCondition
+
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
 	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
 	deferredErr error
@@ -69,6 +107,17 @@ type columnBasedDataOption struct {
 	// field name. Entries with REPLACE (or nil) are treated as no-ops and are
 	// not serialized onto the wire.
 	partialOps map[string]*schemapb.FieldPartialUpdateOp
+}
+
+// errWriteConditionUnsupportedForDML is a sentinel marking the "write condition
+// is only valid for Upsert" rejection so Insert short-circuits schema retry.
+var errWriteConditionUnsupportedForDML = errors.New("write condition is only supported for Upsert")
+
+func unsupportedDMLWriteConditionError(operation string) error {
+	return errors.Mark(
+		merr.WrapErrParameterInvalid("Upsert", operation, "write condition is only supported for Upsert"),
+		errWriteConditionUnsupportedForDML,
+	)
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -372,6 +421,31 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 	return opt
 }
 
+// WithWriteCondition attaches a business-version guard to an Upsert request.
+// Presence of a condition automatically enables partial_update on the request.
+// Passing nil clears any previously configured condition. Insert rejects a
+// configured write condition.
+func (opt *columnBasedDataOption) WithWriteCondition(condition *WriteCondition) *columnBasedDataOption {
+	if condition == nil {
+		opt.writeCondition = nil
+		return opt
+	}
+	cloned := *condition
+	opt.writeCondition = &cloned
+	return opt
+}
+
+func (opt *columnBasedDataOption) buildWriteCondition() *milvuspb.WriteCondition {
+	if opt.writeCondition == nil {
+		return nil
+	}
+	return &milvuspb.WriteCondition{
+		Field:     opt.writeCondition.Field,
+		Op:        opt.writeCondition.Op,
+		OnMissing: opt.writeCondition.OnMissing,
+	}
+}
+
 // WithArrayAppend declares that the Array field `fieldName` should be merged
 // with ARRAY_APPEND semantics during an Upsert. The server implicitly enables
 // partial_update when any non-REPLACE op is present, so callers do not need
@@ -455,6 +529,9 @@ func (opt *columnBasedDataOption) InsertRequest(coll *entity.Collection) (*milvu
 	if opt.deferredErr != nil {
 		return nil, opt.deferredErr
 	}
+	if opt.writeCondition != nil {
+		return nil, unsupportedDMLWriteConditionError("Insert")
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err
@@ -481,10 +558,11 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	}
 	// Materialize any WithArrayAppend/WithArrayRemove/WithFieldPartialOp
 	// directives into UpsertRequest.field_ops. Auto-promote partial_update
-	// when any non-REPLACE op is present.
+	// when any non-REPLACE op or write_condition is present.
 	fieldOps := opt.buildFieldOps()
+	writeCondition := opt.buildWriteCondition()
 	partialUpdate := opt.partialUpdate
-	if len(fieldOps) > 0 {
+	if len(fieldOps) > 0 || writeCondition != nil {
 		partialUpdate = true
 	}
 	return &milvuspb.UpsertRequest{
@@ -498,6 +576,7 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 		SchemaTimestamp: coll.UpdateTimestamp,
 		PartialUpdate:   partialUpdate,
 		FieldOps:        fieldOps,
+		WriteCondition:  writeCondition,
 	}, nil
 }
 
@@ -552,6 +631,11 @@ func (opt *rowBasedDataOption) WithPartialUpdate(partialUpdate bool) *rowBasedDa
 	return opt
 }
 
+func (opt *rowBasedDataOption) WithWriteCondition(condition *WriteCondition) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithWriteCondition(condition)
+	return opt
+}
+
 func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithArrayAppend(fieldName)
 	return opt
@@ -576,6 +660,9 @@ func (opt *rowBasedDataOption) WithFieldPartialOp(fieldName string, op schemapb.
 }
 
 func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
+	if opt.writeCondition != nil {
+		return nil, unsupportedDMLWriteConditionError("Insert")
+	}
 	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
 	if err != nil {
 		return nil, err
@@ -617,8 +704,9 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		return nil, err
 	}
 	fieldOps := opt.buildFieldOps()
+	writeCondition := opt.buildWriteCondition()
 	partialUpdate := opt.partialUpdate
-	if len(fieldOps) > 0 {
+	if len(fieldOps) > 0 || writeCondition != nil {
 		partialUpdate = true
 	}
 	return &milvuspb.UpsertRequest{
@@ -631,6 +719,7 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		NumRows:        uint32(rowNum),
 		PartialUpdate:  partialUpdate,
 		FieldOps:       fieldOps,
+		WriteCondition: writeCondition,
 	}, nil
 }
 
