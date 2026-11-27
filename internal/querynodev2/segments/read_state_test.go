@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -30,6 +31,16 @@ func (suite *SegmentSuite) prepareReadState(local *LocalSegment) (ReadState, err
 	collection := suite.collection.WithLoadScope([]int64{suite.partitionID}, fields, fields)
 	info := proto.Clone(local.LoadInfo()).(*querypb.SegmentLoadInfo)
 	return local.PrepareReadState(suite.T().Context(), nil, info, collection)
+}
+
+func (suite *SegmentSuite) TestViewReadStatePKCandidate() {
+	local := suite.sealed.(*LocalSegment)
+	candidate := pkoracle.NewBloomFilterSet(local.ID(), local.Partition(), local.Type())
+	local.SetPKCandidate(candidate)
+	read, err := suite.prepareReadState(local)
+	suite.Require().NoError(err)
+	defer read.ReleaseReadState()
+	suite.Same(candidate, read.PKCandidate())
 }
 
 func (suite *SegmentSuite) TestViewReadStateArrowSurvivesAdopt() {

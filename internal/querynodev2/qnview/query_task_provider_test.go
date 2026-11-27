@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -99,7 +100,7 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 	mgr := newMockSegmentManager()
 	handles := []*mockSealedSegmentHandle{{id: 1000, partitionID: 10}}
 	mgr.queryHandles = []SealedSegmentHandle{handles[0]}
-	optimizer := &fakeLocalOptimizer{}
+	optimizer := &fakeLocalOptimizer{selection: &viewpb.SegmentSelection{Mode: viewpb.SegmentSelection_Exclude, SegmentIds: []int64{1001}}}
 	mgr.beforeQuery = func() {
 		assert.True(t, optimizer.queryCalled)
 		assert.True(t, mgr.waitCalled)
@@ -120,9 +121,11 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefAfterHandles(t *testin
 		key.QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 10},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
-		&viewpb.SegmentSelection{SegmentIds: []int64{1000}, Mode: viewpb.SegmentSelection_Include},
+		&viewpb.SegmentSelection{SegmentIds: []int64{1000, 1001}, Mode: viewpb.SegmentSelection_Include},
 	)
 	require.NoError(t, err)
+	require.Equal(t, key, optimizer.scope.Key)
+	require.Equal(t, []int64{1000, 1001}, optimizer.scope.Partitions[0].GetSegmentIds())
 	assert.Equal(t, testCollectionID, optimizer.queryReq.GetCollectionID())
 	assert.Equal(t, key, mgr.waitKey)
 	assert.Equal(t, uint64(10), mgr.waitTimetick)
@@ -168,6 +171,8 @@ func TestQNHandler_AcquireSearchSegmentTasksReleasesViewRefAfterHandles(t *testi
 		&viewpb.SegmentSelection{SegmentIds: []int64{1000}, Mode: viewpb.SegmentSelection_Exclude},
 	)
 	require.NoError(t, err)
+	require.Equal(t, key, optimizer.scope.Key)
+	require.Equal(t, []int64{1001}, optimizer.scope.Partitions[0].GetSegmentIds())
 	assert.Equal(t, testCollectionID, optimizer.searchReq.GetCollectionID())
 	assert.Equal(t, key, mgr.waitKey)
 	assert.Equal(t, uint64(10), mgr.waitTimetick)
@@ -266,6 +271,8 @@ func TestQNHandler_AcquireQuerySegmentTasksReleasesViewRefOnTransformWaitError(t
 }
 
 type fakeLocalOptimizer struct {
+	scope        optimizer.LocalSegmentScope
+	selection    *viewpb.SegmentSelection
 	searchCalled bool
 	queryCalled  bool
 	searchReq    *internalpb.SearchRequest
@@ -274,14 +281,16 @@ type fakeLocalOptimizer struct {
 	queryErr     error
 }
 
-func (o *fakeLocalOptimizer) OptimizeSearch(_ context.Context, req *internalpb.SearchRequest) error {
+func (o *fakeLocalOptimizer) OptimizeSearch(_ context.Context, req *internalpb.SearchRequest, scope optimizer.LocalSegmentScope) (optimizer.LocalOptimization, error) {
+	o.scope = scope
 	o.searchCalled = true
 	o.searchReq = req
-	return o.searchErr
+	return optimizer.LocalOptimization{SegmentSelection: o.selection}, o.searchErr
 }
 
-func (o *fakeLocalOptimizer) OptimizeRetrieve(_ context.Context, req *internalpb.RetrieveRequest) error {
+func (o *fakeLocalOptimizer) OptimizeRetrieve(_ context.Context, req *internalpb.RetrieveRequest, scope optimizer.LocalSegmentScope) (optimizer.LocalOptimization, error) {
+	o.scope = scope
 	o.queryCalled = true
 	o.queryReq = req
-	return o.queryErr
+	return optimizer.LocalOptimization{SegmentSelection: o.selection}, o.queryErr
 }

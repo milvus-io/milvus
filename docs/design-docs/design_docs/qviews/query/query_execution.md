@@ -477,16 +477,17 @@ The provider performs two kinds of local planning:
    - exclude segments that cannot contribute to the request.
 2. Optional local optimization:
    - segment pruning from local metadata or statistics;
-   - future PK/bloom pruning;
-   - first implementation can be no-op.
+   - QN Search and Query use the same local PK optimizer. When
+     `queryNode.enableSegmentFilter` is enabled, it borrows PK candidates from
+     the scoped view's prepared ReadStates and evaluates the shard delegator's
+     PK predicates. Segments without usable statistics stay in scope.
 
-The optimizer input should be lightweight segment candidates, not pinned
-physical segment handles. The optimizer output is the selected candidate list
-that the provider converts into concrete segment handles.
-
-Search and Query keep separate external acquisition methods and may use separate
-operation-specific optimizers. They can share internal lifecycle helpers for
-view ref, MVCC wait, candidate construction, and cleanup.
+Both nodes implement the same LocalOptimizer interface. Its Search and Retrieve
+methods take the request, view key and scoped sealed partitions and return a
+`LocalOptimization` value. The zero value uses the provider defaults. QN applies the
+optional `SegmentSelection` after transform visibility to narrow the sealed
+scope before acquiring handles. SN uses the no-op implementation and acquires
+growing handles using its runtime and partition scope.
 
 ## 9. Scheduler and Executor
 

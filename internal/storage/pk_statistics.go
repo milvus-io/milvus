@@ -151,7 +151,8 @@ func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []boo
 	locations := lc.Locations(st.PkFilter.K(), st.PkFilter.Type())
 	pks := lc.PKs()
 	for i, hit := range hits {
-		hits[i] = hit || st.PkFilter.TestLocations(locations[i]) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
+		// An always-true fallback has no hash locations. Its range is still usable.
+		hits[i] = hit || (locations == nil || st.PkFilter.TestLocations(locations[i])) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
 	}
 
 	return hits

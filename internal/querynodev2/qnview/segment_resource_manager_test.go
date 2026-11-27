@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -36,8 +37,9 @@ func (*resourceTestLoader) PrepareReadState(context.Context, TransformSegment, s
 
 type resourceTestRead struct{ segments.Segment }
 
-func (*resourceTestRead) RetainReadState() func() { panic("unpatched") }
-func (*resourceTestRead) ReleaseReadState()       { panic("unpatched") }
+func (*resourceTestRead) PKCandidate() pkoracle.Candidate { return nil }
+func (*resourceTestRead) RetainReadState() func()         { panic("unpatched") }
+func (*resourceTestRead) ReleaseReadState()               { panic("unpatched") }
 
 type resourceTestMetadata struct{}
 

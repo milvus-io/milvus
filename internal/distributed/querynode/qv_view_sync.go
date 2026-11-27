@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/types"
@@ -89,6 +90,13 @@ type queryNodeTaskFunc func(context.Context) error
 
 func (f queryNodeTaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
+}
+
+func (m *lazyQNSegmentManager) SealedPKCandidates(key qviews.QueryViewKey, partitions []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget {
+	if manager := m.get(); manager != nil {
+		return manager.SealedPKCandidates(key, partitions)
+	}
+	return nil
 }
 
 func (m *lazyQNSegmentManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, timetick uint64) ([]qnview.SealedSegmentHandle, error) {

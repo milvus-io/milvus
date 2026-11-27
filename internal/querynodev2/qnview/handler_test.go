@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -61,6 +62,10 @@ func (m *mockSegmentManager) Release(req ReleaseSegments) {
 	delete(m.acquired, req.Key)
 	m.released = append(m.released, req.Key)
 	m.releaseCallback[req.Key] = req.OnDropped
+}
+
+func (*mockSegmentManager) SealedPKCandidates(qviews.QueryViewKey, []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget {
+	return nil
 }
 
 func (m *mockSegmentManager) AcquireSealedSegmentHandles(_ context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, _ uint64) ([]SealedSegmentHandle, error) {

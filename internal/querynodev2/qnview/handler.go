@@ -67,7 +67,7 @@ func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 	return &QNQueryViewHandler{
 		shards:         make(map[qviews.ShardID]*qnShardView),
 		segMgr:         segMgr,
-		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		localOptimizer: localOptimizer{segMgr: segMgr},
 		closing:        make(chan struct{}),
 		closed:         make(chan struct{}),
 	}
