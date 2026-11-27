@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // retryDQL replans the entire request when its read view has
@@ -40,10 +41,16 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	isIterator, _ := strconv.ParseBool(iteratorValue)
 	refreshes := 0
 	autoLoad := Params.ProxyCfg.EnableAutoLoad.GetAsBool()
+	timing := getDQLTiming(ctx)
+	defer timing.Stop()
+	if !autoLoad {
+		setDQLPath(ctx, stage.PathDisabled)
+	}
 	accesslog.SetColdSearch(ctx, false)
 	var attemptErr error
 	err := retry.Handle(ctx, func() (again bool, err error) {
 		defer func() { attemptErr = err }()
+		timing.Readiness()
 		if err := ctx.Err(); err != nil {
 			return false, context.Cause(ctx)
 		}
@@ -58,17 +65,24 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 				if err := node.ensureCollectionReady(ctx, dbName, collectionName); err != nil {
 					return false, err
 				}
+			} else if node.viewQueryClient != nil {
+				setDQLPath(ctx, stage.PathReady)
 			}
 		}
 
+		timing.Ready()
 		again, err = execute(ctx)
 		if autoLoad && ctx.Err() == nil && errors.Is(err, merr.ErrCollectionNotLoaded) {
+			timing.RetryWait()
 			return true, err
 		}
 		if !isIterator && shouldRefreshDQLView(ctx, err, refreshes) {
 			refreshes++
 			node.GetMetaCache().RemoveCollection(ctx, dbName, collectionName)
 			again = true
+		}
+		if again {
+			timing.RetryWait()
 		}
 		return again, err
 	})
@@ -206,5 +220,6 @@ func (node *Proxy) ensureCollectionReady(ctx context.Context, dbName, collection
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
+	setDQLPath(ctx, status.GetExtraInfo()[stage.ReadinessPathKey])
 	return merr.CheckRPCCall(status, err)
 }

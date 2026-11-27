@@ -21,6 +21,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/resource"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -248,7 +250,9 @@ func (t *SearchTask) executeGoReduce(
 	nqOffset int,
 	nq int,
 ) (*mergeResult, error) {
+	reduceStart := time.Now()
 	result, err := heapMergeReduceRange(defaultAllocator, segDFs, topK, groupByOpts, nqOffset, nq)
+	reduceheapStage.Observe(time.Since(reduceStart), stage.Outcome(err))
 	if err != nil {
 		mlog.Warn(t.ctx, "failed to heapMergeReduce", mlog.Err(err))
 		return nil, err
@@ -371,7 +375,9 @@ func (t *SearchTask) marshalReducedResult(
 	reduced *mergeResult,
 	allSearchCount int64,
 ) (*schemapb.SearchResultData, error) {
+	marshalStart := time.Now()
 	searchResultData, err := marshalReduceResult(reduced)
+	reducemarshalStage.Observe(time.Since(marshalStart), stage.Outcome(err))
 	if err != nil {
 		return nil, err
 	}
@@ -413,6 +419,7 @@ func (t *SearchTask) encodeAndAssignReducedResult(
 	tr *timerecord.TimeRecorder,
 	relatedDataSize int64,
 ) error {
+	encodeStart := time.Now()
 	searchResults, err := segments.EncodeSearchResultData(
 		t.ctx,
 		searchResultData,
@@ -420,6 +427,7 @@ func (t *SearchTask) encodeAndAssignReducedResult(
 		t.originTopks[i],
 		metricType,
 	)
+	reduceencodeStage.Observe(time.Since(encodeStart), stage.Outcome(err))
 	if err != nil {
 		return err
 	}
@@ -448,6 +456,7 @@ func lateMaterializeOutputFields(
 	sources [][]segmentSource,
 	searchResultData *schemapb.SearchResultData,
 ) error {
+	mappingStart := time.Now()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -470,8 +479,11 @@ func lateMaterializeOutputFields(
 			pos++
 		}
 	}
+	reducesourceMappingStage.Observe(time.Since(mappingStart), stage.Success)
 
+	fillStart := time.Now()
 	protoBytes, err := segcore.FillOutputFieldsOrdered(ctx, results, plan, segIndices, segOffsets)
+	reducefillStage.Observe(time.Since(fillStart), stage.Outcome(err))
 	if err != nil {
 		return err
 	}
@@ -481,7 +493,10 @@ func lateMaterializeOutputFields(
 
 	var fieldResult schemapb.SearchResultData
 	// Decode with the configured fast or standard protobuf decoder.
-	if err := resource.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
+	decodeStart := time.Now()
+	decodeErr := resource.UnmarshalSearchResultData(protoBytes, &fieldResult)
+	reducedecodeStage.Observe(time.Since(decodeStart), stage.Outcome(decodeErr))
+	if err := decodeErr; err != nil {
 		return err
 	}
 	searchResultData.FieldsData = fieldResult.FieldsData
@@ -588,3 +603,12 @@ func extractSlice(result *mergeResult, nqOffset, nqCount int, maxRowsPerNQ int64
 func emptyDF() *chain.DataFrame {
 	return chain.NewDataFrameBuilder().Build()
 }
+
+var (
+	reducesourceMappingStage = stage.New("queryNode", "reduce", "source_mapping")
+	reduceheapStage          = stage.New("queryNode", "reduce", "heap_merge")
+	reducemarshalStage       = stage.New("queryNode", "reduce", "marshal_reduce")
+	reducefillStage          = stage.New("queryNode", "reduce", "fill_output_fields")
+	reduceencodeStage        = stage.New("queryNode", "reduce", "encode_result")
+	reducedecodeStage        = stage.New("queryNode", "reduce", "decode_output_fields")
+)

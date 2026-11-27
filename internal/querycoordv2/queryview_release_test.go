@@ -231,6 +231,8 @@ func TestQueryViewReleaseRuntimeShutdown(t *testing.T) {
 			completion := syncutil.NewFuture[error]()
 			runtime.balancer = &fakeRuntimeBalancer{completion: completion}
 			runtime.syncer = &readinessSyncer{}
+			runtime.viewFeedback = viewfeedback.New(&loadmgr.LoadConfigStore{}, newRuntimeDataViewProvider(t))
+			t.Cleanup(runtime.viewFeedback.Close)
 			if phase == "already stopped" {
 				runtime.stop()
 			}

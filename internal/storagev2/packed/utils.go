@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -228,7 +229,7 @@ func FetchFragmentsFromExternalSourceWithRange(
 		mlog.Duration("readDuration", time.Since(exploreStart)))
 
 	// Slice to assigned range.
-	if format == "paimon-table" && len(fileInfos) == 0 && fileIndexBegin == 0 && fileIndexEnd == 0 {
+	if format == externalspec.FormatPaimonTable && len(fileInfos) == 0 && fileIndexBegin == 0 && fileIndexEnd == 0 {
 		return nil, nil
 	}
 	if fileIndexEnd > int64(len(fileInfos)) {
@@ -277,12 +278,25 @@ func FetchFragmentsFromExternalSourceWithRange(
 			})
 			continue
 		}
+		// Delta readers require the whole pinned file descriptor. Row ranges
+		// within it are handled by the reader after deletion-vector filtering.
+		if format == externalspec.FormatDeltaLakeTable {
+			fragments = append(fragments, Fragment{
+				FragmentID: fragmentIDGenerator(),
+				FilePath:   fi.FilePath,
+				StartRow:   0,
+				EndRow:     rowCounts[i],
+				RowCount:   rowCounts[i],
+				Properties: fi.Properties,
+			})
+			continue
+		}
 		// A Paimon data-split FileInfo is one immutable DataSplit descriptor. Its
 		// logical range cannot be reopened independently, so preserve it as one
 		// atomic fragment even when it exceeds the generic row limit. Bounded
 		// batches inside PaimonFormatReader bound memory use without
 		// changing the snapshot split boundary.
-		if format == "paimon-table" {
+		if format == externalspec.FormatPaimonTable {
 			readPath, _, err := PaimonRoutingMeta(fi.Properties)
 			if err != nil {
 				return nil, err

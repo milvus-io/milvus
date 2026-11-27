@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -544,14 +545,27 @@ func openTransaction(ctx context.Context, manifest ManifestJSON, cProperties *C.
 }
 
 // openManifest reads the manifest of the revision manifest names.
-func openManifest(ctx context.Context, manifest ManifestJSON, cProperties *C.LoonProperties) (*C.LoonManifest, error) {
+func openManifest(ctx context.Context, manifest ManifestJSON, cProperties *C.LoonProperties, timing *manifestReadTiming) (*C.LoonManifest, error) {
+	beginTimer := manifestBegin.Begin()
+	beginStartedAt := time.Now()
 	handle, err := openTransaction(ctx, manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
+	if timing != nil {
+		timing.durations[manifestReadBegin] = time.Since(beginStartedAt)
+	}
+	beginTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
 	defer C.loon_transaction_destroy(handle)
 	var cManifest *C.LoonManifest
-	if err := HandleLoonFFIResult(C.loon_transaction_get_manifest(handle, &cManifest)); err != nil {
+	getTimer := manifestGet.Begin()
+	getStartedAt := time.Now()
+	err = HandleLoonFFIResult(C.loon_transaction_get_manifest(handle, &cManifest))
+	if timing != nil {
+		timing.durations[manifestReadGet] = time.Since(getStartedAt)
+	}
+	getTimer.End(err)
+	if err != nil {
 		return nil, err
 	}
 	return cManifest, nil

@@ -1034,8 +1034,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestMissingExternalColumnsManifestF
 		},
 		{name: "only truly missing parquet column returned", missing: []string{"price"}, want: []string{"price"}, wantColumns: "doc,price"},
 		{
-			name: "physical IDs map back to external names", spec: `{"format":"milvus-table"}`,
-			missing: []string{"101"}, want: []string{"price"}, wantColumns: "100,101",
+			name: "milvus-table retains physical IDs", spec: `{"format":"milvus-table"}`,
+			missing: []string{"101"}, want: []string{"101"}, wantColumns: "100,101",
 		},
 		{name: "read error is preserved", readErr: readErr, wantColumns: "doc,price"},
 		{name: "cancellation is preserved", readErr: context.Canceled, wantColumns: "doc,price"},
@@ -4480,4 +4480,51 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 
 func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
 	suite.Run(t, new(RefreshExternalCollectionTaskSuite))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestSumFieldSizesOrdinaryStructProjection() {
+	schema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/data", ExternalSpec: `{"format":"parquet"}`,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", ExternalField: "raw_items", FieldID: 100, Fields: []*schemapb.FieldSchema{
+			{Name: "items[a]", FieldID: 101, ExternalField: "raw_items[a]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{Name: "items[b]", FieldID: 102, ExternalField: "raw_items[b]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		}}},
+	}
+	s.Equal(int64(48), sumFieldSizes(map[string]int64{"raw_items[a]": 16, "raw_items[b]": 32, "raw_items[ignored]": 100}, schema))
+}
+
+// A DV update can replace visible rows without changing the path or row count.
+// Segment reuse must consume the persisted snapshot-sensitive fragment identity.
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_DeltaSnapshotChange() {
+	ctx := context.Background()
+	old := packed.Fragment{
+		FilePath: "s3://bucket/table/data.parquet", EndRow: 10, RowCount: 10,
+		Properties: map[string]string{"metadata": `{"version":1,"table_uri":"s3://bucket/table/","snapshot_version":0}`, "file_size": "123"},
+	}
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: s.collectionID, TaskID: s.taskID,
+		ExternalSpec:    `{"format":"deltalake-table"}`,
+		CurrentSegments: []*datapb.SegmentInfo{{ID: 1, CollectionID: s.collectionID, NumOfRows: 10}},
+	}
+	task := s.newTask(ctx, req)
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatDeltaLakeTable}
+	current := packed.SegmentFragments{1: []packed.Fragment{old}}
+	_, err := task.organizeSegments(ctx, current, []packed.Fragment{old})
+	s.NoError(err)
+	s.Equal([]int64{1}, task.GetKeptSegmentIDs())
+	next := old
+	next.Properties = map[string]string{"metadata": `{"version":1,"table_uri":"s3://bucket/table/","snapshot_version":1}`, "file_size": "123"}
+	rebuilt := false
+	patch := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).To(func(ctx context.Context, fragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+		rebuilt = true
+		s.Equal([]packed.Fragment{next}, fragments)
+		return []*datapb.SegmentInfo{{ID: 2, CollectionID: s.collectionID, NumOfRows: 10}}, nil
+	}).Build()
+	defer patch.UnPatch()
+	result, err := task.organizeSegments(ctx, current, []packed.Fragment{next})
+	s.NoError(err)
+	s.True(rebuilt)
+	s.Empty(task.GetKeptSegmentIDs())
+	s.Len(result, 1)
+	s.Equal(int64(2), result[0].GetID())
 }

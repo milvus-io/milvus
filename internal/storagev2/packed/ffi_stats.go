@@ -23,7 +23,9 @@ package packed
 import "C"
 
 import (
+	"context"
 	"strconv"
+	"time"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -131,7 +133,17 @@ func GetManifestStats(
 	storageConfig *indexpb.StorageConfig,
 	talonStages ...uint32,
 ) (map[string]ManifestStat, error) {
-	cManifest, err := GetManifestHandle(manifestPath, storageConfig, talonStages...)
+	return getManifestStats(manifestPath, storageConfig, ManifestReadOther, talonStages...)
+}
+
+func getManifestStats(manifestPath string, storageConfig *indexpb.StorageConfig, origin ManifestReadOrigin, talonStages ...uint32) (_ map[string]ManifestStat, err error) {
+	startedAt := time.Now()
+	timing := manifestReadTiming{}
+	defer func() {
+		timing.durations[manifestReadTotal] = time.Since(startedAt)
+		timing.observe(origin, err)
+	}()
+	cManifest, err := getManifestHandle(context.Background(), manifestPath, storageConfig, ExternalSpecContext{}, &timing, talonStages...)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to get manifest")
 	}
@@ -139,10 +151,12 @@ func GetManifestStats(
 		return nil, merr.WrapErrDataIntegrityMsg("manifest %s returned a nil handle", manifestPath)
 	}
 	defer C.loon_manifest_destroy(cManifest)
-	return manifestStats(cManifest, manifestPath)
+	extractStartedAt := time.Now()
+	defer func() { timing.durations[manifestReadExtract] = time.Since(extractStartedAt) }()
+	return decodeManifestStats(cManifest, manifestPath)
 }
 
-func manifestStats(cManifest *C.LoonManifest, manifestPath string) (map[string]ManifestStat, error) {
+func decodeManifestStats(cManifest *C.LoonManifest, manifestPath string) (map[string]ManifestStat, error) {
 	numStats := int(cManifest.stats.num_stats)
 	result := make(map[string]ManifestStat, numStats)
 

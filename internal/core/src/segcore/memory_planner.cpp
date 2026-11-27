@@ -36,6 +36,7 @@
 #include "folly/coro/WithCancellation.h"
 #include "glog/logging.h"
 #include "log/Log.h"
+#include "monitor/QueryMetrics.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -496,24 +497,34 @@ LoadCellBatchesAsync(OpContext* op_ctx,
     std::exception_ptr submission_error;
     try {
         for (auto& batch : batches) {
+            milvus::monitor::QueryStageTimer budget_timer(
+                milvus::monitor::QueryStage::LoadBatchBudgetWait);
             auto lease = co_await budget.AcquireAsync(
                 {batch.batch_loading_overhead_bytes, 1},
                 budget_priority,
                 token);
+            budget_timer.End();
             const auto reader_memory_limit = BatchReaderMemoryLimit(
                 batch.batch_loaded_memory_bytes, memory_limit);
+            const auto submitted = milvus::monitor::QueryStageClock::now();
             futures.emplace_back(
                 folly::via(
                     &pool,
                     [batch = std::move(batch),
+                     submitted,
                      &reader_factory,
                      &finalize_cell,
                      reader_memory_limit,
                      token,
                      lease = std::move(lease)]() mutable {
+                        const auto started =
+                            milvus::monitor::QueryStageClock::now();
                         // Release before promise completion, after ReadCellBatch's
                         // Arrow buffers and any failed partial results are destroyed.
                         auto admitted = std::move(lease);
+                        milvus::monitor::ObserveQueryStage(
+                            milvus::monitor::QueryStage::LoadBatchQueue,
+                            started - submitted);
                         OpContext context(token);
                         return ReadCellBatch(&context,
                                              batch,
@@ -582,9 +593,12 @@ MakeChunkReaderFactory(
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
         std::vector<int64_t> rg_indices(total_rg_count);
         std::iota(rg_indices.begin(), rg_indices.end(), rg_offset);
-        ARROW_ASSIGN_OR_RAISE(
-            auto batches,
-            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1));
+        milvus::monitor::QueryStageTimer read_timer(
+            milvus::monitor::QueryStage::ManifestReadBatch);
+        auto batches_result =
+            chunk_reader->get_chunks(rg_indices, /*parallelism=*/1);
+        read_timer.End(!batches_result.ok());
+        ARROW_ASSIGN_OR_RAISE(auto batches, std::move(batches_result));
         std::vector<std::shared_ptr<arrow::Table>> tables;
         tables.reserve(batches.size());
         for (auto& batch : batches) {

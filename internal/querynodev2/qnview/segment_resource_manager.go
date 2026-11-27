@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -358,7 +359,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		if b != nil && (b.refreshSnapshot || r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
+			fetchTimer := loadInfoFetch.Begin()
 			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
+			fetchTimer.End(err)
 			cancel()
 			if err == nil {
 				err = r.validateSnapshot(snapshot)
@@ -565,8 +568,18 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 	return nil
 }
 
-func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
+func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (_ *preparedSegmentRead, err error) {
+	totalTimer := segmentLoadTotal.Begin()
 	m := r.manager
+	startedAt := time.Now()
+	timing := segmentLoadTimingSample{}
+	defer func() {
+		timing.total = time.Since(startedAt)
+		timing.result = stage.Outcome(err)
+		timing.failed = timing.result != stage.Success
+		recordSQNSegmentLoadTiming(ctx, timing)
+		totalTimer.EndResult(timing.result)
+	}()
 	info := proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
 	var storageConfig *indexpb.StorageConfig
 	if m.openManifest != nil && info.GetStorageVersion() == storage.StorageV3 &&
@@ -604,12 +617,20 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		})
 	}
 	if m.estimator != nil {
+		reserveResourceStartedAt := time.Now()
 		reservation, err := m.estimator.Reserve(ctx, info, collection)
+		timing.reserveResource = time.Since(reserveResourceStartedAt)
+		segmentReserve.Observe(timing.reserveResource, stage.Outcome(err))
 		if err != nil {
 			return nil, err
 		}
 		if reservation != nil {
-			defer reservation.Release()
+			defer func() {
+				releaseResourceStartedAt := time.Now()
+				reservation.Release()
+				timing.releaseResource = time.Since(releaseResourceStartedAt)
+				segmentUnreserve.Observe(timing.releaseResource, stage.Success)
+			}()
 		}
 	}
 	var base *segmentBase
@@ -633,7 +654,12 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	}
 	m.mu.Unlock()
 	if base == nil {
-		segment, err := m.loader.Load(ctx, info, collection)
+		physicalLoadDetail := &segments.PhysicalLoadTiming{}
+		physicalLoadStartedAt := time.Now()
+		segment, err := m.loader.Load(segments.WithPhysicalLoadTiming(ctx, physicalLoadDetail), info, collection)
+		timing.physicalLoad = time.Since(physicalLoadStartedAt)
+		segmentPhysical.Observe(timing.physicalLoad, stage.Outcome(err))
+		timing.physicalDetail = *physicalLoadDetail
 		if err != nil {
 			return nil, err
 		}
@@ -649,7 +675,10 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	}
 	// Only this operation uses the filtered copy; the base retains the immutable source snapshot.
 	snapshot.LoadInfo = info
+	onLoadedStartedAt := time.Now()
 	read, err := m.loader.PrepareReadState(ctx, base.segment, reuse, collection, snapshot)
+	timing.onLoaded = time.Since(onLoadedStartedAt)
+	segmentOnLoaded.Observe(timing.onLoaded, stage.Outcome(err))
 	if err != nil {
 		return nil, err
 	}
@@ -993,6 +1022,15 @@ func (r *segmentResource) releaseBases(bases []*segmentBase) {
 		_ = base.segment.Release(context.WithoutCancel(r.ctx))
 	}
 }
+
+var (
+	segmentLoadTotal = stage.New("queryNode", "segment_load", "total")
+	segmentReserve   = stage.New("queryNode", "segment_load", "reserve")
+	segmentUnreserve = stage.New("queryNode", "segment_load", "release_reservation")
+	segmentPhysical  = stage.New("queryNode", "segment_load", "physical_load")
+	segmentOnLoaded  = stage.New("queryNode", "segment_load", "on_loaded")
+	loadInfoFetch    = stage.New("queryNode", "load_info", "fetch")
+)
 
 // Pending priority excludes already satisfied, blocked and delayed bindings.
 // A resource's bookkeeping passes still run with default priority when no

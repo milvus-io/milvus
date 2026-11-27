@@ -9,7 +9,8 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -22,12 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -594,17 +595,18 @@ func TestSealedLoadAndReopenUsePreparedManifest(t *testing.T) {
 	manifest, err := packed.OpenLoadManifest(ctx, pointer, config)
 	require.NoError(t, err)
 	defer manifest.Close()
-	ctx = packed.WithLoadManifest(ctx, manifest)
-	// A second stats lookup could be satisfied by Loon's process cache even
-	// if the file was removed. Count calls before that cache instead.
-	readStats := mockey.Mock(packed.GetManifestStats).Return(nil, merr.ErrServiceUnavailable).Build()
-	defer readStats.UnPatch()
+	params := paramtable.Get()
+	oldType := params.CommonCfg.StorageType.SwapTempValue("local")
+	defer params.CommonCfg.StorageType.SwapTempValue(oldType)
+	oldPath := params.LocalStorageCfg.Path.SwapTempValue(dir)
+	defer params.LocalStorageCfg.Path.SwapTempValue(oldPath)
+	preparedCtx := packed.WithLoadManifest(ctx, manifest)
 
 	info := &querypb.SegmentLoadInfo{
 		CollectionID: 1, PartitionID: 2, SegmentID: 3, NumOfRows: 5,
 		ManifestPath: pointer, StorageVersion: storage.StorageV3,
 	}
-	resolver := packed.NewStatsResolverFromLoadInfo(info).WithLoadManifest(ctx)
+	resolver := packed.NewStatsResolverFromLoadInfo(info).WithLoadManifest(preparedCtx)
 	paths, err := resolver.BloomFilterPaths(100)
 	require.NoError(t, err)
 	require.Equal(t, []string{bloomPath}, paths)
@@ -620,18 +622,41 @@ func TestSealedLoadAndReopenUsePreparedManifest(t *testing.T) {
 	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{CollectionID: 1, Schema: schema})
 	require.NoError(t, err)
 	defer collection.Release()
-	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
-		Collection: collection, SegmentID: 3, SegmentType: segcore.SegmentTypeSealed,
-		LoadInfo: info, LoadManifest: manifest, ExplicitLoadScope: true, LoadFields: []int64{100},
-	})
-	require.NoError(t, err)
-	defer segment.Release()
-	require.NoError(t, segment.Load(ctx))
+	// Count fallback calls even when the native process cache satisfies the read.
+	readCount := func(t *testing.T, operation string) uint64 {
+		t.Helper()
+		observer := metrics.QueryStageDuration.WithLabelValues("storage", operation, "total", "success")
+		var sample dto.Metric
+		require.NoError(t, observer.(prometheus.Metric).Write(&sample))
+		return sample.GetHistogram().GetSampleCount()
+	}
+	for _, tc := range []struct {
+		name     string
+		ctx      context.Context
+		manifest *packed.LoadManifest
+		reads    uint64
+	}{
+		{"prepared", preparedCtx, manifest, 0},
+		{"unprepared", ctx, nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := readCount(t, "manifest_create")
+			segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
+				Collection: collection, SegmentID: 3, SegmentType: segcore.SegmentTypeSealed,
+				LoadInfo: info, LoadManifest: tc.manifest, ExplicitLoadScope: true, LoadFields: []int64{100},
+			})
+			require.NoError(t, err)
+			defer segment.Release()
+			require.Equal(t, before+tc.reads, readCount(t, "manifest_create"))
+			require.NoError(t, segment.Load(tc.ctx))
 
-	read, err := segcore.PinSealedReadState(segment)
-	require.NoError(t, err)
-	defer read.Release()
-	require.NoError(t, read.Reopen(ctx, &segcore.ReopenRequest{Collection: collection, LoadInfo: info, LoadFields: []int64{100}}))
-	assertEqualCount(t, collection, read, 5)
-	require.Zero(t, readStats.Times())
+			read, err := segcore.PinSealedReadState(segment)
+			require.NoError(t, err)
+			defer read.Release()
+			before = readCount(t, "manifest_reopen")
+			require.NoError(t, read.Reopen(tc.ctx, &segcore.ReopenRequest{Collection: collection, LoadInfo: info, LoadFields: []int64{100}}))
+			require.Equal(t, before+tc.reads, readCount(t, "manifest_reopen"))
+			assertEqualCount(t, collection, read, 5)
+		})
+	}
 }

@@ -46,7 +46,7 @@ func OpenLoadManifest(ctx context.Context, path string, config *indexpb.StorageC
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	native, err := getManifestHandle(ctx, path, config, ExternalSpecContext{}, common.TalonStageManifest)
+	native, err := getManifestHandle(ctx, path, config, ExternalSpecContext{}, nil, common.TalonStageManifest)
 	if err != nil {
 		return nil, merr.Wrap(err, "open segment load manifest")
 	}
@@ -65,7 +65,7 @@ func (m *LoadManifest) decode(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	stats, err := manifestStats(m.native, m.path)
+	stats, err := decodeManifestStats(m.native, m.path)
 	if err != nil {
 		return err
 	}

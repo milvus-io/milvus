@@ -39,6 +39,7 @@ import "C"
 import (
 	"context"
 	"io"
+	"time"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // ExternalReaderContext carries per-collection context needed by the FFI
@@ -441,7 +443,7 @@ func GetManifestHandleWithExtfs(
 	extfs ExternalSpecContext,
 	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
-	return getManifestHandle(context.Background(), manifestPath, storageConfig, extfs, talonStages...)
+	return getManifestHandle(context.Background(), manifestPath, storageConfig, extfs, nil, talonStages...)
 }
 
 func getManifestHandle(
@@ -449,15 +451,24 @@ func getManifestHandle(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
+	timing *manifestReadTiming,
 	talonStages ...uint32,
-) (*C.LoonManifest, error) {
+) (loonManifestHandle *C.LoonManifest, err error) {
+	totalTimer := manifestTotal.Begin()
+	defer totalTimer.EndError(&err)
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to parse manifest path")
 	}
 	mlog.Debug(ctx, "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", manifest.BasePath), mlog.Int64("version", manifest.ManifestVersion))
 
+	propertiesTimer := manifestProperties.Begin()
+	propertiesStartedAt := time.Now()
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
+	if timing != nil {
+		timing.durations[manifestReadProperties] = time.Since(propertiesStartedAt)
+	}
+	propertiesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -465,8 +476,15 @@ func getManifestHandle(
 	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
 		return nil, merr.Wrap(err, "inject extfs")
 	}
-	return openManifest(ctx, manifest, cProperties)
+	return openManifest(ctx, manifest, cProperties, timing)
 }
 
 // Ensure FFIPackedReader implements array.RecordReader interface
 // var _ array.RecordReader = (*FFIPackedReader)(nil)
+
+var (
+	manifestTotal      = stage.New("storage", "manifest", "total")
+	manifestProperties = stage.New("storage", "manifest", "properties")
+	manifestBegin      = stage.New("storage", "manifest", "transaction_begin")
+	manifestGet        = stage.New("storage", "manifest", "get_manifest")
+)

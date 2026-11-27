@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 var _ viewquery.TaskProvider = (*QNQueryViewHandler)(nil)
@@ -20,7 +21,9 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	req *internalpb.SearchRequest,
 	selection *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
+	leaseTimer := queryLease.Begin()
 	lease, err := h.AcquireReadyView(ctx, shardID, version)
+	leaseTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -30,14 +33,22 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	}
 
 	view := qviews.FilterSelectedSegments(filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs()), selection)
-	if err := h.localOptimizer.OptimizeSearch(ctx, req); err != nil {
+	queryOptimizeTimer := queryOptimize.Begin()
+	queryOptimizeErr := h.localOptimizer.OptimizeSearch(ctx, req)
+	queryOptimizeTimer.End(queryOptimizeErr)
+	if err := queryOptimizeErr; err != nil {
 		return nil, err
 	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
-	if err := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick()); err != nil {
+	queryVisibleTimer := queryVisible.Begin()
+	queryVisibleErr := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick())
+	queryVisibleTimer.End(queryVisibleErr)
+	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
+	handlesTimer := queryHandles.Begin()
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
+	handlesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +71,9 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	req *internalpb.RetrieveRequest,
 	selection *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
+	leaseTimer := queryLease.Begin()
 	lease, err := h.AcquireReadyView(ctx, shardID, version)
+	leaseTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -70,14 +83,22 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	}
 
 	view := qviews.FilterSelectedSegments(filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs()), selection)
-	if err := h.localOptimizer.OptimizeRetrieve(ctx, req); err != nil {
+	queryOptimizeTimer := queryOptimize.Begin()
+	queryOptimizeErr := h.localOptimizer.OptimizeRetrieve(ctx, req)
+	queryOptimizeTimer.End(queryOptimizeErr)
+	if err := queryOptimizeErr; err != nil {
 		return nil, err
 	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
-	if err := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick()); err != nil {
+	queryVisibleTimer := queryVisible.Begin()
+	queryVisibleErr := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick())
+	queryVisibleTimer.End(queryVisibleErr)
+	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
+	handlesTimer := queryHandles.Begin()
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
+	handlesTimer.End(err)
 	if err != nil {
 		return nil, err
 	}
@@ -91,3 +112,10 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	}
 	return NewQNQuerySegmentTasks(tasks), nil
 }
+
+var (
+	queryLease    = stage.New("queryNode", "query_acquire", "lease")
+	queryOptimize = stage.New("queryNode", "query_acquire", "local_optimize")
+	queryVisible  = stage.New("queryNode", "query_acquire", "visibility_wait")
+	queryHandles  = stage.New("queryNode", "query_acquire", "segment_handles")
+)

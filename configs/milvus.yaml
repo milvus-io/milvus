@@ -1392,12 +1392,6 @@ common:
   # Disk write buffer size in KB, used for both 'direct' and 'buffered' modes, default is 64KB.
   # Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.
   diskWriteBufferSizeKb: 64
-  # This parameter controls the number of dedicated local file I/O worker threads. The valid range is [0, hardware_concurrency].
-  # Storage V3 async mmap load uses this pool for Arrow-to-local chunk materialization, file writes, and mmap finalization.
-  # The same value also limits concurrent synchronous FileWriter disk operations in legacy and index-loading paths.
-  # For example, set this parameter to 1 to serialize these local file writes.
-  # The default value is 0, which disables the dedicated pool and the concurrency limit; callers perform local file work directly.
-  diskWriteNumThreads: 0
   diskWriteRateLimiter:
     refillPeriodUs: 100000 # refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)
     avgKBps: 262144 # average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)
@@ -1432,7 +1426,7 @@ common:
     # Large numeric passwords require double quotes to avoid yaml parsing precision issues.
     defaultRootPassword: Milvus
     # Algorithm used to hash newly created or updated passwords: bcrypt or pbkdf2-sha512.
-    # pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs on BoringCrypto.
+    # pbkdf2-sha512 is a FIPS-approved key derivation function. On a build with MILVUS_FIPS_ENABLED=ON it runs in the FIPS 140-3 Go Cryptographic Module.
     # Existing hashes keep working after a change and are rehashed only when the password is updated, including the root hash created at first startup.
     # Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2-sha512: older versions cannot verify these hashes, and they stop verifying after a downgrade.
     passwordHashAlgorithm: bcrypt

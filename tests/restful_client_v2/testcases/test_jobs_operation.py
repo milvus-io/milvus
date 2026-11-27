@@ -2596,11 +2596,17 @@ class TestCreateImportJob(RestImportTestBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize(
-        "invalid_value",
-        [float("nan"), float("inf"), float("-inf"), None],
-        ids=["nan", "positive_inf", "negative_inf", "null_element"],
+        "invalid_value, expected_reason",
+        [
+            pytest.param(float("nan"), "value 'nan' is not a number or infinity", id="nan"),
+            pytest.param(float("inf"), "value '+inf' is not a number or infinity", id="positive_inf"),
+            pytest.param(float("-inf"), "value '-inf' is not a number or infinity", id="negative_inf"),
+            pytest.param(
+                None, "array element is not allowed to be null value for field 'float_array'", id="null_element"
+            ),
+        ],
     )
-    def test_import_parquet_array_float_nan_validation(self, invalid_value):
+    def test_import_parquet_array_float_nan_validation(self, tmp_path, invalid_value, expected_reason):
         """Import rejects non-finite and null Array<Float> elements without exposing rows."""
         name = gen_collection_name()
         dim = 128
@@ -2634,9 +2640,8 @@ class TestCreateImportJob(RestImportTestBase):
             "float_array": [[1.0, 2.0, 3.0], [4.0, invalid_value, 6.0]],
         }
 
-        # Save to Parquet
-        file_name = f"test_parquet_nan_{uuid4()}.parquet"
-        file_path = f"/tmp/{file_name}"
+        file_name = f"float_array_{uuid4()}.parquet"
+        file_path = tmp_path / file_name
 
         # Create parquet schema with proper array type
         pa_schema = pa.schema(
@@ -2656,22 +2661,11 @@ class TestCreateImportJob(RestImportTestBase):
         # Import should fail due to the invalid array element.
         payload = {"collectionName": name, "files": [[file_name]]}
         rsp = self.import_job_client.create_import_jobs(payload)
+        assert rsp["code"] == 0, rsp
         job_id = rsp["data"]["jobId"]
-
-        # Wait and verify import fails
-        finished = False
-        t0 = time.time()
-        while not finished:
-            rsp = self.import_job_client.get_import_job_progress(job_id)
-            if rsp["data"]["state"] == "Failed":
-                reason = rsp["data"].get("reason", "").lower()
-                assert "nan" in reason or "inf" in reason or "null" in reason or "invalid" in reason
-                finished = True
-            elif rsp["data"]["state"] == "Completed":
-                assert False, "Import should have failed due to an invalid array element"
-            time.sleep(5)
-            if time.time() - t0 > IMPORT_TIMEOUT:
-                assert False, "Import job timeout"
+        rsp, failed = self.import_job_client.wait_import_job_state(job_id, "Failed", timeout=IMPORT_TIMEOUT)
+        assert failed, rsp
+        assert expected_reason in rsp["data"]["reason"].lower(), rsp
         assert self._query_count(name) == 0
 
     def test_import_csv_extra_columns_without_dynamic(self):

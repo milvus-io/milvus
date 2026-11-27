@@ -185,6 +185,16 @@ func getCollectionAndPartitionIDs(ctx context.Context, metaCache Cache, r reqPar
 		}
 	}
 
+	// Resolve regex selectors the same way as the DQL task so the limiter
+	// receives the matched partition IDs instead of a failed literal lookup.
+	if len(partitionNames) > 0 && Params.ProxyCfg.PartitionNameRegexp.GetAsBool() {
+		parts, err := GetPartitionIDs(ctx, metaCache, r.GetDbName(), r.GetCollectionName(), partitionNames)
+		if err != nil {
+			return 0, nil, err
+		}
+		return db.DBID, map[int64][]int64{collectionID: parts}, nil
+	}
+
 	parts := make([]int64, len(partitionNames))
 	for i, s := range partitionNames {
 		part, err := metaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)

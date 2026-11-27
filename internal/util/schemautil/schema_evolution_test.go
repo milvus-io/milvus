@@ -182,6 +182,46 @@ func TestValidateSchemaEvolutionAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateSchemaEvolutionMilvusTableStructAddition(t *testing.T) {
+	for _, wholeStruct := range []bool{true, false} {
+		for _, format := range []string{"milvus-table", "parquet", ""} {
+			t.Run(strconv.FormatBool(wholeStruct)+"/"+format, func(t *testing.T) {
+				oldSchema := evolutionSchemaWithStruct()
+				if format != "" {
+					oldSchema.ExternalSource = "s3://bucket/snapshot"
+					oldSchema.ExternalSpec = `{"format":"` + format + `"}`
+				}
+				newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+				child := evolutionField(109, "profile[note]", schemapb.DataType_Array, true)
+				child.ElementType = schemapb.DataType_Int64
+				child.ElementNullable = true
+				child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}}
+				if wholeStruct {
+					child.Name = "extra[note]"
+					newSchema.StructArrayFields = append(newSchema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+						FieldID: 108, Name: "extra", Nullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "64"}},
+						Fields:     []*schemapb.FieldSchema{child},
+					})
+				} else {
+					child.TypeParams = append(child.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+					newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+				}
+				child.ExternalField = child.Name
+				setMaxFieldID(newSchema, 109)
+				err := ValidateSchemaEvolution(oldSchema, newSchema)
+				if format == "milvus-table" {
+					require.NoError(t, err)
+					child.ExternalField = "other[note]"
+					require.ErrorIs(t, ValidateSchemaEvolution(oldSchema, newSchema), merr.ErrParameterInvalid)
+				} else {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				}
+			})
+		}
+	}
+}
+
 func TestValidateSchemaEvolutionRejectsKeptFieldReinterpretation(t *testing.T) {
 	tests := []struct {
 		name   string
