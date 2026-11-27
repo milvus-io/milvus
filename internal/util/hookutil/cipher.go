@@ -47,16 +47,15 @@ var (
 	errCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
-type EZBackupCipher interface {
+// BackupInterface backs up an encryption zone into a portable backup artifact.
+type BackupInterface interface {
 	Backup(ezID int64) (string, error)
+}
 
-	// ResolveImportEZ unwraps a backup using the source KMS and returns its
-	// original EZ ID and raw keyset without publishing it to the ordinary cache.
+// ImportEZResolver resolves a backup artifact with its source credentials on
+// each call and returns the original EZ ID and raw keyset for that artifact.
+type ImportEZResolver interface {
 	ResolveImportEZ(artifact string) (int64, []byte, error)
-
-	// GetDecryptorForKeyset creates a decryptor using an explicit raw keyset
-	// without reading from or mutating the ordinary zone cache.
-	GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error)
 }
 
 // GetCipher returns singleton hook.Cipher instance.
@@ -326,9 +325,6 @@ func GetImportStoragePluginContext(artifact string, collProps []*commonpb.KeyVal
 	if err != nil {
 		return nil, err
 	}
-	if (artifact != "" || hasTarget) && !IsClusterEncryptionEnabled() {
-		return nil, errCipherPluginMissing
-	}
 	source, err := ResolveImportEZ(artifact)
 	if err != nil || !hasTarget {
 		return source, err
@@ -522,10 +518,6 @@ func (d testCipher) GetEncryptor(ezID, collectionID int64) (encryptor hook.Encry
 }
 
 func (d testCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
-	return createTestCryptoImpl(ezID, collectionID), nil
-}
-
-func (d testCipher) GetDecryptorForKeyset(ezID, collectionID int64, keyset, safeKey []byte) (hook.Decryptor, error) {
 	return createTestCryptoImpl(ezID, collectionID), nil
 }
 

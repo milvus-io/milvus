@@ -341,7 +341,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
-			return nil, err
+			if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, merr.ErrParameterInvalid) {
+				return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import timestamp")
+			}
+			return nil, merr.Wrap(err, "allocate import timestamp")
 		}
 	}
 
@@ -360,7 +364,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return ids, ide, e
 	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, merr.ErrParameterInvalid) &&
+			!merr.IsRetryableErr(err) &&
+			!errors.Is(err, context.Canceled) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import auto IDs")
+		}
+		return nil, merr.Wrap(err, "allocate import auto IDs")
 	}
 
 	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,

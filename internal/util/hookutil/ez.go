@@ -17,6 +17,7 @@
 package hookutil
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -142,7 +143,7 @@ func BackupEZ(ezID int64) (string, error) {
 		return "", errCipherPluginMissing
 	}
 
-	backupProvider, ok := cipher.(EZBackupCipher)
+	backupProvider, ok := cipher.(BackupInterface)
 	if !ok {
 		return "", merr.WrapErrServiceInternalMsg("cipher plugin does not support backup operation")
 	}
@@ -153,7 +154,7 @@ func BackupEZ(ezID int64) (string, error) {
 func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, errCipherPluginMissing
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
@@ -200,15 +201,16 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 	}
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, errCipherPluginMissing
+		return nil, merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cipher plugin is unavailable for encrypted backup")
 	}
-	resolver, ok := cipher.(EZBackupCipher)
+	resolver, ok := cipher.(ImportEZResolver)
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("cipher plugin does not support ResolveImportEZ")
+		return nil, merr.Wrap(merr.ErrServiceUnimplemented, "cipher plugin does not support ResolveImportEZ")
 	}
 	ezID, key, err := resolver.ResolveImportEZ(artifact)
 	if err != nil {
-		if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) && isTemporaryError(err) {
+		if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+			(errors.Is(err, context.DeadlineExceeded) || isTemporaryError(err)) {
 			return nil, merr.WrapErrServiceUnavailableErr(err, "failed to resolve source EZK")
 		}
 		return nil, merr.Wrap(err, "failed to resolve source EZK")
@@ -225,7 +227,7 @@ func ResolveImportEZ(artifact string) ([]*commonpb.KeyValuePair, error) {
 func GetEzIDByImportEzk(importEzk string) (int64, error) {
 	ezkBytes, err := base64.StdEncoding.DecodeString(importEzk)
 	if err != nil {
-		return 0, merr.Wrap(err, "failed to decode EZK")
+		return 0, merr.WrapErrParameterInvalidMsg("failed to decode EZK: %v", err)
 	}
 
 	type EZKData struct {
@@ -311,7 +313,7 @@ func RegisterImportCipherContexts(
 	if (source != nil || target != nil) && !IsClusterEncryptionEnabled() {
 		return merr.WrapErrServiceUnavailableErr(errCipherPluginMissing, "cannot register import cipher contexts")
 	}
-	// Only register the authoritative target zone; source decryption is stateless via GetDecryptorForKeyset.
+	// Only register the authoritative target zone; source decryption is stateless in C++ using the bound source keyset.
 	if target != nil {
 		if err := CreateLocalEZ(target.GetEncryptionZoneId(), target.GetEncryptionKey()); err != nil {
 			return err

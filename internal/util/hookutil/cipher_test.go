@@ -78,13 +78,6 @@ func (s *CipherSuite) TestGetTestCipher() {
 	s.NoError(err)
 	s.Equal(plainText, gotPlainText)
 
-	statelessDecryptor, err := cipher.(testCipher).GetDecryptorForKeyset(ezID, collectionID, []byte("keyset"), safeKey)
-	s.NoError(err)
-	s.NotNil(statelessDecryptor)
-	gotPlainText, err = statelessDecryptor.Decrypt(cipherText)
-	s.NoError(err)
-	s.Equal(plainText, gotPlainText)
-
 	// test GetUnsafeKey
 	s.Equal([]byte("unsafe key"), GetCipher().GetUnsafeKey(1, 2))
 }
@@ -281,6 +274,8 @@ func (s *CipherSuite) TestGetStoragePluginContext() {
 	storeCipher(nil)
 	result, err := GetStoragePluginContext(properties, 2)
 	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
 	s.Nil(result)
 
 	InitTestCipher()
@@ -517,10 +512,26 @@ func (s *CipherSuite) TestBackupEZ() {
 	s.Error(err)
 	s.Contains(err.Error(), "does not support backup operation")
 
-	storeCipher(importResolverCipher{})
+	storeCipher(backupOnlyCipher{backup: func(ezID int64) (string, error) {
+		return fmt.Sprintf("backup-%d", ezID), nil
+	}})
 	backup, err := BackupEZ(123)
 	s.NoError(err)
-	s.Equal("test-backup", backup)
+	s.Equal("backup-123", backup)
+	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
+	ctx, err := ResolveImportEZ(artifact)
+	s.Nil(ctx)
+	s.ErrorIs(err, merr.ErrServiceUnimplemented)
+	s.False(merr.IsRetryableErr(err))
+
+	storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
+		return 123, []byte("key"), nil
+	}})
+	_, err = BackupEZ(123)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	ctx, err = ResolveImportEZ(artifact)
+	s.NoError(err)
+	s.Len(ctx, 1)
 }
 
 func (s *CipherSuite) TestBackupEZKFromDBProperties() {
@@ -554,15 +565,20 @@ type importResolverCipher struct {
 	resolve func(string) (int64, []byte, error)
 }
 
-func (importResolverCipher) Backup(int64) (string, error) {
-	return "test-backup", nil
-}
-
 func (c importResolverCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	return c.resolve(artifact)
 }
 
 func (importResolverCipher) GetUnsafeKey(int64, int64) []byte { return nil }
+
+type backupOnlyCipher struct {
+	testCipher
+	backup func(int64) (string, error)
+}
+
+func (c backupOnlyCipher) Backup(ezID int64) (string, error) {
+	return c.backup(ezID)
+}
 
 type temporaryError struct {
 	msg       string
@@ -580,11 +596,16 @@ func (s *CipherSuite) TestImportEZ() {
 	artifact := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":123}`))
 	result, err = ResolveImportEZ(artifact)
 	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
 	s.Nil(result)
 
 	InitTestCipher() // Represents an older plugin without ResolveImportEZ.
 	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnimplemented)
 	s.ErrorContains(err, "ResolveImportEZ")
+	s.False(merr.IsRetryableErr(err))
+	s.False(merr.IsCanceledOrTimeout(err))
 	s.Nil(result)
 
 	denied := errors.New("source KMS denied Decrypt")
@@ -601,6 +622,8 @@ func (s *CipherSuite) TestImportEZ() {
 	for _, invalid := range []string{"%%", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":0}`))} {
 		_, err = ResolveImportEZ(invalid)
 		s.Error(err)
+		s.ErrorIs(err, merr.ErrParameterInvalid)
+		s.False(merr.IsRetryableErr(err))
 	}
 	s.Empty(calls)
 	result, err = ResolveImportEZ(artifact)
@@ -618,6 +641,7 @@ func (s *CipherSuite) TestImportEZ() {
 	result, err = ResolveImportEZ(artifact)
 	s.ErrorIs(err, denied)
 	s.False(merr.IsRetryableErr(err))
+	s.False(merr.IsCanceledOrTimeout(err))
 	s.Nil(result)
 
 	transient := temporaryError{msg: "source KMS throttled", temporary: true}
@@ -646,18 +670,29 @@ func (s *CipherSuite) TestImportEZ() {
 
 	resolveErr = fmt.Errorf("rpc call: %w", context.DeadlineExceeded)
 	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
 	s.ErrorIs(err, context.DeadlineExceeded)
+	s.True(merr.IsRetryableErr(err))
 	s.True(merr.IsCanceledOrTimeout(err))
-	s.NotErrorIs(err, merr.ErrServiceUnavailable)
 	s.Nil(result)
 
-	s.Equal([]string{artifact, rotated, artifact, artifact, artifact, artifact, artifact}, calls)
+	resolveErr = context.Canceled
+	result, err = ResolveImportEZ(artifact)
+	s.ErrorIs(err, context.Canceled)
+	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+	s.False(merr.IsRetryableErr(err))
+	s.True(merr.IsCanceledOrTimeout(err))
+	s.Nil(result)
+
+	s.Equal([]string{artifact, rotated, artifact, artifact, artifact, artifact, artifact, artifact}, calls)
 }
 
 func (s *CipherSuite) TestImportTargetEZKRequired() {
 	target := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "123"}}
 	result, err := GetImportStoragePluginContext("", target, 7)
 	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
 	s.Nil(result)
 
 	storeCipher(importResolverCipher{resolve: func(string) (int64, []byte, error) {
@@ -779,6 +814,8 @@ func (s *CipherSuite) TestGetPluginContext() {
 	storeCipher(nil)
 	result, err := GetPluginContext(123, 456)
 	s.ErrorIs(err, errCipherPluginMissing)
+	s.ErrorIs(err, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(err))
 	s.Nil(result)
 
 	storeCipher(importResolverCipher{})

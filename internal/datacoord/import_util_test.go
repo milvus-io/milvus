@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -1588,16 +1589,8 @@ type importRequestCipher struct {
 	resolve func(artifact string) (int64, []byte, error)
 }
 
-func (*importRequestCipher) Backup(int64) (string, error) {
-	panic("dispatch should resolve the supplied backup")
-}
-
 func (c *importRequestCipher) ResolveImportEZ(artifact string) (int64, []byte, error) {
 	return c.resolve(artifact)
-}
-
-func (*importRequestCipher) GetDecryptorForKeyset(int64, int64, []byte, []byte) (hook.Decryptor, error) {
-	panic("dispatch does not decrypt binlogs")
 }
 
 func TestImportRequestsCarrySourceAndTargetEZKs(t *testing.T) {
@@ -1667,63 +1660,293 @@ type temporaryImportError struct {
 func (e temporaryImportError) Error() string   { return e.msg }
 func (e temporaryImportError) Temporary() bool { return e.temporary }
 
-func TestImportDispatchKeepsPendingAndIncrementsRetryOnError(t *testing.T) {
+func newDispatchTestTask(
+	t *testing.T,
+	state internalpb.ImportJobState,
+	schema *schemapb.CollectionSchema,
+	options []*commonpb.KeyValuePair,
+	dataTs uint64,
+	alloc allocator.Allocator,
+) (ImportTask, ImportMeta, *mocks.DataCoordCatalog) {
+	t.Helper()
+	ctx := context.Background()
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
+		JobID: 1, CollectionID: 7, Schema: schema, State: state, DataTs: dataTs, Options: options,
+	}}, nil)
+	if state == internalpb.ImportJobState_PreImporting {
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
+			JobID: 1, TaskID: 2, CollectionID: 7, State: datapb.ImportTaskStateV2_Pending,
+		}}, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	} else {
+		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+		catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
+			JobID: 1, TaskID: 2, CollectionID: 7, State: datapb.ImportTaskStateV2_Pending,
+		}}, nil)
+	}
+	im, err := NewImportMeta(ctx, catalog, alloc, nil)
+	require.NoError(t, err)
+	return im.GetTask(ctx, 2), im, catalog
+}
+
+func TestImportDispatchRetriesTransientAssembleAndRPCErrors(t *testing.T) {
 	ctx := context.Background()
 	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
+	options := []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}}
 	schema := &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}}
+
+	transientCases := []struct {
+		name      string
+		makeState func(t *testing.T) hook.Cipher
+	}{
+		{
+			name: "service unavailable",
+			makeState: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve:    func(string) (int64, []byte, error) { return 0, nil, merr.ErrServiceUnavailable },
+				}
+			},
+		},
+		{
+			name: "temporary plugin error",
+			makeState: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve: func(string) (int64, []byte, error) {
+						return 0, nil, temporaryImportError{msg: "source KMS throttled", temporary: true}
+					},
+				}
+			},
+		},
+		{
+			name: "deadline exceeded",
+			makeState: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve:    func(string) (int64, []byte, error) { return 0, nil, context.DeadlineExceeded },
+				}
+			},
+		},
+		{
+			name: "context canceled",
+			makeState: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve:    func(string) (int64, []byte, error) { return 0, nil, context.Canceled },
+				}
+			},
+		},
+		{
+			name: "network timeout",
+			makeState: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve: func(string) (int64, []byte, error) {
+						return 0, nil, &net.DNSError{Err: "timeout", IsTimeout: true}
+					},
+				}
+			},
+		},
+		{
+			name:      "missing cipher plugin",
+			makeState: func(*testing.T) hook.Cipher { return nil },
+		},
+		{
+			name: "target key temporarily unavailable",
+			makeState: func(t *testing.T) hook.Cipher {
+				c := &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve:    func(string) (int64, []byte, error) { return 73, []byte("old"), nil },
+				}
+				c.EXPECT().GetUnsafeKey(int64(91), int64(7)).Return(nil).Once()
+				return c
+			},
+		},
+	}
+
 	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
 		t.Run(state.String(), func(t *testing.T) {
-			var sourceErr error
-			cipher := &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t), resolve: func(artifact string) (int64, []byte, error) {
-				require.Equal(t, backup, artifact)
-				return 73, []byte("old"), sourceErr
-			}}
-			t.Cleanup(hookutil.SetTestCipher(cipher))
+			for _, tc := range transientCases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Cleanup(hookutil.SetTestCipher(tc.makeState(t)))
+					alloc := allocator.NewMockAllocator(t)
+					task, im, catalog := newDispatchTestTask(t, state, schema, options, 100, alloc)
+					cluster := session.NewMockCluster(t)
 
-			catalog := mocks.NewDataCoordCatalog(t)
-			catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
-				JobID: 1, Schema: schema, State: state, DataTs: 100, Options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}},
-			}}, nil)
-			cluster := session.NewMockCluster(t)
-			alloc := allocator.NewMockAllocator(t)
-			rpcErr := merr.WrapErrNodeNotFound(10)
-			if state == internalpb.ImportJobState_PreImporting {
-				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{
-					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
-				}}, nil)
-				catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-				cluster.EXPECT().CreatePreImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
-			} else {
-				catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-				catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{
-					JobID: 1, TaskID: 2, State: datapb.ImportTaskStateV2_Pending,
-				}}, nil)
-				alloc.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(20000), nil).Once()
-				cluster.EXPECT().CreateImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
+					task.CreateTaskOnWorker(10, cluster)
+					require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+					require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+					require.Equal(t, int64(1), task.GetTaskVersion())
+					alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+					alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+					catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+				})
 			}
-			im, err := NewImportMeta(ctx, catalog, alloc, nil)
-			require.NoError(t, err)
-			task := im.GetTask(ctx, 2)
 
-			// Assemble errors keep the task pending, increment retryTimes, and do not fail the job or allocate ranges.
-			sourceErr = errors.New("source KMS denied Decrypt")
-			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			require.Equal(t, int64(1), task.GetTaskVersion())
-			alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
-			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+			t.Run("dispatch rpc error retries", func(t *testing.T) {
+				cipher := &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve: func(artifact string) (int64, []byte, error) {
+						require.Equal(t, backup, artifact)
+						return 73, []byte("old"), nil
+					},
+				}
+				cipher.EXPECT().GetUnsafeKey(int64(91), int64(7)).Return([]byte("target-key")).Once()
+				t.Cleanup(hookutil.SetTestCipher(cipher))
 
-			// Dispatch RPC errors also keep the task pending and increment retryTimes.
-			sourceErr = nil
-			cipher.EXPECT().GetUnsafeKey(int64(91), task.GetCollectionID()).Return([]byte("target-key")).Once()
-			task.CreateTaskOnWorker(10, cluster)
-			require.Equal(t, state, im.GetJob(ctx, 1).GetState())
-			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-			require.Equal(t, int64(2), task.GetTaskVersion())
-			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+				alloc := allocator.NewMockAllocator(t)
+				task, im, catalog := newDispatchTestTask(t, state, schema, options, 100, alloc)
+				cluster := session.NewMockCluster(t)
+				rpcErr := merr.WrapErrNodeNotFound(10)
+				if state == internalpb.ImportJobState_PreImporting {
+					cluster.EXPECT().CreatePreImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
+				} else {
+					alloc.EXPECT().AllocN(mock.Anything).Return(int64(10000), int64(20000), nil).Once()
+					cluster.EXPECT().CreateImport(int64(10), mock.Anything, mock.Anything).Return(rpcErr).Once()
+				}
+
+				task.CreateTaskOnWorker(10, cluster)
+				require.Equal(t, state, im.GetJob(ctx, 1).GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+				require.Equal(t, int64(1), task.GetTaskVersion())
+				catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+			})
 		})
 	}
+}
+
+func TestImportDispatchFailsFastOnNonRetryableAssembleErrors(t *testing.T) {
+	ctx := context.Background()
+	backup := base64.StdEncoding.EncodeToString([]byte(`{"ez_id":73}`))
+	validOptions := []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: backup}}
+	validProps := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "91"}}
+
+	cases := []struct {
+		name           string
+		options        []*commonpb.KeyValuePair
+		props          []*commonpb.KeyValuePair
+		makeCipher     func(t *testing.T) hook.Cipher
+		wantReasonPart string
+	}{
+		{
+			name:    "malformed EZK",
+			options: []*commonpb.KeyValuePair{{Key: importutilv2.EZK, Value: "!not-base64"}},
+			props:   validProps,
+			makeCipher: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t)}
+			},
+			wantReasonPart: "decode EZK",
+		},
+		{
+			name:    "invalid target ezID",
+			options: validOptions,
+			props:   []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "bad"}},
+			makeCipher: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{MockCipher: mock_hook.NewMockCipher(t)}
+			},
+			wantReasonPart: "invalid target",
+		},
+		{
+			name:    "permanent KMS denial",
+			options: validOptions,
+			props:   validProps,
+			makeCipher: func(t *testing.T) hook.Cipher {
+				return &importRequestCipher{
+					MockCipher: mock_hook.NewMockCipher(t),
+					resolve: func(string) (int64, []byte, error) {
+						return 0, nil, errors.New("source KMS denied Decrypt")
+					},
+				}
+			},
+			wantReasonPart: "source KMS denied Decrypt",
+		},
+		{
+			name:    "plugin does not implement ResolveImportEZ",
+			options: validOptions,
+			props:   validProps,
+			makeCipher: func(t *testing.T) hook.Cipher {
+				return mock_hook.NewMockCipher(t)
+			},
+			wantReasonPart: "ResolveImportEZ",
+		},
+	}
+
+	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_Importing} {
+		t.Run(state.String(), func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Cleanup(hookutil.SetTestCipher(tc.makeCipher(t)))
+					alloc := allocator.NewMockAllocator(t)
+					schema := &schemapb.CollectionSchema{Properties: tc.props}
+					task, im, catalog := newDispatchTestTask(t, state, schema, tc.options, 100, alloc)
+					catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+					cluster := session.NewMockCluster(t)
+
+					task.CreateTaskOnWorker(10, cluster)
+					got := im.GetJob(ctx, 1)
+					require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+					require.Contains(t, got.GetReason(), tc.wantReasonPart)
+					require.Zero(t, task.GetTaskVersion())
+					alloc.AssertNotCalled(t, "AllocTimestamp", mock.Anything)
+					alloc.AssertNotCalled(t, "AllocN", mock.Anything)
+					cluster.AssertNotCalled(t, "CreatePreImport", mock.Anything, mock.Anything, mock.Anything)
+					cluster.AssertNotCalled(t, "CreateImport", mock.Anything, mock.Anything, mock.Anything)
+				})
+			}
+		})
+	}
+}
+
+func TestAssembleImportRequestAllocErrorClassification(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{}
+
+	t.Run("transient AllocTimestamp failure retries", func(t *testing.T) {
+		for _, allocErr := range []error{errors.New("tso rpc failed"), context.DeadlineExceeded} {
+			alloc := allocator.NewMockAllocator(t)
+			alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(0), allocErr).Once()
+			task, im, catalog := newDispatchTestTask(t, internalpb.ImportJobState_Importing, schema, nil, 0, alloc)
+			cluster := session.NewMockCluster(t)
+
+			task.CreateTaskOnWorker(10, cluster)
+			require.Equal(t, internalpb.ImportJobState_Importing, im.GetJob(ctx, 1).GetState())
+			require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+			require.Equal(t, int64(1), task.GetTaskVersion())
+			catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+			cluster.AssertNotCalled(t, "CreateImport", mock.Anything, mock.Anything, mock.Anything)
+		}
+	})
+
+	t.Run("transient AllocN failure retries", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), errors.New("alloc id rpc failed")).Once()
+		task, im, catalog := newDispatchTestTask(t, internalpb.ImportJobState_Importing, schema, nil, 100, alloc)
+		cluster := session.NewMockCluster(t)
+
+		task.CreateTaskOnWorker(10, cluster)
+		require.Equal(t, internalpb.ImportJobState_Importing, im.GetJob(ctx, 1).GetState())
+		require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
+		require.Equal(t, int64(1), task.GetTaskVersion())
+		catalog.AssertNotCalled(t, "SaveImportJob", mock.Anything, mock.Anything)
+		cluster.AssertNotCalled(t, "CreateImport", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("ErrParameterInvalid from AllocN fails immediately", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrParameterInvalidMsg("too large to allocate IDs")).Once()
+		task, im, catalog := newDispatchTestTask(t, internalpb.ImportJobState_Importing, schema, nil, 100, alloc)
+		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+		cluster := session.NewMockCluster(t)
+
+		task.CreateTaskOnWorker(10, cluster)
+		got := im.GetJob(ctx, 1)
+		require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+		require.Contains(t, got.GetReason(), "too large to allocate IDs")
+		require.Zero(t, task.GetTaskVersion())
+		cluster.AssertNotCalled(t, "CreateImport", mock.Anything, mock.Anything, mock.Anything)
+	})
 }
 
 func TestAssembleImportRequestSkipsAllocOnPluginContextError(t *testing.T) {

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -115,7 +116,15 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
 		log.Warn("assemble preimport request failed", WrapTaskLog(p, zap.Error(err))...)
-		p.retryTimes++
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
+			return
+		}
+		if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed),
+			UpdateJobReason(err.Error())); updateErr != nil {
+			log.Warn("failed to mark preimport job failed after assemble error", WrapTaskLog(p, zap.Error(updateErr))...)
+		}
 		return
 	}
 

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -139,7 +140,15 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		log.Warn("assemble import request failed", WrapTaskLog(t, zap.Error(err))...)
-		t.retryTimes++
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			t.retryTimes++
+			return
+		}
+		if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed),
+			UpdateJobReason(err.Error())); updateErr != nil {
+			log.Warn("failed to mark import job failed after assemble error", WrapTaskLog(t, zap.Error(updateErr))...)
+		}
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
