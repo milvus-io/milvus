@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -113,14 +112,19 @@ func (c *Client) dialOptions() []grpc.DialOption {
 	options = append(options, c.config.DialOptions...)
 
 	options = append(options,
-		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
-			grpc_retry.WithMax(6),
-			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
-				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
-			}),
-			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
-
-		// c.getRetryOnRateLimitInterceptor(),
+		grpc.WithChainUnaryInterceptor(
+			grpc_retry.UnaryClientInterceptor(
+				grpc_retry.WithMax(defaultRetryTimes),
+				grpc_retry.WithBackoff(func(attempt uint) time.Duration {
+					return retryBackoff(attempt, defaultRetryMaxBackoff)
+				}),
+				grpc_retry.WithCodes(retryableCodes...),
+			),
+			// Retry on the Milvus application-level rate limit by default,
+			// matching the pymilvus / C++ / Java SDKs. Disable per call with a
+			// context carrying RetryOnRateLimit=false, or per client by setting
+			// ClientConfig.RetryRateLimit.MaxRetry to 0.
+			c.config.getRetryOnRateLimitInterceptor(),
 		))
 
 	options = append(options, grpc.WithChainUnaryInterceptor(
