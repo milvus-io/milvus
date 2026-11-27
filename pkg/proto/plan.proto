@@ -101,6 +101,11 @@ message QueryInfo {
   float refine_topk_ratio = 18;
   // Multi-field group by: list of field IDs for composite grouping
   repeated int64 group_by_field_ids = 19;
+  // Maximum number of entities kept per group. group_size stays the number a
+  // strict_group_size search fills each group to. Zero, or a value not larger
+  // than group_size, means group_size. Hybrid sub-searches set it larger so
+  // the reranker sees every route's score of an entity.
+  int64 max_group_size = 20;
 }
 
 message ColumnInfo {

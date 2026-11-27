@@ -117,7 +117,7 @@ PhySearchGroupByNode::GetOutput() {
         }
         search_result.composite_group_by_values_ =
             std::move(composite_group_by_values);
-        search_result.group_size_ = search_info_.group_size_;
+        search_result.group_size_ = search_info_.KeptGroupSize();
         AssertInfo(search_result.seg_offsets_.size() ==
                        search_result.composite_group_by_values_.value().size(),
                    "Wrong state! search_result composite_group_by_values_ "

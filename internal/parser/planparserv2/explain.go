@@ -219,6 +219,9 @@ type GroupByExplanation struct {
 	Fields          []FieldRef `json:"fields"`
 	GroupSize       int64      `json:"group_size"`
 	StrictGroupSize bool       `json:"strict_group_size"`
+	// MaxGroupSize is how many entities per group the search keeps when it is
+	// larger than GroupSize, as in hybrid sub-searches.
+	MaxGroupSize int64 `json:"max_group_size,omitempty"`
 }
 
 // IteratorExplanation describes search-iterator paging. The session token is
@@ -593,8 +596,12 @@ func (p *PlanExplanation) Text() string {
 			}
 		}
 		if g := vs.GroupBy; g != nil {
-			fmt.Fprintf(&b, "group_by: %s group_size=%d strict=%t\n",
+			fmt.Fprintf(&b, "group_by: %s group_size=%d strict=%t",
 				strings.Join(fieldLabels(g.Fields), ", "), g.GroupSize, g.StrictGroupSize)
+			if g.MaxGroupSize > 0 {
+				fmt.Fprintf(&b, " max_group_size=%d", g.MaxGroupSize)
+			}
+			b.WriteString("\n")
 		}
 		if it := vs.Iterator; it != nil {
 			fmt.Fprintf(&b, "iterator: batch_size=%d", it.BatchSize)
@@ -706,6 +713,9 @@ func (e *explainer) vectorSearch(anns *planpb.VectorANNS) *VectorSearchExplanati
 			Fields:          e.fields(groupIDs),
 			GroupSize:       info.GetGroupSize(),
 			StrictGroupSize: info.GetStrictGroupSize(),
+		}
+		if info.GetMaxGroupSize() > info.GetGroupSize() {
+			vs.GroupBy.MaxGroupSize = info.GetMaxGroupSize()
 		}
 	}
 	if it := info.GetSearchIteratorV2Info(); it != nil {

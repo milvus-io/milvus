@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
@@ -375,4 +376,30 @@ func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
 	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
+}
+
+func TestRankParamsGetSubSearchGroupSize(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().ProxyCfg.HybridSearchGroupSizeFactor.Key
+	defer paramtable.Get().Reset(key)
+
+	var nilParams *rankParams
+	assert.Equal(t, int64(1), nilParams.GetSubSearchGroupSize())
+
+	params := &rankParams{groupByFieldIds: []int64{102}, groupSize: 3}
+	assert.Equal(t, int64(9), params.GetSubSearchGroupSize())
+	assert.Equal(t, int64(3), params.GetGroupSize())
+
+	// strict_group_size still fills groups to group_size; only the number of
+	// entities kept per group grows.
+	strict := &rankParams{groupByFieldIds: []int64{102}, groupSize: 3, strictGroupSize: true}
+	assert.Equal(t, int64(9), strict.GetSubSearchGroupSize())
+
+	paramtable.Get().Save(key, "4")
+	assert.Equal(t, int64(12), params.GetSubSearchGroupSize())
+
+	for _, factor := range []string{"1", "0", "-5"} {
+		paramtable.Get().Save(key, factor)
+		assert.Equal(t, int64(3), params.GetSubSearchGroupSize(), "factor %s", factor)
+	}
 }

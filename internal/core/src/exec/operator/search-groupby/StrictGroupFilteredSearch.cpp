@@ -38,16 +38,21 @@ struct GroupByMap {
     std::unordered_map<GroupKey, int> group_map_{};
     std::vector<GroupKey> group_order_{};
     int group_capacity_{0};
+    // Entities a strict search fills each group to.
     int group_size_{0};
+    // Entities kept per group, at least group_size_.
+    int kept_group_size_{0};
     int enough_group_count_{0};
     bool strict_group_size_{false};
 
  public:
     GroupByMap(int group_capacity,
                int group_size,
-               bool strict_group_size = false)
+               bool strict_group_size = false,
+               int kept_group_size = 0)
         : group_capacity_(group_capacity),
           group_size_(group_size),
+          kept_group_size_(std::max(group_size, kept_group_size)),
           strict_group_size_(strict_group_size){};
     bool
     IsGroupResEnough() const {
@@ -111,7 +116,7 @@ struct GroupByMap {
             group_order_.emplace_back(group);
         }
 
-        if (it->second >= group_size_) {
+        if (it->second >= kept_group_size_) {
             //we ignore following input no matter the distance as knowhere::iterator doesn't guarantee
             //strictly increase/decreasing distance output
             //but this should not be a very serious influence to overall recall rate
@@ -119,7 +124,7 @@ struct GroupByMap {
         }
 
         it->second += 1;
-        if (it->second >= group_size_) {
+        if (it->second == group_size_) {
             enough_group_count_ += 1;
         }
         return true;
@@ -710,7 +715,8 @@ TrySingleFieldStrictGroup(
         query::CanUseStrictGroupControls(info, iterators.size())};
     prefix.push_back(0);
     for (const auto& iterator : iterators) {
-        GroupByMap<T> map(info.topk_, info.group_size_, true);
+        GroupByMap<T> map(
+            info.topk_, info.group_size_, true, info.KeptGroupSize());
         GroupByResultCollector<T> collector;
         if (!TryStrictGroupFiltered(
                 iterator, getter, map, collector, &context)) {

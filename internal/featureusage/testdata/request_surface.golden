@@ -1070,6 +1070,7 @@ field	milvus.proto.plan.QueryInfo.hints
 field	milvus.proto.plan.QueryInfo.json_path
 field	milvus.proto.plan.QueryInfo.json_type
 field	milvus.proto.plan.QueryInfo.materialized_view_involved
+field	milvus.proto.plan.QueryInfo.max_group_size
 field	milvus.proto.plan.QueryInfo.metric_type
 field	milvus.proto.plan.QueryInfo.query_field_id
 field	milvus.proto.plan.QueryInfo.refine_topk_ratio

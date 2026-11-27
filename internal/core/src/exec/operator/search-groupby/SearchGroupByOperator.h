@@ -567,16 +567,21 @@ struct CompositeGroupByMap {
     std::unordered_map<CompositeGroupKey, int, CompositeGroupKeyHash>
         group_map_{};
     int group_capacity_{0};
+    // Entities a strict search fills each group to.
     int group_size_{0};
+    // Entities kept per group, at least group_size_.
+    int kept_group_size_{0};
     int enough_group_count_{0};
     bool strict_group_size_{false};
 
  public:
     CompositeGroupByMap(int group_capacity,
                         int group_size,
-                        bool strict_group_size = false)
+                        bool strict_group_size = false,
+                        int kept_group_size = 0)
         : group_capacity_(group_capacity),
           group_size_(group_size),
+          kept_group_size_(std::max(group_size, kept_group_size)),
           strict_group_size_(strict_group_size) {
         if (group_capacity > 0) {
             group_map_.reserve(static_cast<size_t>(group_capacity));
@@ -604,11 +609,11 @@ struct CompositeGroupByMap {
                 return false;
             }
         }
-        if (it->second >= group_size_) {
+        if (it->second >= kept_group_size_) {
             return false;
         }
         it->second += 1;
-        if (it->second >= group_size_) {
+        if (it->second == group_size_) {
             enough_group_count_ += 1;
         }
         return true;

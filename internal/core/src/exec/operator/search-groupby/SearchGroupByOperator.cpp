@@ -227,7 +227,8 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     // 1. Create group map for composite keys
     CompositeGroupByMap groupMap(search_info.topk_,
                                  search_info.group_size_,
-                                 search_info.strict_group_size_);
+                                 search_info.strict_group_size_,
+                                 search_info.KeptGroupSize());
 
     auto is_element_id = search_info.element_level();
     AssertInfo(element_indices == nullptr || is_element_id,
@@ -318,7 +319,7 @@ SearchGroupBy(milvus::OpContext* op_ctx,
     const auto& field_ids = search_info.group_by_field_ids_;
 
     int max_total_size =
-        search_info.topk_ * search_info.group_size_ * iterators.size();
+        search_info.topk_ * search_info.KeptGroupSize() * iterators.size();
     seg_offsets.reserve(max_total_size);
     distances.reserve(max_total_size);
     composite_group_by_values.reserve(max_total_size);

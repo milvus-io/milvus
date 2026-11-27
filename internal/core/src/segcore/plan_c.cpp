@@ -157,7 +157,7 @@ GetRetrievePlanFeatureBits(CRetrievePlan c_plan) {
 int64_t
 GetGroupSize(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);
-    return search_plan->plan_node_->search_info_.group_size_;
+    return search_plan->plan_node_->search_info_.KeptGroupSize();
 }
 
 void

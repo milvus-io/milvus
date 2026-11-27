@@ -3709,9 +3709,11 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		assert.NotNil(t, searchInfo.planInfo)
 
 		// all group_by related parameters should be aligned to parameters
-		// set by main request rather than inner sub request
+		// set by main request rather than inner sub request. The sub-search
+		// keeps group_size * proxy.hybridSearchGroupSizeFactor per group.
 		assert.Equal(t, int64(101), searchInfo.planInfo.GetGroupByFieldId())
 		assert.Equal(t, int64(3), searchInfo.planInfo.GetGroupSize())
+		assert.Equal(t, int64(9), searchInfo.planInfo.GetMaxGroupSize())
 		assert.False(t, searchInfo.planInfo.GetStrictGroupSize())
 	})
 
@@ -6070,10 +6072,14 @@ func TestSearchTask_HybridFunctionChainRerankMeta(t *testing.T) {
 	require.Len(t, task.GetSubReqs(), 2)
 	for index, subReq := range task.GetSubReqs() {
 		assert.Equal(t, int64(102), subReq.GetGroupByFieldId())
-		assert.Equal(t, int64(2), subReq.GetGroupSize())
+		// Sub-searches keep group_size * proxy.hybridSearchGroupSizeFactor
+		// entities per group; the final group_by still returns 2.
+		assert.Equal(t, int64(6), subReq.GetGroupSize())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(subReq.GetSerializedExprPlan(), plan))
+		assert.Equal(t, int64(2), plan.GetVectorAnns().GetQueryInfo().GetGroupSize())
+		assert.Equal(t, int64(6), plan.GetVectorAnns().GetQueryInfo().GetMaxGroupSize())
 		assert.Equal(t, []int64{101}, plan.GetOutputFieldIds())
 		if index == 0 {
 			require.Len(t, plan.GetQuerynodeFunctionChains(), 2)

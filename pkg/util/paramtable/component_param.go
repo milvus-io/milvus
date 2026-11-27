@@ -2915,6 +2915,7 @@ type proxyConfig struct {
 	MaxArrayCapacity                  ParamItem `refreshable:"true"`
 	MaxIndexParamsSize                ParamItem `refreshable:"true"`
 	MaxResultEntries                  ParamItem `refreshable:"true"`
+	HybridSearchGroupSizeFactor       ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	EnableLocalCollectionVisibility   ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
@@ -3596,6 +3597,18 @@ Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxResultEntries.Init(base.mgr)
+
+	p.HybridSearchGroupSizeFactor = ParamItem{
+		Key:          "proxy.hybridSearchGroupSizeFactor",
+		Version:      "3.1.0",
+		DefaultValue: "3",
+		Doc: `In a hybrid search with group_by, each sub-search keeps up to group_size * hybridSearchGroupSizeFactor entities per group.
+The final result still returns group_size entities per group, and strict_group_size still fills each group to group_size.
+Keeping more entities per group lets the reranker see the score of an entity on every route, instead of losing it
+because the route kept a different entity of the same group. Values less than 1 are treated as 1.`,
+		Export: true,
+	}
+	p.HybridSearchGroupSizeFactor.Init(base.mgr)
 
 	p.MaxSearchAggregationResultEntries = ParamItem{
 		Key:          "proxy.maxSearchAggregationResultEntries",

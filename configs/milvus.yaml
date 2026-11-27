@@ -495,6 +495,11 @@ proxy:
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
+  # In a hybrid search with group_by, each sub-search keeps up to group_size * hybridSearchGroupSizeFactor entities per group.
+  # The final result still returns group_size entities per group, and strict_group_size still fills each group to group_size.
+  # Keeping more entities per group lets the reranker see the score of an entity on every route, instead of losing it
+  # because the route kept a different entity of the same group. Values less than 1 are treated as 1.
+  hybridSearchGroupSizeFactor: 3
   # maximum number of SearchAggregation result entries, calculated as Nq * DerivedTopK * DerivedGroupSize.
   # DerivedTopK is the product of all aggregation level sizes. DerivedGroupSize is the max top_hits size across all levels, or 1 when top_hits is absent.
   # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
