@@ -6663,7 +6663,7 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 	p.DVForceAllIndexReady = ParamItem{
 		Key:          "dataCoord.dataview.forceAllIndexReady",
 		Version:      "2.6.2",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
 		Export:       false,
 	}
