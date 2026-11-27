@@ -51,9 +51,14 @@ target_include_directories(milvus-common INTERFACE ${MILVUS_COMMON_INCLUDE_DIR})
 # Compatibility shim: the vendored knowhere and milvus-storage checkouts still
 # call find_package(milvus-common) and link milvus-common::milvus-common, which
 # the Conan CMakeDeps config used to provide. Route those lookups to the
-# source-built target instead.
+# source-built target instead. This only takes effect when no real
+# milvus-common config (Conan CMakeDeps or a user-provided one) is already
+# visible: a project-level milvus-common_DIR must not be silently clobbered,
+# so we only write the cache entry when it is not already defined.
 set( MILVUS_COMMON_COMPAT_DIR ${CMAKE_CURRENT_BINARY_DIR}/milvus-common-compat )
 configure_file( milvus-commonConfig.cmake.in
                 "${MILVUS_COMMON_COMPAT_DIR}/milvus-commonConfig.cmake" @ONLY )
-set( milvus-common_DIR "${MILVUS_COMMON_COMPAT_DIR}" CACHE PATH
-     "Compat config for the source-built milvus-common" FORCE )
+if( NOT DEFINED CACHE{milvus-common_DIR} )
+    set( milvus-common_DIR "${MILVUS_COMMON_COMPAT_DIR}" CACHE PATH
+         "Compat config for the source-built milvus-common" )
+endif()

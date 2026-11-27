@@ -59,17 +59,33 @@ find_build_tree_header() {
 # the code-checker job) still read exactly the pinned revision. Returns 1 when
 # the pinned header cannot be obtained so callers can fail loudly instead of
 # silently falling back to an older build's leftover header.
+# The cache directory is keyed only by the pin; a flock serializes concurrent
+# invocations sharing TMPDIR, and the clone is staged in a unique temp dir and
+# renamed into place so a peer never observes a half-finished checkout.
 fetch_pinned_header() {
-  local pin="$1" repo="$2" dir
+  local pin="$1" repo="$2" dir lockdir
   [[ -n "$pin" && -n "$repo" ]] || return 1
-  dir="${TMPDIR:-/tmp}/milvus-common-segcoregen/$pin"
+  lockdir="${TMPDIR:-/tmp}/milvus-common-segcoregen"
+  dir="$lockdir/$pin"
   if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
-    rm -rf "$dir"
-    mkdir -p "$dir"
-    git init -q "$dir" || return 1
-    git -C "$dir" remote add origin "$repo" || return 1
-    git -C "$dir" fetch -q --depth 1 origin "$pin" || { rm -rf "$dir"; return 1; }
-    git -C "$dir" checkout -q FETCH_HEAD || { rm -rf "$dir"; return 1; }
+    mkdir -p "$lockdir"
+    (
+      flock -w 300 9 || exit 1
+      if [[ ! -f "$dir/include/common/EasyAssert.h" ]]; then
+        local staging
+        staging="$(mktemp -d "$lockdir/.$pin.XXXXXX")" || exit 1
+        if git init -q "$staging" &&
+           git -C "$staging" remote add origin "$repo" &&
+           git -C "$staging" fetch -q --depth 1 origin "$pin" &&
+           git -C "$staging" checkout -q FETCH_HEAD; then
+          rm -rf "$dir"
+          mv "$staging" "$dir"
+        else
+          rm -rf "$staging"
+          exit 1
+        fi
+      fi
+    ) 9>"$lockdir/.$pin.lock" || return 1
   fi
   printf '%s\n' "$dir/include/common/EasyAssert.h"
 }

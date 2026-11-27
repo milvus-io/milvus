@@ -412,6 +412,12 @@ ADD_DEFINITIONS(-DBOOST_GEOMETRY_INDEX_DETAIL_EXPERIMENTAL)
 # otherwise cpp code coverage tool will miss src folder
 using_ccache_if_defined(MILVUS_USE_CCACHE)
 add_subdirectory( thirdparty )
+# Fail at configure time rather than silently no-op'ing if the source-built
+# milvus-common include dir was not set (it is defined by the FetchContent
+# wrapper in thirdparty/milvus-common).
+if(NOT MILVUS_COMMON_INCLUDE_DIR)
+    message(FATAL_ERROR "MILVUS_COMMON_INCLUDE_DIR is unset; thirdparty/milvus-common did not configure")
+endif()
 include_directories(SYSTEM ${MILVUS_COMMON_INCLUDE_DIR})
 # Vendored projects may set global launch rules while they configure. Their
 # targets already retain the compiler launcher configured above.
