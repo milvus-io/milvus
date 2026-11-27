@@ -617,6 +617,7 @@ func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.Tru
 			Status: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureTruncateCollection)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
 	defer sp.End()
@@ -893,6 +894,7 @@ func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.Add
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionField")
 	defer sp.End()
@@ -947,6 +949,7 @@ func (node *Proxy) AddCollectionStructField(ctx context.Context, request *milvus
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAddField)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddCollectionStructField")
 	defer sp.End()
@@ -1007,6 +1010,7 @@ func (node *Proxy) AlterCollectionSchema(ctx context.Context, request *milvuspb.
 			AlterStatus: merr.Status(err),
 		}, nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterSchema)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionSchema")
 	defer sp.End()
 
@@ -1310,6 +1314,7 @@ func (node *Proxy) AlterCollectionFunction(ctx context.Context, request *milvusp
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureSchemaChangeAlterFunction)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollectionFunction")
 	defer sp.End()
@@ -6793,6 +6798,7 @@ func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileRes
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	featureusage.Hit(featureusage.FeatureFileResourceAdd)
 
 	mlog.Info(context.TODO(), "receive AddFileResource request")
 
