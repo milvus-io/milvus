@@ -190,13 +190,14 @@ func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, pkType 
 	if cfg == nil {
 		return merr.WrapErrServiceInternalMsg("storage config is required for a packed delta")
 	}
-	actual, metadata, count, err := packed.ReadDeltaFooter(path, cfg, plugin)
+	actual, count, err := packed.ReadDeltaFooter(path, cfg, plugin)
 	if err != nil {
 		return err
 	}
+	metadata := actual.Metadata().ToMap()
 	format, typed := metadata["delta_format_version"]
 	if !typed {
-		if binlog.GetMutationCounts() != nil || len(metadata) != 0 || actual.NumFields() != 2 {
+		if binlog.GetMutationCounts() != nil || !isLegacyDeltaSchema(actual) {
 			return merr.WrapErrDataIntegrityMsg("missing delta format version on a non-legacy file")
 		}
 		return readLegacyMutationDelta(ctx, nil, binlog, StorageV2, pkType, cfg, plugin, visit)
@@ -289,6 +290,20 @@ func ReadPackedMutationDelta(ctx context.Context, binlog *datapb.Binlog, pkType 
 			return err
 		}
 	}
+}
+
+func isLegacyDeltaSchema(schema *arrow.Schema) bool {
+	if schema.NumFields() != 2 {
+		return false
+	}
+	metadata := schema.Metadata()
+	// Native storage metadata is also present on legacy Parquet files.
+	for _, key := range []string{"delta_format_version", "schema_version", "collection_id", "vchannel", "partition_scope", "pk_type", "update_fields"} {
+		if metadata.FindKey(key) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func readLegacyMutationDelta(ctx context.Context, download func(context.Context, []string) ([][]byte, error), binlog *datapb.Binlog, version int64, pkType schemapb.DataType, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext, visit func(deltacodec.Layout, []deltacodec.Row) error) error {

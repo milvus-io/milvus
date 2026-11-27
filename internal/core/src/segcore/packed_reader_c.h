@@ -35,8 +35,7 @@ ReadParquetDeltaFooter(const char* path,
                        CStorageConfig config,
                        CPluginContext* plugin_context,
                        struct ArrowSchema* schema,
-                       int64_t* rows,
-                       char** metadata);
+                       int64_t* rows);
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,

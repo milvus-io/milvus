@@ -16,7 +16,6 @@
 #include "segcore/default_fs.h"
 
 #include <arrow/c/bridge.h>
-#include <nlohmann/json.hpp>
 #include <parquet/arrow/reader.h>
 #include <arrow/status.h>
 #include <algorithm>
@@ -85,8 +84,7 @@ ReadParquetDeltaFooter(const char* path,
                        CStorageConfig config,
                        CPluginContext* plugin_context,
                        struct ArrowSchema* schema,
-                       int64_t* rows,
-                       char** metadata) {
+                       int64_t* rows) {
     try {
         auto fs = GetFsFromStorageConfig(config);
         AssertInfo(fs != nullptr, "missing delta filesystem");
@@ -110,26 +108,9 @@ ReadParquetDeltaFooter(const char* path,
         check(builder.Build(&reader));
         auto footer = reader->parquet_reader()->metadata();
         *rows = footer->num_rows();
-        nlohmann::json fields = nlohmann::json::object();
-        if (auto kv = footer->key_value_metadata()) {
-            for (const auto* key : {"delta_format_version",
-                                    "schema_version",
-                                    "collection_id",
-                                    "vchannel",
-                                    "partition_scope",
-                                    "pk_type",
-                                    "update_fields"}) {
-                auto index = kv->FindKey(key);
-                if (index >= 0) {
-                    fields[key] = kv->value(index);
-                }
-            }
-        }
         std::shared_ptr<arrow::Schema> actual;
         check(reader->GetSchema(&actual));
         check(arrow::ExportSchema(*actual, schema));
-        *metadata = strdup(fields.dump().c_str());
-        AssertInfo(*metadata != nullptr, "could not allocate delta footer");
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

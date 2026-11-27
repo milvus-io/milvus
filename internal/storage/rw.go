@@ -229,14 +229,15 @@ func WithImportDelta() RwOption {
 // ValidateImportDelta checks a packed source before an import or copy can
 // interpret a typed mutation as a legacy delete or remap its source identity.
 func ValidateImportDelta(path string, cfg *indexpb.StorageConfig) error {
-	schema, footer, _, err := packed.ReadDeltaFooter(path, cfg, nil)
+	schema, _, err := packed.ReadDeltaFooter(path, cfg, nil)
 	if err != nil {
 		return merr.Wrap(err, "read source deltalog footer")
 	}
-	if _, typed := footer["delta_format_version"]; typed {
+	metadata := schema.Metadata()
+	if _, typed := metadata.GetValue("delta_format_version"); typed {
 		return merr.WrapErrImportFailedMsg("source-history remapping for typed mutation deltas is unsupported")
 	}
-	if len(footer) != 0 || schema.NumFields() != 2 {
+	if !isLegacyDeltaSchema(schema) {
 		return merr.WrapErrDataIntegrityMsg("unrecognized import deltalog schema")
 	}
 	return nil
