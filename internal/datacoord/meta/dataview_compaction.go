@@ -97,6 +97,9 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			// Check IDs, not just fields: scalar and multiple JSON-path indexes all
 			// participate. Small/no-training builds are Finished by the scheduler.
 			if m.IndexCatalog.GetSegmentIndexState(collectionID, id, index.IndexID).GetState() != commonpb.IndexState_Finished {
+				if segment.GetManifestHasIndex() {
+					m.recheckAfterManifestIndexRecovery(collectionID)
+				}
 				ready[id] = false
 				return false
 			}

@@ -151,7 +151,7 @@ func NewSegmentIndexBuildInfo() *segmentBuildInfo {
 
 func (m *segmentBuildInfo) Add(segIdx *model.SegmentIndex) {
 	m.buildID2SegmentIndex.Insert(segIdx.BuildID, segIdx)
-	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
+	m.recordTaskStats(segIdx)
 }
 
 // AddForRecovery inserts segment index during recovery. It skips the LRU write
@@ -163,6 +163,17 @@ func (m *segmentBuildInfo) AddForRecovery(segIdx *model.SegmentIndex) {
 	if m.taskStats.Len() >= taskStatsLRUCapacity && segIdx.IndexState == commonpb.IndexState_Finished {
 		return
 	}
+	m.recordTaskStats(segIdx)
+}
+
+// insertIfAbsent inserts segIdx unless its build ID is already resident, and
+// reports whether it did. It records no task stats.
+func (m *segmentBuildInfo) insertIfAbsent(segIdx *model.SegmentIndex) bool {
+	_, loaded := m.buildID2SegmentIndex.GetOrInsert(segIdx.BuildID, segIdx)
+	return !loaded
+}
+
+func (m *segmentBuildInfo) recordTaskStats(segIdx *model.SegmentIndex) {
 	m.taskStats.Add(segIdx.BuildID, newIndexTaskStats(segIdx))
 }
 
@@ -313,6 +324,60 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.setSegmentIndexSlot(segIdx, false)
 	m.SegmentBuildInfo.Add(segIdx)
 	m.NotifyManifestIndexMigration(segIdx)
+}
+
+// manifestIndexRecovery installs the SegmentIndex records startup recovers from
+// segment manifests, millions of them on a large cluster. install updates the
+// resident maps and task counts, stored sizes included, exactly as
+// updateSegmentIndex does. updateSegmentIndex would also update the task-stats LRU
+// per record; Finish updates it once into the state those updates leave: it
+// receives the last taskStatsLRUCapacity records in install order. The fresh
+// indexMeta's LRU holds only resident build IDs, which install skips, so every
+// installed build ID is new to the LRU and adding them all would have evicted each
+// earlier one.
+type manifestIndexRecovery struct {
+	indexMeta *IndexMeta
+	latest    [taskStatsLRUCapacity]*model.SegmentIndex
+	installed int
+	finished  bool
+}
+
+func (m *IndexMeta) NewManifestIndexRecovery() meta.ManifestIndexRecovery {
+	return &manifestIndexRecovery{indexMeta: m}
+}
+
+// Install adds segIdx unless a catalog row or an earlier manifest already holds
+// its build ID, which then stays authoritative.
+func (r *manifestIndexRecovery) Install(segIdx *model.SegmentIndex) {
+	m := r.indexMeta
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segIdx.SegmentID)
+	defer locks.Unlock(segIdx.SegmentID)
+	if !m.SegmentBuildInfo.insertIfAbsent(segIdx) {
+		return
+	}
+	m.taskCounts.replaceTask(nil, segIdx)
+	m.setSegmentIndexSlot(segIdx, true)
+	r.latest[r.installed%taskStatsLRUCapacity] = segIdx
+	r.installed++
+}
+
+// Installed returns the number of records installed so far.
+func (r *manifestIndexRecovery) Installed() int { return r.installed }
+
+// Finish publishes the stored sizes and fills the task-stats LRU from the records
+// installed so far. Later calls do nothing.
+func (r *manifestIndexRecovery) Finish() {
+	if r.finished {
+		return
+	}
+	r.finished = true
+	m := r.indexMeta
+	// Off the startup path, which must not wait for reloadFromKV's publication.
+	go m.taskCounts.publishStoredSizes()
+	for i := max(0, r.installed-taskStatsLRUCapacity); i < r.installed; i++ {
+		m.SegmentBuildInfo.recordTaskStats(r.latest[i%taskStatsLRUCapacity])
+	}
 }
 
 // setSegmentIndexSlot updates the current slot and retains displaced build IDs.
@@ -1157,6 +1222,22 @@ func (m *IndexMeta) GetSegmentIndexesUnsafe(collectionID UniqueID, segID UniqueI
 	return ret
 }
 
+// rangeSegmentIndexesBySegment visits, without cloning, the SegmentIndex record
+// of each index of each segment: the records getSegmentIndexes filters. Writers
+// replace a resident record instead of mutating it, so fn may read it but must
+// neither mutate nor keep it; fn returns false to stop. Like any sync.Map
+// traversal, it may miss concurrent updates.
+func (m *IndexMeta) rangeSegmentIndexesBySegment(fn func(segIdx *model.SegmentIndex) bool) {
+	m.SegmentIndexes.Range(func(_ UniqueID, segIndexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+		next := true
+		segIndexes.Range(func(_ UniqueID, segIdx *model.SegmentIndex) bool {
+			next = fn(segIdx)
+			return next
+		})
+		return next
+	})
+}
+
 func (m *IndexMeta) GetFieldIDByIndexID(collID, indexID UniqueID) UniqueID {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1898,12 +1979,6 @@ func (m *IndexMeta) LiveIndexIDsOnColumnsLocked(collectionID int64, columns map[
 }
 
 func (m *IndexMeta) UnlockBuildIDs(buildIDs []int64) { m.KeyLock.UnlockMany(buildIDs) }
-
-func (m *IndexMeta) UpdateSegmentIndex(segIdx *model.SegmentIndex) { m.updateSegmentIndex(segIdx) }
-
-func (m *IndexMeta) PublishStoredIndexSizes() {
-	m.taskCounts.publishStoredSizes()
-}
 
 func (m *IndexMeta) StageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*meta.StagedSegmentIndexMutation, error) {
 	return m.stageSegmentIndexMutation(mut)

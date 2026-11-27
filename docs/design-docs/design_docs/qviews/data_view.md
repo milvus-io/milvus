@@ -499,6 +499,17 @@ manifest scan. It publishes the recovered metadata only after all phases
 succeed. `RecoverManager` starts its async worker only after recovery succeeds,
 so failed attempts do not retain workers or their metadata snapshots.
 
+The first DataView listing runs concurrently with the earlier phases: no
+DataView key can change before `RecoverManager`, because every writer goes
+through the manager it builds and the DDL callbacks and RPCs that reach it wait
+for the recovery barrier. A failed attempt may have deleted or written keys, so
+retries list again. `RecoverManager` runs its per-Collection passes on a
+worker pool bounded by `metastore.readConcurrency` and the CPU count, and each
+pass completes before the next starts: besides the validation rule below,
+every deletion and live-Collection validation completes before reconciliation
+persists a snapshot. A failed pass returns the error of the lowest failing
+Collection, as a serial pass would.
+
 Recovery validates every discovered Collection against CollectionMeta before
 deleting any stale prefix. This prevents a transient validation failure from
 causing partial, speculative cleanup.

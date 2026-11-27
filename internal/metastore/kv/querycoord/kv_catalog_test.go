@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
@@ -398,4 +400,78 @@ func (suite *CatalogTestSuite) TestLoadRelease() {
 
 func TestCatalogSuite(t *testing.T) {
 	suite.Run(t, new(CatalogTestSuite))
+}
+
+// getPartitionsByPrefix is the former GetPartitions: one prefix read per
+// requested collection.
+func getPartitionsByPrefix(ctx context.Context, cli kv.MetaKv, collectionIDs []int64) (map[int64][]*querypb.PartitionLoadInfo, error) {
+	result := make(map[int64][]*querypb.PartitionLoadInfo, len(collectionIDs))
+	for _, collectionID := range collectionIDs {
+		_, values, err := cli.LoadWithPrefix(ctx, EncodePartitionLoadInfoPrefix(collectionID))
+		if err != nil {
+			return nil, err
+		}
+		partitions := make([]*querypb.PartitionLoadInfo, 0, len(values))
+		for _, value := range values {
+			info := &querypb.PartitionLoadInfo{}
+			if err := proto.Unmarshal([]byte(value), info); err != nil {
+				return nil, err
+			}
+			partitions = append(partitions, info)
+		}
+		result[collectionID] = partitions
+	}
+	return result, nil
+}
+
+func (suite *CatalogTestSuite) TestGetPartitionsMatchesPrefixReads() {
+	ctx := context.Background()
+	config := GenerateEtcdConfig()
+	cli, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
+	suite.Require().NoError(err)
+	storage := etcdkv.NewEtcdKV(cli, "get-partitions-"+uuid.New().String())
+	defer storage.Close()
+	defer storage.RemoveWithPrefix(ctx, "")
+	catalog := NewCatalog(storage)
+	for _, collectionID := range []int64{1, 12, 123, 1234, 7, 99, -5} {
+		for partitionID := int64(0); partitionID < collectionID%5+1; partitionID++ {
+			suite.Require().NoError(catalog.SavePartition(ctx, &querypb.PartitionLoadInfo{CollectionID: collectionID, PartitionID: collectionID*100 + partitionID, RecoverTimes: int32(partitionID)}))
+		}
+	}
+	// Keys no collection prefix matches, including non-canonical IDs.
+	for _, key := range []string{"0123/1", "+123/1", "12", "123x/1", "/1"} {
+		suite.Require().NoError(storage.Save(ctx, PartitionLoadInfoPrefix+"/"+key, "invalid protobuf"))
+	}
+	// An orphan's value is never decoded.
+	suite.Require().NoError(storage.Save(ctx, EncodePartitionLoadInfoKey(5, 1), "invalid protobuf"))
+
+	for _, collectionIDs := range [][]int64{{1, 12, 123, 1234}, {123}, {1234, 7, 1, 1}, {99, -5, 8}, {}} {
+		want, err := getPartitionsByPrefix(ctx, storage, collectionIDs)
+		suite.Require().NoError(err)
+		got, err := catalog.GetPartitions(ctx, collectionIDs)
+		suite.Require().NoError(err)
+		suite.Require().Equal(len(want), len(got))
+		for collectionID, partitions := range want {
+			suite.Require().Contains(got, collectionID)
+			suite.Require().NotNil(got[collectionID])
+			suite.Require().Len(got[collectionID], len(partitions))
+			for i := range partitions {
+				suite.True(proto.Equal(partitions[i], got[collectionID][i]))
+			}
+		}
+	}
+
+	suite.Require().NoError(storage.Save(ctx, EncodePartitionLoadInfoKey(7, 999), "invalid protobuf"))
+	_, wantErr := getPartitionsByPrefix(ctx, storage, []int64{1, 7})
+	suite.Require().Error(wantErr)
+	partitions, err := catalog.GetPartitions(ctx, []int64{1, 7})
+	suite.EqualError(err, wantErr.Error())
+	suite.Nil(partitions)
 }

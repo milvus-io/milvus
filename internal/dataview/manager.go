@@ -17,8 +17,10 @@
 package dataview
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -31,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -38,6 +41,7 @@ import (
 
 type Catalog interface {
 	SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error
+	// ListAllDataViews returns snapshots owned by the caller.
 	ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error)
 	DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error
 	DropDataViews(ctx context.Context, collectionID int64) error
@@ -61,14 +65,64 @@ type FrontierProjector func(ctx context.Context, collectionID int64) (map[string
 // the candidate snapshot, such as a pending Import. It must not reenter Manager.
 type PendingTransformProjector func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error)
 
-type Option func(*dataViewManager)
+// ReconcileBarrier runs after RecoverManager's reconciliation pass, before its
+// worker starts. It returns the live Collections to reconcile once more because
+// an input their projection read was still being recovered; an error fails the
+// recovery.
+type ReconcileBarrier func(ctx context.Context) ([]int64, error)
+
+// Option configures a Manager, or how RecoverManager recovers one.
+type Option func(*managerOptions)
+
+type managerOptions struct {
+	frontierProjector         FrontierProjector
+	pendingTransformProjector PendingTransformProjector
+	listedViews               []*viewpb.DataViewOfCollection
+	hasListedViews            bool
+	recoveryConcurrency       int
+	reconcileBarrier          ReconcileBarrier
+}
+
+func collectOptions(options []Option) managerOptions {
+	var opts managerOptions
+	for _, option := range options {
+		option(&opts)
+	}
+	return opts
+}
 
 func WithFrontierProjector(project FrontierProjector) Option {
-	return func(m *dataViewManager) { m.frontierProjector = project }
+	return func(o *managerOptions) { o.frontierProjector = project }
 }
 
 func WithPendingTransformProjector(project PendingTransformProjector) Option {
-	return func(m *dataViewManager) { m.pendingTransformProjector = project }
+	return func(o *managerOptions) { o.pendingTransformProjector = project }
+}
+
+// WithReconcileBarrier makes RecoverManager call barrier after its
+// reconciliation pass and reconcile the Collections it returns again.
+func WithReconcileBarrier(barrier ReconcileBarrier) Option {
+	return func(o *managerOptions) { o.reconcileBarrier = barrier }
+}
+
+// WithListedDataViews hands RecoverManager the result of a ListAllDataViews
+// call the caller already made, so the catalog walk can overlap the caller's
+// earlier recovery phases. The caller must guarantee that no DataView key was
+// written or deleted since that listing, and that a failed recovery attempt
+// is not handed the same listing again: the attempt may have changed keys,
+// and RecoverManager takes ownership of views.
+func WithListedDataViews(views []*viewpb.DataViewOfCollection) Option {
+	return func(o *managerOptions) {
+		o.listedViews = views
+		o.hasListedViews = true
+	}
+}
+
+// WithRecoveryConcurrency bounds the goroutines of RecoverManager's
+// per-Collection passes. They never exceed one per CPU, the default: in the
+// common restart that persists nothing they are CPU-bound in-memory work.
+func WithRecoveryConcurrency(workers int) Option {
+	return func(o *managerOptions) { o.recoveryConcurrency = workers }
 }
 
 type Manager interface {
@@ -255,6 +309,11 @@ func NewManager(catalog Catalog, project Projector, options ...Option) Manager {
 }
 
 func newManager(ctx context.Context, catalog Catalog, project Projector, options ...Option) *dataViewManager {
+	return newSizedManager(ctx, catalog, project, 0, collectOptions(options))
+}
+
+// newSizedManager sizes the Collection state map for collections entries.
+func newSizedManager(ctx context.Context, catalog Catalog, project Projector, collections int, opts managerOptions) *dataViewManager {
 	cfg := &paramtable.Get().QueryViewCfg
 	unit := cfg.LogicalSizeBytesPerUnit.GetAsSize()
 	if unit <= 0 {
@@ -264,13 +323,14 @@ func newManager(ctx context.Context, catalog Catalog, project Projector, options
 		useInsertBytes: cfg.LogicalSizeSource.GetValue() == "insertBytes",
 		bytesPerUnit:   unit,
 		catalog:        catalog,
-		states:         make(map[int64]*collectionState),
+		published:      make(map[int64]*api.CollectionDataView, collections),
+		states:         make(map[int64]*collectionState, collections),
 		dropped:        make(map[int64]struct{}),
 		projector:      project,
 		workerCtx:      ctx,
-	}
-	for _, option := range options {
-		option(m)
+
+		frontierProjector:         opts.frontierProjector,
+		pendingTransformProjector: opts.pendingTransformProjector,
 	}
 	m.queue = newDataViewRecomputeQueue(m)
 	return m
@@ -328,8 +388,15 @@ func (m *dataViewManager) Recompute(ctx context.Context, collectionID int64) err
 //     through the declared vchannel skeleton (collectionVChannels), so empty
 //     channels and channels without loadable segments are present instead of
 //     waiting for the first loadable Segment;
+//   - with WithReconcileBarrier, the live Collections the barrier returns are
+//     reconciled once more after it;
 //   - the async Recompute worker is started, bounded by ctx (canceling ctx
 //     stops the worker).
+//
+// The per-Collection passes run on a bounded worker pool (see
+// WithRecoveryConcurrency), and each pass completes before the next starts. A
+// task touches only its own Collection's state and catalog keys, plus the
+// read-only validator and projections.
 func RecoverManager(
 	ctx context.Context,
 	catalog Catalog,
@@ -342,12 +409,20 @@ func RecoverManager(
 	if validator == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView recovery requires a Collection recovery validator")
 	}
-	views, err := catalog.ListAllDataViews(ctx)
-	if err != nil {
-		return nil, err
+	opts := collectOptions(options)
+	workers := hardware.GetCPUNum()
+	if opts.recoveryConcurrency > 0 {
+		workers = min(workers, opts.recoveryConcurrency)
+	}
+	views := opts.listedViews
+	if !opts.hasListedViews {
+		var err error
+		if views, err = catalog.ListAllDataViews(ctx); err != nil {
+			return nil, err
+		}
 	}
 
-	viewsByCollection := make(map[int64][]*viewpb.DataViewOfCollection)
+	collections := make(map[int64]*recoveredCollection, len(views))
 	for _, view := range views {
 		if view == nil || view.GetDataVersion() == nil {
 			mlog.Warn(ctx, "skip persisted DataView without DataVersion during recovery")
@@ -366,118 +441,229 @@ func RecoverManager(
 				mlog.Err(err))
 			continue
 		}
-		viewsByCollection[view.GetCollectionId()] = append(viewsByCollection[view.GetCollectionId()], view)
+		collection := collections[view.GetCollectionId()]
+		if collection == nil {
+			collection = &recoveredCollection{id: view.GetCollectionId()}
+			collections[collection.id] = collection
+		}
+		collection.views = append(collection.views, view)
+	}
+	discovered := make([]*recoveredCollection, 0, len(collections))
+	for _, collection := range collections {
+		discovered = append(discovered, collection)
+	}
+	slices.SortFunc(discovered, func(a, b *recoveredCollection) int { return cmp.Compare(a.id, b.id) })
+
+	validate := func(pending []*recoveredCollection) error {
+		return runRecoveryTasks(workers, len(pending), func(i int) error {
+			var err error
+			pending[i].recover, err = validator(ctx, pending[i].id)
+			return err
+		})
+	}
+	// Validate every discovered Collection before deleting any prefix, so a
+	// failed lookup cannot cause partial, speculative cleanup.
+	if err := validate(discovered); err != nil {
+		return nil, err
 	}
 
-	collectionIDs := make([]int64, 0, len(viewsByCollection))
-	for collectionID := range viewsByCollection {
-		collectionIDs = append(collectionIDs, collectionID)
+	live := make([]*recoveredCollection, len(liveCollectionIDs))
+	var liveOnly []*recoveredCollection
+	for i, collectionID := range liveCollectionIDs {
+		if live[i] = collections[collectionID]; live[i] == nil {
+			live[i] = &recoveredCollection{id: collectionID}
+			liveOnly = append(liveOnly, live[i])
+		}
 	}
-	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
+	// The passes find the state of every recoverable discovered Collection
+	// created up front; only a bootstrap still inserts into the manager map.
+	manager := newSizedManager(ctx, catalog, project, len(discovered)+len(liveOnly), opts)
+	for _, collection := range discovered {
+		if collection.recover {
+			collection.state = newCollectionState(collection.id)
+			manager.states[collection.id] = collection.state
+		}
+	}
+	// Load every recoverable Collection and delete the snapshots of the rest.
+	if err := runRecoveryTasks(workers, len(discovered), func(i int) error {
+		collection := discovered[i]
+		views := collection.views
+		collection.views = nil
+		if !collection.recover {
+			return catalog.DropDataViews(ctx, collection.id)
+		}
+		loadRecoveredCollection(ctx, collection.state, views)
+		if err := manager.restoreTransformFrontiers(ctx, collection.state); err != nil {
+			if !errors.Is(err, merr.ErrServiceNotReady) {
+				return err
+			}
+			mlog.Warn(ctx, "failed to restore DataView Transform frontiers", mlog.FieldCollectionID(collection.id), mlog.Err(err))
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
-	recoverCollection := make(map[int64]bool, len(collectionIDs))
-	for _, collectionID := range collectionIDs {
-		recover, err := validator(ctx, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		recoverCollection[collectionID] = recover
+	// Validate the live Collections without a snapshot before reconciliation
+	// persists anything. Collection lifecycle DDLs cannot run before recovery
+	// completes, so a discovered Collection keeps its answer from above.
+	if err := validate(liveOnly); err != nil {
+		return nil, err
 	}
 
-	manager := newManager(ctx, catalog, project, options...)
-	for _, collectionID := range collectionIDs {
-		if !recoverCollection[collectionID] {
-			continue
-		}
-		for _, view := range viewsByCollection[collectionID] {
-			state := manager.getOrCreateState(view.GetCollectionId())
-			state.mu.Lock()
-			persisted := canonicalDataViewClone(view)
-			key := protoVersionToStruct(view.GetDataVersion())
-			if existing := state.versions[key]; existing != nil {
-				if !proto.Equal(existing.view, persisted) {
-					state.mu.Unlock()
-					mlog.Warn(ctx, "skip persisted DataView with conflicting snapshots under one version during recovery",
-						mlog.Int64("collectionID", view.GetCollectionId()),
-						mlog.String("version", key.String()))
-					continue
-				}
-				state.mu.Unlock()
-				continue
-			}
-			entry := newVersionEntry(persisted)
-			state.versions[key] = entry
-			if state.latest == nil || compareDataVersion(entry.view.GetDataVersion(), state.latest.view.GetDataVersion()) > 0 {
-				state.latest = entry
-			}
-			state.mu.Unlock()
-		}
-	}
-	for _, collectionID := range collectionIDs {
-		if recoverCollection[collectionID] {
-			state := manager.getState(collectionID)
-			if err := manager.restoreTransformFrontiers(ctx, state); err != nil {
-				if !errors.Is(err, merr.ErrServiceNotReady) {
-					return nil, err
-				}
-				mlog.Warn(ctx, "failed to restore DataView Transform frontiers", mlog.FieldCollectionID(collectionID), mlog.Err(err))
-			}
-			continue
-		}
-		if err := catalog.DropDataViews(ctx, collectionID); err != nil {
-			return nil, err
-		}
-	}
 	// Recovery reconciliation: SegmentMeta is the source of truth. Rebuild
 	// every recoverable live Collection's snapshot from the projection so a
 	// Collection that predates DataView management gets its first snapshot and
 	// a stale one converges. recomputeNow is a no-op when the rebuilt snapshot
 	// matches the persisted one, which also makes re-running this pass inside
-	// the initMeta retry safe.
-	for _, collectionID := range liveCollectionIDs {
-		recover, err := validator(ctx, collectionID)
-		if err != nil {
-			return nil, err
+	// the initMeta retry safe. A per-Collection failure is logged and skipped.
+	reconcile := func(collection *recoveredCollection) {
+		if !collection.recover {
+			return
 		}
-		if !recover {
-			continue
-		}
-		if _, hasSnapshot := viewsByCollection[collectionID]; !hasSnapshot {
+		if collection.state == nil {
 			// First snapshot for a Collection that predates DataView
 			// management: seed it through the declared vchannel skeleton so
 			// empty channels and channels without loadable segments are
 			// present (recomputeNow could only discover shards from
 			// projected segments).
-			segments, err := project(ctx, collectionID, nil)
+			segments, err := project(ctx, collection.id, nil)
 			if err != nil {
 				mlog.Warn(ctx, "failed to project segments for DataView bootstrap",
-					mlog.Int64("collectionID", collectionID), mlog.Err(err))
-				continue
+					mlog.Int64("collectionID", collection.id), mlog.Err(err))
+				return
 			}
 			if _, err := manager.OnBootstrapCollection(ctx, BootstrapCollectionDataViewEvent{
-				CollectionID: collectionID,
-				VChannels:    collectionVChannels[collectionID],
+				CollectionID: collection.id,
+				VChannels:    collectionVChannels[collection.id],
 				Segments:     segments,
 			}); err != nil {
 				mlog.Warn(ctx, "failed to bootstrap DataView for collection during recovery",
-					mlog.Int64("collectionID", collectionID), mlog.Err(err))
+					mlog.Int64("collectionID", collection.id), mlog.Err(err))
+				return
 			}
-			continue
+			// A later pass rebuilds it like any recovered snapshot.
+			collection.state = manager.getState(collection.id)
+			return
 		}
-		if _, err := manager.recomputeNow(ctx, collectionID, project); err != nil {
+		if _, err := manager.recomputeNow(ctx, collection.id, project); err != nil {
 			mlog.Warn(ctx, "failed to rebuild DataView for collection during recovery",
-				mlog.Int64("collectionID", collectionID), mlog.Err(err))
+				mlog.Int64("collectionID", collection.id), mlog.Err(err))
 		}
+	}
+	reconcileAll := func(pending []*recoveredCollection) {
+		// reconcile logs and skips every failure, so no task fails.
+		_ = runRecoveryTasks(workers, len(pending), func(i int) error {
+			reconcile(pending[i])
+			return nil
+		})
+	}
+	reconcileAll(live)
+	if opts.reconcileBarrier != nil {
+		ids, err := opts.reconcileBarrier(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 {
+			recheck := make(map[int64]struct{}, len(ids))
+			for _, id := range ids {
+				recheck[id] = struct{}{}
+			}
+			again := make([]*recoveredCollection, 0, len(recheck))
+			for _, collection := range live {
+				if _, ok := recheck[collection.id]; ok {
+					again = append(again, collection)
+				}
+			}
+			reconcileAll(again)
+		}
+	}
+	// Publish what reconciliation did not. Nothing drops a state before
+	// RecoverManager returns, so a prepared latest entry is already published.
+	for _, state := range manager.states {
+		state.mu.Lock()
+		if state.publishedEntry != state.latest {
+			manager.publishDataViewLocked(state)
+		}
+		state.mu.Unlock()
 	}
 	// Failed recovery attempts must not leave a worker retaining their
 	// snapshots and SegmentMeta projection until the server context ends.
-	for _, state := range manager.states {
-		state.mu.Lock()
-		manager.publishDataViewLocked(state)
-		state.mu.Unlock()
-	}
 	manager.startWorker()
 	return manager, nil
+}
+
+// recoveredCollection is a Collection that recovery found in the persisted
+// snapshots or in liveCollectionIDs. Only a recoverable discovered Collection
+// has a state before reconciliation.
+type recoveredCollection struct {
+	id      int64
+	views   []*viewpb.DataViewOfCollection
+	recover bool
+	state   *collectionState
+}
+
+// loadRecoveredCollection installs the persisted snapshots of a recoverable
+// Collection, keeping the first of identical snapshots under one version. The
+// snapshots are owned by the recovery, so they are canonicalized in place.
+func loadRecoveredCollection(ctx context.Context, state *collectionState, views []*viewpb.DataViewOfCollection) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for _, view := range views {
+		if !isCanonicalDataView(view) {
+			canonicalizeDataView(view)
+		}
+		key := protoVersionToStruct(view.GetDataVersion())
+		if existing := state.versions[key]; existing != nil {
+			if !proto.Equal(existing.view, view) {
+				mlog.Warn(ctx, "skip persisted DataView with conflicting snapshots under one version during recovery",
+					mlog.Int64("collectionID", state.id),
+					mlog.String("version", key.String()))
+			}
+			continue
+		}
+		entry := newVersionEntry(view)
+		state.versions[key] = entry
+		if state.latest == nil || compareDataVersion(entry.view.GetDataVersion(), state.latest.view.GetDataVersion()) > 0 {
+			state.latest = entry
+		}
+	}
+}
+
+// runRecoveryTasks runs task(0) .. task(n-1) on up to workers goroutines,
+// starting indexes in ascending order. After a failure no further index
+// starts and running tasks finish, so every index below the lowest failed one
+// has completed: that failure, which is returned, is the one a serial pass
+// would stop at.
+func runRecoveryTasks(workers, n int, task func(i int) error) error {
+	var (
+		next     atomic.Int64
+		failed   atomic.Bool
+		mu       sync.Mutex
+		failedAt = n
+		firstErr error
+		wg       sync.WaitGroup
+	)
+	for range min(max(workers, 1), n) {
+		wg.Go(func() {
+			for !failed.Load() {
+				i := int(next.Add(1) - 1)
+				if i >= n {
+					return
+				}
+				if err := task(i); err != nil {
+					mu.Lock()
+					if i < failedAt {
+						failedAt, firstErr = i, err
+					}
+					mu.Unlock()
+					failed.Store(true)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return firstErr
 }
 
 func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
@@ -1031,17 +1217,6 @@ func (m *dataViewManager) lockStateForMutation(collectionID int64) (*collectionS
 	}
 }
 
-func (m *dataViewManager) getOrCreateState(collectionID int64) *collectionState {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	state := m.states[collectionID]
-	if state == nil {
-		state = newCollectionState(collectionID)
-		m.states[collectionID] = state
-	}
-	return state
-}
-
 func acquireRefLocked(state *collectionState, entry *versionEntry) DataViewRef {
 	if entry == nil || entry.isTombstone {
 		return nil
@@ -1405,16 +1580,55 @@ func canonicalizePartitionSegments(partition *viewpb.DataViewOfPartition) {
 	}
 }
 
+// dataViewMembershipEqual reports whether two snapshots are equal ignoring
+// their DataVersion. Every stored snapshot is canonical, so the common case
+// compares the snapshots as they are instead of canonical deep clones.
 func dataViewMembershipEqual(left, right *viewpb.DataViewOfCollection) bool {
-	left = canonicalDataViewClone(left)
-	right = canonicalDataViewClone(right)
-	if left != nil {
-		left.DataVersion = nil
+	if !isCanonicalDataView(left) || !isCanonicalDataView(right) {
+		left = canonicalDataViewClone(left)
+		right = canonicalDataViewClone(right)
 	}
-	if right != nil {
-		right.DataVersion = nil
+	return proto.Equal(withoutDataVersion(left), withoutDataVersion(right))
+}
+
+// isCanonicalDataView reports whether canonicalizeDataView leaves view
+// unchanged: shards and partitions strictly ordered by key, and partitions
+// with aligned arrays and strictly increasing Segment IDs.
+func isCanonicalDataView(view *viewpb.DataViewOfCollection) bool {
+	shards := view.GetShards()
+	for i, shard := range shards {
+		if shard == nil || (i > 0 && shards[i-1].GetVchannel() >= shard.GetVchannel()) {
+			return false
+		}
+		partitions := shard.GetPartitions()
+		for j, partition := range partitions {
+			if partition == nil || (j > 0 && partitions[j-1].GetPartitionId() >= partition.GetPartitionId()) {
+				return false
+			}
+			segmentIDs := partition.GetSegmentIds()
+			if len(partition.GetSegmentManifestVersions()) != len(segmentIDs) ||
+				len(partition.GetSegmentTransformStartAfterTimeticks()) != len(segmentIDs) {
+				return false
+			}
+			for k := 1; k < len(segmentIDs); k++ {
+				if segmentIDs[k-1] >= segmentIDs[k] {
+					return false
+				}
+			}
+		}
 	}
-	return proto.Equal(left, right)
+	return true
+}
+
+// withoutDataVersion returns a read-only copy of view without its
+// DataVersion; the copy shares the shards of view.
+func withoutDataVersion(view *viewpb.DataViewOfCollection) *viewpb.DataViewOfCollection {
+	if view == nil {
+		return nil
+	}
+	membership := &viewpb.DataViewOfCollection{CollectionId: view.GetCollectionId(), Shards: view.GetShards(), SchemaVersion: view.GetSchemaVersion()}
+	membership.ProtoReflect().SetUnknown(view.ProtoReflect().GetUnknown())
+	return membership
 }
 
 func dataVersionFromView(view *viewpb.DataViewOfCollection) *viewpb.DataVersion {
@@ -1537,9 +1751,6 @@ func (m *dataViewManager) publishDataViewLocked(state *collectionState) {
 	m.mu.RUnlock()
 	if !current || m.published[state.id] == state.native {
 		return
-	}
-	if m.published == nil {
-		m.published = make(map[int64]*api.CollectionDataView)
 	}
 	m.published[state.id] = state.native
 	for _, listener := range m.listeners {
