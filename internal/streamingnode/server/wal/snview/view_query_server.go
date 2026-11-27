@@ -120,6 +120,17 @@ type pchannelWALProvider interface {
 	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
 }
 
+func (s *PChannelViewQueryServer) PrewarmOnView(ctx context.Context, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
+	if req == nil || req.GetShardId() == nil {
+		return viewquery.NewServer(nil, s.scheduler).PrewarmOnView(ctx, req)
+	}
+	provider, err := s.taskProviderForVChannel(ctx, req.GetShardId().GetVchannel())
+	if err != nil {
+		return nil, err
+	}
+	return viewquery.NewServer(provider, s.scheduler).PrewarmOnView(ctx, req)
+}
+
 type prefetchedSearchOnViewStream struct {
 	viewpb.ViewQueryService_SearchOnViewStreamServer
 	initial *viewpb.SearchOnViewStreamRequest

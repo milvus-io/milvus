@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -455,6 +456,14 @@ func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
 		return
 	}
 	module.ReleaseQueryResource(req)
+}
+
+func (m *PChannelRecoveryManager) Prewarm(ctx context.Context, key qviews.QueryViewKey) error {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil || module.queryResources == nil {
+		return viewerror.NewViewInvalidated("query view %s is unavailable", key.String())
+	}
+	return module.queryResources.Prewarm(ctx, key)
 }
 
 func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {

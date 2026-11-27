@@ -41,6 +41,10 @@ setSearchFanoutThreadCoreCoefficient(float coefficient);
 folly::CPUThreadPoolExecutor*
 getLoadCPUExecutor();
 
+// Optional segment prewarming must not occupy the foreground load workers.
+folly::CPUThreadPoolExecutor*
+getPrewarmCPUExecutor();
+
 folly::CPUThreadPoolExecutor*
 getJsonStatsBuildExecutor();
 

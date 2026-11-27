@@ -78,6 +78,8 @@
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "futures/Executor.h"
+#include "futures/future_c.h"
 #include "gtest/gtest.h"
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
@@ -87,6 +89,7 @@
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/transaction/transaction.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -98,7 +101,9 @@
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
+#include "segcore/segment_c.h"
 #include "segcore/Types.h"
+#include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/SystemIndexTranslator.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
@@ -107,6 +112,7 @@
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
@@ -1350,6 +1356,208 @@ TEST_P(TestLazyManifest, LazyManifestPreservesInitialMultiFieldTask) {
         segment_impl->TestGetPublishedStateSnapshot();
     EXPECT_EQ(
         dropped_column_snapshot->runtime->fields.count(fields.at("int64")), 0);
+}
+
+TEST_P(TestLazyManifest, PrewarmLoadsLazyColumnsAndPkIndex) {
+    LazyColumnGroupGuard lazy_group_guard(true);
+    // One row group per cache cell, so the lazy group spans several chunks.
+    StorageV2CellTargetGuard cell_target_guard(1);
+    auto warmup_policies =
+        milvus::cachinglayer::TieredStorageConfig::GetInstance()
+            .warmup_policies();
+    warmup_policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(warmup_policies);
+
+    const auto base_path =
+        UniqueManifestTestPath(std::string("lazy_manifest_prewarm_") +
+                               (GetParam() ? "varchar" : "int64"));
+    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
+    StorageV2TempDirGuard dir_guard(fs, base_path);
+    // Enough rows for the lazy group to span several 1 MB row groups.
+    milvus::test::V3SegmentTestData test_data(
+        schema_,
+        8,
+        16384,
+        128,
+        TestLocalPath,
+        base_path,
+        LazyManifestTestGroupPattern(schema_));
+    auto manifest_segment =
+        CreateV3ManifestSegment(test_data, 3190 + (GetParam() ? 100 : 0));
+    auto* segment_impl =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(manifest_segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+    auto runtime = segment_impl->TestGetPublishedStateSnapshot()->runtime;
+    ASSERT_NE(runtime->pk_index_slot, nullptr);
+    EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+    auto column = runtime->fields.at(fields.at("int64"));
+    ASSERT_GT(column->num_chunks(), 2);
+    int64_t offset = 0;
+    for (const std::string name : {"int64", "string1"}) {
+        EXPECT_FALSE(
+            runtime->fields.at(fields.at(name))->CellsLoaded(&offset, 1))
+            << name;
+    }
+
+    // The cell target is 1 byte, so a run holds as many chunks as the load batch
+    // has bytes, and the admission capacity caps the batch: num_chunks - 1 warms
+    // the lazy group in two runs, the second a single chunk.
+    const auto batch_bytes = column->num_chunks() - 1;
+    milvus::test::ScopedLoadTransientBudget batch_guard(batch_bytes);
+    ASSERT_EQ(FieldDataLoadBatchSplitTargetBytes(), batch_bytes);
+    segment_impl->Prewarm(nullptr, {});
+
+    std::vector<int64_t> offsets(column->NumRows());
+    std::iota(offsets.begin(), offsets.end(), 0);
+    for (const std::string name : {"int64", "string1", "string2"}) {
+        EXPECT_TRUE(runtime->fields.at(fields.at(name))
+                        ->CellsLoaded(offsets.data(), offsets.size()))
+            << name;
+    }
+    EXPECT_TRUE(runtime->pk_index_slot->IsCached(0));
+    ASSERT_NE(runtime->timestamp_index_slot, nullptr);
+    EXPECT_TRUE(runtime->timestamp_index_slot->IsCached(0));
+}
+
+TEST_P(TestLazyManifest, AsyncPrewarmKeepsForegroundLoadAvailable) {
+    auto* load_executor = futures::getLoadCPUExecutor();
+    auto load_threads = load_executor->numThreads();
+    load_executor->setNumThreads(1);
+    auto restore_load_threads =
+        folly::makeGuard([&] { load_executor->setNumThreads(load_threads); });
+    auto await_future = [](CFuture* future) {
+        while (!future_is_ready(future)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        void* result = nullptr;
+        auto status = future_leak_and_get(future, &result);
+        auto code = status.error_code;
+        if (code != ErrorCode::Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        return code;
+    };
+    LazyColumnGroupGuard lazy_group_guard(true);
+    const auto previous_async =
+        storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore_async = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(previous_async);
+    });
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy = CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    for (bool async_enabled : {false, true}) {
+        SCOPED_TRACE(async_enabled);
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled);
+        auto path = UniqueManifestTestPath("prewarm_cancel_cold_metadata");
+        auto fs = GetDefaultArrowFileSystem();
+        StorageV2TempDirGuard dir_guard(fs, path);
+        milvus::test::V3SegmentTestData data(
+            schema_,
+            1,
+            64,
+            128,
+            TestLocalPath,
+            path,
+            PerFieldManifestTestGroupPattern(schema_));
+        auto segment = CreateV3ManifestSegment(data, 3195);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        auto current = sealed->TestGetPublishedStateSnapshot();
+        auto reader =
+            std::make_shared<BlockingMetadataReader>(current->runtime->reader);
+        auto groups = reader->get_column_groups();
+        const auto field = fields.at("int64");
+        const auto name = schema_->get_storage_column_name(field);
+        size_t index = 0;
+        for (; index < groups->size(); ++index) {
+            const auto& columns = groups->at(index)->columns;
+            if (std::find(columns.begin(), columns.end(), name) !=
+                columns.end()) {
+                break;
+            }
+        }
+        ASSERT_LT(index, groups->size());
+        auto staging_segment = CreateSealedSegment(schema_);
+        auto* staging =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(staging_segment.get());
+        ASSERT_NE(staging, nullptr);
+        auto column =
+            staging
+                ->TestStageLoadColumnGroupsWithReader(
+                    groups,
+                    storage::LoonFFIPropertiesSingleton::GetInstance()
+                        .GetProperties(),
+                    /*eager_cg_field_ids=*/{},
+                    /*lazy_cg_field_ids=*/{{static_cast<int>(index), {field}}},
+                    *current->load_info,
+                    schema_,
+                    reader)
+                .front();
+        auto proxy = std::dynamic_pointer_cast<ProxyChunkColumn>(column);
+        ASSERT_NE(proxy, nullptr);
+        ASSERT_TRUE(proxy->IsLazy());
+        ASSERT_FALSE(proxy->IsMaterialized());
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        runtime->fields.insert_or_assign(field, column);
+        sealed->TestPublishRuntimeResourceState(std::move(runtime));
+
+        auto foreground = CreateSealedSegment(schema_, nullptr, 3196);
+        auto* load_segment =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(foreground.get());
+        ASSERT_NE(load_segment, nullptr);
+        load_segment->SetLoadInfo(MakeV3ManifestLoadInfo(data, 3196));
+
+        auto load_executing =
+            milvus::monitor::internal_cgo_executing_task_total_load.Value();
+        auto prewarm_executing =
+            milvus::monitor::internal_cgo_executing_task_total_prewarm.Value();
+        reader->Arm();
+        auto started = reader->Started();
+        const int64_t field_id = field.get();
+        using FuturePtr = std::unique_ptr<CFuture, decltype(&future_destroy)>;
+        FuturePtr warm(
+            AsyncSegmentPrewarm(
+                static_cast<SegmentInterface*>(sealed), &field_id, 1),
+            future_destroy);
+        auto warming = std::async(std::launch::async, await_future, warm.get());
+        FuturePtr load(nullptr, future_destroy);
+        std::future<int> loading;
+        auto release = folly::makeGuard([&] { reader->Release(); });
+        ASSERT_EQ(started.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(milvus::monitor::internal_cgo_pool_size_prewarm.Value(), 1);
+        EXPECT_EQ(
+            milvus::monitor::internal_cgo_executing_task_total_prewarm.Value(),
+            prewarm_executing + 1);
+        EXPECT_EQ(
+            milvus::monitor::internal_cgo_executing_task_total_load.Value(),
+            load_executing);
+
+        load.reset(AsyncSegmentLoad(
+            CTraceContext{}, static_cast<SegmentInterface*>(load_segment)));
+        loading = std::async(std::launch::async, await_future, load.get());
+        EXPECT_EQ(loading.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready)
+            << "foreground load waited for the blocked prewarm";
+        EXPECT_FALSE(future_is_ready(warm.get()));
+
+        future_cancel(warm.get());
+        reader->Release();
+        EXPECT_EQ(warming.get(), ErrorCode::FollyCancel);
+        EXPECT_EQ(loading.get(), ErrorCode::Success);
+        EXPECT_FALSE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->async_calls, async_enabled ? 1 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 1);
+
+        OpContext fresh_ctx;
+        sealed->Prewarm(&fresh_ctx, {field});
+        EXPECT_TRUE(proxy->IsMaterialized());
+        EXPECT_EQ(reader->async_calls, async_enabled ? 2 : 0);
+        EXPECT_EQ(reader->sync_calls, async_enabled ? 0 : 2);
+    }
 }
 
 TEST_P(TestLazyManifest, LazyManifestDefersTextMatchAfterIndexCreation) {

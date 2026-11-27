@@ -59,6 +59,7 @@ QueryViewStateMachine.Acquire(qv)
   -> wait for runtime build
   -> advance QueryRuntime to the oldest referenced DataVersion
   -> invoke OnReady asynchronously
+  -> optional, independent PrewarmOnView requests borrow the serving View and warm its modules
 ```
 
 `AlterLoadConfig` does not create VChannel-local load state. QueryView metadata

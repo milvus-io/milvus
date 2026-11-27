@@ -7,6 +7,7 @@ import (
 )
 
 type QueryPlanProvider interface {
+	GetPrewarmPlan(context.Context, *viewpb.GetPrewarmPlanRequest) (*viewpb.GetPrewarmPlanResponse, error)
 	GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 	GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error)
 }

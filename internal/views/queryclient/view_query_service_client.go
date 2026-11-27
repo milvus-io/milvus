@@ -17,6 +17,7 @@ type compositeViewQueryServiceClient struct {
 }
 
 type StreamingNodeViewQueryServiceClient interface {
+	PrewarmOnView(context.Context, types.PChannelInfoAssigned, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
 	SearchOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	SearchOnViewStream(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
@@ -24,6 +25,7 @@ type StreamingNodeViewQueryServiceClient interface {
 }
 
 type QueryNodeViewQueryServiceClient interface {
+	PrewarmOnView(context.Context, int64, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
@@ -96,4 +98,21 @@ func (c *compositeViewQueryServiceClient) StatisticsOnView(ctx context.Context, 
 		return nil, invalidWorkNodeError(node)
 	}
 	return c.queryNode.StatisticsOnView(ctx, qn.ID, req)
+}
+
+func (c *compositeViewQueryServiceClient) PrewarmOnView(ctx context.Context, node qviews.WorkNode, plan *qviews.PrewarmPlan) error {
+	req := &viewpb.PrewarmOnViewRequest{ShardId: plan.Plan.ShardId, Version: plan.Plan.Version}
+	switch target := node.(type) {
+	case qviews.StreamingNode:
+		if target.PChannel != plan.StreamingNode.Channel.Name {
+			return viewerror.NewUnknownError("prewarm owner does not match plan")
+		}
+		_, err := c.streamingNode.PrewarmOnView(ctx, plan.StreamingNode, req)
+		return err
+	case qviews.QueryNode:
+		_, err := c.queryNode.PrewarmOnView(ctx, target.ID, req)
+		return err
+	default:
+		return invalidWorkNodeError(node)
+	}
 }

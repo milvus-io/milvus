@@ -480,6 +480,10 @@ func (c *dqlRetryServiceClient) QueryOnView(ctx context.Context, _ qviews.WorkNo
 	return resp, viewerror.ConvertViewError("QueryOnView", err)
 }
 
+func (c *dqlRetryServiceClient) PrewarmOnView(context.Context, qviews.WorkNode, *qviews.PrewarmPlan) error {
+	return grpcstatus.Error(codes.Unimplemented, "prewarm is outside the auto-load test fixture")
+}
+
 func (c *dqlRetryServiceClient) StatisticsOnView(ctx context.Context, _ qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
 	resp, err := c.client.StatisticsOnView(ctx, req)
 	return resp, viewerror.ConvertViewError("StatisticsOnView", err)

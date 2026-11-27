@@ -27,6 +27,15 @@ not grant access to a View. There is no field allowlist in the plan and no
 Phase 1 declaration of future requery fields. Field errors are reported when
 the corresponding request is planned/executed against the selected resources.
 
+## Prewarm topology plans
+
+`GetPrewarmPlan` is a separate method on the query-plan service. The caller
+supplies one exact advertised Up View and the captured load-info version. SN
+acquires that View's serving lease and returns its workers, renewing the lease
+before returning. This operation has no MVCC, expression, optimizer or query
+execution step. The client pins the SN assignment for both phases and performs
+no planning or worker retry. Ordinary query planning remains unchanged.
+
 ## Three distinct timestamp contracts
 
 | Input | Meaning | Retry behavior |

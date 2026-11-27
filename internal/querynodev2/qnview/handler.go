@@ -1,6 +1,7 @@
 package qnview
 
 import (
+	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/views/optimizer"
@@ -56,6 +57,8 @@ type QNQueryViewHandler struct {
 	shards         map[qviews.ShardID]*qnShardView
 	segMgr         SegmentManager
 	localOptimizer optimizer.LocalOptimizer
+	prewarmCtx     context.Context
+	cancelPrewarm  context.CancelFunc
 	stopping       bool
 	closeOnce      sync.Once
 	closing        chan struct{}
@@ -64,10 +67,13 @@ type QNQueryViewHandler struct {
 
 // NewQNQueryViewHandler creates a new QNQueryViewHandler.
 func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
+	prewarmCtx, cancelPrewarm := context.WithCancel(context.Background())
 	return &QNQueryViewHandler{
 		shards:         make(map[qviews.ShardID]*qnShardView),
 		segMgr:         segMgr,
 		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		prewarmCtx:     prewarmCtx,
+		cancelPrewarm:  cancelPrewarm,
 		closing:        make(chan struct{}),
 		closed:         make(chan struct{}),
 	}

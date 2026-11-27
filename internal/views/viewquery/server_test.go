@@ -281,3 +281,37 @@ func TestServerSearchPassesExecutionOptionsAndReleasesOwner(t *testing.T) {
 	require.Same(t, req.ExecutionOptions, SearchOptions(scheduler.searchTasks))
 	require.Equal(t, 1, provider.searchTasks.releaseCount)
 }
+
+// Prewarm only needs the resource identity: there is no predicate or MVCC wait.
+func TestServerPrewarmValidatesIdentityAndPreservesFailure(t *testing.T) {
+	failure := viewerror.NewViewNotFound("retired view")
+	provider := &prewarmTaskProvider{failure: failure}
+	server := NewServer(provider, &fakeScheduler{})
+	for _, req := range []*viewpb.PrewarmOnViewRequest{nil, {}, {ShardId: testShardID().IntoProto()}, {ShardId: &viewpb.ShardID{}, Version: testVersion().IntoProto()}} {
+		_, err := server.PrewarmOnView(t.Context(), req)
+		require.Error(t, err)
+	}
+	require.Zero(t, provider.calls)
+	req := &viewpb.PrewarmOnViewRequest{ShardId: testShardID().IntoProto(), Version: testVersion().IntoProto()}
+	_, err := server.PrewarmOnView(t.Context(), req)
+	require.Same(t, failure, err)
+	require.Same(t, req, provider.request)
+	provider.failure = nil
+	resp, err := server.PrewarmOnView(t.Context(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, 2, provider.calls)
+}
+
+type prewarmTaskProvider struct {
+	TaskProvider
+	request *viewpb.PrewarmOnViewRequest
+	failure error
+	calls   int
+}
+
+func (p *prewarmTaskProvider) Prewarm(_ context.Context, req *viewpb.PrewarmOnViewRequest) error {
+	p.calls++
+	p.request = req
+	return p.failure
+}

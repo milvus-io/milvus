@@ -72,3 +72,11 @@ func (w *walAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.S
 	}
 	return w.queryViewHandler, nil
 }
+
+func (w *walAdaptorImpl) Prewarm(ctx context.Context, req *viewpb.PrewarmOnViewRequest) error {
+	h, err := w.queryViewTaskHandler(qviews.FromProtoShardID(req.GetShardId()))
+	if err != nil {
+		return err
+	}
+	return h.Prewarm(ctx, req)
+}

@@ -20,6 +20,7 @@ type replicaRouter struct {
 	source   QueryPlanClient
 	channels map[string]*replicaRoute
 	closed   bool
+	done     chan struct{}
 }
 
 type replicaRoute struct {
@@ -32,7 +33,7 @@ type replicaRoute struct {
 }
 
 func newReplicaRouter(source QueryPlanClient) *replicaRouter {
-	return &replicaRouter{source: source, channels: make(map[string]*replicaRoute)}
+	return &replicaRouter{source: source, channels: make(map[string]*replicaRoute), done: make(chan struct{})}
 }
 
 func (r *replicaRouter) route(vc string) (*replicaRoute, error) {
@@ -66,7 +67,11 @@ func (r *replicaRouter) route(vc string) (*replicaRoute, error) {
 func (r *replicaRouter) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
 	r.closed = true
+	close(r.done)
 	for _, route := range r.channels {
 		route.mu.Lock()
 		route.closed = true
