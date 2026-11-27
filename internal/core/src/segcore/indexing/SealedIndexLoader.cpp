@@ -12,6 +12,7 @@
 #include "common/resource_c.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
+
 #include "index/Families.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/LoadResource.h"
@@ -19,6 +20,7 @@
 #include "index/LegacyIndexLoad.h"
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LoadConfig.h"
 #include "index/Meta.h"
@@ -166,6 +168,10 @@ SealedIndexLoader::SealedIndexLoader(
     const auto nested =
         milvus::index::ReadNestedConfigParam(config_, "sealed index translator")
             .value_or(false);
+    const bool legacy_row_domain =
+        milvus::index::GetValueFromConfig<bool>(
+            config_, milvus::index::LEGACY_ROW_DOMAIN_KEY)
+            .value_or(false);
     auto adapted = milvus::index::AdaptIndexType({
         .index_type = index_type_,
         .field_type = index_load_info_.field_type,
@@ -179,6 +185,22 @@ SealedIndexLoader::SealedIndexLoader(
     const auto value_type = adapted.value_type;
     source_family_ = adapted.family;
     config_ = std::move(adapted.params);
+
+    if (nested && !IsVectorDataType(index_load_info_.field_type) &&
+        legacy_row_domain) {
+        skipped_incompatible_nested_ = true;
+        family_ = adapted.family;
+        value_type_ = value_type;
+        caps_ = {};
+        LOG_WARN(
+            "skip legacy row-domain StructArray scalar index: segment={}, "
+            "field={}, index_id={}, family={}",
+            index_load_info_.segment_id,
+            index_load_info_.field_id,
+            index_load_info_.index_id,
+            family_);
+        return;
+    }
 
     const auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
@@ -239,6 +261,40 @@ SealedIndexLoader::SealedIndexLoader(
     AssertInfo(static_cast<bool>(loader_entry),
                "no index loader is registered for family {}",
                resolved_family);
+    if (nested && !IsVectorDataType(index_load_info_.field_type) &&
+        loader_entry.check_nested_compatible != nullptr) {
+        const index::OpenedIndexSource opened_source =
+            packed_source ? index::OpenedIndexSource{*packed_source}
+                          : index::OpenedIndexSource{index::LegacyIndexSource{
+                                prepared_legacy_source_,
+                                *file_manager_context_.use_async_load}};
+        auto check =
+            loader_entry.check_nested_compatible(opened_source, config_);
+        const bool is_compatible_nested =
+            *file_manager_context_.use_async_load
+                ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                      storage::ResolveAsyncLoadExecutor({}, priority),
+                      folly::coro::co_withCancellation(token,
+                                                       std::move(check))))
+                : folly::coro::blockingWait(std::move(check));
+        if (!is_compatible_nested) {
+            skipped_incompatible_nested_ = true;
+            family_ = std::move(resolved_family);
+            value_type_ = value_type;
+            caps_ = {};
+            prepared_legacy_source_.reset();
+            LOG_WARN(
+                "skip incompatible legacy nested scalar index: segment={}, "
+                "field={}, index_id={}, family={}, scalar_version={}",
+                index_load_info_.segment_id,
+                index_load_info_.field_id,
+                index_load_info_.index_id,
+                family_,
+                scalar_version);
+            return;
+        }
+    }
+
     family_ = std::move(resolved_family);
     value_type_ = value_type;
     caps_ = loader_entry.derive_caps(config_);
@@ -346,6 +402,9 @@ SealedIndexLoader::EstimatedResources() const {
 
 index::IndexPtr
 SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
+    if (skipped_incompatible_nested_) {
+        return nullptr;
+    }
     // Release preparation metadata after this attempt, including early failure.
     auto prepared_source = std::move(prepared_legacy_source_);
     int64_t segment_id = std::stoll(index_load_info_.segment_id);

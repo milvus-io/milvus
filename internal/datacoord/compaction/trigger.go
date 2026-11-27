@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
@@ -911,6 +912,22 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *meta.SegmentInfo, 
 }
 
 func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo) bool {
+	if t.indexMeta != nil {
+		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
+		for _, idx := range indexIDToSegIdxes {
+			if idx.LegacyRowDomain && !idx.IsDeleted && idx.IndexState == commonpb.IndexState_Finished && idx.HasArtifact() {
+				if t.indexEngineVersionManager != nil && t.indexEngineVersionManager.ResolveScalarIndexVersion() >= 4 {
+					mlog.Info(context.TODO(), "segment has legacy row-domain scalar index, trigger compaction",
+						mlog.FieldSegmentID(segment.ID),
+						mlog.FieldIndexID(idx.IndexID),
+						mlog.Strings("indexFileKeys", idx.IndexFileKeys))
+					return true
+				}
+				break
+			}
+		}
+	}
+
 	if Params.DataCoordCfg.AutoUpgradeSegmentIndex.GetAsBool() {
 		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)

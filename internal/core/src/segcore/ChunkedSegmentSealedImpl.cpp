@@ -1283,6 +1283,40 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(
         return;
     }
 
+    if (info.skipped) {
+        LOG_INFO(
+            "skip incompatible legacy nested scalar index, fieldID:{}, "
+            "segmentID:{}",
+            info.field_id,
+            id_);
+        if (is_replace) {
+            std::unique_lock lck(mutex_);
+            if (target_runtime == nullptr) {
+                owned_runtime = CloneRuntimeResourceState(snapshot->runtime);
+                target_runtime = owned_runtime.get();
+            }
+            for (auto& retired : erase_index_entries(
+                     target_runtime->indexes,
+                     field_id,
+                     [](const IndexRegistration& entry) {
+                         return !is_vector_registration(entry) &&
+                                !is_text_registration(entry);
+                     })) {
+                retire_indexing(std::move(retired));
+            }
+            lck.unlock();
+            if (staged_state != nullptr) {
+                DropIndexFromState(*staged_state, field_id);
+            } else if (owned_runtime != nullptr) {
+                auto published_runtime =
+                    ToConstRuntimeState(std::move(owned_runtime));
+                PublishIndexDroppedLocked(field_id, published_runtime, nullptr);
+                cancel_retired_indexings();
+            }
+        }
+        return;
+    }
+
     const auto& visible_state =
         staged_state != nullptr ? *staged_state : *snapshot;
     bool has_index =

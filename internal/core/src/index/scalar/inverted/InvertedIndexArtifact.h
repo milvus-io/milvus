@@ -36,7 +36,8 @@ CreateInvertedIndexDirectory(const std::string& parent);
 class InvertedIndexArtifact final : public storage::Artifact {
  public:
     InvertedIndexArtifact(std::shared_ptr<storage::LocalDirectory> directory,
-                          std::vector<size_t> null_offsets);
+                          std::vector<size_t> null_offsets,
+                          bool nested = false);
 
     ~InvertedIndexArtifact() override;
 
@@ -53,6 +54,7 @@ class InvertedIndexArtifact final : public storage::Artifact {
 
     std::shared_ptr<storage::LocalDirectory> directory_;
     std::vector<size_t> null_offsets_;
+    bool nested_{false};
 };
 
 }  // namespace milvus::index

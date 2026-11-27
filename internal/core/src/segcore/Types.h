@@ -60,6 +60,7 @@ struct LoadIndexInfo {
     std::string index_family;
     DataType index_value_type{DataType::NONE};
     index::ReaderCaps index_caps;
+    bool skipped{false};
     std::string uri;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
@@ -108,6 +109,7 @@ struct LoadIndexInfo {
           index_family(other.index_family),
           index_value_type(other.index_value_type),
           index_caps(other.index_caps),
+          skipped(other.skipped),
           uri(other.uri),
           index_engine_version(other.index_engine_version),
           schema(other.schema),
@@ -142,6 +144,7 @@ struct LoadIndexInfo {
             index_family = other.index_family;
             index_value_type = other.index_value_type;
             index_caps = other.index_caps;
+            skipped = other.skipped;
             uri = other.uri;
             index_engine_version = other.index_engine_version;
             schema = other.schema;

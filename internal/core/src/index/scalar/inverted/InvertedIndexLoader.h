@@ -48,6 +48,14 @@ class InvertedIndexLoader final : public IndexLoader {
     DeriveCaps(const Config& index_meta);
 
     /**
+     * @brief Check whether persisted nested metadata matches runtime params
+     * without loading payloads.
+     */
+    static folly::coro::Task<bool>
+    CheckNestedCompatible(const OpenedIndexSource& source,
+                          const Config& params);
+
+    /**
      * @brief Validate runtime parameters and legacy inventory; packed targets
      * await Load.
      * @param source Opened storage source owned by the resulting loader.

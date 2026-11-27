@@ -62,14 +62,14 @@ IndexInventory::Entry::Resolve(milvus::OpContext* op_ctx) const {
 
         if (!ready_.load(std::memory_order_acquire)) {
             auto result = factory_(op_ctx);
-            AssertInfo(result.index != nullptr,
+            AssertInfo(result.index != nullptr || result.family.empty(),
                        "lazy index factory returned null owner");
             resolved_ = std::move(result);
             // Release the captured load metadata before publishing the result.
             factory_ = nullptr;
             // Pair with CancelWarmup's sequentially consistent publication check.
             ready_.store(true);
-            if (retired_.load()) {
+            if (retired_.load() && resolved_->index != nullptr) {
                 resolved_->index->CancelWarmup();
             }
         }
@@ -85,7 +85,7 @@ IndexInventory::Entry::Peek() const {
 void
 IndexInventory::Entry::CancelWarmup() const {
     retired_.store(true);
-    if (ready_.load()) {
+    if (ready_.load() && resolved_->index != nullptr) {
         resolved_->index->CancelWarmup();
     }
 }
@@ -135,6 +135,9 @@ IndexInventory::ResolveCapability(milvus::OpContext* op_ctx,
     entries.reserve(field_entries.size());
     for (const auto& [key, entry] : field_entries) {
         const auto& resolved = entry->Resolve(op_ctx);
+        if (resolved.index == nullptr) {
+            continue;
+        }
         const auto& registration = entry->registration();
         entries.push_back(IndexCapabilityEntry{key,
                                                registration.json_path,
@@ -208,6 +211,9 @@ IndexInventory::CreateIndexReader(milvus::OpContext* op_ctx,
 
     const auto& entry = it->second;
     const auto& resolved = entry->Resolve(op_ctx);
+    if (resolved.index == nullptr) {
+        return {};
+    }
     auto reader = resolved.index->CreateReader(op_ctx);
     AssertInfo(reader != nullptr, "index returned a null request reader");
     AssertInfo(SameCaps(resolved.caps, reader->Caps()),

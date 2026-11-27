@@ -65,6 +65,7 @@
 #include "pb/segcore.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -4709,5 +4710,167 @@ TEST_F(MatchExprTest, WholeFilterCacheDistinguishesInnerPredicates) {
             }
             EXPECT_EQ(cache.GetEntryCount(), 2);
         }
+    }
+}
+
+TEST_F(MatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
+    auto data = DataGen(schema_, N_);
+    *data.raw_ = *insert_data_;
+    auto sealed_base = CreateSealedWithFieldDataLoaded(schema_, data);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(sealed_base.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto column = expr::ColumnInfo(sub_str_fid_, DataType::ARRAY);
+    column.element_type_ = DataType::VARCHAR;
+    column.element_level_ = true;
+    proto::plan::GenericValue target_val;
+    target_val.set_string_val("aaa");
+    auto predicate = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column, proto::plan::OpType::Equal, target_val);
+    auto match = std::make_shared<expr::MatchExpr>(
+        "struct_array", expr::MatchType::MatchAny, 0, predicate);
+    auto plan_node =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, match);
+    auto fragment = plan::PlanFragment(plan_node);
+
+    auto run_and_verify = [&] {
+        auto context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, sealed, N_, MAX_TIMESTAMP);
+        context->set_read_snapshot(sealed->CaptureReadSnapshot());
+        auto result =
+            query::ExecPlanNodeVisitor::ExecuteTask(fragment, context);
+        auto col =
+            std::dynamic_pointer_cast<ColumnVector>(result->childrens()[0]);
+        ASSERT_NE(col, nullptr);
+        BitsetTypeView excluded(col->GetRawData(), col->size());
+        ASSERT_EQ(excluded.size(), N_);
+        for (size_t row = 0; row < N_; ++row) {
+            bool expected_hit = false;
+            const auto& str_field = sub_str_data_[row];
+            for (int j = 0; j < array_len_; ++j) {
+                if (str_field.string_data().data(j) == "aaa") {
+                    expected_hit = true;
+                    break;
+                }
+            }
+            EXPECT_EQ(!excluded[row], expected_hit) << "row=" << row;
+        }
+    };
+
+    // 1. Eager skipped legacy index -> LoadIndex succeeds and query falls back
+    // to RawData.
+    {
+        LoadIndexInfo skipped_info{};
+        skipped_info.field_id = sub_str_fid_.get();
+        skipped_info.field_type = DataType::ARRAY;
+        skipped_info.element_type = DataType::VARCHAR;
+        skipped_info.index_id = 9001;
+        skipped_info.index_engine_version = 3;
+        skipped_info.num_rows = N_;
+        skipped_info.skipped = true;
+        skipped_info.index_params = {
+            {index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
+        sealed->LoadIndex(skipped_info);
+        EXPECT_FALSE(sealed->HasIndex(sub_str_fid_));
+        run_and_verify();
+    }
+
+    // 2. Lazy skipped legacy index -> lazy_index_factory returns nullptr owner
+    // and query falls back to RawData cleanly.
+    {
+        LoadIndexInfo lazy_info{};
+        lazy_info.field_id = sub_str_fid_.get();
+        lazy_info.field_type = DataType::ARRAY;
+        lazy_info.element_type = DataType::VARCHAR;
+        lazy_info.index_id = 9002;
+        lazy_info.index_engine_version = 3;
+        lazy_info.num_rows = N_;
+        lazy_info.index_params = {
+            {index::INDEX_TYPE, index::HYBRID_INDEX_TYPE}};
+        lazy_info.lazy_index_factory = [](OpContext*) {
+            return IndexInventory::ResolvedData{
+                "", DataType::NONE, {}, nullptr};
+        };
+        sealed->TestLoadIndex(lazy_info, true, nullptr);
+        run_and_verify();
+    }
+
+    // 3. Defense-in-depth: even if a Row-domain index is mounted on a Struct
+    // sub-field, MATCH_ANY rejects it and falls back to RawData.
+    {
+        std::vector<Array> arrays;
+        arrays.reserve(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            proto::schema::ScalarField values;
+            auto* strings = values.mutable_string_data();
+            for (int j = 0; j < array_len_; ++j) {
+                strings->add_data(sub_str_data_[i].string_data().data(j));
+            }
+            arrays.emplace_back(values);
+        }
+        auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+        field->FillFieldData(arrays.data(), arrays.size());
+        auto row_opened = test::expr_index::BuildIndex(sub_str_fid_,
+                                                       DataType::ARRAY,
+                                                       index::BITMAP_INDEX_TYPE,
+                                                       {field},
+                                                       Config::object(),
+                                                       DataType::VARCHAR,
+                                                       /*nested=*/false);
+        LoadIndexInfo row_info{};
+        row_info.field_id = sub_str_fid_.get();
+        row_info.field_type = DataType::ARRAY;
+        row_info.element_type = DataType::VARCHAR;
+        row_info.index_id = 9003;
+        row_info.index_engine_version = 3;
+        row_info.index_family = row_opened.family;
+        row_info.index_value_type = row_opened.reader->ValueType();
+        row_info.index_caps = row_opened.caps;
+        row_info.num_rows = row_opened.reader->Count();
+        row_info.index_params = {{index::INDEX_TYPE, index::BITMAP_INDEX_TYPE}};
+        row_info.index = std::move(row_opened.index);
+        row_info.load_resource_request = LoadResourceRequest{};
+        sealed->TestLoadIndex(row_info, true, nullptr);
+        run_and_verify();
+    }
+
+    // 4. Replacing with a valid 3.0 nested index works normally.
+    {
+        std::vector<Array> arrays;
+        arrays.reserve(N_);
+        for (size_t i = 0; i < N_; ++i) {
+            proto::schema::ScalarField values;
+            auto* strings = values.mutable_string_data();
+            for (int j = 0; j < array_len_; ++j) {
+                strings->add_data(sub_str_data_[i].string_data().data(j));
+            }
+            arrays.emplace_back(values);
+        }
+        auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+        field->FillFieldData(arrays.data(), arrays.size());
+        auto nested_opened =
+            test::expr_index::BuildIndex(sub_str_fid_,
+                                         DataType::ARRAY,
+                                         index::INVERTED_INDEX_TYPE,
+                                         {field},
+                                         Config::object(),
+                                         DataType::VARCHAR,
+                                         /*nested=*/true);
+        LoadIndexInfo nested_info{};
+        nested_info.field_id = sub_str_fid_.get();
+        nested_info.field_type = DataType::ARRAY;
+        nested_info.element_type = DataType::VARCHAR;
+        nested_info.index_id = 9004;
+        nested_info.index_engine_version = 3;
+        nested_info.index_family = nested_opened.family;
+        nested_info.index_value_type = nested_opened.reader->ValueType();
+        nested_info.index_caps = nested_opened.caps;
+        nested_info.num_rows = nested_opened.reader->Count();
+        nested_info.index_params = {
+            {index::INDEX_TYPE, index::INVERTED_INDEX_TYPE}};
+        nested_info.index = std::move(nested_opened.index);
+        nested_info.load_resource_request = LoadResourceRequest{};
+        sealed->TestLoadIndex(nested_info, true, nullptr);
+        run_and_verify();
     }
 }

@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 
+#include "folly/coro/Task.h"
 #include "common/Types.h"
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/IndexLoader.h"
@@ -53,11 +54,14 @@ struct LoaderEntry {
     using DeriveCapsFn = ReaderCaps (*)(const Config&);
     using CreateFn = folly::coro::Task<std::unique_ptr<IndexLoader>> (*)(
         OpenedIndexSource, storage::LoadOptions);
+    using CheckNestedCompatibleFn =
+        folly::coro::Task<bool> (*)(const OpenedIndexSource&, const Config&);
 
     DeriveCapsFn derive_caps{nullptr};
     // Create parses family metadata into prepared state without retaining an
     // operation context; IndexLoader::Load supplies its own context.
     CreateFn create{nullptr};
+    CheckNestedCompatibleFn check_nested_compatible{nullptr};
 
     explicit operator bool() const noexcept {
         return derive_caps != nullptr && create != nullptr;
@@ -107,7 +111,17 @@ class LoaderRegistry {
     template <StaticLoaderProvider Provider>
     void
     Register() {
-        LoaderEntry entry{&Provider::DeriveCaps, &Provider::Create};
+        LoaderEntry::CheckNestedCompatibleFn check_nested = nullptr;
+        if constexpr (requires(const OpenedIndexSource& source,
+                               const Config& params) {
+                          {
+                              Provider::CheckNestedCompatible(source, params)
+                              } -> std::same_as<folly::coro::Task<bool>>;
+                      }) {
+            check_nested = &Provider::CheckNestedCompatible;
+        }
+        LoaderEntry entry{
+            &Provider::DeriveCaps, &Provider::Create, check_nested};
         RegisterEntry(Provider::kFamily, entry);
     }
 

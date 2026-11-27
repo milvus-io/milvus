@@ -438,12 +438,13 @@ AddArrayByType(milvus::tantivy::TantivyIndexWrapper& engine,
 storage::ArtifactPtr
 FinishBuilder(std::shared_ptr<storage::LocalDirectory> directory,
               std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
-              std::vector<size_t> null_offsets) {
+              std::vector<size_t> null_offsets,
+              bool nested) {
     AssertInfo(engine != nullptr, "inverted builder has no writer to seal");
     engine->finish();
     engine.reset();
-    return std::make_unique<InvertedIndexArtifact>(std::move(directory),
-                                                   std::move(null_offsets));
+    return std::make_unique<InvertedIndexArtifact>(
+        std::move(directory), std::move(null_offsets), nested);
 }
 
 }  // namespace
@@ -520,8 +521,10 @@ InvertedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
     auto engine = std::exchange(engine_, nullptr);
     auto directory = std::move(directory_);
     auto null_offsets = std::move(null_offsets_);
-    return FinishBuilder(
-        std::move(directory), std::move(engine), std::move(null_offsets));
+    return FinishBuilder(std::move(directory),
+                         std::move(engine),
+                         std::move(null_offsets),
+                         params_.nested);
 }
 
 InvertedArrayIndexBuilder::InvertedArrayIndexBuilder(InvertedBuildParams params)
@@ -583,8 +586,10 @@ InvertedArrayIndexBuilder::Build(const ScalarBuildInput<ArrayView>& input) && {
     auto engine = std::exchange(engine_, nullptr);
     auto directory = std::move(directory_);
     auto null_offsets = std::move(null_offsets_);
-    return FinishBuilder(
-        std::move(directory), std::move(engine), std::move(null_offsets));
+    return FinishBuilder(std::move(directory),
+                         std::move(engine),
+                         std::move(null_offsets),
+                         false);
 }
 
 namespace {
