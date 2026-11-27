@@ -873,7 +873,7 @@ ResolvedPredicate(const IJsonIndexReader& json,
         return nullptr;
     }
     ExpectResolvedMetadata(*resolved.get(), count, cast);
-    EXPECT_TRUE(resolved->Caps().predicate);
+    EXPECT_TRUE(resolved->Caps().point_and_range);
     EXPECT_TRUE(resolved->Caps().exact);
     return predicate;
 }
@@ -1074,7 +1074,7 @@ AddPatternCase(IndexTestCases& cases,
             const auto* matcher =
                 dynamic_cast<const IPatternMatchReader*>(resolved.get());
             ASSERT_NE(matcher, nullptr);
-            EXPECT_TRUE(resolved->Caps().predicate);
+            EXPECT_TRUE(resolved->Caps().point_and_range);
             EXPECT_TRUE(resolved->Caps().pattern_match);
             EXPECT_TRUE(resolved->Caps().exact);
             if (backend.Family() == families::kJsonFlat &&
@@ -1139,7 +1139,7 @@ AddResolvedNullCase(IndexTestCases& cases,
             const auto* nulls =
                 dynamic_cast<const INullReader*>(resolved.get());
             ASSERT_NE(nulls, nullptr);
-            EXPECT_TRUE(resolved->Caps().predicate);
+            EXPECT_TRUE(resolved->Caps().point_and_range);
             EXPECT_TRUE(resolved->Caps().exact);
             auto not_null = nulls->IsNotNull();
             ExpectHits(not_null, data.values.size(), expected_not_null);
@@ -2263,7 +2263,7 @@ AddProjectedNgramRoutingCases(IndexTestCases& cases) {
                 dynamic_cast<const INgramReader*>(resolved.get());
             ASSERT_NE(ngram, nullptr);
             EXPECT_TRUE(resolved->Caps().ngram_candidates);
-            EXPECT_FALSE(resolved->Caps().predicate);
+            EXPECT_FALSE(resolved->Caps().point_and_range);
             EXPECT_FALSE(resolved->Caps().exact);
             EXPECT_FALSE(json->Resolve("/wrong", varchar));
             EXPECT_FALSE(json->Resolve("/a", Cast("DOUBLE")));
@@ -2287,7 +2287,7 @@ AddProjectedNgramRoutingCases(IndexTestCases& cases) {
             EXPECT_NE(dynamic_cast<const INgramReader*>(resolved.get()),
                       nullptr);
             EXPECT_TRUE(resolved->Caps().ngram_candidates);
-            EXPECT_FALSE(resolved->Caps().predicate);
+            EXPECT_FALSE(resolved->Caps().point_and_range);
             EXPECT_FALSE(resolved->Caps().exact);
             ExpectHits(json->Exists("/a"), data.values.size(), {0, 1, 2, 3});
             ExpectProjectedExistsProtocol(*json);

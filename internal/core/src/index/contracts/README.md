@@ -100,6 +100,13 @@ that does not exist. The execution path first uses the caps derived from metadat
 opening, checks them against `reader.Caps()`. Decisions that depend on query input, such as literal
 length, are made by calling the corresponding interface on the request reader.
 
+`ReaderCaps::point_and_range` advertises `IScalarPredicateReader<T>`: `In`, `NotIn`, and
+single-bound or interval `Range`. It does not promise arbitrary expression evaluation.
+`ReaderCaps::pattern_match` advertises `IPatternMatchReader`, not every pattern operation.
+Consumers must check `ShouldUseForOp(op, pattern)` before execution and honor
+`PatternMatchIsExact(op)` for candidate refinement. The Growing mutable scalar reader accepts
+only literal `PrefixMatch`; postfix, substring, general LIKE, and regex use the existing fallback.
+
 Typed readers may inherit `PatternMatchReaderAdapter<Derived, T>` unconditionally, but the primary
 template is an empty class; only the `T = std::string_view` specialization inherits
 `IPatternMatchReader`. Numeric instantiations therefore do not expose the pattern-match capability,

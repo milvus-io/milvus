@@ -45,9 +45,10 @@ class IPatternMatchReader {
  public:
     virtual ~IPatternMatchReader() = default;
 
-    // Per-call routing guard. FM-index uses this to reject degenerate
-    // literals; other families can use the operation whenever their static
-    // ReaderCaps advertises pattern matching.
+    // Per-call routing guard, required even when ReaderCaps::pattern_match is
+    // true. False declines the index path for this operation/literal. Growing
+    // B-tree readers accept only PrefixMatch; FM-index also checks literal cost.
+    // The default accepts all operations, so partial implementations override it.
     virtual bool
     ShouldUseForOp(PatternOp op, std::string_view pattern) const {
         return true;

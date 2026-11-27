@@ -3987,14 +3987,14 @@ class SegmentExpr : public Expr {
             exec_path_ = ExprExecPath::RawData;
             return false;
         }
-        bool predicate_available = false;
+        bool point_and_range_available = false;
         bool value_available = false;
         if (req.reader != RequiredReader::JsonPath) {
-            if (reader_caps.predicate) {
-                predicate_available =
+            if (reader_caps.point_and_range) {
+                point_and_range_available =
                     ExposesPredicateReader(interface_type, selected_reader_);
                 if (!entry->caps.json_paths) {
-                    AssertInfo(predicate_available,
+                    AssertInfo(point_and_range_available,
                                "selected index reader does not expose "
                                "predicate type {}",
                                selected_reader_->ValueType());
@@ -4033,8 +4033,8 @@ class SegmentExpr : public Expr {
 
         const bool interface_available = [&]() {
             switch (req.reader) {
-                case RequiredReader::Predicate:
-                    return predicate_available;
+                case RequiredReader::PointAndRange:
+                    return point_and_range_available;
                 case RequiredReader::PatternMatch:
                     return pattern_reader_ != nullptr;
                 case RequiredReader::TextMatch:
@@ -4072,7 +4072,7 @@ class SegmentExpr : public Expr {
 
     ExprIndexRequirement
     MakeIndexRequirement(
-        RequiredReader reader = RequiredReader::Predicate) const {
+        RequiredReader reader = RequiredReader::PointAndRange) const {
         return {
             .field_id = field_id_,
             .reader = reader,

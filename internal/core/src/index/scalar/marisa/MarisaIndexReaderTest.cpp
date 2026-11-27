@@ -362,7 +362,7 @@ TEST_F(MarisaIndexCacheTest, MetadataStaysColdAndOperationsUseRequestContext) {
     EXPECT_EQ(index->Metadata().count, 2);
     EXPECT_EQ(first->Count(), 2);
     EXPECT_EQ(first->ValueType(), DataType::VARCHAR);
-    EXPECT_TRUE(first->Caps().predicate);
+    EXPECT_TRUE(first->Caps().point_and_range);
     EXPECT_EQ(observer->loads, 0);
     const auto* predicate =
         dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
@@ -515,7 +515,7 @@ TEST(MarisaIndexReaderTest, AdvertisesVarcharQueries) {
         const auto& backend =
             ScalarReaderBackends().Get<std::string_view>(name);
         const auto caps = backend.DeriveCaps();
-        EXPECT_TRUE(caps.predicate) << name;
+        EXPECT_TRUE(caps.point_and_range) << name;
         EXPECT_TRUE(caps.pattern_match) << name;
         EXPECT_TRUE(caps.value_lookup) << name;
         EXPECT_EQ(backend.PatternPolicy(PatternOp::Match),

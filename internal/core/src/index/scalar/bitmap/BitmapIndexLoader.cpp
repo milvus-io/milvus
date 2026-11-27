@@ -1158,7 +1158,7 @@ BitmapIndexLoader::DeriveCaps(const Config& index_meta) {
         families::kBitmap,
         index_meta,
         ReaderCaps{
-            .predicate = true,
+            .point_and_range = true,
             .pattern_match = IsStringType(params.value_type),
             .nested = params.nested,
             .value_lookup = params.value_lookup,

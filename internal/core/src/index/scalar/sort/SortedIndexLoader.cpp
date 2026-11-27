@@ -968,7 +968,7 @@ SortedIndexLoader::DeriveCaps(const Config& index_meta) {
     return DeriveJsonProjectedCaps(
         families::kSort,
         index_meta,
-        ReaderCaps{.predicate = true,
+        ReaderCaps{.point_and_range = true,
                    .pattern_match = IsStringDataType(params.value_type),
                    .nested = params.nested,
                    .value_lookup = params.value_lookup,

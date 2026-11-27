@@ -296,22 +296,19 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         scalar_type == DataType::VARCHAR;
     if (field_meta.get_id().get() >= START_USER_FIELDID && mutable_scalar &&
         segcore_config.get_enable_mutable_scalar_index()) {
-        auto owner = index::CreateMutableScalarGrowingIndex(
-            scalar_type,
-            {segcore_config.get_mutable_scalar_hot_bitmap_bytes(),
-             segcore_config.get_mutable_scalar_hot_query_threshold(),
-             segcore_config.get_mutable_scalar_hot_posting_threshold()});
+        auto owner = index::CreateMutableScalarGrowingIndex(scalar_type);
+        // VARCHAR exposes IPatternMatchReader for literal PrefixMatch only.
+        // Expr checks ShouldUseForOp before executing a pattern operation.
         Appender appender(field_meta.get_id(),
-                          index::ReaderCaps{.predicate = true,
+                          index::ReaderCaps{.point_and_range = true,
                                             .pattern_match = scalar_type ==
                                                              DataType::VARCHAR},
                           std::move(owner));
         LOG_INFO(
             "growing mutable scalar index created: segment={}, field={}, "
-            "backend=btree, hot_bitmap_bytes={}",
+            "backend=btree, postings=offsets",
             segment_id,
-            field_meta.get_id().get(),
-            segcore_config.get_mutable_scalar_hot_bitmap_bytes());
+            field_meta.get_id().get());
         return appender;
     }
 

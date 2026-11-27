@@ -697,9 +697,6 @@ queryNode:
     chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
     mutableScalarIndex:
       enabled: false # Experimental append-only Growing scalar index; preserves existing text-match owners.
-      hotBitmapBytes: 0 # Per-field latest-membership bitmap buffer budget in bytes; 0 disables caching. Other index memory is additional.
-      hotQueryThreshold: 8 # Point-query uses required for admission; must be positive.
-      hotPostingThreshold: 256 # Minimum offsets per value for admission; must be positive.
     interimIndex:
       # Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
       # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.

@@ -1142,7 +1142,7 @@ TEST(SealedLazyIndexSlot,
     ASSERT_EQ(capability.entries().size(), 1);
     const auto& resolved = capability.entries().front();
     EXPECT_EQ(resolved.family, index::families::kBitmap);
-    EXPECT_TRUE(resolved.caps.predicate);
+    EXPECT_TRUE(resolved.caps.point_and_range);
     ASSERT_EQ(ResolvedIndexes(snapshot->runtime->indexes).size(), 1);
     OpContext query_context;
     auto pin = sealed->CreateIndexReader(&query_context, resolved.key);

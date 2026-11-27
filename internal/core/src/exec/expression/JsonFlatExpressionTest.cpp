@@ -800,7 +800,7 @@ TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
     const FieldId field_id(100);
     exec::ExprIndexRequirement requirement{
         .field_id = field_id,
-        .reader = exec::RequiredReader::Predicate,
+        .reader = exec::RequiredReader::PointAndRange,
         .value_type = DataType::INT64,
         .is_json_field = true,
         .json_path = "/profile/age",

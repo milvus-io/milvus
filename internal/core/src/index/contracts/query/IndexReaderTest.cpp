@@ -46,7 +46,8 @@ template <typename T>
 void
 ExpectInterfacesMatchCaps(const IIndexReaderBase& reader) {
     const auto caps = reader.Caps();
-    EXPECT_EQ(Implements<IScalarPredicateReader<T>>(reader), caps.predicate);
+    EXPECT_EQ(Implements<IScalarPredicateReader<T>>(reader),
+              caps.point_and_range);
     EXPECT_EQ(Implements<IPatternMatchReader>(reader), caps.pattern_match);
     EXPECT_EQ(Implements<ITextMatchReader>(reader), caps.text_match);
     EXPECT_EQ(Implements<INgramReader>(reader), caps.ngram_candidates);
@@ -72,7 +73,7 @@ ObserveReaderMetadata(const ReaderBackend& backend,
     const auto caps = reader->Caps();
     const auto advertised = backend.DeriveCaps(
         {.row_count = data.values.size(), .values = data.metadata});
-    for (const auto field : {&ReaderCaps::predicate,
+    for (const auto field : {&ReaderCaps::point_and_range,
                              &ReaderCaps::pattern_match,
                              &ReaderCaps::text_match,
                              &ReaderCaps::ngram_candidates,

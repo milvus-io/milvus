@@ -267,7 +267,7 @@ ExpectPredicateProfiles(std::string_view type_name) {
         const auto name =
             "Hybrid" + std::string(type_name) + std::string(suffix);
         const auto& backend = ScalarReaderBackends().Get<T>(name);
-        EXPECT_TRUE(backend.Supports(&ReaderCaps::predicate)) << name;
+        EXPECT_TRUE(backend.Supports(&ReaderCaps::point_and_range)) << name;
     }
 }
 

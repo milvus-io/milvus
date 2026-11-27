@@ -361,7 +361,7 @@ class JsonBoolPathReader final : public JsonPathReaderBase,
 
     ReaderCaps
     Caps() const override {
-        return ReaderCaps{.predicate = true, .exact = true};
+        return ReaderCaps{.point_and_range = true, .exact = true};
     }
 
     DataType
@@ -667,7 +667,7 @@ class JsonNumericPathReader final : public JsonPathReaderBase,
 
     ReaderCaps
     Caps() const override {
-        return ReaderCaps{.predicate = true, .exact = true};
+        return ReaderCaps{.point_and_range = true, .exact = true};
     }
 
     DataType
@@ -917,7 +917,7 @@ class JsonStringPathReader final
     ReaderCaps
     Caps() const override {
         return ReaderCaps{
-            .predicate = true,
+            .point_and_range = true,
             .pattern_match = true,
             .exact = true,
         };

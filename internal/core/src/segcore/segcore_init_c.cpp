@@ -70,26 +70,9 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
-extern "C" CStatus
-SegcoreSetMutableScalarIndex(bool enabled,
-                             int64_t hot_bitmap_bytes,
-                             int64_t hot_queries,
-                             int64_t hot_postings) {
-    try {
-        if (hot_bitmap_bytes < 0 || hot_queries <= 0 || hot_postings <= 0) {
-            ThrowInfo(ConfigInvalid,
-                      "mutable scalar cache bytes must be nonnegative and "
-                      "admission thresholds must be positive");
-        }
-        SegcoreConfig::default_config().set_mutable_scalar_index(
-            enabled,
-            static_cast<size_t>(hot_bitmap_bytes),
-            static_cast<size_t>(hot_queries),
-            static_cast<size_t>(hot_postings));
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
+extern "C" void
+SegcoreSetMutableScalarIndex(bool enabled) {
+    SegcoreConfig::default_config().set_mutable_scalar_index(enabled);
 }
 
 extern "C" CStatus

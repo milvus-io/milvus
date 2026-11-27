@@ -162,10 +162,11 @@ A Tantivy/R-Tree snapshot can bind an immutable engine view. A Knowhere snapshot
 live Add/Search engine, so a pin fixes the reader record, its dependencies, and the queryable
 prefix; it does not guarantee that an older pin's ANN hit set stays unchanged.
 
-The opt-in mutable scalar owner uses a shared appendable value tree with fixed-prefix readers.
+The opt-in `MutableScalarGrowingIndex` uses a shared appendable value tree with fixed-prefix readers.
 It covers BOOL, signed integers, TIMESTAMPTZ, and ordinary VARCHAR; system fields and existing
-VARCHAR text-match owners are excluded. Predicate results and optional latest-membership
-bitmaps are bounded by the pinned prefix before the query's visibility rules are applied.
+VARCHAR text-match owners are excluded. Membership uses uint32 offsets lists only; no per-value
+bitmap cache is maintained. Predicate results are bounded by the pinned prefix before the
+query's visibility rules are applied.
 Raw columns remain the source for value lookup and unsupported predicates. See the
 [Growing mutable scalar index design](../../../../../docs/design-docs/design_docs/20261125-growing-mutable-scalar-index.md)
 for configuration, ownership, and draft validation scope.

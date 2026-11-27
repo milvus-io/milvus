@@ -88,7 +88,7 @@ TEST(InvertedIndexCacheTest, FreshSlotUsesEachReadersContext) {
         slot_lifetime = slot;
         return std::make_shared<InvertedIndex<int64_t>>(
             slot,
-            IndexMetadata{ReaderCaps{.predicate = true},
+            IndexMetadata{ReaderCaps{.point_and_range = true},
                           Domain::Row,
                           DataType::INT64,
                           2});
@@ -139,7 +139,7 @@ ExpectPredicateProfiles(std::string_view type_name) {
         const auto name =
             "Inverted" + std::string(type_name) + std::string(suffix);
         const auto& backend = ScalarReaderBackends().Get<T>(name);
-        EXPECT_TRUE(backend.DeriveCaps().predicate) << name;
+        EXPECT_TRUE(backend.DeriveCaps().point_and_range) << name;
     }
 }
 

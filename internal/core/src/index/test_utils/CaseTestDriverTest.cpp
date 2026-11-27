@@ -40,7 +40,7 @@ struct BatchExecutionLog {
 struct LoggedIn {
     using ValueType = int64_t;
     using Reader = IScalarPredicateReader<int64_t>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         int64_t key;
@@ -73,7 +73,7 @@ template <typename T, typename Tag>
 struct LoggedNotIn {
     using ValueType = T;
     using Reader = IScalarPredicateReader<T>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         T key;
@@ -106,7 +106,7 @@ struct LoggedNotIn {
 struct LoggedError {
     using ValueType = int64_t;
     using Reader = IScalarPredicateReader<int64_t>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         std::shared_ptr<BatchExecutionLog> log;
@@ -178,7 +178,7 @@ class MissingReader {
 struct MissingReaderQuery {
     using ValueType = int64_t;
     using Reader = MissingReader;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {};
 
@@ -400,7 +400,7 @@ TEST(QueryBatchTest, SelectsTheIntersectionOfEveryRequiredCapability) {
     auto expected = ScalarReaderBackends().AllInput<int64_t>(
         BackendInputShape::Scalar, Domain::Row, false, DataType::INT64);
     std::erase_if(expected, [](const auto& backend) {
-        return !backend.Supports(&ReaderCaps::predicate) ||
+        return !backend.Supports(&ReaderCaps::point_and_range) ||
                !backend.Supports(&ReaderCaps::value_lookup);
     });
     ASSERT_FALSE(expected.empty());
@@ -451,7 +451,7 @@ TEST(QueryBatchTest, LeavesSingleObserveAndBuildSelectionRulesUnchanged) {
     const auto expected_predicate =
         ScalarReaderBackends().ForInput<int64_t>(BackendInputShape::Scalar,
                                                  Domain::Row,
-                                                 &ReaderCaps::predicate,
+                                                 &ReaderCaps::point_and_range,
                                                  false,
                                                  DataType::INT64);
     const auto expected_lookup =

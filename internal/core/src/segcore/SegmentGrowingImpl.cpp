@@ -1270,13 +1270,14 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
             // throughout the segment lifetime; Append owns any retained keys.
             const auto count =
                 std::min(row_end - offset, chunk_rows - offset % chunk_rows);
-            FixedVector<bool> valid(static_cast<size_t>(count), true);
+            FixedVector<bool> valid;
             const bool* valid_data = nullptr;
             if (field_meta.is_nullable()) {
                 auto field_valid = insert_record_.get_valid_data(field_id);
                 AssertInfo(field_valid != nullptr,
                            "nullable scalar field {} has no validity",
                            field_id.get());
+                valid.resize(static_cast<size_t>(count));
                 field_valid->bulk_is_valid_range(offset, count, valid.data());
                 valid_data = valid.data();
             }
@@ -1340,13 +1341,14 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
 
     for (auto offset = row_begin; offset < row_end; offset += batch_rows) {
         const auto count = std::min<int64_t>(batch_rows, row_end - offset);
-        FixedVector<bool> valid(static_cast<size_t>(count), true);
+        FixedVector<bool> valid;
         const bool* valid_data = nullptr;
         if (field_meta.is_nullable()) {
             auto field_valid = insert_record_.get_valid_data(field_id);
             AssertInfo(field_valid != nullptr,
                        "nullable growing field {} has no validity storage",
                        field_id.get());
+            valid.resize(static_cast<size_t>(count));
             field_valid->bulk_is_valid_range(offset, count, valid.data());
             valid_data = valid.data();
         }

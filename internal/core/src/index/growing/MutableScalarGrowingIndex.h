@@ -22,19 +22,11 @@
 
 namespace milvus::index {
 
-struct MutableScalarIndexOptions {
-    // Per-field budget for hot membership bitmap buffers. Zero disables them.
-    size_t hot_bitmap_bytes = 0;
-    size_t hot_query_threshold = 8;
-    size_t hot_posting_threshold = 256;
-};
-
 // Construction is the only place that knows the backend. Segment and Expr use
 // the existing growing and reader contracts. Accounting stays with storage,
-// including allocations retained by older pins; the owner reports it through
+// including allocations retained by older pins; the index reports it through
 // MemoryUsage() without charging it again.
 std::unique_ptr<IGrowingIndex>
-CreateMutableScalarGrowingIndex(DataType type,
-                                const MutableScalarIndexOptions& options);
+CreateMutableScalarGrowingIndex(DataType type);
 
 }  // namespace milvus::index

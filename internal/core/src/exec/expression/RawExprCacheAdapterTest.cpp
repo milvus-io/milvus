@@ -858,7 +858,7 @@ TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {
         true,
         std::chrono::seconds(5),
         std::chrono::seconds(5));
-    const index::ReaderCaps caps{.predicate = true,
+    const index::ReaderCaps caps{.point_and_range = true,
                                  .pattern_match = true,
                                  .value_lookup = true,
                                  .cheap_value_lookup = true};

@@ -19,18 +19,18 @@
 #include <absl/container/btree_map.h>
 #include <absl/container/inlined_vector.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <exception>
 #include <iterator>
 #include <limits>
-#include <new>
-#include <list>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <vector>
+#include <utility>
 
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
@@ -143,154 +143,122 @@ OwnScalarKey(const T& value, const ByteCounter& bytes) {
 template <typename T>
 ReaderCaps
 MutableScalarCaps() {
-    return {.predicate = true,
+    // VARCHAR exposes the pattern interface for literal PrefixMatch only;
+    // ShouldUseForOpImpl rejects LIKE, postfix, substring and regex operations.
+    return {.point_and_range = true,
             .pattern_match = std::is_same_v<T, std::string_view>};
 }
 
 template <typename T>
 struct MutableScalarStorage {
-    using Offsets = absl::InlinedVector<int64_t, 2, ScalarAllocator<int64_t>>;
-    using Words = std::vector<uint64_t, ScalarAllocator<uint64_t>>;
-    struct CachedMembership {
-        ScalarKey<T> key;
-        Words words;
-    };
-    using Cache =
-        std::list<CachedMembership, ScalarAllocator<CachedMembership>>;
+    using Offsets = absl::InlinedVector<uint32_t, 2, ScalarAllocator<uint32_t>>;
     struct Posting {
         explicit Posting(const ByteCounter& bytes)
-            : offsets(ScalarAllocator<int64_t>(bytes)) {
+            : offsets(ScalarAllocator<uint32_t>(bytes)) {
         }
+        mutable std::shared_mutex mutex;
         Offsets offsets;
-        // Protected by cache_mutex under a shared tree lock, or by the
-        // exclusive tree lock. B-tree relocation does not invalidate list IDs.
-        mutable size_t hits = 0;
-        mutable bool cached = false;
-        mutable typename Cache::iterator cache;
     };
-    using Pair = std::pair<const ScalarKey<T>, Posting>;
-    using Tree = absl::
-        btree_map<ScalarKey<T>, Posting, ScalarLess<T>, ScalarAllocator<Pair>>;
-
-    MutableScalarStorage(DataType type,
-                         MutableScalarIndexOptions options,
-                         ByteCounter bytes)
+    using PostingPtr = std::shared_ptr<Posting>;
+    using Pair = std::pair<const ScalarKey<T>, PostingPtr>;
+    using Tree = absl::btree_map<ScalarKey<T>,
+                                 PostingPtr,
+                                 ScalarLess<T>,
+                                 ScalarAllocator<Pair>>;
+    MutableScalarStorage(DataType type, ByteCounter bytes)
         : bytes(std::move(bytes)),
           object_charge(this->bytes, sizeof(MutableScalarStorage)),
           type(type),
-          options(options),
-          tree(ScalarLess<T>{}, ScalarAllocator<Pair>(this->bytes)),
-          cache(ScalarAllocator<CachedMembership>(this->bytes)) {
+          tree(ScalarLess<T>{}, ScalarAllocator<Pair>(this->bytes)) {
     }
 
     void
     CheckHealthy() const {
-        if (failure) {
+        if (failed.load(std::memory_order_acquire)) {
             std::rethrow_exception(failure);
         }
     }
 
-    // Caller holds tree's exclusive lock, or shared lock plus cache_mutex.
+    // Published once by the serialized writer; readers acquire the immutable
+    // exception through failed, without taking the writer lock.
     void
-    Evict(typename Cache::iterator item) const {
-        const auto entry = tree.find(item->key);
-        if (entry != tree.end()) {
-            entry->second.cached = false;
-        }
-        cache_bytes -= item->words.capacity() * sizeof(uint64_t);
-        cache.erase(item);
+    RecordFailure() {
+        if (failed.load(std::memory_order_relaxed))
+            return;
+        failure = std::current_exception();
+        failed.store(true, std::memory_order_release);
     }
 
-    // Query-local result, latest shared membership. Older publications read
-    // only their own prefix; later inserts never change existing memberships.
+    // Caller owns writer_mutex. It is the only structural writer, so this
+    // lookup can overlap tree readers without an additional shared lock.
+    Posting&
+    GetOrCreatePosting(const T& value) {
+        auto hint = tree.lower_bound(value);
+        if (hint != tree.end() && !ScalarLess<T>{}(value, hint->first)) {
+            return *hint->second;
+        }
+        auto posting = std::allocate_shared<Posting>(
+            ScalarAllocator<Posting>(bytes), bytes);
+        auto key = OwnScalarKey<T>(value, bytes);
+        std::unique_lock tree_lock(tree_mutex);
+        try {
+            return *tree.try_emplace(hint, std::move(key), std::move(posting))
+                        ->second;
+        } catch (...) {
+            // Publish poison before a waiting reader can inspect the tree.
+            RecordFailure();
+            throw;
+        }
+    }
+
+    size_t
+    VisibleCount(const Posting& posting, int64_t count) const {
+        std::shared_lock posting_lock(posting.mutex);
+        CheckHealthy();
+        const auto& offsets = posting.offsets;
+        if (offsets.empty() || offsets.front() >= count)
+            return 0;
+        if (offsets.back() < count)
+            return offsets.size();
+        return std::lower_bound(offsets.begin(), offsets.end(), count) -
+               offsets.begin();
+    }
+
+    // Emit the pinned reader's prefix into a query-private result. Later
+    // appends cannot change existing offsets.
     void
-    Emit(const ScalarKey<T>& key,
-         const Posting& posting,
+    Emit(const Posting& posting,
          TargetBitmap& result,
          int64_t count,
-         bool point_query) const {
-        if (point_query && options.hot_bitmap_bytes != 0) {
-            std::lock_guard cache_lock(cache_mutex);
-            if (posting.hits < options.hot_query_threshold) {
-                ++posting.hits;
-            }
-            if (!posting.cached &&
-                posting.hits >= options.hot_query_threshold &&
-                posting.offsets.size() >= options.hot_posting_threshold) {
-                const auto words =
-                    static_cast<size_t>(posting.offsets.back()) / 64 + 1;
-                if (words <= options.hot_bitmap_bytes / sizeof(uint64_t)) {
-                    const auto required = words * sizeof(uint64_t);
-                    while (!cache.empty() &&
-                           cache_bytes > options.hot_bitmap_bytes - required) {
-                        Evict(cache.begin());
-                    }
-                    // No query correctness depends on cache admission. Build
-                    // privately; allocation failure leaves canonical postings.
-                    try {
-                        Words bitmap(
-                            words, 0, ScalarAllocator<uint64_t>(bytes));
-                        for (const auto offset : posting.offsets) {
-                            bitmap[offset / 64] |= uint64_t{1} << (offset % 64);
-                        }
-                        const auto capacity =
-                            bitmap.capacity() * sizeof(uint64_t);
-                        if (capacity <=
-                            options.hot_bitmap_bytes - cache_bytes) {
-                            cache.push_back({OwnScalarKey<T>(key, bytes),
-                                             std::move(bitmap)});
-                            posting.cache = std::prev(cache.end());
-                            posting.cached = true;
-                            cache_bytes += capacity;
-                        }
-                    } catch (const std::bad_alloc&) {
-                        // Optional acceleration only; never catches append or
-                        // publication failures and never publishes partial data.
-                    }
-                }
-            }
-            if (posting.cached) {
-                auto item = posting.cache;
-                cache.splice(cache.end(), cache, item);
-                const auto words = std::min(
-                    item->words.size(), (static_cast<size_t>(count) + 63) / 64);
-                for (size_t i = 0; i < words; ++i) {
-                    auto word = item->words[i];
-                    if (i == static_cast<size_t>(count) / 64 && count % 64) {
-                        word &= (uint64_t{1} << (count % 64)) - 1;
-                    }
-                    result.data()[i] |= word;
-                }
-                return;
-            }
-        }
+         bool matched = true) const {
+        std::shared_lock posting_lock(posting.mutex);
+        CheckHealthy();
         for (const auto offset : posting.offsets) {
             if (offset >= count) {
                 break;
             }
-            result[offset] = true;
+            result[offset] = matched;
         }
     }
 
-    // Tree, postings, validity and hot cache share one self-charged counter.
+    // Tree, postings and validity share one self-charged counter.
     // Segment statistics may report it but must not charge it again.
     ByteCounter bytes;
     ScalarMemoryCharge object_charge;
     const DataType type;
-    const MutableScalarIndexOptions options;
-    mutable std::shared_mutex mutex;
+    // Lock order: writer -> tree (release) -> Posting.
+    // Readers never hold tree_mutex while emitting or waiting on a Posting.
+    mutable std::mutex writer_mutex;
+    mutable std::shared_mutex tree_mutex;
     Tree tree;
-    mutable std::mutex cache_mutex;
-    mutable Cache cache;
-    mutable size_t cache_bytes = 0;
     SharedValidityBitmap validity;
     std::shared_ptr<ScalarMemoryCharge> validity_charge;
     int64_t accepted_end = 0;
     int64_t published_end = -1;
-    // Like a built vector engine, a failed mutating append is terminal. Every
-    // reader checks this under the same lock before touching potentially
-    // modified backend state. Publication-only failure remains retryable.
+    // A failed mutating append is terminal. Publication-only failure is
+    // retryable; readers see this exception via the release/acquire flag.
     std::exception_ptr failure;
+    std::atomic<bool> failed{false};
 };
 
 template <typename T>
@@ -330,15 +298,21 @@ class MutableScalarReader final
     In(size_t n, const T* values) const override {
         AssertInfo(n == 0 || values != nullptr,
                    "mutable scalar membership has null query values");
-        std::shared_lock lock(storage_->mutex);
         storage_->CheckHealthy();
         TargetBitmap result(count_, false);
         for (size_t i = 0; i < n; ++i) {
-            const auto it = storage_->tree.find(values[i]);
-            if (it != storage_->tree.end()) {
-                storage_->Emit(it->first, it->second, result, count_, true);
+            const Posting* posting = nullptr;
+            {
+                std::shared_lock lock(storage_->tree_mutex);
+                storage_->CheckHealthy();
+                const auto it = storage_->tree.find(values[i]);
+                if (it != storage_->tree.end())
+                    posting = it->second.get();
             }
+            if (posting != nullptr)
+                storage_->Emit(*posting, result, count_);
         }
+        storage_->CheckHealthy();
         return result;
     }
     TargetBitmap
@@ -354,18 +328,39 @@ class MutableScalarReader final
             return In(1, &value);
         if (op == CompareOp::NotEqual)
             return NotIn(1, &value);
-        std::shared_lock lock(storage_->mutex);
-        storage_->CheckHealthy();
-        const auto& tree = storage_->tree;
         switch (op) {
             case CompareOp::GreaterThan:
-                return Interval(tree.upper_bound(value), tree.end());
+                return EvaluateRange(
+                    [&](const auto& tree) { return tree.upper_bound(value); },
+                    [&](const auto& key) {
+                        return !ScalarLess<T>{}(value, key);
+                    },
+                    [](const auto& tree) { return tree.end(); },
+                    [](const auto&) { return true; });
             case CompareOp::GreaterEqual:
-                return Interval(tree.lower_bound(value), tree.end());
+                return EvaluateRange(
+                    [&](const auto& tree) { return tree.lower_bound(value); },
+                    [&](const auto& key) {
+                        return ScalarLess<T>{}(key, value);
+                    },
+                    [](const auto& tree) { return tree.end(); },
+                    [](const auto&) { return true; });
             case CompareOp::LessThan:
-                return Interval(tree.begin(), tree.lower_bound(value));
+                return EvaluateRange(
+                    [](const auto& tree) { return tree.begin(); },
+                    [](const auto&) { return false; },
+                    [&](const auto& tree) { return tree.lower_bound(value); },
+                    [&](const auto& key) {
+                        return ScalarLess<T>{}(key, value);
+                    });
             case CompareOp::LessEqual:
-                return Interval(tree.begin(), tree.upper_bound(value));
+                return EvaluateRange(
+                    [](const auto& tree) { return tree.begin(); },
+                    [](const auto&) { return false; },
+                    [&](const auto& tree) { return tree.upper_bound(value); },
+                    [&](const auto& key) {
+                        return !ScalarLess<T>{}(value, key);
+                    });
             default:
                 ThrowInfo(OpTypeInvalid,
                           "unsupported mutable scalar comparison");
@@ -373,20 +368,32 @@ class MutableScalarReader final
     }
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
-        std::shared_lock lock(storage_->mutex);
         storage_->CheckHealthy();
         if (hi < lo || (!(lo < hi) && (!lo_inc || !hi_inc))) {
             return TargetBitmap(count_, false);
         }
-        const auto& tree = storage_->tree;
-        return Interval(lo_inc ? tree.lower_bound(lo) : tree.upper_bound(lo),
-                        hi_inc ? tree.upper_bound(hi) : tree.lower_bound(hi));
+        return EvaluateRange(
+            [&](const auto& tree) {
+                return lo_inc ? tree.lower_bound(lo) : tree.upper_bound(lo);
+            },
+            [&](const auto& key) {
+                return lo_inc ? ScalarLess<T>{}(key, lo)
+                              : !ScalarLess<T>{}(lo, key);
+            },
+            [&](const auto& tree) {
+                return hi_inc ? tree.upper_bound(hi) : tree.lower_bound(hi);
+            },
+            [&](const auto& key) {
+                return hi_inc ? !ScalarLess<T>{}(hi, key)
+                              : ScalarLess<T>{}(key, hi);
+            });
     }
     TargetBitmap
     IsNotNull() const override {
-        std::shared_lock lock(storage_->mutex);
         storage_->CheckHealthy();
-        return validity_.ToBitmap();
+        auto result = validity_.ToBitmap();
+        storage_->CheckHealthy();
+        return result;
     }
     TargetBitmap
     IsNull() const override {
@@ -403,16 +410,11 @@ class MutableScalarReader final
         if constexpr (std::is_same_v<T, std::string_view>) {
             AssertInfo(op == PatternOp::PrefixMatch,
                        "mutable scalar reader only supports literal prefix");
-            std::shared_lock lock(storage_->mutex);
-            storage_->CheckHealthy();
-            TargetBitmap result(count_, false);
-            for (auto it = storage_->tree.lower_bound(pattern);
-                 it != storage_->tree.end() &&
-                 std::string_view(it->first).starts_with(pattern);
-                 ++it) {
-                storage_->Emit(it->first, it->second, result, count_, false);
-            }
-            return result;
+            return ScanRange(
+                [&](const auto& tree) { return tree.lower_bound(pattern); },
+                [&](const auto& key) {
+                    return std::string_view(key).starts_with(pattern);
+                });
         } else {
             ThrowInfo(UnexpectedError,
                       "pattern query on numeric scalar reader");
@@ -420,13 +422,181 @@ class MutableScalarReader final
     }
 
  private:
-    using Iterator = typename MutableScalarStorage<T>::Tree::const_iterator;
-    TargetBitmap
-    Interval(Iterator first, Iterator last) const {
-        TargetBitmap result(count_, false);
-        for (auto it = first; it != last; ++it) {
-            storage_->Emit(it->first, it->second, result, count_, false);
+    using Posting = typename MutableScalarStorage<T>::Posting;
+    using ResumeKey =
+        std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+    static ResumeKey
+    CopyKey(const ScalarKey<T>& key) {
+        if constexpr (std::is_same_v<T, std::string_view>) {
+            return std::string(std::string_view(key));
+        } else {
+            return key;
         }
+    }
+
+    std::optional<ResumeKey>
+    LastKey() const {
+        std::shared_lock lock(storage_->tree_mutex);
+        storage_->CheckHealthy();
+        if (storage_->tree.empty())
+            return std::nullopt;
+        return CopyKey(storage_->tree.rbegin()->first);
+    }
+
+    // Query-local cursor: capture bounded groups of stable Posting addresses,
+    // then release the tree lock before counting/emitting. No iterator or key
+    // reference escapes a lock interval; the reader retains the storage.
+    template <typename Seek, typename InRange>
+    class PostingCursor {
+     public:
+        PostingCursor(MutableScalarStorage<T>& storage,
+                      Seek seek,
+                      InRange in_range,
+                      const std::optional<ResumeKey>& last_key)
+            : storage_(storage),
+              seek_(std::move(seek)),
+              in_range_(std::move(in_range)),
+              last_key_(last_key),
+              done_(!last_key.has_value()) {
+        }
+
+        const Posting*
+        Next() {
+            if (position_ == size_ && !done_)
+                Fill();
+            return position_ < size_ ? postings_[position_++] : nullptr;
+        }
+
+        void
+        Reset() {
+            resume_.reset();
+            position_ = size_ = 0;
+            done_ = !last_key_.has_value();
+        }
+
+     private:
+        void
+        Fill() {
+            std::shared_lock lock(storage_.tree_mutex);
+            storage_.CheckHealthy();
+            const auto& tree = storage_.tree;
+            const auto within_range = [&](const auto& key) {
+                return !ScalarLess<T>{}(*last_key_, key) && in_range_(key);
+            };
+            auto it = resume_ ? tree.upper_bound(*resume_) : seek_(tree);
+            position_ = size_ = 0;
+            while (it != tree.end() && within_range(it->first) &&
+                   size_ < postings_.size()) {
+                postings_[size_++] = it->second.get();
+                ++it;
+            }
+            done_ = it == tree.end() || !within_range(it->first);
+            if (!done_)
+                resume_.emplace(CopyKey(std::prev(it)->first));
+        }
+
+        MutableScalarStorage<T>& storage_;
+        const Seek seek_;
+        const InRange in_range_;
+        const std::optional<ResumeKey>& last_key_;
+        std::optional<ResumeKey> resume_;
+        std::array<const Posting*, 256> postings_;
+        size_t position_ = 0;
+        size_t size_ = 0;
+        bool done_;
+    };
+
+    template <typename Cursor>
+    void
+    EmitCursor(Cursor& cursor, TargetBitmap& result, bool matched) const {
+        while (const auto* posting = cursor.Next())
+            storage_->Emit(*posting, result, count_, matched);
+    }
+
+    // Prefix matching retains the positive path. Ordinary ranges can choose
+    // the complement below, without changing the result or validity contract.
+    template <typename Seek, typename InRange>
+    TargetBitmap
+    ScanRange(Seek seek, InRange in_range) const {
+        const auto last_key = LastKey();
+        PostingCursor<Seek, InRange> cursor(
+            *storage_, std::move(seek), std::move(in_range), last_key);
+        TargetBitmap result(count_, false);
+        EmitCursor(cursor, result, true);
+        storage_->CheckHealthy();
+        return result;
+    }
+
+    // Adapt BitmapIndexReader::UnionKeyRange's clear-the-smaller-side rule.
+    // Abseil has no maintained row ranks: probe exact pinned-prefix posting
+    // counts on the side with the smaller accumulated count until one side
+    // finishes below the other's lower bound. This avoids a mutable prefix
+    // table, a full-key prepass for selective ranges, or query-sized buffers.
+    template <typename SeekLower,
+              typename BeforeLower,
+              typename SeekUpper,
+              typename BeforeUpper>
+    TargetBitmap
+    EvaluateRange(SeekLower lower,
+                  BeforeLower before_lower,
+                  SeekUpper upper,
+                  BeforeUpper before_upper) const {
+        const auto last_key = LastKey();
+        const auto make_cursor = [&](auto seek, auto in_range) {
+            return PostingCursor<decltype(seek), decltype(in_range)>(
+                *storage_, std::move(seek), std::move(in_range), last_key);
+        };
+        auto inside = make_cursor(lower, before_upper);
+        auto left = make_cursor([](const auto& tree) { return tree.begin(); },
+                                before_lower);
+        auto right = make_cursor(upper, [](const auto&) { return true; });
+        const auto next_outside = [&]() -> const Posting* {
+            if (const auto* posting = left.Next())
+                return posting;
+            return right.Next();
+        };
+
+        uint64_t inside_rows = 0, outside_rows = 0;
+        bool inside_done = false, outside_done = false;
+        bool prefer_inside = true;
+        bool complement = false;
+        for (;;) {
+            if (inside_done && inside_rows <= outside_rows)
+                break;
+            if (outside_done && outside_rows <= inside_rows) {
+                complement = true;
+                break;
+            }
+            if (!inside_done &&
+                (outside_done || inside_rows < outside_rows ||
+                 (inside_rows == outside_rows && prefer_inside))) {
+                prefer_inside = false;
+                if (const auto* posting = inside.Next())
+                    inside_rows += storage_->VisibleCount(*posting, count_);
+                else
+                    inside_done = true;
+            } else {
+                prefer_inside = true;
+                if (const auto* posting = next_outside())
+                    outside_rows += storage_->VisibleCount(*posting, count_);
+                else
+                    outside_done = true;
+            }
+        }
+
+        auto result =
+            complement ? validity_.ToBitmap() : TargetBitmap(count_, false);
+        if (complement) {
+            left.Reset();
+            right.Reset();
+            EmitCursor(left, result, false);
+            EmitCursor(right, result, false);
+        } else {
+            inside.Reset();
+            EmitCursor(inside, result, true);
+        }
+        storage_->CheckHealthy();
         return result;
     }
     std::shared_ptr<MutableScalarStorage<T>> storage_;
@@ -466,14 +636,12 @@ class MutableScalarPublication final : public IIndex {
 };
 
 template <typename T>
-class MutableScalarGrowingOwner final : public IGrowingIndex,
+class MutableScalarGrowingIndex final : public IGrowingIndex,
                                         public IAppendable<ScalarBatch<T>> {
  public:
-    MutableScalarGrowingOwner(DataType type,
-                              MutableScalarIndexOptions options,
-                              ByteCounter bytes)
+    MutableScalarGrowingIndex(DataType type, ByteCounter bytes)
         : storage_(std::make_shared<MutableScalarStorage<T>>(
-              type, options, std::move(bytes))) {
+              type, std::move(bytes))) {
         PublishAccepted();
     }
     DataType
@@ -491,8 +659,8 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
     void
     CommitIfNeeded() override {
         // Synchronous appends publish before ACK. Pinning must not wait for an
-        // in-flight append; queries check poison under their own shared lock.
-        std::unique_lock lock(storage_->mutex, std::try_to_lock);
+        // in-flight append; queries independently check the failure flag.
+        std::unique_lock lock(storage_->writer_mutex, std::try_to_lock);
         if (lock.owns_lock()) {
             storage_->CheckHealthy();
             PublishAccepted();
@@ -500,7 +668,7 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
     }
     void
     Flush() override {
-        std::unique_lock lock(storage_->mutex);
+        std::unique_lock lock(storage_->writer_mutex);
         storage_->CheckHealthy();
         PublishAccepted();
     }
@@ -513,7 +681,12 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
                                std::numeric_limits<int64_t>::max() - row_begin),
                    "mutable scalar append row range overflows");
         const auto row_end = row_begin + static_cast<int64_t>(batch.row_count);
-        std::unique_lock lock(storage_->mutex);
+        // row_end is exclusive: UINT32_MAX is still a valid stored offset.
+        AssertInfo(
+            row_end <=
+                static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1,
+            "mutable scalar append exceeds uint32 offset capacity");
+        std::unique_lock lock(storage_->writer_mutex);
         storage_->CheckHealthy();
         PublishAccepted();
         if (row_end <= storage_->accepted_end)
@@ -544,26 +717,13 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
                     storage_->validity.AppendNull(offset);
                     continue;
                 }
-                auto it = storage_->tree.find(batch.values[i]);
-                if (it == storage_->tree.end()) {
-                    it = storage_->tree
-                             .try_emplace(OwnScalarKey<T>(batch.values[i],
-                                                          storage_->bytes),
-                                          storage_->bytes)
-                             .first;
-                }
-                auto& posting = it->second;
-                posting.offsets.push_back(offset);
-                if (posting.cached) {
-                    auto item = posting.cache;
-                    const auto words = static_cast<size_t>(offset) / 64 + 1;
-                    if (words > item->words.capacity()) {
-                        storage_->Evict(item);
-                    } else {
-                        item->words.resize(words, 0);
-                        item->words[offset / 64] |= uint64_t{1}
-                                                    << (offset % 64);
-                    }
+                auto& posting = storage_->GetOrCreatePosting(batch.values[i]);
+                std::unique_lock posting_lock(posting.mutex);
+                try {
+                    posting.offsets.push_back(static_cast<uint32_t>(offset));
+                } catch (...) {
+                    storage_->RecordFailure();
+                    throw;
                 }
             }
             storage_->validity.FinishAppend(row_end);
@@ -571,7 +731,7 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
         } catch (...) {
             // The mutable backend does not promise rollback after an allocation
             // failure. Fail closed for all readers, like built vector Add.
-            storage_->failure = std::current_exception();
+            storage_->RecordFailure();
             throw;
         }
         // Publication allocation failure must not repeat the accepted append.
@@ -593,32 +753,30 @@ class MutableScalarGrowingOwner final : public IGrowingIndex,
 
 template <typename T>
 std::unique_ptr<IGrowingIndex>
-MakeMutableScalarOwner(DataType type,
-                       const MutableScalarIndexOptions& options) {
+MakeMutableScalarGrowingIndex(DataType type) {
     auto bytes = std::make_shared<ScalarAllocationCounter>();
-    return std::make_unique<MutableScalarGrowingOwner<T>>(
-        type, options, std::move(bytes));
+    return std::make_unique<MutableScalarGrowingIndex<T>>(type,
+                                                          std::move(bytes));
 }
 
 }  // namespace
 
 std::unique_ptr<IGrowingIndex>
-CreateMutableScalarGrowingIndex(DataType type,
-                                const MutableScalarIndexOptions& options) {
+CreateMutableScalarGrowingIndex(DataType type) {
     switch (type) {
         case DataType::BOOL:
-            return MakeMutableScalarOwner<bool>(type, options);
+            return MakeMutableScalarGrowingIndex<bool>(type);
         case DataType::INT8:
-            return MakeMutableScalarOwner<int8_t>(type, options);
+            return MakeMutableScalarGrowingIndex<int8_t>(type);
         case DataType::INT16:
-            return MakeMutableScalarOwner<int16_t>(type, options);
+            return MakeMutableScalarGrowingIndex<int16_t>(type);
         case DataType::INT32:
-            return MakeMutableScalarOwner<int32_t>(type, options);
+            return MakeMutableScalarGrowingIndex<int32_t>(type);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            return MakeMutableScalarOwner<int64_t>(type, options);
+            return MakeMutableScalarGrowingIndex<int64_t>(type);
         case DataType::VARCHAR:
-            return MakeMutableScalarOwner<std::string_view>(type, options);
+            return MakeMutableScalarGrowingIndex<std::string_view>(type);
         default:
             ThrowInfo(
                 UnexpectedError, "unsupported mutable scalar type {}", type);

@@ -136,8 +136,8 @@ FieldIndexCapability::Find(const IndexKey& key) const {
 
 bool
 SameCaps(const index::ReaderCaps& a, const index::ReaderCaps& b) {
-    return a.predicate == b.predicate && a.pattern_match == b.pattern_match &&
-           a.text_match == b.text_match &&
+    return a.point_and_range == b.point_and_range &&
+           a.pattern_match == b.pattern_match && a.text_match == b.text_match &&
            a.ngram_candidates == b.ngram_candidates && a.spatial == b.spatial &&
            a.nested == b.nested && a.value_lookup == b.value_lookup &&
            a.cheap_value_lookup == b.cheap_value_lookup &&

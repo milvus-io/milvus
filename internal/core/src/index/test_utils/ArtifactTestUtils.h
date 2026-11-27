@@ -71,7 +71,7 @@ CheckReaderBackend(const IIndexReaderBasePtr& reader,
                                ": test loader returned null reader");
     }
     const auto caps = reader->Caps();
-    EXPECT_EQ(caps.predicate, expected_caps.predicate);
+    EXPECT_EQ(caps.point_and_range, expected_caps.point_and_range);
     EXPECT_EQ(caps.pattern_match, expected_caps.pattern_match);
     EXPECT_EQ(caps.text_match, expected_caps.text_match);
     EXPECT_EQ(caps.ngram_candidates, expected_caps.ngram_candidates);

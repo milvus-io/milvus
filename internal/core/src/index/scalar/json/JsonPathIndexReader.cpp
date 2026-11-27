@@ -185,7 +185,7 @@ JsonProjectedIndexSpec::ValidateInner(const IndexMetadata& inner) const {
                "typed JSON projection cannot wrap another JSON router");
     if (cast_type_.data_type() == JsonCastType::DataType::ARRAY) {
         AssertInfo(
-            caps.predicate && !caps.nested,
+            caps.point_and_range && !caps.nested,
             "typed JSON ARRAY projection requires an ordinary row-domain "
             "predicate reader");
     }

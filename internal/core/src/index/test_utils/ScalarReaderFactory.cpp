@@ -40,7 +40,7 @@ namespace {
 
 bool
 CapsEqual(const ReaderCaps& left, const ReaderCaps& right) {
-    return left.predicate == right.predicate &&
+    return left.point_and_range == right.point_and_range &&
            left.pattern_match == right.pattern_match &&
            left.text_match == right.text_match &&
            left.ngram_candidates == right.ngram_candidates &&

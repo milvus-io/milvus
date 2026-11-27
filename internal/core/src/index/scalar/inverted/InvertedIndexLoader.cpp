@@ -655,7 +655,7 @@ InvertedIndexLoader::DeriveCaps(const Config& index_meta) {
         families::kInverted,
         index_meta,
         ReaderCaps{
-            .predicate = true,
+            .point_and_range = true,
             .pattern_match = IsStringDataType(params.value_type),
             .nested = params.nested,
             .exact = !params.nested,
