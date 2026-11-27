@@ -114,7 +114,7 @@ func NewMinHashFunctionRunner(
 	}
 
 	params := getAnalyzerParams(inputField)
-	tokenizer, err := analyzer.RestoreAnalyzer(params, analyzerExtraInfo(extraInfo))
+	tokenizer, err := analyzer.NewAnalyzer(params, analyzerExtraInfo(extraInfo))
 	if err != nil {
 		return nil, err
 	}

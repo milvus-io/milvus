@@ -17,9 +17,11 @@
 package analyzer
 
 import (
+	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/analyzer/canalyzer"
 	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type (
@@ -29,11 +31,6 @@ type (
 
 func NewAnalyzer(param string, extraInfo string) (Analyzer, error) {
 	return canalyzer.NewAnalyzer(param, extraInfo)
-}
-
-// RestoreAnalyzer accepts only analyzer parameters from a persisted schema.
-func RestoreAnalyzer(param string, extraInfo string) (Analyzer, error) {
-	return canalyzer.RestoreAnalyzer(param, extraInfo)
 }
 
 func ValidateAnalyzer(param string, extraInfo string) ([]int64, error) {
@@ -50,4 +47,17 @@ func BuildExtraResourceInfo(storage string, resources []*internalpb.FileResource
 
 func InitOptions() error {
 	return canalyzer.InitOptions()
+}
+
+// WithFileAccessCheck adds admission checking without changing resource bindings.
+func WithFileAccessCheck(extraInfo string) (string, error) {
+	extra := make(map[string]json.RawMessage)
+	if extraInfo != "" {
+		if err := json.Unmarshal([]byte(extraInfo), &extra); err != nil || extra == nil {
+			return "", merr.WrapErrServiceInternalMsg("invalid analyzer runtime options")
+		}
+	}
+	extra["check_file_access"] = json.RawMessage("true")
+	data, err := json.Marshal(extra)
+	return string(data), err
 }

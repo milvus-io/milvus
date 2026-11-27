@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -139,29 +138,6 @@ func UpdateGlobalResourceInfo(resourceMap map[string]int64) error {
 		return errors.Wrap(err, "update global resource info failed")
 	}
 	return nil
-}
-
-// RestoreAnalyzer is only for definitions obtained from a persisted collection schema.
-// Operator admission policy changes must not invalidate an existing collection.
-func RestoreAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {
-	extra := make(map[string]json.RawMessage)
-	if extraInfo == "" {
-		extra["use_global_resources"] = json.RawMessage("true")
-	}
-	if extraInfo != "" {
-		if err := json.Unmarshal([]byte(extraInfo), &extra); err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("invalid analyzer resource bindings")
-		}
-	}
-	if extra == nil {
-		extra = make(map[string]json.RawMessage)
-	}
-	extra["file_access_admitted"] = json.RawMessage("true")
-	data, err := json.Marshal(extra)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("cannot serialize analyzer resource bindings")
-	}
-	return NewAnalyzer(param, string(data))
 }
 
 func NewAnalyzer(param string, extraInfo string) (interfaces.Analyzer, error) {

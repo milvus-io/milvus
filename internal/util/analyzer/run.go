@@ -16,6 +16,10 @@ func Run(ctx context.Context, params string, texts [][]byte, withDetail, withHas
 	if len(extraInfo) > 0 {
 		binding = extraInfo[0]
 	}
+	binding, err := WithFileAccessCheck(binding)
+	if err != nil {
+		return nil, err
+	}
 	tokenizer, err := NewAnalyzer(params, binding)
 	if err != nil {
 		return nil, err

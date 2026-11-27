@@ -3,7 +3,7 @@ use std::ffi::CStr;
 use libc::{c_char, c_void};
 
 use crate::{
-    analyzer::restore_analyzer, array::RustResult, cstr_to_str, index_reader::IndexReaderWrapper,
+    analyzer::create_analyzer, array::RustResult, cstr_to_str, index_reader::IndexReaderWrapper,
     log::init_log,
 };
 
@@ -68,7 +68,7 @@ pub extern "C" fn tantivy_register_tokenizer(
     let params = cstr_to_str!(analyzer_params);
 
     let extra_info_str = cstr_to_str!(analyzer_extra_info);
-    let analyzer = restore_analyzer(params, extra_info_str);
+    let analyzer = create_analyzer(params, extra_info_str);
     match analyzer {
         Ok(text_analyzer) => unsafe {
             (*real).register_tokenizer(String::from(tokenizer_name), text_analyzer);

@@ -1,4 +1,3 @@
-use crate::analyzer::restore_analyzer;
 use crate::error::Result;
 use tantivy::tokenizer::{BoxTokenStream as NewBoxTokenStream, TextAnalyzer as NewAnalyzer};
 use tantivy_5::tokenizer::{TextAnalyzer, Token, TokenStream, Tokenizer};
@@ -61,7 +60,7 @@ impl Tokenizer for AdapterAnalyzer {
 }
 
 pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
-    let tokenizer = restore_analyzer(params, "")?;
+    let tokenizer = crate::analyzer::create_analyzer(params, "")?;
     Ok(TextAnalyzer::builder(AdapterAnalyzer::new(tokenizer)).build())
 }
 

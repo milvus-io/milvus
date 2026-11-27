@@ -41,11 +41,11 @@ func RestrictSource(cm storage.ChunkManager) *restrictedSource {
 			root = path.Join(cm.RootPath(), "file_resource")
 		}
 	}
-	return &restrictedSource{ChunkManager: cm, root: strings.TrimRight(root, "/")}
+	return &restrictedSource{cm: cm, root: strings.TrimRight(root, "/")}
 }
 
 type restrictedSource struct {
-	storage.ChunkManager
+	cm   storage.ChunkManager
 	root string
 }
 
@@ -54,7 +54,7 @@ func (s *restrictedSource) relativePath(name string) (string, error) {
 		return "", merr.WrapErrParameterInvalidMsg("common.fileResource.allowedPath must be configured before using file resources")
 	}
 	relative := name
-	if _, local := s.ChunkManager.(*storage.LocalChunkManager); !local || filepath.IsAbs(name) {
+	if _, local := s.cm.(*storage.LocalChunkManager); !local || filepath.IsAbs(name) {
 		prefix := s.root + "/"
 		if !strings.HasPrefix(name, prefix) {
 			return "", merr.WrapErrParameterInvalidMsg("file resource path is outside the configured directory")
@@ -75,7 +75,7 @@ func (s *restrictedSource) ResolvePath(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, local := s.ChunkManager.(*storage.LocalChunkManager); local {
+	if _, local := s.cm.(*storage.LocalChunkManager); local {
 		return filepath.Join(s.root, relative), nil
 	}
 	return name, nil
@@ -128,10 +128,10 @@ func (s *restrictedSource) Reader(ctx context.Context, name string) (storage.Fil
 	if err != nil {
 		return nil, err
 	}
-	if _, local := s.ChunkManager.(*storage.LocalChunkManager); local {
+	if _, local := s.cm.(*storage.LocalChunkManager); local {
 		return s.openLocal(relative)
 	}
-	return s.ChunkManager.Reader(ctx, name)
+	return s.cm.Reader(ctx, name)
 }
 
 func (s *restrictedSource) Size(ctx context.Context, name string) (int64, error) {
@@ -139,8 +139,8 @@ func (s *restrictedSource) Size(ctx context.Context, name string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	if _, local := s.ChunkManager.(*storage.LocalChunkManager); !local {
-		return s.ChunkManager.Size(ctx, name)
+	if _, local := s.cm.(*storage.LocalChunkManager); !local {
+		return s.cm.Size(ctx, name)
 	}
 	reader, err := s.openLocal(relative)
 	if err != nil {
@@ -148,15 +148,4 @@ func (s *restrictedSource) Size(ctx context.Context, name string) (int64, error)
 	}
 	defer reader.Close()
 	return reader.Size()
-}
-
-func (s *restrictedSource) Exist(ctx context.Context, name string) (bool, error) {
-	if _, err := s.relativePath(name); err != nil {
-		return false, err
-	}
-	if _, local := s.ChunkManager.(*storage.LocalChunkManager); !local {
-		return s.ChunkManager.Exist(ctx, name)
-	}
-	_, err := s.Size(ctx, name)
-	return err == nil, err
 }

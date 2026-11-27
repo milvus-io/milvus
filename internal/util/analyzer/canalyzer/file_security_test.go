@@ -45,6 +45,8 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 	})
 	for name, data := range map[string]string{
 		"valid": "the\n", "synonym": "FILE_SECRET_MARKER=>a=>b", "jieba": "FILE_SECRET_MARKER invalid_frequency",
+		"synonym_missing_separator": "FILE_SECRET_MARKER private value",
+		"synonym_invalid_escape":    "FILE_SECRET_MARKER\\q", "synonym_trailing_escape": "FILE_SECRET_MARKER\\",
 		"large": strings.Repeat("x", 129), "invalid_utf8": "FILE_SECRET_MARKER\xff",
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(data), 0o600))
@@ -66,6 +68,9 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 		{"oversized", "stop", "large", false},
 		{"invalid_utf8", "stop", "invalid_utf8", false},
 		{"synonym_error", "synonym", "synonym", false},
+		{"synonym_missing_separator", "synonym", "synonym_missing_separator", false},
+		{"synonym_invalid_escape", "synonym", "synonym_invalid_escape", false},
+		{"synonym_trailing_escape", "synonym", "synonym_trailing_escape", false},
 		{"jieba_error", "jieba", "jieba", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,7 +88,7 @@ func TestAnalyzerFileSecurity(t *testing.T) {
 			params["filter"] = append(filters, map[string]any{"type": "stop", "stop_words": []string{"REQUEST_SECRET_MARKER"}})
 			data, err := json.Marshal(params)
 			require.NoError(t, err)
-			created, createErr := NewAnalyzer(string(data), "")
+			created, createErr := NewAnalyzer(string(data), `{"check_file_access":true}`)
 			if created != nil {
 				created.Destroy()
 			}
@@ -128,7 +133,7 @@ func TestAnalyzerResourceNamespaceStaysUnderCache(t *testing.T) {
 	}
 }
 
-func TestAnalyzerRestoreIgnoresAdmissionPolicyChanges(t *testing.T) {
+func TestAnalyzerRuntimeIgnoresAdmissionPolicyChanges(t *testing.T) {
 	paramtable.Init()
 	cfg := &paramtable.Get().FunctionCfg
 	root := t.TempDir()
@@ -151,7 +156,7 @@ func TestAnalyzerRestoreIgnoresAdmissionPolicyChanges(t *testing.T) {
 	cfg.LocalResourcePath.SwapTempValue(t.TempDir())
 	cfg.AnalyzerMaxDictSize.SwapTempValue("1")
 	require.NoError(t, updateParams())
-	restored, err := RestoreAnalyzer(string(data), "")
+	restored, err := NewAnalyzer(string(data), "")
 	require.NoError(t, err)
 	defer restored.Destroy()
 	stream, err := restored.NewTokenStream("the cat")
@@ -161,13 +166,13 @@ func TestAnalyzerRestoreIgnoresAdmissionPolicyChanges(t *testing.T) {
 	require.Equal(t, "cat", stream.Token())
 	require.False(t, stream.Advance())
 	stream.Destroy()
-	_, err = NewAnalyzer(string(data), "")
+	_, err = NewAnalyzer(string(data), `{"check_file_access":true}`)
 	require.Error(t, err)
-	_, err = ValidateAnalyzer(string(data), `{"file_access_admitted":true}`)
+	_, err = ValidateAnalyzer(string(data), `{"check_file_access":false}`)
 	require.Error(t, err, "validation cannot inherit a runtime exemption")
 }
 
-func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
+func TestAnalyzerRuntimePreservesResourceBindingOrigin(t *testing.T) {
 	paramtable.Init()
 	setting := &paramtable.Get().LocalStorageCfg.Path
 	previous := setting.SwapTempValue(t.TempDir())
@@ -183,20 +188,20 @@ func TestAnalyzerRestorePreservesResourceBindingOrigin(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("the\n"), 0o600))
 	require.NoError(t, UpdateGlobalResourceInfo(map[string]int64{"dictionary": id}))
 	params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"dictionary","file_name":"stop.txt"}}]}`
-	for _, extra := range []string{"", `{"resource_map":{"dictionary":9007199254740993}}`} {
-		restored, err := RestoreAnalyzer(params, extra)
+	for _, extra := range []string{"", `{}`, `{"check_file_access":true}`, `{"resource_map":{"dictionary":9007199254740993},"check_file_access":true}`} {
+		restored, err := NewAnalyzer(params, extra)
 		require.NoError(t, err)
 		restored.Destroy()
 	}
 	// Linux permits backslashes in basenames that predate admission restrictions.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, `legacy\stop.txt`), []byte("the\n"), 0o600))
 	legacy := strings.Replace(params, `"file_name":"stop.txt"`, `"file_name":"legacy\\stop.txt"`, 1)
-	restored, err := RestoreAnalyzer(legacy, "")
+	restored, err := NewAnalyzer(legacy, "")
 	require.NoError(t, err)
 	restored.Destroy()
 	_, err = ValidateAnalyzer(legacy, "")
 	require.Error(t, err)
 
-	_, err = RestoreAnalyzer(params, `{"resource_map":{}}`)
+	_, err = NewAnalyzer(params, `{"resource_map":{}}`)
 	require.Error(t, err, "explicit empty bindings must not fall back to global names")
 }
