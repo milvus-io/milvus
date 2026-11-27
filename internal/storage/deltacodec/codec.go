@@ -14,14 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package deltacodec maps persisted mutation fragments to and from typed Arrow batches.
+// Package deltacodec encodes mutation fragments as typed Arrow batches.
 package deltacodec
 
 import (
 	"math"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -138,87 +137,6 @@ func (l Layout) Schema() (*arrow.Schema, error) {
 		fields = append(fields, deltaField("field_"+strconv.FormatInt(f.ID, 10), f.ID, arrow.StructOf(arrow.Field{Name: "value", Type: dt, Nullable: true}), true))
 	}
 	return arrow.NewSchema(fields, nil), nil
-}
-
-// WithSchema reads the persisted fields while retaining the caller's scope,
-// schema version and expected PK type. No file-level identity metadata is used.
-func (l Layout) WithSchema(schema *arrow.Schema) (Layout, error) {
-	if schema.NumFields() < 4 {
-		return l, merr.WrapErrDataIntegrityMsg("delta schema is missing common columns")
-	}
-	l.Fields = make([]Field, 0, schema.NumFields()-4)
-	for _, column := range schema.Fields()[4:] {
-		id, _ := column.Metadata.GetValue("PARQUET:field_id")
-		fieldID, err := strconv.ParseInt(id, 10, 64)
-		if err != nil {
-			return l, merr.WrapErrDataIntegrityMsg("invalid delta field ID on %s", column.Name)
-		}
-		parent, ok := column.Type.(*arrow.StructType)
-		if !ok || parent.NumFields() != 1 {
-			return l, merr.WrapErrDataIntegrityMsg("invalid delta assignment column %s", column.Name)
-		}
-		valueType := parent.Field(0).Type
-		f := Field{ID: fieldID}
-		if list, ok := valueType.(*arrow.ListType); ok {
-			f.Type = schemapb.DataType_Array
-			nullable := list.ElemField().Nullable
-			f.ElementNullable = &nullable
-			valueType = list.Elem()
-		}
-		value, err := logical(valueType)
-		if err != nil {
-			return l, err
-		}
-		if f.Type == schemapb.DataType_Array {
-			f.Element = value
-		} else {
-			f.Type = value
-		}
-		l.Fields = append(l.Fields, f)
-	}
-	expected, err := l.Schema()
-	if err != nil {
-		return l, err
-	}
-	for i, field := range expected.Fields() {
-		stored := schema.Field(i)
-		id, _ := field.Metadata.GetValue("PARQUET:field_id")
-		storedID, _ := stored.Metadata.GetValue("PARQUET:field_id")
-		if id != storedID || field.Name != stored.Name || field.Nullable != stored.Nullable || !arrow.TypeEqual(field.Type, stored.Type) {
-			return l, merr.WrapErrDataIntegrityMsg("invalid delta Parquet column %s", stored.Name)
-		}
-	}
-	return l, nil
-}
-
-func logical(dt arrow.DataType) (schemapb.DataType, error) {
-	for _, t := range []schemapb.DataType{
-		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
-		schemapb.DataType_Double, schemapb.DataType_VarChar, schemapb.DataType_Timestamptz,
-	} {
-		physicalType, _, _ := physical(t)
-		if arrow.TypeEqual(dt, physicalType) {
-			return t, nil
-		}
-	}
-	return schemapb.DataType_None, merr.WrapErrDataIntegrityMsg("unsupported delta Arrow type %s", dt)
-}
-
-// Project keeps common columns for every operation. A nil selection loads all
-// fields; an empty selection loads only the common columns.
-func (l Layout) Project(ids []int64) Layout {
-	if ids == nil {
-		return l
-	}
-	fields := make([]Field, 0, len(ids))
-	for _, f := range l.Fields {
-		if slices.Contains(ids, f.ID) {
-			fields = append(fields, f)
-		}
-	}
-	l.Fields = fields
-	return l
 }
 
 func Encode(l Layout, rows []Row) (arrow.Record, error) {
@@ -377,130 +295,4 @@ func appendPrimitive(b array.Builder, v protoreflect.Value) error {
 		return merr.WrapErrDataIntegrityMsg("unexpected primitive delta builder %T", b)
 	}
 	return nil
-}
-
-func primitive(a arrow.Array, i int) protoreflect.Value {
-	switch a := a.(type) {
-	case *array.Boolean:
-		return protoreflect.ValueOfBool(a.Value(i))
-	case *array.Int8:
-		return protoreflect.ValueOfInt32(int32(a.Value(i)))
-	case *array.Int16:
-		return protoreflect.ValueOfInt32(int32(a.Value(i)))
-	case *array.Int32:
-		return protoreflect.ValueOfInt32(a.Value(i))
-	case *array.Int64:
-		return protoreflect.ValueOfInt64(a.Value(i))
-	case *array.Float32:
-		return protoreflect.ValueOfFloat32(a.Value(i))
-	case *array.Float64:
-		return protoreflect.ValueOfFloat64(a.Value(i))
-	case *array.String:
-		return protoreflect.ValueOfString(strings.Clone(a.Value(i)))
-	case *array.Timestamp:
-		return protoreflect.ValueOfInt64(int64(a.Value(i)))
-	default:
-		panic("unexpected validated delta primitive")
-	}
-}
-
-// Decode copies only keys and present assignments. Returned strings and slices
-// own their storage, so the caller can release each input batch immediately.
-func Decode(l Layout, rec arrow.Record) ([]Row, error) {
-	schema, err := l.Schema()
-	if err != nil {
-		return nil, err
-	}
-	if !schema.Equal(rec.Schema()) {
-		return nil, merr.WrapErrDataIntegrityMsg("unexpected delta record schema: %s", rec.Schema())
-	}
-	result := make([]Row, 0, rec.NumRows())
-	for i := 0; i < int(rec.NumRows()); i++ {
-		for j := 0; j < 4; j++ {
-			if rec.Column(j).IsNull(i) {
-				return nil, merr.WrapErrDataIntegrityMsg("null common delta column %s", schema.Field(j).Name)
-			}
-		}
-		r := Row{TimeTick: rec.Column(0).(*array.Uint64).Value(i), SourceOrdinal: rec.Column(3).(*array.Uint32).Value(i), Operation: Operation(rec.Column(1).(*array.Uint8).Value(i))}
-		if r.Operation != Update && r.Operation != Delete {
-			return nil, merr.WrapErrDataIntegrityMsg("unknown delta operation %d", r.Operation)
-		}
-		list := rec.Column(2).(*array.List)
-		lo, hi := list.ValueOffsets(i)
-		if lo == hi {
-			return nil, merr.WrapErrDataIntegrityMsg("empty delta primary-key list")
-		}
-		keys := list.ListValues()
-		for j := lo; j < hi; j++ {
-			if keys.IsNull(int(j)) {
-				return nil, merr.WrapErrDataIntegrityMsg("null delta primary key")
-			}
-		}
-		if l.PKType == schemapb.DataType_Int64 {
-			r.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: slices.Clone(keys.(*array.Int64).Int64Values()[lo:hi])}}}
-		} else {
-			data := make([]string, hi-lo)
-			for j := range data {
-				data[j] = strings.Clone(keys.(*array.String).Value(int(lo) + j))
-			}
-			r.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: data}}}
-		}
-		for j, f := range l.Fields {
-			parent := rec.Column(j + 4).(*array.Struct)
-			if parent.IsNull(i) {
-				continue
-			}
-			if r.Operation == Delete {
-				return nil, merr.WrapErrDataIntegrityMsg("delete contains a field assignment")
-			}
-			child := parent.Field(0)
-			literal := &schemapb.UpdateLiteral{}
-			switch {
-			case child.IsNull(i):
-				literal.Value = &schemapb.UpdateLiteral_SetNull{SetNull: true}
-			case f.Type == schemapb.DataType_Array:
-				payload := &schemapb.ScalarField{}
-				msg := payload.ProtoReflect()
-				_, name, _ := physical(f.Element)
-				values := msg.Mutable(msg.Descriptor().Fields().ByName(name)).Message()
-				out := values.Mutable(values.Descriptor().Fields().ByName("data")).List()
-				list := child.(*array.List)
-				elems := list.ListValues()
-				lo, hi := list.ValueOffsets(i)
-				if f.ElementNullable != nil && *f.ElementNullable && hi > lo {
-					payload.ValidData = make([]bool, hi-lo)
-				}
-				for k := lo; k < hi; k++ {
-					isNull := elems.IsNull(int(k))
-					if isNull && payload.ValidData == nil {
-						if f.ElementNullable != nil {
-							return nil, merr.WrapErrDataIntegrityMsg("NULL element in required delta array field %d", f.ID)
-						}
-						payload.ValidData = make([]bool, hi-lo)
-						for x := range int(k - lo) {
-							payload.ValidData[x] = true
-						}
-					}
-					if payload.ValidData != nil {
-						payload.ValidData[k-lo] = !isNull
-					}
-					if isNull {
-						out.Append(out.NewElement())
-					} else {
-						out.Append(primitive(elems, int(k)))
-					}
-				}
-				literal.Value = &schemapb.UpdateLiteral_ArrayValue{ArrayValue: payload}
-			default:
-				v := &schemapb.ValueField{}
-				msg := v.ProtoReflect()
-				_, name, _ := physical(f.Type)
-				msg.Set(msg.Descriptor().Fields().ByName(name), primitive(child, i))
-				literal.Value = &schemapb.UpdateLiteral_ScalarValue{ScalarValue: v}
-			}
-			r.Assignments = append(r.Assignments, &messagespb.UpdateAssignment{FieldId: f.ID, Literal: literal})
-		}
-		result = append(result, r)
-	}
-	return result, nil
 }

@@ -95,20 +95,6 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
                                    const char* external_source,
                                    const char* external_spec);
 
-CStatus
-NewPackedFFIReaderWithColumnGroupsAndWindow(
-    const LoonColumnGroups* column_groups,
-    struct ArrowSchema* schema,
-    char** needed_columns,
-    int64_t needed_columns_size,
-    CFFIPackedReader* c_loon_reader,
-    CStorageConfig c_storage_config,
-    CPluginContext* c_plugin_context,
-    int64_t collection_id,
-    const char* external_source,
-    const char* external_spec,
-    int64_t window_bytes);
-
 /**
  * @brief Gets an ArrowArrayStream from the FFI reader for streaming data access.
  *

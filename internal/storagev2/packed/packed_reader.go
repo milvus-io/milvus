@@ -311,26 +311,3 @@ func GetPackedFileFieldIDs(filePaths []string, storageConfig *indexpb.StorageCon
 	}
 	return result, nil
 }
-
-// ReadDeltaFooter returns the file schema (including footer metadata) and row
-// count using the same storage and key-retrieval path as data reads.
-func ReadDeltaFooter(path string, cfg *indexpb.StorageConfig, plugin *indexcgopb.StoragePluginContext) (*arrow.Schema, int64, error) {
-	cpath := C.CString(path)
-	defer C.free(unsafe.Pointer(cpath))
-	config, done := newCStorageConfig(cfg)
-	defer done()
-	cipher, done := newCPluginContext(plugin)
-	defer done()
-	var cs cdata.CArrowSchema
-	defer cdata.ReleaseCArrowSchema(&cs)
-	var rows C.int64_t
-	st := C.ReadParquetDeltaFooter(cpath, config, cipher, (*C.struct_ArrowSchema)(unsafe.Pointer(&cs)), &rows)
-	if err := ConsumeCStatusIntoError(&st); err != nil {
-		return nil, 0, err
-	}
-	schema, err := cdata.ImportCArrowSchema(&cs)
-	if err != nil {
-		return nil, 0, merr.Wrap(err, "import delta footer schema")
-	}
-	return schema, int64(rows), nil
-}

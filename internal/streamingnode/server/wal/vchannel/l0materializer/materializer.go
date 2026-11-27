@@ -316,7 +316,7 @@ func splitMaterializeGroups(req MaterializeRequest, collectionID int64) ([]mater
 				if u == nil || len(u.GetAssignments()) == 0 || b.SchemaVersion == nil || b.GetSchemaVersion() != schema.GetVersion() {
 					return nil, merr.WrapErrDataIntegrityMsg("invalid delta payload or schema version at %d", tt)
 				}
-				if err := add(u.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: b.GetSourceOrdinal(), Operation: deltacodec.Update, PrimaryKeys: u.GetPrimaryKeys(), Assignments: u.GetAssignments()}, proto.Size(b)); err != nil {
+				if err := add(b.GetPartitionId(), deltacodec.Row{TimeTick: tt, SourceOrdinal: b.GetSourceOrdinal(), Operation: deltacodec.Update, PrimaryKeys: u.GetPrimaryKeys(), Assignments: u.GetAssignments()}, proto.Size(b)); err != nil {
 					return nil, err
 				}
 			}

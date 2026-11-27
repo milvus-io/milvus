@@ -1302,6 +1302,8 @@ message TransformMutationBlock {
         messages.UpdateMessageBody update = 3;
     }
     optional int32 schema_version = 4;
+    // UPDATE scope copied from UpdateMessageHeader.
+    int64 partition_id = 5;
 }
 message TransformMutationEntry {
     repeated TransformMutationBlock blocks = 1;

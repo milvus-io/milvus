@@ -226,44 +226,11 @@ NewPackedFFIReaderWithColumnGroups(const LoonColumnGroups* column_groups,
                                    int64_t collection_id,
                                    const char* external_source,
                                    const char* external_spec) {
-    return NewPackedFFIReaderWithColumnGroupsAndWindow(column_groups,
-                                                       schema,
-                                                       needed_columns,
-                                                       needed_columns_size,
-                                                       c_loon_reader,
-                                                       c_storage_config,
-                                                       c_plugin_context,
-                                                       collection_id,
-                                                       external_source,
-                                                       external_spec,
-                                                       0);
-}
-
-CStatus
-NewPackedFFIReaderWithColumnGroupsAndWindow(
-    const LoonColumnGroups* column_groups,
-    struct ArrowSchema* schema,
-    char** needed_columns,
-    int64_t needed_columns_size,
-    CFFIPackedReader* c_loon_reader,
-    CStorageConfig c_storage_config,
-    CPluginContext* c_plugin_context,
-    int64_t collection_id,
-    const char* external_source,
-    const char* external_spec,
-    int64_t window_bytes) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
         auto properties =
             MakeInternalPropertiesFromStorageConfig(c_storage_config);
-        if (window_bytes > 0) {
-            auto error = milvus_storage::api::SetValue(
-                *properties,
-                PROPERTY_READER_RECORD_BATCH_MAX_SIZE,
-                std::to_string(window_bytes).c_str());
-            AssertInfo(!error.has_value(), "invalid native delta scan window");
-        }
         if (external_source != nullptr && external_source[0] != '\0') {
             InjectExternalSpecProperties(*properties,
                                          collection_id,

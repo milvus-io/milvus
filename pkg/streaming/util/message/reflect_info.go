@@ -24,7 +24,6 @@ const (
 // Export message types
 const (
 	MessageTypeUnknown                   MessageType = MessageType(messagespb.MessageType_Unknown)
-	MessageTypeUpdate                    MessageType = MessageType(messagespb.MessageType_Update)
 	MessageTypeAddFileResource           MessageType = MessageType(messagespb.MessageType_AddFileResource)
 	MessageTypeRemoveFileResource        MessageType = MessageType(messagespb.MessageType_RemoveFileResource)
 	MessageTypeTimeTick                  MessageType = MessageType(messagespb.MessageType_TimeTick)
@@ -102,8 +101,6 @@ type (
 
 // Export message header and body types
 type (
-	UpdateMessageHeader                    = messagespb.UpdateMessageHeader
-	UpdateMessageBody                      = messagespb.UpdateMessageBody
 	AddFileResourceMessageHeader           = messagespb.AddFileResourceMessageHeader
 	AddFileResourceMessageBody             = messagespb.AddFileResourceMessageBody
 	RemoveFileResourceMessageHeader        = messagespb.RemoveFileResourceMessageHeader
@@ -223,56 +220,6 @@ type (
 	DropRLSMetadataMessageHeader           = messagespb.DropRLSMetadataMessageHeader
 	DropRLSMetadataMessageBody             = messagespb.DropRLSMetadataMessageBody
 )
-
-// Type aliases for UpdateMessageV2
-type (
-	MutableUpdateMessageV2           = specializedMutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-	ImmutableUpdateMessageV2         = SpecializedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-	OwnedImmutableUpdateMessageV2    = SpecializedOwnedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-	RetainedImmutableUpdateMessageV2 = SpecializedRetainedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-	BroadcastUpdateMessageV2         = SpecializedBroadcastMessage[*UpdateMessageHeader, *UpdateMessageBody]
-	BroadcastResultUpdateMessageV2   = BroadcastResult[*UpdateMessageHeader, *UpdateMessageBody]
-	AckResultUpdateMessageV2         = AckResult[*UpdateMessageHeader, *UpdateMessageBody]
-)
-
-// MessageTypeWithVersion for UpdateMessageV2
-var MessageTypeUpdateV2 = MessageTypeWithVersion{
-	MessageType: MessageTypeUpdate,
-	Version:     VersionV2,
-}
-
-// MessageSpecializedType for UpdateMessageV2
-var SpecializedTypeUpdateV2 = MessageSpecializedType{
-	BodyType:   reflect.TypeOf((*UpdateMessageBody)(nil)),
-	HeaderType: reflect.TypeOf((*UpdateMessageHeader)(nil)),
-}
-
-// AsMutableUpdateMessageV2 converts a BasicMessage to MutableUpdateMessageV2
-var AsMutableUpdateMessageV2 = asSpecializedMutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// MustAsMutableUpdateMessageV2 converts a BasicMessage to MutableUpdateMessageV2, panics on error
-var MustAsMutableUpdateMessageV2 = mustAsSpecializedMutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// AsImmutableUpdateMessageV2 converts an ImmutableMessage to ImmutableUpdateMessageV2
-var AsImmutableUpdateMessageV2 = asSpecializedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// MustAsImmutableUpdateMessageV2 converts an ImmutableMessage to ImmutableUpdateMessageV2, panics on error
-var MustAsImmutableUpdateMessageV2 = MustAsSpecializedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// MustAsOwnedImmutableUpdateMessageV2 converts an OwnedImmutableMessage to OwnedImmutableUpdateMessageV2, panics on error
-var MustAsOwnedImmutableUpdateMessageV2 = MustAsSpecializedOwnedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// MustAsRetainedImmutableUpdateMessageV2 converts a RetainedImmutableMessage to RetainedImmutableUpdateMessageV2, panics on error
-var MustAsRetainedImmutableUpdateMessageV2 = MustAsSpecializedRetainedImmutableMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// AsBroadcastUpdateMessageV2 converts a BasicMessage to BroadcastUpdateMessageV2
-var AsBroadcastUpdateMessageV2 = asSpecializedBroadcastMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// MustAsBroadcastUpdateMessageV2 converts a BasicMessage to BroadcastUpdateMessageV2, panics on error
-var MustAsBroadcastUpdateMessageV2 = MustAsSpecializedBroadcastMessage[*UpdateMessageHeader, *UpdateMessageBody]
-
-// NewUpdateMessageBuilderV2 creates a new message builder for UpdateMessageV2
-var NewUpdateMessageBuilderV2 = newMutableMessageBuilder[*UpdateMessageHeader, *UpdateMessageBody]
 
 // Type aliases for AddFileResourceMessageV2
 type (
@@ -3258,7 +3205,6 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.TruncateCollectionMessageHeader{}):        MessageTypeTruncateCollection,
 	reflect.TypeOf(&messagespb.TxnMessageHeader{}):                       MessageTypeTxn,
 	reflect.TypeOf(&messagespb.UpdateImportMessageHeader{}):              MessageTypeUpdateImport,
-	reflect.TypeOf(&messagespb.UpdateMessageHeader{}):                    MessageTypeUpdate,
 }
 
 // MessageTypeWithVersion identifies a message type and version
@@ -3338,7 +3284,6 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeTruncateCollectionV2:        SpecializedTypeTruncateCollectionV2,
 	MessageTypeTxnV2:                       SpecializedTypeTxnV2,
 	MessageTypeUpdateImportV2:              SpecializedTypeUpdateImportV2,
-	MessageTypeUpdateV2:                    SpecializedTypeUpdateV2,
 }
 
 // messageSpecializedTypeVersionMap maps MessageSpecializedType to MessageTypeWithVersion
@@ -3402,5 +3347,4 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeTruncateCollectionV2:        MessageTypeTruncateCollectionV2,
 	SpecializedTypeTxnV2:                       MessageTypeTxnV2,
 	SpecializedTypeUpdateImportV2:              MessageTypeUpdateImportV2,
-	SpecializedTypeUpdateV2:                    MessageTypeUpdateV2,
 }

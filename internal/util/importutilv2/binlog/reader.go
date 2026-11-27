@@ -554,7 +554,7 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 		}),
 	}
 	v2opts := []storage.RwOption{
-		storage.WithVersion(storage.StorageV2), storage.WithImportDelta(),
+		storage.WithVersion(storage.StorageV2),
 		storage.WithStorageConfig(r.storageConfig),
 	}
 
@@ -649,7 +649,7 @@ func (r *reader) readDeleteV3(
 		return merger.Merge(r.ctx, deltaPaths, tsStart, tsEnd, false)
 	}
 	options := []storage.RwOption{
-		storage.WithVersion(storage.StorageV3), storage.WithImportDelta(),
+		storage.WithVersion(storage.StorageV3),
 		storage.WithStorageConfig(r.storageConfig),
 	}
 	// GetDeltaLogPathsFromManifest has already removed zero-entry manifest

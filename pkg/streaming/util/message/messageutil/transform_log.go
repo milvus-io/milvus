@@ -119,6 +119,7 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 			block.Mutation = &streamingpb.TransformMutationBlock_Delete{Delete: deleted}
 		case message.MessageTypeUpdate:
 			update := message.MustAsImmutableUpdateMessageV2(body)
+			block.PartitionId = update.Header().GetPartitionId()
 			block.Mutation = &streamingpb.TransformMutationBlock_Update{Update: proto.Clone(update.MustBody()).(*messagespb.UpdateMessageBody)}
 			if version := update.Header().SchemaVersion; version != nil {
 				block.SchemaVersion = proto.Int32(*version)

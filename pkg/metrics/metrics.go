@@ -58,7 +58,6 @@ const (
 
 	InsertLabel      = "insert"
 	DeleteLabel      = "delete"
-	UpdateLabel      = "update"
 	UpsertLabel      = "upsert"
 	SearchLabel      = "search"
 	QueryLabel       = "query"

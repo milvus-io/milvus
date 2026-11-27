@@ -27,16 +27,6 @@
     "messageReflectInfoTable": [
         {
             "MessageSpecializedType": {
-                "HeaderType": "messagespb.UpdateMessageHeader",
-                "BodyType": "messagespb.UpdateMessageBody"
-            },
-            "MessageTypeWithVersion": {
-                "MessageType": "MessageTypeUpdate",
-                "Version": 2
-            }
-        },
-        {
-            "MessageSpecializedType": {
                 "HeaderType": "messagespb.AddFileResourceMessageHeader",
                 "BodyType": "messagespb.AddFileResourceMessageBody"
             },
