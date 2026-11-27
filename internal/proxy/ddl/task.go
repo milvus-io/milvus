@@ -387,7 +387,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
 	}
 
-	if vectorFields == 0 {
+	if vectorFields == 0 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
 	}
 
@@ -751,6 +751,13 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	}
 	if funcutil.SliceContain([]string{common.RowIDFieldName, common.TimeStampFieldName, common.MetaFieldName, common.NamespaceFieldName, common.VirtualPKFieldName}, structFieldSchema.GetName()) {
 		return merr.WrapErrParameterInvalidMsg("not support to add system field, field name = %s", structFieldSchema.GetName())
+	}
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		if structFieldSchema.GetExternalField() == "" {
+			return merr.WrapErrParameterInvalidMsg("struct field '%s' in external collection %s must have external_field mapping", structFieldSchema.GetName(), schema.GetName())
+		}
+	} else if structFieldSchema.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("external_field is not supported for struct field in non-external collection %s", schema.GetName())
 	}
 	if err := validateStructArrayField(structFieldSchema, schema); err != nil {
 		return err
@@ -1170,6 +1177,19 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *s
 	}
 	newField := proto.Clone(field).(*schemapb.FieldSchema)
 	newField.Name = rawName
+	if typeutil.NewStorageColumnResolver(schema).IsMilvusTable() {
+		parentExt := parent.GetExternalField()
+		if parentExt == "" {
+			parentExt = structPath
+		}
+		expectedExt := storedStructSubFieldName(parentExt, rawName)
+		if field.GetExternalField() != "" && field.GetExternalField() != expectedExt {
+			return merr.WrapErrParameterInvalidMsg("struct %q child %q must map to %q; external_field=%q", structPath, rawName, expectedExt, field.GetExternalField())
+		}
+		// Mapping is validated above. Keep the common protected-role checks
+		// unchanged, and preserve the mapping on the actual request field.
+		newField.ExternalField = ""
+	}
 	if err := validateAddStructSubFieldProperties(&schemapb.StructArrayFieldSchema{Fields: []*schemapb.FieldSchema{newField}}); err != nil {
 		return err
 	}
@@ -1315,7 +1335,7 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	// Check: cannot drop the last vector field. GetVectorFieldSchemas counts
 	// vectors in both top-level Fields and StructArrayField sub-fields.
 	if typeutil.IsVectorType(targetField.DataType) {
-		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
 		}
 	}
@@ -1356,7 +1376,8 @@ func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schem
 	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
 	}
-	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 &&
+		!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", storedName)
 	}
 	for _, fn := range schema.GetFunctions() {
@@ -1405,7 +1426,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop struct array field %s: it would leave no vector field in the collection",
 			sf.GetName())
@@ -1445,7 +1466,7 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 			removedVectors++
 		}
 	}
-	if removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop function %s: it would leave no vector field in the collection",
 			functionName)
@@ -3237,10 +3258,14 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field
@@ -3504,10 +3529,14 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 		err = merr.Error(indexResponse.GetStatus())
 	}
 	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		if !errors.Is(err, merr.ErrIndexNotFound) {
+			return err
 		}
-		return err
+		// A collection with no vector field needs no index to be loaded.
+		if typeutil.HasVectorField(collSchema.CollectionSchema) {
+			return merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		indexResponse = &indexpb.DescribeIndexResponse{}
 	}
 
 	// not support multiple indexes on one field

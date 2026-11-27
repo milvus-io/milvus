@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,9 +43,45 @@ func TestRegistry(t *testing.T) {
 	assert.True(t, id.EQ(newMessageIDOfWoodpecker(1, 2)))
 }
 
+func TestEmbeddedLocalStorageRoot(t *testing.T) {
+	params := paramtable.Get()
+	setParam := func(t *testing.T, item *paramtable.ParamItem, value string) {
+		t.Helper()
+		old := item.SwapTempValue(value)
+		t.Cleanup(func() { item.SwapTempValue(old) })
+	}
+	setParam(t, &params.WoodpeckerCfg.StorageType, "local")
+
+	t.Run("DefaultRoot", func(t *testing.T) {
+		base := t.TempDir()
+		setParam(t, &params.LocalStorageCfg.Path, base)
+		setParam(t, &params.WoodpeckerCfg.RootPath, "default")
+		t.Cleanup(func() { require.NoError(t, woodpecker.StopEmbedLogStore()) })
+
+		wpDir := filepath.Join(base, "wp")
+		require.NoDirExists(t, wpDir)
+		walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
+		require.DirExists(t, wpDir)
+	})
+
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	for _, tc := range []struct{ name, base, root string }{
+		{"MissingBase", missing, "default"},
+		{"MissingCustomRoot", dir, missing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setParam(t, &params.LocalStorageCfg.Path, tc.base)
+			setParam(t, &params.WoodpeckerCfg.RootPath, tc.root)
+			_, err := (&builderImpl{}).Build()
+			require.ErrorIs(t, err, os.ErrNotExist)
+			require.ErrorContains(t, err, missing)
+			require.NoDirExists(t, missing)
+		})
+	}
+}
+
 func TestWAL(t *testing.T) {
-	tmpDir := t.TempDir()
-	rootPath := filepath.Join(tmpDir, "TestWpWAL")
 	testCases := []struct {
 		name        string
 		storageType string
@@ -54,7 +91,7 @@ func TestWAL(t *testing.T) {
 		{
 			name:        "LocalFsStorage",
 			storageType: "local",
-			rootPath:    rootPath,
+			rootPath:    t.TempDir(),
 			needCluster: false,
 		},
 		{
@@ -65,8 +102,8 @@ func TestWAL(t *testing.T) {
 		},
 		{
 			name:        "ServiceStorage",
-			storageType: "service",             // Using default storage type minio-compatible
-			rootPath:    rootPath + "_service", // No need to specify path for this storage
+			storageType: "service", // Using default storage type minio-compatible
+			rootPath:    t.TempDir(),
 			needCluster: true,
 		},
 	}
@@ -152,7 +189,7 @@ func TestWpRetentionTruncateRead(t *testing.T) {
 	// adjust logic lives in woodpecker's log handle/reader and is storage-backend agnostic.
 	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RetentionTTL.Key, "72h"))
 	require.NoError(t, pt.Save(pt.WoodpeckerCfg.StorageType.Key, "local"))
-	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RootPath.Key, filepath.Join(t.TempDir(), "wp_ret_trunc")))
+	require.NoError(t, pt.Save(pt.WoodpeckerCfg.RootPath.Key, t.TempDir()))
 	// Small rolling size + padded messages => a new segment every few messages
 	// (woodpecker rolls by flushed byte size, not timing), so the seek-forward sub-tests
 	// can reach both the within-segment and cross-segment adjustment branches.

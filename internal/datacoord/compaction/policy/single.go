@@ -178,9 +178,8 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 	collectionID int64,
 	collectionTTL time.Duration,
 ) ([]view.CompactionView, []view.CompactionView, error) {
-	log := mlog.WithLazy(mlog.FieldCollectionID(collectionID))
 	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
-		log.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction")
+		mlog.RatedInfo(ctx, rate.Limit(20), "stats task disabled, skip sort compaction", mlog.FieldCollectionID(collectionID))
 		return nil, nil, nil
 	}
 	invisibleViews := make([]view.CompactionView, 0)
@@ -188,16 +187,16 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn(ctx, "fail to apply triggerSegmentSortCompaction, unable to get collection from handler",
+		mlog.Warn(ctx, "fail to apply triggerSegmentSortCompaction, unable to get collection from handler", mlog.FieldCollectionID(collectionID),
 			mlog.Err(err))
 		return nil, nil, err
 	}
 	if collection == nil {
-		log.Warn(ctx, "fail to apply triggerSegmentSortCompaction, collection not exist")
+		mlog.Warn(ctx, "fail to apply triggerSegmentSortCompaction, collection not exist", mlog.FieldCollectionID(collectionID))
 		return nil, nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	if collection.IsExternal() {
-		log.Info(ctx, "skip triggerSegmentSortCompaction for external collection", mlog.FieldCollectionID(collection.ID))
+		mlog.Info(ctx, "skip triggerSegmentSortCompaction for external collection", mlog.FieldCollectionID(collectionID))
 		return nil, nil, nil
 	}
 	excluded := policy.Meta.SegmentChangeCompactionExclusions(collectionID)
@@ -208,7 +207,6 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 				!policy.Meta.IsSegmentCompactionProtected(seg.GetID())
 		}))
 	if len(triggerableSegments) == 0 {
-		log.RatedInfo(ctx, rate.Limit(20), "no triggerable segments")
 		return invisibleViews, visibleViews, nil
 	}
 
@@ -246,7 +244,7 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 		}
 	}
 
-	log.Info(ctx, "succeeded to apply triggerSortCompaction",
+	mlog.Info(ctx, "succeeded to apply triggerSortCompaction", mlog.FieldCollectionID(collectionID),
 		mlog.Int64("triggerID", triggerID),
 		mlog.Int("triggered view num", len(invisibleViews)+len(visibleViews)))
 	return invisibleViews, visibleViews, nil
@@ -255,41 +253,40 @@ func (policy *SingleCompactionPolicy) triggerSortCompaction(
 // triggerOneCollection returns the collection's single compaction views, the
 // sort views of its invisible and of its visible segments, and the trigger ID.
 func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]view.CompactionView, []view.CompactionView, []view.CompactionView, int64, error) {
-	log := mlog.WithLazy(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to get collection from handler",
+		mlog.Warn(ctx, "fail to apply singleCompactionPolicy, unable to get collection from handler", mlog.FieldCollectionID(collectionID),
 			mlog.Err(err))
 		return nil, nil, nil, 0, err
 	}
 	if collection == nil {
-		log.Warn(ctx, "fail to apply singleCompactionPolicy, collection not exist")
+		mlog.Warn(ctx, "fail to apply singleCompactionPolicy, collection not exist", mlog.FieldCollectionID(collectionID))
 		return nil, nil, nil, 0, nil
 	}
 	if collection.IsExternal() {
-		log.Info(ctx, "skip single compaction for external collection")
+		mlog.Info(ctx, "skip single compaction for external collection", mlog.FieldCollectionID(collectionID))
 		return nil, nil, nil, 0, nil
 	}
 
 	collectionTTL, err := common.GetCollectionTTL(collection.Properties)
 	if err != nil {
-		log.Warn(ctx, "failed to apply singleCompactionPolicy, get collection ttl failed")
+		mlog.Warn(ctx, "failed to apply singleCompactionPolicy, get collection ttl failed", mlog.FieldCollectionID(collectionID))
 		return nil, nil, nil, 0, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
-		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to allocate triggerID", mlog.Err(err))
+		mlog.Warn(ctx, "fail to apply singleCompactionPolicy, unable to allocate triggerID", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return nil, nil, nil, 0, err
 	}
 
 	invisibleSortViews, visibleSortViews, err := policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
 	if err != nil {
-		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
+		mlog.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return nil, nil, nil, 0, err
 	}
 	if !IsCollectionAutoCompactionEnabled(collection) {
-		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
+		mlog.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled", mlog.FieldCollectionID(collectionID))
 		return nil, invisibleSortViews, visibleSortViews, 0, nil
 	}
 
@@ -324,7 +321,7 @@ func (policy *SingleCompactionPolicy) TriggerOneCollection(ctx context.Context, 
 	}
 
 	if len(views) > 0 {
-		log.Info(ctx, "succeeded to apply singleCompactionPolicy",
+		mlog.Info(ctx, "succeeded to apply singleCompactionPolicy", mlog.FieldCollectionID(collectionID),
 			mlog.Int64("triggerID", newTriggerID),
 			mlog.Int("triggered view num", len(views)))
 	}

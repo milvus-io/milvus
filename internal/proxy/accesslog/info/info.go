@@ -16,7 +16,12 @@
 
 package info
 
-import "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+import (
+	"strconv"
+	"sync/atomic"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+)
 
 const (
 	Unknown            = "Unknown"
@@ -57,6 +62,7 @@ var MetricFuncMap = map[string]getMetricFunc{
 	"$client_request_time":   getClientRequestTime,
 	"$template_value_length": getTemplateValueLength,
 	"$partial_update":        getPartialUpdate,
+	"$is_cold_search":        getIsColdSearch,
 }
 
 type AccessInfo interface {
@@ -91,6 +97,23 @@ type AccessInfo interface {
 	TemplateValueLength() string
 	PartialUpdate() string
 	SetActualConsistencyLevel(commonpb.ConsistencyLevel)
+	IsColdSearch() string
+	SetColdSearch(bool)
+}
+
+type coldSearchInfo struct {
+	coldSearch atomic.Pointer[bool]
+}
+
+func (i *coldSearchInfo) IsColdSearch() string {
+	if cold := i.coldSearch.Load(); cold != nil {
+		return strconv.FormatBool(*cold)
+	}
+	return NotAny
+}
+
+func (i *coldSearchInfo) SetColdSearch(cold bool) {
+	i.coldSearch.Store(&cold)
 }
 
 func Get(i AccessInfo, keys ...string) []any {
@@ -216,4 +239,8 @@ func getTemplateValueLength(i AccessInfo) string {
 
 func getPartialUpdate(i AccessInfo) string {
 	return i.PartialUpdate()
+}
+
+func getIsColdSearch(i AccessInfo) string {
+	return i.IsColdSearch()
 }

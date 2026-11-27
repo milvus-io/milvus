@@ -628,6 +628,14 @@ func (t *Task) QueryTaskOnWorker(cluster session.Cluster) {
 	t.cleanupAdmissionPending.Store(true)
 	err = SyncCopySegmentTask(t.Ctx, t, resp, t.CopyMeta, t.Meta, t.indexMeta)
 	if err != nil {
+		var conflict *installedCopyReplayError
+		if errors.As(err, &conflict) {
+			// Publication already owns these files. A contradictory worker reply
+			// must not fail the job and hand its committed targets to cleanup.
+			t.cleanupAdmissionPending.Store(false)
+			mlog.Warn(t.Ctx, "rejected replay of installed copy result", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
+			return
+		}
 		if !t.GetCleanupRequired() {
 			// Admission failed before cleanup intent was durable. Retry the
 			// completed result; marking Failed here would lose its cleanup plan.
@@ -909,6 +917,14 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	// manifest index sections the snapshot cannot answer on its own. The FFI
 	// calls are independent across segments, but build-ID allocation and request
 	// assembly below stay ordered so parallel I/O cannot change the request.
+	// Copy keeps the physical column IDs. Even for restores into an existing
+	// collection, only forward totals whose logical field identity is proven.
+	var identityFields map[int64]bool
+	if !isExternalCollection && t.Meta != nil && t.Meta.MetaStore != nil && slices.ContainsFunc(snapshotData.Segments, func(s *datapb.SegmentDescription) bool { return s.GetFieldLogicalSizes() != nil }) {
+		if targetCollection := t.Meta.GetCollection(job.GetCollectionId()); targetCollection != nil && !targetCollection.IsExternal() {
+			identityFields = copyFieldIdentity(sourceSchema, targetCollection.Schema)
+		}
+	}
 	preparedSources := make([]*datapb.CopySegmentSource, len(idMappings))
 	manifestIndexesByMapping := make([][]packed.ManifestIndexInfo, len(idMappings))
 	manifestReadMappings := make([]int, 0, len(idMappings))
@@ -936,6 +952,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			SourceRootPath:       sourceRootPath,
 			NumOfRows:            sourceSegDesc.GetNumOfRows(),
 			ManifestHasIndex:     cloneOptionalBool(sourceSegDesc.ManifestHasIndex),
+			FieldLogicalSizes:    copySourceFieldSizes(sourceSegDesc, identityFields),
 		}
 		preparedSources[i] = source
 
@@ -1084,6 +1101,58 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 	}, nil
 }
 
+// copyFieldIdentity includes only source columns whose schema definition and ID
+// are retained by the destination. For StructArray, also match the parent:
+// its shared row validity is part of the logical representation of its leaves.
+func copyFieldIdentity(source, target *schemapb.CollectionSchema) map[int64]bool {
+	ids := make(map[int64]bool)
+	matchFields := func(src, dst []*schemapb.FieldSchema) bool {
+		fields := make(map[int64]*schemapb.FieldSchema, len(dst))
+		for _, f := range dst {
+			fields[f.GetFieldID()] = f
+		}
+		matched := false
+		for _, f := range src {
+			if other := fields[f.GetFieldID()]; f != nil && other != nil && model.FieldEqual(f, other) {
+				ids[f.GetFieldID()] = true
+				matched = true
+			}
+		}
+		return matched
+	}
+	matchFields(source.GetFields(), target.GetFields())
+	parents := make(map[int64]*schemapb.StructArrayFieldSchema, len(target.GetStructArrayFields()))
+	for _, f := range target.GetStructArrayFields() {
+		parents[f.GetFieldID()] = f
+	}
+	for _, f := range source.GetStructArrayFields() {
+		other := parents[f.GetFieldID()]
+		if f != nil && other != nil && f.GetName() == other.GetName() && f.GetNullable() == other.GetNullable() &&
+			common.KeyValuePairs(f.GetTypeParams()).Equal(other.GetTypeParams()) && matchFields(f.GetFields(), other.GetFields()) {
+			ids[f.GetFieldID()] = true
+		}
+	}
+	return ids
+}
+
+func copySourceFieldSizes(source *datapb.SegmentDescription, identity map[int64]bool) *datapb.FieldLogicalSizes {
+	sizes := source.GetFieldLogicalSizes()
+	if sizes.GetVersion() != storage.FieldLogicalSizeVersion || len(identity) == 0 || source.GetStorageVersion() != storage.StorageV3 ||
+		source.GetSegmentLevel() == datapb.SegmentLevel_L0 || meta.CheckFieldLogicalSizes(sizes, source.GetNumOfRows(), source.GetManifestPath()) != nil {
+		return nil
+	}
+	out := &datapb.FieldLogicalSizes{Version: sizes.Version, RowCount: sizes.RowCount, Fields: make(map[int64]*datapb.FieldLogicalSize)}
+	for id, size := range sizes.GetFields() {
+		if identity[id] && size != nil {
+			out.Fields[id] = proto.Clone(size).(*datapb.FieldLogicalSize)
+		}
+	}
+	if len(out.Fields) == 0 {
+		return nil
+	}
+	return out
+}
+
 func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.SnapshotLayout) (string, error) {
 	root, found := snapshotstorage.DeriveSnapshotRootPath(snapshotS3Location)
 	if !found {
@@ -1174,12 +1243,24 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
-		if current := copyMeta.GetTask(ctx, task.GetTaskId()); current != nil {
-			if current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
-				return nil
-			}
+		current := copyMeta.GetTask(ctx, task.GetTaskId())
+		if current != nil {
 			task = current
 		} else if meta.ManifestIndexRollbackEnabled() {
+			return nil
+		}
+		// Target finalization precedes both group staging and task completion.
+		// Compare known values before either fast path or cleanup admission.
+		results := make([]*datapb.CopySegmentResult, 0, len(resp.GetSegmentResults()))
+		for _, result := range resp.GetSegmentResults() {
+			segment := mt.GetSegment(ctx, result.GetSegmentId())
+			if !copySegmentResultInstalled(segment) {
+				results = append(results, result)
+			} else if err := checkInstalledCopyReplay(task, segment, result); err != nil {
+				return err
+			}
+		}
+		if current != nil && current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
 			return nil
 		}
 		if group := mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
@@ -1198,15 +1279,6 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed &&
 			(len(task.GetCleanupPrefixes()) > 0 || meta.ManifestIndexRollbackEnabled()) {
 			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task after cleanup or during index rollback")
-		}
-		// Segment completion is durable before task completion. On replay, a
-		// finalized target may already have been migrated or compacted; never
-		// validate or reinstall the worker's historical manifest for it.
-		results := make([]*datapb.CopySegmentResult, 0, len(resp.GetSegmentResults()))
-		for _, result := range resp.GetSegmentResults() {
-			if !copySegmentResultInstalled(mt.GetSegment(ctx, result.GetSegmentId())) {
-				results = append(results, result)
-			}
 		}
 		if staging {
 			expected := make(map[int64]bool, len(task.GetIdMappings()))
@@ -1310,7 +1382,7 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	defer locks.Unlock(result.GetSegmentId())
 	segment := mt.GetSegment(ctx, result.GetSegmentId())
 	if copySegmentResultInstalled(segment) {
-		return nil
+		return checkInstalledCopyReplay(task, segment, result)
 	}
 	if !meta.IsSegmentHealthy(segment) {
 		return failCopySegmentSync(ctx, task, copyMeta, merr.WrapErrSegmentNotFound(result.GetSegmentId()))
@@ -1353,6 +1425,9 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	// and rejected before publication if it still carries foreign entries.
 	if manifestPath := result.GetManifestPath(); manifestPath != "" {
 		operators = append(operators, meta.UpdateManifest(result.GetSegmentId(), manifestPath))
+		if result.GetFieldLogicalSizes() != nil {
+			operators = append(operators, copiedFieldSizesOperator(task, result))
+		}
 		if len(publishedBuilds) > 0 {
 			// The worker-created manifest is adopted outside
 			// CommitSegmentManifest, so publish its recovery
@@ -1417,6 +1492,47 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 			mlog.Int("binlogFields", len(result.GetBinlogs())),
 			mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
 	return nil
+}
+
+// An installed target belongs to the successful copy. The scheduler must
+// distinguish its replay conflict from a rejected first publication.
+type installedCopyReplayError struct{ error }
+
+func (e *installedCopyReplayError) Unwrap() error { return e.error }
+
+func checkInstalledCopyReplay(task CopySegmentTask, segment *meta.SegmentInfo, result *datapb.CopySegmentResult) error {
+	if result.GetFieldLogicalSizes() == nil || meta.SegmentFieldLogicalSizes(segment.SegmentInfo) == nil || !copyTaskOwnsTarget(task, segment) {
+		return nil
+	}
+	if err := meta.CheckFieldLogicalSizesReplay(segment.SegmentInfo, result.GetManifestPath(), result.GetImportedRows(), result.GetFieldLogicalSizes()); err != nil {
+		return &installedCopyReplayError{err}
+	}
+	return nil
+}
+
+func copyTaskOwnsTarget(task CopySegmentTask, target *meta.SegmentInfo) bool {
+	return task.GetCollectionId() == target.GetCollectionID() && slices.ContainsFunc(task.GetIdMappings(), func(mapping *datapb.CopySegmentIDMapping) bool {
+		return mapping.GetTargetSegmentId() == target.GetID() && mapping.GetPartitionId() == target.GetPartitionID()
+	})
+}
+
+// A current copy worker echoes only the fields matched at dispatch, and only
+// after copying every insert file. The source description also initialized this
+// target's row count. Install the echo after the binlog operator resets Stats.
+func copiedFieldSizesOperator(task CopySegmentTask, result *datapb.CopySegmentResult) meta.UpdateOperator {
+	return func(pack *meta.UpdateSegmentPack) bool {
+		target := pack.Get(result.GetSegmentId())
+		if target == nil || target.GetLevel() == datapb.SegmentLevel_L0 || target.GetStorageVersion() != storage.StorageV3 ||
+			target.GetManifestPath() == "" || !result.GetManifestIndexRewritten() || result.GetImportedRows() != target.GetNumOfRows() ||
+			!storage.FieldLogicalSizesCover(result.GetFieldLogicalSizes(), target.GetNumOfRows()) || !copyTaskOwnsTarget(task, target) {
+			return false
+		}
+		// UpdateBinlogsOperator just built an independent Statistics value.
+		// UpdateSegmentStats validates and clones it, binding the portable
+		// totals to the destination's published manifest.
+		target.Stats.FieldLogicalSizes = result.GetFieldLogicalSizes()
+		return meta.UpdateSegmentStats(target.GetID(), target.Stats)(pack)
+	}
 }
 
 func failCopySegmentSync(ctx context.Context, task CopySegmentTask, copyMeta CopySegmentMeta, err error) error {

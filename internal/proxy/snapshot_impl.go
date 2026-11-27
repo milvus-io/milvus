@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -46,6 +47,7 @@ func (node *Proxy) CreateSnapshot(ctx context.Context, req *milvuspb.CreateSnaps
 	method := "CreateSnapshot"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(ctx, rpcReceived(method))
+	featureusage.Hit(featureusage.FeatureSnapshotCreate)
 
 	t := NewCreateSnapshotTask(ctx, node, req)
 
@@ -184,6 +186,7 @@ func (node *Proxy) RestoreExternalSnapshot(ctx context.Context, req *milvuspb.Re
 		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""),
 	)
 	log.Info(ctx, rpcReceived(method))
+	featureusage.Hit(featureusage.FeatureSnapshotRestore)
 
 	if req.GetSnapshotMetadataUri() == "" {
 		err := merr.WrapErrParameterInvalidMsg("snapshot_metadata_uri is required for restore external snapshot")
@@ -230,6 +233,7 @@ func (node *Proxy) ExportSnapshot(ctx context.Context, req *milvuspb.ExportSnaps
 		mlog.Bool("externalSpecSet", req.GetExternalSpec() != ""),
 	)
 	log.Info(ctx, rpcReceived(method))
+	featureusage.Hit(featureusage.FeatureSnapshotExport)
 
 	if err := ValidateSnapshotName(req.GetName()); err != nil {
 		return &milvuspb.ExportSnapshotResponse{Status: merr.Status(err)}, nil
@@ -355,6 +359,7 @@ func (node *Proxy) RestoreSnapshot(ctx context.Context, req *milvuspb.RestoreSna
 	method := "RestoreSnapshot"
 	tr := timerecord.NewTimeRecorder(method)
 	log.Info(ctx, rpcReceived(method))
+	featureusage.Hit(featureusage.FeatureSnapshotRestore)
 
 	t := NewRestoreSnapshotTask(ctx, node, req)
 

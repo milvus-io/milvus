@@ -1748,6 +1748,12 @@ func (m *IndexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.C
 	}
 	m.fieldIndexLock.RUnlock()
 
+	// A collection without a vector field has no DiskANN index and keeps the
+	// default segment size; without this guard the empty loop selected the
+	// DiskANN size. Sparse-only collections keep their pre-existing result.
+	if !typeutil.HasVectorField(schema) {
+		return false
+	}
 	for _, field := range typeutil.GetVectorFieldSchemas(schema) {
 		if typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 			continue

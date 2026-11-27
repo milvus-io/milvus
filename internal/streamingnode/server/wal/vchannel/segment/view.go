@@ -873,10 +873,10 @@ func (s *SegmentView) flushPackForTimeTickLocked(timetick uint64) *flushPack {
 		return nil
 	}
 	chunk := &s.pendingFlushChunks[index]
-	meta := proto.Clone(s.durableMeta).(*streamingpb.SegmentAssignmentMeta)
-	applyInsertStat(meta, *chunk)
-	meta.CheckpointTimeTick = chunk.toTimeTick
-	return chunk.flushPack(meta, s.schema)
+	pack := chunk.flushPack(s.durableMeta, s.schema)
+	applyInsertStat(pack.Meta, *chunk)
+	pack.Meta.CheckpointTimeTick = chunk.toTimeTick
+	return pack
 }
 
 func (s *SegmentView) pendingFlushChunkLocked(timetick uint64) *writeOnlyInsertBuffer {

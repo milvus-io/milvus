@@ -97,7 +97,7 @@ func TestCoordinatorSkippedIndexManifestPublication(t *testing.T) {
 			}
 			require.Equal(t, globalTask.LocalCompleted, task.CompleteOnCoordinator(ctx))
 			require.Equal(t, taskcommon.Finished, task.GetTaskState())
-			require.True(t, task.SegmentIndex.IsSkippedBuild())
+			require.True(t, task.IsSkippedBuild())
 
 			segment := m.GetSegment(ctx, meta.RestartSegID)
 			rows, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)

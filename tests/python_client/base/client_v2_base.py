@@ -634,7 +634,16 @@ class TestMilvusClientV2Base(Base):
         return res, check_result
 
     def wait_for_compaction_eligible_segments(
-        self, client, collection_name, minimum_segment_count, timeout=30, poll_interval=2, index_name=None
+        self,
+        client,
+        collection_name,
+        minimum_segment_count,
+        timeout=30,
+        poll_interval=2,
+        index_name=None,
+        *,
+        index_names=(),
+        expected_rows=None,
     ):
         return wait_for_compaction_eligible_segments(
             client._get_connection(),
@@ -644,6 +653,8 @@ class TestMilvusClientV2Base(Base):
             poll_interval=poll_interval,
             context=client._generate_call_context(),
             index_name=index_name,
+            index_names=index_names,
+            expected_rows=expected_rows,
         )
 
     @trace()
