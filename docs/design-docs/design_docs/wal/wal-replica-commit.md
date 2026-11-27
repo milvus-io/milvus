@@ -17,9 +17,15 @@ RO 接收当前 writer 公布的已持久化 checkpoint，只在本地 Buffer �
 
 例如 L=100，RO 已观察到 140。准备任务先取得 (100,140] 并注册实时输入，随后 checkpoint 推到 120。Buffer 可释放自己的前缀，任务仍持有其所需的引用；若读到的 Segment 基线已经覆盖到 125，任务只对该 Segment 应用 125 之后的输入。
 
-## Growing / sealed 的归属在 Ready 前核对
+## Shard 发布下界与 Preparing 的顺序
 
-DataCoord 将 Segment 的首次 sealed_at_data_version 与该版 DataView 绑定发布。SN 的 SegmentAssignmentMeta 副本在 final commit 返回后才更新，可能晚于 DataView。RO 为目标版本 V 加载 Growing 资源时读取相关 Segment 的权威绑定和对应 DataView；在现有 PrepareQueryView/Ready 回调前核对。绑定 S ≤ V 时该 Segment 由 sealed 一侧覆盖，S > V 时旧 View 仍需 growing 侧服务。已经 Flush 但缺少发布证明时不能凭空判定归属；空 Segment 使用显式退休结果。既有版本的首次绑定不可变，因此正常 Ready → Up 直接使用已核对的资源；重连时若未经历本地准备，则先恢复并核对再开放 Up。异步结果只提交给仍有效的 View 引用和本次 runtime。[首次发布时序](segment_view_module.md) · [现有 Ready 前置检查](../../../../internal/streamingnode/server/wal/vchannel/queryresource/manager.go)
+DataCoord 在首次发布 Segment 的事务中更新该 shard 的 `required_streaming_version`。QueryCoord 把选定 DataView 的值带入 QueryView。同一 collection 的其他 shard 可以独立前进。
+
+RW 接到 Preparing 时开始本地资源准备。在发布 Preparing 信号前，它在该 shard 的恢复模块内截取已经开始 final commit 的 Segment。能够产生目标版本的提交都早于这次截取；更晚开始的提交属于未来的 DataView。RW 等待截取范围中仍可能影响目标版本的 assignment 完成 catalog 持久化。DataCoord 的成功响应和 SN catalog 的持久化回调是两个独立的时点。版本 10 的回调先于版本 8 完成时，RW 仍须等 8。完整确认的下界仅在本任 writer 内存中复用。
+
+收到 Preparing 的 RO 此时可以直接从 SN catalog 读取 assignment。两种角色的 QueryRuntime 都在本地 WAL 覆盖相应位置之后应用首次 sealed 绑定，再用资源事件屏障确认 Growing 和 IDF 已处理整批更新。同一 View 引用的 Ready 已包含这次确认，收到 Up 后可直接复用。新加入的 RO 即使首帧收到 Up，也要先在本地完成准备。较旧的 View 按自己的 DataVersion 区分 Growing 和 sealed。已有 Up View 在此期间继续服务。
+
+订阅者从 writer 已经公布的信号集合取得首帧。新 writer 在 RecoveryBarrier 后重新确认未提交的 Preparing，持久化 Up 的记录已经包含以前完成同一确认的事实。恢复首帧不能省略仍然待确认的 View，否则 RO 会将缺项解释为退休；在这些初始信号可发布前，订阅可重试。Down 或 Dropped 取代待确认的意图时取消对应等待。正常 Up/Down 的多副本确认仍由 writer 协调。[发布与恢复](../../../../internal/streamingnode/server/wal/adaptor/replica_views.go)
 
 ## 冷启动和升主
 

@@ -16,7 +16,7 @@ import (
 type VChannelWALView struct {
 	// CaptureQueryView captures a fresh snapshot and registers its consumer under
 	// the VChannel owner lock. The callback must not perform I/O.
-	CaptureQueryView func(*viewpb.QueryViewMeta, func(VChannelWALView)) bool
+	CaptureQueryView func(context.Context, *viewpb.QueryViewMeta, func(VChannelWALView)) bool
 	RuntimeContext   context.Context
 
 	// WithResourceEventLock orders a barrier after all already observed WAL events.
@@ -25,9 +25,8 @@ type VChannelWALView struct {
 	// PrepareQueryView checks final commits and publishes sealed notifications.
 	// QueryRuntime calls it under WithResourceEventLock before its ready barrier.
 	PrepareQueryView func() bool
-	// RefreshSealedVersions reads the authority outside the event lock before
-	// ordering local sealed events and the view-ready barrier.
-	RefreshSealedVersions func(context.Context) error
+	// SyncShardAssignments enqueues catalog-confirmed first seals after local WAL catch-up.
+	SyncShardAssignments func(context.Context, int64, func(VChannelResourceEvent) bool) error
 
 	PChannel     string
 	VChannel     string

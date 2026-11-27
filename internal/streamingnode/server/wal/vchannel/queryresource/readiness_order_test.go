@@ -93,7 +93,7 @@ func TestQueryViewBarrierStopsOnCloseOrCancellation(t *testing.T) {
 		patch := mockey.Mock((*QueryRuntime).submitDrain).Return().Build()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		go func() { done <- runtime.PrepareQueryView(ctx) }()
+		go func() { done <- runtime.PrepareQueryView(ctx, 0) }()
 		require.Eventually(t, func() bool {
 			runtime.mu.Lock()
 			defer runtime.mu.Unlock()

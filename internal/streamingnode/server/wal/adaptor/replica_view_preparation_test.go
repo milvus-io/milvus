@@ -34,14 +34,6 @@ import (
 func TestWriterViewReplicaPreparation(t *testing.T) {
 	t.Run("reader recovers the same version", func(t *testing.T) {
 		f := newReplicaPreparationTest(t)
-		// The RW's resource manager uses manual readiness callbacks. The RO
-		// runs its scheduler, shared growing runtime and per-view preparation.
-		patch := mockey.Mock((*vchannel.ReplicaQueries).PrepareUp).
-			When(func(q *vchannel.ReplicaQueries, _ context.Context, _ qviews.QueryViewKey) bool {
-				return q == f.control.readSide.readQueries
-			}).Return(nil).Build()
-		t.Cleanup(func() { patch.UnPatch() })
-
 		var attempts atomic.Int32
 		retrying := make(chan struct{})
 		resume := make(chan struct{})
@@ -99,6 +91,44 @@ func TestWriterViewReplicaPreparation(t *testing.T) {
 		lease, err := reader.handler.AcquireUpView(f.ctx, f.key.ShardID, f.key.QueryViewVersion)
 		require.NoError(t, err)
 		lease.Release()
+		require.EqualValues(t, 2, attempts.Load(), "Up must reuse the successful Ready preparation")
+	})
+
+	t.Run("rejoining reader prepares a committed Up once", func(t *testing.T) {
+		f := newReplicaPreparationTest(t)
+		f.local.OnReady()
+		f.subscribe(2)(viewpb.QueryViewState_QueryViewStateReady)
+		f.subscribe(3)(viewpb.QueryViewState_QueryViewStateReady)
+		f.expectReport(qviews.QueryViewStateReady)
+		f.reports = f.push(qviews.QueryViewStateUp)
+		f.expectReport(qviews.QueryViewStateUp)
+
+		resume := make(chan struct{})
+		var attempts atomic.Int32
+		reader, _ := f.startReader(func(ctx context.Context) error {
+			attempts.Add(1)
+			select {
+			case <-resume:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		report, err := reader.next(f.ctx)
+		require.NoError(t, err)
+		require.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, report.LocalState)
+		_, err = reader.handler.AcquireUpView(f.ctx, f.key.ShardID, f.key.QueryViewVersion)
+		require.Error(t, err)
+		close(resume)
+		for {
+			report, err = reader.next(f.ctx)
+			require.NoError(t, err)
+			if report.LocalState == viewpb.QueryViewState_QueryViewStateUp {
+				break
+			}
+			require.Equal(t, viewpb.QueryViewState_QueryViewStateReady, report.LocalState)
+		}
+		require.EqualValues(t, 1, attempts.Load())
 	})
 
 	t.Run("writer fails while readers are preparing", func(t *testing.T) {
@@ -187,7 +217,7 @@ func newReplicaPreparationTest(t *testing.T) *replicaPreparationTest {
 	}
 	t.Cleanup(local.readQueries.Close)
 	t.Cleanup(local.readViews.CloseForHandoff)
-	local.follower = newFollower("p", local.readViews, local.readQueries, durable)
+	local.follower = newFollower("p", local.readViews, durable)
 	recovered, ok := resources.getAcquired(viewKey(v1))
 	require.True(t, ok)
 	recovered.OnReady()
@@ -211,7 +241,9 @@ func (f *replicaPreparationTest) startReader(refresh func(context.Context) error
 	patch := mockey.Mock(queryresource.NewManager).Origin(&original).To(func(cfg queryresource.Config) *queryresource.Manager {
 		cfg.Builders = []queryresource.QueryRuntimeModuleBuilder{queryresource.NewGrowingRuntimeModuleBuilder(nil)}
 		cfg.CaptureView = func(_ context.Context, meta *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) error {
-			install(walview.VChannelWALView{VChannel: meta.Vchannel, RefreshSealedVersions: refresh})
+			install(walview.VChannelWALView{VChannel: meta.Vchannel, SyncShardAssignments: func(ctx context.Context, _ int64, _ func(walview.VChannelResourceEvent) bool) error {
+				return refresh(ctx)
+			}})
 			return nil
 		}
 		return original(cfg)
@@ -221,7 +253,7 @@ func (f *replicaPreparationTest) startReader(refresh func(context.Context) error
 	f.t.Cleanup(queries.Close)
 	views := snview.RecoverPChannelSNQueryViewHandler(f.ctx, "p", nil, queries, nil)
 	f.t.Cleanup(views.CloseForHandoff)
-	reader := newFollower("p", views, queries, nil)
+	reader := newFollower("p", views, nil)
 	sub, snapshot, err := f.control.publisher.Subscribe(2)
 	require.NoError(f.t, err)
 	f.t.Cleanup(sub.Close)
@@ -322,4 +354,233 @@ func TestWriterViewDirectDropRetiresDurableUp(t *testing.T) {
 	require.Empty(t, durable)
 	f.reports = f.push(qviews.QueryViewStateDropped)
 	f.expectReport(qviews.QueryViewStateDropped)
+}
+
+func TestWriterViewDownDuringUpPublication(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	f.key = f.v1
+	f.template = newQueryShutdownTestView("p_1v0", 10, viewpb.QueryViewState_QueryViewStateUp)
+	publishing, resume := make(chan struct{}), make(chan struct{})
+	var original func(*replica.Publisher, qviews.QueryViewKey, viewpb.QueryViewState)
+	var upCalls atomic.Int32
+	defer mockey.Mock((*replica.Publisher).PublishView).Origin(&original).To(func(p *replica.Publisher, key qviews.QueryViewKey, state viewpb.QueryViewState) {
+		if key == f.key && state == viewpb.QueryViewState_QueryViewStateUp && upCalls.Add(1) == 2 {
+			close(publishing)
+			select {
+			case <-resume:
+			case <-f.ctx.Done():
+				return
+			}
+		}
+		original(p, key, state)
+	}).Build().UnPatch()
+
+	oldReports := f.push(qviews.QueryViewStateUp)
+	select {
+	case <-publishing:
+	case <-f.ctx.Done():
+		t.Fatal("writer did not reach final Up publication")
+	}
+	started, accepted := make(chan struct{}), make(chan struct{})
+	go func() {
+		close(started)
+		f.reports = f.push(qviews.QueryViewStateDown)
+		close(accepted)
+	}()
+	<-started
+	select {
+	case <-accepted:
+		close(resume)
+		t.Fatal("Down overtook the in-flight local Up dispatch")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(resume)
+	select {
+	case <-accepted:
+	case <-f.ctx.Done():
+		t.Fatal("writer did not accept Down")
+	}
+	sub, snapshot, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer sub.Close()
+	id := &viewpb.QueryViewKey{Shard: f.key.ShardID.IntoProto(), Version: f.key.QueryViewVersion.IntoProto()}
+	var signal viewpb.QueryViewState
+	for _, s := range snapshot.QueryViews {
+		if proto.Equal(s.View, id) {
+			signal = s.State
+		}
+	}
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, signal)
+	f.expectPending()
+	views, err := f.catalog.ListQueryViews(f.ctx, "p")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.Equal(t, f.key, viewKey(views[0]))
+
+	sub.Report(&streamingpb.WALQueryViewReport{View: id, LocalState: viewpb.QueryViewState_QueryViewStateDown})
+	f.expectPending()
+	f.subscribe(3)(viewpb.QueryViewState_QueryViewStateDropped)
+	f.expectReport(qviews.QueryViewStateDown)
+	views, err = f.catalog.ListQueryViews(f.ctx, "p")
+	require.NoError(t, err)
+	require.Empty(t, views)
+	f.control.Stop()
+	for len(oldReports) > 0 {
+		require.Equal(t, qviews.QueryViewStateUp, (<-oldReports).State(), "old Up must never report a local Down to Coord")
+	}
+}
+
+func TestWriterViewReplayedUpAfterLocalDown(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	f.key, f.template = f.v1, newQueryShutdownTestView("p_1v0", 10, viewpb.QueryViewState_QueryViewStateDown)
+	f.reports = f.push(qviews.QueryViewStateDown)
+	obsolete := f.reports
+	f.expectPending()
+	// Simulate a reconnect replaying an older writer intent after local Down.
+	// Its fast-forward report still requires retirement of the durable Up.
+	f.reports = f.push(qviews.QueryViewStateUp)
+	sub, snapshot, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer sub.Close()
+	viewID := &viewpb.QueryViewKey{Shard: f.key.ShardID.IntoProto(), Version: f.key.QueryViewVersion.IntoProto()}
+	down := func(views []*streamingpb.WALQueryViewSignal) bool {
+		for _, v := range views {
+			if proto.Equal(v.View, viewID) {
+				return v.State == viewpb.QueryViewState_QueryViewStateDown
+			}
+		}
+		return false
+	}
+	if !down(snapshot.QueryViews) {
+		change, err := sub.Next(f.ctx)
+		require.NoError(t, err)
+		require.True(t, down(change.QueryViews))
+	}
+	sub.Report(&streamingpb.WALQueryViewReport{View: viewID, LocalState: viewpb.QueryViewState_QueryViewStateDown})
+	f.expectPending()
+	f.subscribe(3)(viewpb.QueryViewState_QueryViewStateDown)
+	f.expectReport(qviews.QueryViewStateDown)
+	durable, err := f.catalog.ListQueryViews(f.ctx, "p")
+	require.NoError(t, err)
+	require.Empty(t, durable)
+	f.control.Stop()
+	require.Empty(t, obsolete)
+}
+
+func TestRecoveredPreparingWaitsBeforeFirstSnapshot(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	view := proto.CloneOf(f.template)
+	view.Meta.Version.QueryVersion += 10
+	view.Meta.RequiredStreamingVersion = 10
+	entered, resume := make(chan struct{}), make(chan struct{})
+	defer mockey.Mock((*vchannel.ReplicaQueries).WaitForAssignments).To(func(_ *vchannel.ReplicaQueries, ctx context.Context, vc string, required int64) error {
+		require.Equal(t, view.Meta.Vchannel, vc)
+		require.EqualValues(t, 10, required)
+		close(entered)
+		select {
+		case <-resume:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Build().UnPatch()
+	f.control.seed("p", []*viewpb.QueryViewOfShard{view})
+	<-entered
+	_, _, err := f.control.publisher.Subscribe(2)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	close(resume)
+	var sub *replica.Subscription
+	var state *streamingpb.WALReplicaState
+	require.Eventually(t, func() bool {
+		sub, state, err = f.control.publisher.Subscribe(2)
+		return err == nil
+	}, time.Second, time.Millisecond)
+	defer sub.Close()
+	for _, s := range state.QueryViews {
+		if s.View.Version.QueryVersion == view.Meta.Version.QueryVersion {
+			require.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, s.State)
+			return
+		}
+	}
+	t.Fatal("certified recovered Preparing missing from first snapshot")
+}
+
+func TestDownCancelsPendingAssignmentPublication(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	view := proto.CloneOf(f.template)
+	view.Meta.Version.QueryVersion += 10
+	view.Meta.RequiredStreamingVersion = 10
+	entered, stopped := make(chan struct{}), make(chan struct{})
+	defer mockey.Mock((*vchannel.ReplicaQueries).WaitForAssignments).To(func(_ *vchannel.ReplicaQueries, ctx context.Context, _ string, _ int64) error {
+		close(entered)
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	}).Build().UnPatch()
+	f.control.seed("p", []*viewpb.QueryViewOfShard{view})
+	select {
+	case <-entered:
+	case <-f.ctx.Done():
+		t.Fatal("writer did not start confirming assignments")
+	}
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	f.control.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(view)}})
+	select {
+	case <-stopped:
+	case <-f.ctx.Done():
+		t.Fatal("Down left the prepare blocked")
+	}
+	sub, snapshot, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer sub.Close()
+	for _, s := range snapshot.QueryViews {
+		if s.View.Version.QueryVersion == view.Meta.Version.QueryVersion {
+			require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, s.State)
+			return
+		}
+	}
+	t.Fatal("reader did not receive the replacement Down")
+}
+
+func TestRetiredViewCancelsStalePreparingBeforeReaderVotes(t *testing.T) {
+	f := newReplicaPreparationTest(t)
+	f.reports = f.push(qviews.QueryViewStateDown)
+	f.subscribe(2)(viewpb.QueryViewState_QueryViewStateDown)
+	f.subscribe(3)(viewpb.QueryViewState_QueryViewStateDown)
+	f.expectReport(qviews.QueryViewStateDown)
+
+	// Reconnect a reader, withdrawing its earlier vote. Coord can re-send
+	// Preparing for an already retired local view while its assignment is saving.
+	sub, _, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer sub.Close()
+	stopped := make(chan struct{})
+	defer mockey.Mock((*vchannel.ReplicaQueries).WaitForAssignments).To(func(_ *vchannel.ReplicaQueries, ctx context.Context, _ string, _ int64) error {
+		<-ctx.Done()
+		close(stopped)
+		return nil // A concurrent catalog completion can also return success.
+	}).Build().UnPatch()
+	f.template.Meta.RequiredStreamingVersion = 10
+	f.reports = f.push(qviews.QueryViewStatePreparing)
+	select {
+	case <-stopped:
+	case <-f.ctx.Done():
+		t.Fatal("retired view waited for its reader vote before canceling Preparing")
+	}
+	sub.Report(&streamingpb.WALQueryViewReport{
+		View:       &viewpb.QueryViewKey{Shard: f.key.ShardID.IntoProto(), Version: f.key.QueryViewVersion.IntoProto()},
+		LocalState: viewpb.QueryViewState_QueryViewStateDown,
+	})
+	f.expectReport(qviews.QueryViewStateDown)
+	f.control.Stop()
+	latest, state, err := f.control.publisher.Subscribe(2)
+	require.NoError(t, err)
+	defer latest.Close()
+	for _, v := range state.QueryViews {
+		if v.View.Version.QueryVersion == f.key.QueryViewVersion.QueryVersion {
+			require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, v.State)
+			return
+		}
+	}
+	t.Fatal("retired view missing from replica snapshot")
 }

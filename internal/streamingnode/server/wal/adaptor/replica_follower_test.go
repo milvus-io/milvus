@@ -51,7 +51,7 @@ func TestReplicaFollowerConfirmsDownBeforeRelease(t *testing.T) {
 	resources := newQueryShutdownTestResMgr(func(snview.ReleaseResource) { releases.Add(1) })
 	readerViews := snview.RecoverPChannelSNQueryViewHandler(ctx, "p", nil, resources, nil)
 	defer readerViews.CloseForHandoff()
-	follower := newFollower("p", readerViews, nil, nil)
+	follower := newFollower("p", readerViews, nil)
 	writer := replica.NewPublisher(nil)
 	defer writer.Close()
 	topology := &streamingpb.WALReplicaTopology{
@@ -83,7 +83,7 @@ func TestReplicaFollowerConfirmsDownBeforeRelease(t *testing.T) {
 	writer.PublishView(key, up)
 	local := &roWALAdaptorImpl{readViews: snview.RecoverPChannelSNQueryViewHandler(ctx, "p", nil, newQueryShutdownTestResMgr(nil), durable)}
 	defer local.readViews.CloseForHandoff()
-	local.follower = newFollower("p", local.readViews, nil, durable)
+	local.follower = newFollower("p", local.readViews, durable)
 	control := newWriterViewControl(ctx, local, writer, durable)
 	defer control.Stop()
 	view.Meta.State = down
@@ -152,7 +152,7 @@ func TestReplicaFollowerRegistersOldestDataVersionAcrossShards(t *testing.T) {
 	defer patch.UnPatch()
 	views := snview.RecoverPChannelSNQueryViewHandler(ctx, "p", nil, newQueryShutdownTestResMgr(nil), nil)
 	defer views.CloseForHandoff()
-	reader := newFollower("p", views, nil, nil)
+	reader := newFollower("p", views, nil)
 
 	// Interleave data versions across two logical replicas. Applying a full
 	// shard at a time cannot produce the required registration order.

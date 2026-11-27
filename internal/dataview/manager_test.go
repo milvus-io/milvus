@@ -1543,3 +1543,48 @@ func TestManagerFlushStatsCarryBaseSegments(t *testing.T) {
 	ids := ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds()
 	require.ElementsMatch(t, []int64{10, 20}, ids)
 }
+
+func TestShardPublicationVersionsSurviveReplayAndRecovery(t *testing.T) {
+	ctx := t.Context()
+	m, catalog := newTestManager()
+	_, err := m.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"a", "b"}})
+	require.NoError(t, err)
+	a, b := segment(101, "a", 1), segment(102, "b", 1)
+	flush := func(s LoadableSegment) *viewpb.DataViewOfCollection {
+		v, commit, _, err := m.PrepareFlush(ctx, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{s}})
+		require.NoError(t, err)
+		require.NoError(t, catalog.SaveDataView(ctx, v))
+		commit()
+		return v
+	}
+	check := func(v *viewpb.DataViewOfCollection, wantA, wantB int64) {
+		require.Len(t, v.Shards, 2)
+		require.Equal(t, wantA, v.Shards[0].RequiredStreamingVersion)
+		require.Equal(t, wantB, v.Shards[1].RequiredStreamingVersion)
+	}
+	first := flush(a)
+	check(first, 2, 0)
+	second := flush(b)
+	check(second, 2, 3)
+	check(flush(a), 2, 3)
+	check(first, 2, 0)
+	// Refreshing an existing segment can advance the collection version.
+	// Neither the manifest change nor a rejected replay is a new first seal.
+	a.ManifestVersion = 7
+	a.TransformStartAfterTimetick = 25
+	refresh := flush(a)
+	require.Greater(t, refresh.DataVersion.StreamingVersion, second.DataVersion.StreamingVersion)
+	check(refresh, 2, 3)
+	a.TransformStartAfterTimetick--
+	_, _, _, err = m.PrepareFlush(ctx, FlushDataViewEvent{CollectionID: 1, Segments: []LoadableSegment{a}})
+	require.Error(t, err)
+	_, err = m.RecomputeNow(ctx, 1, projectSegments(b))
+	require.NoError(t, err)
+	recovered, err := RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
+	require.NoError(t, err)
+	ref, err := recovered.Latest(ctx, 1)
+	require.NoError(t, err)
+	defer ref.Deref()
+	check(ref.DataView(), 2, 3)
+	require.Positive(t, ref.Version().CompactVersion)
+}

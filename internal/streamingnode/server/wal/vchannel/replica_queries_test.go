@@ -3,6 +3,7 @@ package vchannel
 import (
 	"context"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -259,7 +261,6 @@ func TestReplicaQueryCaptureReleasesPinOnShutdown(t *testing.T) {
 			key := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "v1"}}
 			_, ok := q.GetQueryReadRuntime(key)
 			require.False(t, ok)
-			require.Error(t, q.PrepareUp(ctx, key))
 			done := make(chan error, 1)
 			meta := &viewpb.QueryViewMeta{Vchannel: "v1", CollectionId: 1, SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}}}
 			go func() {
@@ -351,4 +352,154 @@ func TestReplicaQueryReleaseWithFullQueue(t *testing.T) {
 		t.Fatal("dropping the blocked runtime did not unblock the scanner")
 	}
 	require.EqualValues(t, 1100, q.through)
+}
+
+func TestWriterAssignmentFenceCoversOutOfOrderCommits(t *testing.T) {
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
+	defer q.Close()
+	m, err := NewPChannelRecoveryManager(PChannelManagerConfig{PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": restoreSchemaTestMeta()}})
+	require.NoError(t, err)
+	defer m.Close()
+	detach := q.BindWriter(m)
+	defer detach()
+	a, b := new(segment.SegmentView), new(segment.SegmentView)
+	mod := m.Module("v1")
+	mod.segments = map[int64]*segment.SegmentView{8: a, 10: b}
+	early, later := make(chan struct{}), make(chan struct{})
+	seen := make(chan struct{}, 8)
+	defer mockey.Mock((*segment.SegmentView).PublicationWait).To(func(s *segment.SegmentView, _ int64) <-chan struct{} {
+		ch := early
+		if s == b {
+			ch = later
+		}
+		select {
+		case <-ch:
+			return nil
+		default:
+			seen <- struct{}{}
+			return ch
+		}
+	}).Build().UnPatch()
+	done := make(chan error, 1)
+	go func() { done <- q.WaitForAssignments(t.Context(), "v1", 10) }()
+	<-seen
+	<-seen
+	close(later)
+	select {
+	case <-done:
+		t.Fatal("published 10 while 8 was pending")
+	default:
+	}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, q.WaitForAssignments(canceled, "v1", 10), context.Canceled)
+	close(early)
+	require.NoError(t, <-done)
+	require.EqualValues(t, 10, mod.confirmedQueryStreamingVersion)
+	require.NoError(t, q.WaitForAssignments(t.Context(), "v1", 8))
+}
+
+func TestReplicaAssignmentCatchupWaitsForLocalWAL(t *testing.T) {
+	catalog := sncatalog.NewCataLog(nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
+	defer q.Close()
+	var covered atomic.Int64
+	read := make(chan struct{}, 4)
+	defer mockey.Mock(mockey.GetMethod(catalog, "ListSegmentAssignment")).To(func(_ context.Context, _ string) ([]*streamingpb.SegmentAssignmentMeta, error) {
+		read <- struct{}{}
+		return []*streamingpb.SegmentAssignmentMeta{
+			{Vchannel: "v1", SegmentId: 1, CheckpointTimeTick: 40, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 8}},
+			{Vchannel: "v1", SegmentId: 2, CheckpointTimeTick: 45, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 10}},
+			{Vchannel: "v2", SegmentId: 3, CheckpointTimeTick: 90, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 9}},
+		}, nil
+	}).Build().UnPatch()
+	done := make(chan error, 1)
+	go func() {
+		done <- q.syncAssignments(t.Context(), "v1", &covered, 10, func(walview.VChannelResourceEvent) bool { return false })
+	}()
+	<-read
+	require.Zero(t, covered.Load())
+	select {
+	case <-done:
+		t.Fatal("seal applied ahead of WAL")
+	default:
+	}
+	q.Observe(nil, 45)
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.Zero(t, covered.Load())
+	var ids []int64
+	require.NoError(t, q.syncAssignments(t.Context(), "v1", &covered, 10, func(e walview.VChannelResourceEvent) bool { ids = append(ids, e.SegmentSealed.SegmentID); return true }))
+	require.ElementsMatch(t, []int64{1, 2}, ids)
+	require.EqualValues(t, 10, covered.Load())
+	require.NoError(t, q.syncAssignments(t.Context(), "v1", &covered, 8, nil))
+}
+
+func TestDemotionCancelsAssignmentFence(t *testing.T) {
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
+	defer q.Close()
+	m, err := NewPChannelRecoveryManager(PChannelManagerConfig{PChannel: "p", VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": restoreSchemaTestMeta()}})
+	require.NoError(t, err)
+	defer m.Close()
+	detach := q.BindWriter(m)
+	mod := m.Module("v1")
+	mod.segments = map[int64]*segment.SegmentView{1: new(segment.SegmentView)}
+	entered := make(chan struct{}, 2)
+	blocked := make(chan struct{})
+	defer mockey.Mock((*segment.SegmentView).PublicationWait).To(func(_ *segment.SegmentView, _ int64) <-chan struct{} {
+		entered <- struct{}{}
+		return blocked
+	}).Build().UnPatch()
+	done := make(chan error, 2)
+	go func() {
+		done <- q.capture(t.Context(), &viewpb.QueryViewMeta{Vchannel: "v1", RequiredStreamingVersion: 8}, nil)
+	}()
+	go func() { done <- q.syncAssignments(t.Context(), "v1", new(atomic.Int64), 8, nil) }()
+	<-entered
+	<-entered
+	detach()
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.Zero(t, mod.confirmedQueryStreamingVersion)
+}
+
+func TestReplicaSnapshotKeepsUnpublishedFlush(t *testing.T) {
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v1", SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 10}}}
+	segments := map[int64]*streamingpb.SegmentAssignmentMeta{
+		1: {PartitionId: 10, SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED},
+		2: {PartitionId: 10, SegmentId: 2, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED},
+		3: {PartitionId: 10, SegmentId: 3, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 8}},
+		4: {PartitionId: 10, SegmentId: 4, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 11}},
+		5: {PartitionId: 99, SegmentId: 5},
+	}
+	vc := NewVChannelViewFromMeta(restoreSchemaTestMeta())
+	view, err := buildReplicaView(meta, vc, segments, nil, 40)
+	require.NoError(t, err)
+	var growing []int64
+	for _, s := range view.SegmentSnapshot.Segments {
+		growing = append(growing, s.SegmentID)
+	}
+	require.ElementsMatch(t, []int64{1, 4}, growing)
+	require.Len(t, view.SegmentSnapshot.FlushedSegments, 1)
+	require.EqualValues(t, 3, view.SegmentSnapshot.FlushedSegments[0].SegmentID)
+	meta.SchemaVersion = 999
+	_, err = buildReplicaView(meta, vc, segments, nil, 40)
+	require.Error(t, err)
+}
+
+func TestFailedCatalogReadLeavesAssignmentPrefixUnchanged(t *testing.T) {
+	catalog := sncatalog.NewCataLog(nil)
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(catalog))
+	q := NewReplicaQueries(t.Context(), "p", replica.NewBuffer(10), 10)
+	defer q.Close()
+	meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v1", RequiredStreamingVersion: 8}
+	fail := mockey.Mock(mockey.GetMethod(catalog, "ListVChannel")).Return(nil, io.ErrUnexpectedEOF).Build()
+	require.ErrorIs(t, q.capture(t.Context(), meta, nil), io.ErrUnexpectedEOF)
+	fail.UnPatch()
+	defer mockey.Mock(mockey.GetMethod(catalog, "ListVChannel")).Return(nil, nil).Build().UnPatch()
+	defer mockey.Mock(mockey.GetMethod(catalog, "ListSegmentAssignment")).Return(nil, io.ErrUnexpectedEOF).Build().UnPatch()
+	require.ErrorIs(t, q.capture(t.Context(), meta, nil), io.ErrUnexpectedEOF)
+	var covered atomic.Int64
+	require.ErrorIs(t, q.syncAssignments(t.Context(), "v1", &covered, 8, nil), io.ErrUnexpectedEOF)
+	require.Zero(t, covered.Load())
 }

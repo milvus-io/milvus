@@ -101,7 +101,7 @@ The single recovery scanner reaches RecoveryBarrier before the startup
 write-path snapshot is published. QueryRuntime preparation may additionally
 wait for actual component conditions, including:
 
-- every retained nonterminal flushed Segment has `sealed_at_data_version`;
+- in replica mode, the runtime has applied the [catalog-confirmed shard assignments](wal-replica-commit.md) for its QueryView;
 - required TransformLog subscription start points remain readable;
 - captured schema and segment state form a consistent VChannel snapshot.
 
@@ -130,7 +130,7 @@ There is no second recovery checkpoint tied to this lifecycle classification.
 
 ## 6. Invariants
 
-1. VChannelRecoveryModule is the only builder of VChannelWALView.
+1. ReplicaQueries builds VChannelWALView for RW and RO replicas. VChannelRecoveryModule supplies the single-WAL runtime.
 2. View capture and live observer installation have no message gap.
 3. QueryRuntime owns no RecoveryStorage handle.
 4. Runtime MVCC frontiers are not global recovery checkpoints.

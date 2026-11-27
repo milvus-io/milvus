@@ -108,7 +108,7 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	}
 	return walview.VChannelWALView{
 		PChannel: m.pchannel, VChannel: m.vchannel, CollectionID: state.CollectionID,
-		CaptureQueryView: func(meta *viewpb.QueryViewMeta, captured func(walview.VChannelWALView)) bool {
+		CaptureQueryView: func(_ context.Context, meta *viewpb.QueryViewMeta, captured func(walview.VChannelWALView)) bool {
 			m.mu.Lock()
 			defer m.mu.Unlock()
 			view, ok := m.queryWALViewLocked(meta)

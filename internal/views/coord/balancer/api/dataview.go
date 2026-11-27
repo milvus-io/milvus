@@ -17,6 +17,7 @@ type CollectionDataView struct {
 // ShardDataView is one vchannel's DataView within a collection.
 type ShardDataView struct {
 	VChannel                             string
+	RequiredStreamingVersion             int64
 	GrowingTransformStartAfterTimetick   uint64
 	CompactedTransformStartAfterTimetick uint64
 	Partitions                           []*PartitionDataView

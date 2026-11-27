@@ -75,7 +75,7 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 	stop := context.AfterFunc(ctx, func() { r.eventMu.Lock(); stage.err = ctx.Err(); r.eventCond.Broadcast(); r.eventMu.Unlock() })
 	defer stop()
 	var view walview.VChannelWALView
-	if !base.CaptureQueryView(target, func(captured walview.VChannelWALView) {
+	if !base.CaptureQueryView(ctx, target, func(captured walview.VChannelWALView) {
 		view = captured
 		r.eventMu.Lock()
 		stage.timeTick, stage.version = view.BaseGrowingTimeTick, view.SegmentSnapshot.DataVersion

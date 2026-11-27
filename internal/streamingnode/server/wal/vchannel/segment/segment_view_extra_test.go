@@ -635,3 +635,32 @@ func TestWriteOnlyFlushPolicy(t *testing.T) {
 	old.fromTimeTick = tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour))
 	assert.True(t, newWriteOnlyFlushPolicy(0, 0, time.Millisecond).ShouldFlush(old, start), "age threshold reached")
 }
+
+func TestPublicationWaitEndsAtCatalogCommit(t *testing.T) {
+	meta := &streamingpb.SegmentAssignmentMeta{SegmentId: 101, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING}
+	s := newSegmentView(meta, 0, false, writeOnlyInsertBuffer{}, nil, runtimeConfig{})
+	wait := s.PublicationWait(10)
+	require.Nil(t, wait)
+	s.closingTimeTick = 20
+	wait = s.PublicationWait(10)
+	require.NotNil(t, wait)
+	// An earlier in-flight save can finish after the final commit response.
+	stale := proto.CloneOf(s.durableMeta)
+	s.finalCommitDone.Store(true)
+	s.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+	s.meta.SealedAtDataVersion = &viewpb.DataVersion{StreamingVersion: 8}
+	s.durableMeta = proto.CloneOf(s.meta)
+	s.dirty = true
+	s.MarkSnapshotPersisted(stale)
+	select {
+	case <-wait:
+		t.Fatal("nonterminal save released the writer")
+	default:
+	}
+	older := s.PublicationWait(7)
+	require.Nil(t, older)
+	s.MarkSnapshotPersisted(s.ConsumeDirtyAndGetSnapshot())
+	<-wait
+	wait = s.PublicationWait(10)
+	require.Nil(t, wait)
+}

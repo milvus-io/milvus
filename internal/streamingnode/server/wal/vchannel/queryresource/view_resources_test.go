@@ -38,7 +38,7 @@ func TestManagerViewResourcesDrainBeforeDropAndRejectRetiredTasks(t *testing.T) 
 	defer manager.Close()
 	schema := mock_segcore.GenTestCollectionSchema("owned-read-schema", schemapb.DataType_Int64, false)
 	view := walview.VChannelWALView{CollectionID: 7881, Schema: schema}
-	view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
+	view.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
 		captured := view
 		captured.Schema = proto.Clone(schema).(*schemapb.CollectionSchema)
 		captured.Schema.Version = meta.GetSchemaVersion()

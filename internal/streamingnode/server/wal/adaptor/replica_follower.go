@@ -4,13 +4,11 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -24,7 +22,6 @@ type followerView struct {
 }
 type replicaFollower struct {
 	channel string
-	queries *vchannel.ReplicaQueries
 	handler *snview.SNQueryViewHandler
 	mu      sync.Mutex
 	current map[qviews.QueryViewKey]*followerView
@@ -33,8 +30,8 @@ type replicaFollower struct {
 	applyMu sync.Mutex
 }
 
-func newFollower(channel string, h *snview.SNQueryViewHandler, queries *vchannel.ReplicaQueries, recovered []*viewpb.QueryViewOfShard) *replicaFollower {
-	f := &replicaFollower{channel: channel, handler: h, queries: queries, current: make(map[qviews.QueryViewKey]*followerView), pending: make(map[qviews.QueryViewKey]*streamingpb.WALQueryViewReport), changed: make(chan struct{}, 1)}
+func newFollower(channel string, h *snview.SNQueryViewHandler, recovered []*viewpb.QueryViewOfShard) *replicaFollower {
+	f := &replicaFollower{channel: channel, handler: h, current: make(map[qviews.QueryViewKey]*followerView), pending: make(map[qviews.QueryViewKey]*streamingpb.WALQueryViewReport), changed: make(chan struct{}, 1)}
 	for _, v := range recovered {
 		f.current[viewKey(v)] = &followerView{definition: v, target: v.Meta.State}
 	}
@@ -137,26 +134,6 @@ func (f *replicaFollower) command(ctx context.Context, key qviews.QueryViewKey, 
 		}
 		if (cmd.target == viewpb.QueryViewState_QueryViewStateUp && local == viewpb.QueryViewState_QueryViewStateReady) || (cmd.target == viewpb.QueryViewState_QueryViewStateDropped && local == viewpb.QueryViewState_QueryViewStateDown) {
 			go func() {
-				if cmd.target == viewpb.QueryViewState_QueryViewStateUp {
-					if err := f.queries.PrepareUp(ctx, key); err != nil {
-						// A failed metadata read must be retried while the intent
-						// remains current, even with no further WAL state changes.
-						for err != nil {
-							select {
-							case <-ctx.Done():
-								return
-							case <-time.After(100 * time.Millisecond):
-							}
-							f.mu.Lock()
-							current := f.current[key] == cmd
-							f.mu.Unlock()
-							if !current {
-								return
-							}
-							err = f.queries.PrepareUp(ctx, key)
-						}
-					}
-				}
 				f.applyMu.Lock()
 				defer f.applyMu.Unlock()
 				f.mu.Lock()

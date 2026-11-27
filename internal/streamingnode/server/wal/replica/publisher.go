@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Publisher lives for one writer term. It keeps one immutable signal per
@@ -23,6 +24,7 @@ type Publisher struct {
 	mu            sync.Mutex
 	checkpoint    *streamingpb.WALCheckpoint
 	views         map[qviews.QueryViewKey]*streamingpb.WALQueryViewSignal
+	initializing  map[qviews.QueryViewKey]struct{}
 	subscriptions map[int64]*Subscription
 	changed       chan struct{}
 	closed        bool
@@ -46,12 +48,23 @@ func (p *Publisher) PublishCheckpoint(cp *streamingpb.WALCheckpoint) {
 	p.notifyLocked()
 }
 
+// ExpectInitialView is called during writer open, before subscriptions are admitted.
+func (p *Publisher) ExpectInitialView(key qviews.QueryViewKey) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.initializing == nil {
+		p.initializing = make(map[qviews.QueryViewKey]struct{})
+	}
+	p.initializing[key] = struct{}{}
+}
+
 func (p *Publisher) PublishView(key qviews.QueryViewKey, state viewpb.QueryViewState) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
 		return
 	}
+	delete(p.initializing, key)
 	if state == viewpb.QueryViewState_QueryViewStateDropped {
 		delete(p.views, key)
 		for _, sub := range p.subscriptions {
@@ -72,6 +85,9 @@ func (p *Publisher) Subscribe(id int64) (*Subscription, *streamingpb.WALReplicaS
 	defer p.mu.Unlock()
 	if p.closed || !p.members[id] {
 		return nil, nil, io.EOF
+	}
+	if len(p.initializing) > 0 {
+		return nil, nil, merr.WrapErrServiceNotReadyMsg("recovering WAL replica QueryView snapshot")
 	}
 	if old := p.subscriptions[id]; old != nil {
 		close(old.done)

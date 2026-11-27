@@ -557,7 +557,7 @@ func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, r
 				return err
 			}
 		}
-		if err := runtime.PrepareQueryView(ctx); err != nil {
+		if err := runtime.PrepareQueryView(ctx, ref.meta.RequiredStreamingVersion); err != nil {
 			return err
 		}
 		if err := ref.resources.prepare(ctx, m.loadInfoProvider); err != nil {

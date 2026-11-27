@@ -195,6 +195,7 @@ type SegmentView struct {
 	// pendingDirtySnapshot is the stable in-flight catalog view returned by
 	// ConsumeDirtyAndGetSnapshot and cleared by MarkSnapshotPersisted.
 	pendingDirtySnapshot *streamingpb.SegmentAssignmentMeta
+	publicationChanged   chan struct{}
 
 	// lifecycle commits data-side segment state to the coordinator after object
 	// storage output is ready.
@@ -603,6 +604,27 @@ func (info *SegmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssi
 		info.pendingDirtySnapshot = nil
 	}
 	info.dirty = !proto.Equal(info.durableMeta, snapshot)
+	if info.publicationChanged != nil && finalCommitDoneFromMeta(snapshot) {
+		close(info.publicationChanged)
+		info.publicationChanged = nil
+	}
+}
+
+// PublicationWait captures a final commit already in flight for this View.
+// A later Flush cannot have published into an already allocated DataView.
+func (s *SegmentView) PublicationWait(required int64) <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if (s.closingTimeTick == 0 && !s.finalCommitDone.Load()) || s.meta.GetSealedAtDataVersion().GetStreamingVersion() > required {
+		return nil
+	}
+	if s.finalCommitDone.Load() && !s.dirty && s.pendingDirtySnapshot == nil {
+		return nil
+	}
+	if s.publicationChanged == nil {
+		s.publicationChanged = make(chan struct{})
+	}
+	return s.publicationChanged
 }
 
 // NotifyDataUpdated reports data changes to the owning module. Must not be

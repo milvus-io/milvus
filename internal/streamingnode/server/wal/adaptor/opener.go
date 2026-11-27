@@ -270,12 +270,12 @@ func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls,
 	if err != nil {
 		return nil, merr.Wrap(err, "load streaming node query views")
 	}
+	var desired []*viewpb.QueryViewOfShard
 	if roWAL.replicaPublisher != nil {
-		desired, err := resource.Resource().QueryViewCatalog().ListQueryViews(ctx)
+		desired, err = resource.Resource().QueryViewCatalog().ListQueryViews(ctx)
 		if err != nil {
 			return nil, merr.Wrap(err, "recover replica QueryView targets")
 		}
-		seedReplicaViews(roWAL.replicaPublisher, opt.Channel.Name, persistedViews, desired)
 	}
 	// Recovery may publish this term's manifest before Open returns. Cleanup
 	// discards the writer on failure, so Sync must not reopen the same term.
@@ -390,6 +390,7 @@ func (o *openerAdaptorImpl) openWriter(ctx context.Context, l walimpls.WALImpls,
 		readSide.readQueries.SetWriter(true)
 		wal.queryViewHandler = readSide.readViews
 		wal.replicaViews = newWriterViewControl(roWAL.availableCtx, readSide, roWAL.replicaPublisher, persistedViews)
+		wal.replicaViews.seed(opt.Channel.Name, desired)
 	}
 	close(liveReady)
 	o.walInstances.Insert(id, wal)
@@ -448,7 +449,7 @@ func (o *openerAdaptorImpl) openReadReplica(ctx context.Context, l walimpls.WALI
 	kept := slices.DeleteFunc(persisted, func(v *viewpb.QueryViewOfShard) bool { return !wanted[viewKey(v)] })
 	r.readQueries = vchannel.NewReplicaQueries(r.availableCtx, l.Channel().Name, r.replicaBuffer, stored.GetTimeTick())
 	r.readViews = snview.RecoverPChannelSNQueryViewHandler(r.availableCtx, l.Channel().Name, nil, r.readQueries, kept)
-	r.follower = newFollower(l.Channel().Name, r.readViews, r.readQueries, kept)
+	r.follower = newFollower(l.Channel().Name, r.readViews, kept)
 	r.replicaReaderDone = make(chan struct{})
 	r.replicaScanner = newScannerAdaptor(fmt.Sprintf("replica-%d", l.Channel().WALReplicaID), l,
 		wal.ReadOption{DeliverPolicy: policy, IgnorePauseConsumption: true}, r.scanMetrics.NewScannerMetrics(), nil, scannerConfig{replicaBuffer: r.replicaBuffer, replicaObserve: r.readQueries.Observe})

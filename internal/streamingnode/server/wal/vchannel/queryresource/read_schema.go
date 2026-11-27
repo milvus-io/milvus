@@ -44,7 +44,7 @@ func (readSchemaBuilder) NewRuntime() (QueryRuntimeModule, error) {
 
 type readSchemas struct {
 	pool    *readSchemaPool
-	capture func(*viewpb.QueryViewMeta, func(walview.VChannelWALView)) bool
+	capture func(context.Context, *viewpb.QueryViewMeta, func(walview.VChannelWALView)) bool
 }
 
 func (r *readSchemas) Prepare(_ context.Context, view walview.VChannelWALView) error {
@@ -69,7 +69,7 @@ func (b *readSchemaBinding) Prepare(ctx context.Context, provider LoadInfoProvid
 		return nil
 	}
 	var view walview.VChannelWALView
-	if b.module.capture == nil || !b.module.capture(b.meta, func(v walview.VChannelWALView) { view = v }) {
+	if b.module.capture == nil || !b.module.capture(ctx, b.meta, func(v walview.VChannelWALView) { view = v }) {
 		return merr.WrapErrServiceNotReadyMsg("query view read schema snapshot is not ready")
 	}
 	if view.Schema == nil || view.Schema.GetVersion() != b.meta.GetSchemaVersion() {

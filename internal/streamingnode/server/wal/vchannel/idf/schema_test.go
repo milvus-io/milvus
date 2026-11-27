@@ -49,11 +49,14 @@ func testRequiredFields(schema *schemapb.CollectionSchema) []*viewpb.LoadFieldCo
 func prepareTestView(t *testing.T, r *Runtime, view walview.VChannelWALView) (*viewBinding, error) {
 	t.Helper()
 	if view.CaptureQueryView == nil {
-		view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+		view.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+			capture(view)
+			return true
+		}
 	}
 	captureSource := view.CaptureQueryView
-	view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
-		return captureSource(meta, func(snapshot walview.VChannelWALView) {
+	view.CaptureQueryView = func(ctx context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		return captureSource(ctx, meta, func(snapshot walview.VChannelWALView) {
 			if snapshot.RequiredFields == nil {
 				snapshot.RequiredFields = testRequiredFields(snapshot.Schema)
 			}
@@ -72,7 +75,7 @@ func TestAddFieldSharesExistingStatisticsAndReclaimsLastOwner(t *testing.T) {
 	defer r.Close()
 	version := qviews.DataVersion{StreamingVersion: 10}
 	current := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: fieldTestSchema(1, 102), PartitionIDs: []int64{10}, BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
-	current.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+	current.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		next := current
 		next.Schema = proto.Clone(current.Schema).(*schemapb.CollectionSchema)
 		next.Schema.Version = meta.GetSchemaVersion()
@@ -131,7 +134,10 @@ func TestFieldSharingRequiresSamePartitionScopeAndSemantics(t *testing.T) {
 	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
 	defer r.Close()
 	current := walview.VChannelWALView{Schema: fieldTestSchema(1, 102), PartitionIDs: []int64{2, 1}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
-	current.CaptureQueryView = func(_ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool { fn(current); return true }
+	current.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
+		fn(current)
+		return true
+	}
 	patch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
 	defer patch.UnPatch()
 	a, err := prepareTestView(t, r, current)
@@ -163,7 +169,10 @@ func TestFieldPreparationCancellationUnblocksFullEventQueue(t *testing.T) {
 	defer r.Close()
 	version := qviews.DataVersion{StreamingVersion: 10}
 	view := walview.VChannelWALView{RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}, Schema: fieldTestSchema(1, 102), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
-	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	view.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		capture(view)
+		return true
+	}
 	require.NoError(t, r.Prepare(t.Context(), view))
 	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}).(*viewBinding)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -225,7 +234,7 @@ func TestNewFieldWaitsForSharedFieldSnapshotPrefix(t *testing.T) {
 	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
 	defer r.Close()
 	current := walview.VChannelWALView{CollectionID: 1, Schema: fieldTestSchema(1, 102), BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
-	current.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+	current.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		capture(current)
 		return true
 	}
@@ -272,7 +281,10 @@ func TestViewBindingUsesRequiredFieldAndPartitionScope(t *testing.T) {
 	r := &Runtime{provider: NewProvider(client)}
 	defer r.Close()
 	view := walview.VChannelWALView{CollectionID: 1, Schema: fieldTestSchema(1, 102, 104), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
-	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	view.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		capture(view)
+		return true
+	}
 	require.NoError(t, r.Prepare(t.Context(), view))
 	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 1, LoadInfoVersion: 42, Version: &viewpb.QueryViewVersion{DataVersion: view.SegmentSnapshot.DataVersion.IntoProto()}}).(*viewBinding)
 	defer binding.Release()

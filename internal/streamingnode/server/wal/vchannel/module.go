@@ -75,12 +75,13 @@ type VChannelRecoveryModule struct {
 	runtime moduleapi.Runtime
 	logger  *mlog.Logger
 
-	vchannelView    *VChannelView
-	segments        map[int64]*segment.SegmentView
-	dirtyMu         sync.Mutex
-	dirtySegments   map[int64]*segment.SegmentView
-	cleanupSegments map[int64]*segment.SegmentView
-	pendingCleanup  map[int64]*segment.SegmentView
+	vchannelView                   *VChannelView
+	segments                       map[int64]*segment.SegmentView
+	confirmedQueryStreamingVersion int64 // catalog-confirmed prefix for this writer lifetime
+	dirtyMu                        sync.Mutex
+	dirtySegments                  map[int64]*segment.SegmentView
+	cleanupSegments                map[int64]*segment.SegmentView
+	pendingCleanup                 map[int64]*segment.SegmentView
 
 	l0Materializer *l0materializer.WALMaterializer
 	pendingDrops   []message.RetainedImmutableMessage

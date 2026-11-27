@@ -46,7 +46,7 @@ func TestPreparePartitionsKeepsOrderedWriteSchema(t *testing.T) {
 		defer r.Close()
 		require.NoError(t, r.Prepare(ctx, walview.VChannelWALView{
 			CollectionID: 1, Schema: schema, WriteSchema: schema, PartitionIDs: []int64{20}, BaseGrowingTimeTick: 10,
-			CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+			CaptureQueryView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 				install(snapshot)
 				return true
 			},
@@ -119,7 +119,7 @@ func TestPreparePartitionsReplaysSnapshotAndLiveTail(t *testing.T) {
 		defer r.Close()
 		captured := make(chan struct{})
 		snapshot := walview.VChannelWALView{BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 2, PartitionID: 20}}}}
-		view := walview.VChannelWALView{PartitionIDs: []int64{10}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 1, PartitionID: 10}}}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+		view := walview.VChannelWALView{PartitionIDs: []int64{10}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{{SegmentID: 1, PartitionID: 10}}}, CaptureQueryView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 			install(snapshot)
 			close(captured)
 			return true
@@ -160,7 +160,7 @@ func TestPreparePartitionsFailureDoesNotPublish(t *testing.T) {
 	for _, canceled := range []bool{false, true} {
 		r := newRuntime()
 		ctx, cancel := context.WithCancel(t.Context())
-		view := walview.VChannelWALView{PartitionIDs: []int64{10}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+		view := walview.VChannelWALView{PartitionIDs: []int64{10}, CaptureQueryView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 			if canceled {
 				install(walview.VChannelWALView{BaseGrowingTimeTick: 10})
 				cancel()
@@ -185,7 +185,7 @@ func TestPreparePartitionsDoesNotWaitForInsertTransform(t *testing.T) {
 		defer cancel()
 		r := newRuntime()
 		defer r.Close()
-		view := walview.VChannelWALView{PartitionIDs: []int64{10}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+		view := walview.VChannelWALView{PartitionIDs: []int64{10}, CaptureQueryView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 			install(walview.VChannelWALView{BaseGrowingTimeTick: 10, BaseTransformTimeTick: 10})
 			return true
 		}}
@@ -209,7 +209,7 @@ func TestPreparePartitionsPreconditionsAndRetainedFloor(t *testing.T) {
 	r.prepareMu.Unlock()
 	require.ErrorIs(t, err, merr.ErrServiceNotReady)
 	r.Truncate(qviews.DataVersion{StreamingVersion: 2})
-	r.view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+	r.view.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 		require.Equal(t, int64(2), meta.GetVersion().GetDataVersion().GetStreamingVersion())
 		install(walview.VChannelWALView{})
 		return true
@@ -231,7 +231,7 @@ func TestPreparePartitionsCancellationDuringSnapshotLoad(t *testing.T) {
 		defer r.Close()
 		view := walview.VChannelWALView{
 			PartitionIDs: []int64{10}, RuntimeContext: runtimeCtx,
-			CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+			CaptureQueryView: func(_ context.Context, _ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
 				install(walview.VChannelWALView{})
 				return true
 			},

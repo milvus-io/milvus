@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
@@ -19,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -39,8 +36,9 @@ type ReplicaQueries struct {
 	mu       sync.Mutex
 	// Cleanup only needs the resource manager. Its lookup must not take mu
 	// while holding the recovery module lock used to serialize admission.
-	active   *typeutil.ConcurrentMap[string, *queryChannel]
-	recovery *PChannelRecoveryManager // bound while this replica has writer recovery
+	active        *typeutil.ConcurrentMap[string, *queryChannel]
+	writerContext context.Context
+	recovery      *PChannelRecoveryManager // bound while this replica has writer recovery
 	// events serializes snapshot installation, live delivery and readiness barriers.
 	// Releasing a view must remain possible while delivery waits for queue space.
 	events  sync.Mutex
@@ -50,8 +48,7 @@ type ReplicaQueries struct {
 type queryChannel struct {
 	resources *queryresource.Manager
 	// A non-nil request is waiting for an admissible DataVersion.
-	refs           map[qviews.QueryViewKey]*snview.AcquireResource
-	awaitingSealed map[int64]struct{}
+	refs map[qviews.QueryViewKey]*snview.AcquireResource
 }
 
 func NewReplicaQueries(ctx context.Context, channel string, b *replica.Buffer, through uint64) *ReplicaQueries {
@@ -76,9 +73,12 @@ func (q *ReplicaQueries) RetryFailedPreparation() bool { return !q.writer.Load()
 func (q *ReplicaQueries) BindWriter(m *PChannelRecoveryManager) func() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	ctx, cancel := context.WithCancel(q.ctx)
+	q.writerContext = ctx
 	q.recovery = m
 	return func() {
 		q.mu.Lock()
+		cancel()
 		q.recovery = nil
 		q.mu.Unlock()
 	}
@@ -120,9 +120,8 @@ func (q *ReplicaQueries) Acquire(req snview.AcquireResource) {
 			},
 		}
 		ch = &queryChannel{
-			resources:      queryresource.NewManager(cfg),
-			refs:           make(map[qviews.QueryViewKey]*snview.AcquireResource),
-			awaitingSealed: make(map[int64]struct{}),
+			resources: queryresource.NewManager(cfg),
+			refs:      make(map[qviews.QueryViewKey]*snview.AcquireResource),
 		}
 		q.active.Insert(vc, ch)
 	}
@@ -240,19 +239,6 @@ func (q *ReplicaQueries) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRunt
 	return v, true
 }
 
-// PrepareUp refreshes the first sealed bindings at the last local transition
-// before a prepared view may start serving. The runtime barrier also drains
-// WAL effects and sealed events delivered during the catalog read.
-func (q *ReplicaQueries) PrepareUp(ctx context.Context, key qviews.QueryViewKey) error {
-	ch, _ := q.active.Get(key.ShardID.VChannel)
-	if ch != nil {
-		if runtime, ok := ch.resources.QueryRuntime(key); ok {
-			return runtime.PrepareQueryView(ctx)
-		}
-	}
-	return merr.WrapErrServiceNotReadyMsg("query replica view %s is preparing", key)
-}
-
 func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint64) {
 	q.events.Lock()
 	defer q.events.Unlock()
@@ -264,9 +250,6 @@ func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint6
 			continue
 		}
 		if ch, ok := q.active.Get(msg.VChannel()); ok {
-			if msg.MessageType() == message.MessageTypeCreateSegment {
-				ch.awaitingSealed[message.MustAsImmutableCreateSegmentMessageV2(msg).Header().GetSegmentId()] = struct{}{}
-			}
 			ch.resources.ObserveEvent(q.ctx, walview.VChannelResourceEvent{Message: msg})
 		}
 	}
@@ -281,6 +264,9 @@ func (q *ReplicaQueries) Observe(batch []message.ImmutableMessage, through uint6
 }
 
 func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) error {
+	if err := q.WaitForAssignments(ctx, meta.Vchannel, meta.RequiredStreamingVersion); err != nil {
+		return err
+	}
 	cursor, floor, err := q.buffer.Pin(false)
 	if err != nil {
 		return err
@@ -312,9 +298,6 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 		frontier = max(frontier, s.CheckpointTimeTick)
 		segments[s.SegmentId] = s
 	}
-	if err := readSealedVersions(ctx, segments); err != nil {
-		return err
-	}
 	store := walsummary.NewStore(resource.Resource().ChunkManager(), q.channel, 0)
 	manifest, err := walsummary.ReadSnapshot(ctx, store, math.MaxInt64)
 	if err != nil {
@@ -322,6 +305,73 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 	}
 	q.events.Lock()
 	defer q.events.Unlock()
+	if err := q.waitForWALLocked(ctx, frontier); err != nil {
+		return err
+	}
+	tail, err := cursor.Window(q.through)
+	if err != nil {
+		return err
+	}
+	view, err := buildReplicaView(meta, vc, segments, tail, q.through)
+	if err != nil {
+		return err
+	}
+	view.PChannel = q.channel
+	view.TransformLogStream = walsummary.NewQuerySnapshot(store, manifest, tail, q.through)
+	var covered atomic.Int64
+	covered.Store(meta.RequiredStreamingVersion)
+	view.SyncShardAssignments = func(ctx context.Context, required int64, enqueue func(walview.VChannelResourceEvent) bool) error {
+		return q.syncAssignments(ctx, meta.Vchannel, &covered, required, enqueue)
+	}
+	view.WithResourceEventLock = func(work func()) { q.events.Lock(); defer q.events.Unlock(); work() }
+	view.CaptureQueryView = func(ctx context.Context, m *viewpb.QueryViewMeta, cb func(walview.VChannelWALView)) bool {
+		return q.capture(ctx, m, cb) == nil
+	}
+	install(view)
+	return nil
+}
+
+// The cursor belongs to this runtime. Under events, WAL delivery precedes
+// seal events and the Ready barrier follows the entire batch.
+func (q *ReplicaQueries) syncAssignments(ctx context.Context, vc string, covered *atomic.Int64, required int64, enqueue func(walview.VChannelResourceEvent) bool) error {
+	if required <= covered.Load() {
+		return nil
+	}
+	if err := q.WaitForAssignments(ctx, vc, required); err != nil {
+		return err
+	}
+	assignments, err := resource.Resource().StreamingNodeCatalog().ListSegmentAssignment(ctx, q.channel)
+	if err != nil {
+		return err
+	}
+	var frontier uint64
+	for _, s := range assignments {
+		if s.Vchannel == vc && s.SealedAtDataVersion != nil && s.SealedAtDataVersion.StreamingVersion <= required {
+			frontier = max(frontier, s.CheckpointTimeTick)
+		}
+	}
+	q.events.Lock()
+	defer q.events.Unlock()
+	if err := q.waitForWALLocked(ctx, frontier); err != nil {
+		return err
+	}
+	after := covered.Load()
+	if required <= after {
+		return nil
+	}
+	for _, s := range assignments {
+		version := s.GetSealedAtDataVersion().GetStreamingVersion()
+		if s.Vchannel == vc && version > after && version <= required {
+			if !enqueue(walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: s.SegmentId, VChannel: s.Vchannel, SealedAtDataVersion: qviews.FromProtoDataVersion(s.SealedAtDataVersion)}}) {
+				return context.Canceled
+			}
+		}
+	}
+	covered.Store(required)
+	return nil
+}
+
+func (q *ReplicaQueries) waitForWALLocked(ctx context.Context, frontier uint64) error {
 	for q.through < frontier {
 		changed := q.changed
 		q.events.Unlock()
@@ -338,97 +388,50 @@ func (q *ReplicaQueries) capture(ctx context.Context, meta *viewpb.QueryViewMeta
 			return q.ctx.Err()
 		}
 	}
-	tail, err := cursor.Window(q.through)
-	if err != nil {
-		return err
-	}
-	view, err := buildReplicaView(meta, vc, segments, tail, q.through)
-	if err != nil {
-		return err
-	}
-	view.PChannel = q.channel
-	view.TransformLogStream = walsummary.NewQuerySnapshot(store, manifest, tail, q.through)
-	view.RefreshSealedVersions = func(ctx context.Context) error { return q.refreshSealedVersions(ctx, meta.Vchannel) }
-	view.WithResourceEventLock = func(work func()) { q.events.Lock(); defer q.events.Unlock(); work() }
-	view.CaptureQueryView = func(m *viewpb.QueryViewMeta, cb func(walview.VChannelWALView)) bool {
-		return q.capture(q.ctx, m, cb) == nil
-	}
-	if ch, ok := q.active.Get(meta.Vchannel); ok {
-		for _, segment := range view.SegmentSnapshot.Segments {
-			if segment.SealedAtDataVersion == nil {
-				ch.awaitingSealed[segment.SegmentID] = struct{}{}
-			}
-		}
-	}
-	install(view)
-	return nil
+	return ctx.Err()
 }
 
-// A reused runtime also needs the first sealed binding for segments flushed
-// since its initial capture. The ready barrier drains these notifications.
-func (q *ReplicaQueries) refreshSealedVersions(ctx context.Context, vchannel string) error {
-	all, err := resource.Resource().StreamingNodeCatalog().ListSegmentAssignment(ctx, q.channel)
-	if err != nil {
-		return err
-	}
-	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
-	for _, s := range all {
-		if s.Vchannel == vchannel {
-			segments[s.SegmentId] = s
-		}
-	}
-	q.events.Lock()
-	ch, _ := q.active.Get(vchannel)
-	if ch != nil {
-		for id := range ch.awaitingSealed {
-			if _, ok := segments[id]; !ok {
-				segments[id] = &streamingpb.SegmentAssignmentMeta{SegmentId: id}
-			}
-		}
-	}
-	q.events.Unlock()
-	if ch == nil {
+// WaitForAssignments takes a finite cut of this writer's outstanding commits.
+// DataCoord allocated the target before the command arrived. Every local commit
+// that could have produced it has therefore already started or been recovered.
+func (q *ReplicaQueries) WaitForAssignments(ctx context.Context, vc string, required int64) error {
+	if required == 0 {
 		return nil
 	}
-	if err := readSealedVersions(ctx, segments); err != nil {
-		return err
+	q.mu.Lock()
+	recovery, owner := q.recovery, q.writerContext
+	q.mu.Unlock()
+	if recovery == nil {
+		return nil
+	} // RO receives Preparing after writer confirmation.
+	m := recovery.Module(vc)
+	if m == nil {
+		return nil
+	} // Admission handles a retired shard.
+	m.mu.Lock()
+	if required <= m.confirmedQueryStreamingVersion {
+		m.mu.Unlock()
+		return nil
 	}
-	q.events.Lock()
-	defer q.events.Unlock()
-	if current, _ := q.active.Get(vchannel); current == ch {
-		for id, s := range segments {
-			if version := s.SealedAtDataVersion; version != nil {
-				delete(ch.awaitingSealed, id)
-				ch.resources.ObserveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{
-					SegmentID: id, VChannel: vchannel, SealedAtDataVersion: qviews.FromProtoDataVersion(version),
-				}})
-			}
+	var pending []<-chan struct{}
+	for _, s := range m.segments {
+		if persisted := s.PublicationWait(required); persisted != nil {
+			pending = append(pending, persisted)
 		}
 	}
-	return nil
-}
-
-func readSealedVersions(ctx context.Context, segments map[int64]*streamingpb.SegmentAssignmentMeta) error {
-	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
-	for id, s := range segments {
-		if s.SealedAtDataVersion != nil {
-			continue
-		}
-		resp, err := coord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{SegmentIDs: []int64{id}, IncludeUnHealthy: true})
-		if err = merr.CheckRPCCall(resp, err); errors.Is(err, merr.ErrSegmentNotFound) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		for _, info := range resp.GetInfos() {
-			if info.GetID() == id && info.SealedAtDataVersion != nil {
-				s.SealedAtDataVersion = info.SealedAtDataVersion
-			}
+	m.mu.Unlock()
+	for _, persisted := range pending {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-owner.Done():
+			return owner.Err()
+		case <-persisted:
 		}
 	}
+	m.mu.Lock()
+	m.confirmedQueryStreamingVersion = max(m.confirmedQueryStreamingVersion, required)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -509,7 +512,7 @@ func buildReplicaView(meta *viewpb.QueryViewMeta, vc *VChannelView, segments map
 			snapshot.FlushedSegments = append(snapshot.FlushedSegments, walview.FlushedSegment{SegmentID: s.SegmentId, PartitionID: s.PartitionId, FlushTimeTick: s.CheckpointTimeTick, SealedAtDataVersion: qviews.FromProtoDataVersion(s.SealedAtDataVersion)})
 			continue
 		}
-		if s.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING && s.SealedAtDataVersion == nil {
+		if s.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED && s.SealedAtDataVersion == nil {
 			continue
 		}
 		snapshot.Segments = append(snapshot.Segments, walview.VisibleSegment{SegmentID: s.SegmentId, PartitionID: s.PartitionId, Schema: vc.restoreSegmentSchema(s.PartitionId, s.GetStat().GetCreateSegmentTimeTick(), s.SchemaVersion), Assignment: s, SealedAtDataVersion: s.SealedAtDataVersion, Data: walview.SegmentSnapshotData{PersistedStorage: s.PersistedStorage, InsertMessages: inserts[s.SegmentId]}})

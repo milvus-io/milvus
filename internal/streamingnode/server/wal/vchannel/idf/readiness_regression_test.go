@@ -50,7 +50,7 @@ func TestQueryViewReadyAfterOlderSchemaPreparation(t *testing.T) {
 				CollectionID: 1, VChannel: "v1", Schema: &schemapb.CollectionSchema{Version: 1},
 				SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version},
 			}
-			view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+			view.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 				next := view
 				next.LoadInfoVersion = meta.GetLoadInfoVersion()
 				next.Schema = &schemapb.CollectionSchema{Version: meta.GetSchemaVersion()}
@@ -136,7 +136,7 @@ func TestSchemaPreparationAndReleaseShareDataViewFloor(t *testing.T) {
 	require.NoError(t, module.Prepare(t.Context(), walview.VChannelWALView{
 		Schema:          &schemapb.CollectionSchema{Version: 1},
 		SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}},
-		CaptureQueryView: func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		CaptureQueryView: func(_ context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 			version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
 			captureVersions <- version
 			if meta.GetSchemaVersion() == 3 {
@@ -189,7 +189,7 @@ func TestReleaseInFlightBlocksNewSchemaSnapshot(t *testing.T) {
 	module.cond = sync.NewCond(&module.mu)
 	defer module.Close()
 	floor := qviews.DataVersion{StreamingVersion: 20}
-	module.view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+	module.view.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		captures++
 		require.Equal(t, floor, qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()))
 		capture(walview.VChannelWALView{

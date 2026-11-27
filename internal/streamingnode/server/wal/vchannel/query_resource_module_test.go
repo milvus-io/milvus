@@ -167,12 +167,12 @@ func TestRecoveryModuleOwnsNonReplicaQueries(t *testing.T) {
 	require.True(t, ok)
 	require.EqualValues(t, 42, view.DeleteReplayStartAfterTimeTick)
 	require.Same(t, manager.queryTransformLogStream, view.TransformLogStream)
-	require.True(t, view.CaptureQueryView(meta, func(captured walview.VChannelWALView) {
+	require.True(t, view.CaptureQueryView(t.Context(), meta, func(captured walview.VChannelWALView) {
 		require.EqualValues(t, 1, captured.Schema.GetVersion())
 	}))
 	unknown := proto.CloneOf(meta)
 	unknown.SchemaVersion = 10
-	require.False(t, view.CaptureQueryView(unknown, func(walview.VChannelWALView) { t.Fatal("captured an unknown schema") }))
+	require.False(t, view.CaptureQueryView(t.Context(), unknown, func(walview.VChannelWALView) { t.Fatal("captured an unknown schema") }))
 	key := qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(meta.Version)}
 	ready := make(chan bool, 1)
 	manager.Acquire(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { ready <- true }, OnUnrecoverable: func() { ready <- false }})

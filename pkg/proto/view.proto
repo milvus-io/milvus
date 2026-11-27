@@ -88,6 +88,8 @@ message DataViewOfShard {
     // A: minimum cursor of the exact Segment bases selected by this view.
     // Recomputed for every membership/base change, including Flush. Empty shards use W.
     uint64 compacted_transform_start_after_timetick = 4;
+    // Collection StreamingVersion of this shard's latest Growing-to-Sealed publication.
+    int64 required_streaming_version = 5;
 }
 
 message DataViewOfPartition {
@@ -138,6 +140,8 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
+    // Copied from the shard in the exact DataView used for placement.
+    int64 required_streaming_version = 10;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

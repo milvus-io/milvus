@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,38 +20,59 @@ func viewKey(v *viewpb.QueryViewOfShard) qviews.QueryViewKey {
 	return qviews.QueryViewKey{ShardID: qviews.NewShardIDFromQVMeta(v.Meta), QueryViewVersion: qviews.FromProtoQueryViewVersion(v.Meta.Version)}
 }
 
-// Publish the effective intent the reader can apply. Up can precede this
-// writer's durable publication, including on restart with a pending Coord Up.
-func seedReplicaViews(p *replica.Publisher, pchannel string, durable, desired []*viewpb.QueryViewOfShard) {
-	up := make(map[qviews.QueryViewKey]bool, len(durable))
-	for _, v := range durable {
-		up[viewKey(v)] = true
-	}
+// Restore pending prepares through the same assignment fence as live commands.
+// A reader treats omission from its first snapshot as a retirement.
+func (h *writerViewControl) seed(pchannel string, desired []*viewpb.QueryViewOfShard) {
+	var prepares []handler.ApplyView
 	for _, v := range desired {
 		if funcutil.ToPhysicalChannel(v.Meta.Vchannel) != pchannel {
 			continue
 		}
-		key := viewKey(v)
-		state := v.Meta.State
-		if state == viewpb.QueryViewState_QueryViewStateUp && !up[key] {
+		key, state := viewKey(v), v.Meta.State
+		if state == viewpb.QueryViewState_QueryViewStateUp && !h.up[key] {
 			state = viewpb.QueryViewState_QueryViewStatePreparing
 		}
-		p.PublishView(key, state)
+		if state == viewpb.QueryViewState_QueryViewStatePreparing && v.Meta.RequiredStreamingVersion > 0 {
+			h.publisher.ExpectInitialView(key)
+			local := qviews.NewFullQueryViewAtStreamingNode(v.Meta, v.StreamingNode, v.QueryNode).IntoProto()
+			local.Meta.State = state
+			prepares = append(prepares, handler.ApplyView{View: qviews.NewQueryViewAtWorkNodeFromProto(local)})
+		} else {
+			h.publisher.PublishView(key, state)
+		}
 	}
+	sort.SliceStable(prepares, func(i, j int) bool { return prepares[j].View.Version().GT(prepares[i].View.Version()) })
+	h.ApplyViews(prepares)
+}
+
+type viewOperation struct {
+	ctx               context.Context
+	cancel            context.CancelFunc
+	command           handler.ApplyView
+	local             chan qviews.QueryViewAtWorkNode
+	publication       <-chan struct{}
+	cancelPublication context.CancelFunc
+}
+
+// snview invokes callbacks serially under the shard lock. Keep the latest
+// local state without waiting for the writer's votes, catalog I/O or mutex.
+func (op *viewOperation) observe(result qviews.QueryViewAtWorkNode) {
+	select {
+	case <-op.local:
+	default:
+	}
+	op.local <- result
 }
 
 // writerViewControl coordinates physical replicas on behalf of the logical SN.
 // Shard locks only cover the local machine. Waiting for votes and catalog I/O
 // runs independently so existing leases can keep serving while another RO loads.
-type viewOperation struct{ cancel context.CancelFunc }
-
 type writerViewControl struct {
-	handler.QueryViewHandler
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
-	wg         sync.WaitGroup
-	stopped    bool
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+
 	publisher  *replica.Publisher
 	operations map[qviews.QueryViewKey]*viewOperation
 	// An entry tracks a published or in-flight Up until its fenced deletion.
@@ -61,7 +83,7 @@ type writerViewControl struct {
 
 func newWriterViewControl(ctx context.Context, r *roWALAdaptorImpl, p *replica.Publisher, durable []*viewpb.QueryViewOfShard) *writerViewControl {
 	ctx, cancel := context.WithCancel(ctx)
-	h := &writerViewControl{QueryViewHandler: r.readViews, ctx: ctx, cancel: cancel, publisher: p, readSide: r, operations: make(map[qviews.QueryViewKey]*viewOperation), up: make(map[qviews.QueryViewKey]bool)}
+	h := &writerViewControl{ctx: ctx, cancel: cancel, publisher: p, readSide: r, operations: make(map[qviews.QueryViewKey]*viewOperation), up: make(map[qviews.QueryViewKey]bool)}
 	for _, v := range durable {
 		h.up[viewKey(v)] = true
 	}
@@ -70,33 +92,39 @@ func newWriterViewControl(ctx context.Context, r *roWALAdaptorImpl, p *replica.P
 
 func (h *writerViewControl) Stop() {
 	h.mu.Lock()
-	h.stopped = true
 	h.cancel()
 	h.mu.Unlock()
 	h.wg.Wait()
 }
 
+func (h *writerViewControl) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return h.readSide.readViews.TakeViewFeedback()
+}
+
+func (h *writerViewControl) ViewFeedbackReady() <-chan struct{} {
+	return h.readSide.readViews.ViewFeedbackReady()
+}
+
 func (h *writerViewControl) ApplyViews(batch []handler.ApplyView) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.ctx.Err() != nil {
+		return
+	}
 	for _, cmd := range batch {
 		key := cmd.View.QueryViewKey()
 		def := cmd.View.IntoProto()
 		target := def.Meta.State
-		h.mu.Lock()
-		if h.stopped {
-			h.mu.Unlock()
-			return
-		}
 		if previous := h.operations[key]; previous != nil {
 			previous.cancel()
 		}
 		ctx, cancel := context.WithCancel(h.ctx)
-		op := &viewOperation{cancel: cancel}
+		op := &viewOperation{ctx: ctx, cancel: cancel, command: cmd, local: make(chan qviews.QueryViewAtWorkNode, 1)}
 		h.operations[key] = op
 		committed, mayBeUp := h.up[key]
 		if target == viewpb.QueryViewState_QueryViewStateUp && !mayBeUp {
 			h.up[key] = false
 		}
-		h.mu.Unlock()
 		initial, signal := target, target
 		if target == viewpb.QueryViewState_QueryViewStateUp {
 			initial = viewpb.QueryViewState_QueryViewStatePreparing
@@ -108,9 +136,11 @@ func (h *writerViewControl) ApplyViews(batch []handler.ApplyView) {
 		if retireUp {
 			signal = viewpb.QueryViewState_QueryViewStateDown
 		}
-		h.publisher.PublishView(key, signal)
-		// Track all local keys so switching this instance to a reader can
-		// retire omissions in the new writer's first snapshot.
+		gate := signal == viewpb.QueryViewState_QueryViewStatePreparing && def.Meta.RequiredStreamingVersion > 0
+		if !gate {
+			h.publisher.PublishView(key, signal)
+		}
+		// A demoted reader retires keys omitted from its new writer's snapshot.
 		f := h.readSide.follower
 		f.mu.Lock()
 		if target == viewpb.QueryViewState_QueryViewStateDropped {
@@ -121,89 +151,117 @@ func (h *writerViewControl) ApplyViews(batch []handler.ApplyView) {
 		f.mu.Unlock()
 		local := cmd.View.IntoProto()
 		local.Meta.State = initial
-		h.QueryViewHandler.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(local), OnReport: func(result qviews.QueryViewAtWorkNode) {
-			if ctx.Err() != nil {
-				return
-			}
-			reported := viewpb.QueryViewState(result.State())
-			if target == viewpb.QueryViewState_QueryViewStateDropped && reported == target {
-				h.run(ctx, func() {
-					if retireUp && !h.confirm(ctx, key, viewpb.QueryViewState_QueryViewStateDown, def) {
-						return
-					}
-					h.mu.Lock()
-					if h.operations[key] != op || ctx.Err() != nil {
-						h.mu.Unlock()
-						return
-					}
-					if retireUp {
-						h.publisher.PublishView(key, target)
-					}
-					delete(h.operations, key)
-					h.mu.Unlock()
-					cancel()
-					if cmd.OnReport != nil {
-						cmd.OnReport(result)
-					}
-				})
-				return
-			}
-			if target == viewpb.QueryViewState_QueryViewStateUp && (reported == viewpb.QueryViewState_QueryViewStateReady || reported == viewpb.QueryViewState_QueryViewStateUp) {
-				h.run(ctx, func() {
-					for h.readSide.readQueries.PrepareUp(ctx, key) != nil {
-						select {
-						case <-ctx.Done():
-							return
-						case <-time.After(100 * time.Millisecond):
-						}
-					}
-					if !committed && !h.confirm(ctx, key, viewpb.QueryViewState_QueryViewStateReady, def) {
-						return
-					}
-					if ctx.Err() != nil {
-						return
-					}
-					h.publisher.PublishView(key, target)
-					h.QueryViewHandler.ApplyViews([]handler.ApplyView{cmd})
-				})
-				return
-			}
-			want := viewpb.QueryViewState_QueryViewStateUnknown
-			var persist *viewpb.QueryViewOfShard
-			if target == viewpb.QueryViewState_QueryViewStatePreparing && reported == viewpb.QueryViewState_QueryViewStateReady {
-				want = reported
-			}
-			if target == viewpb.QueryViewState_QueryViewStateDown && (reported == viewpb.QueryViewState_QueryViewStateDown || reported == viewpb.QueryViewState_QueryViewStateDropped) {
-				want = viewpb.QueryViewState_QueryViewStateDown
-				persist = def
-			}
-			if want != viewpb.QueryViewState_QueryViewStateUnknown {
-				h.run(ctx, func() {
-					if h.confirm(ctx, key, want, persist) && ctx.Err() == nil && cmd.OnReport != nil {
-						cmd.OnReport(result)
-					}
-				})
-			} else if cmd.OnReport != nil {
-				cmd.OnReport(result)
-			}
-		}}})
+		h.readSide.readViews.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(local), OnReport: op.observe}})
+		if gate {
+			published := make(chan struct{})
+			op.publication = published
+			publicationCtx, cancelPublication := context.WithCancel(ctx) //nolint:gosec // Local retirement cancels this wait early. Operation completion cancels the parent.
+			op.cancelPublication = cancelPublication
+			h.wg.Go(func() {
+				if h.readSide.readQueries.WaitForAssignments(publicationCtx, def.Meta.Vchannel, def.Meta.RequiredStreamingVersion) != nil {
+					return
+				}
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				if publicationCtx.Err() == nil {
+					h.publisher.PublishView(key, signal)
+					close(published)
+				}
+			})
+		}
+		h.wg.Go(func() {
+			defer cancel()
+			h.coordinate(op, committed, retireUp)
+		})
 	}
 }
 
-func (h *writerViewControl) run(ctx context.Context, work func()) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.stopped || ctx.Err() != nil {
-		return
+// One operation owns coordination for this command. Replacing the command
+// cancels its waits. Only the current operation may publish, apply or report.
+func (h *writerViewControl) coordinate(op *viewOperation, committed, retireUp bool) {
+	key := op.command.View.QueryViewKey()
+	target := op.command.View.State()
+	defer func() {
+		h.mu.Lock()
+		if h.operations[key] == op {
+			delete(h.operations, key)
+		}
+		h.mu.Unlock()
+	}()
+	appliedUp := false
+	for {
+		var result qviews.QueryViewAtWorkNode
+		select {
+		case <-op.ctx.Done():
+			return
+		case result = <-op.local:
+		}
+		state := result.State()
+		// A reused runtime may already be Ready. Retirements and failure
+		// reports must remain independent of a slow assignment save.
+		if op.publication != nil && (state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUp) {
+			select {
+			case <-op.ctx.Done():
+				return
+			case <-op.publication:
+			}
+		}
+		switch {
+		case target == qviews.QueryViewStateUp && !appliedUp && (state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUp):
+			if !committed && !h.confirm(op.ctx, key, viewpb.QueryViewState_QueryViewStateReady, op.command.View.IntoProto()) {
+				return
+			}
+			// Serialize the last publication and local dispatch with the next
+			// command. The local callback only enqueues a result.
+			h.mu.Lock()
+			if op.ctx.Err() == nil {
+				h.publisher.PublishView(key, viewpb.QueryViewState_QueryViewStateUp)
+				h.readSide.readViews.ApplyViews([]handler.ApplyView{{View: op.command.View, OnReport: op.observe}})
+			}
+			h.mu.Unlock()
+			appliedUp = true
+			continue
+		case target == qviews.QueryViewStatePreparing && state == qviews.QueryViewStateReady:
+			if h.publisher.WaitReports(op.ctx, key, viewpb.QueryViewState_QueryViewStateReady) != nil {
+				return
+			}
+		case state == qviews.QueryViewStateDown || state == qviews.QueryViewStateDropped:
+			// A lagging Coord can re-push Preparing/Up after local retirement.
+			// Fast-forward its report through the same group Down barrier.
+			if target != qviews.QueryViewStateDropped || retireUp {
+				if target != qviews.QueryViewStateDown && !retireUp {
+					h.mu.Lock()
+					if op.ctx.Err() == nil {
+						if op.cancelPublication != nil {
+							op.cancelPublication()
+						}
+						h.publisher.PublishView(key, viewpb.QueryViewState_QueryViewStateDown)
+					}
+					h.mu.Unlock()
+				}
+				if !h.confirm(op.ctx, key, viewpb.QueryViewState_QueryViewStateDown, result.IntoProto()) {
+					return
+				}
+			}
+		}
+
+		h.mu.Lock()
+		if op.ctx.Err() == nil {
+			if retireUp && state == qviews.QueryViewStateDropped {
+				h.publisher.PublishView(key, viewpb.QueryViewState_QueryViewStateDropped)
+			}
+			if op.command.OnReport != nil {
+				op.command.OnReport(result)
+			}
+		}
+		h.mu.Unlock()
+		if state != qviews.QueryViewStatePreparing {
+			return
+		}
 	}
-	h.wg.Add(1)
-	go func() { defer h.wg.Done(); work() }()
 }
 
 func (h *writerViewControl) confirm(ctx context.Context, key qviews.QueryViewKey, want viewpb.QueryViewState, v *viewpb.QueryViewOfShard) bool {
-	if v == nil {
-		return h.publisher.WaitReports(ctx, key, want) == nil
-	}
 	catalog := resource.Resource().StreamingNodeCatalog().(interface {
 		CommitReplicaQueryView(context.Context, *streamingpb.WALReplicaTopology, *viewpb.QueryViewOfShard) error
 	})
