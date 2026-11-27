@@ -40,6 +40,8 @@ random generation must succeed. Embedding hosts must configure FIPS before
 initializing the OpenSSL random generators, since OpenSSL retains generators
 across changes to default properties. `MaybeEnableOpenSSLFIPS` still drives
 CRC32C for S3.
+The [OpenSSL provider design](20261126-openssl-fips-provider.md) records
+provider selection and native TLS policy under the same build flag.
 
 **Startup.** `milvus run` calls `fips.Require` before starting service roles. In a `milvus_fips`
 build it returns an error, and Milvus exits with status 1, when:
@@ -75,9 +77,6 @@ Default builds continue to use Go's standard cryptography with their existing FI
 
 ## Not covered
 
-- OpenSSL's FIPS provider is still built from Conan's OpenSSL 3.3.2, which is
-  not a validated version, and `openssl-fips.cnf` still activates the default
-  provider. The C++ part of #55086 addresses both.
 - Rust crates and other libraries in the image that bundle their own
   cryptography (#55083 and related issues).
 - Go tools built from this repository (`binlog`, `meta-migration`, ...) now

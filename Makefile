@@ -161,6 +161,9 @@ endif
 # All Go artifacts loaded into the same process must use the same snapshot.
 # Go 1.26.10 resolves v1.0.0 to the certified v1.0.0-c2097c7c (CMVP #5247).
 ifeq ($(MILVUS_FIPS_ENABLED),ON)
+ifneq ($(filter rpm,$(MAKECMDGOALS)),)
+$(error MILVUS_FIPS_ENABLED=ON requires the Milvus container layout and is not supported by make rpm)
+endif
 ifneq ($(findstring ',$(MILVUS_GO_BUILD_TAGS))$(findstring ",$(MILVUS_GO_BUILD_TAGS)),)
 $(error FIPS build tags must not contain literal quote characters)
 endif
@@ -196,6 +199,13 @@ ifeq (${ENABLE_AZURE}, false)
 endif
 
 milvus: build-cpp print-build-info build-go build-pyudf-runtime-wheel
+ifeq ($(MILVUS_FIPS_ENABLED),ON)
+milvus: build-fips-provider
+
+.PHONY: build-fips-provider
+build-fips-provider:
+	@bash "$(PWD)/scripts/build_fips_provider.sh" "$(PWD)/cmake_build/fips_provider/artifacts"
+endif
 
 # Expose the server's Go module selection to external packaging builds.
 .PHONY: print-fips-go-module
@@ -623,7 +633,7 @@ install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
 
 install: milvus build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
-	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
+	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) MILVUS_FIPS_ENABLED="$(MILVUS_FIPS_ENABLED)" bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."
 
 clean:

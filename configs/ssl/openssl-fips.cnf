@@ -1,21 +1,39 @@
 config_diagnostics = 1
 openssl_conf = openssl_init
 
-.include /milvus/configs/ssl/fipsmodule.cnf
+# OpenSSL 3.1.2 fipsinstall generates this provider integrity configuration.
+.include /milvus/configs/ssl/fipsmodule-validated.cnf
 
 [openssl_init]
 providers = provider_sect
 alg_section = algorithm_sect
+ssl_conf = ssl_sect
 
+# base supplies key encoders and decoders. The server verifies that only the
+# base provider and the validated FIPS provider are active at startup.
 [provider_sect]
 fips = fips_sect
-default = default_sect
+base = base_sect
 
 [fips_sect]
+module = /milvus/lib/ossl-modules/fips.so
 activate = 1
 
-[default_sect]
+[base_sect]
 activate = 1
 
 [algorithm_sect]
 default_properties = fips=yes
+
+# libssl applies these values when creating an SSL_CTX with system defaults.
+# The 3.1.2 FIPS provider registers X25519 and X448 with fips=yes, but its
+# Security Policy does not allow them in approved mode, so key exchange is
+# limited to NIST curves. Libraries that set their own groups, or that use
+# their own TLS stack (s2n), are not covered by this section.
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+MinProtocol = TLSv1.2
+CipherString = DEFAULT:@SECLEVEL=2
+Groups = P-256:P-384:P-521

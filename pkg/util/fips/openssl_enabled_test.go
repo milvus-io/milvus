@@ -43,10 +43,11 @@ func TestRequireGoFIPS(t *testing.T) {
 
 // Runtime images install the provider and its integrity configuration together.
 func TestOpenSSLFIPSWithInstalledConfig(t *testing.T) {
-	_, err := os.Stat("/milvus/configs/ssl/openssl-fips.cnf")
+	_, err := os.Stat(opensslConfigPath)
 	if os.IsNotExist(err) {
 		t.Skip("Milvus OpenSSL configuration is not installed")
 	}
 	require.NoError(t, err)
 	require.True(t, MaybeEnableOpenSSLFIPS())
+	require.Contains(t, Status(), "OpenSSL FIPS provider 3.1.2")
 }
