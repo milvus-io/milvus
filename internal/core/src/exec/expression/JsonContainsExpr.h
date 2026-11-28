@@ -539,7 +539,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
-        auto req = MakeIndexRequirement(RequiredReader::Predicate);
+        auto req = MakeIndexRequirement(RequiredReader::PointAndRange);
         req.value_type = expr_->column_.data_type_ == DataType::JSON
                              ? value_type_
                              : expr_->column_.element_type_;

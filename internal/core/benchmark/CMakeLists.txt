@@ -19,6 +19,12 @@ target_include_directories(fastmem_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src
 target_link_libraries(fastmem_benchmark PRIVATE benchmark::benchmark)
 install(TARGETS fastmem_benchmark DESTINATION benchmark)
 
+# Isolated uint32 posting emission versus dense uint64 word OR; no core runtime.
+add_executable(mutable_scalar_emit_benchmark MutableScalarEmitBenchmark.cpp)
+target_include_directories(mutable_scalar_emit_benchmark PRIVATE ${CMAKE_HOME_DIRECTORY}/src)
+target_link_libraries(mutable_scalar_emit_benchmark PRIVATE benchmark::benchmark)
+install(TARGETS mutable_scalar_emit_benchmark DESTINATION benchmark)
+
 # This component benchmark can also be built directly with a C++20 compiler;
 # it uses the same membership helper as ScalarIndexSort without storage deps.
 add_executable(sorted_int64_lookup_benchmark SortedInt64LookupBenchmark.cpp)

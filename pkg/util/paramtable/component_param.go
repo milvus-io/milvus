@@ -4765,6 +4765,7 @@ type queryNodeConfig struct {
 	ChunkRows                          ParamItem `refreshable:"false"`
 	FmindexCostRatio                   ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
+	MutableScalarIndexEnabled          ParamItem `refreshable:"false"`
 	InterimIndexNlist                  ParamItem `refreshable:"false"`
 	InterimIndexNProbe                 ParamItem `refreshable:"false"`
 	InterimIndexSubDim                 ParamItem `refreshable:"false"`
@@ -5544,6 +5545,13 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.EnableInterminSegmentIndex.Init(base.mgr)
+
+	p.MutableScalarIndexEnabled = ParamItem{
+		Key:     "queryNode.segcore.mutableScalarIndex.enabled",
+		Version: "3.0.0", DefaultValue: "false", Export: true,
+		Doc: "Enable the experimental append-only scalar index on Growing segments. Captured at segment creation; VARCHAR fields with text match retain their existing index.",
+	}
+	p.MutableScalarIndexEnabled.Init(base.mgr)
 
 	p.DenseVectorInterminIndexType = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.denseVectorIndexType",

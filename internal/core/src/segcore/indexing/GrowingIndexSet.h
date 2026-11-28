@@ -81,8 +81,11 @@ class GrowingIndexSet {
     // Construct without registering. Reopen backfills and flushes this owner
     // through the segment's stable raw prefix before registering the complete
     // batch; any reader it publishes remains private until registration.
+    // The schema supplies field metadata and primary-key exclusion for the
+    // mutable scalar backend.
     std::optional<Appender>
-    StageAppender(const FieldMeta& field_meta,
+    StageAppender(const Schema& schema,
+                  FieldId field_id,
                   const IndexMetaPtr& index_meta,
                   const SegcoreConfig& segcore_config,
                   int64_t segment_id,
@@ -95,6 +98,11 @@ class GrowingIndexSet {
 
     bool
     Has(FieldId field_id) const;
+
+    // Sum available owner reports only; unsupported owners remain unreported.
+    // Reporting does not charge resources or alter Segment tracking.
+    size_t
+    ResidentBytes() const;
 
     // True only when a fixed reader covers the query-visible prefix and can
     // reproduce original values without borrowing the growing column.

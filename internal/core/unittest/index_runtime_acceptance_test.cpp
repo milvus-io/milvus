@@ -72,7 +72,7 @@ ExpectBits(const TargetBitmap& actual,
 void
 ExpectCapsEqual(const index::ReaderCaps& actual,
                 const index::ReaderCaps& expected) {
-    EXPECT_EQ(actual.predicate, expected.predicate);
+    EXPECT_EQ(actual.point_and_range, expected.point_and_range);
     EXPECT_EQ(actual.pattern_match, expected.pattern_match);
     EXPECT_EQ(actual.text_match, expected.text_match);
     EXPECT_EQ(actual.ngram_candidates, expected.ngram_candidates);
@@ -147,7 +147,7 @@ TEST_P(ScalarArtifactRoundTripTest,
     EXPECT_EQ(reader->CoordDomain(), index::Domain::Row);
     EXPECT_EQ(reader->ValueType(), DataType::INT64);
     ExpectCapsEqual(reader->Caps(), derived_caps);
-    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_TRUE(reader->Caps().point_and_range);
     EXPECT_FALSE(reader->Caps().nested);
     EXPECT_TRUE(reader->Caps().value_lookup);
     EXPECT_TRUE(reader->Caps().cheap_value_lookup);

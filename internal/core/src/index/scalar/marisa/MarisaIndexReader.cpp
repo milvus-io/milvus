@@ -234,7 +234,7 @@ MarisaIndex::Metadata() const {
     const auto count = resident
                            ? std::optional<int64_t>((*resident)->str_ids_size)
                            : std::get<CachedStorage>(storage_).count;
-    return {ReaderCaps{.predicate = true,
+    return {ReaderCaps{.point_and_range = true,
                        .pattern_match = true,
                        .value_lookup = true,
                        .cheap_value_lookup = true},

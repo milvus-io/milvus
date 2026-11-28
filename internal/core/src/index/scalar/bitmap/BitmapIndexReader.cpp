@@ -190,7 +190,7 @@ class BitmapIndexImpl final
         }
         const auto& options =
             std::get<std::shared_ptr<const Storage>>(storage_)->options;
-        return {ReaderCaps{.predicate = true,
+        return {ReaderCaps{.point_and_range = true,
                            .pattern_match = std::is_same_v<T, std::string_view>,
                            .nested = options.nested,
                            .value_lookup = options.value_lookup,

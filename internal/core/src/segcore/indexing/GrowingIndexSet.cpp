@@ -24,10 +24,12 @@
 #include <string>
 #include <utility>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/growing/GrowingVectorSource.h"
 #include "index/growing/KnowhereGrowingVectorIndex.h"
+#include "index/growing/MutableScalarGrowingIndex.h"
 #include "index/growing/RTreeGrowingSpatialIndex.h"
 #include "index/growing/TantivyGrowingTextIndex.h"
 #include "knowhere/comp/index_param.h"
@@ -37,6 +39,7 @@
 #include "segcore/IndexConfigGenerator.h"
 #include "segcore/InsertRecord.h"
 #include "storage/MmapManager.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 namespace {
@@ -252,7 +255,8 @@ GrowingIndexSet::Initialize(const Schema& schema,
         if (!include_field(field_id)) {
             continue;
         }
-        auto appender = StageAppender(field_meta,
+        auto appender = StageAppender(schema,
+                                      field_id,
                                       index_meta,
                                       segcore_config,
                                       segment_id,
@@ -265,11 +269,13 @@ GrowingIndexSet::Initialize(const Schema& schema,
 }
 
 std::optional<GrowingIndexSet::Appender>
-GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
+GrowingIndexSet::StageAppender(const Schema& schema,
+                               FieldId field_id,
                                const IndexMetaPtr& index_meta,
                                const SegcoreConfig& segcore_config,
                                int64_t segment_id,
                                const VectorBase* field_raw_data) const {
+    const auto& field_meta = schema[field_id];
     if (IsStringDataType(field_meta.get_data_type()) &&
         field_meta.enable_match()) {
         const auto unique_id = UniqueFieldId(segment_id, field_meta.get_id());
@@ -282,6 +288,34 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                             analyzer_params.c_str(),
                             field_meta.get_data_type(),
                             kGrowingTextCommitIntervalMs));
+    }
+
+    const auto scalar_type = field_meta.get_data_type();
+    const bool mutable_scalar =
+        scalar_type == DataType::BOOL || scalar_type == DataType::INT8 ||
+        scalar_type == DataType::INT16 || scalar_type == DataType::INT32 ||
+        scalar_type == DataType::INT64 ||
+        scalar_type == DataType::TIMESTAMPTZ ||
+        scalar_type == DataType::VARCHAR;
+    // Primary-key lookup already has its own growing PK-to-offsets mapping.
+    // Do not build a second value directory for that field.
+    if (field_id.get() >= START_USER_FIELDID &&
+        schema.get_primary_field_id() != field_id && mutable_scalar &&
+        segcore_config.get_enable_mutable_scalar_index()) {
+        auto owner = index::CreateMutableScalarGrowingIndex(scalar_type);
+        // VARCHAR exposes IPatternMatchReader for literal PrefixMatch only.
+        // Expr checks ShouldUseForOp before executing a pattern operation.
+        Appender appender(field_meta.get_id(),
+                          index::ReaderCaps{.point_and_range = true,
+                                            .pattern_match = scalar_type ==
+                                                             DataType::VARCHAR},
+                          std::move(owner));
+        LOG_INFO(
+            "growing mutable scalar index created: segment={}, field={}, "
+            "backend=btree, postings=offsets",
+            segment_id,
+            field_meta.get_id().get());
+        return appender;
     }
 
     if (field_meta.get_data_type() == DataType::GEOMETRY &&
@@ -437,6 +471,18 @@ bool
 GrowingIndexSet::Has(FieldId field_id) const {
     std::shared_lock lock(mutex_);
     return appenders_.find(field_id) != appenders_.end();
+}
+
+size_t
+GrowingIndexSet::ResidentBytes() const {
+    std::shared_lock lock(mutex_);
+    size_t bytes = 0;
+    for (const auto& [field_id, appender] : appenders_) {
+        if (const auto usage = appender.owner->MemoryUsage()) {
+            bytes += *usage;
+        }
+    }
+    return bytes;
 }
 
 bool

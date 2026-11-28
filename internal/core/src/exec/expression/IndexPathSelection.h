@@ -61,12 +61,12 @@ enum class ExprExecPath {
 
 // Query interface required by this expression, from index/contracts/.
 enum class RequiredReader {
-    Predicate,     // IScalarPredicateReader<T>: In / NotIn / Range
-    PatternMatch,  // IPatternMatchReader: the LIKE family
-    TextMatch,     // ITextMatchReader
-    Ngram,         // INgramReader     — candidate family, caps.exact == false
-    Spatial,       // ISpatialReader   — candidate family, caps.exact == false
-    Null,  // INullReader      — checked after family-capability selection
+    PointAndRange,  // IScalarPredicateReader<T>: In / NotIn / Range
+    PatternMatch,   // IPatternMatchReader: the LIKE family
+    TextMatch,      // ITextMatchReader
+    Ngram,    // INgramReader     — candidate family, caps.exact == false
+    Spatial,  // ISpatialReader   — candidate family, caps.exact == false
+    Null,     // INullReader      — checked after family-capability selection
     ValueLookup,  // IScalarValueReader<T>
     JsonPath,     // IJsonIndexReader
 };
@@ -75,7 +75,7 @@ enum class RequiredReader {
 // plan time; none of it requires touching an index object.
 struct ExprIndexRequirement {
     FieldId field_id;
-    RequiredReader reader{RequiredReader::Predicate};
+    RequiredReader reader{RequiredReader::PointAndRange};
 
     // The value type the predicate is expressed in. For an element-level ARRAY
     // expression this is the element type, not `DataType::ARRAY`.
@@ -189,14 +189,14 @@ ReaderMatches(const ExprIndexRequirement& req,
             req.value_type == DataType::JSON) {
             return false;
         }
-        return req.reader == RequiredReader::Predicate ||
+        return req.reader == RequiredReader::PointAndRange ||
                req.reader == RequiredReader::PatternMatch ||
                req.reader == RequiredReader::Null ||
                req.reader == RequiredReader::JsonPath;
     }
     switch (req.reader) {
-        case RequiredReader::Predicate:
-            return caps.predicate;
+        case RequiredReader::PointAndRange:
+            return caps.point_and_range;
         case RequiredReader::PatternMatch:
             return caps.pattern_match;
         case RequiredReader::TextMatch:
@@ -206,7 +206,7 @@ ReaderMatches(const ExprIndexRequirement& req,
         case RequiredReader::Spatial:
             return caps.spatial;
         case RequiredReader::Null:
-            return caps.predicate || caps.pattern_match ||
+            return caps.point_and_range || caps.pattern_match ||
                    caps.ngram_candidates || caps.spatial || caps.json_paths;
         case RequiredReader::ValueLookup:
             return caps.value_lookup;
@@ -274,7 +274,7 @@ ValueTypeMatches(const ExprIndexRequirement& req,
 
 inline bool
 NeedsCandidateRefine(RequiredReader required, const index::ReaderCaps& caps) {
-    return !caps.exact && (required == RequiredReader::Predicate ||
+    return !caps.exact && (required == RequiredReader::PointAndRange ||
                            required == RequiredReader::Ngram ||
                            required == RequiredReader::Spatial);
 }

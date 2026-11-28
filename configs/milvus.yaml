@@ -697,6 +697,8 @@ queryNode:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
     searchFanoutPoolSizeRatio: 2 # Thread-to-core ratio for the search fanout pool; independent of the search executor and not limited by common.threadCoreCoefficient.maxThreadsSize. Invalid, non-positive, non-finite or overflowing values use the default ratio of 2.
     chunkRows: 128 # Row count by which Segcore divides a segment into chunks.
+    mutableScalarIndex:
+      enabled: false # Experimental append-only Growing scalar index; preserves existing text-match owners.
     interimIndex:
       # Whether to create a temporary index for growing segments and sealed segments not yet indexed, improving search performance.
       # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.

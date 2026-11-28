@@ -276,7 +276,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
  public:
     size_t
     GetMemoryUsageInBytes() const override {
-        return stats_.mem_size.load() + deleted_record_.mem_size();
+        return stats_.mem_size.load() + deleted_record_.mem_size() +
+               growing_indexes_.ResidentBytes();
     }
 
     int64_t

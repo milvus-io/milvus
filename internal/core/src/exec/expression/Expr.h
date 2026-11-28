@@ -3465,11 +3465,14 @@ class SegmentExpr : public Expr {
             AssertInfo(!need_element_slicing,
                        "cannot gather row offsets from an element-level "
                        "index result");
-            AssertInfo(cached_index_chunk_res_->size() ==
+            AssertInfo(cached_index_chunk_res_->size() >=
                            static_cast<size_t>(active_count_),
-                       "index result size {} does not match row count {}",
+                       "index result size {} does not cover row count {}",
                        cached_index_chunk_res_->size(),
                        active_count_);
+            // Growing publications may include newer rows. Gather only the
+            // requested visible offsets instead of copying/truncating a full
+            // bitmap; the helper checks the query boundary as well as storage.
             return GatherCachedResultByOffsets(*cached_index_chunk_res_,
                                                *cached_index_chunk_valid_res_,
                                                *offsets);
@@ -3984,14 +3987,14 @@ class SegmentExpr : public Expr {
             exec_path_ = ExprExecPath::RawData;
             return false;
         }
-        bool predicate_available = false;
+        bool point_and_range_available = false;
         bool value_available = false;
         if (req.reader != RequiredReader::JsonPath) {
-            if (reader_caps.predicate) {
-                predicate_available =
+            if (reader_caps.point_and_range) {
+                point_and_range_available =
                     ExposesPredicateReader(interface_type, selected_reader_);
                 if (!entry->caps.json_paths) {
-                    AssertInfo(predicate_available,
+                    AssertInfo(point_and_range_available,
                                "selected index reader does not expose "
                                "predicate type {}",
                                selected_reader_->ValueType());
@@ -4030,8 +4033,8 @@ class SegmentExpr : public Expr {
 
         const bool interface_available = [&]() {
             switch (req.reader) {
-                case RequiredReader::Predicate:
-                    return predicate_available;
+                case RequiredReader::PointAndRange:
+                    return point_and_range_available;
                 case RequiredReader::PatternMatch:
                     return pattern_reader_ != nullptr;
                 case RequiredReader::TextMatch:
@@ -4069,7 +4072,7 @@ class SegmentExpr : public Expr {
 
     ExprIndexRequirement
     MakeIndexRequirement(
-        RequiredReader reader = RequiredReader::Predicate) const {
+        RequiredReader reader = RequiredReader::PointAndRange) const {
         return {
             .field_id = field_id_,
             .reader = reader,
@@ -4419,9 +4422,11 @@ class SegmentExpr : public Expr {
         for (size_t i = 0; i < offsets.size(); ++i) {
             const auto offset = offsets[i];
             AssertInfo(
-                offset >= 0 && static_cast<size_t>(offset) < cached_res.size(),
-                "offset {} is outside cached result size {}",
+                offset >= 0 && offset < active_count_ &&
+                    static_cast<size_t>(offset) < cached_res.size(),
+                "offset {} is outside query rows {} or cached result size {}",
                 offset,
+                active_count_,
                 cached_res.size());
             result[i] = cached_res[offset];
             valid_result[i] = cached_valid_res[offset];

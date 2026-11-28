@@ -1294,7 +1294,7 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    auto req = MakeIndexRequirement(RequiredReader::PointAndRange);
     req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
     if (data_type == DataType::JSON && !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==

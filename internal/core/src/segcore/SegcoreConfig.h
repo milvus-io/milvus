@@ -76,6 +76,16 @@ class SegcoreConfig {
         return interim_index_target_version_;
     }
 
+    void
+    set_mutable_scalar_index(bool enabled) {
+        enable_mutable_scalar_index_ = enabled;
+    }
+
+    bool
+    get_enable_mutable_scalar_index() const {
+        return enable_mutable_scalar_index_;
+    }
+
     int32_t
     get_interim_index_version() const {
         return interim_index_target_version_ == -1
@@ -358,6 +368,7 @@ class SegcoreConfig {
     inline static std::string sparse_ip_index_algo_;
     inline static std::string sparse_bm25_index_algo_;
     inline static bool enable_interim_segment_index_ = false;
+    inline static bool enable_mutable_scalar_index_ = false;
     inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;

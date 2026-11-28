@@ -808,7 +808,7 @@ SortedIndex<T>::Metadata() const {
     }
     const auto& state =
         std::get<std::shared_ptr<const SortedIndexStorage<T>>>(storage_)->state;
-    return {ReaderCaps{.predicate = true,
+    return {ReaderCaps{.point_and_range = true,
                        .pattern_match = std::is_same_v<T, std::string_view>,
                        .nested = state.nested,
                        .value_lookup = state.value_lookup,

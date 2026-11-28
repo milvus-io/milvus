@@ -154,7 +154,7 @@ TEST(FmIndexReaderTest, AdvertisesSelectiveVarcharPatternPolicy) {
         const auto& backend =
             ScalarReaderBackends().Get<std::string_view>(name);
         const auto caps = backend.DeriveCaps();
-        EXPECT_FALSE(caps.predicate) << name;
+        EXPECT_FALSE(caps.point_and_range) << name;
         EXPECT_TRUE(caps.pattern_match) << name;
         // General LIKE is served, but as a candidate superset the executor
         // must recheck (FmIndexReader::PatternMatchIsExact(Match) == false).
@@ -402,7 +402,7 @@ TEST(FmIndexReaderTest, RegexCandidatesAndRecheckEqualCanonicalScan) {
 
 TEST(FmIndexReaderTest, RegexGuardDeclinesEmptyAndAcceptsZeroHit) {
     auto reader = BuildFmReader({"apple", "banana"});
-    EXPECT_FALSE(reader->Caps().predicate);
+    EXPECT_FALSE(reader->Caps().point_and_range);
     EXPECT_FALSE(reader->Caps().value_lookup);
     const auto* patterns =
         dynamic_cast<const IPatternMatchReader*>(reader.get());

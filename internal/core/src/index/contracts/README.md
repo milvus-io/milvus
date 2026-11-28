@@ -100,6 +100,13 @@ that does not exist. The execution path first uses the caps derived from metadat
 opening, checks them against `reader.Caps()`. Decisions that depend on query input, such as literal
 length, are made by calling the corresponding interface on the request reader.
 
+`ReaderCaps::point_and_range` advertises `IScalarPredicateReader<T>`: `In`, `NotIn`, and
+single-bound or interval `Range`. It does not promise arbitrary expression evaluation.
+`ReaderCaps::pattern_match` advertises `IPatternMatchReader`, not every pattern operation.
+Consumers must check `ShouldUseForOp(op, pattern)` before execution and honor
+`PatternMatchIsExact(op)` for candidate refinement. The Growing mutable scalar reader accepts
+only literal `PrefixMatch`; postfix, substring, general LIKE, and regex use the existing fallback.
+
 Typed readers may inherit `PatternMatchReaderAdapter<Derived, T>` unconditionally, but the primary
 template is an empty class; only the `T = std::string_view` specialization inherits
 `IPatternMatchReader`. Numeric instantiations therefore do not expose the pattern-match capability,
@@ -273,6 +280,11 @@ Reader `Count()`. No scalar index version or new file format is required solely 
 
 ## Growing publication protocol
 
+- `IGrowingIndex::MemoryUsage()` optionally reports tracked index-owned allocation bytes,
+  including storage retained by older pins and excluding borrowed raw columns. It is a
+  thread-safe, read-only report, not RSS or a charge/refund operation. The default is `nullopt`
+  (unavailable), distinct from a measured zero. This owner report is separate from the published
+  `IIndex` and request-reader contracts; accounting remains with concrete storage.
 - `IAppendable<Batch>` is a separate input mixin. `ScalarBatch<T>`, `TextBatch`, and
   `VectorBatch<T>` are flat views borrowed for the duration of the call; they must be fully consumed
   or copied before `Append` returns. Nested input requires explicit offsets/validity.

@@ -631,7 +631,7 @@ MarisaIndexLoader::DeriveCaps(const Config& index_meta) {
     }
     return DeriveJsonProjectedCaps(families::kMarisa,
                                    index_meta,
-                                   ReaderCaps{.predicate = true,
+                                   ReaderCaps{.point_and_range = true,
                                               .pattern_match = true,
                                               .value_lookup = true,
                                               .cheap_value_lookup = true});

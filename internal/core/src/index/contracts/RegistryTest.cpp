@@ -136,7 +136,7 @@ struct LoaderProbeA : IndexLoader {
 
     static ReaderCaps
     DeriveCaps(const Config& params) {
-        return {.predicate = params.value("predicate", false)};
+        return {.point_and_range = params.value("point_and_range", false)};
     }
 
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
@@ -379,13 +379,15 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
     const auto loader_entry =
         LoaderRegistry::Instance().Lookup(std::string(LoaderProbeA::kFamily));
     ASSERT_TRUE(loader_entry);
-    EXPECT_TRUE(loader_entry.derive_caps({{"predicate", true}}).predicate);
-    EXPECT_FALSE(loader_entry.derive_caps({{"predicate", false}}).predicate);
+    EXPECT_TRUE(
+        loader_entry.derive_caps({{"point_and_range", true}}).point_and_range);
+    EXPECT_FALSE(
+        loader_entry.derive_caps({{"point_and_range", false}}).point_and_range);
 
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
-    options.params = {{"predicate", true}};
+    options.params = {{"point_and_range", true}};
     auto reader = loader_entry
                       .Load({OpenedIndexSource{LegacyIndexSource{
                                  std::shared_ptr<storage::FileSource>(
@@ -395,7 +397,7 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
                              milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
-    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_TRUE(reader->Caps().point_and_range);
     EXPECT_EQ(LoaderProbeA::create_thread, std::this_thread::get_id());
     EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
 }
@@ -405,7 +407,7 @@ TEST(RegistryTest, AsyncSourcePreparationRunsOnLoadingExecutor) {
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
-    options.params = {{"predicate", true}};
+    options.params = {{"point_and_range", true}};
     auto reader = entry
                       .Load({OpenedIndexSource{LegacyIndexSource{
                                  std::shared_ptr<storage::FileSource>(
@@ -415,7 +417,7 @@ TEST(RegistryTest, AsyncSourcePreparationRunsOnLoadingExecutor) {
                              milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
-    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_TRUE(reader->Caps().point_and_range);
     EXPECT_NE(LoaderProbeA::create_thread, std::this_thread::get_id());
     // Slot creation stays on the caller so synchronous warmup can use the I/O executor.
     EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());

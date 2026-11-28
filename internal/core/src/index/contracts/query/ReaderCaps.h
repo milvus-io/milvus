@@ -25,11 +25,13 @@
 namespace milvus::index {
 
 struct ReaderCaps {
-    // In / NotIn / Range. INullReader is a separate cross-family interface and
-    // has no capability bit here.
-    bool predicate = false;
+    // IScalarPredicateReader<T>: In / NotIn / Range, not arbitrary expressions.
+    // INullReader is separate and has no capability bit here.
+    bool point_and_range = false;
 
-    // LIKE family: Match / PrefixMatch / PostfixMatch / InnerMatch.
+    // Exposes IPatternMatchReader, not support for every PatternOp. Call
+    // ShouldUseForOp(op, pattern) before use; a reader may support only prefix
+    // matching or decline a particular literal. See PatternMatchIsExact too.
     bool pattern_match = false;
 
     bool text_match = false;

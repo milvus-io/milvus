@@ -47,7 +47,7 @@ CheckArrayRowsMultiKey(std::string_view type_name, T first, T last) {
         const auto backends = ScalarReaderBackends().ForInput<ArrayView>(
             BackendInputShape::ArrayRows,
             Domain::Row,
-            &ReaderCaps::predicate,
+            &ReaderCaps::point_and_range,
             nullable,
             detail::ScalarTestType<T>());
         ASSERT_FALSE(backends.empty());
@@ -168,7 +168,7 @@ template <typename T>
 struct In {
     using ValueType = T;
     using Reader = IScalarPredicateReader<T>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         std::vector<PredicateTestValue<T>> keys;
@@ -203,7 +203,7 @@ template <typename T>
 struct NotIn {
     using ValueType = T;
     using Reader = IScalarPredicateReader<T>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         std::vector<PredicateTestValue<T>> keys;
@@ -230,7 +230,7 @@ template <typename T>
 struct UnaryRange {
     using ValueType = T;
     using Reader = IScalarPredicateReader<T>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         PredicateTestValue<T> value;
@@ -262,7 +262,7 @@ template <typename T>
 struct IntervalRange {
     using ValueType = T;
     using Reader = IScalarPredicateReader<T>;
-    static constexpr auto kCapability = &ReaderCaps::predicate;
+    static constexpr auto kCapability = &ReaderCaps::point_and_range;
 
     struct Args {
         PredicateTestValue<T> lo;
@@ -837,7 +837,7 @@ AddResultOwnershipCase(IndexTestCases& cases) {
         .input_lifetime = InputLifetime::ReleaseBeforeBody,
         .body =
             Observe<T>{
-                .capability = &ReaderCaps::predicate,
+                .capability = &ReaderCaps::point_and_range,
                 .run =
                     [](const auto&, const auto& data, const auto& reader) {
                         const auto* predicate =

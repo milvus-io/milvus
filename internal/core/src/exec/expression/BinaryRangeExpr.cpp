@@ -1232,7 +1232,7 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    auto req = MakeIndexRequirement(RequiredReader::PointAndRange);
     req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
     SelectAndCreateIndexReader(req);
     if (exec_path_ != ExprExecPath::ScalarIndex) {

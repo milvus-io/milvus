@@ -219,7 +219,7 @@ InvertedIndex<T>::Metadata() const {
         return cached->metadata;
     const auto& storage =
         *std::get<std::shared_ptr<const InvertedIndexStorage<T>>>(storage_);
-    return {ReaderCaps{.predicate = true,
+    return {ReaderCaps{.point_and_range = true,
                        .pattern_match = std::is_same_v<T, std::string_view>,
                        .nested = storage.nested_,
                        .exact = !storage.nested_},

@@ -1256,6 +1256,63 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
         return;
     }
 
+    auto feed_scalar = [&]<typename T>() {
+        const auto* values = dynamic_cast<const ConcurrentVector<T>*>(
+            insert_record_.get_data_base(field_id));
+        AssertInfo(values != nullptr,
+                   "growing scalar field {} has incompatible raw storage",
+                   field_id.get());
+        const auto chunk_rows = segcore_config_.get_chunk_rows();
+        AssertInfo(chunk_rows > 0,
+                   "growing scalar chunk size must be positive");
+        for (auto offset = row_begin; offset < row_end;) {
+            // Borrow only within one raw chunk. Scalar raw storage is retained
+            // throughout the segment lifetime; Append owns any retained keys.
+            const auto count =
+                std::min(row_end - offset, chunk_rows - offset % chunk_rows);
+            FixedVector<bool> valid;
+            const bool* valid_data = nullptr;
+            if (field_meta.is_nullable()) {
+                auto field_valid = insert_record_.get_valid_data(field_id);
+                AssertInfo(field_valid != nullptr,
+                           "nullable scalar field {} has no validity",
+                           field_id.get());
+                valid.resize(static_cast<size_t>(count));
+                field_valid->bulk_is_valid_range(offset, count, valid.data());
+                valid_data = valid.data();
+            }
+            const index::ScalarBatch<T> batch{static_cast<size_t>(count),
+                                              values->get_element(offset),
+                                              valid_data};
+            if (staged != nullptr) {
+                GrowingIndexSet::AppendTo(*staged, field_id, offset, batch);
+            } else {
+                growing_indexes_.Append(field_id, offset, batch);
+            }
+            offset += count;
+        }
+    };
+    switch (data_type) {
+        case DataType::BOOL:
+            feed_scalar.template operator()<bool>();
+            return;
+        case DataType::INT8:
+            feed_scalar.template operator()<int8_t>();
+            return;
+        case DataType::INT16:
+            feed_scalar.template operator()<int16_t>();
+            return;
+        case DataType::INT32:
+            feed_scalar.template operator()<int32_t>();
+            return;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            feed_scalar.template operator()<int64_t>();
+            return;
+        default:
+            break;
+    }
+
     AssertInfo(IsStringDataType(data_type) || data_type == DataType::GEOMETRY,
                "field {} type {} has no connected growing feed",
                field_id.get(),
@@ -1284,13 +1341,14 @@ SegmentGrowingImpl::FeedGrowingIndexRange(const FieldMeta& field_meta,
 
     for (auto offset = row_begin; offset < row_end; offset += batch_rows) {
         const auto count = std::min<int64_t>(batch_rows, row_end - offset);
-        FixedVector<bool> valid(static_cast<size_t>(count), true);
+        FixedVector<bool> valid;
         const bool* valid_data = nullptr;
         if (field_meta.is_nullable()) {
             auto field_valid = insert_record_.get_valid_data(field_id);
             AssertInfo(field_valid != nullptr,
                        "nullable growing field {} has no validity storage",
                        field_id.get());
+            valid.resize(static_cast<size_t>(count));
             field_valid->bulk_is_valid_range(offset, count, valid.data());
             valid_data = valid.data();
         }
@@ -3758,7 +3816,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     }
 
     auto appender = growing_indexes_.StageAppender(
-        field_meta, index_meta_, segcore_config_, id_);
+        *schema, field_id, index_meta_, segcore_config_, id_);
     AssertInfo(appender.has_value() && appender->caps.text_match,
                "field {} is not configured for growing text match",
                field_id.get());
@@ -3928,7 +3986,8 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             }
             const auto field_id = field_meta.get_id();
             auto appender = growing_indexes_.StageAppender(
-                field_meta,
+                *sch,
+                field_id,
                 index_meta_,
                 segcore_config_,
                 id_,

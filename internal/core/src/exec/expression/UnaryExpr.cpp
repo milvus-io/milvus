@@ -2177,7 +2177,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         expr_->op_type_ == proto::plan::OpType::InnerMatch ||
         expr_->op_type_ == proto::plan::OpType::RegexMatch;
     auto req = MakeIndexRequirement(is_pattern ? RequiredReader::Ngram
-                                               : RequiredReader::Predicate);
+                                               : RequiredReader::PointAndRange);
     req.value_type =
         data_type == DataType::ARRAY
             ? expr_->column_.element_type_

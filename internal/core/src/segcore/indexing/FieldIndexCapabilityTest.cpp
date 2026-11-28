@@ -76,8 +76,8 @@ class InventoryTestIndex final
     : public index::IIndex,
       public std::enable_shared_from_this<InventoryTestIndex> {
  public:
-    explicit InventoryTestIndex(index::ReaderCaps caps = {.predicate = true},
-                                int64_t count = 1)
+    explicit InventoryTestIndex(
+        index::ReaderCaps caps = {.point_and_range = true}, int64_t count = 1)
         : caps_(caps), count_(count) {
     }
     index::IndexMetadata
@@ -105,7 +105,7 @@ class InventoryTestIndex final
 IndexCapabilityEntry
 TestEntry(FieldId field_id = FieldId(10),
           int64_t index_id = 1,
-          index::ReaderCaps caps = {.predicate = true}) {
+          index::ReaderCaps caps = {.point_and_range = true}) {
     IndexCapabilityEntry entry{
         IndexKey{field_id, IndexIdentity::PreBuiltIndex(index_id)}};
     entry.family = "inventory-test";
@@ -116,7 +116,7 @@ TestEntry(FieldId field_id = FieldId(10),
 
 index::IndexPtr
 TestSlot(std::string key,
-         index::ReaderCaps caps = {.predicate = true},
+         index::ReaderCaps caps = {.point_and_range = true},
          int64_t count = 1) {
     return std::make_shared<InventoryTestIndex>(caps, count);
 }
@@ -599,7 +599,7 @@ TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
             entry.family,
             entry.value_type,
             entry.caps,
-            TestSlot("inventory-old", {.predicate = true}, 7)};
+            TestSlot("inventory-old", {.point_and_range = true}, 7)};
     }));
 
     auto dropped_snapshot = old_snapshot;
@@ -613,7 +613,7 @@ TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
 
     auto replaced_snapshot = old_snapshot;
     replaced_snapshot.Register(std::make_shared<IndexInventory::Entry>(
-        entry, TestSlot("inventory-new", {.predicate = true}, 11)));
+        entry, TestSlot("inventory-new", {.point_and_range = true}, 11)));
     auto new_reader = replaced_snapshot.CreateIndexReader(nullptr, entry.key);
     ASSERT_TRUE(new_reader);
     EXPECT_EQ(new_reader->Count(), 11);

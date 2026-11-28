@@ -231,7 +231,7 @@ IsOrdinaryLifecycleFamily(const ReaderBackend& backend) {
 template <typename T>
 void
 AddScalarLifecycleCases(std::vector<FilterParam>& cases) {
-    auto backends = ScalarReaderBackends().For<T>(&ReaderCaps::predicate);
+    auto backends = ScalarReaderBackends().For<T>(&ReaderCaps::point_and_range);
     std::erase_if(backends, [](const auto& backend) {
         return backend.MmapRequested() || !IsOrdinaryLifecycleFamily(backend);
     });
@@ -353,7 +353,7 @@ AddArrayRowsCases(std::vector<FilterParam>& cases, std::string_view type_name) {
         auto backends = ScalarReaderBackends().ForInput<ArrayView>(
             BackendInputShape::ArrayRows,
             Domain::Row,
-            &ReaderCaps::predicate,
+            &ReaderCaps::point_and_range,
             dataset.requires_nullable,
             detail::ScalarTestType<T>());
         if (backends.empty()) {

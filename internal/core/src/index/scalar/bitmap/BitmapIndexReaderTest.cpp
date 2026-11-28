@@ -100,7 +100,7 @@ CheckBitmapCache(bool offset_cache) {
         slot_lifetime = slot;
         return CreateBitmapIndex<std::string, Posting>(
             slot,
-            IndexMetadata{ReaderCaps{.predicate = true,
+            IndexMetadata{ReaderCaps{.point_and_range = true,
                                      .pattern_match = true,
                                      .value_lookup = true,
                                      .cheap_value_lookup = offset_cache},
@@ -232,7 +232,7 @@ ExpectPredicateProfiles(std::string_view type_name) {
         const auto name =
             "Bitmap" + std::string(type_name) + std::string(suffix);
         const auto& backend = ScalarReaderBackends().Get<T>(name);
-        EXPECT_TRUE(backend.DeriveCaps().predicate) << name;
+        EXPECT_TRUE(backend.DeriveCaps().point_and_range) << name;
     }
 }
 
@@ -252,7 +252,7 @@ TEST(BitmapIndexReaderTest, ProvidesInt64Queries) {
     // cannot silently remove this backend from the shared query suites.
     const auto& backend = ScalarReaderBackends().Get<int64_t>("BitmapInt64");
     const auto caps = backend.DeriveCaps();
-    EXPECT_TRUE(caps.predicate);
+    EXPECT_TRUE(caps.point_and_range);
     EXPECT_TRUE(caps.value_lookup);
 
     const std::array<int64_t, 1> values{42};
@@ -260,7 +260,7 @@ TEST(BitmapIndexReaderTest, ProvidesInt64Queries) {
         ScalarBuildBatch<int64_t>{values, {}}};
     auto reader = backend.Create(ScalarBuildInput<int64_t>{batches});
     ASSERT_NE(reader, nullptr);
-    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_TRUE(reader->Caps().point_and_range);
     EXPECT_TRUE(reader->Caps().value_lookup);
     EXPECT_NE(
         dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get()),
@@ -273,7 +273,7 @@ TEST(BitmapIndexReaderTest, ProvidesVarcharQueries) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("BitmapVarchar");
     const auto caps = backend.DeriveCaps();
-    EXPECT_TRUE(caps.predicate);
+    EXPECT_TRUE(caps.point_and_range);
     EXPECT_TRUE(caps.pattern_match);
     EXPECT_EQ(backend.PatternPolicy(PatternOp::Match),
               PatternQueryPolicy::UseAndRun);
@@ -283,7 +283,7 @@ TEST(BitmapIndexReaderTest, ProvidesVarcharQueries) {
         ScalarBuildBatch<std::string_view>{values, {}}};
     auto reader = backend.Create(ScalarBuildInput<std::string_view>{batches});
     ASSERT_NE(reader, nullptr);
-    EXPECT_TRUE(reader->Caps().predicate);
+    EXPECT_TRUE(reader->Caps().point_and_range);
     EXPECT_TRUE(reader->Caps().pattern_match);
     EXPECT_NE(dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
                   reader.get()),

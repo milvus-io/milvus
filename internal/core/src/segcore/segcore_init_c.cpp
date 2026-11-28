@@ -70,6 +70,11 @@ SegcoreSetEnableInterminSegmentIndex(const bool value) {
     config.set_enable_interim_segment_index(value);
 }
 
+extern "C" void
+SegcoreSetMutableScalarIndex(bool enabled) {
+    SegcoreConfig::default_config().set_mutable_scalar_index(enabled);
+}
+
 extern "C" CStatus
 SegcoreSetInterimIndexTargetVersion(const int64_t target_version) {
     try {
