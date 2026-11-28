@@ -159,8 +159,27 @@ allocation counts, not process RSS. Automatic whole-index eviction is outside th
 
 The 2026-11-29 follow-up excludes primary keys at the shared initialization/reopen factory and
 specializes set/clear emission. Local source hash `4bf04e44e693` passed the full Release C++/Go
-build (GCC 12.3); runtime validation and performance measurements are pending. The results below
-apply to the earlier atomic-count revision, not this follow-up.
+build (GCC 12.3), `check-proto-product`, and `verifiers`. A paired static comparison against the
+already-validated atomic-count revision used the same 10,570,000 rows, one Growing segment,
+zero Sealed segments, disabled expression cache, and three single-client windows per case.
+Each window warmed up for 10 seconds before measuring for 15 seconds; version order alternated.
+All 53,315 timed queries returned the expected counts and used the scalar-index path.
+PK equality/IN retained the existing PK path; excluded PK range evaluation remained correct
+through the raw path. No new UT was added.
+
+| Static case (actual selectivity) | Baseline p50 ms | Candidate p50 ms | Baseline CPU ms/query | Candidate CPU ms/query |
+| --- | ---: | ---: | ---: | ---: |
+| IN (3.65%) | 2.436 | 2.586 | 2.952 | 3.119 |
+| Range (12.43%) | 9.855 | 9.769 | 10.571 | 10.462 |
+| Range (90.28%) | 8.732 | 8.910 | 9.455 | 9.552 |
+
+Median measurement-boundary RSS decreased from 4.199 to 2.378 GiB (43.4%). Post-run jemalloc
+allocated memory decreased from 3.334 to 1.480 GiB, consistent with removing 10.57 million
+redundant singleton PK Postings and their B-tree entries. RSS samples are not a continuous peak
+measurement. Runtime disassembly confirmed OR for set and NOT/AND for clear, but the E2E results
+do not establish an overall query speedup: IN regressed, while range CPU was approximately flat.
+Both changes ran together on separate hosts with the same CPU model and resource limits;
+this experiment does not isolate Emit causality or validate concurrent-write behavior.
 
 On 2026-11-28, the atomic-count revision passed a full Release C++/Go build and static E2E
 comparison against commit `938e3ae23ba87fb543a84bde42a230b938129757`. The new image used local
