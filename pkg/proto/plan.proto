@@ -429,6 +429,26 @@ message PlanOption {
    bool collect_feature_bits = 2;
 };
 
+// Virtual columns: output columns that are not stored fields. Their values
+// are produced while the request runs.
+enum VirtualColumn {
+  VirtualColumnInvalid = 0;
+  VirtualColumnSegmentID = 1;      // ID of the segment that held the row
+  VirtualColumnSegmentOffset = 2;  // offset of the row inside that segment
+  VirtualColumnDistance = 3;       // raw vector-search distance, before any rerank
+  VirtualColumnScore = 4;          // final score of the row
+}
+
+// One output item that is not a stored field. output_id is local to the
+// request: the proxy numbers items from -1000 downward in output_fields
+// order, and every component looks the ID up in this list instead of
+// interpreting its value. The IDs are never persisted.
+message ProjectionItem {
+  int64 output_id = 1;
+  VirtualColumn virtual_column = 2;
+  schema.DataType data_type = 3;
+}
+
 message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;
@@ -445,4 +465,7 @@ message PlanNode {
   // Query chains retain raw expression arguments and output_columns here; do
   // not duplicate their configuration in the enclosing RetrieveRequest.
   repeated schema.FunctionChain querynode_function_chains = 10;
+  // Projection items evaluated on the QueryNode. Items evaluated at the proxy
+  // are not sent.
+  repeated ProjectionItem projection_items = 11;
 }

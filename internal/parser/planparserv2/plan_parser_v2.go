@@ -60,6 +60,12 @@ func ParseExprParams(vals map[string]*schemapb.TemplateValue) *ExprParams {
 //	  so the result/error is exactly what a pure-LL parse would produce. SLL never
 //	  accepts input that LL rejects, so a clean stage-1 parse equals the LL parse.
 func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) planparserv2.IExprContext {
+	return parseTwoStage(parser, listener, parser.Expr)
+}
+
+// parseTwoStage runs one entry rule of the grammar with the SLL-then-LL
+// strategy described above.
+func parseTwoStage[T any](parser *planparserv2.PlanParser, listener *errorListenerImpl, rule func() T) T {
 	interp := parser.GetInterpreter()
 
 	// Stage 1 (fast): SLL prediction with a throwaway listener. For the
@@ -74,7 +80,7 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 	parser.AddErrorListener(probe)
 	parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
 	interp.SetPredictionMode(antlr.PredictionModeSLL)
-	ast := parser.Expr()
+	ast := rule()
 	if probe.Error() == nil {
 		return ast
 	}
@@ -94,7 +100,7 @@ func parseExpr(parser *planparserv2.PlanParser, listener *errorListenerImpl) pla
 	parser.AddErrorListener(listener)
 	parser.SetErrorHandler(antlr.NewDefaultErrorStrategy())
 	interp.SetPredictionMode(antlr.PredictionModeLL)
-	return parser.Expr()
+	return rule()
 }
 
 func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {

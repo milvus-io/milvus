@@ -7,6 +7,18 @@ import "github.com/antlr4-go/antlr/v4"
 type PlanVisitor interface {
 	antlr.ParseTreeVisitor
 
+	// Visit a parse tree produced by PlanParser#SelectStar.
+	VisitSelectStar(ctx *SelectStarContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#SelectAggregate.
+	VisitSelectAggregate(ctx *SelectAggregateContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#SelectExpr.
+	VisitSelectExpr(ctx *SelectExprContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#aggregateCall.
+	VisitAggregateCall(ctx *AggregateCallContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#String.
 	VisitString(ctx *StringContext) interface{}
 
@@ -159,6 +171,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#RegexMatch.
 	VisitRegexMatch(ctx *RegexMatchContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#VirtualColumn.
+	VisitVirtualColumn(ctx *VirtualColumnContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#StructSubField.
 	VisitStructSubField(ctx *StructSubFieldContext) interface{}

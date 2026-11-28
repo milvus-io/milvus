@@ -18,6 +18,7 @@ package milvusclient
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -68,7 +69,47 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 	return resultSets, err
 }
 
+// resolveOutputFields returns the names that result columns are matched
+// against. The server reports the final output column names in the response:
+// the alias for "field AS alias", the key for `$meta["key"]`. When the request
+// has an item that is neither such a name nor a schema field, the requested
+// strings cannot name the returned columns, so the served names are used.
+// "*" is kept so that wildcard handling still applies.
+func resolveOutputFields(schema *entity.Schema, requested, served []string) []string {
+	if len(served) == 0 {
+		return requested
+	}
+	known := make(map[string]struct{}, len(served)+len(schema.Fields))
+	for _, name := range served {
+		known[name] = struct{}{}
+	}
+	for _, field := range schema.Fields {
+		known[field.Name] = struct{}{}
+	}
+	wildcard, unknown := false, false
+	for _, name := range requested {
+		name = strings.TrimSpace(name)
+		switch {
+		case name == "*":
+			wildcard = true
+		default:
+			if _, ok := known[name]; !ok {
+				unknown = true
+			}
+		}
+	}
+	if !unknown {
+		return requested
+	}
+	resolved := append([]string{}, served...)
+	if wildcard {
+		resolved = append(resolved, "*")
+	}
+	return resolved
+}
+
 func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string, nq int, resp *milvuspb.SearchResults) ([]ResultSet, error) {
+	outputFields = resolveOutputFields(schema, outputFields, resp.GetResults().GetOutputFields())
 	sr := make([]ResultSet, 0, nq)
 	results := resp.GetResults()
 	aggBuckets, err := parseAggregationBuckets(results)

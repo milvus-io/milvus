@@ -11143,7 +11143,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->field_ids_) {
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             continue;
         }
         if (ignore_non_pk && !is_pk_field(field_id)) {
@@ -11293,6 +11294,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         }
 
         if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            fields_data->AddAllocated(
+                query::BuildPlacementProjectionColumn(*item, id_, offsets, size)
+                    .release());
             continue;
         }
 

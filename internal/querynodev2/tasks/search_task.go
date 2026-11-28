@@ -50,6 +50,8 @@ var (
 )
 
 type SearchTask struct {
+	// placement is set while a request with placement virtual columns runs.
+	placement        *searchPlacement
 	ctx              context.Context
 	collection       *segments.Collection
 	segmentManager   *segments.Manager
@@ -218,11 +220,17 @@ func (t *SearchTask) execute(selected []segments.Segment) (retErr error) {
 	// Validate before ANN so invalid chains fail even when there are no local
 	// segments. Filter-only requests only collect statistics for two-stage search.
 	var preparedChains *preparedQueryNodeFunctionChains
+	var placementItems []*planpb.ProjectionItem
 	if !searchReq.FilterOnly() {
-		preparedChains, err = prepareQueryNodeFunctionChains(req.GetReq().GetSerializedExprPlan(), t.collection.Schema())
+		planNode, err := extractPlanWithScorers(req.GetReq().GetSerializedExprPlan())
+		if err != nil {
+			return merr.WrapErrServiceInternalErr(err, "querynode function chain: failed to parse search plan")
+		}
+		preparedChains, err = prepareQueryNodeFunctionChainsFromPlan(planNode, t.collection.Schema())
 		if err != nil {
 			return err
 		}
+		placementItems = placementProjectionItems(planNode)
 	}
 	prepareTimer.End(nil)
 	covered += time.Since(prepareStart)
@@ -366,6 +374,17 @@ func (t *SearchTask) execute(selected []segments.Segment) (retErr error) {
 		return err
 	}
 
+	if len(placementItems) > 0 {
+		if len(results) != len(searchedSegments) {
+			return merr.WrapErrServiceInternalMsg("search: result count %d != segment count %d", len(results), len(searchedSegments))
+		}
+		segmentIDs := make([]int64, len(searchedSegments))
+		for i, segment := range searchedSegments {
+			segmentIDs[i] = segment.ID()
+		}
+		t.placement = &searchPlacement{items: placementItems, segmentIDs: segmentIDs}
+	}
+
 	// Export per-segment results as Arrow DataFrames.
 	var l0InputPlan *chain.DataFrameInputPlan
 	if preparedChains.l0 != nil {
@@ -396,6 +415,13 @@ func (t *SearchTask) execute(selected []segments.Segment) (retErr error) {
 	layout, err := t.buildReduceLayout(groupByOpts, preparedChains.l1 != nil)
 	if err != nil {
 		return err
+	}
+	if t.placement != nil {
+		t.placement.segDFs = segDFs
+		t.placement.nqOffsets = make([]int, len(layout.Ranges))
+		for i, reduceRange := range layout.Ranges {
+			t.placement.nqOffsets[i] = reduceRange.NQOffset
+		}
 	}
 	if layout.PerRequestReduce {
 		for i, reduceRange := range layout.Ranges {

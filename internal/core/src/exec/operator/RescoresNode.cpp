@@ -119,6 +119,29 @@ PhyRescoresNode::GetOutput() {
         return input_;
     }
 
+    if (query_context_->get_search_info().keep_raw_distance_) {
+        // distances_ holds the vector-search distance here: the boost below
+        // overwrites it in place.
+        auto topk = search_result.unity_topK_;
+        AssertInfo(topk > 0, "rescoring a search result without topk");
+        search_result.raw_distances_.assign(search_result.total_nq_, {});
+        const bool has_element_indices =
+            !search_result.element_indices_.empty();
+        for (auto i : offset_idx) {
+            auto query_index = i / topk;
+            AssertInfo(query_index < search_result.raw_distances_.size(),
+                       "result row {} is outside nq {} x topk {}",
+                       i,
+                       search_result.total_nq_,
+                       topk);
+            auto element_index =
+                has_element_indices ? search_result.element_indices_[i] : -1;
+            search_result.raw_distances_[query_index].emplace(
+                std::make_pair(search_result.seg_offsets_[i], element_index),
+                search_result.distances_[i]);
+        }
+    }
+
     std::vector<std::optional<float>> boost_scores(offsets.size());
     auto function_mode = option_->function_mode();
     rescores::ComputeFunctionScores(exec_context,

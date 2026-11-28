@@ -33,6 +33,11 @@ func (t *QueryTask) materializeInScope() bool {
 	if t.plan.GetQuery().GetPredicates().GetElementFilterExpr() != nil {
 		return false
 	}
+	// A batch carries schema fields only; $seg_id and $seg_offset of a
+	// requery are computed by the Query path.
+	if len(t.plan.GetProjectionItems()) > 0 {
+		return false
+	}
 	for _, id := range t.GetOutputFieldsId() {
 		if id == common.TimeStampField || id == common.RowIDField {
 			continue

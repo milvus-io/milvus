@@ -262,6 +262,14 @@ BuildEmptyBatch(milvus::query::Plan* plan,
         arrow::field(milvus::segcore::kSegOffsetFieldName, arrow::int64()));
     arrays.push_back(offset_arr);
 
+    // $distance, only when the plan outputs it
+    if (plan->OutputsDistance()) {
+        ARROW_ASSIGN_OR_RAISE(auto distance_arr,
+                              arrow::MakeEmptyArray(arrow::float32()));
+        fields.push_back(arrow::field("$distance", arrow::float32()));
+        arrays.push_back(distance_arr);
+    }
+
     // $group_by_<fieldID> (when group-by is enabled in the plan), kept
     // consistent with non-empty batches so the Arrow stream schema is uniform
     // per segment.
@@ -427,6 +435,53 @@ BuildSearchResultBatch(
         fields.push_back(
             arrow::field(milvus::segcore::kSegOffsetFieldName, arrow::int64()));
         arrays.push_back(seg_offset_array);
+    }
+
+    // Build $distance column (float32): the distance returned by the vector
+    // search, in the metric's natural direction. $score differs from it in
+    // two ways: a rescoring operator may have rewritten the value, and for
+    // metrics where a smaller distance is better the search negates it so
+    // that every later stage ranks by "larger is better".
+    if (plan->OutputsDistance()) {
+        const bool negated = !milvus::PositivelyRelated(
+            plan->plan_node_->search_info_.metric_type_);
+        const auto& prefix = search_result->topk_per_nq_prefix_sum_;
+        const bool has_raw = !search_result->raw_distances_.empty();
+        const bool has_element_indices =
+            !search_result->element_indices_.empty();
+        arrow::FloatBuilder distance_builder;
+        ARROW_RETURN_NOT_OK(distance_builder.Reserve(total_valid));
+        size_t query_index = 0;
+        for (size_t i = 0; i < total_valid; ++i) {
+            auto score = search_result->distances_[i];
+            float distance = negated ? -score : score;
+            if (has_raw) {
+                while (query_index + 1 < prefix.size() &&
+                       i >= prefix[query_index + 1]) {
+                    ++query_index;
+                }
+                AssertInfo(query_index < search_result->raw_distances_.size(),
+                           "result row {} belongs to no query",
+                           i);
+                auto element_index = has_element_indices
+                                         ? search_result->element_indices_[i]
+                                         : -1;
+                const auto& raw = search_result->raw_distances_[query_index];
+                auto it = raw.find(std::make_pair(
+                    search_result->seg_offsets_[i], element_index));
+                AssertInfo(it != raw.end(),
+                           "no vector-search distance recorded for segment "
+                           "offset {} of query {}",
+                           search_result->seg_offsets_[i],
+                           query_index);
+                distance = it->second;
+            }
+            distance_builder.UnsafeAppend(distance);
+        }
+        std::shared_ptr<arrow::Array> distance_array;
+        ARROW_RETURN_NOT_OK(distance_builder.Finish(&distance_array));
+        fields.push_back(arrow::field("$distance", arrow::float32()));
+        arrays.push_back(distance_array);
     }
 
     // Build $group_by_<fieldID> columns when group-by is enabled. Type is
