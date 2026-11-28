@@ -39,6 +39,8 @@ func (e *DirectSegmentTaskExecutor) Query(ctx context.Context, tasks []qnview.QN
 	if err != nil {
 		return nil, err
 	}
-	req := buildQNQueryRequest(tasks[0].Request, tasks[0].MVCC, handles)
+	request := tasks[0].Request
+	selected, handles = pruneQuerySegments(request, selected, handles)
+	req := buildQNQueryRequest(request, tasks[0].MVCC, handles)
 	return e.queryRunner.Query(ctx, collection, selected, req, e.serverID)
 }
