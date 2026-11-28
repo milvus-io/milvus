@@ -510,6 +510,88 @@ class TestGroupSearch(TestMilvusClientV2Base):
         log.info(f"hybrid group-by results: ids={[hit.get(self.primary_field) for hit in res[0]]}, groups={group_values}")
         assert len(group_values) == len(set(group_values)), f"duplicated group values in hybrid search: {group_values}"
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("ranker_name", ["weighted", "rrf"])
+    @pytest.mark.parametrize("strict_group_size", [False, True])
+    def test_hybrid_search_group_by_keeps_route_scores(self, ranker_name, strict_group_size):
+        """
+        target: issue #52531, each sub-search of a grouped hybrid search kept only
+                group_size entities per group, so routes that kept different entities
+                of one group lost each other's scores
+        method: IP + FLAT with vectors (s, 0) and query (1, 0), so each route scores a
+                row exactly s; A1 and A2 share group A and beat B1 on both routes,
+                but the dense route prefers A1 and the sparse route prefers A2
+        expected: with group_size=1 and limit=1 the result is group A, and every hit
+                  has the same score as in the same search without group_by, with
+                  and without strict_group_size
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        group_by_field = "group_key"
+        dense_field = "dense_vector"
+        sparse_field = "sparse_vector"
+
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(self.primary_field, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(group_by_field, DataType.VARCHAR, max_length=16)
+        schema.add_field(dense_field, DataType.FLOAT_VECTOR, dim=2)
+        schema.add_field(sparse_field, DataType.FLOAT_VECTOR, dim=2)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=dense_field, index_type="FLAT", metric_type="IP", params={})
+        index_params.add_index(field_name=sparse_field, index_type="FLAT", metric_type="IP", params={})
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+        # pk, group, dense score, sparse score
+        table = [(1, "A", 0.95, 0.90), (2, "A", 0.90, 0.95), (3, "B", 0.80, 0.80)]
+        rows = [
+            {
+                self.primary_field: pk,
+                group_by_field: group,
+                dense_field: [dense, 0.0],
+                sparse_field: [sparse, 0.0],
+            }
+            for pk, group, dense, sparse in table
+        ]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        self.load_collection(client, collection_name)
+
+        def search(limit, **group_by):
+            # Every route asks for all three rows / both groups, so only the
+            # per-group cap of the sub-search differs from the ungrouped search.
+            reqs = [
+                AnnSearchRequest(data=[[1.0, 0.0]], anns_field=field, param={"metric_type": "IP"}, limit=3)
+                for field in (dense_field, sparse_field)
+            ]
+            ranker = WeightedRanker(0.5, 0.5, norm_score=False) if ranker_name == "weighted" else RRFRanker(60)
+            res = self.hybrid_search(
+                client,
+                collection_name,
+                reqs=reqs,
+                ranker=ranker,
+                limit=limit,
+                output_fields=[group_by_field],
+                consistency_level="Strong",
+                **group_by,
+            )[0]
+            return [(hit.id, hit.get(group_by_field), hit.distance) for hit in res[0]]
+
+        ungrouped = search(3)
+        expected_scores = {pk: score for pk, _, score in ungrouped}
+        log.info(f"hybrid search without group_by: {ungrouped}")
+
+        for group_size in (1, 2):
+            hits = search(
+                1, group_by_field=group_by_field, group_size=group_size, strict_group_size=strict_group_size
+            )
+            log.info(f"hybrid search group_size={group_size}, limit=1: {hits}")
+            assert hits, f"empty result for group_size={group_size}"
+            assert {group for _, group, _ in hits} == {"A"}, f"group_size={group_size} returned {hits}"
+            for pk, _, score in hits:
+                assert score == pytest.approx(expected_scores[pk], rel=1e-5), (
+                    f"pk {pk} scored {score} with group_by, {expected_scores[pk]} without"
+                )
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_group_by_empty_results(self):
         """

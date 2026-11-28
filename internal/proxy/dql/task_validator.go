@@ -16,7 +16,11 @@ type searchTaskValidator struct{}
 
 var searchTaskValidatorInstance taskValidator[*SearchTask] = &searchTaskValidator{}
 
-func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequest) error {
+// validateSubSearch checks the result size of one hybrid sub-search. groupSize
+// is the group size the user requested, not the larger size the sub-search
+// keeps internally (see rankParams.GetSubSearchGroupSize), so enlarging the
+// per-group buffer does not reject requests that passed before.
+func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequest, groupSize int64) error {
 	maxResultEntries := paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64()
 	if maxResultEntries <= 0 {
 		return nil
@@ -24,8 +28,8 @@ func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequ
 	// check if number of result entries is too large
 	nEntries := subReq.GetNq() * subReq.GetTopk()
 	// if there is group size, multiply it
-	if subReq.GetGroupSize() > 0 {
-		nEntries *= subReq.GroupSize
+	if groupSize > 0 {
+		nEntries *= groupSize
 	}
 	if nEntries > maxResultEntries {
 		return merr.WrapErrParameterInvalidMsg("number of result entries is too large")
@@ -54,7 +58,11 @@ func (v *searchTaskValidator) validate(search *SearchTask) error {
 	// if it is a hybrid search, check all sub-searches
 	if search.GetIsAdvanced() {
 		for _, subReq := range search.GetSubReqs() {
-			if err := v.validateSubSearch(subReq); err != nil {
+			groupSize := subReq.GetGroupSize()
+			if search.rankParams != nil {
+				groupSize = search.rankParams.GetGroupSize()
+			}
+			if err := v.validateSubSearch(subReq, groupSize); err != nil {
 				return err
 			}
 		}

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 
@@ -54,7 +55,11 @@ struct BruteForceIndexParams {
 
 struct SearchInfo {
     int64_t topk_{0};
+    // Number of entities a strict_group_size search fills each group to.
     int64_t group_size_{1};
+    // Maximum number of entities kept per group. Values not larger than
+    // group_size_ mean group_size_; use KeptGroupSize().
+    int64_t max_group_size_{0};
     bool strict_group_size_{false};
     StrictGroupStrategy strict_group_strategy_{StrictGroupStrategy::PerGroup};
     int64_t strict_group_phase1_candidate_weight_{0};
@@ -104,6 +109,11 @@ struct SearchInfo {
     bool
     has_group_by() const {
         return !group_by_field_ids_.empty();
+    }
+
+    int64_t
+    KeptGroupSize() const {
+        return std::max(group_size_, max_group_size_);
     }
 };
 

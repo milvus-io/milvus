@@ -154,6 +154,7 @@ StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
     info.topk_ = remaining_topk;
     info.group_by_field_ids_.clear();
     info.group_size_ = 1;
+    info.max_group_size_ = 0;
     info.strict_group_size_ = false;
     info.iterative_filter_execution = false;
     info.iterator_v2_info_.reset();

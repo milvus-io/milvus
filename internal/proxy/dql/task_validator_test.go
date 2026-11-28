@@ -99,3 +99,26 @@ func TestValidateTask(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateHybridSubSearchUsesRequestedGroupSize(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxResultEntries.Key, "1000")
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.MaxResultEntries.Key)
+
+	// The sub-request keeps more entities per group than requested. Only the
+	// requested size (2) counts: 10 * 50 * 2 = 1000 entries passes, while the
+	// internal size (20) would give 10000.
+	task := &SearchTask{
+		SearchRequest: &internalpb.SearchRequest{
+			IsAdvanced: true,
+			SubReqs:    []*internalpb.SubSearchRequest{{Nq: 10, Topk: 50, GroupSize: 20}},
+		},
+		rankParams: &rankParams{groupByFieldIds: []int64{102}, groupSize: 2},
+	}
+	assert.NoError(t, ValidateTask(task))
+
+	task.rankParams.groupSize = 3
+	err := ValidateTask(task)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "number of result entries is too large")
+}

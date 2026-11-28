@@ -294,7 +294,7 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 		{
 			message: &planpb.QueryInfo{},
 			reduction: `topk metric_type search_params round_decimal group_by_field_id group_size strict_group_size
-				hints search_iterator_v2_info json_path json_type strict_cast group_by_field_ids`,
+				hints search_iterator_v2_info json_path json_type strict_cast group_by_field_ids max_group_size`,
 			other: `materialized_view_involved bm25_avgdl query_field_id search_topk_ratio refine_topk_ratio`,
 		},
 		{

@@ -832,7 +832,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			Offset:             offset,
 			MetricType:         queryInfo.GetMetricType(),
 			GroupByFieldId:     t.rankParams.GetGroupByFieldId(),
-			GroupSize:          t.rankParams.GetGroupSize(),
+			GroupSize:          max(queryInfo.GetGroupSize(), queryInfo.GetMaxGroupSize()),
 			IgnoreGrowing:      ignoreGrowing,
 			SearchType:         searchType,
 		}

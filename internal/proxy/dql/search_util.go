@@ -122,6 +122,25 @@ func (r *rankParams) GetGroupSize() int64 {
 	return 1
 }
 
+// GetSubSearchGroupSize returns how many entities per group each hybrid
+// sub-search keeps. It is larger than the requested group size so that the
+// reranker sees the score of an entity on every route. With group_size=1, one
+// route may keep A1 and another A2 of the same group; each then misses the
+// other route's score. The final group_by still uses GetGroupSize, and
+// strict_group_size still fills each group only to GetGroupSize, so the
+// larger value does not make the search scan more rows.
+func (r *rankParams) GetSubSearchGroupSize() int64 {
+	groupSize := r.GetGroupSize()
+	if r == nil || groupSize <= 0 {
+		return groupSize
+	}
+	factor := paramtable.Get().ProxyCfg.HybridSearchGroupSizeFactor.GetAsInt64()
+	if factor <= 1 {
+		return groupSize
+	}
+	return groupSize * factor
+}
+
 func (r *rankParams) GetStrictGroupSize() bool {
 	if r != nil {
 		return r.strictGroupSize
@@ -591,7 +610,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	}
 
 	// 5. parse group by field and group by size
-	var groupByFieldId, groupSize int64
+	var groupByFieldId, groupSize, maxGroupSize int64
 	var groupByFieldIds []int64
 	var strictGroupSize bool
 	var jsonPath string
@@ -601,6 +620,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var isIterativeFilter bool
 	if isAdvanced {
 		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupByFieldIds(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
+		maxGroupSize = rankParams.GetSubSearchGroupSize()
 		jsonPath, jsonType, strictCast = rankParams.GetJSONPath(), rankParams.GetJSONType(), rankParams.GetStrictCast()
 	} else {
 		groupByInfo, err := parseGroupByInfo(searchParamsPair, schema)
@@ -664,6 +684,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			GroupByFieldId:       groupByFieldId,
 			GroupByFieldIds:      groupByFieldIds,
 			GroupSize:            groupSize,
+			MaxGroupSize:         maxGroupSize,
 			StrictGroupSize:      strictGroupSize,
 			Hints:                hints,
 			SearchIteratorV2Info: planSearchIteratorV2Info,

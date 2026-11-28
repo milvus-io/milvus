@@ -217,6 +217,7 @@ ProtoParser::ParseSearchInfo(const planpb::VectorANNS& anns_proto) {
         search_info.group_size_ = query_info_proto.group_size() > 0
                                       ? query_info_proto.group_size()
                                       : 1;
+        search_info.max_group_size_ = query_info_proto.max_group_size();
         search_info.strict_group_size_ = query_info_proto.strict_group_size();
         // Always set json_path to distinguish between unset and empty string
         // Empty string means accessing the entire JSON object

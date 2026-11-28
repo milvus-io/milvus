@@ -1047,6 +1047,7 @@ func TestExplainPlan_SearchOptions(t *testing.T) {
 		SearchParams:         `{not json`,
 		GroupByFieldIds:      []int64{intID},
 		GroupSize:            3,
+		MaxGroupSize:         9,
 		StrictGroupSize:      true,
 		SearchIteratorV2Info: &planpb.SearchIteratorV2Info{Token: "session-token", BatchSize: 100, LastBound: &lastBound},
 		JsonPath:             "/a/b",
@@ -1060,6 +1061,7 @@ func TestExplainPlan_SearchOptions(t *testing.T) {
 	require.NotNil(t, vs.GroupBy)
 	assert.Equal(t, []string{"Int64Field"}, fieldLabels(vs.GroupBy.Fields))
 	assert.Equal(t, int64(3), vs.GroupBy.GroupSize)
+	assert.Equal(t, int64(9), vs.GroupBy.MaxGroupSize)
 	assert.True(t, vs.GroupBy.StrictGroupSize)
 	require.NotNil(t, vs.Iterator)
 	assert.Equal(t, uint32(100), vs.Iterator.BatchSize)
@@ -1075,7 +1077,8 @@ func TestExplainPlan_SearchOptions(t *testing.T) {
 	assert.Contains(t, string(js), `"last_bound":0.5`)
 	text := got.Text()
 	assert.Contains(t, text, "json_path: \"/a/b\" type=Float strict_cast=true\n")
-	assert.Contains(t, text, "group_by: Int64Field group_size=3 strict=true\n")
+	assert.Contains(t, text, "group_by: Int64Field group_size=3 strict=true max_group_size=9\n")
+	assert.Contains(t, string(js), `"max_group_size":9`)
 	assert.Contains(t, text, "iterator: batch_size=100 last_bound=0.5\n")
 	assert.Contains(t, text, "hints: iterative_filter\n")
 
@@ -1799,6 +1802,7 @@ FunctionChainExplanation.ops
 FunctionChainExplanation.stage
 GroupByExplanation.fields
 GroupByExplanation.group_size
+GroupByExplanation.max_group_size,omitempty
 GroupByExplanation.strict_group_size
 IndexCandidate.covers_subpaths,omitempty
 IndexCandidate.name
