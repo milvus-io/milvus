@@ -178,13 +178,19 @@ ParsePlaceholderGroup(const Plan* plan,
 
             if (field_meta.get_data_type() != DataType::VECTOR_ARRAY ||
                 element.element_level_) {
-                if (field_meta.get_sizeof() != line_size &&
-                    !element.element_level_) {
+                // An element-level query vector must match one element of
+                // the array field, not the size of the whole field.
+                const auto expected_line_size =
+                    element.element_level_ ? milvus::vector_bytes_per_element(
+                                                 field_meta.get_element_type(),
+                                                 field_meta.get_dim())
+                                           : field_meta.get_sizeof();
+                if (line_size != expected_line_size) {
                     ThrowInfo(DimNotMatch,
                               fmt::format(
                                   "vector dimension mismatch, expected vector "
                                   "size(byte) {}, actual {}.",
-                                  field_meta.get_sizeof(),
+                                  expected_line_size,
                                   line_size));
                 }
                 target.reserve(line_size * element.num_of_queries_);
