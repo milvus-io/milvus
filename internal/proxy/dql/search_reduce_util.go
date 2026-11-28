@@ -2,12 +2,14 @@ package dql
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -856,7 +858,10 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 			var partialResultData schemapb.SearchResultData
 			// fastpb: hand-written decoder for the search reduce hot path
 			// (wire-equivalent to proto.Unmarshal, ~2x varchar / ~6x vector).
+			start := time.Now()
 			err := resource.UnmarshalSearchResultData(partialSearchResult.SlicedBlob, &partialResultData)
+			elapsed := time.Since(start)
+			metrics.ProxyDecodeResultLatency.WithLabelValues(paramtable.GetStringNodeID(), metrics.SearchLabel).Observe(float64(elapsed) / float64(time.Millisecond))
 			if err != nil {
 				return nil, err
 			}
