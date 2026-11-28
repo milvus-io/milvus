@@ -268,20 +268,20 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
-	// Rows level counter.
-	WALInsertRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+	// DML counters are scoped to a WAL channel ownership interval.
+	WALInsertRowsTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "insert_rows_total",
-		Help: "Rows of growing insert on wal",
+		Help: "Insert rows counted on successful segment assignment",
 	}, WALChannelLabelName)
 
-	WALInsertBytes = newWALGaugeVec(prometheus.GaugeOpts{
-		Name: "insert_bytes",
-		Help: "Bytes of growing insert on wal",
+	WALInsertBytesTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "insert_bytes_total",
+		Help: "Insert payload bytes counted on successful segment assignment",
 	}, WALChannelLabelName)
 
-	WALDeleteRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+	WALDeleteRowsTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "delete_rows_total",
-		Help: "Rows of growing delete on wal",
+		Help: "Rows declared in delete messages processed by the WAL shard interceptor",
 	}, WALChannelLabelName)
 
 	// Segment related metrics
@@ -711,7 +711,7 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALInflightTxn)
 	registry.MustRegister(WALTxnDurationSeconds)
 	registry.MustRegister(WALInsertRowsTotal)
-	registry.MustRegister(WALInsertBytes)
+	registry.MustRegister(WALInsertBytesTotal)
 	registry.MustRegister(WALDeleteRowsTotal)
 	registry.MustRegister(WALGrowingSegmentBytes)
 	registry.MustRegister(WALGrowingSegmentFlushPressureBytes)

@@ -9,6 +9,16 @@ We recommend reading [Milvus monitoring framework overview](monitor_overview.md)
 > And "99th percentile" in this topic refers to the fact that 99 percent of the time statistics are controlled within certain value.
 
 
+### WAL DML counters during a rolling upgrade
+
+Successful segment assignments add rows to `milvus_wal_insert_rows_total` and payload bytes to `milvus_wal_insert_bytes_total`. The shard interceptor adds the row count declared by each delete message to `milvus_wal_delete_rows_total`. An assignment can precede a failed append. These counters measure WAL processing and reset when a channel changes owner.
+
+For insert bytes per second across mixed versions, select the available rate per series before summing. After all targets and historical queries have migrated, use the first rate alone.
+
+```promql
+sum(rate(milvus_wal_insert_bytes_total[5m]) or rate(milvus_wal_insert_bytes[5m]))
+```
+
 <details><summary>Proxy</summary>
 
 | Panel  | Panel description  | PromQL (Prometheus query language)  | The Milvus metrics used      | Milvus metrics description  |
