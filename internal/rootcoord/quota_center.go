@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
@@ -137,8 +138,12 @@ type LimiterRange struct {
 //
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	entityMetrics          map[[3]string]int64
+	indexedEntityMetrics   map[[4]string]int64
+	rateMetricFactors      map[int64]float64
+	incompleteQuotaMetrics bool
+	ctx                    context.Context
+	cancel                 context.CancelFunc
 
 	// clients
 	proxies  proxyutil.ProxyClientManagerInterface
@@ -408,32 +413,48 @@ func SplitCollectionKey(key string) (dbID int64, collectionName string) {
 	return dbID, collectionName
 }
 
-// indexedEntitiesKey identifies an aggregate-mode indexed entity series.
-type indexedEntitiesKey struct {
-	dbName        string
-	indexName     string
-	isVectorIndex string
+// publishEntityMetrics reconciles the label sets from one complete topology refresh.
+func (q *QuotaCenter) publishEntityMetrics(entities map[[3]string]int64, indexed map[[4]string]int64) {
+	if metrics.IsCollectionLevelMetricsAggregateMode() {
+		// Per-collection deletion is suppressed in aggregate mode. This refresh owns both whole families.
+		metrics.RootCoordNumEntities.Reset()
+		metrics.RootCoordIndexedNumEntities.Reset()
+	}
+	for key, value := range entities {
+		metrics.RootCoordNumEntities.WithLabelValues(key[:]...).Set(float64(value))
+	}
+	for key, value := range indexed {
+		metrics.RootCoordIndexedNumEntities.WithLabelValues(key[:]...).Set(float64(value))
+	}
+	for key := range q.entityMetrics {
+		if _, ok := entities[key]; !ok {
+			metrics.RootCoordNumEntities.DeleteLabelValues(key[:]...)
+		}
+	}
+	for key := range q.indexedEntityMetrics {
+		if _, ok := indexed[key]; !ok {
+			metrics.RootCoordIndexedNumEntities.DeleteLabelValues(key[:]...)
+		}
+	}
+	q.entityMetrics, q.indexedEntityMetrics = entities, indexed
 }
 
-// publishAggregateEntityMetrics replaces the aggregate entity gauges with the
-// values of one complete refresh.
-func publishAggregateEntityMetrics(loadedByDB, totalByDB map[string]int64, indexedByKey map[indexedEntitiesKey]int64) {
-	metrics.RootCoordNumEntities.Reset()
-	metrics.RootCoordIndexedNumEntities.Reset()
-	for dbName, numEntity := range loadedByDB {
-		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.LoadedLabel).Set(float64(numEntity))
+func (q *QuotaCenter) publishRateLimitRatios(factors map[int64]float64) {
+	if q.incompleteQuotaMetrics {
+		return
 	}
-	for dbName, numEntity := range totalByDB {
-		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.TotalLabel).Set(float64(numEntity))
+	if metrics.IsCollectionLevelMetricsAggregateMode() {
+		return
 	}
-	for key, numEntity := range indexedByKey {
-		metrics.RootCoordIndexedNumEntities.WithLabelValues(
-			key.dbName,
-			metrics.AllLabel,
-			key.indexName,
-			key.isVectorIndex,
-		).Set(float64(numEntity))
+	for id, factor := range factors {
+		metrics.RootCoordRateLimitRatio.WithLabelValues(strconv.FormatInt(id, 10)).Set(1 - factor)
 	}
+	for id := range q.rateMetricFactors {
+		if _, ok := factors[id]; !ok {
+			metrics.RootCoordRateLimitRatio.DeleteLabelValues(strconv.FormatInt(id, 10))
+		}
+	}
+	q.rateMetricFactors = factors
 }
 
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
@@ -449,15 +470,12 @@ func (q *QuotaCenter) collectMetrics() error {
 	defer cancel()
 
 	group := &errgroup.Group{}
-
-	// In aggregate mode the entity gauges are built per database here and
-	// published only after every source answered, so a slow or failed refresh
-	// keeps the last complete values instead of exposing partial ones.
-	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
-	numEntitiesLoadedByDB := make(map[string]int64)
-	numEntitiesTotalByDB := make(map[string]int64)
-	indexedEntitiesByKey := make(map[indexedEntitiesKey]int64)
-
+	// Each worker owns its maps until Wait returns.
+	loaded := make(map[[3]string]int64)
+	totals := make(map[[3]string]int64)
+	indexed := make(map[[4]string]int64)
+	queryComplete, dataComplete := true, true
+	queryQuotaComplete, dataQuotaComplete := true, true
 	// get Query cluster metrics
 	group.Go(func() error {
 		queryCoordTopology, err := getQueryCoordMetrics(ctx, q.mixCoord)
@@ -468,10 +486,16 @@ func (q *QuotaCenter) collectMetrics() error {
 		collections := typeutil.NewUniqueSet()
 		numEntitiesLoaded := make(map[int64]int64)
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
+			if queryNodeMetric.HasError || queryNodeMetric.QuotaMetrics == nil {
+				queryQuotaComplete = false
+			}
 			if queryNodeMetric.QuotaMetrics != nil {
 				oldQueryNodes.Remove(queryNodeMetric.ID)
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
 				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
+			}
+			if queryNodeMetric.HasError || queryNodeMetric.CollectionMetrics == nil {
+				queryComplete = false
 			}
 			if queryNodeMetric.CollectionMetrics != nil {
 				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
@@ -489,11 +513,26 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
-		var rangeErr error
-		collections.Range(func(collectionID int64) bool {
-			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+		queryQuotaComplete = queryQuotaComplete && !queryCoordTopology.Cluster.Self.HasError
+		queryComplete = queryComplete && !queryCoordTopology.Cluster.Self.HasError
+		metricAndQuotaIDs := typeutil.NewUniqueSet(lo.Keys(numEntitiesLoaded)...)
+		metricAndQuotaIDs.Insert(collections.Collect()...)
+		metricAndQuotaIDs.Range(func(collectionID int64) bool {
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(ctx, collectionID)
 			if getErr != nil {
-				// skip limit check if the collection meta has been removed from rootcoord meta
+				if !errors.Is(getErr, merr.ErrCollectionNotFound) {
+					queryComplete = false
+				}
+				return true
+			}
+			if count, ok := numEntitiesLoaded[collectionID]; ok {
+				name := coll.Name
+				if metrics.IsCollectionLevelMetricsAggregateMode() {
+					name = metrics.AllLabel
+				}
+				loaded[[3]string{coll.DBName, name, metrics.LoadedLabel}] += count
+			}
+			if !collections.Contain(collectionID) {
 				return true
 			}
 			collIDToPartIDs, ok := q.readableCollections[coll.DBID]
@@ -504,17 +543,11 @@ func (q *QuotaCenter) collectMetrics() error {
 			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
-			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
-				if aggregateCollectionMetrics {
-					numEntitiesLoadedByDB[coll.DBName] += numEntity
-				} else {
-					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
-				}
-			}
+
 			return true
 		})
 
-		return rangeErr
+		return nil
 	})
 	// get Data cluster metrics
 	group.Go(func() error {
@@ -525,6 +558,9 @@ func (q *QuotaCenter) collectMetrics() error {
 
 		collections := typeutil.NewUniqueSet()
 		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
+			if dataNodeMetric.HasError || dataNodeMetric.QuotaMetrics == nil {
+				dataQuotaComplete = false
+			}
 			if dataNodeMetric.QuotaMetrics != nil {
 				oldDataNodes.Remove(dataNodeMetric.ID)
 				q.dataNodeMetrics[dataNodeMetric.ID] = dataNodeMetric.QuotaMetrics
@@ -549,13 +585,44 @@ func (q *QuotaCenter) collectMetrics() error {
 			collectionMetrics = cm.Collections
 		}
 
-		collections.Range(func(collectionID int64) bool {
-			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+		dataQuotaComplete = dataQuotaComplete && dataCoordTopology.Cluster.Self.QuotaMetrics != nil && !dataCoordTopology.Cluster.Self.HasError
+		dataComplete = cm != nil && !dataCoordTopology.Cluster.Self.HasError
+		metricAndQuotaIDs := typeutil.NewUniqueSet(lo.Keys(collectionMetrics)...)
+		metricAndQuotaIDs.Insert(collections.Collect()...)
+		metricAndQuotaIDs.Range(func(collectionID int64) bool {
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(ctx, collectionID)
 			if getErr != nil {
-				// skip limit check if the collection meta has been removed from rootcoord meta
+				if !errors.Is(getErr, merr.ErrCollectionNotFound) {
+					dataComplete = false
+				}
 				return true
 			}
 
+			if info, ok := collectionMetrics[collectionID]; ok {
+				if info == nil {
+					dataComplete = false
+				} else {
+					name := coll.Name
+					if metrics.IsCollectionLevelMetricsAggregateMode() {
+						name = metrics.AllLabel
+					}
+					totals[[3]string{coll.DBName, name, metrics.TotalLabel}] += info.NumEntitiesTotal
+					fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
+					for _, index := range info.IndexInfo {
+						if index == nil {
+							dataComplete = false
+							continue
+						}
+						if field, ok := fields[index.FieldID]; ok {
+							key := [4]string{coll.DBName, name, index.IndexName, strconv.FormatBool(typeutil.IsVectorType(field.DataType))}
+							indexed[key] += index.NumEntitiesIndexed
+						}
+					}
+				}
+			}
+			if !collections.Contain(collectionID) {
+				return true
+			}
 			collIDToPartIDs, ok := q.writableCollections[coll.DBID]
 			if !ok {
 				collIDToPartIDs = make(map[int64][]int64)
@@ -564,38 +631,7 @@ func (q *QuotaCenter) collectMetrics() error {
 			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
-			if collectionMetrics == nil {
-				return true
-			}
-			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				if aggregateCollectionMetrics {
-					numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
-				} else {
-					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
-				}
-				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
-				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
-					if _, ok := fields[indexInfo.FieldID]; !ok {
-						continue
-					}
-					field := fields[indexInfo.FieldID]
-					isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
-					if aggregateCollectionMetrics {
-						key := indexedEntitiesKey{
-							dbName:        coll.DBName,
-							indexName:     indexInfo.IndexName,
-							isVectorIndex: isVectorIndex,
-						}
-						indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
-					} else {
-						metrics.RootCoordIndexedNumEntities.WithLabelValues(
-							coll.DBName,
-							coll.Name,
-							indexInfo.IndexName,
-							isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
-					}
-				}
-			}
+
 			return true
 		})
 
@@ -603,7 +639,7 @@ func (q *QuotaCenter) collectMetrics() error {
 			if collections.Contain(collectionID) {
 				continue
 			}
-			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(ctx, collectionID)
 			if getErr != nil {
 				// skip limit check if the collection meta has been removed from rootcoord meta
 				continue
@@ -624,12 +660,13 @@ func (q *QuotaCenter) collectMetrics() error {
 		return nil
 	})
 
-	err := group.Wait()
-	if err != nil {
+	if err := group.Wait(); err != nil {
 		return err
 	}
-	if aggregateCollectionMetrics {
-		publishAggregateEntityMetrics(numEntitiesLoadedByDB, numEntitiesTotalByDB, indexedEntitiesByKey)
+	q.incompleteQuotaMetrics = !queryQuotaComplete || !dataQuotaComplete
+	if queryComplete && dataComplete {
+		maps.Copy(totals, loaded)
+		q.publishEntityMetrics(totals, indexed)
 	}
 
 	for oldDN := range oldDataNodes {
@@ -907,7 +944,11 @@ func (q *QuotaCenter) getDenyWritingDBs() map[int64]struct{} {
 func (q *QuotaCenter) calculateWriteRates() error {
 	// check force deny writing of cluster level
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
-		return q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, true, nil, nil, nil, "config force deny writing")
+		err := q.forceDenyWriting(commonpb.ErrorCode_ForceDeny, true, nil, nil, nil, "config force deny writing")
+		if err == nil {
+			q.publishRateLimitRatios(nil)
+		}
+		return err
 	}
 
 	// check force deny writing of db level
@@ -959,7 +1000,6 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	q.prevFactors = make(map[int64]float64, len(collectionFactors))
 
 	for collection, factor := range collectionFactors {
-		metrics.RootCoordRateLimitRatio.WithLabelValues(strconv.FormatInt(collection, 10)).Set(1 - factor)
 		if factor <= 0 {
 			if _, ok := ttFactors[collection]; ok && factor == ttFactors[collection] {
 				// factor comes from ttFactor
@@ -1023,6 +1063,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		}
 	}
 
+	q.publishRateLimitRatios(collectionFactors)
 	return nil
 }
 
