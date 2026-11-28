@@ -77,13 +77,14 @@ func allTasksDone(tasks []ImportTask) (failed ImportTask, done bool) {
 // to it when the job leaves it. Uncommitted, Committing and Failed have no
 // stage.
 var importV3StageOfState = map[internalpb.ImportJobState]string{
-	internalpb.ImportJobState_Pending:          metrics.ImportStagePending,
-	internalpb.ImportJobState_PreImporting:     metrics.ImportStagePreImport,
-	internalpb.ImportJobState_AssigningIDRange: metrics.ImportStagePreImport,
-	internalpb.ImportJobState_Resharding:       metrics.ImportStageReshard,
-	internalpb.ImportJobState_Planning:         metrics.ImportStagePlanning,
-	internalpb.ImportJobState_Importing:        metrics.ImportStageImport,
-	internalpb.ImportJobState_IndexBuilding:    metrics.ImportStageBuildIndex,
+	internalpb.ImportJobState_Pending:           metrics.ImportStagePending,
+	internalpb.ImportJobState_SnapshotPreparing: metrics.ImportStagePending,
+	internalpb.ImportJobState_PreImporting:      metrics.ImportStagePreImport,
+	internalpb.ImportJobState_AssigningIDRange:  metrics.ImportStagePreImport,
+	internalpb.ImportJobState_Resharding:        metrics.ImportStageReshard,
+	internalpb.ImportJobState_Planning:          metrics.ImportStagePlanning,
+	internalpb.ImportJobState_Importing:         metrics.ImportStageImport,
+	internalpb.ImportJobState_IndexBuilding:     metrics.ImportStageBuildIndex,
 }
 
 // ImportV3JobTransitTo is the single writer of the V3 job state. It persists the

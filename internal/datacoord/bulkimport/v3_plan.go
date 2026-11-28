@@ -74,6 +74,9 @@ type importV3Config struct {
 	reshardFlushConcurrency      int64
 	reshardMemoryExpansionFactor float64
 	reshardResidentBucketCap     int64
+	// snapshotDeleteBudget is the per-map reservation for snapshot delete and
+	// bitmap work. Read once so the reshard plan and its slot/resource charge agree.
+	snapshotDeleteBudget int64
 }
 
 // getImportV3Config reads every Param the Import V3 plan factory and the
@@ -99,6 +102,7 @@ func getImportV3Config() importV3Config {
 		reshardFlushConcurrency:      Params.DataCoordCfg.ReshardFlushConcurrency.GetAsInt64(),
 		reshardMemoryExpansionFactor: Params.DataCoordCfg.ReshardMemoryExpansionFactor.GetAsFloat(),
 		reshardResidentBucketCap:     Params.DataCoordCfg.ReshardResidentBucketCap.GetAsInt64(),
+		snapshotDeleteBudget:         max(Params.DataNodeCfg.ImportDeleteBufferSize.GetAsInt64(), 1),
 	}
 }
 
@@ -161,15 +165,51 @@ func reshardPlan(job ImportJob, p *datapb.ReshardTask, cfg importV3Config) (*imp
 	if err != nil {
 		return nil, err
 	}
+	// A task may span source scopes; select and merge only the inventories its
+	// files need. The DataNode matches each inventory to files by source scope.
+	snapshotL0Sources, err := importutilv2.SnapshotTaskL0Sources(files, job.GetSnapshotL0Sources())
+	if err != nil {
+		return nil, err
+	}
+	budgets := snapshotBudgets(job, cfg)
 	return &importv3pb.ReshardTaskPlan{
-		CollectionId:     job.GetCollectionID(),
-		CollectionSchema: job.GetSchema(),
-		Vchannels:        append([]string(nil), job.GetVchannels()...),
-		PartitionIds:     append([]int64(nil), job.GetPartitionIDs()...),
-		Files:            append([]*internalpb.ImportFile(nil), files...),
-		Options:          append([]*commonpb.KeyValuePair(nil), job.GetOptions()...),
-		FragmentSize:     fragmentSize,
+		CollectionId:      job.GetCollectionID(),
+		CollectionSchema:  job.GetSchema(),
+		Vchannels:         append([]string(nil), job.GetVchannels()...),
+		PartitionIds:      reshardTaskPartitions(job, files),
+		Files:             append([]*internalpb.ImportFile(nil), files...),
+		Options:           append([]*commonpb.KeyValuePair(nil), job.GetOptions()...),
+		FragmentSize:      fragmentSize,
+		SnapshotL0Sources: snapshotL0Sources,
+		SnapshotBudget:    budgets,
 	}, nil
+}
+
+// snapshotBudgets returns the delete-map and bitmap reservations of a snapshot
+// job. Both are frozen into the reshard plan so DataCoord's slot charge and the
+// DataNode's enforcement use one value. Every expanded snapshot file reads its
+// segment-local deletes, so the delete map is always reserved; only a job with
+// a shared L0 inventory needs the bitmap that folds it.
+func snapshotBudgets(job ImportJob, cfg importV3Config) *importv3pb.SnapshotBudget {
+	if !importutilv2.IsSnapshotSource(job.GetOptions()) {
+		return nil
+	}
+	budgets := &importv3pb.SnapshotBudget{DeleteBudget: cfg.snapshotDeleteBudget}
+	if len(job.GetSnapshotL0Sources()) > 0 {
+		budgets.BitmapBudget = cfg.snapshotDeleteBudget
+	}
+	return budgets
+}
+
+// reshardTaskPartitions returns the partition set one reshard task routes
+// into. groupSources bins files by explicit target partition (snapshot
+// partition mapping), so one mapped file makes the whole task
+// single-partition; otherwise the task routes across the job's partitions.
+func reshardTaskPartitions(job ImportJob, files []*internalpb.ImportFile) []int64 {
+	if id := files[0].GetSnapshotSource().GetTargetPartitionId(); id != 0 {
+		return []int64{id}
+	}
+	return append([]int64(nil), job.GetPartitionIDs()...)
 }
 
 // importPlan re-derives the complete execution input of one ImportTaskV3 and
@@ -223,20 +263,23 @@ func reshardSlot(job ImportJob, cfg importV3Config) int64 {
 
 // reshardWorkingSet is the bytes one reshard run of job holds on the worker
 // under cfg: the reshardmem model's working set (the GC-scaled resident set,
-// the prepare pipeline and one sort copy; see calculateReshardTaskSlot). It is
-// the single number both the slot charge (reshardSlot) and the cpu/memory
-// estimate (reshardTask.GetTaskResource) are derived from. It fails only on an
-// invalid fragment size.
+// the prepare pipeline, one sort copy, and any snapshot delete/bitmap budgets;
+// see calculateReshardTaskSlot). It is the single number both the slot charge
+// (reshardSlot) and the cpu/memory estimate (reshardTask.GetTaskResource) are
+// derived from. It fails only on an invalid fragment size.
 func reshardWorkingSet(job ImportJob, cfg importV3Config) (int64, error) {
 	fragmentSize, err := importFragmentSizeBytes(cfg)
 	if err != nil {
 		return 0, err
 	}
+	budgets := snapshotBudgets(job, cfg)
 	model := reshardmem.Model{
-		ReadBuffer:       cfg.importBaseBufferSize,
-		FragmentTarget:   fragmentSize,
-		FlushConcurrency: cfg.reshardFlushConcurrency,
-		ExpansionFactor:  cfg.reshardMemoryExpansionFactor,
+		ReadBuffer:           cfg.importBaseBufferSize,
+		FragmentTarget:       fragmentSize,
+		FlushConcurrency:     cfg.reshardFlushConcurrency,
+		ExpansionFactor:      cfg.reshardMemoryExpansionFactor,
+		SnapshotDeleteBudget: budgets.GetDeleteBudget(),
+		SnapshotBitmapBudget: budgets.GetBitmapBudget(),
 	}
 	return model.WorkingSet(
 		int64(len(job.GetVchannels())*len(job.GetPartitionIDs())),

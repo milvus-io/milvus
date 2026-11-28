@@ -23,6 +23,16 @@ message ReshardTaskPlan {
   repeated common.KeyValuePair options = 7;
   int64 fragment_size = 8;
   plan.Expr rls_check_predicate = 10;
+  repeated internal.SnapshotImportL0Source snapshot_l0_sources = 11;
+  SnapshotBudget snapshot_budget = 12;
+}
+
+// SnapshotBudget groups every memory reservation one reshard task needs for
+// snapshot delete folding. Add new snapshot budgets here instead of new
+// top-level ReshardTaskPlan fields.
+message SnapshotBudget {
+  int64 delete_budget = 1;
+  int64 bitmap_budget = 2;
 }
 
 message FragmentDescriptor {

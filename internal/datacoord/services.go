@@ -1982,15 +1982,14 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	// CDC-replicated requests carry the version chosen by the originating
 	// coordinator, and it must be honored even if the local gate differs. The
 	// gate only selects the execution version for NEW unversioned requests: L0
-	// and snapshot-sourced imports are always V2, ordinary/backup follow the
+	// imports are always V2, while ordinary/backup/snapshot imports follow the
 	// one-way rollout gate. Unknown explicit versions are rejected here so no
 	// garbage version is broadcast.
 	version := in.GetVersion()
 	if version == internalpb.ImportVersion_ImportVersionUnspecified {
 		version = internalpb.ImportVersion_ImportVersionV2
 		if Params.DataCoordCfg.EnableImportV3.GetAsBool() &&
-			!importutilv2.IsL0Import(in.GetOptions()) &&
-			!importutilv2.IsSnapshotSource(in.GetOptions()) {
+			!importutilv2.IsL0Import(in.GetOptions()) {
 			version = internalpb.ImportVersion_ImportVersionV3
 		}
 	} else if version != internalpb.ImportVersion_ImportVersionV2 && version != internalpb.ImportVersion_ImportVersionV3 {
@@ -2154,17 +2153,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		return resp, nil
 	}
 
-	// Snapshot-sourced imports exist only on the V2 pipeline. A replicated or
-	// forwarded message claiming V3 is downgraded instead of being handed to a V3
-	// job, which would drop the snapshot's L0 deletes and import deleted rows.
-	if jobVersion == internalpb.ImportVersion_ImportVersionV3 && importutilv2.IsSnapshotSource(options) {
-		mlog.Warn(ctx, "snapshot import forced onto the V2 pipeline",
-			mlog.Int64("jobID", body.GetJobID()), mlog.Int64("collectionID", body.GetCollectionID()))
-		jobVersion = internalpb.ImportVersion_ImportVersionV2
-	}
-
 	// Persist malformed durable input as a Failed job rather than retrying the
-	// same ACK forever. This validation is pure: source reads belong to Pending.
+	// same ACK forever. This validation is pure: source reads belong to snapshot
+	// preparation.
 	sourceErr := importutilv2.ValidateImportPlan(files, options, nil)
 	timeoutTs, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {

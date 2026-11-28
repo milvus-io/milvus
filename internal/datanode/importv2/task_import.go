@@ -243,7 +243,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	if source := req.GetSnapshotL0Source(); source != nil {
 		return executeSnapshotSharedRead(t.ctx, t, t.manager, len(req.GetFiles()),
 			func(ctx context.Context, budget, bitmapBudget int64) (*binlog.SnapshotL0Deletes, error) {
-				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), req.GetFiles(), source, budget, bitmapBudget)
+				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), req.GetFiles(), []*internalpb.SnapshotImportL0Source{source}, budget, bitmapBudget)
 			},
 			func(ctx context.Context, i int, rowBuffer, budget int64, shared *binlog.SnapshotL0Deletes) error {
 				return fn(ctx, req.GetFiles()[i], rowBuffer, budget, shared)

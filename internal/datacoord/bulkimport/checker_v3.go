@@ -22,8 +22,10 @@ package bulkimport
 // a tick does to one job lives in import_v3_handler.go and the
 // import_v3_handler_<state>.go files (with the generic helpers in
 // import_v3_job_context.go), the preimport stage in import_v3_preimport.go, the
-// reshard and planning stages in import_v3_reshard.go and
-// import_v3_planning.go, and the job-to-plan derivation in import_v3_plan.go.
+// snapshot expansion in snapshot.go (run off this goroutine by
+// snapshot_expand_manager.go), the reshard and
+// planning stages in import_v3_reshard.go and import_v3_planning.go, and the
+// job-to-plan derivation in import_v3_plan.go.
 
 import (
 	"context"
@@ -37,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -60,6 +63,9 @@ type importCheckerV3 struct {
 
 	closeOnce sync.Once
 	closeChan chan struct{}
+
+	// snapshotExpandManager runs SnapshotPreparing source I/O off this goroutine.
+	snapshotExpandManager *snapshotExpandManager
 }
 
 func NewImportCheckerV3(ctx context.Context,
@@ -71,14 +77,15 @@ func NewImportCheckerV3(ctx context.Context,
 	hooks ImportCheckerHooks,
 ) ImportChecker {
 	return &importCheckerV3{
-		ctx:        ctx,
-		meta:       mt,
-		indexMeta:  indexMeta,
-		alloc:      alloc,
-		importMeta: importMeta,
-		cluster:    cluster,
-		hooks:      hooks,
-		closeChan:  make(chan struct{}),
+		ctx:                   ctx,
+		meta:                  mt,
+		indexMeta:             indexMeta,
+		alloc:                 alloc,
+		importMeta:            importMeta,
+		cluster:               cluster,
+		hooks:                 hooks,
+		closeChan:             make(chan struct{}),
+		snapshotExpandManager: newSnapshotExpandManager(ctx, mt.ChunkManager),
 	}
 }
 
@@ -112,6 +119,12 @@ func (c *importCheckerV3) runStateMachineLoop() {
 			mlog.Info(c.ctx, "import checker v3 state-machine loop exited")
 			return
 		case <-ticker.C:
+			c.snapshotExpandManager.cancelInactive(func(jobID int64) bool {
+				job := c.importMeta.GetJob(c.ctx, jobID)
+				return job != nil &&
+					job.GetState() == internalpb.ImportJobState_SnapshotPreparing &&
+					importutilv2.IsSnapshotPreparation(job.GetFiles())
+			})
 			for _, job := range c.importMeta.GetJobBy(c.ctx, WithJobVersions(internalpb.ImportVersion_ImportVersionV3)) {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
 					// wait for all channels to send signals
@@ -180,6 +193,7 @@ func (c *importCheckerV3) runGCLoop() {
 func (c *importCheckerV3) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeChan)
+		c.snapshotExpandManager.close()
 	})
 }
 

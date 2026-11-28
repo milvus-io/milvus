@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
@@ -133,13 +134,13 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption)
 }
 
-// PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
-// existing private-map reservation becomes the bitmap pool; neither the wire
-// task nor coordinator grouping/slot calculation needs a new field or knob.
+// PrepareSnapshotDeletes is task-local and shared by PreImport and Import. A
+// task may carry inventories from several source scopes; each is folded into
+// only the masks of its own channel and partition.
 func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *schemapb.CollectionSchema,
-	files []*internalpb.ImportFile, source *internalpb.SnapshotImportL0Source, deleteBudget, bitmapBudget int64,
+	files []*internalpb.ImportFile, l0Sources []*internalpb.SnapshotImportL0Source, deleteBudget, bitmapBudget int64,
 ) (*binlog.SnapshotL0Deletes, error) {
-	if err := ValidateSnapshotImportTask(files, f.options, source); err != nil {
+	if err := ValidateImportPlan(files, f.options, l0Sources); err != nil {
 		return nil, err
 	}
 	start, end, err := ParseTimeRange(f.options)
@@ -161,14 +162,77 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 		hasV2 = hasV2 || sources[i].GetV2Reference() != nil
 	}
 	if !hasV2 {
-		return binlog.BuildSnapshotDeleteMasks(ctx, resolved.cm, schema, resolved.cfg, sources, source,
+		return binlog.BuildSnapshotDeleteMasks(ctx, resolved.cm, schema, resolved.cfg, sources, l0Sources,
 			start, end, deleteBudget, bitmapBudget, resolved.encryption, validate)
 	}
-	return binlog.BuildSnapshotDeleteMasksWithV2(ctx, resolved.cm, schema, resolved.cfg, sources, source,
+	return binlog.BuildSnapshotDeleteMasksWithV2(ctx, resolved.cm, schema, resolved.cfg, sources, l0Sources,
 		start, end, deleteBudget, bitmapBudget, resolved.encryption, validate,
 		func(ctx context.Context, source *internalpb.SnapshotImportSource) (*datapb.SegmentDescription, error) {
 			return resolveSnapshotV2Source(ctx, resolved.cm, source, f.options)
 		})
+}
+
+// SnapshotFileSize sizes one exact snapshot manifest without reading rows or
+// deltalogs. Import V3's preimport is size-only for backup/snapshot jobs, so it
+// must not pay the row-reader initialization that loads segment-local deletes.
+func (f *ReaderFactory) SnapshotFileSize(ctx context.Context, schema *schemapb.CollectionSchema, file *internalpb.ImportFile) (int64, error) {
+	if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
+		return 0, err
+	}
+	resolved, err := f.storage()
+	if err != nil {
+		return 0, err
+	}
+	validate, err := SnapshotPathValidator(f.options, resolved.cm)
+	if err != nil {
+		return 0, err
+	}
+	source := file.GetSnapshotSource()
+	if source.GetV2Reference() != nil {
+		// Only the captured per-segment Avro is read; binlog sizes come from
+		// object metadata, never from rows or deltalogs.
+		segment, err := resolveSnapshotV2Source(ctx, resolved.cm, source, f.options)
+		if err != nil {
+			return 0, err
+		}
+		var paths []string
+		for _, group := range segment.GetBinlogs() {
+			for _, log := range group.GetBinlogs() {
+				if validate != nil {
+					if err := validate(log.GetLogPath()); err != nil {
+						return 0, err
+					}
+				}
+				paths = append(paths, snapshotstorage.NormalizeSnapshotObjectPath(log.GetLogPath()))
+			}
+		}
+		return storage.GetFilesSize(ctx, paths, resolved.cm)
+	}
+	manifestPath := source.GetManifestPath()
+	if manifestPath == "" {
+		if len(file.GetPaths()) != 1 {
+			return 0, merr.WrapErrImportFailedMsg("snapshot-source import file requires exactly one manifest path")
+		}
+		manifestPath = file.GetPaths()[0]
+	}
+	base, version, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil || base == "" || version == packed.ManifestLatest {
+		return 0, merr.WrapErrImportFailedMsg("snapshot-source import requires an exact StorageV3 manifest version")
+	}
+	if validate != nil {
+		if err := validate(base); err != nil {
+			return 0, err
+		}
+	}
+	files, lobSize, err := binlog.StorageV3ManifestFiles(ctx, resolved.cm, resolved.cfg, schema, manifestPath, validate)
+	if err != nil {
+		return 0, err
+	}
+	size, err := storage.GetFilesSize(ctx, files, resolved.cm)
+	if err != nil {
+		return 0, err
+	}
+	return size + lobSize, nil
 }
 
 // NewReader requires the caller's reserved positive delete budget for typed
@@ -235,7 +299,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				)
 			}
 			// DataCoord broadcasts a metadata URI, then expands and persists
-			// exact StorageV3 manifests during Pending preparation before dispatch.
+			// exact StorageV3 manifests during snapshot preparation before dispatch.
 			// Do not consult storage_version: snapshot metadata is the source of
 			// truth and ValidateImportSourceOptions rejects that ambiguity.
 			if len(paths) != 1 {

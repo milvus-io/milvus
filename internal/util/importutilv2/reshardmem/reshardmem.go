@@ -105,6 +105,12 @@ type Model struct {
 	// DefaultExpansionFactor; callers pass
 	// dataCoord.import.reshardMemoryExpansionFactor.
 	ExpansionFactor float64
+	// SnapshotDeleteBudget and SnapshotBitmapBudget are explicit reservations
+	// for a snapshot-source reshard that folds L0 deletes. They are charged
+	// as-is (not scaled by ExpansionFactor) because the DataNode hands exactly
+	// these limits to the delete merger and bitmap builder.
+	SnapshotDeleteBudget int64
+	SnapshotBitmapBudget int64
 }
 
 // Expansion returns the live-set expansion factor, falling back to the default
@@ -184,7 +190,7 @@ func (m Model) WorkingSet(buckets, bucketCap, nFields int64) int64 {
 	inFlight := m.Flushes() * m.FragmentTarget
 	structural := m.StructOverhead(resident, max(buckets, 1), nFields)
 	footprint := m.FixedOverhead() + m.Pipeline() + resident + inFlight + structural + inFlight
-	return int64(m.Expansion() * float64(footprint))
+	return int64(m.Expansion()*float64(footprint)) + m.SnapshotDeleteBudget + m.SnapshotBitmapBudget
 }
 
 // SortInput is the largest logical input one storage.Sort may materialize

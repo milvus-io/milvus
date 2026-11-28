@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -42,6 +43,13 @@ const (
 	SnapshotManifestsSubPath = "manifests"
 	SnapshotStagingSubPath   = "_staging"
 	SnapshotFormatVersion    = snapshotio.SnapshotFormatVersion
+
+	// snapshotManifestReadConcurrency bounds parallel per-segment Avro reads
+	// within one ReadSnapshotFromMetadata call. Reading segment manifests is
+	// almost purely I/O-bound, so a small fixed bound cuts large-snapshot
+	// latency while keeping transient decode buffers and object-store request
+	// fan-out bounded.
+	snapshotManifestReadConcurrency = 8
 )
 
 // SnapshotData is the in-memory form of a stored snapshot.
@@ -490,12 +498,28 @@ func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataF
 
 	var allSegments []*datapb.SegmentDescription
 	if includeSegments {
-		for _, manifestPath := range metadata.GetManifestList() {
-			segment, err := r.ReadSegmentManifest(ctx, manifestPath, int(metadata.GetFormatVersion()))
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to read manifest file %s", manifestPath)
+		manifests := metadata.GetManifestList()
+		if len(manifests) > 0 {
+			allSegments = make([]*datapb.SegmentDescription, len(manifests))
+			group, groupCtx := errgroup.WithContext(ctx)
+			group.SetLimit(snapshotManifestReadConcurrency)
+			formatVersion := int(metadata.GetFormatVersion())
+			for i, manifestPath := range manifests {
+				group.Go(func() error {
+					if err := groupCtx.Err(); err != nil {
+						return err
+					}
+					segment, err := r.ReadSegmentManifest(groupCtx, manifestPath, formatVersion)
+					if err != nil {
+						return merr.Wrapf(err, "failed to read manifest file %s", manifestPath)
+					}
+					allSegments[i] = segment
+					return nil
+				})
 			}
-			allSegments = append(allSegments, segment)
+			if err := group.Wait(); err != nil {
+				return nil, err
+			}
 		}
 
 		if err := validateSnapshotSegmentIDs(metadata.GetSegmentIds(), allSegments); err != nil {
