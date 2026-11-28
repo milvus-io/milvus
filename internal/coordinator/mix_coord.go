@@ -317,11 +317,21 @@ func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	// task-creation feature counters (see internal/featureusage)
 	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
+
 	s.startPosixCleanupTask()
 	s.startTiKVGCWorker()
 	RegisterMgrRoute(s)
 
 	s.onActiveMu.Lock()
+	metrics.SetQueryCoordComplianceEvaluator(func() (map[string]bool, error) {
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		defer cancel()
+		snapshot, err := s.evaluateReplicaLoadConfigCompliance(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return snapshot.resourceGroups, nil
+	})
 	s.activated = true
 	fns := s.onActive
 	s.onActive = nil
@@ -498,6 +508,12 @@ func (s *mixCoordImpl) Stop() error {
 		}
 	}()
 
+	// Wait for any scrape in progress before tearing down its dependencies.
+	s.onActiveMu.Lock()
+	if s.activated {
+		metrics.SetQueryCoordComplianceEvaluator(nil)
+	}
+	s.onActiveMu.Unlock()
 	s.stopPosixCleanupTask()
 	if s.stopTiKVGC != nil {
 		s.stopTiKVGC()

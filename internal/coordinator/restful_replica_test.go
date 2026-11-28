@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -63,6 +64,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 		{name: "scale down residual", count: "1", rgs: "B", actual: []string{"B"}, leak: true, leakedRG: "A", want: map[string]bool{"A": false, "B": true}},
 		{name: "unknown residual owner", actual: []string{"B"}, leak: true, want: map[string]bool{"B": true}},
 		{name: "empty replica set", count: "1", rgs: "A", want: map[string]bool{"A": false}},
+		{name: "empty default instance", noCollections: true, ready: true, want: map[string]bool{}},
 		{name: "empty loaded set", count: "1", rgs: "A", noCollections: true, ready: true, want: map[string]bool{}},
 		{name: "incomplete count", count: "2", actual: []string{"A"}, want: map[string]bool{"A": true}},
 		{name: "incomplete groups", rgs: "A", actual: []string{"A"}, want: map[string]bool{"A": true}},
@@ -172,6 +174,7 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 				}
 				return leaks
 			}).Build().UnPatch()
+			defer mockey.Mock((*querycoordv2.Server).GetResourceGroupNames).Return([]string{"active"}).Build().UnPatch()
 			coord := &mixCoordImpl{queryCoordServer: &querycoordv2.Server{}}
 			var previousReason string
 			for i, output := range []string{"", "summary", "per_resource_group"} {
@@ -200,8 +203,25 @@ func TestHandleReplicaLoadConfigCompliance(t *testing.T) {
 					require.Equal(t, want, g.State == LoadConfigComplianceStateReady, g.Reason)
 				}
 			}
-			require.Equal(t, 3*len(ids), checked, "every collection must be checked in every output mode")
-			require.Equal(t, 3, nodeReads, "one complete StreamingNode snapshot per request, with or without a primary RG")
+			snapshot, err := coord.evaluateReplicaLoadConfigCompliance(context.Background())
+			require.NoError(t, err)
+			for rg, ready := range tc.want {
+				require.Contains(t, snapshot.resourceGroups, rg)
+				require.Equal(t, ready, snapshot.resourceGroups[rg], "HTTP and metrics must agree for %s", rg)
+			}
+			if tc.noCollections {
+				require.Contains(t, snapshot.resourceGroups, common.DefaultResourceGroupName)
+				require.Contains(t, snapshot.resourceGroups, "active")
+				require.Equal(t, !tc.unknownSource, snapshot.resourceGroups[common.DefaultResourceGroupName])
+				require.Equal(t, !tc.unknownSource, snapshot.resourceGroups["active"])
+				if tc.rgs == "A" {
+					require.True(t, snapshot.resourceGroups["A"], "empty configured target is ready")
+				}
+			} else {
+				require.Equal(t, tc.want, snapshot.resourceGroups)
+			}
+			require.Equal(t, 4*len(ids), checked, "HTTP and metrics must check every collection")
+			require.Equal(t, 4, nodeReads, "one complete StreamingNode snapshot per evaluation")
 		})
 	}
 }
@@ -246,6 +266,11 @@ func TestComplianceReadAndRequestErrors(t *testing.T) {
 			w := httptest.NewRecorder()
 			(&mixCoordImpl{}).HandleReplicaLoadConfigCompliance(w, httptest.NewRequest(method, url, nil))
 			require.Equal(t, code, w.Code, w.Body.String())
+			if code == http.StatusInternalServerError {
+				snapshot, err := (&mixCoordImpl{}).evaluateReplicaLoadConfigCompliance(context.Background())
+				require.Error(t, err)
+				require.Nil(t, snapshot)
+			}
 		})
 	}
 }
