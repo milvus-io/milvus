@@ -122,7 +122,9 @@ PhyNullExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BFLOAT16:
         case DataType::VECTOR_SPARSE_U32_F32:
-        case DataType::VECTOR_INT8: {
+        case DataType::VECTOR_INT8:
+        // TEXT values are LOBs; IS NULL only needs the validity bitmap.
+        case DataType::TEXT: {
             result = ExecVectorNull(input);
             break;
         }
@@ -138,7 +140,8 @@ PhyNullExpr::DetermineExecPath() {
     // Element validity is read from raw data; a field without null elements
     // is not read at all.
     if (expr_->column_.element_level_ ||
-        IsVectorDataType(expr_->column_.data_type_)) {
+        IsVectorDataType(expr_->column_.data_type_) ||
+        expr_->column_.data_type_ == DataType::TEXT) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
@@ -155,7 +158,7 @@ PhyNullExpr::DetermineExecPath() {
 void
 PhyNullExpr::MoveCursor() {
     if (!expr_->column_.element_level_ &&
-        IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+        ReadsValidityOnly(expr_->column_.data_type_)) {
         if (!has_offset_input_ && !execute_all_at_once_) {
             current_data_global_pos_ +=
                 std::min(batch_size_, active_count_ - current_data_global_pos_);
@@ -174,7 +177,7 @@ PhyNullExpr::MoveCursor() {
 bool
 PhyNullExpr::CanExecuteAllAtOnce() const {
     if (expr_->column_.element_level_ ||
-        IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+        ReadsValidityOnly(expr_->column_.data_type_)) {
         return false;
     }
     return SegmentExpr::CanExecuteAllAtOnce();
@@ -188,7 +191,7 @@ PhyNullExpr::PrefetchRawData() {
         }
         return;
     }
-    if (IsOrdinaryVectorDataType(expr_->column_.data_type_)) {
+    if (ReadsValidityOnly(expr_->column_.data_type_)) {
         return;
     }
     SegmentExpr::PrefetchRawData();

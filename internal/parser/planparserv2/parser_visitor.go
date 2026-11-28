@@ -1639,6 +1639,15 @@ func (v *ParserVisitor) getNullExprColumnInfo(identifier parser.IFieldNameContex
 			return columnInfo, err
 		}
 	}
+	if identifier != nil {
+		// IS NULL / IS NOT NULL only read the validity bitmap, never the
+		// (potentially large) TEXT value, so TEXT is allowed here.
+		childExpr, err := v.translateIdentifierWithText(identifier.GetText(), true)
+		if err != nil {
+			return nil, err
+		}
+		return toColumnInfo(childExpr), nil
+	}
 	return v.getChildColumnInfo(identifier, child, nil, nil)
 }
 
