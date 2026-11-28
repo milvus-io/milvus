@@ -6,7 +6,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/milvusdb/woodpecker
-    tag: v0.1.49
+    tag: v0.1.50
     pullPolicy: Always
 streaming:
   enabled: true
