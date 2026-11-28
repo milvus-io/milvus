@@ -30,6 +30,7 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -283,7 +284,12 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
+	if pack.pluginContext == nil {
+		if ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID); ez != nil && !hookutil.IsClusterEncryptionEnabled() {
+			return nil, nil, retry.Unrecoverable(merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID)))
+		}
+	}
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack)
 	if err != nil {
 		return nil, nil, err
 	}

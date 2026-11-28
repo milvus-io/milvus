@@ -17,7 +17,6 @@
 package task
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -53,20 +52,35 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 	t.Cleanup(func() { patch.UnPatch() })
 	for _, kind := range []datapb.CompactionType{
 		datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction,
-		datapb.CompactionType_BumpSchemaVersionCompaction,
+		datapb.CompactionType_BumpSchemaVersionCompaction, datapb.CompactionType_Level0DeleteCompaction,
 	} {
 		t.Run(kind.String(), func(t *testing.T) {
 			cipher.key = nil
 			mt := NewMockCompactionMeta(t)
-			mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{ID: 31, CollectionID: 23},
-			})
+			if kind == datapb.CompactionType_Level0DeleteCompaction {
+				mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID: 31, CollectionID: 23, Level: datapb.SegmentLevel_L0,
+						InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed,
+					},
+				})
+				mt.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*meta.SegmentInfo{{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID: 32, CollectionID: 23, Level: datapb.SegmentLevel_L1,
+						InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed,
+					},
+				}})
+			} else {
+				mt.EXPECT().GetHealthySegment(mock.Anything, int64(31)).Return(&meta.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{ID: 31, CollectionID: 23},
+				})
+			}
 			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil)
 			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Once()
 			taskMeta := NewCompactionTaskMetaOverCatalog(catalog)
 			taskProto := &datapb.CompactionTask{
-				PlanID: 1, CollectionID: 23, Type: kind,
+				PlanID: 1, CollectionID: 23, PartitionID: 10, Channel: "ch-1", Type: kind,
 				State:         datapb.CompactionTaskState_pipelining,
 				InputSegments: []int64{31},
 				Schema: &schemapb.CollectionSchema{Properties: []*commonpb.KeyValuePair{
@@ -74,25 +88,23 @@ func TestCompactionRejectsUnavailableWriterContext(t *testing.T) {
 				}},
 			}
 			var task CompactionTask
-			if kind == datapb.CompactionType_BumpSchemaVersionCompaction {
+			switch kind {
+			case datapb.CompactionType_BumpSchemaVersionCompaction:
 				task = NewBumpSchemaVersionTask(taskProto, alloc, mt, taskMeta, index.NewTestVersionManager())
-			} else {
+			case datapb.CompactionType_Level0DeleteCompaction:
+				task = NewL0CompactionTask(taskProto, alloc, mt, taskMeta)
+			default:
 				task = NewMixCompactionTask(taskProto, alloc, mt, taskMeta, index.NewTestVersionManager())
 			}
 			plan, err := task.BuildCompactionRequest()
 			require.Nil(t, plan)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 			require.True(t, merr.IsRetryableErr(err))
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 			cluster := session.NewMockCluster(t)
-			// Keep the task's existing assemble-error transition. The key
-			// failure must prevent dispatch, without adding a retry policy.
-			catalog.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).
-				RunAndReturn(func(_ context.Context, saved *datapb.CompactionTask) error {
-					require.Equal(t, datapb.CompactionTaskState_failed, saved.GetState())
-					return nil
-				}).Once()
 			task.CreateTaskOnWorker(42, cluster, task.GetTaskResource())
 			require.Equal(t, datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+			alloc.AssertNotCalled(t, "AllocN", mock.Anything)
 		})
 	}
 }

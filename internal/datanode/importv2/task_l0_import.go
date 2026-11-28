@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -43,6 +44,7 @@ import (
 
 type L0ImportTask struct {
 	*datapb.ImportTaskV2
+	importCipher hookutil.ImportCipherContext
 	ctx          context.Context
 	cancel       context.CancelFunc
 	segmentsInfo map[int64]*datapb.ImportSegmentInfo
@@ -61,6 +63,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 	resource taskcommon.Resource,
+	cipher ...hookutil.ImportCipherContext,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Allocator for autoIDs and logIDs.
@@ -72,6 +75,7 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
+		importCipher: lo.FirstOrEmpty(cipher),
 		ctx:          ctx,
 		cancel:       cancel,
 		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
@@ -134,6 +138,7 @@ func (t *L0ImportTask) Clone() Task {
 	// that cancellation a no-op on the work actually in flight.
 	return &L0ImportTask{
 		ImportTaskV2: typeutil.Clone(t.ImportTaskV2),
+		importCipher: t.importCipher,
 		ctx:          t.ctx,
 		cancel:       t.cancel,
 		segmentsInfo: infos,
@@ -184,7 +189,8 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		}
 
 		var reader binlog.L0Reader
-		reader, err = binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd)
+		reader, err = binlog.NewL0Reader(t.ctx, t.cm, t.req.GetStorageConfig(), pkField, file, bufferSize, tsStart, tsEnd,
+			storage.WithPluginContext(t.importCipher.Source))
 		if err != nil {
 			return err
 		}
@@ -264,7 +270,7 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
 			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
-			nil, storage.StorageV2, false, t.req.GetStorageConfig())
+			nil, storage.StorageV2, false, t.req.GetStorageConfig(), t.importCipher.Target)
 		if err != nil {
 			return nil, nil, err
 		}

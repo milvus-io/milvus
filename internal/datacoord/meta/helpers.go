@@ -48,13 +48,29 @@ const (
 	NullNodeID = -1
 )
 
-// Return None nil slice
-func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	importEzk, _ := importutilv2.GetEZK(options)
-	return hookutil.GetReadStoragePluginContext(importEzk)
+func GetImportPluginContext(collectionID int64, properties, options []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	artifact, _ := importutilv2.GetEZK(options)
+	return hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		pluginContext, err := GetImportPluginContext(collectionID, properties, msg.GetOptions())
+		if err != nil {
+			return err
+		}
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+		return nil
+	case *datapb.PreImportRequest:
+		pluginContext, err := GetImportPluginContext(collectionID, properties, msg.GetOptions())
+		if err != nil {
+			return err
+		}
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+		return nil
+	}
+
 	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
 	if err != nil {
 		return err
@@ -65,29 +81,17 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 
 	switch msg := msg.(type) {
 	case *datapb.CompactionPlan:
-		plan := msg
-		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateJobRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.AnalyzeRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *datapb.ReshardTaskRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *datapb.ImportTaskV3Request:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	default:
 		return nil
 	}

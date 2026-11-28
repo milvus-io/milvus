@@ -457,6 +457,10 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segments = append(segments, segInfo)
 	}
 
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan); err != nil {
+		return nil, err
+	}
+
 	logIDRange, err := PreAllocateBinlogIDs(t.Allocator, segments, taskSchema)
 	if err != nil {
 		return nil, err
@@ -464,10 +468,6 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 	plan.PreAllocatedLogIDs = logIDRange
 	// BeginLogID is deprecated, but still assign it for compatibility.
 	plan.BeginLogID = logIDRange.Begin
-
-	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskSchema.GetProperties(), plan); err != nil {
-		return nil, err
-	}
 
 	mlog.Info(context.TODO(), "Compaction handler refreshed mix compaction plan", mlog.Int64("maxSize", plan.GetMaxSize()),
 		mlog.Any("PreAllocatedLogIDs", logIDRange), mlog.Any("segID2DeltaLogs", segIDMap))

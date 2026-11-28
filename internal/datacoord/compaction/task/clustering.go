@@ -377,10 +377,6 @@ func (t *ClusteringCompactionTask) Clean() bool {
 
 func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()), taskProto.GetSchema())
-	if err != nil {
-		return nil, err
-	}
 	compactionParams, err := compaction.GenerateJSONParams(taskProto.GetSchema())
 	if err != nil {
 		return nil, err
@@ -398,9 +394,7 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		PreferSegmentRows:         taskProto.GetPreferSegmentRows(),
 		AnalyzeResultPath:         path.Join(t.meta.(*meta.Meta).ChunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:         taskProto.GetInputSegments(),
-		BeginLogID:                logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
-		PreAllocatedLogIDs:        logIDRange,
 		SlotUsage:                 t.GetSlotUsage(),
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
@@ -445,6 +439,12 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
 		return nil, err
 	}
+	logIDRange, err := PreAllocateBinlogIDs(t.allocator, t.meta.GetSegmentInfos(taskProto.GetInputSegments()), taskProto.GetSchema())
+	if err != nil {
+		return nil, err
+	}
+	plan.BeginLogID = logIDRange.Begin // BeginLogID is deprecated, but still assign it for compatibility.
+	plan.PreAllocatedLogIDs = logIDRange
 	mlog.Info(context.TODO(), "Compaction handler build clustering compaction plan", mlog.Any("PreAllocatedLogIDs", logIDRange))
 	return plan, nil
 }

@@ -221,6 +221,11 @@ func (f propagationFixture) waitForRetry(t *testing.T, fault keyFaultControl, as
 
 func (f propagationFixture) assertRegistration(t *testing.T, nodeID, ezID, collectionID int64) {
 	t.Helper()
+	f.assertNativeCipherOperation(t, nodeID, ezID, collectionID, "register")
+}
+
+func (f propagationFixture) assertNativeCipherOperation(t *testing.T, nodeID, ezID, collectionID int64, operation string) {
+	t.Helper()
 	var goPID int
 	for _, event := range f.observations(t, "go") {
 		if event.NodeID == nodeID && event.Role == "datanode" && event.EZID == ezID && event.Operation == "register" {
@@ -230,12 +235,24 @@ func (f propagationFixture) assertRegistration(t *testing.T, nodeID, ezID, colle
 	require.Positive(t, goPID, "cold DataNode did not receive EZ %d", ezID)
 	var cppPID int
 	for _, event := range f.observations(t, "cpp") {
-		if event.NodeID == nodeID && event.EZID == ezID && event.CollectionID == collectionID && event.Operation == "register" {
+		if event.NodeID == nodeID && event.EZID == ezID && event.CollectionID == collectionID && event.Operation == operation {
 			cppPID = event.PID
 		}
 	}
-	require.Equal(t, goPID, cppPID, "C++ context must be registered in the executing DataNode process")
-	t.Logf("stage=registered node=%d pid=%d ez=%d collection=%d", nodeID, cppPID, ezID, collectionID)
+	require.Equal(t, goPID, cppPID, "C++ %s must run in the executing DataNode process", operation)
+	t.Logf("operation=%s node=%d pid=%d ez=%d collection=%d", operation, nodeID, cppPID, ezID, collectionID)
+}
+
+func (f propagationFixture) assertStatelessNativeCipherOperation(t *testing.T, nodeID, ezID, collectionID int64, operation string) {
+	t.Helper()
+	var cppPID int
+	for _, event := range f.observations(t, "cpp") {
+		if event.NodeID == nodeID && event.EZID == ezID && event.CollectionID == collectionID && event.Operation == operation {
+			cppPID = event.PID
+		}
+	}
+	require.Positive(t, cppPID, "C++ %s did not run on node %d for ez=%d collection=%d", operation, nodeID, ezID, collectionID)
+	t.Logf("operation=%s node=%d pid=%d ez=%d collection=%d", operation, nodeID, cppPID, ezID, collectionID)
 }
 
 func (f propagationFixture) assertNotRegistered(t *testing.T, nodeID, ezID int64) {

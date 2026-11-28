@@ -79,7 +79,7 @@ func TestPackedWriterKeyLookupRetry(t *testing.T) {
 			if tc.cancel {
 				cancel()
 			}
-			pluginContext, err := bw.getPluginContext(ctx, 23)
+			pluginContext, err := bw.getPluginContext(ctx, &SyncPack{collectionID: 23})
 			require.Equal(t, tc.lookups, cipher.lookups)
 			switch {
 			case tc.cancel:

@@ -42,6 +42,7 @@ import (
 type DeleteMerger struct {
 	cm            storage.ChunkManager
 	cfg           *indexpb.StorageConfig
+	options       []storage.RwOption
 	pkType        schemapb.DataType
 	retryAttempts uint
 	budget        int64
@@ -56,7 +57,7 @@ type DeleteMerger struct {
 }
 
 func NewDeleteMerger(cm storage.ChunkManager, cfg *indexpb.StorageConfig, pkType schemapb.DataType,
-	retryAttempts uint, budget int64,
+	retryAttempts uint, budget int64, options ...storage.RwOption,
 ) (*DeleteMerger, error) {
 	if budget <= 0 {
 		return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
@@ -65,7 +66,7 @@ func NewDeleteMerger(cm storage.ChunkManager, cfg *indexpb.StorageConfig, pkType
 		return nil, merr.WrapErrDataIntegrityMsg("unsupported primary key type %s in deltalog", pkType.String())
 	}
 	m := &DeleteMerger{
-		cm: cm, cfg: cfg, pkType: pkType, retryAttempts: retryAttempts,
+		cm: cm, cfg: cfg, pkType: pkType, retryAttempts: retryAttempts, options: options,
 		budget: budget, data: make(map[any]typeutil.Timestamp),
 	}
 	return m, nil
@@ -76,7 +77,7 @@ func NewDeleteMerger(cm storage.ChunkManager, cfg *indexpb.StorageConfig, pkType
 // path inventory prevents reopening objects already folded into every bitmap.
 func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	cfg *indexpb.StorageConfig, source *internalpb.SnapshotImportL0Source, start, end uint64, budget int64,
-	consume func(map[any]typeutil.Timestamp) error, validate func(string) error,
+	consume func(map[any]typeutil.Timestamp) error, validate func(string) error, options ...storage.RwOption,
 ) (*DeleteMerger, error) {
 	if consume == nil {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot L0 loading requires a batch consumer")
@@ -92,7 +93,7 @@ func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema 
 		return nil, err
 	}
 	merger, err := NewDeleteMerger(cm, cfg, pkField.GetDataType(),
-		paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(), budget)
+		paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(), budget, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +232,7 @@ func (m *DeleteMerger) mergeFile(ctx context.Context, path string, start, end ui
 			return multiReadWithRetry(ctx, m.cm, m.retryAttempts, paths)
 		}),
 	}
-	delta, err := storage.NewDeltalogReader(ctx, m.pkType, []string{path}, options...)
+	delta, err := storage.NewDeltalogReader(ctx, m.pkType, []string{path}, append(options, m.options...)...)
 	if err != nil {
 		return false, err
 	}

@@ -53,9 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// An immutable job/task source mismatch cannot be repaired by rescheduling.
-var errSnapshotTaskSource = errors.New("invalid snapshot task source")
-
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -101,6 +98,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       meta.NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format(time.RFC3339),
@@ -404,10 +402,9 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
 		SnapshotL0Source: l0Source,
 	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+	if err := meta.WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
 		return nil, err
 	}
 	return req, nil
@@ -419,7 +416,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	})
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, merr.Mark(err, errSnapshotTaskSource)
+		return nil, err
 	}
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
@@ -433,37 +430,6 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 			Vchannel:    segment.GetInsertChannel(),
 		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	ts := job.GetDataTs()
-	if ts == 0 {
-		ts, err = alloc.AllocTimestamp(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	totalRows := lo.SumBy(task.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {
-		return stat.GetTotalRows()
-	})
-
-	// Reserve the task-level log id range. AutoID jobs whose files carry per-file row id
-	// ranges consume it only for binlog logIDs; backup/L0 and legacy no-range jobs may also
-	// consume it per row for PK/RowID. ReserveLogIDs also checks every file's ID range
-	// against the exact preimport count and fails terminally with ErrIDRangeTooSmall when
-	// a range cannot hold its rows.
-	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
-		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
-	if err != nil {
-		return nil, err
-	}
-
-	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
-		mlog.Int64("totalRows", totalRows),
-		mlog.Int64("idBegin", idRange.GetBegin()),
-		mlog.Int64("idEnd", idRange.GetEnd()),
-		mlog.Uint64("ts", ts))...,
-	)
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
@@ -479,19 +445,62 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		Schema:           job.GetSchema(),
 		Files:            importFiles,
 		Options:          job.GetOptions(),
-		Ts:               ts,
-		IDRange:          idRange,
 		RequestSegments:  requestSegments,
 		StorageConfig:    meta.CreateStorageConfig(),
-		TaskSlot:         task.GetTaskSlot(),
 		StorageVersion:   storageVersion,
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
 		UseLoonFfi:       useLoonFFI,
 		SnapshotL0Source: l0Source,
 	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+	// Resolve and validate cipher contexts before allocating timestamps/IDs so retries do not waste ranges.
+	if err := meta.WrapPluginContext(req.GetCollectionID(), req.GetSchema().GetProperties(), req); err != nil {
 		return nil, err
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ts := job.GetDataTs()
+	if ts == 0 {
+		ts, err = alloc.AllocTimestamp(ctx)
+		if err != nil {
+			if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, merr.ErrParameterInvalid) {
+				return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import timestamp")
+			}
+			return nil, merr.Wrap(err, "allocate import timestamp")
+		}
+	}
+
+	totalRows := lo.SumBy(task.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {
+		return stat.GetTotalRows()
+	})
+
+	// Reserve the task-level log id range. AutoID jobs whose files carry per-file row id
+	// ranges consume it only for binlog logIDs; backup/L0 and legacy no-range jobs may also
+	// consume it per row for PK/RowID. ReserveLogIDs also checks every file's ID range
+	// against the exact preimport count and fails terminally with ErrIDRangeTooSmall when
+	// a range cannot hold its rows.
+	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
+		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
+	if err != nil {
+		if !errors.Is(err, importid.ErrIDRangeTooSmall) &&
+			!errors.Is(err, merr.ErrParameterInvalid) &&
+			!merr.IsRetryableErr(err) &&
+			!errors.Is(err, context.Canceled) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "reserve import log IDs")
+		}
+		return nil, err
+	}
+
+	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
+		mlog.Int64("totalRows", totalRows),
+		mlog.Int64("idBegin", idRange.GetBegin()),
+		mlog.Int64("idEnd", idRange.GetEnd()),
+		mlog.Uint64("ts", ts))...,
+	)
+
+	req.Ts = ts
+	req.IDRange = idRange
+	req.TaskSlot = task.GetTaskSlot()
 	return req, nil
 }
 

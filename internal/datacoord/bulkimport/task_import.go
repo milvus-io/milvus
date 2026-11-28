@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -196,28 +194,30 @@ func (t *Task) NodeMemoryShare() float64 {
 func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.ImportMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssembleImportRequest(t, job, t.Meta, t.Alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, importid.ErrIDRangeTooSmall) || errors.Is(err, errSnapshotTaskSource) {
-			// Immutable source mismatches and insufficient reservations cannot
-			// be repaired by retrying. Neither the source nor the per-file range
-			// and row count changes by rescheduling, so fail the job now
-			// and keep the precise reason -- otherwise the job stays Importing
-			// (checkImportingJob only advances once every task is Completed) until
-			// tryTimeoutJob overwrites the reason with a generic timeout message.
-			//
-			// Only the job is updated, as in preimport: the checker's tryFailingTasks
-			// marks this task Failed on the next tick.
-			if updateErr := t.ImportMeta.UpdateJob(context.TODO(), t.GetJobID(),
-				UpdateJobState(internalpb.ImportJobState_Failed),
-				UpdateJobReason(err.Error())); updateErr != nil {
-				mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
-					WrapTaskLog(t, mlog.Err(updateErr))...)
-			}
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			t.retryTimes++
 			return
 		}
-		t.retryTimes++
+		// Non-retryable assemble errors (immutable source, cipher, or ID-range
+		// mismatches) cannot be repaired by rescheduling, so fail the job now
+		// and keep the precise reason -- otherwise the job stays Importing
+		// (checkImportingJob only advances once every task is Completed) until
+		// tryTimeoutJob overwrites the reason with a generic timeout message.
+		//
+		// Only the job is updated, as in preimport: the checker's tryFailingTasks
+		// marks this task Failed on the next tick.
+		if updateErr := t.ImportMeta.UpdateJob(context.TODO(), t.GetJobID(),
+			UpdateJobState(internalpb.ImportJobState_Failed),
+			UpdateJobReason(err.Error())); updateErr != nil {
+			mlog.Warn(context.TODO(), "failed to mark import job failed after assemble error",
+				WrapTaskLog(t, mlog.Err(updateErr))...)
+		}
 		return
 	}
 	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)

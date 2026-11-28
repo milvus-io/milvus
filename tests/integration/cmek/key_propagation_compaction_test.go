@@ -194,7 +194,8 @@ func (s *propagationAnalyzeSuite) TestVectorClustering() {
 	s.Require().Equal(int64(len(expected)), rows)
 	s.Require().True(slices.Contains(plan.GetInputSegments(), inputs[0].GetID()))
 	s.inspectPropagationRaw(ctx, outputs, collectionID)
-	s.fixture.assertRegistration(s.T(), compactNode, s.ezID, collectionID)
+	s.fixture.assertNativeCipherOperation(s.T(), compactNode, s.ezID, collectionID, "read_keyset")
+	s.fixture.assertNativeCipherOperation(s.T(), compactNode, s.ezID, collectionID, "write_keyset")
 	s.reloadPropagation(ctx, description, outputs)
 	s.assertConsumerRows(ctx, collection, expected)
 }
@@ -505,7 +506,10 @@ func (s *propagationSchemaSuite) TestBackfill() {
 			s.Require().Equal(fields, columns[object], "append must retain old column groups")
 		}
 	}
-	s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
+	s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "write_keyset")
+	if s.rewrite {
+		s.fixture.assertNativeCipherOperation(s.T(), nodeID, s.ezID, collectionID, "read_keyset")
+	}
 	// Disable further schema work before proving the independent Stats entry.
 	s.Cluster.MustModifyMilvusConfig(map[string]string{"dataCoord.compaction.bumpSchemaVersion.enabled": "false"})
 	if !s.rewrite {

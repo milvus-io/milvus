@@ -49,13 +49,29 @@ func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
 	var receiver fixtureCipher
 	require.NoError(t, receiver.Init(map[string]string{"cipher.milvusRoleName": "datanode"}))
 	require.Empty(t, receiver.GetUnsafeKey(17, 0))
-	require.NoError(t, receiver.Init(map[string]string{"cipher.ez.import": backup}))
-	require.Equal(t, payload.Key, receiver.GetUnsafeKey(17, 0))
+	zone, key, err := receiver.ResolveImportEZ(backup)
+	require.NoError(t, err)
+	require.Equal(t, int64(17), zone)
+	require.Equal(t, payload.Key, key)
+
+	encryptor, edek, err := sender.GetEncryptor(17, 42)
+	require.NoError(t, err)
+	_, err = encryptor.Encrypt([]byte("stateless backup payload"))
+	require.NoError(t, err)
+
+	// ResolveImportEZ does not register or mutate the receiver's ordinary zone cache.
+	_, err = receiver.GetDecryptor(17, 42, edek)
+	require.Error(t, err)
+	require.Empty(t, receiver.GetUnsafeKey(17, 0))
+	_, _, err = receiver.GetEncryptor(17, 42)
+	require.Error(t, err)
 	require.Empty(t, receiver.GetUnsafeKey(18, 0))
+
 	payload.Key[0] ^= 1
 	invalid, err := json.Marshal(payload)
 	require.NoError(t, err)
-	require.Error(t, receiver.Init(map[string]string{"cipher.ez.import": base64.StdEncoding.EncodeToString(invalid)}))
+	_, _, err = receiver.ResolveImportEZ(base64.StdEncoding.EncodeToString(invalid))
+	require.Error(t, err)
 }
 
 func TestFixtureDataNodeRequiresReceivedKey(t *testing.T) {

@@ -30,6 +30,7 @@
 #include "pb/clustering.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 #include "test_utils/Constants.h"
 
@@ -76,6 +77,20 @@ class RecordingCipherPlugin : public plugin::ICipherPlugin {
     int64_t updated_collection_id = 0;
     std::string updated_key;
     std::shared_ptr<plugin::IEncryptor> encryptor;
+};
+
+class ImportCipherPlugin : public RecordingCipherPlugin {
+ public:
+    using EncryptorResult =
+        std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>;
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
+                (const, override));
 };
 
 void
@@ -212,6 +227,60 @@ TEST(CipherPluginContextTest, WriterPreservesBinaryKeysAcrossStringBoundary) {
         EXPECT_STREQ(metadata, "17_23_fixture-edek");
         EXPECT_EQ(cipher->update_count, previous_updates + 1);
     }
+}
+
+TEST(CipherPluginContextTest, ImportWriterRejectsUnusableEncryptionParameters) {
+    auto& loader = PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+    auto cipher = std::make_shared<testing::StrictMock<ImportCipherPlugin>>();
+    loader.registerPluginForTest(cipher);
+    CPluginContext context{17, 23, "a2V5"};
+    auto encryptor = std::make_shared<testing::StrictMock<KeyOnlyEncryptor>>();
+    for (const auto& [handle, dek, edek] :
+         std::vector<std::tuple<bool, std::string, std::string>>{
+             {false, "", "edek"},
+             {true, "short", "edek"},
+             {true, std::string(32, 'k'), ""},
+             {true,
+              std::string(32, 'k'),
+              std::string("unsafe\0metadata", 15)}}) {
+        EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "a2V5"))
+            .WillOnce(testing::Return(ImportCipherPlugin::EncryptorResult{
+                handle ? encryptor : nullptr, edek}));
+        if (handle) {
+            EXPECT_CALL(*encryptor, GetKey()).WillOnce(testing::Return(dek));
+        }
+        char* key = nullptr;
+        char* metadata = nullptr;
+        auto status = GetEncParams(&context, &key, &metadata);
+        ASSERT_EQ(status.error_code, ErrorCode::InvalidParameter);
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(key, nullptr);
+        EXPECT_EQ(metadata, nullptr);
+    }
+
+    std::string binary_dek(32, '\0');
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "a2V5"))
+        .WillOnce(testing::Return(
+            ImportCipherPlugin::EncryptorResult{encryptor, "target-edek"}));
+    EXPECT_CALL(*encryptor, GetKey()).WillOnce(testing::Return(binary_dek));
+    char* key = nullptr;
+    char* metadata = nullptr;
+    auto status = GetEncParams(&context, &key, &metadata);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto cleanup = folly::makeGuard([&] {
+        free(key);
+        free(metadata);
+    });
+    EXPECT_EQ(arrow::util::base64_decode(key), binary_dek);
+    EXPECT_STREQ(metadata, "17_23_target-edek");
+    EXPECT_EQ(cipher->update_count, 0);
 }
 
 }  // namespace

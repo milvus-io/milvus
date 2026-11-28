@@ -39,8 +39,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mocks/github.com/milvus-io/milvus-proto/go-api/v3/mock_hook"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -243,6 +245,48 @@ func (s *SyncTaskSuite) TestRunNormalWithStorageV2() {
 
 func (s *SyncTaskSuite) TestRunNormalWithStorageV3() {
 	s.runTestRunNormal(storage.StorageV3)
+}
+
+func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
+	for _, storageVersion := range []int64{storage.StorageV2, storage.StorageV3} {
+		s.Run(fmt.Sprintf("storage_v%d", storageVersion), func() {
+			seg := s.createSegment(storageVersion)
+			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+			s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+			s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+			schema := s.schema
+			s.schema = &schemapb.CollectionSchema{
+				Name:       schema.GetName(),
+				Fields:     schema.GetFields(),
+				Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
+			}
+			defer func() { s.schema = schema }()
+
+			s.Run("missing_cipher_plugin", func() {
+				s.T().Cleanup(hookutil.SetTestCipher(nil))
+				pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.AttemptAlways())
+				err := task.Run(context.Background())
+				s.ErrorIs(err, merr.ErrServiceUnavailable)
+			})
+
+			s.Run("empty_unsafe_key_retries_under_policy", func() {
+				cipher := mock_hook.NewMockCipher(s.T())
+				if storageVersion == storage.StorageV2 {
+					cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Twice()
+				} else {
+					cipher.EXPECT().GetUnsafeKey(int64(17), s.collectionID).Return(nil).Maybe()
+				}
+				s.T().Cleanup(hookutil.SetTestCipher(cipher))
+
+				pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(2), retry.Sleep(0))
+				err := task.Run(context.Background())
+				s.ErrorIs(err, merr.ErrServiceUnavailable)
+			})
+		})
+	}
 }
 
 func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {

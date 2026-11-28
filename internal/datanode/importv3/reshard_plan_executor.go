@@ -37,7 +37,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -81,11 +80,11 @@ func executeReshardPlan(
 	cm storage.ChunkManager,
 	req *datapb.ReshardTaskRequest,
 	plan *importv3pb.ReshardTaskPlan,
-	pluginContext *indexcgopb.StoragePluginContext,
+	source, target *indexcgopb.StoragePluginContext,
 	metrics *Metrics,
 	progress *ReshardProgress,
 ) error {
-	executor, err := newReshardPlanExecutor(cm, req, plan, pluginContext, metrics, progress)
+	executor, err := newReshardPlanExecutor(cm, req, plan, source, target, metrics, progress)
 	if err != nil {
 		return err
 	}
@@ -126,7 +125,7 @@ func newReshardPlanExecutor(
 	cm storage.ChunkManager,
 	req *datapb.ReshardTaskRequest,
 	plan *importv3pb.ReshardTaskPlan,
-	pluginContext *indexcgopb.StoragePluginContext,
+	source, target *indexcgopb.StoragePluginContext,
 	metrics *Metrics,
 	progress *ReshardProgress,
 ) (*reshardPlanExecutor, error) {
@@ -137,19 +136,8 @@ func newReshardPlanExecutor(
 	// The chunk manager and the storage plugin context are run handles the
 	// caller supplies, not values derived from the request and the plan.
 	policy.source.cm = cm
-	// Backup input belongs to the source EZ. The context supplied by the
-	// worker entry point belongs to the target and is only used for outputs.
-	if ezk, _ := importutilv2.GetEZK(plan.GetOptions()); ezk != "" {
-		ezID, err := hookutil.GetEzIDByImportEzk(ezk)
-		if err != nil {
-			return nil, err
-		}
-		policy.source.pluginContext, err = hookutil.GetCPluginContextByEzID(ezID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	policy.write.pluginContext = pluginContext
+	policy.source.pluginContext = source
+	policy.write.pluginContext = target
 	return &reshardPlanExecutor{
 		req:      req,
 		plan:     plan,

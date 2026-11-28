@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -36,8 +37,9 @@ type Serializer interface {
 
 // SyncPack is the struct contains buffer sync data.
 type SyncPack struct {
-	metacache  metacache.MetaCache
-	metawriter MetaWriter
+	pluginContext *indexcgopb.StoragePluginContext
+	metacache     metacache.MetaCache
+	metawriter    MetaWriter
 	// data
 	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
@@ -60,6 +62,11 @@ type SyncPack struct {
 	level        datapb.SegmentLevel
 	// error handler function
 	errHandler func(err error)
+}
+
+func (p *SyncPack) WithPluginContext(context *indexcgopb.StoragePluginContext) *SyncPack {
+	p.pluginContext = context
+	return p
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {

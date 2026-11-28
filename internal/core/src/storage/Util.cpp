@@ -2635,9 +2635,17 @@ GetFieldIDList(FieldId column_group_id,
 std::vector<int64_t>
 GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
                             const std::string& filepath) {
+    return GetPackedFileColumnFieldIDs(fs, filepath, GetReaderProperties());
+}
+
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(
+    const milvus_storage::ArrowFileSystemPtr& fs,
+    const std::string& filepath,
+    const parquet::ReaderProperties& reader_properties) {
     // Opening the reader reads the footer only; no column data is fetched.
     auto reader_result = milvus_storage::MakeArrowFileReader(
-        *fs, filepath, GetReaderProperties(), GetArrowReaderProperties());
+        *fs, filepath, reader_properties, GetArrowReaderProperties());
     if (!reader_result.ok()) {
         // Keep the classification the filesystem attached (a transient
         // storage failure stays retriable, a missing object stays permanent).

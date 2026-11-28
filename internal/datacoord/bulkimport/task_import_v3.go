@@ -169,12 +169,31 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		t.Fail("import v3 task job is missing")
 		return
 	}
+	if job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	if job.GetState() != internalpb.ImportJobState_Planning && job.GetState() != internalpb.ImportJobState_Importing {
 		t.Fail(fmt.Sprintf("import v3 task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
 		return
 	}
 	plan, slot, err := importPlan(job, p, getImportV3Config())
 	if err != nil {
+		t.Fail(err.Error())
+		return
+	}
+	req := &datapb.ImportTaskV3Request{
+		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
+		LogRange: p.GetLogRange(), Slot: slot,
+		StorageConfig: meta.CreateStorageConfig(),
+		Plan:          plan,
+	}
+	// Resolve target cipher context before mutating segment metadata so key
+	// failures do not drop old segments or create new ones.
+	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return
+		}
 		t.Fail(err.Error())
 		return
 	}
@@ -202,17 +221,6 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 				WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
-	}
-	req := &datapb.ImportTaskV3Request{
-		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
-		LogRange: p.GetLogRange(), Slot: slot,
-		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: meta.GetReadPluginContext(job.GetOptions()),
-		Plan:          plan,
-	}
-	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
 	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.

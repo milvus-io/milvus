@@ -689,7 +689,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 	for phase := 0; phase < 2; phase++ {
 		file := &internalpb.ImportFile{}
 		require.NoError(t, proto.Unmarshal(encoded, file))
-		readers := importutilv2.NewReaderFactory(ctx, cm, cfg, SnapshotImportTestOptions())
+		readers := importutilv2.NewReaderFactory(ctx, cm, cfg, SnapshotImportTestOptions(), nil)
 		shared, err := readers.PrepareSnapshotDeletes(ctx, schema, []*internalpb.ImportFile{file}, l0Source, 1024, 1024)
 		require.NoError(t, err)
 		reader, err := readers.NewReader(ctx, schema, file, 1024, 1024, shared)
@@ -1448,6 +1448,9 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	// No worker/allocator is supplied: malformed immutable inventories must
 	// fail before dispatch/allocation, not keep the job retrying until timeout.
 	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())
+	require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
+	job.State = internalpb.ImportJobState_Importing
+	job.Reason = ""
 	imp.CreateTaskOnWorker(1, nil, imp.GetTaskResource())
 	require.Equal(t, 2, updates)
 	require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
@@ -1455,6 +1458,7 @@ func TestSnapshotSharedL0AssemblyFailure(t *testing.T) {
 	require.Zero(t, pre.retryTimes)
 	require.Zero(t, imp.retryTimes)
 	updateJob.UnPatch()
+	job.State = internalpb.ImportJobState_PreImporting
 	persistFailure := mockey.Mock((*failedSourceMeta).UpdateJob).Return(merr.ErrIoKeyNotFound).Build()
 	defer persistFailure.UnPatch()
 	pre.CreateTaskOnWorker(1, nil, pre.GetTaskResource())

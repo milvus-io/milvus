@@ -24,10 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -352,4 +355,55 @@ func TestCreateTaskNormalizesLegacyV3PriceAtIngress(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestImportV3ServicesRegisterTargetOnly(t *testing.T) {
+	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	sameZoneEntries := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:b2xk"},
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="},
+	}
+	targetOnlyEntries := []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:bGl2ZQ=="},
+	}
+	wantCalls := []map[string]string{
+		{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "bGl2ZQ=="},
+	}
+
+	t.Run("reshard", func(t *testing.T) {
+		cipher := &importContextReceiver{}
+		patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+		defer patch.UnPatch()
+
+		node, _ := newImportV3ServicesNode(t, false)
+		req := validReshardRequest()
+		req.Plan.CollectionSchema = &schemapb.CollectionSchema{Properties: properties}
+		req.Plan.Options = []*commonpb.KeyValuePair{{Key: "ezk", Value: "eyJlel9pZCI6MTd9"}}
+		req.PluginContext = sameZoneEntries
+		status, err := node.submitReshardTask(context.Background(), req, taskcommon.Resource{CPU: 1, Memory: 1})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(status))
+		require.Equal(t, wantCalls, cipher.calls)
+	})
+
+	t.Run("import_v3", func(t *testing.T) {
+		cipher := &importContextReceiver{}
+		patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+		defer patch.UnPatch()
+
+		node, _ := newImportV3ServicesNode(t, false)
+		req := validImportV3Request()
+		req.Plan.CollectionSchema = &schemapb.CollectionSchema{Properties: properties}
+		req.PluginContext = targetOnlyEntries
+		status, err := node.submitImportTaskV3(context.Background(), req, taskcommon.Resource{CPU: 1, Memory: 1})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(status))
+		require.Equal(t, wantCalls, cipher.calls)
+
+		// Extra source entries on ImportTaskV3 are rejected since final merge only uses target key.
+		req.PluginContext = sameZoneEntries
+		status, err = node.submitImportTaskV3(context.Background(), req, taskcommon.Resource{CPU: 1, Memory: 1})
+		require.NoError(t, err)
+		require.Equal(t, merr.Code(merr.ErrImportSysFailed), status.GetCode())
+	})
 }
