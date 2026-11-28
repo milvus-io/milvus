@@ -67,6 +67,10 @@ type QueryTask struct {
 	queryParams    *queryParams
 	schema         *schemaInfo
 
+	// Only Search requery supplies this version, including zero. It detects
+	// schema changes without pinning an unavailable execution schema.
+	requerySchemaVersion *int32
+
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
@@ -636,6 +640,14 @@ func (t *QueryTask) createPlan(ctx context.Context) error {
 
 func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv2.ParserVisitorArgs) error {
 	schema := t.schema
+	if t.reQuery && t.requerySchemaVersion != nil && *t.requerySchemaVersion != schema.GetVersion() {
+		// Rebuild the whole Search before interpreting its expanded projection
+		// with another schema. Validation alone is insufficient: with dynamic
+		// fields enabled, a dropped field can silently resolve to a $meta key.
+		return merr.WrapErrInconsistentRequery(fmt.Sprintf(
+			"schema changed during requery, collection=%d, search schema version=%d, query schema version=%d",
+			t.CollectionID, *t.requerySchemaVersion, schema.GetVersion()))
+	}
 	var err error
 	if t.plan == nil {
 		start := time.Now()
