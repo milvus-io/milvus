@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -69,6 +70,14 @@ type collectionUsageManager struct {
 	// Pressure is retained between the low and high watermarks, per pool.
 	memoryPressure map[string]bool
 
+	releaseQueue []releaseCandidate
+	// Entries cover queued and running releases. Removing a load invalidates
+	// its queued release, even if the collection is loaded again before dispatch.
+	releasing        map[int64]bool
+	releasesInFlight int
+	// Counts LRU releases from admission until completion or discard.
+	lruReleasesOutstanding int
+
 	stop context.CancelFunc
 	wg   sync.WaitGroup
 }
@@ -79,6 +88,7 @@ func newCollectionUsageManager(s *Server) *collectionUsageManager {
 		s:                   s,
 		lastActiveUnixNanos: make(map[int64]int64),
 		memoryPressure:      make(map[string]bool),
+		releasing:           make(map[int64]bool),
 		configChanged:       make(chan struct{}, 1),
 	}
 	s.qviewsRuntime.loadConfigStore.RegisterObserver(m.handleLoadConfigChange)
@@ -101,8 +111,7 @@ func (m *collectionUsageManager) refreshConfig() {
 
 	m.enabled = autoReleaseEnabled && autoLoadEnabled
 	if !m.enabled {
-		clear(m.lastActiveUnixNanos)
-		clear(m.memoryPressure)
+		m.resetUsageLocked()
 	}
 	m.mu.Unlock()
 	if misconfigured {
@@ -180,13 +189,21 @@ func (m *collectionUsageManager) close() {
 	params.Unwatch(params.ProxyCfg.EnableAutoLoad.Key, m.configWatcher)
 	m.mu.Lock()
 	m.enabled = false
-	clear(m.lastActiveUnixNanos)
-	clear(m.memoryPressure)
+	m.resetUsageLocked()
 	m.mu.Unlock()
 	if m.stop != nil {
 		m.stop()
 	}
 	m.wg.Wait()
+}
+
+func (m *collectionUsageManager) resetUsageLocked() {
+	clear(m.lastActiveUnixNanos)
+	clear(m.memoryPressure)
+	for _, candidate := range m.releaseQueue {
+		m.removeReleaseLocked(candidate)
+	}
+	m.releaseQueue = nil
 }
 
 func (m *collectionUsageManager) handleLoadConfigChange(collectionID int64, released bool) {
@@ -195,6 +212,9 @@ func (m *collectionUsageManager) handleLoadConfigChange(collectionID int64, rele
 	}
 	m.mu.Lock()
 	delete(m.lastActiveUnixNanos, collectionID)
+	if _, scheduled := m.releasing[collectionID]; scheduled {
+		m.releasing[collectionID] = false
+	}
 	m.mu.Unlock()
 }
 
@@ -220,7 +240,10 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 	snapshot := m.s.qviewsRuntime.loadConfigStore.Snapshot()
 	pressure := m.pressuredPools(ctx)
 	feedback := m.s.qviewsRuntime.viewFeedback.GetPlanningSnapshot()
-	limit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	lruLimit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	m.mu.Lock()
+	lruBudget := lruLimit - m.lruReleasesOutstanding
+	m.mu.Unlock()
 	lru := typeutil.NewObjectArrayBasedMaximumHeap(nil, func(candidate releaseCandidate) int64 {
 		return candidate.lastActiveUnixNanos
 	})
@@ -244,9 +267,9 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 			candidates = append(candidates, candidate)
 			continue
 		}
-		if underMemoryPressure(cfg, pressure) {
+		if lruBudget > 0 && underMemoryPressure(cfg, pressure) {
 			candidate.reason = releaseReasonMemoryPressure
-			if lru.Len() < limit {
+			if lru.Len() < lruBudget {
 				lru.Push(candidate)
 			} else if candidate.lastActiveUnixNanos < lru.Peek().lastActiveUnixNanos {
 				lru.Pop()
@@ -254,10 +277,13 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 			}
 		}
 	}
+	firstLRU := len(candidates)
 	for lru.Len() > 0 {
 		candidates = append(candidates, lru.Pop())
 	}
-	m.releaseCollections(ctx, candidates)
+	// Oldest candidates get the remaining budget if it shrank during the scan.
+	slices.Reverse(candidates[firstLRU:])
+	m.queueReleases(ctx, candidates)
 }
 
 func (m *collectionUsageManager) pressuredPools(ctx context.Context) map[string]bool {
@@ -296,6 +322,12 @@ func (m *collectionUsageManager) pressuredPools(ctx context.Context) map[string]
 
 func (m *collectionUsageManager) releaseCandidate(ctx context.Context, cfg *loadmgr.LoadConfig, feedback *viewfeedback.PlanningSnapshot) (releaseCandidate, time.Duration, bool) {
 	collectionID := cfg.CollectionID
+	m.mu.Lock()
+	_, scheduled := m.releasing[collectionID]
+	m.mu.Unlock()
+	if scheduled {
+		return releaseCandidate{}, 0, false
+	}
 	tti, err := m.tti(ctx, collectionID)
 	if err != nil {
 		mlog.RatedWarn(ctx, 1.0, "failed to get collection auto release TTI, skip this scan",
@@ -348,29 +380,71 @@ func (m *collectionUsageManager) collectionReady(collectionID int64) bool {
 	return loadstatus.Get(runtime.loadConfigStore, runtime.shardViewRegistry, collectionID, coll.VChannelNames).Ready()
 }
 
-// releaseCollections reads the latest concurrency limit for this scan and waits
-// for the entire batch. Neither submission nor release holds the activity lock.
-func (m *collectionUsageManager) releaseCollections(ctx context.Context, candidates []releaseCandidate) {
-	if len(candidates) == 0 {
+// Both TTI and memory-pressure decisions use the scan snapshot. Once queued,
+// a release proceeds even after later queries, TTI changes or lower memory usage.
+func (m *collectionUsageManager) queueReleases(ctx context.Context, candidates []releaseCandidate) {
+	lruLimit := paramtable.Get().QueryCoordCfg.AutoReleaseLRUMaxEvictions.GetAsInt()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.enabled || ctx.Err() != nil {
 		return
 	}
-	var group errgroup.Group
-	group.SetLimit(min(paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt(), len(candidates)))
 	for _, candidate := range candidates {
-		if ctx.Err() != nil {
-			break
+		id := candidate.collectionID
+		if _, loaded := m.lastActiveUnixNanos[id]; !loaded {
+			continue
 		}
-		group.Go(func() error {
-			if ctx.Err() == nil {
-				if err := m.autoReleaseCollection(ctx, candidate.collectionID, candidate.reason); err != nil {
-					mlog.Warn(ctx, "failed to auto release collection",
-						mlog.FieldCollectionID(candidate.collectionID), mlog.String("releaseReason", string(candidate.reason)), mlog.Err(err))
-				}
+		if _, scheduled := m.releasing[id]; scheduled {
+			continue
+		}
+		if candidate.reason == releaseReasonMemoryPressure {
+			if m.lruReleasesOutstanding >= lruLimit {
+				continue
 			}
-			return nil
-		})
+			m.lruReleasesOutstanding++
+		}
+		m.releasing[id] = true
+		m.releaseQueue = append(m.releaseQueue, candidate)
 	}
-	_ = group.Wait()
+	m.dispatchReleasesLocked(ctx)
+}
+
+func (m *collectionUsageManager) dispatchReleasesLocked(ctx context.Context) {
+	limit := paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt()
+	for len(m.releaseQueue) > 0 && m.releasesInFlight < limit && ctx.Err() == nil {
+		candidate := m.releaseQueue[0]
+		m.releaseQueue = m.releaseQueue[1:]
+		if !m.releasing[candidate.collectionID] {
+			m.removeReleaseLocked(candidate)
+			continue
+		}
+		m.releasesInFlight++
+		m.wg.Add(1)
+		go m.runRelease(ctx, candidate)
+	}
+	if len(m.releaseQueue) == 0 {
+		m.releaseQueue = nil
+	}
+}
+
+func (m *collectionUsageManager) runRelease(ctx context.Context, candidate releaseCandidate) {
+	defer m.wg.Done()
+	if err := m.autoReleaseCollection(ctx, candidate.collectionID, candidate.reason); err != nil {
+		mlog.Warn(ctx, "failed to auto release collection",
+			mlog.FieldCollectionID(candidate.collectionID), mlog.String("releaseReason", string(candidate.reason)), mlog.Err(err))
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removeReleaseLocked(candidate)
+	m.releasesInFlight--
+	m.dispatchReleasesLocked(ctx)
+}
+
+func (m *collectionUsageManager) removeReleaseLocked(candidate releaseCandidate) {
+	delete(m.releasing, candidate.collectionID)
+	if candidate.reason == releaseReasonMemoryPressure {
+		m.lruReleasesOutstanding--
+	}
 }
 
 func (m *collectionUsageManager) tti(ctx context.Context, collectionID int64) (time.Duration, error) {

@@ -4283,13 +4283,13 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "3.0.0",
 		DefaultValue: "16",
 		PanicIfEmpty: true,
-		Doc:          "maximum concurrent automatic collection releases per scan; runtime updates take effect on the next scan",
+		Doc:          "maximum concurrent automatic collection releases",
 		Export:       true,
 		Formatter: func(v string) string {
 			if getAsInt(v) <= 0 {
 				mlog.Warn(context.TODO(), "queryCoord.autoRelease.releaseConcurrency must be positive, using default",
 					mlog.String("configured", v))
-				return "16"
+				return p.AutoReleaseConcurrency.DefaultValue
 			}
 			return v
 		},
@@ -4319,7 +4319,7 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Version:      "3.0.0",
 		DefaultValue: "64",
 		Export:       true,
-		Doc:          "maximum collection LRU releases selected per scan, independent of releaseConcurrency",
+		Doc:          "maximum queued and running collection LRU releases across scans",
 		Formatter: func(v string) string {
 			value, err := strconv.Atoi(v)
 			if err != nil || value <= 0 {
