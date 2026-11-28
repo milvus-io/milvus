@@ -1689,14 +1689,14 @@ SegmentGrowingImpl::Insert(
     // row. Treating a truncated internal message as NULL later in the index or
     // cache path would be too late: the raw column and validity vectors copy
     // num_rows entries first.
-    for (const auto& [field_id, field_meta] : schema_->get_fields()) {
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
         if (field_id.get() < START_USER_FIELDID ||
             field_meta.get_data_type() != DataType::GEOMETRY) {
             continue;
         }
         auto data_it = field_id_to_offset.find(field_id);
         if (data_it == field_id_to_offset.end()) {
-            AssertInfo(schema_->is_function_output(field_id),
+            AssertInfo(schema->is_function_output(field_id),
                        "geometry field {} missing from insert",
                        field_id.get());
             continue;
