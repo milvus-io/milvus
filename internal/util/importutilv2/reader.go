@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/lance"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -278,6 +279,12 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			return nil, err
 		}
 		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep, nullkey)
+	case FileTypeLance:
+		ver, err := GetLanceVersion(options)
+		if err != nil {
+			return nil, err
+		}
+		return lance.NewReader(ctx, cm, schema, importFile.GetPaths()[0], ver, bufferSize)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }
