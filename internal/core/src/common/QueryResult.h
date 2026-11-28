@@ -404,6 +404,16 @@ struct SearchResult {
     // after reducing search result done, size(distances_) = size(seg_offsets_) = size(primary_keys_) =
     // size(primary_keys_)
 
+    // Distance returned by the vector search, in the metric's natural
+    // direction, recorded by the rescoring operator before it rewrites
+    // distances_. raw_distances_[q] maps (segment offset, element index) to
+    // the distance for query q; the element index is -1 for row-level
+    // results. A lookup is used instead of a parallel vector because later
+    // stages permute and compact distances_ and seg_offsets_ in several
+    // places. Empty unless the plan outputs $distance and an operator
+    // rewrote the scores.
+    std::vector<std::map<std::pair<int64_t, int32_t>, float>> raw_distances_;
+
     // set output fields data when fill target entity
     std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data_;
 

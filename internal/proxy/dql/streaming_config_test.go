@@ -248,7 +248,10 @@ func TestStreamingConfigAllowsQueryScan(t *testing.T) {
 		prepared := queryStageTestTask()
 		require.NoError(t, prepared.createPlan(t.Context()))
 		query.request.FunctionChains, query.plan = prepared.request.FunctionChains, prepared.plan
-		require.NotEmpty(t, query.plan.GetQuerynodeFunctionChains())
+		// The chain was rewritten into the plan's predicate and projection
+		// items; nothing travels as a chain.
+		require.Empty(t, query.plan.GetQuerynodeFunctionChains())
+		require.NotEmpty(t, query.plan.GetProjectionItems())
 		require.NoError(t, query.Execute(t.Context()))
 		require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
 	}
@@ -282,9 +285,10 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 			other:     `dsl placeholder_group dsl_type partitionIDs field_id ignore_growing analyzer_name`,
 		},
 		{
-			message:   &planpb.PlanNode{},
-			reduction: `vector_anns query output_field_ids dynamic_fields scorers score_option querynode_function_chains`,
-			other:     `predicates plan_options namespace`,
+			message: &planpb.PlanNode{},
+			reduction: `vector_anns query output_field_ids dynamic_fields scorers score_option querynode_function_chains
+				projection_items`,
+			other: `predicates plan_options namespace`,
 		},
 		{
 			message:   &planpb.QueryPlanNode{},

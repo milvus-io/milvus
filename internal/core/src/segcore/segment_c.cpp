@@ -1110,8 +1110,15 @@ WorthCarryingAsArrow(const milvus::DataArray& fd) {
 // Moving rather than copying is what the aliasing depends on: Swap transfers
 // the inner buffers, so the payload is never duplicated and its address is the
 // one Arrow will point at.
+// Projection items (virtual columns) stay in the header like system fields:
+// they have no schema entry for the Arrow conversion to look up.
 std::shared_ptr<RetrieveUserColumns>
-PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
+PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results,
+                        const milvus::query::RetrievePlan* plan) {
+    auto stays_in_header = [plan](milvus::FieldId field_id) {
+        return milvus::SystemProperty::Instance().IsSystem(field_id) ||
+               plan->FindProjectionItem(field_id) != nullptr;
+    };
     auto holder = std::make_shared<RetrieveUserColumns>();
     auto* fields_data = results->mutable_fields_data();
     milvus::proto::segcore::RetrieveResults retained;
@@ -1136,8 +1143,7 @@ PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
     // is something this function can repair.
     bool any_retained = false;
     for (const auto& fd : *fields_data) {
-        if (milvus::SystemProperty::Instance().IsSystem(
-                milvus::FieldId(fd.field_id())) ||
+        if (stays_in_header(milvus::FieldId(fd.field_id())) ||
             !WorthCarryingAsArrow(fd)) {
             any_retained = true;
             break;
@@ -1151,8 +1157,7 @@ PartitionRetrieveResult(milvus::proto::segcore::RetrieveResults* results) {
         const bool force_retain = !any_retained && first;
         first = false;
 
-        if (force_retain ||
-            milvus::SystemProperty::Instance().IsSystem(field_id) ||
+        if (force_retain || stays_in_header(field_id) ||
             !WorthCarryingAsArrow(fd)) {
             retained.mutable_fields_data()->Add()->Swap(&fd);
             continue;
@@ -1224,149 +1229,6 @@ BuildRetrieveUserColumnBatch(const std::shared_ptr<RetrieveUserColumns>& holder,
                              total_rows);
 }
 
-// QueryScan transports row-sized state in Arrow. The protobuf header retains
-// only scalar statistics. Fixed-width arrays alias moved protobuf storage;
-// their shared owner survives the future and the C result wrapper.
-struct QueryScanColumns : milvus::segcore::ProtoStorageOwner {
-    std::vector<milvus::DataArray> columns;
-    std::vector<std::string> names;
-};
-
-arrow::Result<std::shared_ptr<arrow::Array>>
-BuildQueryElementIndices(const milvus::proto::segcore::RetrieveResults& results,
-                         int64_t rows) {
-    AssertInfo(results.element_indices_size() == rows,
-               "candidate element list count differs from offsets");
-    auto values = std::make_shared<arrow::Int32Builder>();
-    arrow::ListBuilder builder(arrow::default_memory_pool(), values);
-    ARROW_RETURN_NOT_OK(builder.Reserve(rows));
-    int64_t count = 0;
-    for (const auto& list : results.element_indices()) {
-        AssertInfo(list.indices_size() > 0,
-                   "candidate document has no selected elements");
-        AssertInfo(
-            list.indices_size() <= std::numeric_limits<int32_t>::max() - count,
-            "candidate element values exceed Arrow List capacity");
-        count += list.indices_size();
-    }
-    ARROW_RETURN_NOT_OK(values->Reserve(count));
-    for (const auto& list : results.element_indices()) {
-        ARROW_RETURN_NOT_OK(builder.Append());
-        for (auto index : list.indices()) {
-            AssertInfo(index >= 0, "negative candidate element index");
-            ARROW_RETURN_NOT_OK(values->Append(index));
-        }
-    }
-    return builder.Finish();
-}
-
-CRetrieveArrowResult*
-ExportQueryScanResult(
-    std::unique_ptr<milvus::proto::segcore::RetrieveResults> results,
-    const milvus::query::RetrievePlan* plan,
-    bool identities) {
-    auto owner = std::make_shared<QueryScanColumns>();
-    const int64_t rows = results->offset_size();
-    owner->columns.reserve(results->fields_data_size() + 2);
-    auto add = [&](const std::string& name) -> milvus::DataArray& {
-        owner->names.push_back(name);
-        owner->columns.emplace_back();
-        return owner->columns.back();
-    };
-    auto& offsets = add(milvus::segcore::kSegOffsetFieldName);
-    offsets.set_type(milvus::proto::schema::DataType::Int64);
-    offsets.mutable_scalars()->mutable_long_data()->mutable_data()->Swap(
-        results->mutable_offset());
-    if (identities) {
-        const auto pk = plan->schema_->get_primary_field_id();
-        AssertInfo(pk.has_value(), "identity export requires a primary key");
-        auto& ids = add("$id");
-        const auto type = (*plan->schema_)[*pk].get_data_type();
-        if (type == milvus::DataType::INT64) {
-            AssertInfo(results->ids().int_id().data_size() == rows,
-                       "identity PK count differs from offsets");
-            ids.set_type(milvus::proto::schema::DataType::Int64);
-            ids.mutable_scalars()->mutable_long_data()->Swap(
-                results->mutable_ids()->mutable_int_id());
-        } else {
-            AssertInfo(type == milvus::DataType::VARCHAR &&
-                           results->ids().str_id().data_size() == rows,
-                       "invalid identity string PK layout");
-            ids.set_type(milvus::proto::schema::DataType::VarChar);
-            ids.mutable_scalars()->mutable_string_data()->Swap(
-                results->mutable_ids()->mutable_str_id());
-        }
-        AssertInfo(
-            results->fields_data_size() == 1 &&
-                results->fields_data(0).field_id() == TimestampFieldID.get() &&
-                results->fields_data(0).scalars().long_data().data_size() ==
-                    rows,
-            "identity timestamp column does not match offsets");
-        add("$timestamp").Swap(results->mutable_fields_data(0));
-    }
-    results->clear_ids();
-    results->clear_fields_data();
-    std::vector<std::shared_ptr<arrow::Field>> fields;
-    std::vector<std::shared_ptr<arrow::Array>> arrays;
-    for (size_t i = 0; i < owner->columns.size(); ++i) {
-        auto converted = milvus::segcore::FieldDataToArrow(
-            owner->names[i], owner->columns[i], rows, false, owner);
-        if (!converted.ok()) {
-            ThrowInfo(milvus::segcore::ArrowExportErrorCode(converted.status()),
-                      "failed to build QueryScan column: {}",
-                      converted.status().ToString());
-        }
-        auto array = converted->second;
-        fields.push_back(arrow::field(owner->names[i], array->type(), false));
-        arrays.push_back(std::move(array));
-        // Strings are copied by FieldDataToArrow, unlike fixed-width columns.
-        // Do not retain the old string payload through the offset buffer owner.
-        if (owner->columns[i].type() ==
-            milvus::proto::schema::DataType::VarChar) {
-            milvus::DataArray released;
-            released.Swap(&owner->columns[i]);
-        }
-    }
-    if (results->element_level()) {
-        auto lists = BuildQueryElementIndices(*results, rows);
-        if (!lists.ok()) {
-            ThrowInfo(milvus::segcore::ArrowExportErrorCode(lists.status()),
-                      "failed to build QueryScan element indices: {}",
-                      lists.status().ToString());
-        }
-        arrays.push_back(std::move(lists).ValueOrDie());
-        fields.push_back(
-            arrow::field(milvus::segcore::kQueryElementIndicesFieldName,
-                         arrow::list(arrow::int32()),
-                         false));
-        results->clear_element_indices();
-    } else {
-        AssertInfo(results->element_indices_size() == 0,
-                   "document candidate result contains element indices");
-    }
-    auto batch = arrow::RecordBatch::Make(
-        arrow::schema(std::move(fields)), rows, std::move(arrays));
-    // Allocate the C structs under RAII, including allocation-failure paths.
-    auto schema = std::make_unique<ArrowSchema>();
-    auto array = std::make_unique<ArrowArray>();
-    auto cleanup = folly::makeGuard([&] {
-        MilvusGoArrowArrayRelease(array.get());
-        MilvusGoArrowSchemaRelease(schema.get());
-    });
-    auto status = arrow::ExportRecordBatch(*batch, array.get(), schema.get());
-    if (!status.ok()) {
-        ThrowInfo(milvus::segcore::ArrowExportErrorCode(status),
-                  "failed to export QueryScan batch: {}",
-                  status.ToString());
-    }
-    auto out = std::make_unique<CRetrieveArrowResult>();
-    out->header = CreateLeakedCRetrieveResultFromProto(std::move(results));
-    out->array = array.release();
-    out->schema = schema.release();
-    cleanup.dismiss();
-    return out.release();
-}
-
 }  // namespace
 
 // CRetrieveArrowResult owns its header blob and both Arrow C structs through
@@ -1423,8 +1285,7 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
             CheckExternalFieldsInLoadedManifest(
                 plan->schema_, internal_segment, plan->access_entries_);
 
-            // Ordinary Arrow retrieval needs user columns. Candidate mode
-            // ignores this flag and returns only offsets and scalar stats.
+            // Arrow retrieval carries the user columns.
             auto results =
                 internal_segment->Retrieve(&trace_ctx,
                                            plan,
@@ -1435,10 +1296,6 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
                                            consistency_level,
                                            collection_ttl,
                                            entity_ttl_physical_time_us);
-
-            if (plan->mode_ == milvus::query::RetrieveMode::Candidates) {
-                return ExportQueryScanResult(std::move(results), plan, false);
-            }
 
             // The routing precondition -- no aggregation, no
             // ignore_non_pk -- is enforced in Go by
@@ -1511,7 +1368,7 @@ AsyncRetrieveAsArrow(CTraceContext c_trace,
             // the user columns' protobuf buffers, so those buffers must already
             // be owned by something that outlives the export. Partitioning
             // afterwards would free them while Arrow still referenced them.
-            auto user_columns = PartitionRetrieveResult(results.get());
+            auto user_columns = PartitionRetrieveResult(results.get(), plan);
             auto batch_result =
                 BuildRetrieveUserColumnBatch(user_columns, plan, total_rows);
             // Classify at the throw site. The copy paths -- every nullable
@@ -1572,23 +1429,19 @@ DeleteRetrieveArrowResult(CRetrieveArrowResult* result) {
     delete result;
 }
 
-template <bool identities_only>
-static CFuture*
-AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
-                           CSegmentInterface c_segment,
-                           CRetrievePlan c_plan,
-                           int64_t* offsets,
-                           int64_t len,
-                           bool identity_take_allowed) {
+CFuture*
+AsyncRetrieveByOffsets(CTraceContext c_trace,
+                       CSegmentInterface c_segment,
+                       CRetrievePlan c_plan,
+                       int64_t* offsets,
+                       int64_t len) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
-    using Result = std::
-        conditional_t<identities_only, CRetrieveArrowResult, CRetrieveResult>;
-    auto future = milvus::futures::Future<Result>::async(
+    auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, offsets, len, identity_take_allowed](
+        [c_trace, segment, plan, offsets, len](
             folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
@@ -1609,48 +1462,12 @@ AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
                 plan->schema_, internal_segment, plan->access_entries_);
 
             auto retrieve_result =
-                identities_only
-                    ? internal_segment->RetrieveIdentitiesByOffsets(
-                          &trace_ctx,
-                          plan,
-                          offsets,
-                          len,
-                          identity_take_allowed,
-                          cancel_token)
-                    : segment->Retrieve(
-                          &trace_ctx, plan, offsets, len, cancel_token);
-
-            if constexpr (identities_only) {
-                return ExportQueryScanResult(
-                    std::move(retrieve_result), plan, true);
-            } else {
-                return CreateLeakedCRetrieveResultFromProto(
-                    std::move(retrieve_result));
-            }
+                segment->Retrieve(&trace_ctx, plan, offsets, len, cancel_token);
+            return CreateLeakedCRetrieveResultFromProto(
+                std::move(retrieve_result));
         });
     return static_cast<CFuture*>(static_cast<void*>(
         static_cast<milvus::futures::IFuture*>(future.release())));
-}
-
-CFuture*
-AsyncRetrieveByOffsets(CTraceContext trace,
-                       CSegmentInterface segment,
-                       CRetrievePlan plan,
-                       int64_t* offsets,
-                       int64_t len) {
-    return AsyncRetrieveByOffsetsImpl<false>(
-        trace, segment, plan, offsets, len, false);
-}
-
-CFuture*
-AsyncRetrieveIdentitiesByOffsets(CTraceContext trace,
-                                 CSegmentInterface segment,
-                                 CRetrievePlan plan,
-                                 int64_t* offsets,
-                                 int64_t len,
-                                 bool take_for_output_allowed) {
-    return AsyncRetrieveByOffsetsImpl<true>(
-        trace, segment, plan, offsets, len, take_for_output_allowed);
 }
 
 int64_t

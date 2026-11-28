@@ -61,10 +61,6 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
-	emptyComputed, err := prepareComputedResults(results)
-	if err != nil {
-		return nil, err
-	}
 
 	// Filter out empty results and extract timestamps
 	type validEntry struct {
@@ -83,7 +79,7 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{}}, nil
 	}
 
 	// No single-result shortcut: even a single result may contain duplicate PKs.
@@ -135,7 +131,7 @@ func (op *DeduplicatePKOperator) Run(ctx context.Context, span trace.Span, input
 	}
 
 	if len(selectedRows) == 0 {
-		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMoreResult}}, nil
 	}
 
 	merged, err := buildMergedRetrieveResults(origResults, selectedRows, op.schema)
@@ -185,10 +181,6 @@ func (op *ConcatAndCheckPKOperator) Run(ctx context.Context, span trace.Span, in
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
-	emptyComputed, err := prepareComputedResults(results)
-	if err != nil {
-		return nil, err
-	}
 
 	// Filter out empty results, collecting HasMoreResult from all inputs including empty ones.
 	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
@@ -204,7 +196,7 @@ func (op *ConcatAndCheckPKOperator) Run(ctx context.Context, span trace.Span, in
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMoreResult}}, nil
 	}
 
 	if len(validResults) == 1 {

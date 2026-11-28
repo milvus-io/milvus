@@ -89,7 +89,6 @@ set(MILVUS_TEST_FILES
         )
 
 set(INDEX_TEST_FILES
-        ${CMAKE_HOME_DIRECTORY}/src/grep/SegmentGrepTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/IndexLoadContextTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/segcore/json_stats/BsonInvertedIndexTranslatorTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/segcore/indexing/FieldIndexCapabilityTest.cpp

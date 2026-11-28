@@ -313,6 +313,38 @@ Plan::CreateSession() const {
     }
 }
 
+Session
+Plan::CreateSession(const LineSelection& selection) const {
+    if (!handle_) {
+        throw GrepError(Status::InvalidArgument,
+                        Operation::CreateSession,
+                        "plan has been moved from");
+    }
+    MgGrepError error{};
+    MgGrepSession* raw = nullptr;
+    const MgGrepLineSelection c_selection{selection.max_count.has_value(),
+                                          selection.max_count.value_or(0),
+                                          selection.before_context,
+                                          selection.after_context};
+    auto status = mg_grep_session_create_with_selection(
+        handle_.get(), &c_selection, &raw, &error);
+    SessionHandle handle(raw);
+    CheckStatus(status, Operation::CreateSession, error);
+    if (!handle) {
+        throw GrepError(Status::InternalError,
+                        Operation::CreateSession,
+                        "successful session creation returned NULL");
+    }
+    try {
+        return Session(
+            std::make_shared<detail::SessionState>(std::move(handle)));
+    } catch (const std::bad_alloc&) {
+        throw GrepError(Status::AllocationError,
+                        Operation::CreateSession,
+                        "C++ session state allocation failed");
+    }
+}
+
 std::string
 Plan::ConditionPayload() const {
     if (!handle_) {

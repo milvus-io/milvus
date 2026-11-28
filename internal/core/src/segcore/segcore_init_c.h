@@ -44,6 +44,14 @@ SegcoreSetEnableGeometryCache(const bool);
 void
 SegcoreSetEnableGISSplitFusion(const bool);
 
+// Compile budgets and text read batch of the grep filter predicate and the
+// GREP_MATCHES output item, and the byte cap of one GREP_MATCHES column.
+void
+SegcoreSetGrepLimits(const uint64_t max_regex_bytes,
+                     const uint64_t max_dfa_cache_bytes,
+                     const int64_t batch_size,
+                     const uint64_t max_result_bytes);
+
 void
 SegcoreSetScanCursorOwnsPin(const bool);
 

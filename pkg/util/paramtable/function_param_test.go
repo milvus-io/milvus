@@ -131,7 +131,6 @@ func TestGrepConfigValidationAndRefresh(t *testing.T) {
 		{&params.FunctionCfg.GrepMaxRegexBytes, 10485760, false},
 		{&params.FunctionCfg.GrepMaxDFACacheBytes, 8388608, false},
 		{&params.FunctionCfg.GrepBatchSize, 128, false},
-		{&params.FunctionCfg.GrepMaxScanRows, 0, true},
 	} {
 		t.Run(tc.item.Key, func(t *testing.T) {
 			assert.Equal(t, tc.fallback, tc.item.GetAsInt64())

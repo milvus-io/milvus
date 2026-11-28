@@ -141,7 +141,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
 		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
 	}
-	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(data.GetFieldsData(), nil, groupFields).RowSize
+	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(data.GetFieldsData(), groupFields).RowSize
 	rowIndex := int64(0)
 	for queryIndex, count := range data.GetTopks() {
 		for i := int64(0); i < count; i++ {

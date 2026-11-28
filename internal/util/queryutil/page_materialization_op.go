@@ -53,14 +53,9 @@ func (op *pkPageOperator) Run(ctx context.Context, span trace.Span, inputs ...an
 	defer sp.End()
 
 	rawResults := inputs[0].([]*internalpb.RetrieveResults)
-	// Validate before filtering so empty shards retain their declared outputs.
-	emptyComputed, err := prepareComputedResults(rawResults)
-	if err != nil {
-		return nil, err
-	}
 	results, hasMore := filterPKResults(rawResults)
 	if len(results) == 0 {
-		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{}}, nil
 	}
 	if len(results) == 1 {
 		// Preserve the existing single-source validation contract: the proxy
@@ -73,7 +68,7 @@ func (op *pkPageOperator) Run(ctx context.Context, span trace.Span, inputs ...an
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMore, ComputedResults: emptyComputed}}, nil
+		return []any{&internalpb.RetrieveResults{HasMoreResult: hasMore}}, nil
 	}
 
 	window := op.page.selectRowWindow(results, rows)
@@ -84,7 +79,7 @@ func (op *pkPageOperator) Run(ctx context.Context, span trace.Span, inputs ...an
 		return nil, err
 	}
 	if window.start == window.end {
-		return []any{&internalpb.RetrieveResults{ElementLevel: result.GetElementLevel(), ComputedResults: result.GetComputedResults()}}, nil
+		return []any{&internalpb.RetrieveResults{ElementLevel: result.GetElementLevel()}}, nil
 	}
 
 	if result.GetElementLevel() {

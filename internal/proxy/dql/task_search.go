@@ -123,6 +123,8 @@ type SearchTask struct {
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
+	outputProjection       *outputProjection
+	virtualColumnStash     *virtualColumnStash
 	highlighter            Highlighter
 	resultBuf              *typeutil.ConcurrentSet[*internalpb.SearchResults]
 	reducedResult          *milvuspb.SearchResults
@@ -380,7 +382,11 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	}
 
 	var aggs []agg.AggregateBase
-	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	binding, err := bindOutputFields(t.request.OutputFields, t.schema, true)
+	if binding != nil {
+		t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly = binding.resultFieldNames, binding.userOutputFields, binding.userDynamicFields, binding.aggregates, binding.userRequestedPkFieldExplicitly
+		t.outputProjection = binding.projection
+	}
 	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, t.featureSink())
 	if err != nil {
 		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
@@ -443,6 +449,10 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	}
 	if err != nil {
 		log.Debug(ctx, "init search request failed", mlog.Err(err))
+		return err
+	}
+	if err = t.validateVirtualColumns(); err != nil {
+		log.Debug(ctx, "virtual column is not available for the request", mlog.Err(err))
 		return err
 	}
 
@@ -583,6 +593,12 @@ func (t *SearchTask) initSearchAggregation() error {
 		return merr.WrapErrParameterInvalidMsg("search aggregation is not supported for hybrid search")
 	}
 
+	// An aggregation response is built from buckets, not from rows, so a
+	// virtual column has no value to return.
+	if t.outputProjection != nil && len(t.outputProjection.virtualItems) > 0 {
+		return merr.WrapErrParameterInvalidMsg("virtual column %s is not available with search_aggregation", t.outputProjection.virtualItems[0].name)
+	}
+
 	if t.request.GetHighlighter() != nil {
 		return merr.WrapErrParameterInvalidMsg("highlighter and search_aggregation cannot be used simultaneously")
 	}
@@ -693,7 +709,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	// Parse order_by_fields from main search params
-	if t.orderByFields, err = parseOrderByFields(t.request.GetSearchParams(), t.schema.CollectionSchema); err != nil {
+	if t.orderByFields, err = parseOrderByFields(t.request.GetSearchParams(), t.schema.CollectionSchema, t.outputProjection); err != nil {
 		log.Error(ctx, "parseOrderByFields failed", mlog.Err(err))
 		return err
 	}
@@ -887,6 +903,10 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 		t.retainRerankDynamicFields(plan)
 		plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+		// The scores of a hybrid result come from the fusion, so $distance is
+		// never the final Scores.
+		t.outputProjection.configureSearch(t.needRequery, false)
+		plan.ProjectionItems = t.outputProjection.planItems(true)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 		internalSubReq.SerializedExprPlan, filterPlanSize, err = MarshalPlanWithMembershipFilterSizeLimit(plan, filterPlanSize)
@@ -1234,6 +1254,23 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	}
 	t.retainRerankDynamicFields(plan)
 	plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
+	// $distance(x) of a single-field Search means $distance; resolve it
+	// before the plan is given its projection items.
+	if annsField, fieldErr := t.schema.SchemaHelper.GetFieldFromID(queryInfo.GetQueryFieldId()); fieldErr == nil {
+		if err := t.outputProjection.resolveSingleSearchArguments(annsField.GetName()); err != nil {
+			return err
+		}
+	}
+	// The final Scores are the distances of the vector search unless a
+	// rerank, a Boost scorer in the plan (it runs in segcore and leaves no
+	// rerank on the proxy), a score-writing function chain or an aggregation
+	// produces them. order_by does not change that: it moves the scores with
+	// the rows (orderByOperator.reorderResults).
+	scoresAreDistances := t.rerankMeta == nil && t.request.GetFunctionScore() == nil && len(plan.GetScorers()) == 0 &&
+		t.aggCtx == nil && !chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains())
+	// The order_by pipeline always requeries, whatever the requery policy says.
+	t.outputProjection.configureSearch(t.needRequery || len(t.orderByFields) > 0, scoresAreDistances)
+	plan.ProjectionItems = t.outputProjection.planItems(true)
 	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
 	// Propagate agg-path overrides into queryInfo BEFORE plan serialization so
@@ -1404,7 +1441,7 @@ func (t *SearchTask) tryGeneratePlan(
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.largeTopKEnabled)
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams, t.largeTopKEnabled, t.outputProjection)
 	if err != nil {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
@@ -2190,11 +2227,15 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	}
 	if reducedResult != nil {
 		fillFieldNames(t.schema.CollectionSchema, reducedResult.GetResults())
+		// RunFromReduced skips the reduce operator, which is where the Batch
+		// path records the virtual columns of the reduced result.
+		t.getVirtualColumnStash().capture([]*milvuspb.SearchResults{reducedResult}, []searchScoreInfo{t.reducedScoreInfo})
 		t.result, t.storageCost, err = pipeline.RunFromReduced(ctx, sp, []*milvuspb.SearchResults{reducedResult}, []searchScoreInfo{t.reducedScoreInfo}, storageCost)
 	} else if reducedSubResults != nil {
 		for _, result := range reducedSubResults {
 			fillFieldNames(t.schema.CollectionSchema, result.GetResults())
 		}
+		t.getVirtualColumnStash().capture(reducedSubResults, t.reducedSubScoreInfos)
 		t.result, t.storageCost, err = pipeline.RunFromReduced(ctx, sp, reducedSubResults, t.reducedSubScoreInfos, storageCost)
 	} else {
 		t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost)
@@ -2237,6 +2278,23 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 		}
 		t.result.Results.FieldsData = append(t.result.Results.FieldsData, pkFieldData)
 	}
+	if !t.outputProjection.empty() {
+		if t.result.Results.FieldsData, err = t.outputProjection.completeQueryNodeColumns(t.result.Results.FieldsData, true, typeutil.GetSizeOfIDs(t.result.GetResults().GetIds())); err != nil {
+			log.Warn(ctx, "fail to complete virtual columns", mlog.Err(err))
+			return err
+		}
+		t.outputProjection.appendSearchScoreColumns(t.result.Results)
+		if err = t.outputProjection.appendSubRequestColumns(t.result.Results, t.getVirtualColumnStash()); err != nil {
+			log.Warn(ctx, "fail to build per-sub-request virtual columns", mlog.Err(err))
+			return err
+		}
+		t.result.Results.FieldsData = t.outputProjection.apply(t.result.Results.FieldsData)
+		// The primary key requested only under an alias is not also listed
+		// under its own name.
+		if t.outputProjection.renamed(primaryFieldSchema.GetName()) {
+			t.result.Results.OutputFields = lo.Without(t.result.Results.OutputFields, primaryFieldSchema.GetName())
+		}
+	}
 	t.result.Results.PrimaryFieldName = primaryFieldSchema.GetName()
 	if t.isIterator && len(t.queryInfos) == 1 && t.queryInfos[0] != nil {
 		if iterInfo := t.queryInfos[0].GetSearchIteratorV2Info(); iterInfo != nil {
@@ -2246,6 +2304,11 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
+	// "$distance AS distance" selects the raw distance as the built-in
+	// similarity value of every hit. This is the last change to Scores: the
+	// $score columns and the iterator bound above are taken from the final
+	// score.
+	t.outputProjection.overwriteScoresWithDistance(t.result.Results)
 
 	fieldsData := t.result.GetResults().GetFieldsData()
 	for i, fieldData := range fieldsData {
@@ -2453,5 +2516,57 @@ func (t *SearchTask) OnEnqueue() error {
 	t.Base = commonpbutil.NewMsgBase()
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+// getVirtualColumnStash returns the request's stash for virtual columns
+// computed on the QueryNodes, or nil when the request has none. The reduce
+// operators fill it and the end operator reads it.
+func (t *SearchTask) getVirtualColumnStash() *virtualColumnStash {
+	if t.virtualColumnStash == nil {
+		t.virtualColumnStash = newVirtualColumnStash(t.outputProjection.searchRowItemIDs(), t.outputProjection.hasSubRequestColumns())
+	}
+	return t.virtualColumnStash
+}
+
+// validateVirtualColumns rejects virtual columns that have no value for this
+// Search. A virtual column without a value is an error; it is never returned
+// as 0 or NULL.
+func (t *SearchTask) validateVirtualColumns() error {
+	if t.outputProjection == nil || len(t.outputProjection.virtualItems) == 0 {
+		return nil
+	}
+	if t.GetIsAdvanced() {
+		targets := make([]subRequestTarget, len(t.queryInfos))
+		for i, queryInfo := range t.queryInfos {
+			fieldID := queryInfo.GetQueryFieldId()
+			if field, err := t.schema.SchemaHelper.GetFieldFromID(fieldID); err == nil {
+				targets[i].annsField = field.GetName()
+			}
+			_, isBM25 := getBM25FunctionOfAnnsField(fieldID, t.schema.GetFunctions())
+			targets[i].isBM25 = isBM25 || queryInfo.GetMetricType() == metric.BM25
+		}
+		if err := t.outputProjection.resolveSubRequests(targets); err != nil {
+			return err
+		}
+	}
+	for _, item := range t.outputProjection.virtualItems {
+		if item.argKind != planparserv2.VirtualColumnNoArg {
+			if !t.GetIsAdvanced() {
+				return merr.WrapErrParameterInvalidMsg("virtual column %s is only available in hybrid search", item.text())
+			}
+			continue
+		}
+		if item.column != planparserv2.VirtualColumnDistance {
+			continue
+		}
+		if t.GetIsAdvanced() {
+			return merr.WrapErrParameterInvalidMsg("virtual column $distance is not available in hybrid search without an argument: " +
+				"use $distance(x) to select a sub-request by vector field name or position")
+		}
+		if _, isBM25 := getBM25FunctionOfAnnsField(t.FieldId, t.schema.GetFunctions()); isBM25 || t.MetricType == metric.BM25 {
+			return merr.WrapErrParameterInvalidMsg("virtual column $distance is not available in full-text search: BM25 is a relevance score, not a vector distance; use $score")
+		}
+	}
 	return nil
 }

@@ -152,6 +152,12 @@ func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface
 	return expr
 }
 
+// VisitVirtualColumn rejects virtual columns in filter expressions. Their values
+// do not exist when the filter runs; they are accepted in output_fields only.
+func (v *ParserVisitor) VisitVirtualColumn(ctx *parser.VirtualColumnContext) interface{} {
+	return merr.WrapErrParameterInvalidMsg("virtual column %s cannot be used in a filter expression", ctx.GetName().GetText())
+}
+
 // VisitBoolean translates expr to GenericValue.
 func (v *ParserVisitor) VisitBoolean(ctx *parser.BooleanContext) interface{} {
 	literal := ctx.BooleanConstant().GetText()
@@ -1649,6 +1655,9 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 		return merr.WrapErrParameterInvalidMsg(
 			"%s is not supported; use %s(field, {blob}) with optional type=bloom|roaring",
 			functionName, MembershipMatchFunctionName)
+	}
+	if functionName == GrepFunctionName {
+		return v.visitGrepCall(ctx)
 	}
 	if isMembershipFunctionName(functionName) {
 		// membership_match is compiled on the proxy into a deferred CallExpr that

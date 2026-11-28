@@ -21,6 +21,7 @@
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
+#include "expr/ITypeExpr.h"
 
 namespace milvus::plan {
 class PlanNode;
@@ -75,6 +76,12 @@ struct RetrievePlanNode : PlanNode {
     // Used by FillOrderByResult to set field_id on DataArrays produced by the pipeline.
     std::vector<FieldId> pipeline_field_ids_;
     std::optional<QueryIteratorCursor> query_iterator_cursor_;
+    // Predicates removed from the top-level AND of the filter because the
+    // query only needs its first limit_ rows. They are evaluated on
+    // primary-key-ordered candidates after the operator pipeline, where limit_
+    // is applied, and evaluation stops once enough rows passed. Null when the
+    // whole filter runs in the filter operator. See query/LimitPredicate.h.
+    expr::TypedExprPtr limit_predicate_;
 };
 
 }  // namespace milvus::query

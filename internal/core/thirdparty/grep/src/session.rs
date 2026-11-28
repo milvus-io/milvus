@@ -47,11 +47,19 @@ pub struct Session {
 impl Session {
     pub fn new(plan: &Plan) -> Self {
         let (before, after) = plan.context();
+        Self::with_selection(plan, plan.max_count(), before, after)
+    }
+
+    /// A session that selects lines by the given matching-line cap and
+    /// context instead of the plan's own. The compiled matcher does not
+    /// depend on these three values, so one plan can serve uses that differ
+    /// only in them.
+    pub fn with_selection(plan: &Plan, max_count: Option<u64>, before: u64, after: u64) -> Self {
         let matcher = plan.matcher();
         let searcher = SearcherBuilder::new()
             .before_context(before.min(usize::MAX as u64) as usize)
             .after_context(after.min(usize::MAX as u64) as usize)
-            .max_matches(plan.max_count())
+            .max_matches(max_count)
             .line_number(true)
             .multi_line(false)
             .binary_detection(BinaryDetection::none())

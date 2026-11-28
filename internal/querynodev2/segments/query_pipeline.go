@@ -78,7 +78,7 @@ func RunQNQueryPipeline(
 	selection := &queryutil.ArrowSelection{}
 
 	if retrievePlan.IsIgnoreNonPk() {
-		pipeline, msg, err = buildIgnoreNonPkPipeline(req, schema, segcoreResults, segments, manager, retrievePlan)
+		pipeline, msg, err = buildIgnoreNonPkPipeline(req, schema, plan, segcoreResults, segments, manager, retrievePlan)
 	} else {
 		pipeline, msg, err = buildStandardQNPipeline(req, schema, plan, segcoreResults, arrowRecords, selection)
 	}
@@ -108,6 +108,7 @@ func RunQNQueryPipeline(
 func buildIgnoreNonPkPipeline(
 	req *querypb.QueryRequest,
 	schema *schemapb.CollectionSchema,
+	plan *planpb.PlanNode,
 	segcoreResults []*segcorepb.RetrieveResults,
 	segments []Segment,
 	manager *Manager,
@@ -132,6 +133,16 @@ func buildIgnoreNonPkPipeline(
 	fieldSchemaMap := make(map[int64]*schemapb.FieldSchema, len(allFields))
 	for _, f := range allFields {
 		fieldSchemaMap[f.GetFieldID()] = f
+	}
+	// Projection items are output columns without a schema entry. The Arrow
+	// conversion of the fetched fields skips a column it cannot describe, so
+	// each item is described here by its request-local ID and type.
+	for _, item := range plan.GetProjectionItems() {
+		fieldSchemaMap[item.GetOutputId()] = &schemapb.FieldSchema{
+			FieldID:  item.GetOutputId(),
+			DataType: item.GetDataType(),
+			Nullable: item.GetGrepMatches() != nil,
+		}
 	}
 
 	builder := queryutil.NewPipelineBuilder(queryutil.PipelineNameQNIgnoreNonPk)

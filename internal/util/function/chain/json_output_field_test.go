@@ -6,7 +6,7 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,26 +17,17 @@
 package chain
 
 import (
-	"testing"
+	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
-func TestPrepareQueryOutputSchema(t *testing.T) {
-	pb := queryChainFixture()
-	pb.OutputColumns = []string{"renamed"}
-	pb.Ops[0].Outputs = []string{"renamed"}
-	prepared, err := PrepareQueryChain([]*schemapb.FunctionChain{pb}, querySchemaFixture())
-	require.NoError(t, err)
-	require.True(t, prepared.OutputSchema.Equal(arrow.NewSchema([]arrow.Field{grepOutputField("renamed")}, nil)))
-	// Preparation supplies the schema even without an execution frame or segment.
-	pb.OutputColumns[0] = "changed"
-	require.Equal(t, "renamed", prepared.OutputSchema.Field(0).Name)
-	pb.OutputColumns = nil
-	prepared, err = PrepareQueryChain([]*schemapb.FunctionChain{pb}, querySchemaFixture())
-	require.NoError(t, err)
-	require.Zero(t, prepared.OutputSchema.NumFields())
+// jsonOutputField declares a computed JSON column: Arrow Binary carrying the
+// Milvus logical type in its field metadata.
+func jsonOutputField(name string) arrow.Field {
+	return arrow.Field{Name: name, Type: arrow.BinaryTypes.Binary, Metadata: arrow.NewMetadata(
+		[]string{ArrowDataTypeMetadataKey}, []string{strconv.Itoa(int(schemapb.DataType_JSON))},
+	)}
 }

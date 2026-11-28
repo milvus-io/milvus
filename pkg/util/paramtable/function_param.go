@@ -27,7 +27,6 @@ type functionConfig struct {
 	GrepMaxRegexBytes             ParamItem  `refreshable:"true"`
 	GrepMaxDFACacheBytes          ParamItem  `refreshable:"true"`
 	GrepBatchSize                 ParamItem  `refreshable:"true"`
-	GrepMaxScanRows               ParamItem  `refreshable:"true"`
 	BatchFactor                   ParamItem  `refreshable:"true"`
 	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
@@ -79,7 +78,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "65536",
 		Export:       true,
-		Doc:          "Maximum byte length of GrepOp arguments. Invalid or non-positive values fall back to 65536. Changes apply to newly prepared operators.",
+		Doc:          "Maximum byte length of the argument string of the grep filter predicate and of the GREP_MATCHES output item. Invalid or non-positive values fall back to 65536. Changes apply to new requests.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed <= 0 {
@@ -95,7 +94,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "10485760",
 		Export:       true,
-		Doc:          "Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to newly prepared operators.",
+		Doc:          "Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to new requests.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed <= 0 {
@@ -111,7 +110,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "8388608",
 		Export:       true,
-		Doc:          "Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to newly prepared operators.",
+		Doc:          "Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to new requests.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed <= 0 {
@@ -127,7 +126,7 @@ func (p *functionConfig) init(base *BaseTable) {
 		Version:      "3.1.0",
 		DefaultValue: "128",
 		Export:       true,
-		Doc:          "Candidate text rows per Grep read batch, independent of the matching limit. Invalid or non-positive configuration falls back to 128. Changes apply to newly prepared operators.",
+		Doc:          "Text rows read together by the grep filter predicate and the GREP_MATCHES output item. Invalid or non-positive configuration falls back to 128. Changes apply to new requests.",
 		Formatter: func(value string) string {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed <= 0 {
@@ -137,22 +136,6 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.GrepBatchSize.Init(base.mgr)
-
-	p.GrepMaxScanRows = ParamItem{
-		Key:          "function.grep.maxScanRows",
-		Version:      "3.1.0",
-		DefaultValue: "0",
-		Export:       true,
-		Doc:          "Soft threshold for text rows scanned by Grep per segment. 0 disables it; invalid or negative configuration falls back to 0. Checked between batches, so scans may exceed the threshold. NGRAM-rejected rows and NULLs do not count; Probe scans do. Candidate offsets remain complete. Stopping with unread candidates may produce incomplete results. Changes apply to newly prepared Grep operators.",
-		Formatter: func(value string) string {
-			parsed, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || parsed < 0 {
-				return p.GrepMaxScanRows.DefaultValue
-			}
-			return value
-		},
-	}
-	p.GrepMaxScanRows.Init(base.mgr)
 
 	p.BatchFactor = ParamItem{
 		Key:          "function.batch_factor.",

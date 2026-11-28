@@ -35,6 +35,7 @@
 #include "exec/expression/ExistsExpr.h"
 #include "exec/expression/GISConjunctExpr.h"
 #include "exec/expression/GISFunctionFilterExpr.h"
+#include "exec/expression/GrepFilterExpr.h"
 #include "exec/expression/JsonContainsExpr.h"
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
@@ -491,6 +492,18 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+    } else if (auto grep_expr =
+                   std::dynamic_pointer_cast<const milvus::expr::GrepExpr>(
+                       expr)) {
+        result = std::make_shared<PhyGrepFilterExpr>(
+            std::move(compiled_inputs),
+            grep_expr,
+            "PhyGrepFilterExpr",
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size(),
+            context->get_read_snapshot());
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
@@ -776,6 +789,15 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
             continue;
         }
         if (input->name() == "PhyGISRefineConjunctExpr") {
+            heavy_conjunct_expr.push_back(i);
+            has_heavy_operation = true;
+            continue;
+        }
+
+        // grep reads and matches raw text for every row it is given, so it
+        // runs last and refines only rows that passed every other item. Its
+        // NGRAM bitmap is materialized lazily inside the expression.
+        if (input->name() == "PhyGrepFilterExpr") {
             heavy_conjunct_expr.push_back(i);
             has_heavy_operation = true;
             continue;

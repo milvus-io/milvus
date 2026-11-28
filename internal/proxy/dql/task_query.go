@@ -87,6 +87,7 @@ type QueryTask struct {
 	userOutputFields       []string
 	userDynamicFields      []string
 	userAggregates         []agg.AggregateBase
+	outputProjection       *outputProjection
 
 	resultBuf *typeutil.ConcurrentSet[*internalpb.RetrieveResults]
 
@@ -689,7 +690,12 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 	// parse output fields names
 	originalOuputFields := t.request.GetOutputFields()
-	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
+	binding, err := bindOutputFields(t.request.GetOutputFields(), t.schema, false)
+	if binding != nil {
+		t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates = binding.resultFieldNames, binding.userOutputFields, binding.userDynamicFields, binding.aggregates
+		t.outputProjection = binding.projection
+		originalOuputFields = binding.sourceOutputFields
+	}
 	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, t.featureSink())
 	collectQueryAggregationFeatures(t.userAggregates, t.featureSink())
 	if err != nil {
@@ -709,8 +715,14 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 
 	// Validate ORDER BY fields compatibility with GROUP BY
 	// When GROUP BY is used, ORDER BY can only reference groupBy columns or aggregate results
+	// order_by resolves names in the output scope: an alias first, then the
+	// stored field of that name.
+	orderByFieldSpecs, err := resolveOrderByAliases(t.queryParams.orderByFields, t.outputProjection)
+	if err != nil {
+		return err
+	}
 	if err := validateOrderByFieldsWithGroupBy(
-		t.queryParams.orderByFields,
+		orderByFieldSpecs,
 		t.queryParams.groupByFields,
 		t.userAggregates,
 	); err != nil {
@@ -718,7 +730,7 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	}
 
 	// parse order by fields
-	orderByFields, err := translateOrderByFields(t.queryParams.orderByFields, groupByFieldsIDs, t.schema.CollectionSchema)
+	orderByFields, err := translateOrderByFields(orderByFieldSpecs, groupByFieldsIDs, t.schema.CollectionSchema)
 	if err != nil {
 		return err
 	}
@@ -733,6 +745,11 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		emptyOutputFields := make([]UniqueID, 0)
 		t.OutputFieldsId = emptyOutputFields
 		t.plan.OutputFieldIds = emptyOutputFields
+		// An aggregation returns groups, not rows, so a virtual column has
+		// no value to return.
+		if t.outputProjection != nil && len(t.outputProjection.virtualItems) > 0 {
+			return merr.WrapErrParameterInvalidMsg("virtual column %s is not available in a query with aggregation or group by", t.outputProjection.virtualItems[0].name)
+		}
 		aggFieldMap, err := agg.NewAggregationFieldMap(originalOuputFields, t.queryParams.groupByFields, t.userAggregates)
 		if err != nil {
 			return merr.WrapErrParameterInvalidMsg(err.Error())
@@ -747,6 +764,7 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 		t.OutputFieldsId = outputFieldIDs
 		t.plan.OutputFieldIds = outputFieldIDs
 		t.plan.DynamicFields = t.userDynamicFields
+		t.plan.ProjectionItems = t.outputProjection.planItems(false)
 	}
 
 	if err := t.prepareQueryFunctionChains(); err != nil {
@@ -1318,7 +1336,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		t.GetGroupByFieldIds(),
 		t.GetAggregates(),
 		t.aggregationFieldMap,
-		filterSystemFields(t.GetOutputFieldsId()),
+		append(filterSystemFields(t.GetOutputFieldsId()), t.outputProjection.queryNodeItemIDs(false)...),
 	)
 	if err != nil {
 		log.Warn(ctx, "fail to create query pipeline", mlog.Err(err))
@@ -1342,6 +1360,11 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.result.OutputFields = t.userOutputFields
+	if t.result.FieldsData, err = t.outputProjection.completeQueryNodeColumns(t.result.FieldsData, false, -1); err != nil {
+		log.Warn(ctx, "fail to complete virtual columns", mlog.Err(err))
+		return err
+	}
+	t.result.FieldsData = t.outputProjection.apply(t.result.FieldsData)
 	if !t.reQuery {
 		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
 	}
@@ -1425,19 +1448,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 			return nil, merr.Error(chunk.GetStatus())
 		}
 
-		computed, err := queryutil.PrepareComputedResults([]*internalpb.RetrieveResults{chunk})
-		if err != nil {
-			return nil, err
-		}
-		// Check only headers against accumulated output; never rescan earlier rows.
-		_, computedSources, err := queryutil.IndexComputedResults([]*internalpb.RetrieveResults{output, chunk})
-		if err != nil {
-			return nil, err
-		}
-		if len(output.GetComputedResults()) == 0 {
-			output.ComputedResults = computed
-		}
-		computedSize := queryutil.NewRowSizeCalculator(&internalpb.RetrieveResults{ComputedResults: chunk.GetComputedResults()})
 		rowCount := queryutil.GetRowCount(chunk)
 		if rowCount == 0 && len(output.GetFieldsData()) == 0 && chunk.GetElementLevel() {
 			output.ElementLevel = true
@@ -1474,11 +1484,6 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 			// ORDER BY keeps receiving Chunks for duplicate validation after the
 			// requested window is full, but must not append rows from those Chunks.
 			for row := 0; row < rowCount && (limit <= 0 || collected < limit); row++ {
-				previous := queryutil.GetRowCount(output)
-				for _, column := range output.GetComputedResults() {
-					queryutil.AppendComputedField(column, computedSources[1][column.GetFieldName()], int64(row), previous)
-				}
-				outputSize += computedSize.RowSize(int64(row))
 				fieldIndexes := indexComputer.Compute(int64(row))
 				outputSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), int64(row), fieldIndexes...)
 				if idCount > 0 {

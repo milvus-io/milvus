@@ -31,6 +31,11 @@
 #include "common/Utils.h"
 #include "pb/plan.pb.h"
 
+namespace milvus::grep {
+// Only held by shared_ptr below; see grep/Grep.h.
+class Plan;
+}  // namespace milvus::grep
+
 namespace milvus {
 
 // Only held by shared_ptr below, never dereferenced in this header. Keep it a
@@ -965,6 +970,68 @@ class MatchExpr : public ITypeFilterExpr {
     std::string struct_name_;
     MatchType match_type_;
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
+};
+
+// GrepExpr: line-oriented text match on one VARCHAR/TEXT field
+// (`grep(field, "rg-style arguments")`). The proxy parses the argument string;
+// this node carries the normalized matching specification only. Options that
+// shape returned details (context, a positive matching-line cap) are not part
+// of a predicate.
+//
+// plan_ holds the compiled patterns. Compilation happens once, at plan-proto
+// parse time, and every per-segment physical expression creates its matching
+// session from this one immutable instance. Compiling per segment instead
+// would repeat the regex compilation once per segment of the request.
+class GrepExpr : public ITypeFilterExpr {
+ public:
+    GrepExpr(const ColumnInfo& column,
+             std::vector<std::string> patterns,
+             uint32_t pattern_kind,
+             uint32_t case_mode,
+             uint32_t boundary,
+             bool select_none,
+             std::shared_ptr<const grep::Plan> plan)
+        : column_(column),
+          patterns_(std::move(patterns)),
+          pattern_kind_(pattern_kind),
+          case_mode_(case_mode),
+          boundary_(boundary),
+          select_none_(select_none),
+          plan_(std::move(plan)) {
+        AssertInfo(select_none_ == (plan_ == nullptr),
+                   "grep patterns are compiled unless no row is selected");
+    }
+
+    // This string is the identity used by the filter result caches, so it
+    // carries the complete specification. Patterns are length-prefixed so two
+    // different pattern lists can never render to the same text.
+    std::string
+    ToString() const override {
+        std::string patterns;
+        for (const auto& pattern : patterns_) {
+            patterns += fmt::format("{}:{},", pattern.size(), pattern);
+        }
+        return fmt::format(
+            "GrepExpr:[Column: {}, Kind: {}, Case: {}, Boundary: {}, "
+            "SelectNone: {}, Patterns: [{}]]",
+            column_.ToString(),
+            pattern_kind_,
+            case_mode_,
+            boundary_,
+            select_none_,
+            patterns);
+    }
+
+ public:
+    const ColumnInfo column_;
+    const std::vector<std::string> patterns_;
+    const uint32_t pattern_kind_;
+    const uint32_t case_mode_;
+    const uint32_t boundary_;
+    // A final "-m 0": no row is selected and the patterns are never compiled.
+    const bool select_none_;
+    // Null exactly when select_none_ is set.
+    const std::shared_ptr<const grep::Plan> plan_;
 };
 
 // RoaringFilterExpr: exact integer membership filter (`membership_match`, MRB1).

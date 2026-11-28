@@ -3,7 +3,6 @@ package reducestream
 
 import (
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,36 +43,6 @@ func TestRetrieveUnitByteSizePayload(t *testing.T) {
 	renamed, err := buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
 	require.Equal(t, got, renamed)
-}
-
-func TestRetrieveUnitComputedBytes(t *testing.T) {
-	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
-	result.ComputedResults = []*schemapb.FieldData{{
-		FieldName: "scan.matches", Type: schemapb.DataType_JSON,
-		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-			ValidData: []bool{true, false, true},
-			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
-				[]byte(`[{"content":"foo","starts":[0],"ends":[3]}]`), nil, []byte(`{"text":"` + strings.Repeat("x", 1024) + `"}`),
-			}}},
-		}},
-	}}
-	buffer := orderedChildBuffer{}
-	require.NoError(t, buffer.accept(result))
-	for row := int64(0); row < 3; row++ {
-		unit := queryReduceUnit{result: result, rowIndex: row}
-		got, err := buffer.reducibleByteSize(unit)
-		require.NoError(t, err)
-		require.Equal(t, 16+len(result.ComputedResults[0].GetScalars().GetJsonData().GetData()[row]), got)
-		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = buffer.reducibleByteSize(unit) }))
-		require.NoError(t, err)
-	}
-	threshold := queryChunkBytes(t, result, 2) - 1
-	chunks, err := SplitRetrieveResult(result, threshold)
-	require.NoError(t, err)
-	require.Len(t, chunks, 2)
-	require.Equal(t, []int64{1, 2}, queryTestIDs(chunks[0]))
-	require.Equal(t, []int64{3}, queryTestIDs(chunks[1]))
-	require.Greater(t, queryChunkBytes(t, chunks[1], 1), threshold)
 }
 
 // TestRetrieveUnitByteSizeMixedFields covers variable fields and compact nullable vectors.
@@ -118,7 +87,7 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 	require.Equal(t, 7+8+6+3+16, got)
 	result.Ids = nil                          // Grouped Query Units need not carry a PK.
 	result.FieldsData = result.FieldsData[:3] // Group keys and aggregates are scalar fields.
-	buffer.sizeRow = queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), nil, nil).RowSize
+	buffer.sizeRow = queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), nil).RowSize
 	got, err = buffer.reducibleByteSize(unit)
 	require.NoError(t, err)
 	require.Equal(t, 8+6+3, got)

@@ -21,7 +21,6 @@ package chain
 import (
 	"math"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -2934,93 +2932,6 @@ func BenchmarkFromSearchResultData_ErrorPath(b *testing.B) {
 	}
 }
 
-func TestToRetrieveResults(t *testing.T) {
-	for _, empty := range []bool{false, true} {
-		t.Run(map[bool]string{false: "rows", true: "empty"}[empty], func(t *testing.T) {
-			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-			defer pool.AssertSize(t, 0)
-			rows := int64(2)
-			if empty {
-				rows = 0
-			}
-			builder := NewDataFrameBuilder().SetChunkSizes([]int64{rows})
-			defer builder.Release()
-			add := func(name string, dtype arrow.DataType, input string) {
-				if empty {
-					input = "[]"
-				}
-				values, _, err := array.FromJSON(pool, dtype, strings.NewReader(input))
-				require.NoError(t, err)
-				require.NoError(t, builder.AddColumnFromChunks(name, []arrow.Array{values}))
-			}
-			add(types.IDFieldName, arrow.BinaryTypes.String, `["pk-a","pk-b"]`)
-			add("text", arrow.BinaryTypes.String, `["ordinary",null]`)
-			vectors := array.NewFixedSizeBinaryBuilder(pool, &arrow.FixedSizeBinaryType{ByteWidth: 8})
-			if !empty {
-				vectors.Append(arrow.Float32Traits.CastToBytes([]float32{1, 2}))
-				vectors.Append(arrow.Float32Traits.CastToBytes([]float32{3, 4}))
-			}
-			require.NoError(t, builder.AddColumnFromChunks("vector", []arrow.Array{vectors.NewArray()}))
-			vectors.Release()
-			// Ordinary and computed outputs use their actual DataFrame column names.
-			matches := array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary)
-			if !empty {
-				matches.Append([]byte(`[10,20]`))
-				matches.Append([]byte(`[]`))
-			}
-			require.NoError(t, builder.SetComputedField(grepOutputField("matches")))
-			require.NoError(t, builder.AddColumnFromChunks("matches", []arrow.Array{matches.NewArray()}))
-			matches.Release()
-			add(types.TimestampFieldName, arrow.PrimitiveTypes.Int64, `[7,8]`)
-			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true},
-				{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
-			}}
-			for _, field := range schema.Fields {
-				builder.SetFieldSchema(field.Name, field)
-			}
-			frame := builder.Build()
-			defer func() {
-				if frame != nil {
-					frame.Release()
-				}
-			}()
-
-			result, err := ToRetrieveResults(frame)
-			frame.Release()
-			frame = nil
-			require.NoError(t, err)
-			require.Len(t, result.FieldsData, 3)
-			require.Len(t, result.ComputedResults, 1)
-			require.Equal(t, "matches", result.ComputedResults[0].FieldName)
-			require.Equal(t, int64(common.TimeStampField), result.FieldsData[2].FieldId)
-			if empty {
-				require.NotNil(t, result.Ids.GetStrId())
-				require.Empty(t, result.FieldsData[2].GetScalars().GetLongData().Data)
-				require.Empty(t, result.GetIds().GetStrId().GetData())
-				require.Empty(t, result.ComputedResults[0].GetScalars().GetJsonData().Data)
-			} else {
-				require.Equal(t, []string{"pk-a", "pk-b"}, result.Ids.GetStrId().Data)
-				require.Equal(t, []int64{7, 8}, result.FieldsData[2].GetScalars().GetLongData().Data)
-				require.Equal(t, "ordinary", result.FieldsData[0].GetScalars().GetStringData().Data[0])
-				require.Equal(t, []float32{1, 2, 3, 4}, result.FieldsData[1].GetVectors().GetFloatVector().Data)
-				require.JSONEq(t, `[10,20]`, string(result.ComputedResults[0].GetScalars().GetJsonData().Data[0]))
-			}
-		})
-	}
-}
-
-func TestToRetrieveResultsMissingFrameOrIdentity(t *testing.T) {
-	builder := NewDataFrameBuilder().SetChunkSizes([]int64{0})
-	frame := builder.Build()
-	defer frame.Release()
-	_, err := ToRetrieveResults(nil)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	result, err := ToRetrieveResults(frame)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.Nil(t, result)
-}
-
 func TestSharedFieldExportMultipleChunks(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
 	defer pool.AssertSize(t, 0)
@@ -3047,7 +2958,7 @@ func TestSharedFieldExportMultipleChunks(t *testing.T) {
 		matches = append(matches, b.NewArray())
 		b.Release()
 	}
-	require.NoError(t, builder.SetComputedField(grepOutputField("matches")))
+	require.NoError(t, builder.SetComputedField(jsonOutputField("matches")))
 	require.NoError(t, builder.AddColumnFromChunks("matches", matches))
 	var vectors []arrow.Array
 	for _, values := range [][]float32{{1, 2}, {3, 4}} {
@@ -3071,122 +2982,11 @@ func TestSharedFieldExportMultipleChunks(t *testing.T) {
 	defer frame.Release()
 	search, err := ToSearchResultDataWithOptions(frame, &ExportOptions{SkipColumns: []string{types.TimestampFieldName}})
 	require.NoError(t, err)
-	query, err := ToRetrieveResults(frame)
-	require.NoError(t, err)
-	require.Equal(t, search.Ids, query.Ids)
 	byName := make(map[string]*schemapb.FieldData)
 	for _, field := range search.FieldsData {
 		byName[field.FieldName] = field
 	}
-	require.Equal(t, byName["text"].GetScalars(), query.FieldsData[0].GetScalars())
-	require.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(query.FieldsData[0]))
-	require.Equal(t, byName["vector"].GetVectors(), query.FieldsData[1].GetVectors())
-	require.Equal(t, []float32{1, 2, 3, 4}, query.FieldsData[1].GetVectors().GetFloatVector().Data)
-	require.Equal(t, byName["matches"], query.ComputedResults[0])
-}
-
-// Equal Arrow types are routed by saved declarations, not by a field ID alone.
-func TestToRetrieveResultsClassifiesColumnsByMetadata(t *testing.T) {
-	for _, rows := range []int64{0, 2} {
-		t.Run(strconv.FormatInt(rows, 10), func(t *testing.T) {
-			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-			defer pool.AssertSize(t, 0)
-			builder := NewDataFrameBuilder().SetChunkSizes([]int64{rows})
-			defer builder.Release()
-			for _, name := range []string{types.IDFieldName, "computed", "ordinary", types.TimestampFieldName, types.SegOffsetFieldName, types.ScoreFieldName, types.ElementIndicesFieldName} {
-				b := array.NewInt64Builder(pool)
-				for i := int64(0); i < rows; i++ {
-					b.Append(i + 1)
-				}
-				require.NoError(t, builder.AddColumnFromChunks(name, []arrow.Array{b.NewArray()}))
-				b.Release()
-			}
-			// An ID without a declaration must not turn a computed column into a collection field.
-			builder.SetFieldID("computed", 100)
-			builder.SetFieldID("ordinary", 999)
-			builder.SetFieldSchema("ordinary", &schemapb.FieldSchema{Name: "ordinary", FieldID: 100, DataType: schemapb.DataType_Int64, Nullable: true})
-			frame := builder.Build()
-			defer frame.Release()
-			result, err := ToRetrieveResults(frame)
-			require.NoError(t, err)
-			require.Len(t, result.FieldsData, 2)
-			require.Equal(t, int64(100), result.FieldsData[0].FieldId)
-			require.Equal(t, int64(common.TimeStampField), result.FieldsData[1].FieldId)
-			require.Len(t, result.FieldsData[1].GetScalars().GetLongData().Data, int(rows))
-			require.Len(t, result.ComputedResults, 1)
-			require.Equal(t, "computed", result.ComputedResults[0].FieldName)
-			require.Zero(t, result.ComputedResults[0].FieldId)
-			require.Len(t, result.ComputedResults[0].GetScalars().GetLongData().Data, int(rows))
-			if rows > 0 {
-				require.Equal(t, []bool{true, true}, typeutil.GetFieldDataValidData(result.FieldsData[0]))
-			}
-		})
-	}
-}
-
-func TestToRetrieveResultsRejectsInvalidComputedValues(t *testing.T) {
-	for _, input := range []string{`[null]`} {
-		pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-		builder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
-		ids := array.NewInt64Builder(pool)
-		ids.Append(1)
-		idColumn := ids.NewArray()
-		idColumn.Retain()
-		require.NoError(t, builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idColumn}))
-		require.NoError(t, builder.AddColumnFromChunks(types.TimestampFieldName, []arrow.Array{idColumn}))
-		ids.Release()
-		values, _, err := array.FromJSON(pool, arrow.PrimitiveTypes.Int64, strings.NewReader(input))
-		require.NoError(t, err)
-		require.NoError(t, builder.AddColumnFromChunks("computed", []arrow.Array{values}))
-		frame := builder.Build()
-		_, err = ToRetrieveResults(frame)
-		require.ErrorIs(t, err, merr.ErrServiceInternal)
-		require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-		frame.Release()
-		builder.Release()
-		pool.AssertSize(t, 0)
-	}
-}
-
-func TestToRetrieveResultsRejectsMalformedTimestamp(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		typ   arrow.DataType
-		value string
-	}{
-		{"null", arrow.PrimitiveTypes.Int64, `[null]`},
-		{"wrong_type", arrow.BinaryTypes.String, `["1"]`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
-			defer pool.AssertSize(t, 0)
-			builder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
-			defer builder.Release()
-			ids, _, err := array.FromJSON(pool, arrow.PrimitiveTypes.Int64, strings.NewReader(`[1]`))
-			require.NoError(t, err)
-			require.NoError(t, builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{ids}))
-			ts, _, err := array.FromJSON(pool, tc.typ, strings.NewReader(tc.value))
-			require.NoError(t, err)
-			require.NoError(t, builder.AddColumnFromChunks(types.TimestampFieldName, []arrow.Array{ts}))
-			frame := builder.Build()
-			defer frame.Release()
-			result, err := ToRetrieveResults(frame)
-			require.Nil(t, result)
-			require.ErrorIs(t, err, merr.ErrServiceInternal)
-			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
-		})
-	}
-}
-
-func TestToRetrieveResultsRequiresTimestampForEmptyFrame(t *testing.T) {
-	builder := NewDataFrameBuilder().SetChunkSizes([]int64{0})
-	defer builder.Release()
-	ids := array.NewInt64Builder(memory.DefaultAllocator)
-	require.NoError(t, builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{ids.NewArray()}))
-	ids.Release()
-	frame := builder.Build()
-	defer frame.Release()
-	result, err := ToRetrieveResults(frame)
-	require.Nil(t, result)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, []string{"first", ""}, byName["text"].GetScalars().GetStringData().GetData())
+	require.Equal(t, []float32{1, 2, 3, 4}, byName["vector"].GetVectors().GetFloatVector().Data)
+	require.Len(t, byName["matches"].GetScalars().GetJsonData().GetData(), 2)
 }

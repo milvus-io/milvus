@@ -21,6 +21,7 @@
 #include "PlanNode.h"
 #include "common/Schema.h"
 #include "expr/ITypeExpr.h"
+#include "grep/CompiledPlan.h"
 #include "pb/plan.pb.h"
 #include "rescores/Scorer.h"
 
@@ -155,6 +156,9 @@ class ProtoParser {
     ParseRoaringFilterExprs(const proto::plan::RoaringFilterExpr& expr_pb);
 
     expr::TypedExprPtr
+    ParseGrepExprs(const proto::plan::GrepExpr& expr_pb);
+
+    expr::TypedExprPtr
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
     void
@@ -172,6 +176,9 @@ class ProtoParser {
     // expressions retain the shared strings they consume. Legacy const-ref
     // entry points leave this empty and keep their safe-copy behavior.
     const BloomBlobOwners bloom_blob_owners_;
+    // Compiled Grep patterns of the plan being parsed, shared between a
+    // predicate and an output item that use the same pattern.
+    grep::PlanCompiler grep_plans_;
 };
 
 }  // namespace milvus::query

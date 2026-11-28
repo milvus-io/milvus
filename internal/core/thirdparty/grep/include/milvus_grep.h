@@ -93,6 +93,21 @@ typedef struct {
 } MgGrepError;
 
 /**
+ * Line selection of one session: the matching-line cap and the context of
+ * MgGrepMatchOptions, without the fields that shape the compiled matcher.
+ * Zero initialization means no cap and no context.
+ */
+typedef struct {
+  /**
+   * 0: unlimited; 1: max_count is present (including zero).
+   */
+  uint32_t has_max_count;
+  uint64_t max_count;
+  uint64_t before_context;
+  uint64_t after_context;
+} MgGrepLineSelection;
+
+/**
  * UTF-8 byte interval [start,end) relative to the owning line.content.
  * Empty matches have start == end; endpoints may lie inside UTF-8 code points.
  */
@@ -206,6 +221,19 @@ MgGrepStatus mg_grep_plan_condition(const MgGrepPlan *plan, MgGrepBytes *out, Mg
 MgGrepStatus mg_grep_session_create(const MgGrepPlan *plan,
                                     MgGrepSession **out_session,
                                     MgGrepError *error);
+
+/**
+ * Like mg_grep_session_create, but the session selects lines by `selection`
+ * instead of the cap and context the plan was compiled with. One plan can
+ * then serve sessions that differ only in these values.
+ * Required: plan, selection, out_session. A valid output slot is NULL on failure.
+ * # Safety
+ * plan is a live handle; selection/out_session/error obey the header's memory rules.
+ */
+MgGrepStatus mg_grep_session_create_with_selection(const MgGrepPlan *plan,
+                                                   const MgGrepLineSelection *selection,
+                                                   MgGrepSession **out_session,
+                                                   MgGrepError *error);
 
 /**
  * Sticky, idempotent cancellation, including future batches. NULL is a no-op.

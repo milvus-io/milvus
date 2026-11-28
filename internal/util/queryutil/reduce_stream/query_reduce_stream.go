@@ -164,7 +164,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	}
 	b.chunk = chunk
 	b.cursor = 0
-	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(chunk.GetFieldsData(), chunk.GetComputedResults(), nil).RowSize
+	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(chunk.GetFieldsData(), nil).RowSize
 	return nil
 }
 
@@ -186,10 +186,8 @@ type OrderedReduceStream struct {
 	outputChunks   []*internalpb.RetrieveResults // Query ORDER BY: sorted Chunks prepared after draining workers.
 	outputIndex    int                           // Index of the next prepared ORDER BY Chunk.
 
-	elementLevel      bool                  // Element-level Query: whether input rows represent elements.
-	elementLevelKnown bool                  // Whether an input Chunk established elementLevel.
-	computedFields    []*schemapb.FieldData // QueryScan: empty computed-column templates, without input rows.
-	computedKnown     bool                  // Whether input established the QueryScan computed-column layout.
+	elementLevel      bool // Element-level Query: whether input rows represent elements.
+	elementLevelKnown bool // Whether an input Chunk established elementLevel.
 
 	metadata        *internalpb.RetrieveResults // Metadata accumulated from child Chunks.
 	metadataEmitted bool                        // Whether metadata has been attached to an output Chunk.
@@ -303,7 +301,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	if len(outputBuffer) == 0 {
 		s.finished = true
 		if s.metadata != nil && !s.metadataEmitted {
-			chunk := &internalpb.RetrieveResults{Status: merr.Success(), ComputedResults: s.computedFields}
+			chunk := &internalpb.RetrieveResults{Status: merr.Success()}
 			s.attachMetadata(chunk)
 			if err := s.closeChildren(); err != nil {
 				return nil, err
@@ -413,21 +411,6 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 			s.acceptMetadata(chunk)
 			if err := s.childBuffers[childIndex].accept(chunk); err != nil {
 				return merr.Wrapf(err, "Query child stream %d returned an invalid Chunk", childIndex)
-			}
-			if len(chunk.GetComputedResults()) > 0 || s.childBuffers[childIndex].hasUnit() {
-				if s.computedKnown && len(chunk.GetComputedResults()) != len(s.computedFields) {
-					return merr.WrapErrServiceInternalMsg("inconsistent computed column count")
-				}
-				// Validate each received payload once, even if its rows lose deduplication.
-				computed, err := queryutil.PrepareComputedResults([]*internalpb.RetrieveResults{
-					{ComputedResults: s.computedFields}, chunk,
-				})
-				if err != nil {
-					return err
-				}
-				if !s.computedKnown {
-					s.computedFields, s.computedKnown = computed, true
-				}
 			}
 			if s.childBuffers[childIndex].hasUnit() || chunk.GetElementLevel() {
 				if s.elementLevelKnown && s.elementLevel != chunk.GetElementLevel() {
@@ -764,9 +747,6 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	if chunkBytes <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query Chunk bytes must be positive, got %d", chunkBytes)
 	}
-	if _, err := queryutil.PrepareComputedResults([]*internalpb.RetrieveResults{result}); err != nil {
-		return nil, err
-	}
 	rowCount := queryutil.GetRowCount(result)
 	if rowCount == 0 {
 		return []*internalpb.RetrieveResults{proto.Clone(result).(*internalpb.RetrieveResults)}, nil
@@ -775,7 +755,7 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	chunks := make([]*internalpb.RetrieveResults, 0)
 	units := make([]queryReduceUnit, 0)
 	accumulatedBytes := 0
-	buffer := orderedChildBuffer{sizeRow: queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), result.GetComputedResults(), nil).RowSize}
+	buffer := orderedChildBuffer{sizeRow: queryutil.NewOrderedRowSizeCalculator(result.GetFieldsData(), nil).RowSize}
 	for row := 0; row < rowCount; row++ {
 		unit := queryReduceUnit{result: result, rowIndex: int64(row)}
 		unitBytes, err := buffer.reducibleByteSize(unit)
@@ -861,7 +841,6 @@ func (s *OrderedReduceStream) Close() error {
 
 // closeChildren runs with recvMu held, including on the Recv error path.
 func (s *OrderedReduceStream) closeChildren() error {
-	s.computedFields = nil
 	if s.closed {
 		return s.closeErr
 	}

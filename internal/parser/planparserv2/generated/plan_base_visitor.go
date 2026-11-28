@@ -7,6 +7,22 @@ type BasePlanVisitor struct {
 	*antlr.BaseParseTreeVisitor
 }
 
+func (v *BasePlanVisitor) VisitSelectStar(ctx *SelectStarContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSelectAggregate(ctx *SelectAggregateContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSelectExpr(ctx *SelectExprContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitAggregateCall(ctx *AggregateCallContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -208,6 +224,10 @@ func (v *BasePlanVisitor) VisitIsNull(ctx *IsNullContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitRegexMatch(ctx *RegexMatchContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitVirtualColumn(ctx *VirtualColumnContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

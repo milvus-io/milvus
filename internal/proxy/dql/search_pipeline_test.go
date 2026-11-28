@@ -336,6 +336,7 @@ func (s *SearchPipelineSuite) TestSearchReduceOp() {
 		[]*planpb.QueryInfo{{}},
 		nil,
 		false,
+		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.NoError(err)
@@ -377,6 +378,7 @@ func (s *SearchPipelineSuite) TestHybridSearchReduceOp() {
 		1,
 		[]int64{1},
 		[]*planpb.QueryInfo{{}, {}},
+		nil,
 		nil,
 	}
 	_, err := op.run(context.Background(), s.span, []*internalpb.SearchResults{data1, data2})
@@ -428,6 +430,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 		[]*planpb.QueryInfo{{}},
 		nil,
 		false,
+		nil,
 	}
 
 	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 103, false)
@@ -568,6 +571,7 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 		[]*planpb.QueryInfo{{}},
 		nil,
 		false,
+		nil,
 	}
 
 	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "ts", 101, false)

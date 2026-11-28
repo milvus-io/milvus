@@ -88,16 +88,6 @@ DeleteRetrievePlan(CRetrievePlan plan);
 void
 SetRetrievePlanTakeForOutputAllowed(CRetrievePlan plan, bool allowed);
 
-typedef enum CRetrieveMode {
-    RetrieveModeNormal = 0,
-    RetrieveModeCandidates = 1,
-} CRetrieveMode;
-
-// Set before using the request-local plan concurrently. Does not change its
-// Query limit or output fields. Candidates mode supports plain document Query.
-CStatus
-SetRetrievePlanMode(CRetrievePlan plan, CRetrieveMode mode);
-
 bool
 ShouldIgnoreNonPk(CRetrievePlan plan);
 

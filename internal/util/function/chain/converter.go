@@ -30,8 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/arrowconv"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
-	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -941,81 +939,4 @@ func maxChunkSize(df *DataFrame) int64 {
 		}
 	}
 	return maxSize
-}
-
-// =============================================================================
-// Retrieve Export
-// =============================================================================
-
-// ToRetrieveResults exports every column of the final materialized DataFrame.
-// Collection fields are identified by their saved DataFrame definitions; other
-// non-system columns are computed results. System identities and query element indices use their dedicated wire representation.
-// Callers must prune intermediate columns and reject
-// computed names that collide with collection fields before export. Zero-row
-// frames must retain typed $id, $timestamp and all projected output columns.
-// All payloads are Go-owned and remain valid after the DataFrame is released.
-// Scanning statistics belong to the caller, not to the DataFrame converter.
-func ToRetrieveResults(df *DataFrame) (*segcorepb.RetrieveResults, error) {
-	if df == nil {
-		return nil, merr.WrapErrServiceInternalMsg("missing retrieve DataFrame")
-	}
-	result := &segcorepb.RetrieveResults{}
-	ids, err := exportIDs(df, true)
-	if err != nil {
-		return nil, err
-	}
-	result.Ids = ids
-	if col := df.Column(types.QueryElementIndicesFieldName); col != nil {
-		if !arrow.TypeEqual(col.DataType(), arrow.ListOf(arrow.PrimitiveTypes.Int32)) || int64(col.Len()) != df.NumRows() {
-			return nil, merr.WrapErrServiceInternalMsg("invalid query element indices column")
-		}
-		result.ElementLevel = true
-		for _, chunk := range col.Chunks() {
-			lists := chunk.(*array.List)
-			values := lists.ListValues().(*array.Int32)
-			for i := 0; i < lists.Len(); i++ {
-				start, end := lists.ValueOffsets(i)
-				result.ElementIndices = append(result.ElementIndices, &segcorepb.ElementIndices{
-					Indices: append([]int32(nil), values.Int32Values()[start:end]...),
-				})
-			}
-		}
-	}
-	for _, name := range df.ColumnNames() {
-		if IsFunctionChainSystemName(name) {
-			continue
-		}
-		field, err := exportFieldData(df, name)
-		if err != nil {
-			return nil, err
-		}
-		if !df.IsComputedColumn(name) {
-			result.FieldsData = append(result.FieldsData, field)
-		} else {
-			result.ComputedResults = append(result.ComputedResults, field)
-		}
-	}
-	// The Query wire contract carries row timestamps in FieldsData, not in a
-	// dedicated field. Only the chain system name is meaningful inside the DF.
-	col := df.Column(types.TimestampFieldName)
-	if col == nil {
-		return nil, merr.WrapErrServiceInternalMsg("missing retrieve timestamp column")
-	}
-	for _, chunk := range col.Chunks() {
-		if chunk.NullN() != 0 {
-			return nil, merr.WrapErrServiceInternalMsg("null retrieve timestamp")
-		}
-	}
-	timestamps, err := exportChunkedValues[int64, *array.Int64](col, types.TimestampFieldName)
-	if err != nil {
-		return nil, err
-	}
-	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
-		FieldId: common.TimeStampField,
-		Type:    schemapb.DataType_Int64,
-		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: timestamps}},
-		}},
-	})
-	return result, nil
 }

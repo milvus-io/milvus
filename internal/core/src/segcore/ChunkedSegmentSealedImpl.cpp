@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <numeric>
+#include "grep/GrepMatchesColumn.h"
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "exec/expression/ExprCache.h"
@@ -11143,7 +11144,8 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->field_ids_) {
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             continue;
         }
         if (ignore_non_pk && !is_pk_field(field_id)) {
@@ -11293,6 +11295,13 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
         }
 
         if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            fields_data->AddAllocated(
+                grep::BuildProjectionColumn(this, *item, offsets, size, op_ctx)
+                    .release());
             continue;
         }
 

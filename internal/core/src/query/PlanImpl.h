@@ -19,6 +19,7 @@
 
 #include "Plan.h"
 #include "PlanNode.h"
+#include "ProjectionItem.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Consts.h"
@@ -65,6 +66,27 @@ struct Plan {
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
     bool take_for_output_allowed_{true};
+    // Virtual-column output items of the request. They are not listed in
+    // target_entries_: the QueryNode computes $seg_id and $seg_offset from
+    // its reduce record, and $distance is a column of the per-segment
+    // result export.
+    std::vector<ProjectionItem> projection_items_;
+
+    bool
+    OutputsDistance() const {
+        for (const auto& item : projection_items_) {
+            if (item.column ==
+                proto::plan::VirtualColumn::VirtualColumnDistance) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const ProjectionItem*
+    FindProjectionItem(FieldId id) const {
+        return query::FindProjectionItem(projection_items_, id);
+    }
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;
@@ -118,8 +140,6 @@ struct Placeholder {
     }
 };
 
-enum class RetrieveMode { Normal = 0, Candidates = 1 };
-
 struct RetrievePlan {
  public:
     explicit RetrievePlan(SchemaPtr schema) : schema_(std::move(schema)) {
@@ -130,16 +150,38 @@ struct RetrievePlan {
     std::unique_ptr<RetrievePlanNode> plan_node_;
     // Requested output fields, kept in request order for retrieve results.
     // access_entries_ also includes them for external manifest checks.
+    // Virtual-column output items follow the stored fields; they have no
+    // schema entry, see projection_items_.
     std::vector<FieldId> field_ids_;
     // Fields referenced by retrieve execution or output. For external
     // collections this drives manifest-column checks, not data readiness.
     std::vector<FieldId> access_entries_;
     std::vector<std::string> target_dynamic_fields_;
     bool take_for_output_allowed_{true};
-    // Request-local execution option, set before segment fan-out. Candidate
-    // retrieval ignores the result limit and returns offsets without field data.
-    // Explicit retrieval by offsets continues to use field_ids_ unchanged.
-    RetrieveMode mode_{RetrieveMode::Normal};
+    // Virtual-column output items of the request, also listed in field_ids_.
+    std::vector<ProjectionItem> projection_items_;
+
+    const ProjectionItem*
+    FindProjectionItem(FieldId id) const {
+        return query::FindProjectionItem(projection_items_, id);
+    }
+
+    // field_ids_ without the projection items: the IDs that name schema or
+    // system fields.
+    std::vector<FieldId>
+    StoredFieldIds() const {
+        if (projection_items_.empty()) {
+            return field_ids_;
+        }
+        std::vector<FieldId> ids;
+        ids.reserve(field_ids_.size());
+        for (auto id : field_ids_) {
+            if (FindProjectionItem(id) == nullptr) {
+                ids.push_back(id);
+            }
+        }
+        return ids;
+    }
 };
 
 using PlanPtr = std::unique_ptr<Plan>;

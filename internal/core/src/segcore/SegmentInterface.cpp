@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "grep/GrepMatchesColumn.h"
 #include "SegmentInterface.h"
 
 #include <folly/CancellationToken.h>
@@ -60,17 +61,31 @@ namespace milvus::segcore {
 namespace {
 
 void
-FillEmptyRetrieveFields(const Schema& schema,
+FillEmptyRetrieveFields(const query::RetrievePlan& plan,
                         const std::vector<FieldId>& field_ids,
                         proto::segcore::RetrieveResults& results,
                         int64_t segment_id,
                         milvus::OpContext* op_ctx,
                         bool ignore_non_pk = false,
                         bool fill_ids = false) {
+    const Schema& schema = *plan.schema_;
     auto fields_data = results.mutable_fields_data();
     auto ids = results.mutable_ids();
     auto pk_field_id = schema.get_primary_field_id();
     for (auto field_id : field_ids) {
+        if (auto item = plan.FindProjectionItem(field_id)) {
+            // A virtual column is part of the output only, like any non-pk
+            // field: it is skipped while candidates are being selected.
+            if (!ignore_non_pk) {
+                fields_data->AddAllocated(
+                    (item->grep_matches != nullptr
+                         ? query::BuildEmptyGrepMatchesColumn(*item)
+                         : query::BuildPlacementProjectionColumn(
+                               *item, segment_id, nullptr, 0))
+                        .release());
+            }
+            continue;
+        }
         const bool is_system = SystemProperty::Instance().IsSystem(field_id);
         const bool is_pk =
             pk_field_id.has_value() && pk_field_id.value() == field_id;
@@ -277,24 +292,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
-    const bool candidates = plan->mode_ == query::RetrieveMode::Candidates;
-    AssertInfo(candidates || plan->mode_ == query::RetrieveMode::Normal,
-               "invalid retrieve mode");
-    if (candidates) {
-        AssertInfo(limit_size > 0, "candidate byte budget must be positive");
-        AssertInfo(plan->plan_node_ && plan->plan_node_->plannodes_,
-                   "candidate retrieval requires a plan node");
-        if (plan->plan_node_->has_order_by_ ||
-            plan->plan_node_->query_iterator_cursor_.has_value() ||
-            (dynamic_cast<const plan::MvccNode*>(
-                 plan->plan_node_->plannodes_.get()) == nullptr &&
-             dynamic_cast<const plan::ElementFilterBitsNode*>(
-                 plan->plan_node_->plannodes_.get()) == nullptr)) {
-            ThrowInfo(NotImplemented,
-                      "candidate retrieval supports only plain or "
-                      "element-filter Query");
-        }
-    }
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -303,9 +300,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
     visitor.SetReadSchema(plan->schema_);
-    if (candidates) {
-        visitor.SetRetrieveCandidateBudget(limit_size);
-    }
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;
@@ -317,8 +311,20 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
-    if (!candidates && result_rows > 0) {
+    if (result_rows > 0) {
         for (auto field_id : plan->field_ids_) {
+            if (auto item = plan->FindProjectionItem(field_id)) {
+                // The matching lines of a value are a subset of it; context
+                // and JSON punctuation are charged when the column is built.
+                output_data_size +=
+                    (item->grep_matches != nullptr
+                         ? get_field_avg_size(FieldId(item->grep_matches->spec()
+                                                          .column_info()
+                                                          .field_id()))
+                         : sizeof(int64_t)) *
+                    result_rows;
+                continue;
+            }
             output_data_size += get_field_avg_size(field_id) * result_rows;
         }
     }
@@ -341,18 +347,6 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
             elem_indices->mutable_indices()->Add(indices.begin(),
                                                  indices.end());
         }
-    }
-
-    if (candidates) {
-        // Carry offsets and optional element lists; defer all field reads.
-        milvus::futures::throwIfCancelled(cancel_token);
-        if (results->ByteSizeLong() > static_cast<uint64_t>(limit_size)) {
-            ThrowInfo(InvalidParameter,
-                      "grep candidate result exceeds the retrieve byte budget "
-                      "(limit={} bytes); add a more selective filter",
-                      limit_size);
-        }
-        return results;
     }
 
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
@@ -497,13 +491,18 @@ SegmentInternalInterface::FillOrderByResult(
 
     std::vector<FieldId> fields_to_fetch(deferred.begin(), deferred.end());
     for (auto field_id : plan->field_ids_) {
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             fields_to_fetch.push_back(field_id);
         }
     }
 
     auto fetch_one = [this, plan, &offset_data, topk_count](
                          FieldId field_id, milvus::OpContext* field_ctx) {
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            return grep::BuildProjectionColumn(
+                this, *item, offset_data.data(), topk_count, field_ctx);
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
@@ -552,11 +551,8 @@ SegmentInternalInterface::FillOrderByResult(
     };
 
     if (topk_count == 0) {
-        FillEmptyRetrieveFields(*plan->schema_,
-                                fields_to_fetch,
-                                *results,
-                                get_segment_id(),
-                                op_ctx);
+        FillEmptyRetrieveFields(
+            *plan, fields_to_fetch, *results, get_segment_id(), op_ctx);
     } else {
         auto fetched_fields = FetchOutputFields(
             fields_to_fetch, get_segment_id(), op_ctx, fetch_one);
@@ -607,7 +603,7 @@ SegmentInternalInterface::FillTargetEntry(
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     if (size == 0) {
-        FillEmptyRetrieveFields(*plan->schema_,
+        FillEmptyRetrieveFields(*plan,
                                 plan->field_ids_,
                                 *results,
                                 get_segment_id(),
@@ -663,6 +659,10 @@ SegmentInternalInterface::FillTargetEntry(
 
     auto fetch_one = [this, plan, offsets, size, snapshot](
                          FieldId field_id, milvus::OpContext* field_ctx) {
+        if (auto item = plan->FindProjectionItem(field_id)) {
+            return grep::BuildProjectionColumn(
+                this, *item, offsets, size, field_ctx);
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
@@ -715,7 +715,8 @@ SegmentInternalInterface::FillTargetEntry(
                                           fetched.scanned_remote_bytes);
         results->set_scanned_total_bytes(results->scanned_total_bytes() +
                                          fetched.scanned_total_bytes);
-        if (SystemProperty::Instance().IsSystem(field_id)) {
+        if (SystemProperty::Instance().IsSystem(field_id) ||
+            plan->FindProjectionItem(field_id) != nullptr) {
             fields_data->AddAllocated(col.release());
             continue;
         }
@@ -786,34 +787,6 @@ SegmentInternalInterface::Retrieve(
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
-    return results;
-}
-
-std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::RetrieveIdentitiesByOffsets(
-    tracer::TraceContext* trace_ctx,
-    const query::RetrievePlan* plan,
-    const int64_t* offsets,
-    int64_t size,
-    bool take_for_output_allowed,
-    const folly::CancellationToken& cancel_token) const {
-    std::shared_lock lck(mutex_);
-    milvus::futures::throwIfCancelled(cancel_token);
-    AssertInfo(size >= 0 && (size == 0 || offsets != nullptr),
-               "invalid identity offsets");
-    const auto pk = plan->schema_->get_primary_field_id();
-    AssertInfo(pk.has_value(), "identity retrieval requires a primary key");
-    query::RetrievePlan projection(plan->schema_);
-    projection.field_ids_ = {*pk, TimestampFieldID};
-    projection.take_for_output_allowed_ = take_for_output_allowed;
-    auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    if (size > 0) {
-        results->mutable_offset()->Add(offsets, offsets + size);
-    }
-    milvus::OpContext op_ctx(cancel_token);
-    FillTargetEntry(
-        trace_ctx, &projection, results, offsets, size, true, true, &op_ctx);
-    milvus::futures::throwIfCancelled(cancel_token);
     return results;
 }
 

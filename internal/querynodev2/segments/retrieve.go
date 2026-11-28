@@ -40,10 +40,9 @@ type RetrieveSegmentResult struct {
 	Result  *segcorepb.RetrieveResults
 	Segment Segment
 
-	// Record carries candidate offsets in QueryScan mode, or user output
-	// columns when the ordinary Arrow transport was used;
-	// nil otherwise. Result holds scalar statistics in candidate mode, or
-	// system columns and metadata in ordinary mode. The RECEIVER owns it: whoever consumes a
+	// Record carries the user output columns when the Arrow transport was
+	// used; nil otherwise. Result then holds the system columns and metadata.
+	// The RECEIVER owns it: whoever consumes a
 	// []RetrieveSegmentResult must Release every non-nil Record once it has
 	// materialized the selection, including on error paths.
 	Record arrow.Record
@@ -211,11 +210,6 @@ func shouldEnableIgnoreNonPk(req *querypb.QueryRequest, segmentNum int, planShou
 // instead, and is itself referenced only by its own unit test -- so it was dead
 // code twice over.
 func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan, forceArrow bool) bool {
-	// QueryScan's internal row state is always Arrow; the ordinary output
-	// transport switch does not govern candidate offsets.
-	if plan.IsCandidateMode() {
-		return true
-	}
 	// Same switch as the IgnoreNonPk Arrow path (ignore_non_pk_ops.go): both are
 	// the "hand Arrow across the CGO boundary instead of protobuf" interface, so
 	// they share one operator-facing knob rather than accumulating one per call
