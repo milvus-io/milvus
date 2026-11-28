@@ -37,6 +37,7 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -45,6 +46,7 @@
 #include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/JsonFlatIndex.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "knowhere/comp/index_param.h"
@@ -1638,5 +1640,292 @@ TEST_F(JsonFlatIndexExprTest, TestExistsExpr) {
     EXPECT_FALSE(final[7]);
     EXPECT_FALSE(final[14]);
     EXPECT_FALSE(final[15]);
+}
+
+namespace {
+
+class UnaryExprExecPathProbe : public exec::PhyUnaryRangeFilterExpr {
+ public:
+    using exec::PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+    exec::ExprExecPath
+    Path() {
+        EnsureExecPathDetermined();
+        return exec_path_;
+    }
+};
+
+std::string
+NextPathSelectionCacheKey() {
+    static int64_t next = 0;
+    return fmt::format("json_path_selection_{}", next++);
+}
+
+}  // namespace
+
+// Which JSON path index, if any, a sealed segment uses for a JSON path. The
+// rows hold keys that start with "a" without being "a", and an array under
+// "address".
+class JsonFlatIndexPathSelectionTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+
+        json_data_ = {
+            R"({"a": {"b": "x"}})",
+            R"({"address": "x"})",
+            R"({"address": "y"})",
+            R"({"address": {"city": "x"}})",
+            R"({"ab": "x"})",
+            R"({"a": "x"})",
+            R"({"a": {"dress": "x"}})",
+            R"({"address": ["x"]})",
+            R"({})",
+        };
+        json_field_ =
+            std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+        std::vector<milvus::Json> jsons;
+        for (const auto& json_str : json_data_) {
+            jsons.emplace_back(simdjson::padded_string(json_str));
+        }
+        json_field_->add_json_data(jsons);
+        CreateSegment();
+    }
+
+    void
+    TearDown() override {
+        auto& cache = exec::ExprResCacheManager::Instance();
+        cache.Clear();
+        exec::ExprResCacheManager::SetEnabled(false);
+    }
+
+    // Replaces the segment with one that holds the rows and no index.
+    void
+    CreateSegment() {
+        auto schema = std::make_shared<Schema>();
+        schema->AddDebugField(
+            "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+        json_fid_ = schema->AddDebugField("json", DataType::JSON);
+        schema->set_primary_field_id(i64_fid);
+        segment_ = segcore::CreateSealedSegment(schema);
+
+        auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        auto load_info = PrepareSingleFieldInsertBinlog(
+            1, 1, 1, json_fid_.get(), {json_field_}, cm);
+        segment_->LoadFieldData(load_info);
+    }
+
+    storage::FileManagerContext
+    JsonFileManagerContext() const {
+        auto file_manager_ctx = storage::FileManagerContext();
+        file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+            milvus::proto::schema::JSON);
+        file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(
+            json_fid_.get());
+        file_manager_ctx.fieldDataMeta.field_id = json_fid_.get();
+        return file_manager_ctx;
+    }
+
+    void
+    LoadIndex(std::unique_ptr<index::IndexBase> index,
+              const std::string& nested_path,
+              const std::string& cast_type) {
+        segcore::LoadIndexInfo load_index_info;
+        load_index_info.field_id = json_fid_.get();
+        load_index_info.field_type = DataType::JSON;
+        load_index_info.index_params = {{JSON_PATH, nested_path},
+                                        {JSON_CAST_TYPE, cast_type}};
+        load_index_info.cache_index =
+            CreateTestCacheIndex(NextPathSelectionCacheKey(), std::move(index));
+        segment_->LoadIndex(load_index_info);
+    }
+
+    // Builds a JSON flat index on `nested_path` ("" for the whole field) over
+    // the rows and loads it into the segment.
+    void
+    LoadFlatIndex(const std::string& nested_path) {
+        auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::CreateIndexInfo{
+                .index_type = index::INVERTED_INDEX_TYPE,
+                .json_cast_type = JsonCastType::FromString("JSON"),
+                .json_path = nested_path,
+            },
+            JsonFileManagerContext());
+        auto json_index = std::unique_ptr<index::JsonFlatIndex>(
+            static_cast<index::JsonFlatIndex*>(index.release()));
+        json_index->BuildWithFieldData({json_field_});
+        json_index->finish();
+        json_index->create_reader(milvus::index::SetBitsetSealed);
+        LoadIndex(std::move(json_index), nested_path, "JSON");
+    }
+
+    // Builds an INVERTED index with a VARCHAR cast on `nested_path` over the
+    // rows and loads it into the segment.
+    void
+    LoadVarcharIndex(const std::string& nested_path) {
+        auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
+            index::CreateIndexInfo{
+                .index_type = index::INVERTED_INDEX_TYPE,
+                .json_cast_type = JsonCastType::FromString("VARCHAR"),
+                .json_path = nested_path,
+            },
+            JsonFileManagerContext());
+        auto json_index =
+            std::unique_ptr<index::JsonInvertedIndex<std::string>>(
+                static_cast<index::JsonInvertedIndex<std::string>*>(
+                    index.release()));
+        json_index->BuildWithFieldData({json_field_});
+        json_index->finish();
+        json_index->create_reader(milvus::index::SetBitsetSealed);
+        LoadIndex(std::move(json_index), nested_path, "VARCHAR");
+    }
+
+    // The nested path of the flat index the segment matches with `path`; ""
+    // also when no flat index does.
+    std::string
+    CoveringIndex(std::string_view path) const {
+        return segment_->GetJsonFlatIndexNestedPath(json_fid_, path);
+    }
+
+    std::shared_ptr<expr::UnaryRangeFilterExpr>
+    Equal(std::vector<std::string> path, const std::string& value) const {
+        proto::plan::GenericValue literal;
+        literal.set_string_val(value);
+        return std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(json_fid_, DataType::JSON, std::move(path)),
+            proto::plan::OpType::Equal,
+            literal,
+            std::vector<proto::plan::GenericValue>());
+    }
+
+    exec::ExprExecPath
+    ExecPath(const std::shared_ptr<expr::UnaryRangeFilterExpr>& expr) const {
+        const auto rows = static_cast<int64_t>(json_data_.size());
+        UnaryExprExecPathProbe phy({},
+                                   expr,
+                                   "json-flat-path-selection",
+                                   nullptr,
+                                   segment_.get(),
+                                   rows,
+                                   rows,
+                                   0);
+        return phy.Path();
+    }
+
+    // The rows `expr` selects. UNKNOWN does not select a row.
+    std::vector<int64_t>
+    Select(const expr::TypedExprPtr& expr) const {
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        auto final = query::ExecuteQueryExpr(
+            plan, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+        std::vector<int64_t> rows;
+        for (size_t i = 0; i < final.size(); ++i) {
+            if (final[i]) {
+                rows.push_back(static_cast<int64_t>(i));
+            }
+        }
+        return rows;
+    }
+
+    FieldId json_fid_;
+    std::vector<std::string> json_data_;
+    std::shared_ptr<FieldData<milvus::Json>> json_field_;
+    segcore::SegmentSealedUPtr segment_;
+};
+
+// A flat index on json["a"] answers "/a" and the paths below it, except those
+// that index into an array. "/address" and "/ab" only start with the same
+// characters, so they are read from the raw data. Through the index they
+// would be queried with the relative paths "ddress" and "b", which the
+// executor reads as "dress" and as the root of the indexed subtree:
+// json["address"] == "x" would select {"a": {"dress": "x"}}, and
+// json["ab"] == "x" would select {"a": "x"}.
+TEST_F(JsonFlatIndexPathSelectionTest, NestedIndexCoversOnlyItsSubtree) {
+    using Rows = std::vector<int64_t>;
+    LoadFlatIndex("/a");
+
+    EXPECT_EQ(CoveringIndex("/a"), "/a");
+    EXPECT_EQ(CoveringIndex("/a/b"), "/a");
+    EXPECT_EQ(CoveringIndex("/address"), "");
+    EXPECT_EQ(CoveringIndex("/address/city"), "");
+    EXPECT_EQ(CoveringIndex("/ab"), "");
+    EXPECT_EQ(CoveringIndex("/a/0"), "");
+
+    auto address = Equal({"address"}, "x");
+    EXPECT_EQ(ExecPath(address), exec::ExprExecPath::RawData);
+    EXPECT_EQ(Select(address), Rows({1}));
+    EXPECT_EQ(Select(std::make_shared<expr::LogicalUnaryExpr>(
+                  expr::LogicalUnaryExpr::OpType::LogicalNot, address)),
+              Rows({2}));
+    EXPECT_EQ(Select(std::make_shared<expr::ExistsExpr>(
+                  expr::ColumnInfo(json_fid_, DataType::JSON, {"address"}))),
+              Rows({1, 2, 3, 7}));
+
+    auto city = Equal({"address", "city"}, "x");
+    EXPECT_EQ(ExecPath(city), exec::ExprExecPath::RawData);
+    EXPECT_EQ(Select(city), Rows({3}));
+
+    auto ab = Equal({"ab"}, "x");
+    EXPECT_EQ(ExecPath(ab), exec::ExprExecPath::RawData);
+    EXPECT_EQ(Select(ab), Rows({4}));
+
+    // The index's own path and the paths below it still use the index.
+    auto a = Equal({"a"}, "x");
+    EXPECT_EQ(ExecPath(a), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(Select(a), Rows({5}));
+
+    auto b = Equal({"a", "b"}, "x");
+    EXPECT_EQ(ExecPath(b), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(Select(b), Rows({0}));
+
+    auto dress = Equal({"a", "dress"}, "x");
+    EXPECT_EQ(ExecPath(dress), exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(Select(dress), Rows({6}));
+}
+
+// Tantivy keeps no array positions, so no flat index can answer a path that
+// indexes into an array, such as json["address"][0]; a flat index on the
+// whole field (nested path "") answers every other path. A flat index on
+// json["a"] next to it does not cover the path either.
+TEST_F(JsonFlatIndexPathSelectionTest, ArrayIndexPathsStayOnRawData) {
+    using Rows = std::vector<int64_t>;
+    auto first = Equal({"address", "0"}, "x");
+
+    LoadFlatIndex("");
+    EXPECT_EQ(ExecPath(Equal({"address"}, "x")),
+              exec::ExprExecPath::ScalarIndex);
+    EXPECT_EQ(ExecPath(first), exec::ExprExecPath::RawData);
+    EXPECT_EQ(Select(first), Rows({7}));
+
+    LoadFlatIndex("/a");
+    EXPECT_EQ(ExecPath(first), exec::ExprExecPath::RawData);
+    EXPECT_EQ(Select(first), Rows({7}));
+}
+
+// An exact typed index on an array-index path serves it next to a flat index
+// on the whole field, whichever of the two is loaded first.
+TEST_F(JsonFlatIndexPathSelectionTest, ExactTypedIndexServesArrayIndexPath) {
+    using Rows = std::vector<int64_t>;
+    auto first = Equal({"address", "0"}, "x");
+    for (bool flat_index_first : {true, false}) {
+        CreateSegment();
+        if (flat_index_first) {
+            LoadFlatIndex("");
+            LoadVarcharIndex("/address/0");
+        } else {
+            LoadVarcharIndex("/address/0");
+            LoadFlatIndex("");
+        }
+        EXPECT_EQ(ExecPath(first), exec::ExprExecPath::ScalarIndex)
+            << "flat index first: " << flat_index_first;
+        EXPECT_EQ(Select(first), Rows({7}))
+            << "flat index first: " << flat_index_first;
+    }
 }
 }  // namespace milvus::test
