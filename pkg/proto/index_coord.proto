@@ -73,6 +73,13 @@ message FieldIndex {
     int32 min_schema_version = 4;
 }
 
+// Describes the published artifact; missing historical metadata stays unknown.
+enum IndexEncryptionState {
+    INDEX_ENCRYPTION_UNKNOWN = 0;
+    INDEX_ENCRYPTION_PLAIN = 1;
+    INDEX_ENCRYPTION_ENCRYPTED = 2;
+}
+
 message SegmentIndex {
     int64 collectionID = 1;
     int64 partitionID = 2;
@@ -99,6 +106,7 @@ message SegmentIndex {
     // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
     // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
+    IndexEncryptionState encryption_state = 23;
 }
 
 message RegisterNodeRequest {
@@ -188,6 +196,7 @@ message IndexFilePathInfo {
     int32 current_scalar_index_version = 13;
     IndexStorePathVersion index_store_path_version = 14;
     string index_type = 15;
+    IndexEncryptionState encryption_state = 16;
 }
 
 message SegmentInfo {

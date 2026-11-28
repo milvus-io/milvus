@@ -216,7 +216,8 @@ ScalarIndex<T>::UploadUnified(const Config& config) {
     auto remote_path = remote_prefix + "/" + filename;
     index_files.emplace_back(remote_path, file_size);
 
-    return IndexStats::New(file_size, std::move(index_files));
+    return IndexStats::New(
+        file_size, std::move(index_files), writer->IsEncrypted());
 }
 
 template <typename T>

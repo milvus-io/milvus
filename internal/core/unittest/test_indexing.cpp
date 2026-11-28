@@ -63,6 +63,8 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "nlohmann/json.hpp"
 #include "pb/common.pb.h"
+#include "pb/cgo_msg.pb.h"
+#include "common/protobuf_utils_c.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
 #include "query/SubSearchResult.h"
@@ -2441,4 +2443,26 @@ TEST(ReduceApplyRefinedOrder, MultipleDisjointCycles) {
         /*coarse_distances=*/{0.9f, 0.7f, 0.5f, 0.3f, 0.1f},
         /*initial_offsets=*/{11, 22, 33, 44, 55},
         /*new_distances=*/{0.8f, 0.4f, 0.2f, 1.0f, 0.6f});
+}
+
+TEST(Indexing, IndexStatsEncryptionProjection) {
+    for (const auto state : {std::optional<bool>{},
+                             std::optional<bool>{false},
+                             std::optional<bool>{true}}) {
+        auto stats = index::IndexStats::New(16, {{"packed.v3", 32}}, state);
+        milvus::ProtoLayout layout;
+        stats->SerializeAt(&layout);
+        const auto* wire = reinterpret_cast<const ::ProtoLayout*>(&layout);
+        proto::cgo::IndexStats decoded;
+        ASSERT_TRUE(decoded.ParseFromArray(wire->blob, wire->size));
+        const auto expected =
+            !state.has_value()
+                ? proto::index::INDEX_ENCRYPTION_UNKNOWN
+                : (*state ? proto::index::INDEX_ENCRYPTION_ENCRYPTED
+                          : proto::index::INDEX_ENCRYPTION_PLAIN);
+        EXPECT_EQ(decoded.encryption_state(), expected);
+        ASSERT_EQ(decoded.serialized_index_infos_size(), 1);
+        EXPECT_EQ(decoded.serialized_index_infos(0).file_name(), "packed.v3");
+        EXPECT_EQ(decoded.mem_size(), 16);
+    }
 }

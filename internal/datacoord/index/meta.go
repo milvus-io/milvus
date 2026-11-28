@@ -1109,6 +1109,7 @@ func (m *IndexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		segIdx.CurrentIndexVersion = taskInfo.GetCurrentIndexVersion()
 		segIdx.FinishedUTCTime = uint64(time.Now().Unix())
 		segIdx.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
+		segIdx.EncryptionState = taskInfo.GetEncryptionState()
 		segIdx.IndexStorePathVersion = actualPathVersion
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}

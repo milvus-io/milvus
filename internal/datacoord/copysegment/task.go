@@ -1012,6 +1012,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexVersion:              indexInfo.GetVersion(),
 			CurrentIndexVersion:       indexInfo.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: indexInfo.GetCurrentScalarIndexVersion(),
+			EncryptionState:           indexInfo.GetEncryptionState(),
 			CreatedUTCTime:            uint64(now),
 			FinishedUTCTime:           uint64(now),
 			NumRows:                   numRows,

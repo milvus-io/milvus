@@ -533,6 +533,7 @@ TEST_F(IndexEntryWriterV3Test, SmallMemoryEntryRoundtrip) {
     {
         auto output = CreateOutputStream(file_path);
         IndexEntryDirectStreamWriter writer(output);
+        EXPECT_EQ(writer.IsEncrypted(), std::optional<bool>(false));
         writer.WriteEntry("small_entry", data.data(), data.size());
         writer.Finish();
     }
@@ -1174,6 +1175,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedSmallEntryRoundtrip) {
                                               /*collection_id=*/100,
                                               GetRootPath(),
                                               slice_size);
+        EXPECT_EQ(writer.IsEncrypted(), std::optional<bool>(true));
         writer.WriteEntry("enc_entry", data.data(), data.size());
         writer.Finish();
     }

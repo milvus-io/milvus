@@ -53,6 +53,8 @@ struct LoadIndexInfo {
     index::IndexBasePtr index;
     index::CacheIndexBasePtr cache_index;
     std::string uri;
+    // Missing historical metadata preserves the compatibility estimate.
+    std::optional<bool> encrypted;
     IndexVersion index_engine_version;
     proto::schema::FieldSchema schema;
     int64_t index_size;  // It's the size of index file before compressing

@@ -859,6 +859,7 @@ func buildIndexInfoFromSource(
 			IndexSize:                 int64(srcIndex.GetSerializedSize()),
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
+			EncryptionState:           srcIndex.GetEncryptionState(),
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),

@@ -84,6 +84,16 @@ FillLoadIndexInfoFromProto(const milvus::proto::cgo::LoadIndexInfo& info_proto,
                                         info_proto.index_files().end());
     load_index_info->uri = info_proto.uri();
     load_index_info->index_engine_version = info_proto.index_engine_version();
+    switch (info_proto.encryption_state()) {
+        case milvus::proto::index::INDEX_ENCRYPTION_PLAIN:
+            load_index_info->encrypted = false;
+            break;
+        case milvus::proto::index::INDEX_ENCRYPTION_ENCRYPTED:
+            load_index_info->encrypted = true;
+            break;
+        default:
+            load_index_info->encrypted.reset();
+    }
     auto scalar_version = info_proto.current_scalar_index_version();
     if (scalar_version > 0) {
         load_index_info
@@ -134,7 +144,8 @@ EstimateLoadIndexResourceFromLoadInfo(
         index_params,
         load_index_info->enable_mmap,
         load_index_info->num_rows,
-        load_index_info->dim);
+        load_index_info->dim,
+        load_index_info->encrypted);
 }
 
 }  // namespace

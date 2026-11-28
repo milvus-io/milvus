@@ -1612,6 +1612,7 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 			BuildID:               meta.BuildID,
 			State:                 commonpb.IndexState_Finished,
 			IndexFileKeys:         []string{"file1", "file2"},
+			EncryptionState:       indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN,
 			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 		})
 		assert.NoError(t, err)
@@ -1620,6 +1621,7 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, segIdx.IndexStorePathVersion)
 		assert.Equal(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
+		assert.Equal(t, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, segIdx.EncryptionState)
 	})
 
 	t.Run("actual higher than requested returns error and leaves metadata unchanged", func(t *testing.T) {

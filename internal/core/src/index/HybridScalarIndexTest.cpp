@@ -1549,3 +1549,39 @@ INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackNullBinlog,
 INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HasLackDefaultValueBinlog,
                                HybridIndexTestV4,
                                BitmapType);
+
+TEST(ScalarIndexV3ResourceTest, KnownPlainIgnoresInstalledCipherPlugin) {
+    auto cipher =
+        std::make_shared<milvus::test::CollectionBoundPlannerCipherPlugin>(1);
+    auto& plugins = storage::PluginLoader::GetInstance();
+    plugins.addPluginForTest(cipher);
+    auto& budget = storage::TransientMemoryBudget::GetLoadTransientBudget();
+    const auto old_bytes = budget.CapacityBytes();
+    auto restore = folly::makeGuard([&] {
+        budget.SetCapacityBytes(old_bytes);
+        plugins.unload("CipherPlugin");
+    });
+    budget.SetCapacityBytes(0);
+    constexpr uint64_t bytes = 64 * 1024 * 1024;
+    for (bool mmap : {false, true}) {
+        auto estimate = [&](std::optional<bool> encrypted) {
+            return index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+                DataType::INT64,
+                0,
+                bytes,
+                std::map<std::string, std::string>{
+                    {INDEX_TYPE, ASCENDING_SORT},
+                    {SCALAR_INDEX_ENGINE_VERSION, "3"}},
+                mmap,
+                1000,
+                encrypted);
+        };
+        const auto plain = estimate(false);
+        const auto encrypted = estimate(true);
+        const auto unknown = estimate(std::nullopt);
+        EXPECT_LT(plain.max_memory_cost, encrypted.max_memory_cost);
+        EXPECT_EQ(unknown.max_memory_cost, encrypted.max_memory_cost);
+        EXPECT_EQ(plain.final_memory_cost, encrypted.final_memory_cost);
+        EXPECT_EQ(plain.final_disk_cost, encrypted.final_disk_cost);
+    }
+}

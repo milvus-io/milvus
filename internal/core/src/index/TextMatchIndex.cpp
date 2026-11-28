@@ -178,7 +178,8 @@ TextMatchIndex::UploadUnified(const Config& config) {
             StripTextLogPrefix(file.file_name, base_prefix), file.file_size);
     }
 
-    return IndexStats::New(stats->GetMemSize(), std::move(index_files));
+    return IndexStats::New(
+        stats->GetMemSize(), std::move(index_files), stats->IsEncrypted());
 }
 
 void

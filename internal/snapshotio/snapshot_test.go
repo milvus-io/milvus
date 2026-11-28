@@ -611,3 +611,16 @@ func TestSegmentIndexTypeCompatibility(t *testing.T) {
 		})
 	}
 }
+
+func TestIndexEncryptionSnapshotRoundTrip(t *testing.T) {
+	for _, state := range []indexpb.IndexEncryptionState{indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_PLAIN, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_ENCRYPTED} {
+		segment := &datapb.SegmentDescription{SegmentId: 1, IndexFiles: []*indexpb.IndexFilePathInfo{{BuildID: 10, EncryptionState: state}}}
+		data, err := MarshalSegmentManifest(segment)
+		require.NoError(t, err)
+		restored, err := ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.NoError(t, err)
+		require.Equal(t, state, restored.GetIndexFiles()[0].GetEncryptionState())
+	}
+	require.NotContains(t, AvroSchemaV4(), "encryption_state")
+	require.Equal(t, indexpb.IndexEncryptionState_INDEX_ENCRYPTION_UNKNOWN, AvroToIndexFilePathInfo(AvroIndexFilePathInfo{}).GetEncryptionState())
+}

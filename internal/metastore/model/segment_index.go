@@ -7,19 +7,20 @@ import (
 )
 
 type SegmentIndex struct {
-	SegmentID      int64
-	CollectionID   int64
-	PartitionID    int64
-	NumRows        int64
-	IndexID        int64
-	BuildID        int64
-	NodeID         int64
-	IndexVersion   int64
-	IndexState     commonpb.IndexState
-	FailReason     string
-	IsDeleted      bool
-	CreatedUTCTime uint64
-	IndexFileKeys  []string
+	EncryptionState indexpb.IndexEncryptionState
+	SegmentID       int64
+	CollectionID    int64
+	PartitionID     int64
+	NumRows         int64
+	IndexID         int64
+	BuildID         int64
+	NodeID          int64
+	IndexVersion    int64
+	IndexState      commonpb.IndexState
+	FailReason      string
+	IsDeleted       bool
+	CreatedUTCTime  uint64
+	IndexFileKeys   []string
 	// The byte size of serialized index data at oos. (compressed)
 	IndexSerializedSize uint64
 	// The byte size of index data in memory. (uncompressed)
@@ -64,6 +65,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.GetCurrentIndexVersion(),
 		FinishedUTCTime:           segIndex.FinishedTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		EncryptionState:           segIndex.EncryptionState,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 	}
@@ -94,6 +96,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 		FinishedTime:              segIdx.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+		EncryptionState:           segIdx.EncryptionState,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 	}
@@ -120,6 +123,7 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentIndexVersion:       segIndex.CurrentIndexVersion,
 		FinishedUTCTime:           segIndex.FinishedUTCTime,
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
+		EncryptionState:           segIndex.EncryptionState,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
 	}

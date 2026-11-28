@@ -416,7 +416,8 @@ IndexFactory::IndexLoadResource(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    int64_t dim) {
+    int64_t dim,
+    std::optional<bool> encrypted) {
     if (milvus::IsVectorDataType(field_type)) {
         return VecIndexLoadResource(field_type,
                                     element_type,
@@ -432,7 +433,8 @@ IndexFactory::IndexLoadResource(
                                        index_size_in_bytes,
                                        index_params,
                                        mmap_enable,
-                                       num_rows);
+                                       num_rows,
+                                       encrypted);
     }
 }
 
@@ -697,14 +699,16 @@ IndexFactory::ScalarIndexLoadResource(
     uint64_t index_size_in_bytes,
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
-    int64_t num_rows) {
+    int64_t num_rows,
+    std::optional<bool> encrypted) {
     return ScalarIndexLoadResourceImpl(field_type,
                                        index_version,
                                        index_size_in_bytes,
                                        index_params,
                                        mmap_enable,
                                        num_rows,
-                                       std::nullopt);
+                                       std::nullopt,
+                                       encrypted);
 }
 
 LoadResourceRequest
@@ -715,7 +719,8 @@ IndexFactory::ScalarIndexLoadResourceImpl(
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable,
     int64_t num_rows,
-    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info) {
+    const std::optional<storage::EntryStreamLoadInfo>& stream_load_info,
+    std::optional<bool> encrypted) {
     auto config = milvus::index::ParseConfigFromIndexParams(index_params);
 
     auto index_type_it = index_params.find("index_type");
@@ -728,13 +733,15 @@ IndexFactory::ScalarIndexLoadResourceImpl(
             config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     // File-aware callers use the persisted __edek__ marker. Keep plugin state
-    // only as a compatibility fallback for callers without file context.
+    // only as a compatibility fallback when persisted encryption is unknown.
     auto encrypted_stream =
         scalar_version >= 3 &&
         (stream_load_info.has_value()
              ? stream_load_info->encrypted
-             : milvus::storage::PluginLoader::GetInstance().getCipherPlugin() !=
-                   nullptr);
+             : (encrypted.has_value()
+                    ? *encrypted
+                    : milvus::storage::PluginLoader::GetInstance()
+                              .getCipherPlugin() != nullptr));
     auto file_stream = index_type != milvus::index::BITMAP_INDEX_TYPE &&
                        index_type != milvus::index::HYBRID_INDEX_TYPE;
     auto stream_memory_overhead =

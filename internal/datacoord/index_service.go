@@ -1287,6 +1287,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							NumRows:                   segIdx.NumRows,
 							CurrentIndexVersion:       segIdx.CurrentIndexVersion,
 							CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
+							EncryptionState:           segIdx.EncryptionState,
 							IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 						})
 				}

@@ -242,6 +242,7 @@ message IndexTaskInfo {
   // The actual index file path layout used by the worker for this build.
   // See milvus.proto.index.IndexStorePathVersion for value semantics.
   index.IndexStorePathVersion index_store_path_version = 10;
+  index.IndexEncryptionState encryption_state = 11;
 }
 
 message IndexJobResults {

@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,8 @@ class IndexStats {
     // Create a new IndexStats instance.
     static IndexStatsPtr
     New(int64_t mem_size,
-        std::vector<SerializedIndexFileInfo>&& serialized_index_infos);
+        std::vector<SerializedIndexFileInfo>&& serialized_index_infos,
+        std::optional<bool> encrypted = std::nullopt);
 
     IndexStats(const IndexStats&) = delete;
 
@@ -78,10 +80,17 @@ class IndexStats {
         return serialized_index_infos_;
     }
 
+    std::optional<bool>
+    IsEncrypted() const {
+        return encrypted_;
+    }
+
  private:
     IndexStats(int64_t mem_size,
-               std::vector<SerializedIndexFileInfo>&& serialized_index_infos);
+               std::vector<SerializedIndexFileInfo>&& serialized_index_infos,
+               std::optional<bool> encrypted);
 
+    std::optional<bool> encrypted_;
     int64_t mem_size_;
     std::vector<SerializedIndexFileInfo> serialized_index_infos_;
 };

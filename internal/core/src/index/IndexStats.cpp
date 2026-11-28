@@ -32,15 +32,18 @@ IndexStats::NewFromSizeMap(
 
 IndexStatsPtr
 IndexStats::New(int64_t mem_size,
-                std::vector<SerializedIndexFileInfo>&& serialized_index_infos) {
+                std::vector<SerializedIndexFileInfo>&& serialized_index_infos,
+                std::optional<bool> encrypted) {
     return std::unique_ptr<IndexStats>(
-        new IndexStats(mem_size, std::move(serialized_index_infos)));
+        new IndexStats(mem_size, std::move(serialized_index_infos), encrypted));
 }
 
 IndexStats::IndexStats(
     int64_t mem_size,
-    std::vector<SerializedIndexFileInfo>&& serialized_index_infos)
-    : mem_size_(mem_size),
+    std::vector<SerializedIndexFileInfo>&& serialized_index_infos,
+    std::optional<bool> encrypted)
+    : encrypted_(encrypted),
+      mem_size_(mem_size),
       serialized_index_infos_(std::move(serialized_index_infos)) {
 }
 
@@ -53,6 +56,11 @@ void
 IndexStats::SerializeAt(milvus::ProtoLayout* layout) {
     milvus::proto::cgo::IndexStats result;
     result.set_mem_size(mem_size_);
+    if (encrypted_.has_value()) {
+        result.set_encryption_state(
+            *encrypted_ ? proto::index::INDEX_ENCRYPTION_ENCRYPTED
+                        : proto::index::INDEX_ENCRYPTION_PLAIN);
+    }
     for (auto& info : serialized_index_infos_) {
         auto serialized_info = result.add_serialized_index_infos();
         serialized_info->set_file_name(info.file_name);
