@@ -1267,6 +1267,12 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							break
 						}
 					}
+					if segIdx.LegacyRowDomain {
+						indexParams = append(indexParams[:len(indexParams):len(indexParams)], &commonpb.KeyValuePair{
+							Key:   common.LegacyRowDomainKey,
+							Value: "true",
+						})
+					}
 					indexName := s.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 					if segIdx.IndexType != "" && segIdx.IndexType != indexName {
 						indexName = segIdx.IndexType

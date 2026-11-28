@@ -241,6 +241,14 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     path_ = prefix;
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    if (is_nested_index_ && config.contains(SCALAR_INDEX_ENGINE_VERSION)) {
+        const auto scalar_version =
+            GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(1);
+        if (scalar_version < 4) {
+            is_nested_index_ = false;
+        }
+    }
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
 
@@ -982,6 +990,7 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
     writer->PutMeta("file_names", file_names);
     writer->PutMeta("has_null", has_null);
+    writer->PutMeta("is_nested", is_nested_index_);
 
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
@@ -1007,6 +1016,9 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
                                      const Config& config) {
     auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
     bool has_null = reader.GetMeta<bool>("has_null");
+    if (reader.HasMeta("is_nested")) {
+        is_nested_index_ = reader.GetMeta<bool>("is_nested");
+    }
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);

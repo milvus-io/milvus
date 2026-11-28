@@ -379,7 +379,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         milvus::fastmem::FastMemcpy(&loaded_is_nested_index,
                                     is_nested_index->data.get(),
                                     (size_t)is_nested_index->size);
-        is_nested_index_ = is_nested_index_ || loaded_is_nested_index;
+        is_nested_index_ = loaded_is_nested_index;
+    } else {
+        is_nested_index_ = false;
     }
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
@@ -716,7 +718,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
     size_t index_size = reader.GetMeta<size_t>("index_length");
     total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    is_nested_index_ = reader.GetMeta<bool>("is_nested", false);
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 

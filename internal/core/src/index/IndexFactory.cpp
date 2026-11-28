@@ -252,10 +252,99 @@ HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
 }
 
 std::optional<ScalarIndexType>
-ResolveHybridInternalIndexType(
+ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
+    const std::string prefix = "milvus_packed_";
+    const std::string suffix = "_index.v3";
+    if (filename.size() < prefix.size() + suffix.size() ||
+        filename.compare(0, prefix.size(), prefix) != 0 ||
+        filename.compare(
+            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return std::nullopt;
+    }
+    auto type_str = filename.substr(
+        prefix.size(), filename.size() - prefix.size() - suffix.size());
+    if (type_str == "stlsort") {
+        return ScalarIndexType::STLSORT;
+    } else if (type_str == "inverted") {
+        return ScalarIndexType::INVERTED;
+    } else if (type_str == "bitmap") {
+        return ScalarIndexType::BITMAP;
+    } else if (type_str == "marisa") {
+        return ScalarIndexType::MARISA;
+    }
+    return std::nullopt;
+}
+
+std::optional<storage::EntryStreamLoadInfo>
+InspectScalarIndexStreamLoadInfo(
+    const std::vector<std::string>& index_files,
+    const storage::FileManagerContext& file_manager_context) {
+    if (index_files.size() != 1 || !file_manager_context.Valid()) {
+        return std::nullopt;
+    }
+
+    storage::MemFileManagerImpl file_manager(file_manager_context);
+    auto input = file_manager.OpenInputStream(index_files[0]);
+    AssertInfo(input != nullptr,
+               "failed to open packed scalar index file: {}",
+               index_files[0]);
+    return storage::IndexEntryReader::InspectStreamLoadInfo(input,
+                                                            input->Size());
+}
+
+}  // namespace
+
+bool
+IndexFactory::CanUseIndexRawDataForField(DataType field_type,
+                                         bool has_raw_data) {
+    // ARRAY and JSON indexes only index a projection of the value (array
+    // elements / a JSON path) and cannot reconstruct the whole raw value, so
+    // their index is never a stand-in for the raw column. This mirrors the
+    // segment runtime contract (HasRawDataFromState returns column-based
+    // field_data_ready for JSON), so no loader path treats a JSON index as
+    // raw-serving and skips its raw column. VECTOR_ARRAY indexes may carry raw
+    // vector payloads, but the field column is still needed for struct offsets
+    // and parent-row validity.
+    return has_raw_data && field_type != DataType::ARRAY &&
+           field_type != DataType::VECTOR_ARRAY && field_type != DataType::JSON;
+}
+
+std::optional<ScalarIndexType>
+IndexFactory::ResolveHybridPackedIndexType(
+    const storage::IndexEntryReader& reader,
+    const std::vector<std::string>& index_files) {
+    if (reader.HasMeta(INDEX_TYPE)) {
+        return static_cast<ScalarIndexType>(
+            reader.GetMeta<uint8_t>(INDEX_TYPE));
+    }
+
+    // Legacy 3.0.0 (#52359/#52360): struct-array sub-field HYBRID indexes
+    // were built as a standalone physical file whose meta lacks index_type.
+    // Prefer the packed filename ("milvus_packed_<type>_index.v3") and fall
+    // back to physical file meta keys.
+    if (!index_files.empty()) {
+        if (auto type = ParsePhysicalTypeFromPackedFileName(
+                GetIndexFileBaseName(index_files[0]))) {
+            return type;
+        }
+    }
+    if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
+        return ScalarIndexType::STLSORT;
+    }
+    if (reader.HasMeta("file_names")) {
+        return ScalarIndexType::INVERTED;
+    }
+    if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
+        return ScalarIndexType::BITMAP;
+    }
+    return std::nullopt;
+}
+
+std::optional<ScalarIndexType>
+IndexFactory::ResolveHybridInternalIndexType(
     const std::vector<std::string>& index_files,
     const storage::FileManagerContext& file_manager_context,
-    std::optional<storage::EntryStreamLoadInfo>* stream_load_info = nullptr) {
+    std::optional<storage::EntryStreamLoadInfo>* stream_load_info) {
     if (stream_load_info != nullptr) {
         stream_load_info->reset();
     }
@@ -298,47 +387,10 @@ ResolveHybridInternalIndexType(
         if (stream_load_info != nullptr) {
             *stream_load_info = reader->GetStreamLoadInfo();
         }
-        if (reader->HasMeta(INDEX_TYPE)) {
-            return static_cast<ScalarIndexType>(
-                reader->GetMeta<uint8_t>(INDEX_TYPE));
-        }
+        return ResolveHybridPackedIndexType(*reader, index_files);
     }
 
     return std::nullopt;
-}
-
-std::optional<storage::EntryStreamLoadInfo>
-InspectScalarIndexStreamLoadInfo(
-    const std::vector<std::string>& index_files,
-    const storage::FileManagerContext& file_manager_context) {
-    if (index_files.size() != 1 || !file_manager_context.Valid()) {
-        return std::nullopt;
-    }
-
-    storage::MemFileManagerImpl file_manager(file_manager_context);
-    auto input = file_manager.OpenInputStream(index_files[0]);
-    AssertInfo(input != nullptr,
-               "failed to open packed scalar index file: {}",
-               index_files[0]);
-    return storage::IndexEntryReader::InspectStreamLoadInfo(input,
-                                                            input->Size());
-}
-
-}  // namespace
-
-bool
-IndexFactory::CanUseIndexRawDataForField(DataType field_type,
-                                         bool has_raw_data) {
-    // ARRAY and JSON indexes only index a projection of the value (array
-    // elements / a JSON path) and cannot reconstruct the whole raw value, so
-    // their index is never a stand-in for the raw column. This mirrors the
-    // segment runtime contract (HasRawDataFromState returns column-based
-    // field_data_ready for JSON), so no loader path treats a JSON index as
-    // raw-serving and skips its raw column. VECTOR_ARRAY indexes may carry raw
-    // vector payloads, but the field column is still needed for struct offsets
-    // and parent-row validity.
-    return has_raw_data && field_type != DataType::ARRAY &&
-           field_type != DataType::VECTOR_ARRAY && field_type != DataType::JSON;
 }
 
 template <typename T>

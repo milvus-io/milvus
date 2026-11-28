@@ -4698,6 +4698,69 @@ TEST_P(SealedMatchExprIntTypeTest, MatchLeastBruteForce) {
     std::cout << "==============================" << std::endl;
 }
 
+TEST_F(SealedMatchExprTest, SkippedAndRowDomainLegacyIndexFallsBackToRawData) {
+    const std::string target_str = "aaa";
+    std::set<int64_t> expected_rows;
+    for (size_t i = 0; i < N_; ++i) {
+        if (std::find(sub_str_arrays_[i].begin(),
+                      sub_str_arrays_[i].end(),
+                      target_str) != sub_str_arrays_[i].end()) {
+            expected_rows.insert(static_cast<int64_t>(i));
+        }
+    }
+
+    const std::string filter_expr =
+        "match_any(struct_array, $[sub_str] == \"aaa\")";
+
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(seg_.get());
+    ASSERT_NE(sealed, nullptr);
+
+    // 1. Replace with a skipped LoadIndexInfo drops the old index and executes
+    // accurately via RawData.
+    {
+        LoadIndexInfo skipped_info{};
+        skipped_info.field_id = sub_str_fid_.get();
+        skipped_info.skipped = true;
+        sealed->TestLoadIndex(skipped_info, true, nullptr);
+        EXPECT_FALSE(seg_->HasIndex(sub_str_fid_));
+
+        auto result = ExecuteRetrieve(filter_expr);
+        ASSERT_NE(result, nullptr);
+        std::set<int64_t> actual_rows;
+        for (const auto& offset : result->offset()) {
+            actual_rows.insert(offset);
+        }
+        EXPECT_EQ(actual_rows, expected_rows);
+    }
+
+    // 2. Direct load of a non-nested (row-domain) index declines ScalarIndex
+    // execution for element-level expressions and falls back to RawData.
+    {
+        auto row_domain_index =
+            std::make_unique<index::InvertedIndexTantivy<std::string>>();
+        Config cfg;
+        cfg["is_array"] = true;
+        row_domain_index->BuildWithRawDataForUT(
+            N_, sub_str_arrays_.data(), cfg);
+        ASSERT_FALSE(row_domain_index->IsNestedIndex());
+
+        LoadIndexInfo row_info{};
+        row_info.field_id = sub_str_fid_.get();
+        row_info.index_params = GenIndexParams(row_domain_index.get());
+        row_info.cache_index = CreateTestCacheIndex(
+            "sub_str_row_domain", std::move(row_domain_index));
+        sealed->TestLoadIndex(row_info, true, nullptr);
+
+        auto result = ExecuteRetrieve(filter_expr);
+        ASSERT_NE(result, nullptr);
+        std::set<int64_t> actual_rows;
+        for (const auto& offset : result->offset()) {
+            actual_rows.insert(offset);
+        }
+        EXPECT_EQ(actual_rows, expected_rows);
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(
     IntTypes,
     SealedMatchExprIntTypeTest,

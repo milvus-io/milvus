@@ -32,6 +32,7 @@
 #include "glog/logging.h"
 #include "index/BitmapIndex.h"
 #include "index/HybridScalarIndex.h"
+#include "index/IndexFactory.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
@@ -52,42 +53,6 @@
 
 namespace milvus {
 namespace index {
-
-namespace {
-
-// V3 packed filenames encode the physical index type (lowercased
-// ScalarIndexType, see ScalarIndex::UploadUnified): e.g.
-// "milvus_packed_stlsort_index.v3". The writer chose the name from
-// GetIndexType(), so it is an authoritative discriminator and stays correct
-// as new physical index types are added (their meta keys may reuse names like
-// "version" or "file_names", which would break meta-key-only inference).
-// Returns nullopt for the proper hybrid name ("milvus_packed_hybrid_index.v3")
-// and for unknown names, so callers fall back to the file meta.
-std::optional<ScalarIndexType>
-ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
-    const std::string prefix = "milvus_packed_";
-    const std::string suffix = "_index.v3";
-    if (filename.size() < prefix.size() + suffix.size() ||
-        filename.compare(0, prefix.size(), prefix) != 0 ||
-        filename.compare(
-            filename.size() - suffix.size(), suffix.size(), suffix) != 0) {
-        return std::nullopt;
-    }
-    auto type_str = filename.substr(
-        prefix.size(), filename.size() - prefix.size() - suffix.size());
-    if (type_str == "stlsort") {
-        return ScalarIndexType::STLSORT;
-    } else if (type_str == "inverted") {
-        return ScalarIndexType::INVERTED;
-    } else if (type_str == "bitmap") {
-        return ScalarIndexType::BITMAP;
-    } else if (type_str == "marisa") {
-        return ScalarIndexType::MARISA;
-    }
-    return std::nullopt;
-}
-
-}  // namespace
 
 template <typename T>
 HybridScalarIndex<T>::HybridScalarIndex(
@@ -432,6 +397,7 @@ HybridScalarIndex<T>::Load(const BinarySet& binary_set, const Config& config) {
     LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(binary_set, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();
@@ -464,6 +430,7 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LOG_INFO("load hybrid index with internal index:{}",
              ToString(internal_index_type_));
     index->Load(ctx, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();
@@ -488,49 +455,30 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    if (reader.HasMeta(INDEX_TYPE)) {
-        internal_index_type_ =
-            static_cast<ScalarIndexType>(reader.GetMeta<uint8_t>(INDEX_TYPE));
-    } else {
-        // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
-        // indexes were built as a standalone STLSORT (or, hypothetically, other
-        // physical) file whose meta lacks the hybrid index_type key. Prefer the
-        // packed filename ("milvus_packed_<type>_index.v3") to recover the
-        // physical type; fall back to the file meta keys for robustness.
-        internal_index_type_ = ScalarIndexType::NONE;
-        auto index_files =
-            GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
-        if (index_files.has_value() && !index_files.value().empty()) {
-            auto path = index_files.value()[0];
-            auto filename = path.substr(path.find_last_of('/') + 1);
-            if (auto type = ParsePhysicalTypeFromPackedFileName(filename)) {
-                internal_index_type_ = *type;
-            }
-        }
-        if (internal_index_type_ == ScalarIndexType::NONE) {
-            if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
-                internal_index_type_ = ScalarIndexType::STLSORT;
-            } else if (reader.HasMeta("file_names")) {
-                internal_index_type_ = ScalarIndexType::INVERTED;
-            } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
-                internal_index_type_ = ScalarIndexType::BITMAP;
-            } else {
-                ThrowInfo(UnexpectedError,
-                          "hybrid index file has neither index_type meta, a "
-                          "recognizable packed filename, nor a recognizable "
-                          "physical index meta");
-            }
-        }
+    const auto index_files =
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES)
+            .value_or(std::vector<std::string>{});
+    auto resolved_type =
+        IndexFactory::ResolveHybridPackedIndexType(reader, index_files);
+    if (!resolved_type.has_value()) {
+        ThrowInfo(UnexpectedError,
+                  "hybrid index file has neither index_type meta, a "
+                  "recognizable packed filename, nor a recognizable "
+                  "physical index meta");
+    }
+    if (!reader.HasMeta(INDEX_TYPE)) {
         LOG_WARN(
             "hybrid index missing index_type meta, inferred physical type: {}",
-            ToString(internal_index_type_));
+            ToString(*resolved_type));
     }
+    internal_index_type_ = *resolved_type;
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
 
     auto index = GetInternalIndex();
     index->LoadEntries(reader, config);
+    is_nested_index_ = index->IsNestedIndex();
 
     is_built_ = true;
     ComputeByteSize();

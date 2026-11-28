@@ -2473,6 +2473,54 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 }
 
+func TestUncompressIndexFilesLegacyRowDomain(t *testing.T) {
+	handler := &ServerHandler{
+		s: &Server{
+			meta: &meta.Meta{
+				ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+			},
+			domainMetas: domainMetas{indexMeta: &index.IndexMeta{}},
+		},
+	}
+
+	mockGetSegmentIndexes := mockey.Mock((*index.IndexMeta).GetSegmentIndexesUnsafe).To(func(im *index.IndexMeta, collectionID, segmentID int64) map[int64]*model.SegmentIndex {
+		return map[int64]*model.SegmentIndex{
+			10: {
+				CollectionID:          collectionID,
+				PartitionID:           20,
+				SegmentID:             segmentID,
+				IndexID:               10,
+				IndexType:             "BITMAP",
+				BuildID:               30,
+				IndexVersion:          40,
+				IndexState:            commonpb.IndexState_Finished,
+				IndexFileKeys:         []string{"index_data"},
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+				LegacyRowDomain:       true,
+			},
+		}
+	}).Build()
+	defer mockGetSegmentIndexes.UnPatch()
+
+	mockFieldID := mockey.Mock((*index.IndexMeta).GetFieldIDByIndexID).Return(int64(100)).Build()
+	defer mockFieldID.UnPatch()
+
+	mockIndexName := mockey.Mock((*index.IndexMeta).GetIndexNameByID).Return("sub_idx").Build()
+	defer mockIndexName.UnPatch()
+
+	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).To(func(*index.IndexMeta, UniqueID, UniqueID) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "BITMAP"}}
+	}).Build()
+	defer mockIndexParams.UnPatch()
+
+	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
+	defer mockTypeParams.UnPatch()
+
+	indexFiles := uncompressIndexFiles(handler, 1, 2)
+	require.Len(t, indexFiles, 1)
+	assert.Contains(t, indexFiles[0].GetIndexParams(), &commonpb.KeyValuePair{Key: common.LegacyRowDomainKey, Value: "true"})
+}
+
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
 	handler := &ServerHandler{
 		s: &Server{

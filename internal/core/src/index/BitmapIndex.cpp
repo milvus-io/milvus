@@ -416,18 +416,16 @@ BitmapIndex<T>::DeserializeIndexMeta(const uint8_t* data_ptr,
         auto j = nlohmann::json::parse(meta_str);
         auto index_length = j[BITMAP_INDEX_LENGTH].get<size_t>();
         auto index_num_rows = j[BITMAP_INDEX_NUM_ROWS].get<size_t>();
-        if (j.contains(BITMAP_INDEX_IS_NESTED)) {
-            is_nested_index_ = j[BITMAP_INDEX_IS_NESTED].get<bool>();
-        }
+        is_nested_index_ = j.contains(BITMAP_INDEX_IS_NESTED) &&
+                           j[BITMAP_INDEX_IS_NESTED].get<bool>();
         return std::make_pair(index_length, index_num_rows);
     } catch (const nlohmann::json::parse_error&) {
         // Fall back to YAML for backward compatibility with V2
         YAML::Node node = YAML::Load(meta_str);
         auto index_length = node[BITMAP_INDEX_LENGTH].as<size_t>();
         auto index_num_rows = node[BITMAP_INDEX_NUM_ROWS].as<size_t>();
-        if (node[BITMAP_INDEX_IS_NESTED]) {
-            is_nested_index_ = node[BITMAP_INDEX_IS_NESTED].as<bool>();
-        }
+        is_nested_index_ = node[BITMAP_INDEX_IS_NESTED] &&
+                           node[BITMAP_INDEX_IS_NESTED].as<bool>();
         return std::make_pair(index_length, index_num_rows);
     }
 }
@@ -1441,8 +1439,7 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     // V3 format: meta is in __meta__ entry
     auto index_length = reader.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
     total_num_rows_ = reader.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
-    is_nested_index_ =
-        reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
+    is_nested_index_ = reader.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, false);
     valid_bitset_ =
         TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
     bool rebuild_validity_from_postings =

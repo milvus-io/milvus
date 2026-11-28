@@ -2755,6 +2755,19 @@ class SegmentExpr : public Expr {
                 data_pos + batch_rows);
             auto elem_count = elem_end - elem_start;
 
+            AssertInfo(cached_index_chunk_res_->size() >=
+                           static_cast<size_t>(elem_end),
+                       "cached element-level index result size {} smaller "
+                       "than elem_end {} (nested index required)",
+                       cached_index_chunk_res_->size(),
+                       elem_end);
+            AssertInfo(cached_index_chunk_valid_res_->size() >=
+                           static_cast<size_t>(elem_end),
+                       "cached element-level valid result size {} smaller "
+                       "than elem_end {} (nested index required)",
+                       cached_index_chunk_valid_res_->size(),
+                       elem_end);
+
             result.append(*cached_index_chunk_res_, elem_start, elem_count);
             valid_result.append(
                 *cached_index_chunk_valid_res_, elem_start, elem_count);
@@ -3369,6 +3382,12 @@ class SegmentExpr : public Expr {
         // the pin actually came up empty so pinned_index_ is non-empty iff
         // exec_path_ == ScalarIndex holds.
         if (pinned_index_.empty()) {
+            exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+        if (IsElementLevelExpression() &&
+            (pinned_index_[0].get() == nullptr ||
+             !pinned_index_[0].get()->IsNestedIndex())) {
             exec_path_ = ExprExecPath::RawData;
             return;
         }

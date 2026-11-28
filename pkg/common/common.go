@@ -528,6 +528,10 @@ const (
 	WarmupDisable        = "disable"
 	WarmupSync           = "sync"
 	WarmupAsync          = "async"
+
+	// LegacyRowDomainKey marks StructArray scalar sub-field indexes built
+	// under 2.6 row-domain semantics so 3.0+ skips loading and rebuilds them.
+	LegacyRowDomainKey = "legacy_row_domain"
 )
 
 const (

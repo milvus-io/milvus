@@ -92,3 +92,17 @@ func TestSegmentIndex_Clone_PreservesPathVersion(t *testing.T) {
 	cloned.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, original.IndexStorePathVersion)
 }
+
+func TestSegmentIndex_LegacyRowDomain(t *testing.T) {
+	original := &SegmentIndex{
+		CollectionID:    100,
+		BuildID:         1000,
+		LegacyRowDomain: true,
+	}
+	pb := MarshalSegmentIndexModel(original)
+	assert.True(t, pb.GetLegacyRowDomain())
+	restored := UnmarshalSegmentIndexModel(pb)
+	assert.True(t, restored.LegacyRowDomain)
+	cloned := CloneSegmentIndex(original)
+	assert.True(t, cloned.LegacyRowDomain)
+}

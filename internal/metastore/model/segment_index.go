@@ -38,6 +38,7 @@ type SegmentIndex struct {
 	// FinishTask. Readers that construct paths from this field must check
 	// IndexState == Finished first.
 	IndexStorePathVersion indexpb.IndexStorePathVersion
+	LegacyRowDomain       bool
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -66,6 +67,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		LegacyRowDomain:           segIndex.LegacyRowDomain,
 	}
 }
 
@@ -96,6 +98,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexType:                 segIdx.IndexType,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
+		LegacyRowDomain:           segIdx.LegacyRowDomain,
 	}
 }
 
@@ -122,5 +125,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		LegacyRowDomain:           segIndex.LegacyRowDomain,
 	}
 }
