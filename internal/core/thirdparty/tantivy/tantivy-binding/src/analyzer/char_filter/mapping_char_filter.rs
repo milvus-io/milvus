@@ -1,0 +1,483 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde_json as json;
+
+use super::char_filter::{BoxCharFilter, CharFilter, FilteredText};
+use crate::error::{Result, TantivyBindingError};
+
+/// Rewrites tokenizer input with greedy longest-match `source => target` rules.
+///
+/// The filter scans its input once from left to right. Replacement output is
+/// not processed again by this filter, but can be processed by a later char
+/// filter in the analyzer chain. `FilteredText` composes the replacements with
+/// existing offset corrections.
+#[derive(Clone)]
+pub(crate) struct MappingCharFilter {
+    trie: Arc<MappingTrie>,
+}
+
+#[derive(Default)]
+struct MappingTrie {
+    // Node 0 is the root. Each edge creates one node.
+    edges: HashMap<(usize, u8), MappingEdge>,
+    rules: Vec<(String, String)>,
+}
+
+#[derive(Clone, Copy)]
+struct MappingEdge {
+    child: usize,
+    prefix_len: usize,
+    // The shortest rule below this edge supplies its label and the minimum input length.
+    shortest_rule: usize,
+}
+
+impl MappingTrie {
+    fn insert(&mut self, mapping: (String, String)) -> Result<()> {
+        let rule = self.rules.len();
+        self.rules.push(mapping);
+        let source = self.rules[rule].0.as_bytes();
+        let mut parent = 0;
+        let mut start = 0;
+        while start < source.len() {
+            let key = (parent, source[start]);
+            let next = self.edges.len() + 1;
+            let Some(edge) = self.edges.get_mut(&key) else {
+                self.edges.insert(
+                    key,
+                    MappingEdge {
+                        child: next,
+                        prefix_len: source.len(),
+                        shortest_rule: rule,
+                    },
+                );
+                break;
+            };
+            let old = *edge;
+            let shortest = self.rules[old.shortest_rule].0.as_bytes();
+            let shared = source[start..]
+                .iter()
+                .zip(&shortest[start..old.prefix_len])
+                .take_while(|(a, b)| a == b)
+                .count();
+            start += shared;
+            if start == source.len() && start == shortest.len() {
+                return Err(TantivyBindingError::InvalidArgument(format!(
+                    "mapping char_filter source must be unique: {:?}",
+                    self.rules[rule].0
+                )));
+            }
+            if source.len() < shortest.len() {
+                edge.shortest_rule = rule;
+            }
+            if start < old.prefix_len {
+                // Split the edge at the common prefix without copying either source.
+                edge.prefix_len = start;
+                edge.child = next;
+                self.edges.insert((next, shortest[start]), old);
+                parent = next;
+            } else {
+                parent = old.child;
+            }
+        }
+        Ok(())
+    }
+
+    fn next_edge(&self, node: usize, start: usize, text: &[u8]) -> Option<&MappingEdge> {
+        let edge = self.edges.get(&(node, *text.get(start)?))?;
+        let source = self.rules[edge.shortest_rule].0.as_bytes();
+        (source.len() <= text.len() && text[start..].starts_with(&source[start..edge.prefix_len]))
+            .then_some(edge)
+    }
+
+    fn longest_match(&self, text: &str) -> Option<(usize, &str)> {
+        let mut node = 0;
+        let mut offset = 0;
+        let mut longest = None;
+        while let Some(edge) = self.next_edge(node, offset, text.as_bytes()) {
+            offset = edge.prefix_len;
+            node = edge.child;
+            let (source, target) = &self.rules[edge.shortest_rule];
+            if offset == source.len() {
+                longest = Some((offset, target.as_str()));
+            }
+        }
+        longest
+    }
+}
+
+impl MappingCharFilter {
+    pub(crate) fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+        let mappings = params
+            .get("mappings")
+            .ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(
+                    "mapping char_filter must set mappings".to_string(),
+                )
+            })?
+            .as_array()
+            .ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(
+                    "mapping char_filter mappings must be array".to_string(),
+                )
+            })?;
+
+        let mut trie = MappingTrie::default();
+        for mapping in mappings {
+            let mapping = mapping.as_str().ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(
+                    "mapping char_filter mapping item must be string".to_string(),
+                )
+            })?;
+            trie.insert(parse_mapping(mapping)?)?;
+        }
+
+        Ok(MappingCharFilter {
+            trie: Arc::new(trie),
+        })
+    }
+}
+
+impl CharFilter for MappingCharFilter {
+    fn apply(&self, input: FilteredText) -> FilteredText {
+        input.replace_matches(|text| self.trie.longest_match(text))
+    }
+
+    fn box_clone(&self) -> BoxCharFilter {
+        Box::new(self.clone())
+    }
+}
+
+fn parse_mapping(mapping: &str) -> Result<(String, String)> {
+    if mapping.contains('\0') {
+        return Err(nul_not_supported());
+    }
+
+    let separator = mapping.rfind("=>").ok_or_else(|| {
+        TantivyBindingError::InvalidArgument(format!(
+            "invalid mapping char_filter mapping: {}",
+            mapping
+        ))
+    })?;
+
+    let source = trim_mapping_side(&mapping[..separator]);
+    let target = trim_mapping_side(&mapping[(separator + 2)..]);
+
+    let source = unescape_mapping_side(source)?;
+    let target = unescape_mapping_side(target)?;
+    if source.contains('\0') || target.contains('\0') {
+        return Err(nul_not_supported());
+    }
+    if source.is_empty() {
+        return Err(TantivyBindingError::InvalidArgument(
+            "mapping char_filter source must not be empty".to_string(),
+        ));
+    }
+
+    Ok((source, target))
+}
+
+fn nul_not_supported() -> TantivyBindingError {
+    TantivyBindingError::InvalidArgument("mapping char_filter does not support U+0000".to_string())
+}
+
+fn unescape_mapping_side(input: &str) -> Result<String> {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+
+        let escaped = chars.next().ok_or_else(|| {
+            TantivyBindingError::InvalidArgument(
+                "mapping char_filter escape sequence must not end with backslash".to_string(),
+            )
+        })?;
+        match escaped {
+            '\\' => output.push('\\'),
+            'n' => output.push('\n'),
+            'r' => output.push('\r'),
+            't' => output.push('\t'),
+            'b' => output.push('\u{0008}'),
+            'f' => output.push('\u{000c}'),
+            'u' => output.push(parse_unicode_escape(&mut chars)?),
+            other => output.push(other),
+        }
+    }
+    Ok(output)
+}
+
+// Elasticsearch trims characters up to U+0020 before parsing escapes.
+fn trim_mapping_side(input: &str) -> &str {
+    input.trim_matches(|ch| ch <= '\u{0020}')
+}
+
+fn parse_unicode_escape(chars: &mut std::str::Chars<'_>) -> Result<char> {
+    let first = parse_unicode_code_unit(chars)?;
+    let code_point = if (0xd800..=0xdbff).contains(&first) {
+        if chars.next() != Some('\\') || chars.next() != Some('u') {
+            return Err(invalid_unicode_escape());
+        }
+        let second = parse_unicode_code_unit(chars)?;
+        if !(0xdc00..=0xdfff).contains(&second) {
+            return Err(invalid_unicode_escape());
+        }
+        0x10000 + (((first as u32 - 0xd800) << 10) | (second as u32 - 0xdc00))
+    } else if (0xdc00..=0xdfff).contains(&first) {
+        return Err(invalid_unicode_escape());
+    } else {
+        first as u32
+    };
+
+    char::from_u32(code_point).ok_or_else(invalid_unicode_escape)
+}
+
+fn parse_unicode_code_unit(chars: &mut std::str::Chars<'_>) -> Result<u16> {
+    let mut value = 0u16;
+    for _ in 0..4 {
+        let digit = chars
+            .next()
+            .and_then(|ch| ch.to_digit(16))
+            .ok_or_else(invalid_unicode_escape)?;
+        value = (value << 4) | digit as u16;
+    }
+    Ok(value)
+}
+
+fn invalid_unicode_escape() -> TantivyBindingError {
+    TantivyBindingError::InvalidArgument(
+        "mapping char_filter contains an invalid unicode escape".to_string(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json as json;
+
+    use super::{unescape_mapping_side, MappingCharFilter};
+    use crate::analyzer::char_filter::{CharFilter, FilteredText};
+
+    #[test]
+    fn test_mapping_char_filter() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["&=>and", "--=>-"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a&b--c"));
+
+        assert_eq!(output.text, "aandb-c");
+        assert_eq!(output.correct_offsets(1, 4), (1, 2));
+        assert_eq!(output.correct_offsets(4, 5), (2, 3));
+        assert_eq!(output.correct_offsets(5, 6), (3, 5));
+        assert_eq!(output.correct_offsets(0, 7), (0, 6));
+    }
+
+    #[test]
+    fn test_mapping_char_filter_uses_longest_match() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>x", "aa=>y"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("aa"));
+
+        assert_eq!(output.text, "y");
+        assert_eq!(output.correct_offsets(0, 1), (0, 2));
+    }
+
+    #[test]
+    fn test_mapping_char_filter_falls_back_to_longest_complete_prefix() {
+        let params = json::json!({"mappings": ["中ab=>x", "中文=>", "中=>y", "中ac=>z"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let output = filter.apply(FilteredText::new("中ab中ac中ad中文丰"));
+
+        assert_eq!(output.text, "xzyad丰");
+        assert_eq!(output.correct_offsets(2, 3), (10, 13));
+    }
+
+    #[test]
+    fn test_short_input_skips_unreachable_mapping_prefixes() {
+        let params = json::json!({"mappings": ["aaaaaa=>long", "a=>short", "bbbb=>other"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let trie = &filter.trie;
+        assert!(trie.next_edge(0, 0, b"bbb").is_none());
+        let a = trie.next_edge(0, 0, b"aaa").unwrap();
+        assert!(trie.next_edge(a.child, a.prefix_len, b"aaa").is_none());
+        assert_eq!(trie.longest_match("aaa"), Some((1, "short")));
+        assert_eq!(trie.longest_match("aaaaaa"), Some((6, "long")));
+    }
+
+    #[test]
+    fn test_mapping_trie_compresses_long_shared_prefixes() {
+        let prefix = "中".repeat(256);
+        let params = json::json!({"mappings": [
+            format!("{prefix}甲=>a"), format!("{prefix}申=>b"), format!("{prefix}=>c")
+        ]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let trie = &filter.trie;
+        // 甲 and 申 share their first two UTF-8 bytes.
+        assert_eq!(trie.edges.len(), 4);
+        assert_eq!(
+            trie.longest_match(&format!("{prefix}申")),
+            Some((prefix.len() + 3, "b"))
+        );
+        assert_eq!(
+            trie.longest_match(&format!("{prefix}田")),
+            Some((prefix.len(), "c"))
+        );
+    }
+
+    #[test]
+    fn test_mapping_char_filter_accepts_es_style_separator_padding() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["& => and", ":) => _happy_"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a&b :)"));
+
+        assert_eq!(output.text, "aandb _happy_");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_can_delete() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["-=>"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("中-文"));
+
+        assert_eq!(output.text, "中文");
+        assert_eq!(output.correct_offsets(0, 3), (0, 3));
+        assert_eq!(output.correct_offsets(3, 6), (4, 7));
+        assert_eq!(output.correct_offsets(0, 6), (0, 7));
+    }
+
+    #[test]
+    fn test_mapping_char_filter_uses_unicode_escape_for_whitespace() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["-=>\\u0020", "\\u0020=>_"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a-b c"));
+
+        assert_eq!(output.text, "a b_c");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_escaped_whitespace_and_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["\\t=>\\u0020", "\\=\\>=>arrow"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("\t=>"));
+
+        assert_eq!(output.text, " arrow");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_es_escape_rules() {
+        let escaped = r#"\\\n\r\t\b\f\u0041\"\q\=\>"#;
+
+        assert_eq!(
+            unescape_mapping_side(escaped).unwrap(),
+            "\\\n\r\t\u{0008}\u{000c}A\"q=>"
+        );
+    }
+
+    #[test]
+    fn test_mapping_char_filter_uses_last_raw_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b=>c"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a=>b"));
+
+        assert_eq!(output.text, "c");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_backslash_before_raw_separator() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b\\=>c"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_duplicate_source() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>x", "\\u0061=>y"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
+    }
+
+    #[test]
+    fn test_mapping_char_filter_trims_each_mapping_side() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a => b", "-=> "]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("a-"));
+
+        assert_eq!(output.text, "b");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_supports_unicode_surrogate_pairs() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["\\u4e2d=>zhong", "\\ud83d\\ude00=>smile"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+        let filter = MappingCharFilter::from_json(&params).unwrap();
+        let output = filter.apply(FilteredText::new("中😀"));
+
+        assert_eq!(output.text, "zhongsmile");
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_invalid_unicode_escape() {
+        for mapping in ["\\u123=>x", "\\ud83d=>x", "\\ud83d\\u0041=>x"] {
+            let params = json::json!({
+                "type": "mapping",
+                "mappings": [mapping]
+            });
+
+            assert!(MappingCharFilter::from_json(params.as_object().unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn test_mapping_char_filter_rejects_trailing_escape() {
+        let params = r#"{
+            "type": "mapping",
+            "mappings": ["a=>b\\"]
+        }"#;
+        let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+
+        assert!(MappingCharFilter::from_json(&params).is_err());
+    }
+}

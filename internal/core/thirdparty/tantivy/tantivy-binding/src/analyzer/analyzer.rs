@@ -1,10 +1,14 @@
-use log::warn;
 use serde_json as json;
 use std::collections::HashMap;
 use tantivy::tokenizer::*;
 
 use super::options::{get_global_file_resource_helper, FileResourcePathHelper};
-use super::{build_in_analyzer::*, filter::*, tokenizers::get_builder_with_tokenizer};
+use super::{
+    build_in_analyzer::*,
+    char_filter::{build_char_filters, OffsetMappingMode},
+    filter::*,
+    tokenizers::{get_builder_with_tokenizer, CharFilterTokenizer},
+};
 use crate::analyzer::filter::{create_filter, get_stop_words_list, get_string_list};
 use crate::error::Result;
 use crate::error::TantivyBindingError;
@@ -74,6 +78,8 @@ impl<'a> AnalyzerBuilder<'a> {
         for (key, value) in self.params {
             match key.as_str() {
                 "tokenizer" => {}
+                "char_filter" => {}
+                "char_filter_offset_mode" => {}
                 "filter" => {
                     // build with filter if filter param exist
                     builder = self.build_filter(builder, value)?;
@@ -126,6 +132,7 @@ impl<'a> AnalyzerBuilder<'a> {
                         "analyzer type should be string"
                     )));
                 }
+                // Ignore unrelated options to preserve persisted template semantics across upgrades.
                 return self.build_template(type_.as_str().unwrap());
             }
             _ => {}
@@ -151,6 +158,26 @@ impl<'a> AnalyzerBuilder<'a> {
             &mut self.helper,
             create_analyzer_by_json,
         )?;
+
+        if self.params.contains_key("char_filter_offset_mode")
+            && !self.params.contains_key("char_filter")
+        {
+            return Err(TantivyBindingError::InvalidArgument(
+                "char_filter_offset_mode requires char_filter".to_string(),
+            ));
+        }
+        let offset_mode = OffsetMappingMode::from_json(self.params.get("char_filter_offset_mode"))?;
+        if let Some(char_filter_params) = self.params.get("char_filter") {
+            let char_filters = build_char_filters(char_filter_params)?;
+            if !char_filters.is_empty() {
+                builder = TextAnalyzer::builder(CharFilterTokenizer::new(
+                    char_filters,
+                    builder.build(),
+                    offset_mode,
+                ))
+                .dynamic();
+            }
+        }
 
         // build and check other options
         builder = self.build_option(builder)?;
@@ -209,6 +236,7 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
 #[cfg(test)]
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
+    use tantivy::tokenizer::TokenStream;
 
     #[test]
     fn test_standard_analyzer() {
@@ -219,6 +247,138 @@ mod tests {
 
         let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+    }
+
+    #[test]
+    fn test_analyzer_with_empty_char_filter() {
+        let params = r#"{
+            "char_filter": [],
+            "tokenizer": "standard",
+            "filter": ["lowercase"]
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+        let mut analyzer = analyzer.unwrap();
+        let mut stream = analyzer.token_stream("MILVUS");
+        assert!(stream.advance());
+
+        let token = stream.token();
+        assert_eq!(token.text, "milvus");
+        assert_eq!(token.offset_from, 0);
+        assert_eq!(token.offset_to, 6);
+        assert!(!stream.advance());
+    }
+
+    #[test]
+    fn test_analyzer_with_mapping_char_filter() {
+        let params = r#"{
+            "char_filter": [
+                {
+                    "type": "mapping",
+                    "mappings": ["&=>and"]
+                }
+            ],
+            "tokenizer": "standard",
+            "filter": ["lowercase"]
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_ok(), "error: {}", analyzer.err().unwrap());
+
+        let mut analyzer = analyzer.unwrap();
+        let mut stream = analyzer.token_stream("A&B");
+        assert!(stream.advance());
+
+        let token = stream.token();
+        assert_eq!(token.text, "aandb");
+        assert_eq!(token.offset_from, 0);
+        assert_eq!(token.offset_to, 3);
+        assert!(!stream.advance());
+    }
+
+    #[test]
+    fn test_analyzer_rejects_unsupported_char_filter() {
+        let params = r#"{
+            "char_filter": [
+                {
+                    "type": "unsupported"
+                }
+            ],
+            "tokenizer": "standard"
+        }"#;
+
+        let analyzer = create_analyzer(params, "");
+        assert!(analyzer.is_err());
+    }
+
+    #[test]
+    fn test_analyzer_rejects_unsupported_char_filter_offset_mode() {
+        let params = r#"{
+            "char_filter": [],
+            "char_filter_offset_mode": "unsupported",
+            "tokenizer": "standard"
+        }"#;
+
+        assert!(create_analyzer(params, "").is_err());
+    }
+
+    #[test]
+    fn test_builtin_analyzers_ignore_unrelated_options() {
+        use serde_json::json;
+
+        let tokens = |params: &str| {
+            assert!(super::validate_analyzer(params, "").unwrap().is_empty());
+            let mut analyzer = create_analyzer(params, "").unwrap();
+            let mut stream = analyzer.token_stream("A&B running 中文 ภาษาไทย العربية");
+            let mut result = Vec::new();
+            while stream.advance() {
+                let token = stream.token();
+                result.push((
+                    token.text.clone(),
+                    token.offset_from,
+                    token.offset_to,
+                    token.position,
+                    token.position_length,
+                ));
+            }
+            result
+        };
+
+        for type_ in ["standard", "english", "chinese", "arabic", "thai"] {
+            let baseline = json!({"type": type_, "stop_words": ["b"]});
+            let expected = tokens(&baseline.to_string());
+            assert!(!expected.is_empty());
+            for options in [
+                json!({"char_filter": [{"type": "mapping", "mappings": ["& => and"]}]}),
+                json!({"char_filter": []}),
+                json!({"char_filter_offset_mode": "boundary"}),
+                json!({"char_filter": null}),
+                json!({"char_filter": [{"type": "unsupported"}]}),
+                json!({"char_filter": "invalid", "char_filter_offset_mode": 42}),
+                json!({"tokenizer": "invalid", "filter": false, "unknown_option": true}),
+            ] {
+                let mut params = baseline.clone();
+                params
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(options.as_object().unwrap().clone());
+                assert_eq!(tokens(&params.to_string()), expected, "params: {params}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_builtin_analyzers_still_validate_template_parameters() {
+        for params in [
+            r#"{"type":1,"char_filter":[]}"#,
+            r#"{"type":"unknown","char_filter":[]}"#,
+            r#"{"type":"standard","stop_words":42,"char_filter":[]}"#,
+        ] {
+            assert!(create_analyzer(params, "").is_err(), "{params}");
+            assert!(super::validate_analyzer(params, "").is_err(), "{params}");
+        }
     }
 
     #[test]
