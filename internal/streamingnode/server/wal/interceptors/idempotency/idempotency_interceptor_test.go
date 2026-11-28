@@ -323,10 +323,12 @@ func TestTopologyChangeReclaimsReplicatedTxnBuffers(t *testing.T) {
 		return nil, context.Canceled
 	})
 	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, impl.topologyGeneration)
 	require.NotNil(t, impl.txnInsertResultBuffers.BuildIfComplete(commit, 1))
 	_, err = impl.DoAppend(t.Context(), alter(false), ok)
 	require.NoError(t, err)
 	require.Nil(t, impl.txnInsertResultBuffers.BuildIfComplete(commit, 1))
+	require.EqualValues(t, 1, impl.topologyGeneration)
 }
 
 // The replicate interceptor rejects a replicated commit whose accepted bodies

@@ -142,7 +142,7 @@ func TestSalvageCheckpointCaptureOnForcePromote(t *testing.T) {
 	assert.Empty(t, rm.GetSalvageCheckpoint())
 
 	// Force promote to primary
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
@@ -176,7 +176,7 @@ func TestSalvageCheckpointNotCapturedOnNormalPromote(t *testing.T) {
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
 
 	// Normal promote (not force)
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", false, "test2"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessageWithForcePromote("test1", false, "test2"))
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
@@ -195,7 +195,7 @@ func TestSalvageCheckpointNotCapturedWhenAlreadyPrimary(t *testing.T) {
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
 	// Force promote when already primary (no secondary state)
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessageWithForcePromote("test1", true, "test2"))
 	assert.NoError(t, err)
 
 	// Salvage checkpoint should NOT be captured (no secondary state to capture)
@@ -256,7 +256,7 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 	assert.Empty(t, rm.GetSalvageCheckpoint())
 
 	// First force promote: secondary(cluster-a) -> primary
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-a"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-a"))
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 	cps := rm.GetSalvageCheckpoint()
@@ -264,7 +264,7 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 	assert.Equal(t, "cluster-a", cps[0].ClusterID)
 
 	// Now become secondary of cluster-b
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("cluster-b", "test1"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessage("cluster-b", "test1"))
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RoleSecondary, rm.Role())
 
@@ -272,7 +272,7 @@ func TestSalvageCheckpointMultipleForcePromotes(t *testing.T) {
 	assert.Len(t, rm.GetSalvageCheckpoint(), 1)
 
 	// Second force promote: secondary(cluster-b) -> primary
-	err = rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-b"))
+	err = appendConfig(context.Background(), rm, newAlterReplicateConfigMessageWithForcePromote("test1", true, "cluster-b"))
 	assert.NoError(t, err)
 	assert.Equal(t, replicateutil.RolePrimary, rm.Role())
 
@@ -435,11 +435,19 @@ func TestSecondaryReplicateManagerIgnoreStaleTxnBody(t *testing.T) {
 	assert.Nil(t, g)
 }
 
+func appendConfig(ctx context.Context, rm ReplicatesManager, msg message.MutableMessage) error {
+	acker, err := rm.BeginReplicateMessage(ctx, msg)
+	if err == nil {
+		acker.Ack(nil)
+	}
+	return err
+}
+
 func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterID, secondaryClusterID string) {
 	ctx := context.Background()
 
 	// switch to primary
-	err := rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
+	err := appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err := rm.GetReplicateCheckpoint()
@@ -447,7 +455,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// idempotent switch to primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -455,7 +463,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// switch to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -466,7 +474,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// idempotent switch to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -477,7 +485,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// switch back to primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -485,7 +493,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// idempotent switch back to primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -493,7 +501,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// switch back to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -504,7 +512,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// idempotent switch back to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -515,7 +523,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// add a new cluster and switch to primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID, "test3"))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID, "test3"))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -523,7 +531,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// idempotent add a new cluster and switch to primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID, "test3"))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(primaryClusterID, secondaryClusterID, "test3"))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RolePrimary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -531,7 +539,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Nil(t, cp)
 
 	// add a new cluster and switch to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID, "test3"))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID, "test3"))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -542,7 +550,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// idempotent add a new cluster and switch to secondary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID, "test3"))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage(secondaryClusterID, primaryClusterID, "test3"))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -553,7 +561,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// switch the primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage("test3", primaryClusterID, secondaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage("test3", primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -564,7 +572,7 @@ func testSwitchReplicateMode(t *testing.T, rm ReplicatesManager, primaryClusterI
 	assert.Equal(t, cp.TimeTick, uint64(0))
 
 	// idempotent switch the primary
-	err = rm.SwitchReplicateMode(ctx, newAlterReplicateConfigMessage("test3", primaryClusterID, secondaryClusterID))
+	err = appendConfig(ctx, rm, newAlterReplicateConfigMessage("test3", primaryClusterID, secondaryClusterID))
 	assert.NoError(t, err)
 	assert.Equal(t, rm.Role(), replicateutil.RoleSecondary)
 	cp, err = rm.GetReplicateCheckpoint()
@@ -596,7 +604,7 @@ func newReplicateRecoverySnapshot(
 
 func testMessageOnPrimary(t *testing.T, rm ReplicatesManager) {
 	// switch to primary
-	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test1", "test2"))
+	err := appendConfig(context.Background(), rm, newAlterReplicateConfigMessage("test1", "test2"))
 	assert.NoError(t, err)
 
 	// Test self-controlled message
@@ -623,7 +631,7 @@ func testMessageOnPrimary(t *testing.T, rm ReplicatesManager) {
 
 func testMessageOnSecondary(t *testing.T, rm ReplicatesManager) {
 	// switch to secondary
-	err := rm.SwitchReplicateMode(context.Background(), newAlterReplicateConfigMessage("test2", "test1"))
+	err := appendConfig(context.Background(), rm, newAlterReplicateConfigMessage("test2", "test1"))
 	assert.NoError(t, err)
 
 	// Test wrong cluster replicates
@@ -707,19 +715,19 @@ func newReplicateConfiguration(primaryClusterID string, secondaryClusterID ...st
 	}
 }
 
-func newAlterReplicateConfigMessage(primaryClusterID string, secondaryClusterID ...string) message.MutableAlterReplicateConfigMessageV2 {
+func newAlterReplicateConfigMessage(primaryClusterID string, secondaryClusterID ...string) message.MutableMessage {
 	return newAlterReplicateConfigMessageWithForcePromote(primaryClusterID, false, secondaryClusterID...)
 }
 
-func newAlterReplicateConfigMessageWithForcePromote(primaryClusterID string, forcePromote bool, secondaryClusterID ...string) message.MutableAlterReplicateConfigMessageV2 {
-	return message.MustAsMutableAlterReplicateConfigMessageV2(message.NewAlterReplicateConfigMessageBuilderV2().
+func newAlterReplicateConfigMessageWithForcePromote(primaryClusterID string, forcePromote bool, secondaryClusterID ...string) message.MutableMessage {
+	return message.NewAlterReplicateConfigMessageBuilderV2().
 		WithHeader(&message.AlterReplicateConfigMessageHeader{
 			ReplicateConfiguration: newReplicateConfiguration(primaryClusterID, secondaryClusterID...),
 			ForcePromote:           forcePromote,
 		}).
 		WithBody(&message.AlterReplicateConfigMessageBody{}).
 		WithVChannel(primaryClusterID + "-rootcoord-dml_0").
-		MustBuildMutable())
+		MustBuildMutable()
 }
 
 func newNonReplicateMessage(clusterID string) message.MutableMessage {

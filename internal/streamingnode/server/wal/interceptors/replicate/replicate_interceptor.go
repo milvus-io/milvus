@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -22,26 +21,6 @@ func (impl *replicateInterceptor) Name() string {
 }
 
 func (impl *replicateInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
-	if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-		alterReplicateConfig := message.MustAsMutableAlterReplicateConfigMessageV2(msg)
-		header := alterReplicateConfig.Header()
-
-		// Check ignore field - if true, skip all processing and just append the message
-		// This is used for incomplete switchover messages that should be ignored after force promote
-		if header.Ignore {
-			mlog.Info(ctx, "AlterReplicateConfig message has ignore flag set, skipping replicate mode switch and txn rollback")
-			return appendOp(ctx, msg)
-		}
-
-		// A AlterReplicateConfig message is protected by wal level lock, so it's safe to switch replicate mode.
-		// switch replicate mode if the message is put replicate config.
-		if err := impl.replicateManager.SwitchReplicateMode(ctx, alterReplicateConfig); err != nil {
-			return nil, err
-		}
-
-		return appendOp(ctx, msg)
-	}
-
 	// Begin to replicate the message.
 	acker, err := impl.replicateManager.BeginReplicateMessage(ctx, msg)
 	if errors.Is(err, replicates.ErrNotHandledByReplicateManager) {

@@ -17,7 +17,7 @@ func (r replicateAckerImpl) Ack(err error) {
 // ReplicateAcker is a guard for replicate message.
 type ReplicateAcker interface {
 	// Ack acknowledges the replicate message operation is done.
-	// It will push forward the in-memory checkpoint if the err is nil.
+	// A successful append applies the configuration change or advances replication progress.
 	Ack(err error)
 }
 
@@ -28,15 +28,6 @@ type ReplicateAcker interface {
 type ReplicatesManager interface {
 	// Role returns the role of the replicate manager.
 	Role() replicateutil.Role
-
-	// SwitchReplicateMode switches the replicate mode.
-	// following cases will happens:
-	// 1. primary->secondary: will transit into replicating mode, the message without replicate header will be rejected.
-	// 2. primary->primary: nothing happens,
-	// 3. secondary->primary: will transit into non-replicating mode, the secondary replica state (remote cluster replicating checkpoint...) will be dropped.
-	// 4. secondary->secondary with the source cluster is changed: the previous remote cluster replicating checkpoint will be dropped.
-	// 5. secondary->secondary without the source cluster is changed: nothing happens.
-	SwitchReplicateMode(ctx context.Context, msg message.MutableAlterReplicateConfigMessageV2) error
 
 	// BeginReplicateMessage begins the replicate one-replicated-message operation.
 	// ReplicateAcker's Ack method should be called if returned without error.

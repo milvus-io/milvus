@@ -236,53 +236,6 @@ func (_c *MockReplicatesManager_Role_Call) RunAndReturn(run func() replicateutil
 	return _c
 }
 
-// SwitchReplicateMode provides a mock function with given fields: ctx, msg
-func (_m *MockReplicatesManager) SwitchReplicateMode(ctx context.Context, msg message.MutableAlterReplicateConfigMessageV2) error {
-	ret := _m.Called(ctx, msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SwitchReplicateMode")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, message.MutableAlterReplicateConfigMessageV2) error); ok {
-		r0 = rf(ctx, msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockReplicatesManager_SwitchReplicateMode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SwitchReplicateMode'
-type MockReplicatesManager_SwitchReplicateMode_Call struct {
-	*mock.Call
-}
-
-// SwitchReplicateMode is a helper method to define mock.On call
-//   - ctx context.Context
-//   - msg message.MutableAlterReplicateConfigMessageV2
-func (_e *MockReplicatesManager_Expecter) SwitchReplicateMode(ctx interface{}, msg interface{}) *MockReplicatesManager_SwitchReplicateMode_Call {
-	return &MockReplicatesManager_SwitchReplicateMode_Call{Call: _e.mock.On("SwitchReplicateMode", ctx, msg)}
-}
-
-func (_c *MockReplicatesManager_SwitchReplicateMode_Call) Run(run func(ctx context.Context, msg message.MutableAlterReplicateConfigMessageV2)) *MockReplicatesManager_SwitchReplicateMode_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(message.MutableAlterReplicateConfigMessageV2))
-	})
-	return _c
-}
-
-func (_c *MockReplicatesManager_SwitchReplicateMode_Call) Return(_a0 error) *MockReplicatesManager_SwitchReplicateMode_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockReplicatesManager_SwitchReplicateMode_Call) RunAndReturn(run func(context.Context, message.MutableAlterReplicateConfigMessageV2) error) *MockReplicatesManager_SwitchReplicateMode_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NewMockReplicatesManager creates a new instance of MockReplicatesManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockReplicatesManager(t interface {
