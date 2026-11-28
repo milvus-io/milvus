@@ -21,6 +21,7 @@
 #define NOT_COMPILE_FOR_SWIG
 #endif
 
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -33,10 +34,13 @@
 #include <mutex>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "index/GrowingIndexCatchupCost.h"
 #include "index/growing/KnowhereGrowingVectorIndex.h"
 #include "knowhere/index/index_factory.h"
+#include "monitor/Monitor.h"
 #include "segcore/indexing/GrowingIndexSet.h"
 
 namespace milvus::index::test {
@@ -86,6 +90,7 @@ class WriterPause {
 };
 
 struct NativeControl {
+    WriterPause build;
     WriterPause add;
     std::atomic<int> adds{0};
     std::atomic<bool> fail_publication_after_add{false};
@@ -111,6 +116,7 @@ class ControlledVectorNode final : public knowhere::IndexNode {
           std::shared_ptr<knowhere::Config> cfg,
           bool use_pool,
           milvus::OpContext* ctx) override {
+        control_->build.Enter();
         return inner_.Node()->Build(dataset, std::move(cfg), use_pool, ctx);
     }
 
@@ -231,10 +237,11 @@ class TestVectorSource final : public GrowingVectorSource<float> {
         return {values.data() + begin * 2, static_cast<size_t>(count * 2)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t begin, int64_t count, float* output) const override {
         const auto rows = ContiguousRows(begin, count);
         std::copy(rows.begin(), rows.end(), output);
+        return {};
     }
 
     const float*
@@ -245,6 +252,11 @@ class TestVectorSource final : public GrowingVectorSource<float> {
 
 class KnowhereGrowingVectorIndexTest : public ::testing::Test {
  protected:
+    virtual GrowingBuildOptions
+    BuildOptions() const {
+        return {};
+    }
+
     void
     SetUp() override {
         static std::atomic<int> next_id{0};
@@ -272,7 +284,9 @@ class KnowhereGrowingVectorIndexTest : public ::testing::Test {
                            {knowhere::meta::NUM_BUILD_THREAD, "1"}},
             knowhere::Json{{knowhere::indexparam::NPROBE, "1"}},
             source_,
-            false);
+            false,
+            std::function<int64_t()>{},
+            BuildOptions());
         owner_ = owner.get();
         segcore::GrowingIndexSet::AppenderMap staged;
         staged.emplace(field_,
@@ -302,6 +316,14 @@ class KnowhereGrowingVectorIndexTest : public ::testing::Test {
     KnowhereGrowingVectorIndex<float>* owner_{nullptr};
     const FieldId field_{101};
 };
+
+TEST_F(KnowhereGrowingVectorIndexTest, VectorDataPinRequiresFullCoverage) {
+    FirstBatch();
+    const std::array<int64_t, 2> covered{2, 0};
+    const std::array<int64_t, 2> partial{4, 0};
+    EXPECT_TRUE(indexes_->PinVectorDataForOffsets(nullptr, field_, covered));
+    EXPECT_FALSE(indexes_->PinVectorDataForOffsets(nullptr, field_, partial));
+}
 
 TEST_F(KnowhereGrowingVectorIndexTest, PinDoesNotWaitForAdd) {
     FirstBatch();
@@ -342,6 +364,125 @@ TEST_F(KnowhereGrowingVectorIndexTest, PublicationRetryStaysOnFlush) {
     owner_->Flush();
     EXPECT_EQ(control_->adds.load(), 1);
     EXPECT_EQ(Pin().CoveredRowEnd(), 5);
+}
+
+class AsyncGrowingVectorIndexTest : public KnowhereGrowingVectorIndexTest {
+ protected:
+    GrowingBuildOptions
+    BuildOptions() const override {
+        return {.enabled = true};
+    }
+};
+
+class DeadlineGrowingVectorIndexTest : public AsyncGrowingVectorIndexTest {
+ protected:
+    static constexpr int64_t kDeadlineMs = 1000;
+
+    GrowingBuildOptions
+    BuildOptions() const override {
+        return {.enabled = true,
+                .finalize_budget_ms = 10000,
+                .catchup_deadline_ms = kDeadlineMs};
+    }
+};
+
+TEST(GrowingIndexCatchupCostTest, AccountsForLogicalAndPhysicalWork) {
+    milvus::index::GrowingIndexCatchupCost cost;
+    cost.Observe(1000, 0, 1);
+    EXPECT_GT(cost.EstimateMs(1, 1), 20);
+    cost.Observe(1000, 2, 10);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(10, 10), 50);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(1000, 0), 5.5);
+    EXPECT_DOUBLE_EQ(cost.EstimateMs(0, 0), 0);
+}
+
+TEST_F(AsyncGrowingVectorIndexTest, NullOnlySampleCannotBudgetVectorAdd) {
+    int unlocked_rounds = 0;
+    int finalize_attempts = 0;
+    growing_build_test_hook = [&](GrowingBuildPhase phase) {
+        if (phase == GrowingBuildPhase::kAfterCatchupRound) {
+            ++unlocked_rounds;
+        }
+        if (phase == GrowingBuildPhase::kBeforeFinalize &&
+            ++finalize_attempts == 1) {
+            // FirstBatch leaves one trailing null beyond the build prefix.
+            const bool valid = true;
+            owner_->Append(
+                4,
+                VectorBatch<float>{1, source_->values.data() + 4, 2, &valid});
+        }
+    };
+    auto guard = folly::makeGuard([&] {
+        indexes_.reset();
+        growing_build_test_hook = {};
+    });
+    FirstBatch();
+    owner_->Flush();
+    const auto pin = Pin();
+    ASSERT_TRUE(pin);
+    EXPECT_EQ(pin.CoveredRowEnd(), 5);
+    EXPECT_EQ(pin.Reader().Count(), 3);
+    EXPECT_EQ(unlocked_rounds, 2);
+}
+
+TEST_F(DeadlineGrowingVectorIndexTest, NullOnlyFinalizeDeferralHonorsDeadline) {
+    int finalize_attempts = 0;
+    growing_build_test_hook = [&](GrowingBuildPhase phase) {
+        if (phase == GrowingBuildPhase::kBeforeFinalize &&
+            ++finalize_attempts == 1) {
+            // FirstBatch already drained a row after the build prefix, so a
+            // single null fits the finalization budget but still must defer.
+            const bool valid = false;
+            owner_->Append(4, VectorBatch<float>{1, nullptr, 2, &valid});
+            std::this_thread::sleep_for(std::chrono::milliseconds(kDeadlineMs));
+        }
+    };
+    auto guard = folly::makeGuard([&] {
+        indexes_.reset();
+        growing_build_test_hook = {};
+    });
+    auto& deadline_failures =
+        monitor::internal_core_growing_index_deadline_failures;
+    const auto failures_before = deadline_failures.Value();
+
+    FirstBatch();
+    owner_->Flush();
+    EXPECT_EQ(finalize_attempts, 1);
+    EXPECT_FALSE(Pin());
+    EXPECT_DOUBLE_EQ(deadline_failures.Value(), failures_before + 1);
+}
+
+TEST_F(AsyncGrowingVectorIndexTest,
+       FlushWaitsForNullOnlyTailBeforePublication) {
+    control_->build.Arm();
+    FirstBatch();
+    const bool entered = control_->build.WaitUntilEntered();
+    if (!entered) {
+        control_->build.Release();
+        FAIL() << "background build did not reach the native engine";
+    }
+    // Longer than one staging slice but no new physical vectors. Flush is
+    // the boundary used by load/reopen; a query in the meantime gets no pin.
+    constexpr int64_t tail_rows = (1 << 20) + 17;
+    const auto nulls = std::make_unique<bool[]>(tail_rows);
+    owner_->Append(4, VectorBatch<float>{tail_rows, nullptr, 2, nulls.get()});
+    auto flush = std::async(std::launch::async, [&] { owner_->Flush(); });
+    EXPECT_EQ(flush.wait_for(std::chrono::milliseconds(20)),
+              std::future_status::timeout);
+    EXPECT_FALSE(Pin());
+    control_->build.Release();
+    flush.get();
+    const auto pin = Pin();
+    ASSERT_TRUE(pin);
+    EXPECT_EQ(pin.CoveredRowEnd(), 4 + tail_rows);
+    EXPECT_EQ(pin.Reader().Count(), 2);
+    const bool valid = true;
+    owner_->Append(
+        4 + tail_rows,
+        VectorBatch<float>{1, source_->values.data() + 4, 2, &valid});
+    EXPECT_EQ(Pin().CoveredRowEnd(), 5 + tail_rows);
+    EXPECT_EQ(Pin().Reader().Count(), 3);
+    EXPECT_EQ(pin.CoveredRowEnd(), 4 + tail_rows);
 }
 
 }  // namespace

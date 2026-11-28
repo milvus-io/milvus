@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <memory>
 #include <cstdint>
 #include <span>
 #include <type_traits>
@@ -49,8 +50,9 @@ class GrowingVectorSource {
     virtual std::span<const T>
     ContiguousRows(int64_t physical_begin, int64_t row_count) const = 0;
 
-    // output follows the same element-count convention as ContiguousRows().
-    virtual void
+    // Stage the same element count as ContiguousRows(). Keep the returned
+    // generation alive through consumption if output contains borrowed rows.
+    virtual std::shared_ptr<const void>
     CopyRows(int64_t physical_begin, int64_t row_count, T* output) const = 0;
 
     // Dense sources return the first of dim T elements; sparse sources return

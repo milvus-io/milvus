@@ -672,23 +672,18 @@ void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId,
                                       const Schema& schema,
                                       int64_t covered_row_end) {
-    //remove the chunk data to reduce memory consumption
-    auto& field_meta = schema.operator[](fieldId);
-    auto data_type = field_meta.get_data_type();
-    if (IsVectorDataType(data_type)) {
-        if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
-            auto vec_data_base = insert_record_.get_data_base(fieldId);
-            if (vec_data_base && vec_data_base->num_chunk() > 0) {
-                // No lock, and no try_lock: clear() swaps the container's
-                // internal chunk collection under the container's own mutex,
-                // and every reader holds a ChunkSnapshot pinning the
-                // generation it is walking. Reclamation therefore always
-                // proceeds -- the previous try_lock made it fail under query
-                // load and only retry on the next insert, so a segment that
-                // stopped taking writes never got its memory back.
-                vec_data_base->clear();
-            }
-        }
+    if (!schema[fieldId].is_vector() || !growing_indexes_.Has(fieldId)) {
+        return;
+    }
+    auto* column = insert_record_.get_data_base(fieldId);
+    if (!column || column->num_chunk() == 0) {
+        return;
+    }
+    // Arm first, then check for an already-published reader. Either side of
+    // the last write / first publication race can complete the handoff.
+    growing_indexes_.ArmRawColumnRelease(fieldId, column, covered_row_end);
+    if (growing_indexes_.CanReleaseVectorColumn(fieldId, covered_row_end)) {
+        column->clear();
     }
 }
 
@@ -744,6 +739,7 @@ SegmentGrowingImpl::StageInsertVectorInput(
     }
 
     std::lock_guard lock(growing_index_feed_mutex_);
+    growing_indexes_.SuspendRawColumnRelease();
     const auto result =
         pending_vector_inputs_.try_emplace(row_begin, std::move(pending));
     AssertInfo(result.second,
@@ -798,6 +794,7 @@ SegmentGrowingImpl::StageLoadedVectorInput(
     location.loaded_fields = std::move(retained);
 
     std::lock_guard lock(growing_index_feed_mutex_);
+    growing_indexes_.SuspendRawColumnRelease();
     auto [it, inserted] = pending_vector_inputs_.try_emplace(row_begin);
     auto& pending = it->second;
     if (inserted) {
@@ -3304,11 +3301,16 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     const int64_t* seg_offsets,
     int64_t count,
     milvus::proto::schema::SparseFloatArray* output) const {
-    // Pin raw before inspecting the reader. If reclamation wins first the
-    // empty snapshot directs this operation to one fixed reader generation;
-    // otherwise this operation retains and reads the raw generation it saw.
+    // Retain the raw generation for fallback if the index does not cover
+    // this request. A nonempty raw directory can outlive the handoff.
     auto chunks = vec_raw->acquire_chunks();
-    if (!chunks.empty()) {
+    auto pin = growing_indexes_.PinVectorDataForOffsets(
+        op_ctx, field_id, {seg_offsets, static_cast<size_t>(count)});
+    if (!pin) {
+        AssertInfo(
+            !chunks.empty(),
+            "no raw storage covers the requested sparse vectors for field {}",
+            field_id.get());
         const auto physical_offsets =
             MapValidVectorOffsets(*vec_raw, seg_offsets, count);
         const auto* raw_offsets =
@@ -3325,16 +3327,8 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
         return;
     }
 
-    auto pin = PinGrowingIndex(op_ctx, field_id);
-    AssertInfo(pin,
-               "growing sparse vector field {} has neither raw data nor an "
-               "index reader",
-               field_id.get());
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    AssertInfo(reader != nullptr && reader->HasRawData(),
-               "growing sparse vector reader for field {} has no raw values",
-               field_id.get());
+    const auto& reader =
+        dynamic_cast<const index::IVectorReader&>(pin.Reader());
     // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
     // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
@@ -3342,7 +3336,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     ids->SetDim(1);
     ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
-    auto retrieved = reader->GetSparseVector(ids);
+    auto retrieved = reader.GetSparseVector(ids);
     SparseRowsToProto(
         [&](size_t i) { return retrieved.get() + i; }, count, output);
 }
@@ -3397,7 +3391,12 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     auto& vec = *vec_ptr;
 
     auto chunks = vec.acquire_chunks();
-    if (!chunks.empty()) {
+    auto pin = growing_indexes_.PinVectorDataForOffsets(
+        op_ctx, field_id, {seg_offsets, static_cast<size_t>(count)});
+    if (!pin) {
+        AssertInfo(!chunks.empty(),
+                   "no raw storage covers the requested vectors for field {}",
+                   field_id.get());
         const auto physical_offsets =
             MapValidVectorOffsets(vec, seg_offsets, count);
         const auto* raw_offsets =
@@ -3412,16 +3411,8 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
         return;
     }
 
-    auto pin = PinGrowingIndex(op_ctx, field_id);
-    AssertInfo(pin,
-               "growing vector field {} has neither raw data nor an index "
-               "reader",
-               field_id.get());
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    AssertInfo(reader != nullptr && reader->HasRawData(),
-               "growing vector reader for field {} has no raw values",
-               field_id.get());
+    const auto& reader =
+        dynamic_cast<const index::IVectorReader&>(pin.Reader());
     // Nullable row mapping lives inside knowhere's IdMap (#50524), so the
     // reader takes logical row ids directly.
     auto ids = std::make_shared<knowhere::DataSet>();
@@ -3429,7 +3420,7 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     ids->SetDim(1);
     ids->SetIds(seg_offsets);
     ids->SetIsOwner(false);
-    auto retrieved = reader->GetVector(ids);
+    auto retrieved = reader.GetVector(ids);
     AssertInfo(retrieved.size() == static_cast<size_t>(count * element_sizeof),
                "growing vector reader returned {} bytes, expected {}",
                retrieved.size(),

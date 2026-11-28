@@ -86,7 +86,7 @@ class ChunkedGrowingVectorSource final : public index::GrowingVectorSource<T> {
                 ElementCount(row_count)};
     }
 
-    void
+    std::shared_ptr<const void>
     CopyRows(int64_t physical_begin,
              int64_t row_count,
              T* output) const override {
@@ -110,11 +110,25 @@ class ChunkedGrowingVectorSource final : public index::GrowingVectorSource<T> {
                        chunk_id);
             const auto* chunk = static_cast<const T*>(
                 storage_->get_chunk_data(snapshot, chunk_id));
-            std::copy_n(chunk + chunk_offset * elements_per_row_,
-                        ElementCount(count),
-                        output + copied * elements_per_row_);
+            if constexpr (std::is_same_v<T,
+                                         index::GrowingVectorStorageType<
+                                             sparse_u32_f32>>) {
+                for (int64_t i = 0; i < count; ++i) {
+                    const auto& row = chunk[chunk_offset + i];
+                    output[copied + i] =
+                        T(row.size(),
+                          const_cast<uint8_t*>(
+                              static_cast<const uint8_t*>(row.data())),
+                          /*own_data=*/false);
+                }
+            } else {
+                std::copy_n(chunk + chunk_offset * elements_per_row_,
+                            ElementCount(count),
+                            output + copied * elements_per_row_);
+            }
             copied += count;
         }
+        return snapshot.storage;
     }
 
     const T*
@@ -208,6 +222,12 @@ MakeCapability(FieldId field_id,
 
 }  // namespace
 
+std::shared_ptr<const index::GrowingVectorSource<
+    index::GrowingVectorStorageType<sparse_u32_f32>>>
+MakeSparseGrowingVectorSource(const VectorBase* column) {
+    return MakeVectorSource<sparse_u32_f32, SparseFloatVector>(column);
+}
+
 // Resolved against the live build pool size -- the cpu budget of index
 // building -- and clamped to [1, pool size] because knowhere declares
 // num_build_thread without a range and hands it to omp_set_num_threads, and
@@ -230,6 +250,53 @@ ResolveGrowingBuildThreadNum(const SegcoreConfig& segcore_config) {
     return std::clamp<int64_t>(thread_num, 1, pool_size);
 }
 
+// A worker never takes the segment feed mutex (Flush may be waiting there).
+// Only the registered appender can be armed, so a private reopen/backfill
+// owner cannot reclaim a column before its registration commits.
+struct GrowingIndexSet::RawReleaseWindow {
+    std::mutex mutex;
+    int64_t safe_end{-1};  // Negative while any staged write is outstanding.
+};
+
+struct GrowingIndexSet::DeferredColumnRelease {
+    VectorBase* column{nullptr};  // Guarded by the shared release window.
+
+    void
+    OnPublished(RawReleaseWindow& window, int64_t covered_end) {
+        std::lock_guard lock(window.mutex);
+        if (column && window.safe_end >= 0 && covered_end >= window.safe_end &&
+            column->num_chunk() > 0) {
+            column->clear();
+        }
+        column = nullptr;
+    }
+};
+
+void
+GrowingIndexSet::SuspendRawColumnRelease() {
+    if (release_window_) {
+        std::lock_guard lock(release_window_->mutex);
+        release_window_->safe_end = -1;
+    }
+}
+
+void
+GrowingIndexSet::ArmRawColumnRelease(FieldId field_id,
+                                     VectorBase* column,
+                                     int64_t row_end) {
+    if (!release_window_) {
+        return;
+    }
+    std::shared_lock lock(mutex_);
+    auto it = appenders_.find(field_id);
+    if (it != appenders_.end() && it->second.deferred_release) {
+        auto& release = *it->second.deferred_release;
+        std::lock_guard guard(release_window_->mutex);
+        release.column = column;
+        release_window_->safe_end = row_end;
+    }
+}
+
 GrowingIndexSet::Appender::Appender(FieldId field_id,
                                     index::ReaderCaps reader_caps,
                                     std::unique_ptr<index::IGrowingIndex> value,
@@ -247,6 +314,18 @@ GrowingIndexSet::Initialize(const Schema& schema,
                             int64_t segment_id,
                             const InsertRecordGrowing& insert_record,
                             const std::function<bool(FieldId)>& include_field) {
+    // Initialize runs again when the first input reveals function outputs.
+    // Existing segments must retain the policy captured at construction.
+    std::call_once(growing_build_options_once_, [&] {
+        growing_build_options_ = {
+            segcore_config.get_enable_async_growing_index_build(),
+            segcore_config.get_async_growing_index_finalize_budget_ms(),
+            segcore_config.get_async_growing_index_catchup_deadline_ms(),
+            segcore_config.get_growing_index_build_pool_ratio()};
+        if (growing_build_options_.enabled) {
+            release_window_ = std::make_shared<RawReleaseWindow>();
+        }
+    });
     AppenderMap staged;
     for (const auto& [field_id, field_meta] : schema.get_fields()) {
         if (!include_field(field_id)) {
@@ -347,6 +426,15 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         return ResolveGrowingBuildThreadNum(SegcoreConfig::default_config());
     };
 
+    auto options = growing_build_options_;
+    std::shared_ptr<DeferredColumnRelease> release;
+    if (options.enabled && !source_backed) {
+        release = std::make_shared<DeferredColumnRelease>();
+        options.on_raw_owned = [release,
+                                window = release_window_](int64_t covered_end) {
+            release->OnPublished(*window, covered_end);
+        };
+    }
     auto make_owner =
         [&]<typename EngineType>(
             std::shared_ptr<const index::GrowingVectorSource<
@@ -363,7 +451,8 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
             config.GetSearchBaseParams(),
             std::move(source),
             source_backed,
-            build_thread_num);
+            build_thread_num,
+            options);
     };
 
     std::unique_ptr<index::IGrowingIndex> owner;
@@ -382,8 +471,7 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
             break;
         case DataType::VECTOR_SPARSE_U32_F32:
             owner = make_owner.operator()<sparse_u32_f32>(
-                MakeVectorSource<sparse_u32_f32, SparseFloatVector>(
-                    field_raw_data));
+                MakeSparseGrowingVectorSource(field_raw_data));
             break;
         default:
             ThrowInfo(UnexpectedError,
@@ -391,7 +479,9 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
                       data_type);
     }
 
-    return Appender(field_meta.get_id(), {}, std::move(owner), source_backed);
+    Appender appender(field_meta.get_id(), {}, std::move(owner), source_backed);
+    appender.deferred_release = std::move(release);
+    return appender;
 }
 
 void
@@ -439,22 +529,56 @@ GrowingIndexSet::Has(FieldId field_id) const {
     return appenders_.find(field_id) != appenders_.end();
 }
 
+index::GrowingIndexSnapshotPin
+GrowingIndexSet::Appender::PinOwnedVectorData(milvus::OpContext* op_ctx) const {
+    if (!owner || source_backed) {
+        return {};
+    }
+    auto pin = owner->PinSnapshot(op_ctx);
+    const auto* reader =
+        pin ? dynamic_cast<const index::IVectorReader*>(&pin.Reader())
+            : nullptr;
+    if (reader && reader->HasRawData()) {
+        return pin;
+    }
+    return {};
+}
+
 bool
 GrowingIndexSet::CanReleaseVectorColumn(FieldId field_id,
                                         int64_t visible_row_end) const {
     std::shared_lock lock(mutex_);
     auto it = appenders_.find(field_id);
-    if (it == appenders_.end() || !it->second.owner ||
-        it->second.source_backed) {
+    if (it == appenders_.end()) {
         return false;
     }
-    auto pin = it->second.owner->PinSnapshot();
-    if (!pin || pin.CoveredRowEnd() < visible_row_end) {
-        return false;
+    auto pin = it->second.PinOwnedVectorData(nullptr);
+    return pin && pin.CoveredRowEnd() >= visible_row_end;
+}
+
+index::GrowingIndexSnapshotPin
+GrowingIndexSet::PinVectorDataForOffsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    std::span<const int64_t> offsets) const {
+    index::GrowingIndexSnapshotPin pin;
+    {
+        std::shared_lock lock(mutex_);
+        auto it = appenders_.find(field_id);
+        if (it == appenders_.end() || !it->second.owner ||
+            it->second.source_backed) {
+            return {};
+        }
+        it->second.owner->CommitIfNeeded();
+        pin = it->second.PinOwnedVectorData(op_ctx);
     }
-    const auto* reader =
-        dynamic_cast<const index::IVectorReader*>(&pin.Reader());
-    return reader != nullptr && reader->HasRawData();
+    if (pin &&
+        std::none_of(offsets.begin(), offsets.end(), [&](int64_t offset) {
+            return offset < 0 || offset >= pin.CoveredRowEnd();
+        })) {
+        return pin;
+    }
+    return {};
 }
 
 void
