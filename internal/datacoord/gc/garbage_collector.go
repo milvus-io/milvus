@@ -29,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1151,8 +1152,13 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		loadedSegments.Insert(segmentID)
 	}
 
-	io := packed.NewManifestIOContext(1)
+	concurrency := max(1, min(len(drops), Params.DataCoordCfg.GCDroppedSegmentConcurrency.GetAsInt()))
+	io := packed.NewManifestIOContext(concurrency)
 	defer io.Close()
+	var workers errgroup.Group
+	workers.SetLimit(concurrency)
+	defer func() { _ = workers.Wait() }()
+
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -1160,7 +1166,15 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			return
 		}
 
-		gc.ackSignal(signal)
+		select {
+		case cmd := <-signal:
+			// Acknowledge only after all admitted segment reclamations finish.
+			_ = workers.Wait()
+			if cmd.done != nil {
+				close(cmd.done)
+			}
+		default:
+		}
 
 		if _, referenced := protected[segmentID]; referenced {
 			continue
@@ -1197,7 +1211,13 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.RecycleDroppedSegment(ctx, io, segmentID)
+		workers.Go(func() error {
+			// Admission may have blocked on the limit while a pause was recorded.
+			if ctx.Err() == nil && !gc.IsPaused(segment.GetCollectionID()) {
+				gc.RecycleDroppedSegment(ctx, io, segmentID)
+			}
+			return nil
+		})
 	}
 }
 

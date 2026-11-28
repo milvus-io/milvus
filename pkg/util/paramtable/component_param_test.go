@@ -1756,6 +1756,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, 1, Params.GCDroppedSegmentConcurrency.GetAsInt())
 		assert.Equal(t, hardware.GetCPUNum(), Params.GCRemoveConcurrent.GetAsInt())
 		params.Save("dataCoord.gc.removeConcurrent", "32")
 		assert.Equal(t, 32, Params.GCRemoveConcurrent.GetAsInt())

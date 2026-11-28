@@ -6896,6 +6896,7 @@ type dataCoordConfig struct {
 	PKIndexManifestRetainDuration          ParamItem `refreshable:"false"`
 	GCMissingTolerance                     ParamItem `refreshable:"false"`
 	GCDropTolerance                        ParamItem `refreshable:"false"`
+	GCDroppedSegmentConcurrency            ParamItem `refreshable:"true"`
 	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
 	GCScanIntervalInHour                   ParamItem `refreshable:"false"`
 	GCSlowDownCPUUsageThreshold            ParamItem `refreshable:"false"`
@@ -8040,6 +8041,15 @@ Only in-memory manifest-resident records are migrated. Untracked manifest entrie
 		Export:       true,
 	}
 	p.GCDropTolerance.Init(base.mgr)
+
+	p.GCDroppedSegmentConcurrency = ParamItem{
+		Key:          "dataCoord.gc.droppedSegmentConcurrency",
+		Version:      "3.0.1",
+		DefaultValue: "1",
+		Doc:          "Maximum number of dropped segments reclaimed at once per sweep. Values below 1 use 1.",
+		Export:       true,
+	}
+	p.GCDroppedSegmentConcurrency.Init(base.mgr)
 
 	p.GCRemoveConcurrent = ParamItem{
 		Key:          "dataCoord.gc.removeConcurrent",
