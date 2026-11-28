@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -54,6 +55,42 @@ func (s *MiniClusterSuite) WaitForLoadWithDB(ctx context.Context, dbName, collec
 
 func (s *MiniClusterSuite) WaitForLoad(ctx context.Context, collection string) {
 	s.waitForLoadInternal(ctx, "", collection)
+}
+
+// WaitForPublishedSegments waits for the sealed-data fixture after index build.
+// Flush proves durability; private streaming sources and sort outputs may still
+// be Flushed until their group publishes. They must not count as sealed inputs.
+func (s *MiniClusterSuite) WaitForPublishedSegments(ctx context.Context, dbName, collection string) []*datapb.SegmentInfo {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		segments, err := s.Cluster.ShowSegmentsWithDB(dbName, collection)
+		if err == nil {
+			var published []*datapb.SegmentInfo
+			pending := false
+			for _, segment := range segments {
+				if segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetState() != commonpb.SegmentState_Flushed || segment.GetNumOfRows() == 0 {
+					continue
+				}
+				if segment.GetIsInvisible() || segment.GetIsImporting() {
+					pending = true
+					continue
+				}
+				published = append(published, segment)
+			}
+			if !pending && len(published) > 0 {
+				return published
+			}
+		}
+		select {
+		case <-ctx.Done():
+			s.Require().NoError(ctx.Err(), "waiting for published sealed segments in %s", collection)
+			return nil
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *MiniClusterSuite) WaitForSortedSegmentLoaded(ctx context.Context, dbName, collection string) {

@@ -66,7 +66,8 @@ func isSchemaBumpDataSegment(segment *meta.SegmentInfo) bool {
 // whose SchemaVersion lags behind collectionSchemaVersion.
 func (policy *BumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, collectionSchemaVersion int32) []*meta.ChanPartSegments {
 	return meta.GetSegmentsChanPart(policy.meta, collectionID, meta.SegmentFilterFunc(func(segment *meta.SegmentInfo) bool {
-		if !isSchemaBumpDataSegment(segment) ||
+		groupOutput := policy.meta.CanPrepareStreamingSchema(segment.GetID())
+		if (!isSchemaBumpDataSegment(segment) && !groupOutput) ||
 			segment.IsCompacting ||
 			policy.meta.IsSegmentCompactionProtected(segment.GetID()) ||
 			segment.GetSchemaVersion() >= collectionSchemaVersion {
@@ -87,6 +88,17 @@ func (policy *BumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, 
 }
 
 func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]view.CompactionView, error) {
+	return policy.trigger(ctx, false)
+}
+
+// TriggerRequired prepares accepted streaming data even when automatic schema
+// cleanup is disabled. Current private outputs and bases required by an
+// outstanding ALTER target are eligible; optional stale cleanup stays opt-in.
+func (policy *BumpSchemaVersionPolicy) TriggerRequired(ctx context.Context) (map[CompactionTriggerType][]view.CompactionView, error) {
+	return policy.trigger(ctx, true)
+}
+
+func (policy *BumpSchemaVersionPolicy) trigger(ctx context.Context, requiredOnly bool) (map[CompactionTriggerType][]view.CompactionView, error) {
 	collections := policy.meta.CollectionsForPreparation(ctx)
 	events := make(map[CompactionTriggerType][]view.CompactionView)
 
@@ -104,6 +116,8 @@ func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 			continue
 		}
 		collectionID := collection.ID
+		published := policy.meta.GetCollection(collectionID)
+		pendingTarget := published != nil && published.Schema != nil && collection.Schema.GetVersion() > published.Schema.GetVersion()
 		// The collection cache publishes replacements. Keep this schema reference
 		// so candidate selection and the task snapshot use the same version.
 		schema := collection.Schema
@@ -120,6 +134,9 @@ func (policy *BumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 		for _, group := range partSegments {
 			for _, segment := range group.Segments {
 				segmentID := segment.GetID()
+				if requiredOnly && !pendingTarget && !policy.meta.CanPrepareStreamingSchema(segmentID) {
+					continue
+				}
 				segmentViews := view.GetViewsByInfo(segment)
 				if len(segmentViews) == 0 {
 					mlog.Warn(ctx, "GetViewsByInfo returned empty views, skip segment",

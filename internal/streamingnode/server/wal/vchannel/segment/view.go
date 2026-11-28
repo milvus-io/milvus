@@ -13,9 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -54,7 +56,7 @@ func newSegmentView(
 		closingTimeTick = meta.GetCheckpointTimeTick()
 	}
 	durableMeta := proto.CloneOf(meta)
-	return &SegmentView{
+	view := &SegmentView{
 		closingTimeTick:             closingTimeTick,
 		meta:                        cloneSegmentMetaState(durableMeta),
 		durableMeta:                 durableMeta,
@@ -67,27 +69,32 @@ func newSegmentView(
 		flushPolicy:                 flushPolicy,
 		schema:                      schema,
 		finalCommitDone:             *atomic.NewBool(finalCommitDoneFromMeta(meta)),
+		flushDataDurable:            *atomic.NewBool(meta.GetFlushDataDurable() || finalCommitDoneFromMeta(meta)),
 		createSegmentTimeTick:       meta.GetStat().GetCreateSegmentTimeTick(),
 		segmentID:                   meta.GetSegmentId(),
 		vchannel:                    meta.GetVchannel(),
 		owner:                       config.owner,
 	}
+	view.scheduleHandoffAckLocked()
+	return view
 }
 
 // cloneSegmentMetaState copies mutable state while sharing read-only binlog
 // entries and Statistics owned by the SegmentView, as on the flush path.
 func cloneSegmentMetaState(meta *streamingpb.SegmentAssignmentMeta) *streamingpb.SegmentAssignmentMeta {
 	cloned := &streamingpb.SegmentAssignmentMeta{
-		CollectionId:        meta.CollectionId,
-		PartitionId:         meta.PartitionId,
-		SegmentId:           meta.SegmentId,
-		Vchannel:            meta.Vchannel,
-		State:               meta.State,
-		Stat:                proto.CloneOf(meta.Stat),
-		StorageVersion:      meta.StorageVersion,
-		CheckpointTimeTick:  meta.CheckpointTimeTick,
-		SealedAtDataVersion: proto.CloneOf(meta.SealedAtDataVersion),
-		SchemaVersion:       meta.SchemaVersion,
+		CollectionId:                   meta.CollectionId,
+		PartitionId:                    meta.PartitionId,
+		SegmentId:                      meta.SegmentId,
+		Vchannel:                       meta.Vchannel,
+		State:                          meta.State,
+		Stat:                           proto.CloneOf(meta.Stat),
+		StorageVersion:                 meta.StorageVersion,
+		CheckpointTimeTick:             meta.CheckpointTimeTick,
+		SealedAtDataVersion:            proto.CloneOf(meta.SealedAtDataVersion),
+		SchemaVersion:                  meta.SchemaVersion,
+		FlushDataDurable:               meta.FlushDataDurable,
+		FlushPendingThroughDataVersion: proto.CloneOf(meta.FlushPendingThroughDataVersion),
 	}
 	cloned.ProtoReflect().SetUnknown(slices.Clone(meta.ProtoReflect().GetUnknown()))
 	if storage := meta.PersistedStorage; storage != nil {
@@ -221,6 +228,11 @@ type SegmentView struct {
 	// vchannel module can scan views without taking the per-view lock on the WAL
 	// observation hot path.
 	finalCommitDone atomic.Bool
+	// Runtime-only: Drop replay restores this intent until a stable child
+	// tombstone proves coordinator retirement. Other partitions never inherit it.
+	dropRequested       atomic.Bool
+	flushDataDurable    atomic.Bool
+	handoffAckScheduled bool
 	// createSegmentTimeTick mirrors meta.Stat.CreateSegmentTimeTick and is
 	// immutable after construction; the module reads it lock-free when
 	// recomputing the L1 materialization bound.
@@ -372,6 +384,18 @@ func (s *SegmentView) Flush(
 		// incoming flush message instead of dropping it silently, so a
 		// consumer can handle it separately.
 		owned.IntoPoisoned()
+		return false
+	}
+	if msg.MessageType() == message.MessageTypeDropCollection ||
+		(msg.MessageType() == message.MessageTypeDropPartition &&
+			message.MustAsImmutableDropPartitionMessageV1(msg).Header().GetPartitionId() == s.meta.GetPartitionId()) {
+		s.dropRequested.Store(true)
+	}
+	// The first flush closes the source and durably registers all its data.
+	// Later ManualFlush/DDL messages need no further persistence from it, even
+	// while query publication is pending. Retaining them here would leave no
+	// commit task to release their handles and would block consuming ACKs.
+	if s.flushDataDurable.Load() {
 		return false
 	}
 	timetick := msg.TimeTick()
@@ -575,8 +599,8 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 	return info.meta.GetStat().GetCreateSegmentTimeTick()
 }
 
-// L1MaterializationBlockerTimeTick reports the inclusive L0 materialization
-// materialization frontier imposed by an L1 segment whose final commit has not
+// L1MaterializationBlockerTimeTick caps the query transform frontier while an
+// L1 segment still serves as a growing source and its final publication has not
 // completed yet. Lock-free by design: finalCommitDone is published atomically
 // and createSegmentTimeTick is immutable, so the vchannel module may scan every
 // view on the WAL observation hot path without acquiring the per-view lock.
@@ -584,6 +608,15 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 // tracks L1 segments.
 func (info *SegmentView) L1MaterializationBlockerTimeTick() (uint64, bool) {
 	if info.finalCommitDone.Load() {
+		return 0, false
+	}
+	return info.createSegmentTimeTick, true
+}
+
+// Index readiness cannot block WAL durability or explicit Flush ACKs. A
+// registered flush remains a growing query source until its publication V.
+func (info *SegmentView) L1DataMaterializationBlockerTimeTick() (uint64, bool) {
+	if info.flushDataDurable.Load() {
 		return 0, false
 	}
 	return info.createSegmentTimeTick, true
@@ -603,6 +636,22 @@ func (info *SegmentView) MarkSnapshotPersisted(snapshot *streamingpb.SegmentAssi
 		info.pendingDirtySnapshot = nil
 	}
 	info.dirty = !proto.Equal(info.durableMeta, snapshot)
+	if snapshot.GetFlushDataDurable() && snapshot.GetSealedAtDataVersion() != nil {
+		info.scheduleHandoffAckLocked()
+	}
+}
+
+// A pending receipt proves that this source is still growing through the
+// supplied version. Newer views wait for a fresh receipt or the final handoff.
+func (info *SegmentView) EnsureQueryPublication(version *viewpb.DataVersion) bool {
+	if info.EnsureFinalCommit() {
+		return true
+	}
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	through := info.meta.GetFlushPendingThroughDataVersion()
+	return info.meta.GetFlushDataDurable() && through != nil &&
+		qviews.FromProtoDataVersion(through).GTE(qviews.FromProtoDataVersion(version))
 }
 
 // NotifyDataUpdated reports data changes to the owning module. Must not be
@@ -753,10 +802,12 @@ func (info *SegmentView) observeFlushMeta(timetick uint64) (bool, uint64, bool) 
 }
 
 func (s *SegmentView) markPendingDataDurableLocked(timetick uint64) []message.RetainedImmutableMessage {
-	if timetick <= s.durableMeta.GetCheckpointTimeTick() {
-		return nil
-	}
+	// A replayed Flush can retain a handle at an already durable checkpoint.
+	// Its registration still owns that handle even though no checkpoint moves.
 	completed := s.takeDataHandlesThroughLocked(timetick)
+	if timetick <= s.durableMeta.GetCheckpointTimeTick() {
+		return completed
+	}
 	for _, chunk := range s.pendingFlushChunks {
 		if chunk.toTimeTick > timetick {
 			break

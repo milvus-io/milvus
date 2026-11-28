@@ -22,6 +22,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -47,7 +48,7 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 	for _, action := range actions {
 		switch e := action.Entry.(type) {
 		case metastore.SegmentEntry:
-			if err := kc.applySegmentEntry(ctx, b, action.Type, e, publishesSegmentVersion(e.Segment, actions)); err != nil {
+			if err := kc.applySegmentEntry(ctx, b, action.Type, e, publishesSegmentVersion(e.Segment, actions) || commitsStreamingFlushRecord(e.Segment, actions)); err != nil {
 				return err
 			}
 		case metastore.SegmentIndexEntry:
@@ -259,6 +260,37 @@ func publishesSegmentVersion(segment *datapb.SegmentInfo, actions []metastore.Up
 	return false
 }
 
+// Source records are durability receipts; DDL source/output records are
+// retirement receipts. Their final transaction must follow the binlog chunks
+// so recovery cannot mistake a partial write for either completed transition.
+func commitsStreamingFlushRecord(segment *datapb.SegmentInfo, actions []metastore.UpdateAction) bool {
+	if segment == nil {
+		return false
+	}
+	for _, action := range actions {
+		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if !ok || entry.Group == nil || entry.Group.Source != model.SegmentChangeSourceStreamingFlush {
+			continue
+		}
+		g := entry.Group
+		if g.StreamingDataRetired {
+			if segment.GetID() == g.StreamingSegmentID {
+				return true
+			}
+			for _, id := range g.NewSegmentIDs {
+				if segment.GetID() == id {
+					return true
+				}
+			}
+		}
+		if segment.GetIsInvisible() && segment.GetState() == commonpb.SegmentState_Flushed &&
+			g.State == model.SegmentChangeStateStaged && g.StreamingSegmentID == segment.GetID() {
+			return true
+		}
+	}
+	return false
+}
+
 // applySegmentEntry stages the kv writes for a segment action.
 //   - ActionAdd    -> segment record + its binlog KVs (a new segment).
 //   - ActionUpdate -> segment record rewrite; the caller supplies the
@@ -272,9 +304,9 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 	if e.Segment == nil {
 		return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment in UpdateAction")
 	}
-	// A durable first-publication binding must never precede its DataView.
-	// Keep just the segment record (not its potentially large binlog set) in
-	// the final atomic transaction with the DataView on the chunked path.
+	// Source receipts and first-publication bindings belong in the final
+	// atomic transaction with their group/DataView marker. Large binlog sets
+	// can still be written in earlier chunks.
 	save := b.Save
 	if publishesVersion {
 		segmentKey := buildSegmentPath(e.Segment.GetCollectionID(), e.Segment.GetPartitionID(), e.Segment.GetID())

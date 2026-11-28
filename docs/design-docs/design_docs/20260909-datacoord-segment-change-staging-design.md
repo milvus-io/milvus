@@ -667,8 +667,8 @@ only briefly (bounded catalog I/O) and never request manifest, so
 |---|---|---|---|
 | 0 | manifest-lock acquisition timeout / ctx canceled | untouched | retry / defer to next inspector round |
 | 1 | collection dropped (state==nil) | untouched | group→ABORTED, reclaim members |
-| 2 validate | member missing / externally dropped / `change_group_id` mismatch | untouched | group→FAILED (external drop is unconvergeable) |
-| 2 validate | schema version behind | untouched | reject publish; regress to STAGED, then FAILED under C23 (staged rows cannot converge through visible-only schema bump) |
+| 2 validate | member missing / externally dropped / `change_group_id` mismatch | untouched | ordinary producers fail; accepted streaming sources fail closed, and only explicit DDL authorizes retirement |
+| 2 validate | schema version behind | untouched | regress to STAGED; streaming flush outputs use private schema preparation and retain accepted rows, other producers retain C23 |
 | 2 validate | superseded already Dropped | untouched | treated as idempotent, skip (not fail) — covers **same-group publish replay** and **external DDL racing the parent** (truncate/drop-partition dropped it first); it is NOT a path that legitimizes two alive groups sharing a parent, which is rejected at registration by the anti-duplication invariant (§1.1) |
 | 2 validate | publish does not retire a superseded parent (chyezh#C) | untouched | group→FAILED. A COMMITTED publish must drop every superseded parent in the same write (unless it is already Dropped in meta): otherwise the parent and the now-visible member both cover the same rows — duplicated query results — and the terminal group can no longer repair it |
 | 3 | `PublishChange` monotonicity conflict (manifest version pushed higher by L0 then re-read lower) | untouched | stale error, back to STAGED, re-read and retry |
@@ -694,7 +694,7 @@ compensating write** is introduced.
 | R7 superseded dropped externally (partition/truncate/collection) ∥ publish | DDL vs publish | publish treats superseded idempotently (already Dropped → skip); non-idempotent for `new_segment` → FAILED | §5.4.3 |
 | R8 member re-selected for a second compaction ∥ publish | planner vs publish | Selectors and reservation exclude ALIVE-group members and parents, except that a single unsorted STAGED member can enter its owning group's Sort subtask. The exception is rechecked under `segMu`; group-less awaiting-sort flush inputs retain their old admission. | membership index + reservation |
 | R9 two alive groups referencing the same L1/L2 segment (new or superseded) | registration vs registration | **rejected at `AddSegmentChangeGroup`** via the `stagedSegmentToGroup`/`supersededSegmentToGroup` reverse indexes (anti-duplication invariant §1.1); a registration race is serialized by segMu | invariant + §1.1 |
-| R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:583`) | **existing bug**: filters `IsImporting` but not staged members; a staged segment's DML position can pollute the channel-seek fallback. **Scope note**: this fix targets the LEGACY (non-dataview) view only — the dataview path (`loadableProjection`) already excludes staged members natively. Filter by **ALIVE-group membership** (`stagedSegmentToGroup` reverse index, exposed as `aliveStagedMembers`), NOT by blanket `IsInvisible`: sort-enabled flush's awaiting-sort segments (§6.1) are `IsInvisible=true` but not group members and must keep their growing/DML contribution — a blanket filter would regress the sort-enabled collection's seek. Applies to `getEarliestSegmentDMLPos`, `GetQueryVChanPositions`, `GetCurrentSegmentsView`. This is a deliberate deviation from the earlier "filter `IsInvisible`" wording, gated on O1 (§6.1): if O1 later makes awaiting-sort segments fully invisible, the filter widens to `IsInvisible` | ALIVE-group filter (§10) |
+| R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:583`) | **existing bug**: filters `IsImporting` but not staged members; a staged segment's DML position can pollute the channel-seek fallback. **Scope note**: this filter targets the LEGACY (non-dataview) view only — the dataview path (`loadableProjection`) already excludes staged members natively. Filter by **ALIVE-group membership** (`stagedSegmentToGroup` reverse index, exposed as `aliveStagedMembers`), NOT by blanket `IsInvisible`: sort-enabled flush's awaiting-sort segments (§6.1) are `IsInvisible=true` but not group members and must keep their growing/DML contribution — a blanket filter would regress the sort-enabled collection's seek. Applies to `getEarliestSegmentDMLPos`, `GetQueryVChanPositions`, `GetCurrentSegmentsView`. New capable streaming writers instead retain the original source in SN until the full-group handoff in §6.1; legacy raw flushes still require the narrower membership filter | ALIVE-group filter (§10) |
 | R11 metrics/partition stats ∥ staged | none | clustering's `UpdateSegmentPartitionStatsVersionOperator` runs only at publish | publish txn |
 
 ### View Reading (delete the fallback)
@@ -726,7 +726,7 @@ audit/observability. No view path walks lineage anymore.
 | mix/sort: `IsInvisible=false` + view lineage fallback | outputs `IsInvisible=true` enter a group; published as a whole by `publishGroup` after index convergence (replacing the PR's `recomputeDataView`) |
 | import: `IsImporting=true` + visible right after commit (`ddl_callbacks_import.go` / `import_checker.go`) | import segments stay `IsImporting` (invisible); sort→stats→index convergence then `publishGroup` makes them visible at once (`HandleCommitVchannel`'s `recomputeDataView` replaced by atomic publish) |
 | backfill: BatchUpdateManifest broadcast per segment (`services_commit_backfill.go`) | result/updated segments grouped; published as a whole after the schema fence passes |
-| streaming flush | existing `PrepareFlush` + `UpdateSegmentsInfoAndDataView` (`streaming_version` +1); staging does not intervene; `SOURCE_STREAMING_FLUSH` is only a trivial-group abstraction |
+| streaming flush | capable writers register one group through private preparation and first sealed publication (`streaming_version` +1); legacy writers retain `PrepareFlush` (§6.1) |
 | DataView `Recompute` (the PR's default batch publication) | downgraded to convergence/repair: old-data bootstrap, crash reconciliation, fallback for paths not yet staged |
 
 ### Failure and Reclamation
@@ -745,27 +745,114 @@ audit/observability. No view path walks lineage anymore.
 
 ## Per-Path Adaptation and Edge Cases
 
-### 6.1 Ordinary streaming flush (sort compaction enabled)
+### 6.1 Ordinary streaming flush: one group through first publication
 
-Today (master + #52537): `SaveBinlogPaths` sets `IsInvisible=true` on flushed
-non-L0 segments **and** publishes them into DataView (advancing
-`streaming_version`) — the "invisible-while-published" contradiction window.
+With segment changes enabled, capable StreamingNodes advertise
+`flush_group_protocol=1`. A nonempty `SaveBinlogPaths(Flushed)` registers a
+`StreamingFlush` group whose group/job identity is the original segment ID A.
+The same composite write persists A's final data and keeps A private. Empty
+flushes retire directly, with emptiness derived from the resulting metadata
+and authoritative binlogs rather than the request's row count alone.
 
-After staging:
+The group starts STAGED with A as its current output. STAGED is a preparation
+state and can contain unsorted data. READY still requires every readiness term:
+data, sort (when enabled), stats, schema, and target indexes. Private Sort
+replaces A with B **inside the same group**; a private schema rewrite follows
+the same lineage protocol. No intermediate output is published. When Sort is
+disabled, A itself remains the output. V3 schema preparation can update a
+private streaming output or replace it without creating a second publication
+group. Other private producer groups retain their existing C23 behavior.
 
-- sort compaction **disabled**: the original `PrepareFlush` path, member visible
-  immediately (`SOURCE_STREAMING_FLUSH` trivial semantics, `streaming_version`
-  +1); staging does not intervene.
-- sort compaction **enabled**: preserve the existing synchronous publication
-  and `sealed_at_data_version` binding. The raw flush remains "awaiting sort"
-  (`IsInvisible=true`, no group); its sorted output enters a group that retires
-  the raw input only on publish. `loadableProjection` retains raw invisible
-  segments with a durable seal binding so an unrelated recompute cannot remove
-  the already-published input while sorting/indexing proceeds. The output
-  replaces it by advancing `compact_version`, not `streaming_version`.
-- Deferring the raw flush's first publication remains a separate handoff change
-  requiring `transform_start_after_timetick`; this implementation selects the
-  compatibility branch of O1 and does not defer the SN handshake.
+Durable registration also notifies the ordinary post-flush preparation path.
+Publication polls re-notify required private sort work after a lost notification
+and run the same readiness/publish state machine, so progress does not require
+two inspector ticks or an automatic compaction sweep. These notifications are
+best effort and must not block the durability receipt. A poll never bypasses
+sort, schema, stats, or index readiness.
+
+Registration and polling also notify missing text/JSON stats when Sort is
+disabled; the ten-interval reconciliation scan is a recovery fallback. Required
+schema preparation of current private streaming outputs runs independently of
+the automatic schema-bump cleanup switch and ordinary compaction task budget.
+An outstanding ALTER target also requires preparation of visible stale bases,
+even when automatic cleanup is disabled.
+
+Flush durability and query handoff are separate facts:
+
+1. The registration receipt releases the WAL Flush handle after data is
+   durable. SN persists `flush_data_durable` and continues serving A as a
+   growing source. L0 materialization and explicit Flush ACKs depend on this
+   durability fact, so they do not wait for indexes.
+2. A pending receipt carries `flush_pending_through_data_version`. The
+   coordinator captures Latest, then re-reads the alive group; this proves
+   that A still serves through that immutable version. SN can prepare those
+   old QueryViews. A newer QueryView waits for a refreshed receipt or the
+   final handoff, preventing both a gap and A+B double counting.
+3. Publication installs only the group's final outputs, advances
+   `streaming_version`, and binds **original A** to `sealed_at_data_version=V`.
+   This is the first sealed publication even when Sort changed the IDs.
+   A's binding, the terminal group carrying V, and the DataView are final
+   atomic commit markers, including on the catalog's chunked fallback.
+4. SN learns V by polling on the segment task scheduler. Waiting retries
+   release the worker; they retain no Flush handle. A is growing for versions
+   before V and sealed/retired at V. SN acknowledges the handoff only after
+   its assignment snapshot containing V is persisted. GC retains A until that
+   acknowledgment **and** all older DataViews have been collected.
+
+Recovery preserves those boundaries. An interrupted registration leaves the
+STAGED anchor but no durable final source record; SN replays registration from
+its retained WAL/assignment metadata. An interrupted publication can expose
+an output record before the final marker, but not A's version binding. Startup
+hides that output again and resumes READY through the recovered DataView
+manager, rather than allocating an invented handoff version during metadata
+reconciliation. Missing accepted source data fails closed.
+
+Accepted streaming rows never expire on a staging timeout or become garbage
+because an index/schema task is delayed. Explicit partition deletion/truncate
+records `streaming_data_retired` with the source/current-output retirement
+records and terminal group in the final atomic transaction, one group at a
+  time so deleting a large partition cannot exceed the transaction limit. Other preparation
+failures preserve the source and retry. The feature flag controls admission;
+existing groups finish even if it is subsequently disabled.
+
+An owning WAL DropCollection/DropPartition additionally authorizes SN's pending
+publication task to request `SaveBinlogPaths(Flushed, Dropped)` with
+`flush_group_retire=1`. An ordinary empty-flush retry grants no such permission.
+DataCoord retires
+the original source and current private outputs with `streaming_data_retired`
+and the terminal group in the same final transaction. Only after this succeeds
+does SN persist the child tombstone and finish the Drop ACK; it neither waits
+for indexes/schema publication nor fabricates a handoff version. A concurrent
+publication may win and return its actual version. DropPartition does not
+authorize retirement of sources in other partitions. Replay restores this
+runtime Drop intent; primary and CDC receiver derive retirement independently
+from the same WAL Drop, using their own physical segment identities.
+
+Snapshots use the durable original source while a flush group is pending,
+including after private Sort, instead of excluding both frontiers. Snapshot
+protection defers group publication until the snapshot has pinned its sources.
+
+Old writers without the protocol capability retain the synchronous raw-flush
+publication path and immutable seal binding for rolling upgrades. If they
+retry an already-staged group, a pending response is an explicit retryable
+error; they never receive a baseline version that could be mistaken for a
+completed seal. Completed groups still return the original final version. Physical
+flush groups are cluster-local realizations of the existing WAL messages;
+no physical group or output ID is introduced into replicated messages.
+
+### 6.1.1 Index task completion and query publication
+
+Collection index progress uses the current output frontier of a replacement
+or streaming flush group. It excludes superseded parents and historical
+private Sort/schema inputs and counts current outputs once, even while they
+are invisible. Segment records and group membership are captured under one
+metadata lock so a concurrent replacement cannot produce an empty frontier.
+
+Completion of a requested scalar index depends on that index's tasks on these
+outputs. It does not require the group to pass the vector-index readiness
+term. Group publication independently checks all target index requirements.
+This allows an SDK to await scalar index completion before issuing
+CreateIndex for a vector field, while keeping query publication strict.
 
 ### 6.2 L0 — never staged
 
@@ -846,6 +933,17 @@ After staging:
   replay; it does not allocate a new row timestamp. The primary validates the
   readiness/schema fence before appending CommitImport. The callback assigns
   each group's WAL timestamp, then waits for publication before job completion.
+  The DataView built for that publication projects this timestamp as each new
+  member's `transform_start_after_timetick`; the private SegmentMeta still has
+  its pre-commit cursor until the same catalog transaction installs both the
+  DataView and `UpdateCommitTimestamp`. An aborted transaction exposes neither.
+  Copy groups that own their publication timestamp use the same projection;
+  copy groups preserving member timestamps retain their source cursors.
+  Pending-transform projection reads group ownership and SegmentMeta together.
+  Unselected sibling members use their owning group's WAL fence, or freeze the
+  accepted W before ACK, even after registration clears `IsImporting`. They must
+  not block each other on private zero cursors. Unowned zero coverage still
+  fails closed.
   With staging opted in it also completes legacy jobs; per-channel SN RPCs are
   idempotent participants. CDC receivers may prepare their local groups only
   when the replicated commit arrives and then wait for local artifacts.
@@ -1032,15 +1130,19 @@ Replay safety:
 - **DataView snapshot GC**: `GarbageCollect(retainLatest)` is independent of the
   group table; after a publish, old snapshots (without the new members) should
   become recyclable promptly, `retainLatest ≥ 1` suffices.
-- **Snapshot export** (`handler.GenSnapshot`): export contains only published
-  members. The candidate projection excludes unpublished group outputs while
-  retaining their still-visible parents; restore therefore cannot copy both.
+- **Snapshot export** (`handler.GenSnapshot`): the candidate projection excludes
+  unpublished group outputs while retaining their still-visible parents. Pending
+  streaming flushes retain their original durable source instead of the private
+  sorted replacement; restore therefore cannot copy both.
   Candidate segments and exclusions are read under one `segMu.RLock`. A
   compaction group rechecks snapshot protection under the commit's `segMu`
   write lock, so a snapshot starting after the first publish check cannot
   race the final SegmentMeta write.
 - **Row-count statistics**: collection and partition statistics exclude
-  unpublished group members and retain their still-visible parents. Segment
+  unpublished group members and retain their still-visible parents. Pending
+  streaming-flush groups count their durable original source, including after
+  a private Sort rewrite; publication switches to the final output exactly once.
+  Query handoff readiness does not delay these durability-based statistics. Segment
   states and group exclusions are read under one metadata lock, including
   after opt-out while existing groups drain.
 - **Terminal group cleanup**: the inspector sweeps terminal groups after each
@@ -1088,8 +1190,8 @@ Replay safety:
    already excludes staged members natively. A blanket `IsInvisible` filter
    would also drop sort-enabled flush's awaiting-sort segments (§6.1), which
    are `IsInvisible=true` but not group members and legitimately contribute
-   their growing/DML position; if O1 (§6.1) later makes awaiting-sort segments
-   fully invisible, the filter can be widened to `IsInvisible`.
+   their growing/DML position. Capable writers instead use the SN growing
+   source barrier in §6.1.
 
 ## Implementation Notes
 
@@ -1142,11 +1244,14 @@ enabling producers. The first producer slice below is opt-in.
   delta application to visible parents. These prerequisite selector guards use
   group membership rather than a blanket `IsInvisible` exclusion, preserving
   existing group-less awaiting-sort behavior. This refines the broader C29
-  selector proposal above without resolving O1 or changing flush semantics.
+  selector proposal above. Full streaming groups add the SN-owned growing
+  source handoff described in §6.1.
 
-### Opt-in producer coverage (2026-10-28)
+### Producer coverage (updated 2026-11-18)
 
-`dataCoord.segmentChange.enabled` defaults to `false` and is refreshable. It
+`dataCoord.segmentChange.enabled` is refreshable. The CI validation branch
+sets its default to `true`; deployment admission/fairness remains the open
+requirement described in §6.2. It
 controls admission of **new** groups only. Group recovery, readiness evaluation,
 publication and reclamation run regardless of its value, so disabling it drains
 existing groups instead of stranding their invisible outputs or releasing their
@@ -1175,8 +1280,10 @@ parents early.
   reserving their own parents again or dispatching another worker. Terminal task
   decisions are preserved for cleanup. An empty output already
   collected after COMMITTED does not invalidate this identity.
-- Flush keeps its synchronous version handshake; both Flush→Mix and Flush→Sort
-  publish their replacement through a group and preserve SN retry bindings.
+- Capable streaming writers register the first flush as a complete group,
+  including its private Sort/schema preparation. The durability receipt,
+  immutable version handoff, persisted-SN acknowledgment, snapshot selection,
+  and GC holds follow §6.1. Legacy writers keep their synchronous handshake.
 - Clustering registers final private results after its TMP/sort preparation.
   Its persisted group carries partition-stats publication metadata. The stats
   info, current-version pointer, member visibility, input/TMP retirement and
@@ -1280,9 +1387,9 @@ subgroups to bound single-txn size and the "entire batch invisible" wait.
 | `internal/dataview/manager.go` | add `PublishChange` (§5.4); reuse `lockStateForMutation` |
 | `internal/datacoord/meta.go` | composite group updates and `loadableProjection` group exclusion; retain the raw invisible flush while its sorted replacement is staged |
 | `internal/datacoord/segment_change_*.go` | new files (§Implementation Notes) |
-| `internal/datacoord/handler.go` | `getEarliestSegmentDMLPos` / `GetQueryVChanPositions` / `GetCurrentSegmentsView` exclude ALIVE-group members via `aliveStagedMembers` (R10; NOT blanket `IsInvisible` — see §6.1 awaiting-sort, gated on O1); view read path deletes `retrieveSegment` (Phase 2) |
+| `internal/datacoord/handler.go` | `getEarliestSegmentDMLPos` / `GetQueryVChanPositions` / `GetCurrentSegmentsView` exclude ALIVE-group members via `aliveStagedMembers` (R10; NOT blanket `IsInvisible` — see §6.1 for the legacy path and SN growing-source barrier); view read path deletes `retrieveSegment` (Phase 2) |
 | `internal/datacoord/compaction_task_mix.go` / `sort` / `clustering` / `bump_schema_version` | outputs enter groups, retirement deferred to publish, `recomputeDataView` replaced by publish trigger |
-| `internal/datacoord/services.go` | `SaveBinlogPaths` preserves synchronous seal binding; `HandleCommitVchannel` joins staged import publication |
+| `internal/datacoord/services.go` | `SaveBinlogPaths` stages capable first flushes and preserves legacy seal bindings; `HandleCommitVchannel` joins staged import publication |
 | `internal/datacoord/copy_segment_task.go` | completion enters a group |
 | `internal/datacoord/compaction_policy_single.go` | allow Sort only for unsorted STAGED group members and ordinary group-less awaiting-sort flush outputs; reject other group members |
 | `internal/datacoord/compaction_task_l0.go` / `compaction_inspector.go` | exclude unpublished members as targets; defer new and queued L0 on channels with unpublished groups or active copy jobs |
@@ -1391,9 +1498,9 @@ DataView entity (PR #52537) as prerequisite/parallel:
 
 ## Open Questions (require review adjudication)
 
-- **O1 (compatibility branch selected)**: §6.1 preserves raw flush publication
-  and the synchronous SN seal binding; the sorted replacement is staged.
-  Deferring first publication still requires the separate QueryView/SN barrier.
+- **O1 (resolved: full streaming group)**: §6.1 separates durable Flush ACK
+  from query handoff and stages the first sealed publication. Legacy writers
+  without the capability keep the compatibility path during rolling upgrades.
 - **O2**: during Phase-1 dual-track, "staged groups retire late" and "unstaged
   compaction retires immediately" coexist in one collection; must the
   `retrieveSegment` compatibility path keep its present-parents normalization
@@ -1407,6 +1514,21 @@ DataView entity (PR #52537) as prerequisite/parallel:
   probe-already-visible check makes publish idempotent.) Recommended: no
   standalone field; recovery probing covers it. Keep the field only for
   observability.
+
+- **O6 (blocks completing the streaming-flush change)**: a materializing
+  ALTER's consuming-side Flush ACK now certifies durability rather than query
+  publication. `PrepareDataViewSchema` currently checks `LoadableProjection`,
+  which excludes private streaming outputs. A diagnostic reproduced read
+  schema version 1 being published while an accepted flush remains STAGED
+  with source encoding version 0. This requires an additional schema barrier
+  or materialization of the SN growing source. Waiting for old-schema groups
+  to publish also exposes a policy choice: the existing IndexReady predicate
+  requires every vector field even when its index has not been created.
+  A sequential ALTER-then-CreateIndex client can therefore wait on itself.
+  Proposed resolution: readiness waits only for configured target indexes,
+  and materializing ALTER waits for old-encoding streaming groups to publish.
+  This changes the existing target-index contract and requires a design
+  decision before the branch is ready for CI/e2e.
 
 ## Appendix: Key Code Locations
 

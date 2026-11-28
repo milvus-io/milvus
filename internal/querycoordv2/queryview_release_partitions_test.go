@@ -37,6 +37,7 @@ func TestReleasePartitionsWaitsForHandoff(t *testing.T) {
 				require.NoError(t, store.Put(t.Context(), cfg))
 			}
 			var closed atomic.Bool
+			configApplied := make(chan error, 1)
 			patches := []*mockey.Mocker{
 				mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(releasePartitionsBroadcaster{}, nil).Build(),
 				mockey.Mock(releasePartitionsBroadcaster.Close).To(func(releasePartitionsBroadcaster) { closed.Store(true) }).Build(),
@@ -51,7 +52,9 @@ func TestReleasePartitionsWaitsForHandoff(t *testing.T) {
 					if scenario == "broadcast error" {
 						return nil, merr.ErrServiceUnavailable
 					}
-					return nil, store.Put(t.Context(), cfg)
+					err := store.Put(t.Context(), cfg)
+					configApplied <- err
+					return nil, err
 				}).Build(),
 			}
 			for _, patch := range patches {
@@ -75,6 +78,16 @@ func TestReleasePartitionsWaitsForHandoff(t *testing.T) {
 			if scenario == "broadcast error" {
 				require.ErrorIs(t, <-done, merr.ErrServiceUnavailable)
 				return
+			}
+			if scenario == "partial" || scenario == "cancel" {
+				// A readiness report must name the new persisted config version.
+				// An elapsed blocking assertion does not prove Broadcast applied it.
+				select {
+				case err := <-configApplied:
+					require.NoError(t, err)
+				case <-ctx.Done():
+					t.Fatal("load configuration was not applied:", ctx.Err())
+				}
 			}
 			assertReadinessBlocked(t, done)
 			require.False(t, closed.Load(), "handoff must retain collection serialization")

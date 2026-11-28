@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -1211,6 +1212,21 @@ func (gc *GarbageCollector) dataViewCompactionProtection(children map[int64][]in
 		return nil
 	}
 	protected := gc.Meta.DataViewManager.ReferencedSegments()
+	for _, group := range gc.Meta.GetSegmentChangeGroupsByCollection(gc.ctx, 0) {
+		if group.Source != model.SegmentChangeSourceStreamingFlush || group.StreamingSegmentID == 0 || group.StreamingDataRetired {
+			continue
+		}
+		retain := !group.StreamingHandoffAcknowledged || group.StreamingDataVersion == nil
+		if !retain {
+			retention, ok := gc.Meta.DataViewManager.(interface {
+				RetainsBefore(int64, *viewpb.DataVersion) bool
+			})
+			retain = !ok || retention.RetainsBefore(group.CollectionID, group.StreamingDataVersion)
+		}
+		if retain {
+			protected[group.StreamingSegmentID] = struct{}{}
+		}
+	}
 	queue := make([]int64, 0, len(protected))
 	for id := range protected {
 		queue = append(queue, id)

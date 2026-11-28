@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -577,24 +578,39 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 func (s *Server) selectSegmentIndexesStats(ctx context.Context, filters ...meta.SegmentFilter) map[int64]*indexStats {
 	ret := make(map[int64]*indexStats)
 
-	segments := s.meta.SelectSegments(ctx, filters...)
+	segments, groups := s.meta.SelectSegmentsWithChangeGroups(ctx, filters...)
 	segmentIDs := lo.Map(segments, func(info *meta.SegmentInfo, i int) int64 {
 		return info.GetID()
 	})
 	if len(segments) == 0 {
 		return ret
 	}
+	// A replacement group owns the index-build frontier even before it owns
+	// query visibility. Count its current outputs once, rather than waiting on
+	// parents that deliberately stop receiving new index tasks.
 	hasCompactionLineage := false
 	segmentsIndexes := s.indexMeta.GetSegmentsIndexStates(segments[0].CollectionID, segmentIDs)
 	if s.droppedSinceSnapshot(ctx, segments, segmentsIndexes) {
-		// The index states carry a task aborted because its segment was
-		// dropped after the snapshot. The abort is persisted only once the
-		// drop is in meta, so a snapshot taken now sees the drop, along with
-		// any compaction output committed with it, which has no index state
-		// read yet and therefore counts as unissued.
-		segments = s.meta.SelectSegments(ctx, filters...)
+		// Re-read the group frontier together with its replacement segments.
+		segments, groups = s.meta.SelectSegmentsWithChangeGroups(ctx, filters...)
+	}
+	outputs, replaced := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
+	for _, g := range groups {
+		if g.Source != model.SegmentChangeSourceStreamingFlush && len(g.SupersededSegmentIDs) == 0 {
+			continue
+		}
+		outputs.Insert(g.NewSegmentIDs...)
+		replaced.Insert(g.SupersededSegmentIDs...)
+		for _, id := range g.UnpublishedSegmentIDs() {
+			if !slices.Contains(g.NewSegmentIDs, id) {
+				replaced.Insert(id)
+			}
+		}
 	}
 	for _, info := range segments {
+		if replaced.Contain(info.GetID()) {
+			continue
+		}
 		hasCompactionLineage = hasCompactionLineage || len(info.GetCompactionFrom()) > 0
 		is := &indexStats{
 			ID:                  info.GetID(),
@@ -607,6 +623,7 @@ func (s *Server) selectSegmentIndexesStats(ctx context.Context, filters ...meta.
 			isInvisible:         info.GetIsInvisible(),
 			createdByCompaction: info.GetCreatedByCompaction(),
 			segmentInfo:         info,
+			isGroupOutput:       outputs.Contain(info.GetID()),
 		}
 		ret[info.GetID()] = is
 	}
@@ -891,7 +908,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, idx *model.Inde
 		// zero earliestTs is unknown, rather than evidence of newer data.
 		// Only invisible compaction outputs are omitted; ordinary segments
 		// still need their requested index while waiting for sort.
-		eligible := (!seg.isInvisible || !seg.createdByCompaction) && !seg.isImporting && (realTime || seg.earliestTs == 0 || seg.earliestTs <= ts)
+		eligible := (seg.isGroupOutput || !seg.isInvisible || !seg.createdByCompaction) && !seg.isImporting && (realTime || seg.earliestTs == 0 || seg.earliestTs <= ts)
 		if !ok || segIdx.GetState() != commonpb.IndexState_Finished {
 			pendingIndexRows += seg.numRows
 		}
@@ -1034,6 +1051,7 @@ type indexStats struct {
 	segmentInfo         *meta.SegmentInfo
 	isRecoverable       bool
 	isQueryable         bool
+	isGroupOutput       bool
 }
 
 // DescribeIndex describe the index info of the collection.

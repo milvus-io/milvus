@@ -7,7 +7,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 #include <gtest/gtest.h>
-#include <thread>
+#include <folly/ScopeGuard.h>
 #include <numeric>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -16,6 +16,7 @@
 #include <arrow/c/bridge.h>
 #include <arrow/c/abi.h>
 #include "grep/segment_grep_c.h"
+#include "grep/SegmentGrepTestHooks.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
@@ -1783,12 +1784,18 @@ TEST_P(GrepScanTest, CancellationDuringExecution) {
     std::vector<int64_t> offsets(20000);
     std::iota(offsets.begin(), offsets.end(), 0);
     folly::CancellationSource source;
-    std::thread cancel([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        source.requestCancellation();
+    int batches = 0;
+    auto previous = milvus::grep::SetSegmentGrepBatchObserverForTesting([&] {
+        if (++batches == 2) {
+            source.requestCancellation();
+        }
+    });
+    auto restore = folly::makeGuard([&] {
+        milvus::grep::SetSegmentGrepBatchObserverForTesting(
+            std::move(previous));
     });
     Scan(offsets, "timeout", FollyCancel, &source);
-    cancel.join();
+    EXPECT_EQ(batches, 2);
 }
 
 TEST_P(GrepScanTest, PersistedInvalidUtf8IsSystemError) {

@@ -87,8 +87,12 @@ There are exactly two schema transitions:
    mutation lock before publishing. Wait without holding metadata/mutation locks.
 
 ALTER uses consuming-side `AckSyncUp`. WAL allocation fencing isolates old/new
-write schemas; consuming-side Ack additionally waits for pre-ALTER L1 final
-publication. Thus the callback cannot overlook old growing data still flushing.
+write schemas; consuming-side Ack waits for pre-ALTER L1 durable registration
+and L0 completion. Query publication may still be pending. A materialized
+callback must therefore join old-encoding streaming groups before certifying
+the complete sealed projection; an empty projection cannot hide those rows.
+Required preparation of private outputs and an unfinished ALTER target is
+independent of the optional automatic schema-bump cleanup switch.
 Data preparation uses Broadcaster's pending target and must not await callback
 completion or recursively broadcast.
 

@@ -219,8 +219,14 @@ func (t *BumpSchemaVersionTask) doClean() error {
 		if err != nil {
 			return err
 		}
-		if err := m.AbortProducerChange(m.CompactionContext(), g, "schema bump task cleaned before publication"); err != nil {
-			return err
+		materialized := false
+		if g != nil {
+			_, materialized = g.SortJobs[t.GetTaskID()]
+		}
+		if !materialized {
+			if err := m.AbortProducerChange(m.CompactionContext(), g, "schema bump task cleaned before publication"); err != nil {
+				return err
+			}
 		}
 	}
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
@@ -506,7 +512,8 @@ func (t *BumpSchemaVersionTask) commitBumpV3Materialization(ctx context.Context,
 	if current.GetStorageVersion() != storage.StorageV3 || current.GetManifestPath() == "" {
 		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization requires a published StorageV3 manifest, segmentID=%d", segmentID)
 	}
-	if current.GetIsInvisible() {
+	preparer, canPrepare := t.meta.(interface{ CanPrepareStreamingSchema(int64) bool })
+	if current.GetIsInvisible() && (!canPrepare || !preparer.CanPrepareStreamingSchema(segmentID)) {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump compaction input segment should not be invisible")
 	}
 	if t.GetTaskProto().GetSchema() == nil {

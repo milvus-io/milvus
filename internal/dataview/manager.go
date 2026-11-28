@@ -682,6 +682,22 @@ func (m *dataViewManager) ReferencedSegments() map[int64]struct{} {
 	return ids
 }
 
+// RetainsBefore also protects growing sources: they are absent from sealed
+// membership, but an older retained view can still query their persisted data.
+func (m *dataViewManager) RetainsBefore(collectionID int64, version *viewpb.DataVersion) bool {
+	state, unlock := m.lockStateForMutation(collectionID)
+	if state == nil {
+		return false
+	}
+	defer unlock()
+	for _, entry := range state.versions {
+		if !entry.isTombstone && compareDataVersion(entry.view.GetDataVersion(), version) < 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error {
 	state := m.getState(collectionID)
 	if state == nil {

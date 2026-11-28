@@ -17,6 +17,13 @@ The framework allows developers to:
 
 The test framework is built on top of Go's testing package and the testify/suite framework, making it easy to write structured and maintainable integration tests.
 
+Streaming Flush acknowledges persistence before sealed publication. Tests that
+need sealed data (segment counts, replica placement, or QueryNode outage
+behavior) should build indexes and call `WaitForPublishedSegments` before load.
+`ShowSegments` remains a physical metadata inspection and includes private flush
+sources and sort outputs while their change group is preparing. Those records
+must not count as published sealed segments.
+
 ## How to run integration test locally
 
 Because integration test is a multi-process framework, it requires some components to start:

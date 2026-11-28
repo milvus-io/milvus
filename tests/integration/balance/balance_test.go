@@ -157,6 +157,7 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 	s.NoError(err)
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+	s.WaitForPublishedSegments(ctx, dbName, collectionName)
 	mlog.Info(context.TODO(), "index create done")
 
 	// load

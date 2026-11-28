@@ -622,6 +622,11 @@ func (c *Inspector) claimCompactionInputs(t *datapb.CompactionTask) error {
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
 		return err
 	}
+	if preparer, ok := c.meta.(interface {
+		ReserveStreamingSchema(*datapb.CompactionTask) bool
+	}); ok && preparer.ReserveStreamingSchema(t) {
+		return nil
+	}
 	if c.meta.ReserveGroupSort(t) {
 		return nil
 	}
