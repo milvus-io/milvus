@@ -1762,9 +1762,10 @@ func appendFinalSearchChunk(
 	output.AllSearchCount += chunk.GetAllSearchCount()
 
 	var fieldIndexComputer *typeutil.FieldDataIdxComputer
+	capacity := min(maxStreamResultPreallocRows, output.GetNumQueries()*limit)
 	if len(chunk.GetFieldsData()) > 0 {
 		if len(output.GetFieldsData()) == 0 {
-			output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), output.GetNumQueries()*limit)
+			output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), capacity)
 		}
 		if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 			return 0, merr.WrapErrServiceInternalMsg("Search CHUNK field count %d does not match final result field count %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
@@ -1780,7 +1781,7 @@ func appendFinalSearchChunk(
 	var groupIndexComputer *typeutil.FieldDataIdxComputer
 	if len(chunkGroups) > 0 {
 		if len(output.GetGroupByFieldValues()) == 0 {
-			output.GroupByFieldValues = typeutil.PrepareResultFieldData(chunkGroups, output.GetNumQueries()*limit)
+			output.GroupByFieldValues = typeutil.PrepareResultFieldData(chunkGroups, capacity)
 		}
 		if len(output.GetGroupByFieldValues()) != len(chunkGroups) {
 			return 0, merr.WrapErrServiceInternalMsg("Search Chunk group-by field count changed")
@@ -1836,7 +1837,7 @@ func appendFinalSearchChunk(
 			output.Scores = append(output.Scores, score)
 			if chunk.GetElementIndices() != nil {
 				if output.ElementIndices == nil {
-					output.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, output.GetNumQueries()*limit)}
+					output.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, capacity)}
 				}
 				output.ElementIndices.Data = append(output.ElementIndices.Data, chunk.GetElementIndices().GetData()[rowIndex])
 			}
@@ -1878,7 +1879,7 @@ func (t *SearchTask) consumeSearchResultStream(
 		NumQueries: request.GetNq(),
 		TopK:       limit,
 		Ids:        &schemapb.IDs{},
-		Scores:     make([]float32, 0, request.GetNq()*limit),
+		Scores:     make([]float32, 0, min(maxStreamResultPreallocRows, request.GetNq()*limit)),
 		Topks:      make([]int64, request.GetNq()),
 	}
 	seenPerQuery := make([]int64, request.GetNq())

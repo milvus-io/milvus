@@ -49,6 +49,10 @@ const (
 	boundedTS = 2
 )
 
+// Stream consumers grow their result buffers as hits arrive instead of
+// reserving the full requested output before knowing the actual row count.
+const maxStreamResultPreallocRows = 1024
+
 // isAlpha returns true if the byte is an ASCII letter.
 func isAlpha(c uint8) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
