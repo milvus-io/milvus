@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver/httpcompress"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/featureusage"
@@ -267,16 +268,20 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
+	decodeRequestBody := httpcompress.RequestBodyMiddleware(httpserver.AbortHTTPResponse)
 	if proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
-		app := ginHandler.Group("/v1")
+		app := ginHandler.Group("/v1", decodeRequestBody)
 		httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
 	}
 	appV2 := ginHandler.Group("/v2/vectordb")
-	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
+	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2, decodeRequestBody)
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(httpserver.DQLStreamingHTTPHandler(ginHandler)), http2Server),
+		// Response compression wraps only the RESTful chain: httpHandler
+		// dispatches gRPC before it, and the DQL abort panic must pass through
+		// it unfinished.
+		Handler:           h2c.NewHandler(s.httpHandler(httpcompress.Handler(httpserver.DQLStreamingHTTPHandler(ginHandler))), http2Server),
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
 		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
 		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),

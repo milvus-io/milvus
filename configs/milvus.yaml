@@ -573,9 +573,8 @@ proxy:
     legacyArrayResponse: false
     enablePprof: true # Whether to enable pprof middleware on the metrics port
     # high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
-    # queue is full, before the request body is decoded. The scheduler rejects such a request with the same
-    # TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
-    # cost. Disabling restores the old always-decode behavior.
+    # queue is full, before reading or decompressing the request body. If disabled, the scheduler still checks
+    # the queue when the request is enqueued.
     dqlAdmissionEnabled: true
     readHeaderTimeout: 5s # HTTP server timeout for reading request headers
     readTimeout: 0s # HTTP server timeout for reading the entire request, including the body. 0 disables this timeout
@@ -588,6 +587,14 @@ proxy:
     enableWebUI: true # Whether to enable setting the WebUI middleware on the metrics port
     queryDefaultLimit: -1 # Default limit for REST v2 Query requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.
     searchDefaultLimit: -1 # Default limit for REST v2 Search and HybridSearch requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.
+    compression:
+      # Whether the RESTful API can serve gzip and zstd responses. A client that requires compression receives HTTP 406
+      # if no enabled coding is acceptable, or HTTP 503 if every encoder slot is occupied. These responses have no body and
+      # the route is not invoked. With either setting, the RESTful API decodes gzip and zstd requests after authentication and any applicable
+      # DQL admission check. Every RESTful response advertises Accept-Encoding: zstd, gzip. gRPC requests
+      # on a shared port are not affected.
+      enabled: true
+      minResponseSize: 1024 # Responses smaller than this many bytes can be sent uncompressed when the client accepts identity. Up to this many bytes of each response are held in memory until that is known, so keep it small. Unit: byte
   ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
   port: 19530 # TCP port of proxy
   internalPort: 19529

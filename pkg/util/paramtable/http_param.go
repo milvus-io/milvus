@@ -45,6 +45,9 @@ type httpConfig struct {
 
 	QueryDefaultLimit  ParamItem `refreshable:"true"`
 	SearchDefaultLimit ParamItem `refreshable:"true"`
+
+	CompressionEnabled         ParamItem `refreshable:"true"`
+	CompressionMinResponseSize ParamItem `refreshable:"true"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -176,9 +179,8 @@ string wherever one appears, including inside either kind of array.`,
 		DefaultValue: "true",
 		Version:      "3.0.1",
 		Doc: `high-level restful api, reject a search/query request with HTTP 429 while the proxy's DQL task
-queue is full, before the request body is decoded. The scheduler rejects such a request with the same
-TooManyRequests error anyway, but only after the body has been decoded; admission moves the same verdict before that
-cost. Disabling restores the old always-decode behavior.`,
+queue is full, before reading or decompressing the request body. If disabled, the scheduler still checks
+the queue when the request is enqueued.`,
 		Export: true,
 	}
 	p.DQLAdmissionEnabled.Init(base.mgr)
@@ -286,6 +288,29 @@ cost. Disabling restores the old always-decode behavior.`,
 		Export:       true,
 	}
 	p.SearchDefaultLimit.Init(base.mgr)
+
+	p.CompressionEnabled = ParamItem{
+		Key:          "proxy.http.compression.enabled",
+		DefaultValue: "true",
+		Version:      "3.1.0",
+		Doc: `Whether the RESTful API can serve gzip and zstd responses. A client that requires compression receives HTTP 406
+if no enabled coding is acceptable, or HTTP 503 if every encoder slot is occupied. These responses have no body and
+the route is not invoked. With either setting, the RESTful API decodes gzip and zstd requests after authentication and any applicable
+DQL admission check. Every RESTful response advertises Accept-Encoding: zstd, gzip. gRPC requests
+on a shared port are not affected.`,
+		Export: true,
+	}
+	p.CompressionEnabled.Init(base.mgr)
+
+	p.CompressionMinResponseSize = ParamItem{
+		Key:          "proxy.http.compression.minResponseSize",
+		DefaultValue: "1024",
+		Version:      "3.1.0",
+		Doc: "Responses smaller than this many bytes can be sent uncompressed when the client accepts identity. " +
+			"Up to this many bytes of each response are held in memory until that is known, so keep it small. Unit: byte",
+		Export: true,
+	}
+	p.CompressionMinResponseSize.Init(base.mgr)
 }
 
 func formatRESTDefaultLimit(value string) string {

@@ -41,6 +41,8 @@ func TestHTTPConfig_Init(t *testing.T) {
 	assert.Equal(t, 300*time.Second, cfg.IdleTimeout.GetAsDurationByParse())
 	assert.Equal(t, 16777216, cfg.MaxHeaderBytes.GetAsInt())
 	assert.Equal(t, cfg.EnableWebUI.GetAsBool(), true)
+	assert.True(t, cfg.CompressionEnabled.GetAsBool())
+	assert.Equal(t, 1024, cfg.CompressionMinResponseSize.GetAsInt())
 }
 
 func TestHTTPConfig_TimeoutOverrides(t *testing.T) {

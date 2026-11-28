@@ -89,39 +89,34 @@ func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 	return h
 }
 
-// dqlAdmission rejects a DQL request with 429 while the proxy's DQL queue is
-// full, before the body is decoded. The scheduler's Enqueue stays the
-// authority; this only pre-fires the TooManyRequests verdict Enqueue would
-// return after the decoding cost had already been paid, so admitting a request
-// that later hits a full queue (or vice versa) is benign.
-func (h *HandlersV2) dqlAdmission(handler gin.HandlerFunc) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() && h.dqlQueueFull() {
-			err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
-			// admission aborts before wrapperPost, the only ProxyFunctionCall
-			// site for v2 routes, so the rejection is recorded here. The
-			// method comes from the route; db and collection stay empty:
-			// neither authoritative value exists before decode, and a
-			// client-controlled header must not mint or shift per-database
-			// series.
-			if methodTag, ok := routeToMethod[c.FullPath()]; ok {
-				nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
-				label, cause := requestutil.ParseMetricLabel(nil, err)
-				metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
-			}
-			c.Header("Retry-After", "1")
-			// Retry-After is not CORS-safelisted; expose it so browser
-			// callers can read the retry delay.
-			c.Header("Access-Control-Expose-Headers", "Retry-After")
-			HTTPAbortReturn(c, http.StatusTooManyRequests, gin.H{
-				HTTPReturnCode:    merr.Code(err),
-				HTTPReturnMessage: err.Error(),
-			})
-			return
-		}
-		handler(c)
+// dqlAdmission rejects a DQL request with 429 before reading its body when
+// the queue is full. The scheduler still checks capacity on enqueue.
+func (h *HandlersV2) dqlAdmission(c *gin.Context) {
+	if !paramtable.Get().HTTPCfg.DQLAdmissionEnabled.GetAsBool() || !h.dqlQueueFull() {
+		return
 	}
+
+	err := merr.WrapErrTooManyRequests(int32(proxy.Params.ProxyCfg.MaxTaskNum.GetAsInt()))
+	// admission aborts before wrapperPost, the only ProxyFunctionCall
+	// site for v2 routes, so the rejection is recorded here. The
+	// method comes from the route; db and collection stay empty:
+	// neither authoritative value exists before decode, and a
+	// client-controlled header must not mint or shift per-database
+	// series.
+	if methodTag, ok := routeToMethod[c.FullPath()]; ok {
+		nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, metrics.TotalLabel, metrics.CauseNA, "", "", "").Inc()
+		label, cause := requestutil.ParseMetricLabel(nil, err)
+		metrics.ProxyFunctionCall.WithLabelValues(nodeID, methodTag, label, cause, "", "", "").Inc()
+	}
+	c.Header("Retry-After", "1")
+	// Retry-After is not CORS-safelisted; expose it so browser
+	// callers can read the retry delay.
+	c.Header("Access-Control-Expose-Headers", "Retry-After")
+	HTTPAbortReturn(c, http.StatusTooManyRequests, gin.H{
+		HTTPReturnCode:    merr.Code(err),
+		HTTPReturnMessage: err.Error(),
+	})
 }
 
 var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a route-to-method mapping
@@ -257,7 +252,13 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/common/run_analyzer": "RunAnalyzer",
 }
 
-func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
+func (h *HandlersV2) RegisterRoutesToV2(group gin.IRouter, bodyMiddleware ...gin.HandlerFunc) {
+	// Both groups inherit authentication. Only DQL has a queue admission
+	// check, which must run before middleware that reads the request body.
+	dql := group.Group("", h.dqlAdmission)
+	dql.Use(bodyMiddleware...)
+	router := group.Group("", bodyMiddleware...)
+
 	router.POST(CollectionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.listCollections))))
 	router.POST(CollectionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.hasCollection))))
 	// todo review the return data
@@ -297,18 +298,18 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
-	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
+	dql.POST(EntityCategory+QueryAction, restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        max(0, paramtable.Get().HTTPCfg.QueryDefaultLimit.GetAsInt32()),
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.query))), true)))
+	}, wrapperTraceLog(h.query))), true))
 	// Get
-	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
+	dql.POST(EntityCategory+GetAction, restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
-	}, wrapperTraceLog(h.get))), true)))
+	}, wrapperTraceLog(h.get))), true))
 	// Delete
 	router.POST(EntityCategory+DeleteAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionFilterReq{}
@@ -322,17 +323,17 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
-	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
+	dql.POST(EntityCategory+SearchAction, restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{}
-	}, wrapperTraceLog(h.search))), true)))
+	}, wrapperTraceLog(h.search))), true))
 	// advanced_search, backward compatible uri
-	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
+	dql.POST(EntityCategory+AdvancedSearchAction, restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{}
-	}, wrapperTraceLog(h.advancedSearch))), true)))
+	}, wrapperTraceLog(h.advancedSearch))), true))
 	// HybridSearch
-	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
+	dql.POST(EntityCategory+HybridSearchAction, restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{}
-	}, wrapperTraceLog(h.advancedSearch))), true)))
+	}, wrapperTraceLog(h.advancedSearch))), true))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listPartitions))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.hasPartitions))))
@@ -545,13 +546,22 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 // data array as []map[string]interface{}. Insert and upsert parse that array
 // with the collection schema after fetching it from the proxy.
 func bindCollectionDataMetadata(c *gin.Context, req *CollectionDataReq) error {
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		return err
+	// A middleware that already read the body leaves it under BodyBytesKey, as
+	// ShouldBindBodyWith expects: httpcompress.RequestBodyMiddleware does for a
+	// decompressed one. Reading the request again would copy the whole body.
+	var body []byte
+	if cached, ok := c.Get(gin.BodyBytesKey); ok {
+		body, _ = cached.([]byte)
+	}
+	if body == nil {
+		var err error
+		if body, err = io.ReadAll(c.Request.Body); err != nil {
+			return err
+		}
+		c.Set(gin.BodyBytesKey, body)
 	}
 	// Row conversion borrows this buffer through unsafe.String. Do not mutate
 	// or pool it after caching: converted field strings may still alias it.
-	c.Set(gin.BodyBytesKey, body)
 	if len(bytes.TrimSpace(body)) == 0 {
 		return io.EOF
 	}
