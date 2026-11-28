@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/vllm"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type vllmProvider struct {
@@ -64,7 +65,8 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 		return nil, merr.WrapErrParameterInvalidMsg("rerank function lost params endpoint")
 	}
 
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
+	confPrefix := paramtable.Get().FunctionCfg.RerankModelProviders.KeyPrefix + vllmProviderName
+	apiKey, err := models.ParseAKForEndpoint(credentials, params, conf, "", &models.ModelExtraInfo{}, endpoint, confPrefix)
 	if err != nil {
 		return nil, err
 	}
