@@ -19,6 +19,7 @@ package dql
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -48,6 +49,34 @@ const (
 	strongTS  = 0
 	boundedTS = 2
 )
+
+// The requested page is an upper bound, not an estimate of how many rows match.
+func initialStreamResultRows(rows int64, factor float64) int64 {
+	if factor == 1 { // Keep the exact limit rather than rounding it through float64.
+		return rows
+	}
+	return int64(math.Ceil(float64(rows) * factor))
+}
+
+// Reserve once per chunk: Go's smaller growth steps repeatedly copy wide
+// vectors on dense pages. Compact nullable payloads do not have one vector per row.
+func growStreamFloatVectors(output, chunk []*schemapb.FieldData, rows, limit int64) {
+	for i := 0; i < len(output) && i < len(chunk); i++ {
+		vectors := output[i].GetVectors()
+		dst := vectors.GetFloatVector()
+		dim := vectors.GetDim()
+		if dst == nil || dim <= 0 || typeutil.IsCompactNullableVectorFieldData(chunk[i]) {
+			continue
+		}
+		capRows := int64(cap(dst.Data)) / dim
+		needed := int64(len(dst.Data))/dim + rows
+		if needed > capRows {
+			data := make([]float32, len(dst.Data), min(limit, max(needed, 2*capRows))*dim)
+			copy(data, dst.Data)
+			dst.Data = data
+		}
+	}
+}
 
 // isAlpha returns true if the byte is an ASCII letter.
 func isAlpha(c uint8) bool {

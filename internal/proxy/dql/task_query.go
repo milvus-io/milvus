@@ -65,6 +65,7 @@ type QueryTask struct {
 	baseTask
 	Condition
 	*internalpb.RetrieveRequest
+	preAllocFactor float64 // Captured once per request, including retries.
 
 	ctx     context.Context
 	result  *milvuspb.QueryResults
@@ -1175,6 +1176,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
 	enableReduceStream := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool()
 	reduceStreamChunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
+	t.preAllocFactor = paramtable.Get().ProxyCfg.ReduceStreamPreAllocFactor.GetAsFloat()
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: enableReduceStream,
@@ -1464,11 +1466,14 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 				if capacity <= 0 {
 					capacity = int64(rowCount)
 				}
-				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), capacity)
+				output.FieldsData = typeutil.PrepareResultFieldData(chunk.GetFieldsData(), initialStreamResultRows(capacity, t.preAllocFactor))
 			}
 			if len(output.GetFieldsData()) != len(chunk.GetFieldsData()) {
 				return nil, merr.WrapErrServiceInternalMsg(
 					"final Query Chunk field count %d does not match %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
+			}
+			if limit > 0 && collected < limit && !chunk.GetElementLevel() {
+				growStreamFloatVectors(output.FieldsData, chunk.GetFieldsData(), min(int64(rowCount), limit-collected), limit)
 			}
 			indexComputer := typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
 			// ORDER BY keeps receiving Chunks for duplicate validation after the

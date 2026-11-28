@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -119,7 +120,7 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, newSearchScoreInfo(metric.L2, false), false)
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, 2, newSearchScoreInfo(metric.L2, false), false)
 		require.NoError(t, err)
 	}
 
@@ -152,10 +153,33 @@ func TestAppendFinalSearchChunkRejectsMalformedShape(t *testing.T) {
 			case "hit_count":
 				chunk.Topks[0] = 2
 			}
-			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, newSearchScoreInfo(metric.IP, false), false)
+			_, err := appendFinalSearchChunk(output, chunk, seen, 0, 1, 1, newSearchScoreInfo(metric.IP, false), false)
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Empty(t, output.GetScores())
 		})
+	}
+}
+
+func TestSearchStreamInitialCapacityAcrossNQ(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 4000}
+	chunk := newFinalSearchChunk([]int64{7}, []float32{1}, "v1")
+	chunk.ResultData.NumQueries, chunk.ResultData.Topks = 2, []int64{0, 1}
+	chunk.ResultData.FieldsData = newFinalQueryChunk([]int64{7}, 1).FieldsData
+	chunk.ResultData.GroupByFieldValues = newFinalQueryChunk([]int64{3}, 1).FieldsData
+	chunk.ResultData.ElementIndices = &schemapb.LongArray{Data: []int64{9}}
+	for _, tc := range []struct {
+		factor float64
+		want   int
+	}{{1, 8000}, {0.5, 4000}, {0.1, 800}} {
+		stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{chunk}}
+		result, _, err := (&SearchTask{preAllocFactor: tc.factor}).consumeSearchResultStream(stream, request, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
+		require.NoError(t, err)
+		data := result.Results
+		require.Equal(t, []int64{7}, data.GetIds().GetIntId().GetData())
+		require.Equal(t, tc.want, cap(data.Scores))
+		require.Equal(t, tc.want, cap(data.FieldsData[0].GetScalars().GetLongData().Data))
+		require.Equal(t, tc.want, cap(data.GroupByFieldValues[0].GetScalars().GetLongData().Data))
+		require.Equal(t, tc.want, cap(data.GetElementIndices().Data))
 	}
 }
 
@@ -172,6 +196,92 @@ func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, result.Results.Topks)
 	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
 	require.Len(t, stream.chunks, 1, "Proxy must not pull again to fill the exhausted first vector")
+}
+
+func TestSearchStreamGrowsForAcceptedHits(t *testing.T) {
+	makeChunk := func(ids []int64, topks []int64) *internalpb.SearchResults {
+		vectors := make([]float32, 0, 2*len(ids))
+		for _, id := range ids {
+			vectors = append(vectors, float32(id), -float32(id))
+		}
+		chunk := newFinalSearchChunk(ids, make([]float32, len(ids)), "v1")
+		chunk.ResultData.NumQueries, chunk.ResultData.Topks = 2, topks
+		chunk.ResultData.FieldsData = []*schemapb.FieldData{testFloatVectorFieldData("v", vectors, 2)}
+		return chunk
+	}
+	first := makeChunk([]int64{1, 2, 3, 4, 5, 6, 7}, []int64{5, 2})
+	last := makeChunk([]int64{8}, []int64{0, 1})
+	for _, hybrid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("groupedHybrid=%t", hybrid), func(t *testing.T) {
+			req := &internalpb.SearchRequest{Nq: 2, Topk: 3, Offset: 1}
+			task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: hybrid}}
+			stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first}}
+			wantIDs, wantTopks, wantCap := []int64{2, 3, 7}, []int64{2, 1}, 3
+			if hybrid {
+				req.GroupByFieldId = 101
+				stream.chunks = append(stream.chunks, last)
+				wantIDs, wantTopks, wantCap = []int64{1, 2, 3, 4, 5, 6, 7, 8}, []int64{5, 3}, 14
+			}
+			result, _, err := task.consumeSearchResultStream(stream, req, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
+			require.NoError(t, err)
+			require.Equal(t, wantIDs, result.Results.Ids.GetIntId().Data)
+			require.Equal(t, wantTopks, result.Results.Topks)
+			var want []float32
+			for _, id := range wantIDs {
+				want = append(want, float32(id), -float32(id))
+			}
+			got := result.Results.FieldsData[0].GetVectors().GetFloatVector().Data
+			require.Equal(t, want, got)
+			require.Equal(t, wantCap*2, cap(got))
+		})
+	}
+}
+
+func BenchmarkConsumeSearchResultStreamFloatVector(b *testing.B) {
+	const nq, topK, dim, chunkRows = 8, 2048, 1536, 42
+	req := &internalpb.SearchRequest{Nq: nq, Topk: topK}
+	for _, hits := range []int{1, topK} {
+		ids := make([]int64, nq*hits)
+		vectors := make([]float32, len(ids)*dim)
+		for i := range ids {
+			ids[i] = int64(i)
+		}
+		for i := range vectors {
+			vectors[i] = float32(i % 8191)
+		}
+		var chunks []*internalpb.SearchResults
+		for start := 0; start < len(ids); start += chunkRows {
+			end := min(start+chunkRows, len(ids))
+			chunk := newFinalSearchChunk(ids[start:end], make([]float32, end-start), "v1")
+			chunk.ResultData.NumQueries, chunk.ResultData.Topks = nq, make([]int64, nq)
+			for row := start; row < end; row++ {
+				chunk.ResultData.Topks[row/hits]++
+			}
+			chunk.ResultData.FieldsData = []*schemapb.FieldData{testFloatVectorFieldData("v", vectors[start*dim:end*dim], dim)}
+			chunks = append(chunks, chunk)
+		}
+		for _, factor := range []float64{0, 0.0625, 0.1, 0.5, 1} {
+			b.Run(fmt.Sprintf("hitsPerQuery=%d/factor=%g", hits, factor), func(b *testing.B) {
+				task := &SearchTask{SearchRequest: req, preAllocFactor: factor}
+				var result *milvuspb.SearchResults
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					var err error
+					result, _, err = task.consumeSearchResultStream(&searchTaskReduceStream{chunks: chunks}, req, newSearchScoreInfo(metric.IP, false), func(*internalpb.SearchResults) {})
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StopTimer()
+				require.True(b, slices.Equal(ids, result.Results.Ids.GetIntId().Data))
+				require.True(b, slices.Equal(vectors, result.Results.FieldsData[0].GetVectors().GetFloatVector().Data))
+				for _, count := range result.Results.Topks {
+					require.EqualValues(b, hits, count)
+				}
+			})
+		}
+	}
 }
 
 func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {

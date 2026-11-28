@@ -98,10 +98,21 @@ not resume from a partial position. See [Search](../../../internal/proxy/dql/tas
 
 | Server YAML key | Default |
 | --- | --- |
-| `proxy.queryView.enableReduceStream` | `true` |
-| `proxy.queryView.reduceStreamChunkBytes` | `262144` |
+| `proxy.queryView.reduceStream.enabled` | `true` |
+| `proxy.queryView.reduceStream.chunkBytes` | `262144` |
+| `proxy.queryView.reduceStream.preAllocFactor` | `1` |
 
-Both [settings](../../../configs/milvus.yaml#L528) are refreshable: Proxy captures
+The previous keys `proxy.queryView.enableReduceStream` and
+`proxy.queryView.reduceStreamChunkBytes` remain supported. The allocation factor
+controls only Proxy output capacity, not the result limit or output quota:
+reserve `ceil(requestedRows * factor)` rows initially. The default reserves the full requested page. For Search,
+the estimate covers all NQ combined; for unbounded Query, use the first nonempty
+Chunk's row count instead of a limit. Bounded row-level Query and Search grow
+dense Float32 vector buffers per Chunk, using only the rows they will append.
+For grouped Hybrid Search the sub-search page size is not a cap: all candidates
+remain available for fusion.
+
+All three [settings](../../../configs/milvus.yaml#L528) are refreshable: Proxy captures
 them once before retries and propagates Chunk bytes to workers. New requests use
 refreshed values without QN/SN restart; in-flight requests retain their values.
 Existing configuration-source precedence applies. SDK parameters cannot override
