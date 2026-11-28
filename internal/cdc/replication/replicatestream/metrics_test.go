@@ -17,13 +17,21 @@
 package replicatestream
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/cdc/cluster"
+	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -79,6 +87,112 @@ func TestReplicateMetricsOnCloseKeepsLastReplicatedSeries(t *testing.T) {
 	m.OnClose()
 
 	assert.True(t, metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target))
+}
+
+func TestReplicateStreamClientSharedConnectionMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics.RegisterCDC(registry)
+	targetCluster := t.Name()
+	t.Cleanup(func() { metrics.CDCStreamRPCReconnectTimes.DeleteLabelValues(targetCluster) })
+
+	connectionCounts := func() map[string]float64 {
+		families, err := registry.Gather()
+		require.NoError(t, err)
+		counts := make(map[string]float64)
+		for _, family := range families {
+			if family.GetName() != "milvus_cdc_stream_rpc_connections" {
+				continue
+			}
+			for _, sample := range family.GetMetric() {
+				labels := make(map[string]string)
+				for _, label := range sample.GetLabel() {
+					labels[label.GetName()] = label.GetValue()
+				}
+				if labels[metrics.CDCLabelTargetCluster] == targetCluster {
+					counts[labels[metrics.CDCLabelConnectionStatus]] = sample.GetGauge().GetValue()
+				}
+			}
+		}
+		return counts
+	}
+	wait := func(ready <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-ready:
+		case <-time.After(5 * time.Second):
+			t.Fatal("replication stream did not reach the expected stage")
+		}
+	}
+	start := func(channel string, target *cluster.MockMilvusClient) ReplicateStreamClient {
+		info := newTestReplicateInfo(channel, channel+"-target")
+		info.TargetCluster.ClusterId = targetCluster
+		client := NewReplicateStreamClient(context.Background(), target, &meta.ReplicateChannel{Key: channel, Value: info})
+		t.Cleanup(client.Close)
+		return client
+	}
+
+	firstTarget := cluster.NewMockMilvusClient(t)
+	firstConnected := make(chan struct{})
+	firstTarget.EXPECT().CreateReplicateStream(mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+			return &connectionMetricsTestStream{ctx: ctx, connected: firstConnected}, nil
+		}).Once()
+	first := start("first", firstTarget)
+	wait(firstConnected)
+
+	secondTarget := cluster.NewMockMilvusClient(t)
+	secondConnected, disconnect := make(chan struct{}), make(chan struct{})
+	secondTarget.EXPECT().CreateReplicateStream(mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+			return &connectionMetricsTestStream{ctx: ctx, connected: secondConnected, disconnect: disconnect}, nil
+		}).Once()
+	dialing, reconnect, reconnected := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	secondTarget.EXPECT().CreateReplicateStream(mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+			close(dialing)
+			select {
+			case <-reconnect:
+				return &connectionMetricsTestStream{ctx: ctx, connected: reconnected}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}).Once()
+	second := start("second", secondTarget)
+	wait(secondConnected)
+	assert.Equal(t, map[string]float64{"connected": 2, "disconnected": 0}, connectionCounts())
+
+	first.Close()
+	assert.Equal(t, map[string]float64{"connected": 1, "disconnected": 0}, connectionCounts(),
+		"closing the first stream must preserve the second stream's connection series")
+
+	close(disconnect)
+	wait(dialing)
+	assert.Equal(t, map[string]float64{"connected": 0, "disconnected": 1}, connectionCounts())
+	close(reconnect)
+	wait(reconnected)
+	assert.Equal(t, map[string]float64{"connected": 1, "disconnected": 0}, connectionCounts())
+
+	second.Close()
+	require.Empty(t, connectionCounts())
+}
+
+type connectionMetricsTestStream struct {
+	milvuspb.MilvusService_CreateReplicateStreamClient
+	ctx        context.Context
+	connected  chan struct{}
+	disconnect <-chan struct{}
+}
+
+func (s *connectionMetricsTestStream) CloseSend() error { return nil }
+
+func (s *connectionMetricsTestStream) Recv() (*milvuspb.ReplicateResponse, error) {
+	close(s.connected)
+	select {
+	case <-s.disconnect:
+		return nil, assert.AnError
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
 }
 
 func TestDeleteLastReplicatedTimeTickDeletesExactSeries(t *testing.T) {
