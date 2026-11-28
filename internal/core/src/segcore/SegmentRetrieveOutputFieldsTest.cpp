@@ -425,7 +425,8 @@ TEST_P(RetrieveOutputFieldsPKTest, RetrieveByOffsetsUsesParallelFieldReads) {
                                               segment.get(),
                                               plan.get(),
                                               mutable_offsets.data(),
-                                              mutable_offsets.size());
+                                              mutable_offsets.size(),
+                                              0);
         auto destroy_future = folly::makeGuard([&] { future_destroy(future); });
         void* raw_result = nullptr;
         auto pending = std::async(std::launch::async, [&] {
@@ -501,6 +502,7 @@ TEST_F(RetrieveOutputFieldsTest, OrderedArrowOutputUsesBothPoolsWithOneWorker) {
             return FillRetrieveFieldsOrdered(c_segments,
                                              2,
                                              plan.get(),
+                                             0,
                                              indices,
                                              selected_offsets,
                                              3,
@@ -1154,6 +1156,7 @@ class SealedRetrieveOutputFieldsDeathTest : public ::testing::Test {
                 auto status = FillRetrieveFieldsOrdered(&c_segment,
                                                         1,
                                                         plan.get(),
+                                                        0,
                                                         indices,
                                                         offsets.data(),
                                                         offsets.size(),

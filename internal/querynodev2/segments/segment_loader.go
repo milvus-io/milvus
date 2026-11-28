@@ -367,6 +367,11 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			}
 		}
 
+		if local, ok := segment.(*LocalSegment); ok {
+			if err := local.PreparePOCUpdates(ctx); err != nil {
+				return err
+			}
+		}
 		if segment.Level() != datapb.SegmentLevel_L0 {
 			loader.manager.Segment.Put(ctx, segmentType, segment)
 		}

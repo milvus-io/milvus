@@ -194,6 +194,7 @@ CStatus
 FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           int64_t num_segments,
                           CRetrievePlan c_plan,
+                          uint64_t timestamp,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,
@@ -330,7 +331,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                         field_meta,
                         materialized.segment_offsets.data(),
                         materialized.segment_offsets.size(),
-                        dynamic_field_names);
+                        dynamic_field_names,
+                        timestamp);
                 };
                 auto fetched_fields = milvus::segcore::FetchOutputFields(
                     plan->field_ids_,

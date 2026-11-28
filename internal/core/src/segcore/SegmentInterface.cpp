@@ -185,7 +185,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                          field_meta,
                                          results.seg_offsets_.data(),
                                          size,
-                                         dynamic_fields);
+                                         dynamic_fields,
+                                         results.query_timestamp_);
     };
     auto fetched_fields = FetchOutputFields(
         plan->target_entries_, get_segment_id(), op_ctx, fetch_one);
@@ -229,6 +230,7 @@ SegmentInternalInterface::Search(
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
+    results->query_timestamp_ = timestamp;
     return results;
 }
 
@@ -373,7 +375,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                         retrieve_results.result_offsets_.size(),
                         ignore_non_pk,
                         true,
-                        &fte_op_ctx);
+                        &fte_op_ctx,
+                        timestamp);
     } else if (!plan->plan_node_->pipeline_field_ids_.empty()) {
         // Non-aggregation ORDER BY (single-project or two-project mode):
         // Pipeline output contains [pk, sort_cols, ..., hidden columns].
@@ -384,7 +387,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         //
         // Aggregation + ORDER BY does NOT set pipeline_field_ids_ and produces
         // final columns directly, falling through to FillTargetEntryDirectly.
-        FillOrderByResult(plan, results, retrieve_results, &fte_op_ctx);
+        FillOrderByResult(
+            plan, results, retrieve_results, &fte_op_ctx, timestamp);
     } else {
         FillTargetEntryDirectly(trace_ctx, results, retrieve_results);
     }
@@ -418,7 +422,8 @@ SegmentInternalInterface::FillOrderByResult(
     const query::RetrievePlan* plan,
     const std::unique_ptr<proto::segcore::RetrieveResults>& results,
     RetrieveResult& retrieveResult,
-    milvus::OpContext* op_ctx) const {
+    milvus::OpContext* op_ctx,
+    std::optional<Timestamp> query_timestamp) const {
     auto fields_data = results->mutable_fields_data();
     auto& deferred = plan->plan_node_->deferred_field_ids_;
 
@@ -502,7 +507,7 @@ SegmentInternalInterface::FillOrderByResult(
         }
     }
 
-    auto fetch_one = [this, plan, &offset_data, topk_count](
+    auto fetch_one = [this, plan, &offset_data, topk_count, query_timestamp](
                          FieldId field_id, milvus::OpContext* field_ctx) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
@@ -540,8 +545,15 @@ SegmentInternalInterface::FillOrderByResult(
             col = bulk_subscript_not_exist_field(
                 field_meta, offset_data.data(), topk_count);
         } else {
-            col = bulk_subscript(
-                field_ctx, field_id, offset_data.data(), topk_count);
+            col = BulkSubscriptWithSnapshot(this,
+                                            nullptr,
+                                            field_ctx,
+                                            field_id,
+                                            plan->schema_->operator[](field_id),
+                                            offset_data.data(),
+                                            topk_count,
+                                            nullptr,
+                                            query_timestamp);
         }
         auto& field_meta = plan->schema_->operator[](field_id);
         if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -603,7 +615,8 @@ SegmentInternalInterface::FillTargetEntry(
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids,
-    milvus::OpContext* op_ctx) const {
+    milvus::OpContext* op_ctx,
+    std::optional<Timestamp> query_timestamp) const {
     tracer::AutoSpan span("FillTargetEntry", tracer::GetRootSpan());
 
     if (size == 0) {
@@ -661,7 +674,7 @@ SegmentInternalInterface::FillTargetEntry(
         }
     }
 
-    auto fetch_one = [this, plan, offsets, size, snapshot](
+    auto fetch_one = [this, plan, offsets, size, snapshot, query_timestamp](
                          FieldId field_id, milvus::OpContext* field_ctx) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
@@ -696,7 +709,8 @@ SegmentInternalInterface::FillTargetEntry(
                                              field_meta,
                                              offsets,
                                              size,
-                                             dynamic_field_names);
+                                             dynamic_field_names,
+                                             query_timestamp);
         // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
@@ -766,7 +780,8 @@ SegmentInternalInterface::Retrieve(
     const query::RetrievePlan* Plan,
     const int64_t* offsets,
     int64_t size,
-    const folly::CancellationToken& cancel_token) const {
+    const folly::CancellationToken& cancel_token,
+    std::optional<Timestamp> query_timestamp) const {
     tracer::AutoSpan span("RetrieveByOffsets", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     std::chrono::high_resolution_clock::time_point get_target_entry_start =
@@ -777,8 +792,15 @@ SegmentInternalInterface::Retrieve(
     fte_op_ctx.runtime_load_priority =
         milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
-    FillTargetEntry(
-        trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
+    FillTargetEntry(trace_ctx,
+                    Plan,
+                    results,
+                    offsets,
+                    size,
+                    false,
+                    false,
+                    &fte_op_ctx,
+                    query_timestamp);
     std::chrono::high_resolution_clock::time_point get_target_entry_end =
         std::chrono::high_resolution_clock::now();
     double get_entry_cost = std::chrono::duration<double, std::micro>(

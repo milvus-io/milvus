@@ -333,7 +333,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
                        CSegmentInterface c_segment,
                        CRetrievePlan c_plan,
                        int64_t* offsets,
-                       int64_t len);
+                       int64_t len,
+                       uint64_t timestamp);
 
 // Read PK and timestamp for selected offsets, before reduction.
 // Returns Future<CRetrieveArrowResult>: $seg_offset, $id, $timestamp

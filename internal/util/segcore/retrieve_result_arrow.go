@@ -91,6 +91,7 @@ func FillRetrieveFieldsOrdered(
 		&cSegments[0],
 		C.int64_t(len(cSegments)),
 		plan.cRetrievePlan,
+		C.uint64_t(plan.Timestamp),
 		segIndicesPtr,
 		segOffsetsPtr,
 		C.int64_t(len(segIndices)),

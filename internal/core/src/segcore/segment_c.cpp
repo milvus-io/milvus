@@ -1579,7 +1579,8 @@ AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
                            CRetrievePlan c_plan,
                            int64_t* offsets,
                            int64_t len,
-                           bool identity_take_allowed) {
+                           bool identity_take_allowed,
+                           uint64_t timestamp) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
 
@@ -1588,8 +1589,13 @@ AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
     auto future = milvus::futures::Future<Result>::async(
         milvus::futures::getSearchCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,
-        [c_trace, segment, plan, offsets, len, identity_take_allowed](
-            folly::CancellationToken cancel_token) {
+        [c_trace,
+         segment,
+         plan,
+         offsets,
+         len,
+         identity_take_allowed,
+         timestamp](folly::CancellationToken cancel_token) {
             auto trace_ctx = milvus::tracer::TraceContext{
                 c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
             milvus::tracer::AutoSpan span(
@@ -1609,16 +1615,19 @@ AsyncRetrieveByOffsetsImpl(CTraceContext c_trace,
                 plan->schema_, internal_segment, plan->access_entries_);
 
             auto retrieve_result =
-                identities_only
-                    ? internal_segment->RetrieveIdentitiesByOffsets(
-                          &trace_ctx,
-                          plan,
-                          offsets,
-                          len,
-                          identity_take_allowed,
-                          cancel_token)
-                    : segment->Retrieve(
-                          &trace_ctx, plan, offsets, len, cancel_token);
+                identities_only ? internal_segment->RetrieveIdentitiesByOffsets(
+                                      &trace_ctx,
+                                      plan,
+                                      offsets,
+                                      len,
+                                      identity_take_allowed,
+                                      cancel_token)
+                                : segment->Retrieve(&trace_ctx,
+                                                    plan,
+                                                    offsets,
+                                                    len,
+                                                    cancel_token,
+                                                    timestamp);
 
             if constexpr (identities_only) {
                 return ExportQueryScanResult(
@@ -1637,9 +1646,10 @@ AsyncRetrieveByOffsets(CTraceContext trace,
                        CSegmentInterface segment,
                        CRetrievePlan plan,
                        int64_t* offsets,
-                       int64_t len) {
+                       int64_t len,
+                       uint64_t timestamp) {
     return AsyncRetrieveByOffsetsImpl<false>(
-        trace, segment, plan, offsets, len, false);
+        trace, segment, plan, offsets, len, false, timestamp);
 }
 
 CFuture*
@@ -1650,7 +1660,7 @@ AsyncRetrieveIdentitiesByOffsets(CTraceContext trace,
                                  int64_t len,
                                  bool take_for_output_allowed) {
     return AsyncRetrieveByOffsetsImpl<true>(
-        trace, segment, plan, offsets, len, take_for_output_allowed);
+        trace, segment, plan, offsets, len, take_for_output_allowed, 0);
 }
 
 int64_t

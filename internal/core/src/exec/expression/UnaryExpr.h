@@ -958,6 +958,16 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     void
+    DetermineUpdateExecPath() override {
+        if (IsTextIndexOpType(expr_->op_type_)) {
+            throw SegcoreError(Unsupported,
+                               "Text/phrase matching on updated fields is not "
+                               "supported in phase 1");
+        }
+        DetermineExecPath();
+    }
+
+    void
     DetermineExecPath() override;
 
     bool

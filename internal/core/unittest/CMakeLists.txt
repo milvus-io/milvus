@@ -42,6 +42,8 @@ file(GLOB_RECURSE SOURCE_TEST_FILES
 set(MILVUS_TEST_FILES
         ${SOURCE_TEST_FILES}
         init_gtest.cpp
+        test_ts_vector_updates.cpp
+        test_ts_vector_segment.cpp
         test_bloom_filter_expr.cpp
         test_roaring_filter_expr.cpp
         test_loading.cpp
@@ -306,6 +308,30 @@ target_link_libraries(index_runtime_acceptance_test
 add_dependencies(index_runtime_acceptance_test milvus_core)
 
 install(TARGETS index_runtime_acceptance_test DESTINATION unittest)
+
+# Focused query-side updates correctness target; no performance-route matrix.
+add_executable(ts_vector_updates_test
+        init_gtest.cpp
+        test_ts_vector_updates.cpp
+        test_ts_vector_segment.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/TestArtifactIO.cpp)
+target_include_directories(ts_vector_updates_test PRIVATE
+        ${CMAKE_HOME_DIRECTORY}/../parser/planparserv2/cwrapper)
+target_link_libraries(ts_vector_updates_test PRIVATE
+        GTest::gtest
+        "$<COMPILE_ONLY:milvus_core>"
+        "$<TARGET_FILE:milvus_core>"
+        "$<TARGET_FILE:milvus-storage>"
+        "$<TARGET_FILE:knowhere>"
+        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        gRPC::grpc++ Boost::filesystem glog::glog
+        "${INDEX_TEST_FOLLY_LIBRARY}" "${INDEX_TEST_FMT_LIBRARY}")
+add_dependencies(ts_vector_updates_test milvus_core)
+set_property(TARGET ts_vector_updates_test APPEND PROPERTY BUILD_RPATH
+        "$<TARGET_FILE_DIR:milvus_core>"
+        "$<TARGET_FILE_DIR:milvus-storage>"
+        "$<TARGET_FILE_DIR:knowhere>")
+add_test(NAME ts_vector_updates COMMAND ts_vector_updates_test)
 
 add_subdirectory(test_json_stats)
 
