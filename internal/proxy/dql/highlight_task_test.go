@@ -66,6 +66,10 @@ func TestHighlightTask(t *testing.T) {
 			assert.Equal(t, HighlightTaskName, task.Name())
 		})
 
+		t.Run("subtask", func(t *testing.T) {
+			assert.True(t, task.IsSubTask())
+		})
+
 		t.Run("type", func(t *testing.T) {
 			assert.Equal(t, commonpb.MsgType_Undefined, task.Type())
 		})

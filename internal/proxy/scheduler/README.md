@@ -7,16 +7,21 @@ task model (`taskmodel`) plus `pkg/v3`.
 
 ## Overview
 
-The proxy has four task queues, each backed by its own scheduler loop:
+The proxy exposes four task queues:
 
 - **DdQueue** (definition) — DDL tasks such as create/drop collection, alias,
   index, database, resource-group operations.
 - **DmQueue** (manipulation) — DML tasks: insert/delete/upsert.
-- **DqQueue** (query) — DQL tasks: search/query.
+- **DqQueue** (query) — search and query tasks, with a separate queue for
+  requery and lexical highlight tasks. Each queue has its own dispatch loop
+  and worker pool so a Search waiting on a subtask can finish even when the
+  main pool is full. Each queue admits up to `proxy.maxTaskNum` pending
+  tasks. External Search and Query requests use the main queue.
 - **DcQueue** (control) — data-control operations such as flush.
 
-Each task is enqueued by the proxy's RPC handlers and, when picked up by its
-loop, runs `PreExecute -> Execute -> PostExecute` under bounded concurrency.
+RPC handlers and Search tasks enqueue work. Each task runs
+`PreExecute -> Execute -> PostExecute` under bounded concurrency.
+
 DML uses execution slots: a read-dependent upsert releases its slot while waiting
 for readiness or read-retry backoff, and reacquires it for every read and before
 continuing the mutation. Suspended tasks retain their stack and appear in the
@@ -33,13 +38,15 @@ acquisition, without waiting for ordinary DML to finish.
 1. **Queues** (`DdTaskQueue`, `DmTaskQueue`, `DqTaskQueue`, `DcTaskQueue`) —
    each maintains an unissued list and an active map, plus the enqueue/dequeue
    and task-lookup primitives.
-2. **`TaskScheduler`** — owns the four queues and their loops (`definitionLoop`,
-   `controlLoop`, `manipulationLoop`, `queryLoop`), and exposes `Start`/`Close`.
+2. **`TaskScheduler`** — owns the queues and their loops (`definitionLoop`,
+   `controlLoop`, `manipulationLoop`, and one `queryLoop` for each DQL queue),
+   and exposes `Start`/`Close`.
 3. **TSO + ID allocation** — `Enqueue` allocates a timestamp (or an ID from the
    meta cache for tasks that skip timestamp allocation) before a task is
    unissued.
-4. **Metrics** — `GetMetrics` reports per-queue pending/executing task counts
-   and timing, consumed by the proxy's quota/system-info metrics.
+4. **Metrics** — `GetMetrics` reports pending/executing task counts and
+   timing, consumed by the proxy's quota/system-info metrics. Both DQL queues
+   contribute to the `dql` metrics.
 
 ## Architecture
 
@@ -49,7 +56,8 @@ acquisition, without waiting for ordinary DML to finish.
 │                                                               │
 │   DdQueue ──► definitionLoop ──► processTask(Pre/Exec/Post)   │
 │   DmQueue ──► manipulationLoop ──► processTask                 │
-│   DqQueue ──► queryLoop ──► processTask                        │
+│   DqQueue (main)     ──► queryLoop ──► main pool               │
+│   DqQueue (subtasks) ──► queryLoop ──► subtask pool            │
 │   DcQueue ──► controlLoop ──► processTask                      │
 │                                                               │
 │   queues hold: unissued list · active map · TSO allocator      │
