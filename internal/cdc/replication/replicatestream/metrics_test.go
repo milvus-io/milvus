@@ -17,11 +17,13 @@
 package replicatestream
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -89,4 +91,54 @@ func TestDeleteLastReplicatedTimeTickDeletesExactSeries(t *testing.T) {
 	DeleteLastReplicatedTimeTick(info)
 
 	assert.False(t, metrics.CDCLastReplicatedTimeTick.DeleteLabelValues(source, target))
+}
+
+func TestReplicateMetricsSharedTargetConnections(t *testing.T) {
+	target := t.Name()
+	newStream := func(channel string) ReplicateMetrics {
+		info := newTestReplicateInfo(channel, channel)
+		info.TargetCluster.ClusterId = target
+		stream := NewReplicateMetrics(info)
+		stream.OnInitiate()
+		t.Cleanup(stream.OnClose)
+		return stream
+	}
+	connections := metrics.CDCStreamRPCConnections
+	t.Cleanup(func() { metrics.CDCStreamRPCReconnectTimes.DeleteLabelValues(target) })
+	checkCounts := func(connected, disconnected float64) {
+		t.Helper()
+		require.Equal(t, connected, testutil.ToFloat64(connections.WithLabelValues(target, metrics.CDCStatusConnected)))
+		require.Equal(t, disconnected, testutil.ToFloat64(connections.WithLabelValues(target, metrics.CDCStatusDisconnected)))
+	}
+
+	first, second := newStream("ch1"), newStream("ch2")
+	checkCounts(0, 2)
+	first.OnConnect()
+	second.OnConnect()
+	checkCounts(2, 0)
+	first.OnClose()
+	checkCounts(1, 0)
+
+	second.OnDisconnect()
+	checkCounts(0, 1)
+	second.OnConnect()
+	checkCounts(1, 0)
+	replacement := newStream("ch1")
+	checkCounts(1, 1)
+	first.OnClose() // A repeated close must not release the replacement.
+	checkCounts(1, 1)
+	var transitions sync.WaitGroup
+	transitions.Go(replacement.OnClose) // Closed before it could connect.
+	transitions.Go(func() {
+		second.OnDisconnect()
+		second.OnConnect()
+	})
+	transitions.Wait()
+	checkCounts(1, 0)
+	require.Equal(t, 4.0, testutil.ToFloat64(metrics.CDCStreamRPCReconnectTimes.WithLabelValues(target)))
+
+	second.OnDisconnect()
+	second.OnClose()
+	require.False(t, connections.DeleteLabelValues(target, metrics.CDCStatusConnected))
+	require.False(t, connections.DeleteLabelValues(target, metrics.CDCStatusDisconnected))
 }
