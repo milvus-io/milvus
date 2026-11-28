@@ -17,6 +17,7 @@
 package column
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -468,6 +469,162 @@ func (s *NullableScalarSuite) TestVectorSlice() {
 			s.True(isNull)
 			_, err = sliced.Get(1)
 			s.NoError(err)
+		})
+	}
+}
+
+type appendValueCase struct {
+	input    any
+	expected any
+}
+
+type appendValueColumnCase struct {
+	name   string
+	create func() Column
+	cases  []appendValueCase
+}
+
+func appendValueColumnCases() []appendValueColumnCase {
+	type jsonStruct struct {
+		A int `json:"a"`
+	}
+	mapJSON, _ := json.Marshal(map[string]any{"a": 1})
+	structJSON, _ := json.Marshal(jsonStruct{A: 2})
+	fp32 := []float32{1, 2}
+
+	return []appendValueColumnCase{
+		{
+			name:   "json",
+			create: func() Column { return NewColumnJSONBytes("json", nil) },
+			cases: []appendValueCase{
+				{input: []byte(`{"a":0}`), expected: []byte(`{"a":0}`)},
+				{input: map[string]any{"a": 1}, expected: mapJSON},
+				{input: jsonStruct{A: 2}, expected: structJSON},
+				{input: &jsonStruct{A: 2}, expected: structJSON},
+			},
+		},
+		{
+			name:   "float_vector",
+			create: func() Column { return NewColumnFloatVector("vector", 2, nil) },
+			cases: []appendValueCase{
+				{input: entity.FloatVector(fp32), expected: entity.FloatVector(fp32)},
+				{input: fp32, expected: entity.FloatVector(fp32)},
+			},
+		},
+		{
+			name:   "binary_vector",
+			create: func() Column { return NewColumnBinaryVector("vector", 8, nil) },
+			cases: []appendValueCase{
+				{input: entity.BinaryVector([]byte{1}), expected: entity.BinaryVector([]byte{1})},
+				{input: []byte{2}, expected: entity.BinaryVector([]byte{2})},
+			},
+		},
+		{
+			name:   "float16_vector",
+			create: func() Column { return NewColumnFloat16Vector("vector", 2, nil) },
+			cases: []appendValueCase{
+				{input: entity.Float16Vector([]byte{1, 2, 3, 4}), expected: entity.Float16Vector([]byte{1, 2, 3, 4})},
+				{input: []byte{5, 6, 7, 8}, expected: entity.Float16Vector([]byte{5, 6, 7, 8})},
+				{input: entity.FloatVector(fp32), expected: entity.FloatVector(fp32).ToFloat16Vector()},
+				{input: fp32, expected: entity.FloatVector(fp32).ToFloat16Vector()},
+			},
+		},
+		{
+			name:   "bfloat16_vector",
+			create: func() Column { return NewColumnBFloat16Vector("vector", 2, nil) },
+			cases: []appendValueCase{
+				{input: entity.BFloat16Vector([]byte{1, 2, 3, 4}), expected: entity.BFloat16Vector([]byte{1, 2, 3, 4})},
+				{input: []byte{5, 6, 7, 8}, expected: entity.BFloat16Vector([]byte{5, 6, 7, 8})},
+				{input: entity.FloatVector(fp32), expected: entity.FloatVector(fp32).ToBFloat16Vector()},
+				{input: fp32, expected: entity.FloatVector(fp32).ToBFloat16Vector()},
+			},
+		},
+		{
+			name:   "int8_vector",
+			create: func() Column { return NewColumnInt8Vector("vector", 2, nil) },
+			cases: []appendValueCase{
+				{input: entity.Int8Vector([]int8{1, 2}), expected: entity.Int8Vector([]int8{1, 2})},
+				{input: []int8{3, 4}, expected: entity.Int8Vector([]int8{3, 4})},
+			},
+		},
+	}
+}
+
+// checkNullableAppend appends every case value followed by a null and checks that
+// the logical length, validity and payload stay consistent.
+func (s *NullableScalarSuite) checkNullableAppend(appendNull func(Column) error) {
+	for _, tc := range appendValueColumnCases() {
+		s.Run(tc.name, func() {
+			col := tc.create()
+			col.SetNullable(true)
+
+			// interleave a null between every value to exercise both bookkeeping paths
+			for _, c := range tc.cases {
+				s.Require().NoError(col.AppendValue(c.input))
+				s.Require().NoError(appendNull(col))
+			}
+
+			s.Equal(len(tc.cases)*2, col.Len())
+			s.NoError(col.ValidateNullable())
+			s.Len(col.FieldData().GetValidData(), len(tc.cases)*2)
+
+			for i, c := range tc.cases {
+				isNull, err := col.IsNull(i * 2)
+				s.NoError(err)
+				s.False(isNull, "row %d should be valid", i*2)
+				val, err := col.Get(i * 2)
+				s.NoError(err)
+				s.Equal(c.expected, val)
+
+				isNull, err = col.IsNull(i*2 + 1)
+				s.NoError(err)
+				s.True(isNull, "row %d should be null", i*2+1)
+			}
+
+			sliced := col.Slice(0, col.Len())
+			s.Equal(col.Len(), sliced.Len())
+			s.NoError(sliced.ValidateNullable())
+		})
+	}
+}
+
+func (s *NullableScalarSuite) TestAppendValueNullableKeepsValidity() {
+	// row-based insert path: values via AppendValue, nils via AppendNull
+	s.Run("append_null", func() {
+		s.checkNullableAppend(func(col Column) error { return col.AppendNull() })
+	})
+	// AppendValue(nil) shall be treated as a null for nullable columns
+	s.Run("append_value_nil", func() {
+		s.checkNullableAppend(func(col Column) error { return col.AppendValue(nil) })
+	})
+}
+
+func (s *NullableScalarSuite) TestAppendValueNonNullable() {
+	for _, tc := range appendValueColumnCases() {
+		s.Run(tc.name, func() {
+			col := tc.create()
+
+			for _, c := range tc.cases {
+				s.Require().NoError(col.AppendValue(c.input))
+			}
+			s.Equal(len(tc.cases), col.Len())
+
+			var err error
+			s.NotPanics(func() {
+				err = col.AppendValue(nil)
+			})
+			s.Error(err)
+			s.Equal(len(tc.cases), col.Len())
+
+			s.Error(col.AppendValue(true))
+			s.Equal(len(tc.cases), col.Len())
+
+			s.Empty(col.FieldData().GetValidData())
+			for i, c := range tc.cases {
+				val, err := col.Get(i)
+				s.NoError(err)
+				s.Equal(c.expected, val)
+			}
 		})
 	}
 }
