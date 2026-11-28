@@ -19,6 +19,7 @@ package metrics
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -60,4 +61,36 @@ func TestCleanupDataNodeCompactionMetrics(t *testing.T) {
 	DataNodeCompactionLatency.Reset()
 	DataNodeCompactionLatencyInQueue.Reset()
 	DataNodeCompactionStageLatency.Reset()
+}
+
+func TestCleanupDataNodeWriteMetrics(t *testing.T) {
+	DataNodeWriteDataCount.Reset()
+	t.Cleanup(DataNodeWriteDataCount.Reset)
+	for _, source := range []string{StreamingDataSourceLabel, CompactionDataSourceLabel} {
+		for _, kind := range []string{InsertLabel, DeleteLabel} {
+			DataNodeWriteDataCount.WithLabelValues("1", source, kind, "10").Add(3)
+		}
+	}
+	otherNode := DataNodeWriteDataCount.WithLabelValues("2", StreamingDataSourceLabel, InsertLabel, "10")
+	otherCollection := DataNodeWriteDataCount.WithLabelValues("1", StreamingDataSourceLabel, InsertLabel, "11")
+	otherNode.Add(4)
+	otherCollection.Add(5)
+	CleanupDataNodeWriteMetrics(1, 10)
+	CleanupDataNodeWriteMetrics(1, 10)
+	assert.Equal(t, 2, testutil.CollectAndCount(DataNodeWriteDataCount))
+	assert.Equal(t, 4.0, testutil.ToFloat64(otherNode))
+	assert.Equal(t, 5.0, testutil.ToFloat64(otherCollection))
+}
+
+func TestCleanupDataNodeWriteMetricsAggregate(t *testing.T) {
+	mode := CollectionLevelMetricsMode()
+	SetCollectionLevelMetricsMode(CollectionLevelMetricsModeAggregate)
+	t.Cleanup(func() { SetCollectionLevelMetricsMode(mode) })
+	t.Cleanup(DataNodeWriteDataCount.Reset)
+	for _, id := range []string{"10", "11"} {
+		DataNodeWriteDataCount.WithLabelValues("1", StreamingDataSourceLabel, InsertLabel, id).Inc()
+	}
+	CleanupDataNodeWriteMetrics(1, 10)
+	assert.Equal(t, 1, testutil.CollectAndCount(DataNodeWriteDataCount))
+	assert.Equal(t, 2.0, testutil.ToFloat64(DataNodeWriteDataCount.WithLabelValues("1", StreamingDataSourceLabel, InsertLabel, AllLabel)))
 }
