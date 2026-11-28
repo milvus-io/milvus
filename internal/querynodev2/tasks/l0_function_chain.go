@@ -111,21 +111,22 @@ func (t *SearchTask) applyL0Rerank(segDFs []*chain.DataFrame, prepared *prepared
 		).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}()
 
-	switch {
-	case prepared.chain != nil && prepared.boostScore != nil:
-		return merr.WrapErrServiceInternalMsg("l0_rerank: public chain and boost score are both prepared")
-	case prepared.chain != nil:
-		return t.applyPublicL0Rerank(segDFs, prepared)
-	case prepared.boostScore != nil:
-		return t.applyPreparedBoostScores(segDFs, prepared.boostScore, searchedSegments, searchReq)
-	default:
-		return merr.WrapErrServiceInternalMsg("l0_rerank: prepared L0 rerank has no implementation")
-	}
+	return t.applyPublicL0Rerank(segDFs, prepared, &l0SegmentBinding{segments: searchedSegments, request: searchReq})
 }
 
-func (t *SearchTask) applyPublicL0Rerank(segDFs []*chain.DataFrame, prepared *preparedL0Rerank) error {
+type l0SegmentBinding struct {
+	segments []segments.Segment
+	request  *segcore.SearchRequest
+}
+
+var newL0ScoringSegment = segments.NewScoringSegment
+
+func (t *SearchTask) applyPublicL0Rerank(segDFs []*chain.DataFrame, prepared *preparedL0Rerank, binding *l0SegmentBinding) error {
 	if prepared == nil || prepared.chain == nil {
 		return merr.WrapErrServiceInternalMsg("l0_rerank: prepared L0 function chain is nil")
+	}
+	if binding != nil && len(binding.segments) != len(segDFs) {
+		return merr.WrapErrServiceInternalMsg("l0_rerank: DataFrame count %d does not match segment count %d", len(segDFs), len(binding.segments))
 	}
 	if len(segDFs) == 0 {
 		return nil
@@ -138,8 +139,12 @@ func (t *SearchTask) applyPublicL0Rerank(segDFs []*chain.DataFrame, prepared *pr
 	// Public L0 avoids reparsing proto by reusing the prepared ChainRepr, but builds
 	// a fresh FuncChain for each segment so operator/function execution state is not
 	// shared across concurrent per-segment execution.
-	return executeL0RerankChains(t.ctx, segDFs, func(context.Context, int, *chain.DataFrame) (*chain.FuncChain, error) {
-		fc, err := chain.FuncChainFromReprWithContext(repr, defaultAllocator, chaintypes.FunctionBuildContext{})
+	return executeL0RerankChains(t.ctx, segDFs, func(_ context.Context, i int, _ *chain.DataFrame) (*chain.FuncChain, error) {
+		ctx := chaintypes.FunctionBuildContext{}
+		if binding != nil {
+			ctx.L0 = &chaintypes.L0BuildContext{Segment: newL0ScoringSegment(binding.segments[i], binding.request)}
+		}
+		fc, err := chain.FuncChainFromReprWithContext(repr, defaultAllocator, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +160,7 @@ func validateL0FunctionChainOps(repr *chain.ChainRepr) error {
 		if op.Type != chaintypes.OpTypeMap {
 			return merr.WrapErrParameterInvalidMsg("op[%d] type %q is not supported by L0 rerank function chain", opIdx, op.Type)
 		}
-		if err := validateQueryNodeMapOp(&op, chaintypes.StageL0Rerank); err != nil {
+		if err := validateQueryNodeMapOp(&op); err != nil {
 			return merr.Wrapf(err, "op[%d]", opIdx)
 		}
 	}

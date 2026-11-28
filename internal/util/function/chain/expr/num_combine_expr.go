@@ -401,5 +401,5 @@ func (s *NumCombineExpr) combine(values []float64, weights []float64) float64 {
 // =============================================================================
 
 func init() {
-	types.MustRegisterFunction(NumCombineFuncName, NewNumCombineExprFromParams)
+	types.MustRegisterFunction(NumCombineFuncName, types.FunctionDefinition{Factory: NewNumCombineExprFromParams})
 }

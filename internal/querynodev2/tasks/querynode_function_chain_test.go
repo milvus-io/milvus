@@ -19,6 +19,7 @@ package tasks
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -26,13 +27,17 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	boostnative "github.com/milvus-io/milvus/internal/util/function/boost/native"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/pyudf"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -246,6 +251,12 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	})
 
 	t.Run("boost score is prepared as L0 rerank", func(t *testing.T) {
+		prepareCalls := 0
+		prepare := mockey.Mock(chain.PrepareFunctionFromRepr).To(func(*chain.FunctionRepr, types.FunctionBuildContext) error {
+			prepareCalls++
+			return merr.WrapErrServiceInternalMsg("legacy scorer must not enter parameter preparation")
+		}).Build()
+		defer prepare.UnPatch()
 		plan := &planpb.PlanNode{
 			Scorers: []*planpb.ScoreFunction{{Weight: 2}},
 			ScoreOption: &planpb.ScoreOption{
@@ -257,12 +268,21 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
 		require.NoError(t, err)
 		require.NotNil(t, prepared.l0)
-		assert.Nil(t, prepared.l0.chain)
+		require.NotNil(t, prepared.l0.chain)
 		assert.Nil(t, prepared.l0.inputPlan)
-		require.NotNil(t, prepared.l0.boostScore)
-		assert.Equal(t, plan.GetScorers(), prepared.l0.boostScore.scorers)
-		assert.Equal(t, chainexpr.ModeSum, prepared.l0.boostScore.functionMode)
-		assert.Equal(t, chainexpr.ModeMultiply, prepared.l0.boostScore.boostMode)
+		require.Len(t, prepared.l0.chain.Operators, 2)
+		assert.NotNil(t, prepared.l0.chain.Operators[0].Function.Prepared)
+		fnRepr := prepared.l0.chain.Operators[0].Function
+		originalPrepared := fnRepr.Prepared
+		for i := 0; i < 2; i++ {
+			// No public parameters or schema: creation must use the adapter's scorer.
+			fn, err := chain.FunctionFromReprWithContext(fnRepr, types.FunctionBuildContext{Stage: types.StageL0Rerank})
+			require.NoError(t, err)
+			require.Equal(t, chainexpr.BoostScoreFuncName, fn.Name())
+			require.Same(t, originalPrepared, fnRepr.Prepared)
+		}
+		require.Zero(t, prepareCalls)
+		assert.Equal(t, chainexpr.ModeMultiply, prepared.l0.chain.Operators[1].Function.Params["mode"].GetStringValue())
 		assert.Nil(t, prepared.l1)
 	})
 
@@ -767,6 +787,162 @@ func TestMaterializedInputContracts(t *testing.T) {
 					assert.Contains(t, err.Error(), "l0_rerank: segment dataframe 0")
 				}
 			}
+		})
+	}
+}
+
+func TestPublicBoostChainPreparation(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	boost := mapOpWithParamsForTest("boost", chainexpr.BoostScoreFuncName, map[string]*schemapb.FunctionParamValue{
+		"weight": {Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: 2}},
+		"filter": stringParamForTest("pk > 0"),
+	})
+	combine := mapOpWithParamsForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, map[string]*schemapb.FunctionParamValue{
+		"mode": stringParamForTest("multiply"), "null_policy": stringParamForTest("skip"),
+	}, columnArgForTest(types.ScoreFieldName), columnArgForTest("boost"))
+	plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{l0FunctionChainForTest(boost, combine)}}
+	prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+	require.NoError(t, err)
+	require.Empty(t, prepared.l0.inputPlan.PhysicalFieldIDs())
+	require.NotContains(t, prepared.l0.chain.Info.RequiredInputs, types.SegOffsetFieldName)
+	require.Empty(t, prepared.l0.chain.Operators[0].Inputs)
+	require.NotNil(t, prepared.l0.chain.Operators[0].Function.Prepared)
+
+	withBoostScoreCheckedAllocator(t)
+	old := newL0ScoringSegment
+	newL0ScoringSegment = func(segments.Segment, *segcore.SearchRequest) boostnative.Segment { return publicBoostTestSegment{} }
+	defer func() { newL0ScoringSegment = old }()
+	dfs := []*chain.DataFrame{makeBoostScoreTestDF(t, []int64{1, 2}, []float32{0.5, 0.8}, []int64{10, 20}, []int64{2})}
+	defer func() {
+		for _, df := range dfs {
+			df.Release()
+		}
+	}()
+	task := &SearchTask{ctx: context.Background()}
+	require.NoError(t, task.applyL0Rerank(dfs, prepared.l0, []segments.Segment{nil}, nil))
+	scores := dfs[0].Column(types.ScoreFieldName).Chunk(0).(*array.Float32)
+	require.InDelta(t, 1.0, scores.Value(0), 1e-6)
+	require.InDelta(t, 0.8, scores.Value(1), 1e-6)
+	require.False(t, dfs[0].HasColumn("boost"))
+}
+
+type publicBoostTestSegment struct{}
+
+func (publicBoostTestSegment) ComputeScores(_ context.Context, offsets *arrow.Chunked, req *planpb.ScoreFunction) (*arrow.Chunked, error) {
+	b := array.NewFloat32Builder(defaultAllocator)
+	defer b.Release()
+	b.Append(req.Weight)
+	b.AppendNull()
+	a := b.NewArray()
+	defer a.Release()
+	return arrow.NewChunked(arrow.PrimitiveTypes.Float32, []arrow.Array{a}), nil
+}
+
+func TestQueryNodeMapPreparationPreservesArgumentValidation(t *testing.T) {
+	for _, stage := range []string{types.StageL0Rerank, types.StageL1Rerank} {
+		t.Run(stage, func(t *testing.T) {
+			op := &chain.OperatorRepr{
+				Type:    types.OpTypeMap,
+				Inputs:  []string{types.ScoreFieldName},
+				Outputs: []string{types.ScoreFieldName},
+				Function: &chain.FunctionRepr{
+					Name: chainexpr.NumCombineFuncName,
+					Args: []*schemapb.FunctionChainExprArg{nil},
+				},
+			}
+			require.NoError(t, validateQueryNodeMapOp(op))
+			_, err := chain.NewMapOpFromReprWithContext(op, types.FunctionBuildContext{Stage: stage})
+			require.ErrorContains(t, err, "expr arg[0] is nil")
+			require.Nil(t, op.Function.Prepared)
+		})
+	}
+}
+
+func TestQueryNodeBoostPreparationRejectsL1BeforeSchema(t *testing.T) {
+	op := mapOpWithParamsForTest(types.ScoreFieldName, chainexpr.BoostScoreFuncName,
+		map[string]*schemapb.FunctionParamValue{"weight": {Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: 1}}, "filter": stringParamForTest("invalid filter")})
+	fn, _, err := chain.ProtoExprToRepr(op.Expr)
+	require.NoError(t, err)
+	err = chain.PrepareFunctionFromRepr(fn, types.FunctionBuildContext{Stage: types.StageL1Rerank})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "only L0 rerank")
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	_, err = prepareQueryNodeFunctionChainsFromPlan(&planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{l1FunctionChainForTest(op)}}, schema)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "only L0 rerank")
+}
+
+func TestQueryNodePreparationFollowsAllStructuralChecks(t *testing.T) {
+	name := "test_request_preparation_order"
+	prepareCalls, factoryCalls := 0, 0
+	data := &struct{}{}
+	types.MustRegisterFunction(name, types.FunctionDefinition{
+		Factory: func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (types.FunctionExpr, error) {
+			factoryCalls++
+			require.Equal(t, 2, prepareCalls, "all preparation must finish before validation construction")
+			require.Nil(t, ctx.L0, "validation must not bind a segment")
+			require.Same(t, data, cfg.Prepared)
+			return chainexpr.NewNumCombineExpr(chainexpr.ModeSum, nil)
+		},
+		Prepare: func(ctx types.FunctionBuildContext, cfg types.FunctionConfig) (any, error) {
+			prepareCalls++
+			require.NotNil(t, ctx.Schema)
+			require.Contains(t, []string{types.StageL0Rerank, types.StageL1Rerank}, ctx.Stage)
+			return data, nil
+		},
+	})
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	first := mapOpForTest(types.ScoreFieldName, name, columnArgForTest(types.ScoreFieldName))
+	second := mapOpForTest(types.ScoreFieldName, name, columnArgForTest(types.ScoreFieldName))
+	second.Outputs = nil
+	plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{l0FunctionChainForTest(first), l1FunctionChainForTest(second)}}
+	_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+	require.ErrorContains(t, err, "requires outputs")
+	require.Zero(t, prepareCalls)
+	require.Zero(t, factoryCalls)
+	second.Outputs = []string{types.ScoreFieldName}
+	prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+	require.NoError(t, err)
+	require.Equal(t, 2, prepareCalls)
+	require.Equal(t, 2, factoryCalls)
+	require.Same(t, data, prepared.l0.chain.Operators[0].Function.Prepared)
+	require.Same(t, data, prepared.l1.chain.Operators[0].Function.Prepared)
+}
+
+func TestQueryNodeBoostFilterUsesPlanTimezone(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Timestamptz},
+	}}
+	for _, tc := range []struct{ name, timezone, literal, wantZone string }{
+		{"legacy_plan", "", "2025-01-01T00:00:00", "UTC"},
+		{"utc", "UTC", "2025-01-01T00:00:00", "UTC"},
+		{"shanghai", "Asia/Shanghai", "2025-01-01T00:00:00", "Asia/Shanghai"},
+		{"new_york", "America/New_York", "2025-01-01T00:00:00", "America/New_York"},
+		{"explicit_offset", "Asia/Shanghai", "2025-01-01T00:00:00Z", "UTC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{l0FunctionChainForTest(
+				mapOpWithParamsForTest("boost", chainexpr.BoostScoreFuncName, map[string]*schemapb.FunctionParamValue{
+					"weight": {Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: 2}},
+					"filter": stringParamForTest("ts > ISO '" + tc.literal + "'"),
+				}),
+			)}}
+			if tc.timezone != "" {
+				plan.PlanOptions = &planpb.PlanOption{ResolvedTimezone: tc.timezone}
+			}
+			blob, err := proto.Marshal(plan)
+			require.NoError(t, err)
+			prepared, err := prepareQueryNodeFunctionChains(blob, schema)
+			require.NoError(t, err)
+			scorer := prepared.l0.chain.Operators[0].Function.Prepared.(*planpb.ScoreFunction)
+			predicate := scorer.Filter.GetUnaryRangeExpr()
+			require.NotNil(t, predicate)
+			zone, err := time.LoadLocation(tc.wantZone)
+			require.NoError(t, err)
+			require.Equal(t, time.Date(2025, 1, 1, 0, 0, 0, 0, zone).UnixMicro(), predicate.GetValue().GetInt64Val())
 		})
 	}
 }

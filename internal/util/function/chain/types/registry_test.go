@@ -57,7 +57,7 @@ func dummyFactory(name string) FunctionFactory {
 func TestFunctionRegistry_Register(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	err := r.Register("my_func", dummyFactory("my_func"))
+	err := r.Register("my_func", FunctionDefinition{Factory: dummyFactory("my_func")})
 	assert.NoError(t, err)
 	assert.True(t, r.Has("my_func"))
 }
@@ -65,7 +65,7 @@ func TestFunctionRegistry_Register(t *testing.T) {
 func TestFunctionRegistry_Register_EmptyName(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	err := r.Register("", dummyFactory("x"))
+	err := r.Register("", FunctionDefinition{Factory: dummyFactory("x")})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "function name cannot be empty")
 }
@@ -73,7 +73,7 @@ func TestFunctionRegistry_Register_EmptyName(t *testing.T) {
 func TestFunctionRegistry_Register_NilFactory(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	err := r.Register("nil_factory", nil)
+	err := r.Register("nil_factory", FunctionDefinition{Factory: nil})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "function factory cannot be nil")
 }
@@ -81,10 +81,10 @@ func TestFunctionRegistry_Register_NilFactory(t *testing.T) {
 func TestFunctionRegistry_Register_Duplicate(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	err := r.Register("dup", dummyFactory("dup"))
+	err := r.Register("dup", FunctionDefinition{Factory: dummyFactory("dup")})
 	require.NoError(t, err)
 
-	err = r.Register("dup", dummyFactory("dup"))
+	err = r.Register("dup", FunctionDefinition{Factory: dummyFactory("dup")})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already registered")
 }
@@ -94,7 +94,7 @@ func TestFunctionRegistry_MustRegister(t *testing.T) {
 
 	// Should not panic on valid registration
 	assert.NotPanics(t, func() {
-		r.MustRegister("must_func", dummyFactory("must_func"))
+		r.MustRegister("must_func", FunctionDefinition{Factory: dummyFactory("must_func")})
 	})
 	assert.True(t, r.Has("must_func"))
 }
@@ -102,10 +102,10 @@ func TestFunctionRegistry_MustRegister(t *testing.T) {
 func TestFunctionRegistry_MustRegister_PanicOnDuplicate(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	r.MustRegister("panic_dup", dummyFactory("panic_dup"))
+	r.MustRegister("panic_dup", FunctionDefinition{Factory: dummyFactory("panic_dup")})
 
 	assert.Panics(t, func() {
-		r.MustRegister("panic_dup", dummyFactory("panic_dup"))
+		r.MustRegister("panic_dup", FunctionDefinition{Factory: dummyFactory("panic_dup")})
 	})
 }
 
@@ -113,7 +113,7 @@ func TestFunctionRegistry_MustRegister_PanicOnEmptyName(t *testing.T) {
 	r := NewFunctionRegistry()
 
 	assert.Panics(t, func() {
-		r.MustRegister("", dummyFactory("x"))
+		r.MustRegister("", FunctionDefinition{Factory: dummyFactory("x")})
 	})
 }
 
@@ -121,20 +121,20 @@ func TestFunctionRegistry_MustRegister_PanicOnNilFactory(t *testing.T) {
 	r := NewFunctionRegistry()
 
 	assert.Panics(t, func() {
-		r.MustRegister("nil_panic", nil)
+		r.MustRegister("nil_panic", FunctionDefinition{Factory: nil})
 	})
 }
 
 func TestFunctionRegistry_Get(t *testing.T) {
 	r := NewFunctionRegistry()
-	r.MustRegister("get_func", dummyFactory("get_func"))
+	r.MustRegister("get_func", FunctionDefinition{Factory: dummyFactory("get_func")})
 
-	factory, ok := r.Get("get_func")
+	definition, ok := r.Get("get_func")
 	assert.True(t, ok)
-	assert.NotNil(t, factory)
+	assert.NotNil(t, definition.Factory)
 
 	// Verify the factory produces the expected function
-	fn, err := factory(FunctionBuildContext{}, FunctionConfig{})
+	fn, err := definition.Factory(FunctionBuildContext{}, FunctionConfig{})
 	require.NoError(t, err)
 	assert.Equal(t, "get_func", fn.Name())
 }
@@ -142,14 +142,14 @@ func TestFunctionRegistry_Get(t *testing.T) {
 func TestFunctionRegistry_Get_NotFound(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	factory, ok := r.Get("nonexistent")
+	definition, ok := r.Get("nonexistent")
 	assert.False(t, ok)
-	assert.Nil(t, factory)
+	assert.Equal(t, FunctionDefinition{}, definition)
 }
 
 func TestFunctionRegistry_Create(t *testing.T) {
 	r := NewFunctionRegistry()
-	r.MustRegister("create_func", dummyFactory("create_func"))
+	r.MustRegister("create_func", FunctionDefinition{Factory: dummyFactory("create_func")})
 
 	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{Name: "create_func"})
 	require.NoError(t, err)
@@ -159,13 +159,13 @@ func TestFunctionRegistry_Create(t *testing.T) {
 func TestFunctionRegistry_Create_WithConfig(t *testing.T) {
 	r := NewFunctionRegistry()
 
-	r.MustRegister("param_func", func(_ FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
+	r.MustRegister("param_func", FunctionDefinition{Factory: func(_ FunctionBuildContext, cfg FunctionConfig) (FunctionExpr, error) {
 		name := cfg.Name
 		if v := cfg.Params["name"]; v != nil && v.GetStringValue() != "" {
 			name = v.GetStringValue()
 		}
 		return &dummyFunc{name: name}, nil
-	})
+	}})
 
 	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{
 		Name:   "param_func",
@@ -189,7 +189,7 @@ func TestFunctionRegistry_Has(t *testing.T) {
 
 	assert.False(t, r.Has("has_func"))
 
-	r.MustRegister("has_func", dummyFactory("has_func"))
+	r.MustRegister("has_func", FunctionDefinition{Factory: dummyFactory("has_func")})
 	assert.True(t, r.Has("has_func"))
 }
 
@@ -200,9 +200,9 @@ func TestFunctionRegistry_Names(t *testing.T) {
 	names := r.Names()
 	assert.Empty(t, names)
 
-	r.MustRegister("alpha", dummyFactory("alpha"))
-	r.MustRegister("beta", dummyFactory("beta"))
-	r.MustRegister("gamma", dummyFactory("gamma"))
+	r.MustRegister("alpha", FunctionDefinition{Factory: dummyFactory("alpha")})
+	r.MustRegister("beta", FunctionDefinition{Factory: dummyFactory("beta")})
+	r.MustRegister("gamma", FunctionDefinition{Factory: dummyFactory("gamma")})
 
 	names = r.Names()
 	assert.Len(t, names, 3)
@@ -216,7 +216,7 @@ func TestFunctionRegistry_Names(t *testing.T) {
 func TestGlobalRegistry_RegisterFunction(t *testing.T) {
 	name := "test_global_register_xyz"
 
-	err := RegisterFunction(name, dummyFactory(name))
+	err := RegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	assert.NoError(t, err)
 	assert.True(t, HasFunction(name))
 }
@@ -224,10 +224,10 @@ func TestGlobalRegistry_RegisterFunction(t *testing.T) {
 func TestGlobalRegistry_RegisterFunction_Duplicate(t *testing.T) {
 	name := "test_global_dup_xyz"
 
-	err := RegisterFunction(name, dummyFactory(name))
+	err := RegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	require.NoError(t, err)
 
-	err = RegisterFunction(name, dummyFactory(name))
+	err = RegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already registered")
 }
@@ -236,7 +236,7 @@ func TestGlobalRegistry_MustRegisterFunction(t *testing.T) {
 	name := "test_global_must_xyz"
 
 	assert.NotPanics(t, func() {
-		MustRegisterFunction(name, dummyFactory(name))
+		MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	})
 	assert.True(t, HasFunction(name))
 }
@@ -244,17 +244,17 @@ func TestGlobalRegistry_MustRegisterFunction(t *testing.T) {
 func TestGlobalRegistry_MustRegisterFunction_PanicOnDuplicate(t *testing.T) {
 	name := "test_global_must_panic_xyz"
 
-	MustRegisterFunction(name, dummyFactory(name))
+	MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 
 	assert.Panics(t, func() {
-		MustRegisterFunction(name, dummyFactory(name))
+		MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	})
 }
 
 func TestGlobalRegistry_GetFunctionFactory(t *testing.T) {
 	name := "test_global_get_xyz"
 
-	MustRegisterFunction(name, dummyFactory(name))
+	MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 
 	factory, ok := GetFunctionFactory(name)
 	assert.True(t, ok)
@@ -274,7 +274,7 @@ func TestGlobalRegistry_GetFunctionFactory_NotFound(t *testing.T) {
 func TestGlobalRegistry_CreateFunction(t *testing.T) {
 	name := "test_global_create_xyz"
 
-	MustRegisterFunction(name, dummyFactory(name))
+	MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 
 	fn, err := CreateFunction(FunctionBuildContext{}, FunctionConfig{Name: name})
 	require.NoError(t, err)
@@ -293,7 +293,7 @@ func TestGlobalRegistry_HasFunction(t *testing.T) {
 
 	assert.False(t, HasFunction(name))
 
-	MustRegisterFunction(name, dummyFactory(name))
+	MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 	assert.True(t, HasFunction(name))
 }
 
@@ -301,8 +301,31 @@ func TestGlobalRegistry_FunctionNames(t *testing.T) {
 	// Register a unique function so we can verify it appears in the list
 	name := "test_global_names_xyz"
 
-	MustRegisterFunction(name, dummyFactory(name))
+	MustRegisterFunction(name, FunctionDefinition{Factory: dummyFactory(name)})
 
 	names := FunctionNames()
 	assert.Contains(t, names, name)
+}
+
+func TestFunctionRegistry_DefinitionValueCopy(t *testing.T) {
+	r := NewFunctionRegistry()
+	definition := FunctionDefinition{
+		Factory: dummyFactory("prepared"),
+		Prepare: func(FunctionBuildContext, FunctionConfig) (any, error) {
+			t.Fatal("registry must not invoke preparation")
+			return nil, nil
+		},
+	}
+	require.NoError(t, r.Register("prepared", definition))
+	definition.Factory = nil
+	definition.Prepare = nil
+	got, ok := r.Get("prepared")
+	require.True(t, ok)
+	require.NotNil(t, got.Factory)
+	require.NotNil(t, got.Prepare)
+	got.Factory = nil
+	fn, err := r.Create(FunctionBuildContext{}, FunctionConfig{Name: "prepared"})
+	require.NoError(t, err)
+	require.Equal(t, "prepared", fn.Name())
+	require.Error(t, r.Register("no_factory", FunctionDefinition{Prepare: got.Prepare}))
 }

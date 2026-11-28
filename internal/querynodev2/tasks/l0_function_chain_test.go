@@ -48,7 +48,7 @@ func histogramSampleCount(t *testing.T, observer prometheus.Observer) uint64 {
 func TestApplyPublicL0RerankRejectsNilPreparedChain(t *testing.T) {
 	task := &SearchTask{ctx: t.Context()}
 
-	err := task.applyPublicL0Rerank(nil, nil)
+	err := task.applyPublicL0Rerank(nil, nil, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "prepared L0 function chain is nil")
 }
@@ -99,7 +99,7 @@ func TestApplyPublicL0RerankPrunesInputsAndPreservesReduceSystemColumns(t *testi
 	require.NoError(t, err)
 	task := &SearchTask{ctx: t.Context()}
 
-	require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: repr}))
+	require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: repr}, nil))
 	defer segDFs[0].Release()
 
 	result := segDFs[0]
@@ -155,7 +155,7 @@ func TestL0ThenL1RerankPrunesStageLocalColumns(t *testing.T) {
 	)))
 	require.NoError(t, err)
 	task := &SearchTask{ctx: t.Context()}
-	require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: l0Repr}))
+	require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: l0Repr}, nil))
 	defer segDFs[0].Release()
 
 	require.False(t, segDFs[0].HasColumn("l0_bonus"))
@@ -223,13 +223,10 @@ func TestApplyL0RerankMetrics(t *testing.T) {
 	)))
 	require.NoError(t, err)
 	publicPrepared := &preparedL0Rerank{chain: repr}
-	boostPrepared := &preparedL0Rerank{
-		boostScore: &preparedBoostScore{
-			scorers:      []*planpb.ScoreFunction{{Weight: 1}},
-			functionMode: chainexpr.ModeSum,
-			boostMode:    chainexpr.ModeMultiply,
-		},
-	}
+	boostRepr, err := legacyBoostChainRepr([]*planpb.ScoreFunction{{Weight: 1}}, chainexpr.ModeSum, chainexpr.ModeMultiply)
+	require.NoError(t, err)
+	boostPrepared := &preparedL0Rerank{chain: boostRepr}
+
 	task := &SearchTask{ctx: t.Context()}
 	nodeID := fmt.Sprint(task.GetNodeID())
 
@@ -256,7 +253,7 @@ func TestApplyL0RerankMetrics(t *testing.T) {
 			}
 		}()
 
-		require.NoError(t, task.applyL0Rerank(segDFs, publicPrepared, nil, nil))
+		require.NoError(t, task.applyL0Rerank(segDFs, publicPrepared, []segments.Segment{nil, nil}, nil))
 		require.Equal(t, before+1, histogramSampleCount(t, successObserver))
 	})
 
@@ -268,12 +265,12 @@ func TestApplyL0RerankMetrics(t *testing.T) {
 	})
 
 	t.Run("boost score success", func(t *testing.T) {
-		oldFactory := boostScoreRunnerFactory
-		boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+		oldFactory := boostScoreSegmentFactory
+		boostScoreSegmentFactory = mockBoostScoreSegmentFactory(boostScoreOutput{
 			scores:   []float32{2.0},
 			hasScore: []bool{true},
 		})
-		defer func() { boostScoreRunnerFactory = oldFactory }()
+		defer func() { boostScoreSegmentFactory = oldFactory }()
 
 		before := histogramSampleCount(t, successObserver)
 		segDFs := []*chain.DataFrame{
@@ -340,7 +337,7 @@ func TestL0ComputedInvalidScoreRejectedAtMergeBoundary(t *testing.T) {
 			task := &SearchTask{ctx: t.Context()}
 			// Intermediate chain results remain nullable/non-finite, including
 			// overflow produced by adding two otherwise finite inputs.
-			require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: repr}))
+			require.NoError(t, task.applyPublicL0Rerank(segDFs, &preparedL0Rerank{chain: repr}, nil))
 			result, err := task.executeGoReduce(segDFs, 1, nil, 0, 1)
 			require.Nil(t, result)
 			require.ErrorIs(t, err, merr.ErrFunctionFailed)

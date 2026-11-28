@@ -18,6 +18,7 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	boostnative "github.com/milvus-io/milvus/internal/util/function/boost/native"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 )
 
@@ -48,6 +51,11 @@ func TestBoostScoreColumn(t *testing.T) {
 }
 
 func withBoostScoreCheckedAllocator(t *testing.T) {
+	oldBinding := newL0ScoringSegment
+	newL0ScoringSegment = func(s segments.Segment, r *segcore.SearchRequest) boostnative.Segment {
+		return &testScoringSegment{s, r, segments.AsyncComputeScorerScoresOnChunkedOffsets}
+	}
+	t.Cleanup(func() { newL0ScoringSegment = oldBinding })
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	oldAllocator := defaultAllocator
 	defaultAllocator = pool
@@ -146,12 +154,12 @@ type boostScoreOutput struct {
 	hasScore []bool
 }
 
-func mockBoostScoreRunnerFactory(outputs ...boostScoreOutput) func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+func mockBoostScoreSegmentFactory(outputs ...boostScoreOutput) func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) boostnative.Segment {
 	call := 0
-	return func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	return func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) boostnative.Segment {
 		idx := call
 		call++
-		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+		return testScoreSegmentFunc(func(ctx context.Context, offsets *arrow.Chunked, _ *planpb.ScoreFunction) (*arrow.Chunked, error) {
 			chunks := make([]arrow.Array, 0, len(offsets.Chunks()))
 			pos := 0
 			for _, offsetChunk := range offsets.Chunks() {
@@ -169,7 +177,7 @@ func mockBoostScoreRunnerFactory(outputs ...boostScoreOutput) func(boostScoreFun
 				chunks = append(chunks, chunk)
 			}
 			return newBoostScoreTestChunked(chunks), nil
-		}
+		})
 	}
 }
 
@@ -198,12 +206,12 @@ func newConstantBoostScoreTestChunked(offsets *arrow.Chunked, score float32) *ar
 func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(boostScoreOutput{
 		scores:   []float32{2.0},
 		hasScore: []bool{true},
 	})
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 	defer df.Release()
@@ -232,12 +240,12 @@ func TestBuildBoostScoreChainSkipsFunctionCombineForSingleScorer(t *testing.T) {
 func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(
 		boostScoreOutput{scores: []float32{2.0}, hasScore: []bool{true}},
 		boostScoreOutput{scores: []float32{3.0}, hasScore: []bool{true}},
 	)
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 	defer df.Release()
@@ -267,12 +275,12 @@ func TestBuildBoostScoreChainCombinesMultipleScorers(t *testing.T) {
 func TestApplyBoostScoresPrunesTempsAndPreservesReduceSystemColumns(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(boostScoreOutput{
 		scores:   []float32{1.0, 10.0, 2.0},
 		hasScore: []bool{true, true, false},
 	})
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2, 3},
@@ -315,12 +323,12 @@ func TestApplyBoostScoresPrunesTempsAndPreservesReduceSystemColumns(t *testing.T
 func TestApplyBoostScoresMultipleScorersCombinesScoresAndSorts(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(
 		boostScoreOutput{scores: []float32{2.0, 0.0, 3.0}, hasScore: []bool{true, false, true}},
 		boostScoreOutput{scores: []float32{4.0, 5.0, 0.0}, hasScore: []bool{true, true, false}},
 	)
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2, 3},
@@ -373,12 +381,12 @@ func TestApplyBoostScoresNoScorersNoop(t *testing.T) {
 func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(boostScoreOutput{
 		scores:   []float32{1.0, 1.0, 0.25},
 		hasScore: []bool{true, true, true},
 	})
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2, 3},
@@ -417,12 +425,12 @@ func TestApplyBoostScoresDistanceMetricKeepsInternalScoreDescending(t *testing.T
 func TestApplyBoostScoresDistanceMetricSumKeepsInternalScoreDescending(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(boostScoreOutput{
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(boostScoreOutput{
 		scores:   []float32{0.0, 0.0, 0.7},
 		hasScore: []bool{false, false, true},
 	})
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2, 3},
@@ -461,12 +469,12 @@ func TestApplyBoostScoresDistanceMetricSumKeepsInternalScoreDescending(t *testin
 func TestApplyBoostScoresMultipleScorersAllMissKeepOriginalScores(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = mockBoostScoreRunnerFactory(
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = mockBoostScoreSegmentFactory(
 		boostScoreOutput{scores: []float32{0.0, 0.0}, hasScore: []bool{false, false}},
 		boostScoreOutput{scores: []float32{0.0, 0.0}, hasScore: []bool{false, false}},
 	)
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	df := makeBoostScoreTestDF(t,
 		[]int64{1, 2},
@@ -549,17 +557,17 @@ func TestExtractPlanScorers(t *testing.T) {
 func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	oldFactory := boostScoreSegmentFactory
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
-	boostScoreRunnerFactory = func(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorer *planpb.ScoreFunction) expr.BoostScoreRunner {
+	boostScoreSegmentFactory = func(scoreFunc boostScoreFunc, segment segments.Segment, searchReq *segcore.SearchRequest, scorer *planpb.ScoreFunction) boostnative.Segment {
 		require.Equal(t,
 			reflect.ValueOf(segments.AsyncComputeScorerScoresOnChunkedOffsets).Pointer(),
 			reflect.ValueOf(scoreFunc).Pointer(),
 		)
-		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+		return testScoreSegmentFunc(func(ctx context.Context, offsets *arrow.Chunked, _ *planpb.ScoreFunction) (*arrow.Chunked, error) {
 			return newConstantBoostScoreTestChunked(offsets, 1.0), nil
-		}
+		})
 	}
 
 	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
@@ -579,14 +587,14 @@ func TestApplyBoostScoresUsesAsyncBoostScoreFunc(t *testing.T) {
 func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	oldFactory := boostScoreSegmentFactory
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	var started atomic.Int32
 	var releaseBoth sync.Once
 	bothStarted := make(chan struct{})
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
-		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+	boostScoreSegmentFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) boostnative.Segment {
+		return testScoreSegmentFunc(func(ctx context.Context, offsets *arrow.Chunked, _ *planpb.ScoreFunction) (*arrow.Chunked, error) {
 			if started.Add(1) == 2 {
 				releaseBoth.Do(func() { close(bothStarted) })
 			}
@@ -598,7 +606,7 @@ func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 			}
 
 			return newConstantBoostScoreTestChunked(offsets, 1.0), nil
-		}
+		})
 	}
 
 	df1 := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
@@ -624,17 +632,17 @@ func TestApplyBoostScoresRunsSegmentsConcurrently(t *testing.T) {
 func TestApplyBoostScoresReleasesBoostedFramesOnError(t *testing.T) {
 	withBoostScoreCheckedAllocator(t)
 
-	oldFactory := boostScoreRunnerFactory
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	oldFactory := boostScoreSegmentFactory
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
 	var calls atomic.Int32
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
-		return func(ctx context.Context, offsets *arrow.Chunked) (*arrow.Chunked, error) {
+	boostScoreSegmentFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) boostnative.Segment {
+		return testScoreSegmentFunc(func(ctx context.Context, offsets *arrow.Chunked, _ *planpb.ScoreFunction) (*arrow.Chunked, error) {
 			if calls.Add(1) == 1 {
 				return newConstantBoostScoreTestChunked(offsets, 1.0), nil
 			}
 			return nil, errors.New("mock boost failure")
-		}
+		})
 	}
 
 	df1 := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
@@ -676,9 +684,10 @@ func TestPrepareBoostScore(t *testing.T) {
 		prepared, err := prepareBoostScore(plan)
 		require.NoError(t, err)
 		require.NotNil(t, prepared)
-		require.Equal(t, plan.GetScorers(), prepared.scorers)
-		require.Equal(t, expr.ModeSum, prepared.functionMode)
-		require.Equal(t, expr.ModeMultiply, prepared.boostMode)
+		require.Len(t, prepared.Operators, 4)
+		require.NotNil(t, prepared.Operators[0].Function.Prepared)
+		require.Equal(t, expr.ModeSum, prepared.Operators[2].Function.Params["mode"].GetStringValue())
+		require.Equal(t, expr.ModeMultiply, prepared.Operators[3].Function.Params["mode"].GetStringValue())
 	})
 
 	t.Run("invalid modes", func(t *testing.T) {
@@ -801,31 +810,92 @@ func TestBuildBoostScoreChainPropagatesBuilderErrors(t *testing.T) {
 	df := makeBoostScoreTestDF(t, []int64{1}, []float32{0.5}, []int64{10}, []int64{1})
 	defer df.Release()
 
-	oldFactory := boostScoreRunnerFactory
-	boostScoreRunnerFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) expr.BoostScoreRunner {
+	oldFactory := boostScoreSegmentFactory
+	boostScoreSegmentFactory = func(boostScoreFunc, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction) boostnative.Segment {
 		return nil
 	}
-	defer func() { boostScoreRunnerFactory = oldFactory }()
+	defer func() { boostScoreSegmentFactory = oldFactory }()
 
-	_, err := buildBoostScoreChain(
-		df,
-		nil,
-		nil,
-		[]*planpb.ScoreFunction{{Weight: 1}},
-		segments.ComputeScorerScoresOnChunkedOffsets,
-		expr.ModeSum,
-		expr.ModeMultiply,
-	)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "runner is nil")
+	fc, err := buildBoostScoreChain(df, nil, nil, []*planpb.ScoreFunction{{Weight: 1}}, segments.ComputeScorerScoresOnChunkedOffsets, expr.ModeSum, expr.ModeMultiply)
+	require.NoError(t, err)
+	_, err = fc.Execute(df)
+	require.ErrorContains(t, err, "segment binding is nil")
+	_, err = legacyBoostChainRepr([]*planpb.ScoreFunction{{Weight: 1}, {Weight: 2}}, "bad-mode", expr.ModeMultiply)
+	require.ErrorContains(t, err, "invalid mode")
+	_, err = legacyBoostChainRepr([]*planpb.ScoreFunction{{Weight: 1}}, expr.ModeSum, "bad-mode")
+	require.ErrorContains(t, err, "invalid mode")
+}
 
-	chainWithBadFunctionMode := chain.NewFuncChainWithAllocator(defaultAllocator)
-	_, err = appendFunctionScoreColumn(chainWithBadFunctionMode, []string{boostScoreColumn(0), boostScoreColumn(1)}, "bad-mode")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid mode")
+// Legacy test fixtures now build the same representation as production.
+type boostScoreFunc func(context.Context, segments.Segment, *segcore.SearchRequest, *planpb.ScoreFunction, *arrow.Chunked) (*arrow.Chunked, error)
 
-	chainWithBadBoostMode := chain.NewFuncChainWithAllocator(defaultAllocator)
-	err = appendFinalBoostScore(chainWithBadBoostMode, boostScoreColumn(0), "bad-mode")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid mode")
+var boostScoreSegmentFactory = func(f boostScoreFunc, s segments.Segment, r *segcore.SearchRequest, scorer *planpb.ScoreFunction) boostnative.Segment {
+	return testScoreSegmentFunc(func(ctx context.Context, offsets *arrow.Chunked, _ *planpb.ScoreFunction) (*arrow.Chunked, error) {
+		return f(ctx, s, r, scorer, offsets)
+	})
+}
+
+type testScoringSegment struct {
+	segment segments.Segment
+	request *segcore.SearchRequest
+	score   boostScoreFunc
+}
+
+func (s *testScoringSegment) ComputeScores(ctx context.Context, offsets *arrow.Chunked, req *planpb.ScoreFunction) (*arrow.Chunked, error) {
+	segment := boostScoreSegmentFactory(s.score, s.segment, s.request, req)
+	if segment == nil {
+		return nil, fmt.Errorf("segment binding is nil")
+	}
+	return segment.ComputeScores(ctx, offsets, req)
+}
+
+func buildBoostScoreChain(_ *chain.DataFrame, segment segments.Segment, request *segcore.SearchRequest, scorers []*planpb.ScoreFunction, score boostScoreFunc, functionMode, boostMode string) (*chain.FuncChain, error) {
+	repr, err := legacyBoostChainRepr(scorers, functionMode, boostMode)
+	if err != nil {
+		return nil, err
+	}
+	fc, err := chain.FuncChainFromReprWithContext(repr, defaultAllocator, types.FunctionBuildContext{L0: &types.L0BuildContext{Segment: &testScoringSegment{segment, request, score}}})
+	if err != nil {
+		return nil, err
+	}
+	return appendL0RerankReduceContract(fc), nil
+}
+
+func (t *SearchTask) applyBoostScores(dfs []*chain.DataFrame, segments []segments.Segment, request *segcore.SearchRequest) error {
+	if len(dfs) != len(segments) {
+		return fmt.Errorf("DataFrame count does not match segment count")
+	}
+	plan, err := extractPlanWithScorers(t.req.GetReq().GetSerializedExprPlan())
+	if err != nil {
+		return fmt.Errorf("failed to parse search plan scorers: %w", err)
+	}
+	repr, err := prepareBoostScore(plan)
+	if err != nil {
+		return err
+	}
+	if repr == nil {
+		return nil
+	}
+	return t.applyPublicL0Rerank(dfs, &preparedL0Rerank{chain: repr}, &l0SegmentBinding{segments, request})
+}
+
+// testScoreSegmentFunc supplies the native interface directly, without a runner
+// constructor or alternate expression execution path.
+type testScoreSegmentFunc func(context.Context, *arrow.Chunked, *planpb.ScoreFunction) (*arrow.Chunked, error)
+
+func (f testScoreSegmentFunc) ComputeScores(ctx context.Context, offsets *arrow.Chunked, req *planpb.ScoreFunction) (*arrow.Chunked, error) {
+	return f(ctx, offsets, req)
+}
+
+func TestLegacyBoostChainPreparedScorerOwnership(t *testing.T) {
+	scorer := &planpb.ScoreFunction{Weight: 2}
+	repr, err := legacyBoostChainRepr([]*planpb.ScoreFunction{scorer}, expr.ModeSum, expr.ModeMultiply)
+	require.NoError(t, err)
+	prepared, ok := repr.Operators[0].Function.Prepared.(*planpb.ScoreFunction)
+	require.True(t, ok)
+	require.NotSame(t, scorer, prepared)
+	scorer.Weight = 100
+	require.Equal(t, float32(2), prepared.Weight)
+	_, err = legacyBoostChainRepr([]*planpb.ScoreFunction{nil}, expr.ModeSum, expr.ModeMultiply)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }

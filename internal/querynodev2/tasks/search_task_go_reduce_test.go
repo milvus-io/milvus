@@ -1351,20 +1351,20 @@ func TestExecuteValidatesFunctionChainsBeforeANN(t *testing.T) {
 		op      *schemapb.FunctionChainOp
 		message string
 	}{
-		{"unknown function", mapOpForTest(chaintypes.ScoreFieldName, "unknown_function", columnArgForTest(chaintypes.ScoreFieldName)), "unknown function"},
 		{"invalid parameter", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName,
 			map[string]*schemapb.FunctionParamValue{"mode": stringParamForTest("invalid")}, columnArgForTest(chaintypes.ScoreFieldName)), "invalid mode"},
-		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "field missing_field not exist"},
-		{"unsupported field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(vectorField)), "unsupported field type"},
 		{"invalid arguments", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
 			map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("model.json")}), "expected at least one feature column"},
 		{"missing inputs", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName), "requires inputs"},
-		{"missing outputs", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Expr: &schemapb.FunctionChainExpr{
-			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
-		}}, "requires outputs"},
 		{"output count", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Outputs: []string{chaintypes.ScoreFieldName, "extra"}, Expr: &schemapb.FunctionChainExpr{
 			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
 		}}, "does not match function output count"},
+		{"unknown function", mapOpForTest(chaintypes.ScoreFieldName, "unknown_function", columnArgForTest(chaintypes.ScoreFieldName)), "unknown function"},
+		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "field missing_field not exist"},
+		{"unsupported field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(vectorField)), "unsupported field type"},
+		{"missing outputs", &schemapb.FunctionChainOp{Op: chaintypes.OpTypeMap, Expr: &schemapb.FunctionChainExpr{
+			Name: chainexpr.NumCombineFuncName, Args: []*schemapb.FunctionChainExprArg{columnArgForTest(chaintypes.ScoreFieldName)},
+		}}, "requires outputs"},
 	}
 	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
 		for _, stage := range []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank} {
@@ -1413,12 +1413,12 @@ func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *t
 	defer manager.Collection.Unref(collection.ID(), 1)
 
 	for _, scope := range []querypb.DataScope{querypb.DataScope_Historical, querypb.DataScope_Streaming} {
-		for _, withChain := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/chain=%t", scope.String(), withChain), func(t *testing.T) {
+		for _, chainKind := range []string{"none", "xgboost", "boost"} {
+			t.Run(fmt.Sprintf("%s/chain=%s", scope.String(), chainKind), func(t *testing.T) {
 				queryReq, err := mock_segcore.GenQueryRequest(collection.GetCCollection(), nil, nq, topK, testCollectionID)
 				require.NoError(t, err)
 				queryReq.Scope = scope
-				if withChain {
+				if chainKind != "none" {
 					plan := &planpb.PlanNode{}
 					require.NoError(t, proto.Unmarshal(queryReq.GetReq().GetSerializedExprPlan(), plan))
 					// A valid XGBoost configuration needs no model on the empty path:
@@ -1428,7 +1428,15 @@ func TestExecuteEmptySearchReturnsNQEmptyResultAfterFunctionChainValidation(t *t
 							map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("not-loaded-empty-search-model.json")},
 							columnArgForTest(chaintypes.ScoreFieldName))
 					}
-					plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l0FunctionChainForTest(newOp()), l1FunctionChainForTest(newOp())}
+					if chainKind == "boost" {
+						// Boost preparation and validation need no segment; execution is skipped.
+						plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l0FunctionChainForTest(
+							mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.BoostScoreFuncName,
+								map[string]*schemapb.FunctionParamValue{"weight": {Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: 2}}}),
+						)}
+					} else {
+						plan.QuerynodeFunctionChains = []*schemapb.FunctionChain{l0FunctionChainForTest(newOp()), l1FunctionChainForTest(newOp())}
+					}
 					queryReq.Req.SerializedExprPlan, err = proto.Marshal(plan)
 					require.NoError(t, err)
 				}

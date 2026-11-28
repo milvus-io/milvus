@@ -1,0 +1,63 @@
+{
+  "stage": "FunctionChainStageL0Rerank",
+  "ops": [
+    {
+      "op": "map",
+      "expr": {
+        "name": "boost_score",
+        "params": {
+          "random_score": {
+            "objectValue": {
+              "fields": {
+                "field": {
+                  "stringValue": "id"
+                },
+                "seed": {
+                  "int64Value": "42"
+                }
+              }
+            }
+          },
+          "filter": {
+            "stringValue": "category == 1"
+          },
+          "weight": {
+            "doubleValue": 2.5
+          }
+        }
+      },
+      "outputs": [
+        "boost"
+      ]
+    },
+    {
+      "op": "map",
+      "expr": {
+        "name": "num_combine",
+        "args": [
+          {
+            "column": {
+              "name": "$score"
+            }
+          },
+          {
+            "column": {
+              "name": "boost"
+            }
+          }
+        ],
+        "params": {
+          "null_policy": {
+            "stringValue": "skip"
+          },
+          "mode": {
+            "stringValue": "multiply"
+          }
+        }
+      },
+      "outputs": [
+        "$score"
+      ]
+    }
+  ]
+}

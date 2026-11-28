@@ -108,5 +108,5 @@ func (e *RoundDecimalExpr) Execute(ctx *types.FuncContext, inputs []*arrow.Chunk
 }
 
 func init() {
-	types.MustRegisterFunction(RoundDecimalFuncName, NewRoundDecimalExprFromParams)
+	types.MustRegisterFunction(RoundDecimalFuncName, types.FunctionDefinition{Factory: NewRoundDecimalExprFromParams})
 }

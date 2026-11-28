@@ -178,5 +178,5 @@ func validateXGBoostInputChunks(inputs []*arrow.Chunked) error {
 }
 
 func init() {
-	types.MustRegisterFunction(XGBoostFuncName, NewXGBoostExprFromParams)
+	types.MustRegisterFunction(XGBoostFuncName, types.FunctionDefinition{Factory: NewXGBoostExprFromParams})
 }

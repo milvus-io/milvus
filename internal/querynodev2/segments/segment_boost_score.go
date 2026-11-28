@@ -23,6 +23,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
+	boostnative "github.com/milvus-io/milvus/internal/util/function/boost/native"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -86,4 +87,19 @@ func computeScorerScoresOnChunkedOffsets(
 		return segcore.AsyncComputeScorerScoresOnChunkedOffsets(ctx, csegment, searchReq, scorer, offsets)
 	}
 	return segcore.ComputeScorerScoresOnChunkedOffsets(csegment, searchReq, scorer, offsets)
+}
+
+// NewScoringSegment borrows the exact search segment/read-state and request.
+// Existing scoring code retains the native handle through asynchronous cleanup.
+func NewScoringSegment(segment Segment, request *segcore.SearchRequest) boostnative.Segment {
+	return &scoringSegment{segment: segment, request: request}
+}
+
+type scoringSegment struct {
+	segment Segment
+	request *segcore.SearchRequest
+}
+
+func (s *scoringSegment) ComputeScores(ctx context.Context, offsets *arrow.Chunked, request *planpb.ScoreFunction) (*arrow.Chunked, error) {
+	return AsyncComputeScorerScoresOnChunkedOffsets(ctx, s.segment, s.request, request, offsets)
 }

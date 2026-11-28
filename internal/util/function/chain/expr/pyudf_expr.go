@@ -238,5 +238,5 @@ func releasePyUDFOutputs(outputs []*arrow.Chunked) {
 }
 
 func init() {
-	types.MustRegisterFunction(PyUDFFuncName, NewPyUDFExprFromParams)
+	types.MustRegisterFunction(PyUDFFuncName, types.FunctionDefinition{Factory: NewPyUDFExprFromParams})
 }

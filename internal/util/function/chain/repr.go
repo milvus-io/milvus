@@ -49,9 +49,11 @@ type OperatorRepr struct {
 
 // FunctionRepr is the internal representation of a FunctionExpr.
 type FunctionRepr struct {
-	Name   string
-	Params map[string]*schemapb.FunctionParamValue
-	Args   []*schemapb.FunctionChainExprArg
+	// Prepared is populated before execution, then shared read-only by segment builds.
+	Prepared any
+	Name     string
+	Params   map[string]*schemapb.FunctionParamValue
+	Args     []*schemapb.FunctionChainExprArg
 }
 
 // ChainReprInfo contains context-independent structural information derived from a ChainRepr.
@@ -387,6 +389,7 @@ func funcChainFromRepr(repr *ChainRepr, alloc memory.Allocator, buildCtx types.F
 	if repr.Stage == types.StageQueryScan && (len(repr.Operators) != 1 || repr.Operators[0].Type != types.OpTypeGrep) {
 		return nil, merr.WrapErrParameterInvalidMsg("QueryScan requires exactly one grep operator")
 	}
+	buildCtx.Stage = repr.Stage
 	chain := NewFuncChainWithAllocator(alloc)
 	if repr.Name != "" {
 		chain.SetName(repr.Name)
@@ -439,9 +442,10 @@ func FunctionFromReprWithContext(repr *FunctionRepr, buildCtx types.FunctionBuil
 	}
 
 	fn, err := types.CreateFunction(buildCtx, types.FunctionConfig{
-		Name:   repr.Name,
-		Params: repr.Params,
-		Args:   repr.Args,
+		Prepared: repr.Prepared,
+		Name:     repr.Name,
+		Params:   repr.Params,
+		Args:     repr.Args,
 	})
 	if err != nil {
 		return nil, err
@@ -524,4 +528,27 @@ func parseInputDataTypes(params map[string]*schemapb.FunctionParamValue, inputCo
 // inputs, not system columns, despite using the '$' prefix.
 func IsFunctionChainSystemName(name string) bool {
 	return strings.HasPrefix(name, "$") && !isExplicitMetaInput(name)
+}
+
+// PrepareFunctionFromRepr prepares optional immutable data before concurrent
+// segment execution. Callers invoke this for parameter-based requests, once before
+// building segment exprs. Legacy adapters supply prepared data directly instead.
+// It does not construct an expr or replace argument validation.
+func PrepareFunctionFromRepr(repr *FunctionRepr, ctx types.FunctionBuildContext) error {
+	if repr == nil {
+		return merr.WrapErrParameterInvalidMsg("function repr is nil")
+	}
+	definition, ok := types.GetFunctionDefinition(repr.Name)
+	if !ok {
+		return merr.WrapErrParameterInvalidMsg("unknown function: %s", repr.Name)
+	}
+	if definition.Prepare == nil {
+		return nil
+	}
+	prepared, err := definition.Prepare(ctx, types.FunctionConfig{Name: repr.Name, Params: repr.Params, Args: repr.Args})
+	if err != nil {
+		return err
+	}
+	repr.Prepared = prepared
+	return nil
 }

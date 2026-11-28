@@ -129,3 +129,22 @@ func TestBoostUsesPinnedReadStateInsteadOfLatestSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestScoringSegmentAdapterPreservesReadStateAndCancellation(t *testing.T) {
+	mockey.PatchConvey("bound scorer uses borrowed read state", t, func() {
+		pinned := &mock_segcore.MockCSegment{}
+		read := &sealedReadState{parent: &LocalSegment{csegment: &mock_segcore.MockCSegment{}}, native: pinned}
+		read.refs.Store(1)
+		scorer := &planpb.ScoreFunction{Weight: 2}
+		req := &segcore.SearchRequest{}
+		mockey.Mock(segcore.AsyncComputeScorerScoresOnChunkedOffsets).To(func(_ context.Context, actual segcore.CSegment, actualReq *segcore.SearchRequest, actualScorer *planpb.ScoreFunction, _ *arrow.Chunked) (*arrow.Chunked, error) {
+			require.Same(t, pinned, actual)
+			require.Same(t, req, actualReq)
+			require.Same(t, scorer, actualScorer)
+			return nil, context.Canceled
+		}).Build()
+		_, err := NewScoringSegment(read, req).ComputeScores(context.Background(), nil, scorer)
+		require.ErrorIs(t, err, context.Canceled)
+		require.EqualValues(t, 1, read.refs.Load())
+	})
+}

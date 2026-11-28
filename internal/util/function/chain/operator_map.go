@@ -179,13 +179,20 @@ func NewMapOpFromReprWithContext(repr *OperatorRepr, buildCtx types.FunctionBuil
 	}
 	fn, err := FunctionFromReprWithContext(repr.Function, buildCtx)
 	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("map function: %v", err)
+		return nil, merr.Wrap(err, "map function")
 	}
-	if len(repr.Inputs) == 0 {
+	inputs := append([]string(nil), repr.Inputs...)
+	if provider, ok := fn.(types.FunctionInternalInputs); ok {
+		inputs = append(inputs, provider.InternalInputs()...)
+	}
+	if len(inputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires inputs")
 	}
 	if len(repr.Outputs) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("map operator requires outputs")
 	}
-	return NewMapOp(fn, repr.Inputs, repr.Outputs)
+	if outputTypes := fn.OutputDataTypes(); outputTypes != nil && len(repr.Outputs) != len(outputTypes) {
+		return nil, merr.WrapErrParameterInvalidMsg("map output columns count %d does not match function output count %d", len(repr.Outputs), len(outputTypes))
+	}
+	return NewMapOp(fn, inputs, repr.Outputs)
 }

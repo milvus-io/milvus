@@ -92,3 +92,22 @@ Each serialization returns an independent protobuf snapshot. Calling
 `testdata/*.json` are actual PyMilvus protobuf outputs, compared with Go outputs
 using protobuf equality. Regenerate with `testdata/generate.py` in the referenced
 PyMilvus environment.
+
+## Boost score
+
+`BoostScore(weight)` runs at L0 and accepts no public column arguments. Configure
+an optional `filter` and `random_score` object using `WithParam`:
+
+```go
+boost := fc.BoostScore(2.0).WithParam("filter", `category == "vip"`)
+chain := fc.NewFunctionChain(fc.L0Rerank).
+    Map("boost", boost).
+    Map("$score", fc.NumCombine(fc.Col("$score"), fc.Col("boost")).
+        WithParam("mode", "multiply").WithParam("null_policy", "skip"))
+```
+
+An omitted filter matches all candidates. Rows that do not match produce NULL;
+`null_policy="skip"` preserves their original score. Zero weight is valid.
+Random scoring uses `WithParam("random_score", map[string]any{"field": "id",
+"seed": int64(42)})`; both entries are optional, and the field must be an Int64
+field in the collection. The server validates the filter, schema and L0 placement.
