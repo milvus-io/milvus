@@ -241,8 +241,7 @@ type Field struct {
 	ElementType     FieldType
 	DefaultValue    *schemapb.ValueField
 	Nullable        bool
-	// ElementNullable marks the leaf values of an Array<T> struct sub-field as nullable.
-	// For other fields it maps to FieldSchema.element_nullable as is.
+	// ElementNullable allows null elements independently of the row-level Nullable flag.
 	ElementNullable bool
 	StructSchema    *StructSchema
 	ExternalField   string // external field name - maps to column name in external source
@@ -323,7 +322,7 @@ func (f *Field) WithNullable(nullable bool) *Field {
 	return f
 }
 
-// WithElementNullable sets whether the leaf values of an Array<T> struct sub-field may be null.
+// WithElementNullable sets whether the elements of an array field may be null.
 func (f *Field) WithElementNullable(elementNullable bool) *Field {
 	f.ElementNullable = elementNullable
 	return f

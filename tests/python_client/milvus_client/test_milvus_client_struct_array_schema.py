@@ -139,11 +139,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("kind", ["element_nullable", "nested"])
-    def test_add_top_level_native_array_rejected(self, kind):
+    def test_add_top_level_native_array(self, kind):
         """
-        target: reject native-list placement at AddCollectionField as well as Create
+        target: allow single-level nullable elements when adding a top-level array
         method: raw schema alteration with a top-level element-nullable or nested array
-        expected: precise placement rejection, unchanged schema/data, ordinary Array control succeeds
+        expected: historical rows read as null and nested placement is rejected
         """
         client = self._client()
         name, schema = self.create_struct_collection(client, nullable_children())
@@ -167,14 +167,12 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
             field.element_nullable = True
         raw = Prepare.alter_collection_schema_request(name, field_schema=field)
         status = client._get_connection()._stub.AlterCollectionSchema(raw, timeout=30).alter_status
-        assert status.code == 1100, status
-        reason = "element_nullable is only supported" if kind == "element_nullable" else "nested array can only"
-        assert reason in status.reason, status
-        assert client.describe_collection(name) == before
-        self.assert_rows(client, name, model)
-        client.add_collection_field(
-            name, "new_array", DataType.ARRAY, element_type=DataType.INT64, max_capacity=8, nullable=True
-        )
+        if kind == "nested":
+            assert status.code == 1100 and "nested array can only" in status.reason, status
+            assert client.describe_collection(name) == before
+            self.assert_rows(client, name, model)
+            return
+        assert status.code == 0, status
         for row in model.values():
             row["new_array"] = None
         self.reload_collection(client, name)
@@ -223,10 +221,29 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
                 client.drop_collection(name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_create_top_level_array_with_nullable_elements(self):
+        client = self._client()
+        name = cf.gen_unique_str("nullable_array")
+        request, wire = self._nested_wire(client, name)
+        field = wire.fields.add(
+            name="plain_array", data_type=DataType.ARRAY, element_type=DataType.INT64, element_nullable=True
+        )
+        field.type_params.add(key="max_capacity", value="8")
+        request.schema = wire.SerializeToString()
+        stub = client._get_connection()._stub
+        try:
+            check_status(stub.CreateCollection(request, timeout=30))
+            response = stub.DescribeCollection(milvus_pb2.DescribeCollectionRequest(collection_name=name), timeout=30)
+            check_status(response.status)
+            actual = next(f for f in response.schema.fields if f.name == "plain_array")
+            assert actual.element_nullable and not actual.nullable
+        finally:
+            client.drop_collection(name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "violation,reason",
         [
-            ("top_nullable", "element_nullable"),
             ("top_nested", "nested array"),
             ("vector_leaf", "element type floatvector is not supported"),
             ("struct_leaf", "element type struct is not supported"),
@@ -244,12 +261,7 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         good, wire = self._nested_wire(client, name)
         bad = copy.deepcopy(good)
         field = wire.struct_array_fields[0].fields[0]
-        if violation == "top_nullable":
-            top = wire.fields.add(
-                name="plain_array", data_type=DataType.ARRAY, element_type=DataType.INT64, element_nullable=True
-            )
-            top.type_params.add(key="max_capacity", value="8")
-        elif violation == "top_nested":
+        if violation == "top_nested":
             top = wire.fields.add()
             top.CopyFrom(field)
             top.name = "nested_top"
