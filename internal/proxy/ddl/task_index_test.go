@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -560,6 +561,142 @@ func Test_parseIndexParamsRejectsFinalIndexParamsOverLimit(t *testing.T) {
 	err := cit.parseIndexParams(context.TODO())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "index params size")
+}
+
+func Test_parseIndexParams_DiskANNBuildParameterPrecedence(t *testing.T) {
+	for _, codec := range []string{"PQ", "RABITQ"} {
+		for key, value := range map[string]any{
+			indexparams.MaxDegreeKey: 32, indexparams.SearchListSizeKey: 64,
+			indexparams.PQCodeBudgetRatioKey: 0.0625, indexparams.NumBuildThreadRatioKey: 0.5,
+			indexparams.SearchCacheBudgetRatioKey: 0.2,
+		} {
+			t.Run(codec+"/"+key, func(t *testing.T) {
+				params := paramtable.Get()
+				for _, name := range []string{params.AutoIndexConfig.Enable.Key, params.KnowhereConfig.Enable.Key} {
+					t.Cleanup(func() { params.Reset(name) })
+				}
+				require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, "false"))
+				require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, "true"))
+				requestJSON, err := json.Marshal(map[string]any{key: value, "quant_type": codec})
+				require.NoError(t, err)
+				task := &CreateIndexTask{
+					fieldSchema: &schemapb.FieldSchema{
+						DataType:   schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+					},
+					req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
+						{Key: common.IndexTypeKey, Value: "DISKANN"},
+						{Key: common.MetricTypeKey, Value: "L2"},
+						{Key: common.ParamsKey, Value: string(requestJSON)},
+					}},
+				}
+				require.NoError(t, task.parseIndexParams(context.Background()))
+				want, err := funcutil.JSONToMap(string(requestJSON))
+				require.NoError(t, err)
+				assert.Equal(t, want[key], funcutil.KeyValuePair2Map(task.newIndexParams)[key])
+				prepared, err := indexparams.UpdateDiskIndexBuildParams(params, task.newIndexParams)
+				require.NoError(t, err)
+				built := funcutil.KeyValuePair2Map(prepared)
+				assert.Equal(t, want[key], built[key])
+				require.NoError(t, indexparams.SetDiskIndexBuildParams(built, 4<<30))
+				assert.Equal(t, want[key], built[key])
+			})
+		}
+	}
+}
+
+func Test_parseIndexParams_DiskANNPQBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		request  string
+		knowhere bool
+		auto     bool
+		want     float64
+		wantErr  string
+		codec    string
+	}{
+		{"shipped defaults preserve common", "", true, false, 0.25, "", ""},
+		{"SDK overrides both server settings", "0.0625", true, false, 0.0625, "", ""},
+		{"SDK with generic config disabled", "0.0625", false, false, 0.0625, "", ""},
+		{"common with generic config disabled", "", false, false, 0.25, "", ""},
+		{"AutoIndex remains server controlled", "0.0625", true, true, 0.1875, "", ""},
+		{"AutoIndex ignores invalid SDK ratio", "true", true, true, 0.1875, "", ""},
+		{"numeric string remains valid", `"0.1"`, true, false, 0.1, "", ""},
+		{"positive ratio above 0.25 remains valid", "0.5", true, false, 0.5, "", ""},
+		{"zero ratio rejected", "0", true, false, 0, "PQ navigation requires positive", ""},
+		{"zero ratio rejected with generic config disabled", "0", false, false, 0, "PQ navigation requires positive", ""},
+		{"negative ratio rejected", "-0.1", true, false, 0, "should be in range", ""},
+		{"boolean ratio rejected", "true", true, false, 0, "invalid float value", ""},
+		{"null ratio rejected", "null", true, false, 0, "invalid float value", ""},
+		{"RaBitQ boolean ratio rejected", "true", true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ null ratio rejected", "null", true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ nonnumeric string rejected", `"abc"`, true, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ invalid ratio with generic config disabled", "true", false, false, 0, "invalid float value", "RABITQ"},
+		{"RaBitQ zero ratio remains unused", "0", true, false, 0, "", "RABITQ"},
+		{"RaBitQ numeric string remains valid", `"0.1"`, true, false, 0.1, "", "RABITQ"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			genericKey := "knowhere.DISKANN.build.pq_code_budget_gb_ratio"
+			for _, key := range []string{
+				genericKey, params.KnowhereConfig.Enable.Key,
+				params.CommonCfg.PQCodeBudgetGBRatio.Key, params.AutoIndexConfig.Enable.Key,
+				params.AutoIndexConfig.IndexParams.Key, params.AutoIndexConfig.ExtraParams.Key,
+			} {
+				t.Cleanup(func() { params.Reset(key) })
+			}
+			// Keep the shipped generic default while tuning only the legacy server setting.
+			require.NoError(t, params.Reset(genericKey))
+			require.Equal(t, "0.125", params.GetWithDefault(genericKey, ""))
+			require.NoError(t, params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25"))
+			require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, strconv.FormatBool(tc.knowhere)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.Enable.Key, strconv.FormatBool(tc.auto)))
+			require.NoError(t, params.Save(params.AutoIndexConfig.IndexParams.Key,
+				`{"index_type":"DISKANN","max_degree":56,"search_list_size":100}`))
+			require.NoError(t, params.Save(params.AutoIndexConfig.ExtraParams.Key,
+				`{"build_ratio":"{\"pq_code_budget_gb\":0.1875,\"num_threads\":1}"}`))
+
+			requestParams := map[string]any{}
+			if tc.request != "" {
+				requestParams[indexparams.PQCodeBudgetRatioKey] = json.RawMessage(tc.request)
+			}
+			if tc.codec != "" {
+				requestParams["quant_type"] = tc.codec
+			}
+			requestJSON, err := json.Marshal(requestParams)
+			require.NoError(t, err)
+			task := &CreateIndexTask{
+				fieldSchema: &schemapb.FieldSchema{
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+				req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "DISKANN"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+					{Key: common.ParamsKey, Value: string(requestJSON)},
+				}},
+			}
+			err = task.parseIndexParams(context.Background())
+			if tc.wantErr != "" {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), indexparams.PQCodeBudgetRatioKey)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			built := funcutil.KeyValuePair2Map(task.newIndexParams)
+			ratio, err := strconv.ParseFloat(built[indexparams.PQCodeBudgetRatioKey], 64)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, ratio)
+			assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), built[indexparams.MaxDegreeKey])
+			require.NoError(t, indexparams.SetDiskIndexBuildParams(built, 4<<30))
+			budget, err := strconv.ParseFloat(built[indexparams.PQCodeBudgetKey], 64)
+			require.NoError(t, err)
+			assert.Equal(t, 4*tc.want, budget)
+		})
+	}
 }
 
 func Test_parseIndexParams(t *testing.T) {
