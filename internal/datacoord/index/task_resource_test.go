@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -103,6 +104,140 @@ func TestTaskResource_IndexScalar(t *testing.T) {
 
 	it := NewIndexBuildTask(&model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, im, nil, nil, nil)
 	assert.Equal(t, taskresource.Index(1000*64, false), it.GetTaskResource())
+}
+
+func TestTaskResource_IndexFieldLogicalSize(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceIndexMemoryFactor.Key, "2"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceMinTaskMemory.Key, "1MB"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceDefaultCPU.Key, "1"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceVectorIndexCPU.Key, "8"))
+	t.Cleanup(func() {
+		params.Reset(params.DataCoordCfg.TaskResourceIndexMemoryFactor.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceMinTaskMemory.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceDefaultCPU.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceVectorIndexCPU.Key)
+	})
+
+	for _, tc := range []struct {
+		name         string
+		indexType    string
+		fieldType    schemapb.DataType
+		payloadBytes uint64
+		validityBits uint64
+		wantCPU      int64
+		wantMemory   int64
+	}{
+		{"ngram payload", "NGRAM", schemapb.DataType_Text, 1 << 30, 0, 1, 2 << 30},
+		{"inverted payload", "INVERTED", schemapb.DataType_Text, 1 << 30, 0, 1, 2 << 30},
+		{"varchar payload", "INVERTED", schemapb.DataType_VarChar, 32000000, 0, 1, 64000000},
+		// Half the million 128-dimensional vectors are null: 256 MB of values
+		// plus a 125 KB validity bitmap, with the existing 2x index factor.
+		{"nullable vector payload", "HNSW", schemapb.DataType_FloatVector, 256000000, 1000000, 8, 512250000},
+		// With the default FM parameters, the suffix-array phase determines
+		// these peaks for one million VARCHAR rows (including empty values).
+		{"fmindex payload", indexparamcheck.IndexFMINDEX, schemapb.DataType_VarChar, 32000000, 0, 1, 373930884},
+		{"ngram known zero", "NGRAM", schemapb.DataType_Text, 0, 0, 1, 1 << 20},
+		{"inverted known zero", "INVERTED", schemapb.DataType_Text, 0, 0, 1, 1 << 20},
+		{"fmindex known zero", indexparamcheck.IndexFMINDEX, schemapb.DataType_VarChar, 0, 0, 1, 64930884},
+		{"empty sparse vectors", "SPARSE_INVERTED_INDEX", schemapb.DataType_SparseFloatVector, 0, 0, 8, 1 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(true))
+			schema := taskresource.FixtureSchema()
+			schema.Fields[2].DataType = tc.fieldType
+			schema.Fields[2].TypeParams = nil
+			schema.Fields[2].Nullable = tc.validityBits > 0
+			switch tc.fieldType {
+			case schemapb.DataType_VarChar:
+				schema.Fields[2].TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}
+			case schemapb.DataType_FloatVector:
+				schema.Fields[2].TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
+			}
+			taskresource.PutFixtureSchema(mt, schema)
+			idx := im.Indexes[1][4]
+			idx.FieldID = 102
+			idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: tc.indexType}}
+			taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) {
+				seg.Level = datapb.SegmentLevel_L1
+				seg.ManifestPath = packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+				seg.FieldLogicalSizesManifest = seg.ManifestPath
+				seg.Stats.FieldLogicalSizes = &datapb.FieldLogicalSizes{
+					Version: 1, RowCount: taskresource.BigFixtureRows,
+					Fields: map[int64]*datapb.FieldLogicalSize{102: {PayloadBytes: tc.payloadBytes, ValidityBits: tc.validityBits}},
+				}
+				if tc.fieldType == schemapb.DataType_FloatVector {
+					seg.Stats.NullCounts = map[int64]int64{102: taskresource.BigFixtureRows / 2}
+				}
+				// Shared groups and TEXT references are not the field's logical size.
+				seg.Stats.LoadResource = &datapb.LoadResourceStatistics{
+					ColumnGroups: []*datapb.ColumnGroupStatistics{
+						{GroupId: 0, FieldIds: []int64{101, 102}, MemorySize: 512 << 20},
+					},
+				}
+				if tc.fieldType == schemapb.DataType_FloatVector {
+					// Nullable vector storage also carries (rows+1) int32 offsets;
+					// logical field bytes exclude that physical representation.
+					seg.Stats.LoadResource.ColumnGroups = []*datapb.ColumnGroupStatistics{
+						{GroupId: 102, FieldIds: []int64{102}, MemorySize: 260125004},
+					}
+					seg.Stats.InsertBinlogSize = 796125004
+				}
+			})
+
+			it := bigFixtureIndexTask(mt, im)
+			assert.Equal(t, taskcommon.Resource{CPU: tc.wantCPU, Memory: tc.wantMemory}, it.GetTaskResource())
+		})
+	}
+}
+
+func TestTaskResource_IndexUnknownText(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceIndexMemoryFactor.Key, "2"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceMinTaskMemory.Key, "1MB"))
+	require.NoError(t, params.Save(params.DataCoordCfg.TaskResourceDefaultCPU.Key, "1"))
+	t.Cleanup(func() {
+		params.Reset(params.DataCoordCfg.TaskResourceIndexMemoryFactor.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceMinTaskMemory.Key)
+		params.Reset(params.DataCoordCfg.TaskResourceDefaultCPU.Key)
+	})
+
+	for _, indexType := range []string{"NGRAM", "INVERTED"} {
+		for _, tc := range []struct {
+			name       string
+			recorded   int64
+			wantMemory int64
+		}{
+			// 1000 rows at 64 KiB, then the 2x index factor: 131072000 bytes.
+			{"reference group below fallback", 8 << 20, 131072000},
+			{"recorded input above fallback", 96 << 20, 192 << 20},
+		} {
+			t.Run(indexType+"/"+tc.name, func(t *testing.T) {
+				mt, im := fixtureIndexMeta(t, taskresource.NewFixtureMeta(false))
+				schema := taskresource.FixtureSchema()
+				schema.Fields[2].DataType = schemapb.DataType_Text
+				schema.Fields[2].TypeParams = nil
+				taskresource.PutFixtureSchema(mt, schema)
+				idx := im.Indexes[1][4]
+				idx.FieldID = 102
+				idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}}
+				taskresource.UpdateFixtureSegment(mt, func(seg *datapb.SegmentInfo) {
+					seg.Level = datapb.SegmentLevel_L1
+					seg.ManifestPath = packed.MarshalManifestPath("files/insert_log/1/2/3", 1)
+					seg.Stats.InsertBinlogSize = tc.recorded + 536000
+					seg.Stats.LoadResource = &datapb.LoadResourceStatistics{
+						ColumnGroups: []*datapb.ColumnGroupStatistics{{GroupId: 102, FieldIds: []int64{102}, MemorySize: tc.recorded}},
+					}
+				})
+				it := NewIndexBuildTask(&model.SegmentIndex{
+					CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000,
+				}, 1, mt, im, nil, nil, nil)
+				assert.Equal(t, taskcommon.Resource{CPU: 1, Memory: tc.wantMemory}, it.GetTaskResource())
+			})
+		}
+	}
 }
 
 // TestTaskResource_IndexFMIndex: an FM-index build is priced on its modeled

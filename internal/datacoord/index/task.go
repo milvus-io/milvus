@@ -174,8 +174,11 @@ func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
 		fieldID := it.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
 		fieldSize := taskresource.EstimateFieldSize(segment, coll.Schema, fieldID)
 		if fieldSize <= 0 {
-			return taskresource.Default(), false
+			if _, known := meta.SegmentFieldLogicalSizes(segment.SegmentInfo).GetFields()[fieldID]; !known {
+				return taskresource.Default(), false
+			}
 		}
+		// A known zero still needs the index's CPU and FM-index row overhead.
 		if indexType == indexparamcheck.IndexFMINDEX {
 			return taskresource.FMIndex(EstimateFMIndexBuildPeakBytes(fieldSize, segment.GetNumOfRows(), indexParams)), true
 		}
