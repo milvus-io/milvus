@@ -211,20 +211,25 @@ func TestFunctionChainGrepIntegration(t *testing.T) {
 		require.NoError(t, err)
 		data, ok := raw.([]byte)
 		require.True(t, ok)
-		var lines []struct {
-			Content         string `json:"content"`
-			LineNumber      int    `json:"line_number"`
-			LineStartOffset int    `json:"line_start_offset"`
-			Starts          []int  `json:"starts"`
-			Ends            []int  `json:"ends"`
+		var details struct {
+			Items []struct {
+				Type           string `json:"type"`
+				Text           string `json:"text"`
+				LineNumber     int    `json:"line_number"`
+				AbsoluteOffset int    `json:"absolute_offset"`
+				Starts         []int  `json:"starts"`
+				Ends           []int  `json:"ends"`
+			} `json:"items"`
 		}
-		require.NoError(t, json.Unmarshal(data, &lines))
-		require.Len(t, lines, 1)
-		require.Equal(t, "TIMEOUT timeout", lines[0].Content)
-		require.Equal(t, 2, lines[0].LineNumber)
-		require.Equal(t, 7, lines[0].LineStartOffset)
-		require.Equal(t, []int{0, 8}, lines[0].Starts)
-		require.Equal(t, []int{7, 15}, lines[0].Ends)
+		require.NoError(t, json.Unmarshal(data, &details))
+		require.Len(t, details.Items, 1)
+		line := details.Items[0]
+		require.Equal(t, "match", line.Type)
+		require.Equal(t, "TIMEOUT timeout", line.Text)
+		require.Equal(t, 2, line.LineNumber)
+		require.Equal(t, 7, line.AbsoluteOffset)
+		require.Equal(t, []int{0, 8}, line.Starts)
+		require.Equal(t, []int{7, 15}, line.Ends)
 	})
 	t.Run("filter_only_and_pagination", func(t *testing.T) {
 		c := fc.NewFunctionChain(fc.QueryScan).Grep("text", "-i -e timeout")

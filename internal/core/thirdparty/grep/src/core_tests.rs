@@ -38,13 +38,14 @@ fn search(patterns: &[&str], options: MatchOptions, inputs: &[&str]) -> BatchRes
         .unwrap()
 }
 
+// Compare logical-line spans independently of retained output terminators.
 fn rows(result: &TextResult) -> Vec<(&str, Vec<(u64, u64)>)> {
     result
         .lines
         .iter()
         .map(|line| {
             (
-                line.content.as_ref(),
+                line.content.strip_suffix('\n').unwrap_or(&line.content),
                 line.spans.iter().map(|s| (s.start, s.end)).collect(),
             )
         })
@@ -172,7 +173,7 @@ fn byte_mode_preserves_partial_character_spans_and_context() {
         let partial = search(&[r"(?-u:\xA9)"], options, &["before\né中a\nafter"]);
         let lines = &partial.texts[0].lines;
         let hit = &lines[context as usize];
-        assert_eq!(hit.content.as_ref(), "é中a");
+        assert_eq!(hit.content.as_ref(), "é中a\n");
         assert_eq!((hit.line_number, hit.line_start_offset), (2, 7));
         assert_eq!(hit.spans.as_ref(), &[Span { start: 1, end: 2 }]);
         assert_eq!(lines.len(), 1 + 2 * context as usize);
@@ -234,7 +235,7 @@ fn rg_json_printer_agrees_for_common_patterns() {
                 let text = d["lines"]["text"].as_str().unwrap();
                 expected.push(Line {
                     is_match: record["type"] == "match",
-                    content: text.strip_suffix('\n').unwrap_or(text).into(),
+                    content: text.into(),
                     line_number: d["line_number"].as_u64().unwrap(),
                     line_start_offset: d["absolute_offset"].as_u64().unwrap(),
                     spans: d["submatches"]
@@ -690,7 +691,7 @@ fn original_line_coordinates_for_empty_lines_and_terminal_lf() {
             )
         })
         .collect();
-    assert_eq!(coordinates, [(1, 0, ""), (2, 1, "中\r"), (3, 6, "")]);
+    assert_eq!(coordinates, [(1, 0, "\n"), (2, 1, "中\r\n"), (3, 6, "\n")]);
     assert!(r.texts[1].lines.is_empty());
 }
 
@@ -831,7 +832,7 @@ fn context_windows_match_a_line_union_oracle() {
                     };
                     let result = search(&[pattern], options, &inputs);
                     for (text, actual) in inputs.iter().zip(&result.texts) {
-                        let lines: Vec<_> = text.split_terminator('\n').collect();
+                        let lines: Vec<_> = text.split_inclusive('\n').collect();
                         let hits: Vec<_> = lines
                             .iter()
                             .enumerate()
@@ -856,7 +857,7 @@ fn context_windows_match_a_line_union_oracle() {
                                     line.contains(pattern),
                                 ));
                             }
-                            offset += line.len() as u64 + 1;
+                            offset += line.len() as u64;
                         }
                         let actual: Vec<_> = actual
                             .lines
@@ -962,7 +963,10 @@ fn line_local_spans_ignore_buffer_position_and_terminal_lf() {
                             .find(|hit| hit.line_start_offset == prefix.len() as u64)
                             .unwrap();
                         assert!(hit.is_match, "{pattern:?}");
-                        assert_eq!(hit.content.as_ref(), line);
+                        assert_eq!(
+                            hit.content.as_ref(),
+                            format!("{line}{}", if suffix.is_empty() { "" } else { "\n" })
+                        );
                         assert_eq!(hit.spans.iter().map(|s| (s.start, s.end)).collect::<Vec<_>>(), spans,
                             "{pattern:?}, {before_context}/{after_context}, prefix bytes={}, suffix={suffix:?}", prefix.len());
                     }
@@ -970,4 +974,96 @@ fn line_local_spans_ignore_buffer_position_and_terminal_lf() {
             }
         }
     }
+}
+
+#[test]
+fn summaries_count_lines_without_allocating_details_and_reset_per_input() {
+    for mode in [crate::ResultMode::Count, crate::ResultMode::Exists] {
+        for cap in [None, Some(0), Some(1), Some(2), Some(8)] {
+            let p = plan(
+                &["hit", "hit"],
+                MatchOptions {
+                    result_mode: mode,
+                    max_count: cap,
+                    before_context: u64::MAX,
+                    after_context: u64::MAX,
+                    ..Default::default()
+                },
+            );
+            let mut session = Session::new(&p);
+            for _ in 0..2 {
+                let got = session
+                    .execute_accounted(
+                        &[b"before\nhit hit\nmiss\nhit\nhit\n", b"", b"miss", b"hit"],
+                        4096,
+                        ResultOverhead::default(),
+                    )
+                    .unwrap();
+                for (actual, total) in got.texts.iter().zip([3, 0, 0, 1]) {
+                    let limit = if cap == Some(0) {
+                        0
+                    } else if mode == crate::ResultMode::Exists {
+                        1
+                    } else {
+                        cap.unwrap_or(u64::MAX)
+                    };
+                    assert_eq!(actual.count, total.min(limit));
+                    assert_eq!(actual.matched, total.min(limit) > 0);
+                    assert!(actual.lines.is_empty());
+                    if total > 0 && limit > 0 {
+                        assert_eq!(actual.complete, total < limit);
+                    }
+                }
+            }
+        }
+    }
+    // Empty/zero-width patterns count matching lines, not their many spans.
+    let got = search(
+        &[""],
+        MatchOptions {
+            result_mode: crate::ResultMode::Count,
+            ..Default::default()
+        },
+        &["\né中\nx\r\n"],
+    );
+    assert_eq!(got.texts[0].count, 3);
+    assert!(got.texts[0].complete && got.texts[0].lines.is_empty());
+}
+
+#[test]
+fn summaries_avoid_detail_budgets_but_preserve_failures() {
+    let text = "hit ".repeat(20000);
+    for mode in [crate::ResultMode::Count, crate::ResultMode::Exists] {
+        let p = plan(
+            &["hit"],
+            MatchOptions {
+                result_mode: mode,
+                ..Default::default()
+            },
+        );
+        let mut session = Session::new(&p);
+        let got = session
+            .execute_accounted(&[text.as_bytes()], 1024, ResultOverhead::default())
+            .unwrap();
+        assert!(got.texts[0].matched && got.texts[0].lines.is_empty());
+        assert_eq!(got.texts[0].count, 1);
+        assert!(matches!(
+            session.execute_accounted(&[b"hit\n\xff"], 1024, ResultOverhead::default()),
+            Err(Error::InvalidUtf8 { .. })
+        ));
+        assert!(matches!(
+            session.execute_accounted(&[b"hit"], 1, ResultOverhead::default()),
+            Err(Error::ResourceLimit(LimitKind::ResultBytes))
+        ));
+        session.cancellation_token().cancel();
+        assert!(matches!(
+            session.execute_accounted(&[b"hit"], 1024, ResultOverhead::default()),
+            Err(Error::Cancelled)
+        ));
+    }
+    let mut details = Session::new(&plan(&["hit"], MatchOptions::default()));
+    assert!(matches!(
+        details.execute_accounted(&[text.as_bytes()], 1024, ResultOverhead::default()),
+        Err(Error::ResourceLimit(LimitKind::ResultBytes))
+    ));
 }

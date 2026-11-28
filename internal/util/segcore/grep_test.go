@@ -172,15 +172,17 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					require.NoError(t, err)
 					var lines []struct {
 						Type            string `json:"type"`
-						Content         string `json:"content"`
+						Content         string `json:"text"`
 						Starts          []int  `json:"starts"`
 						LineNumber      int    `json:"line_number"`
-						LineStartOffset int    `json:"line_start_offset"`
+						LineStartOffset int    `json:"absolute_offset"`
 					}
-					require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(result.Details.Len()-1), &lines))
+					require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(result.Details.Len()-1), &struct {
+						Items any `json:"items"`
+					}{Items: &lines}))
 					result.Release()
 					require.Len(t, lines, 2)
-					require.Equal(t, "timeout", lines[0].Content)
+					require.Equal(t, "timeout\n", lines[0].Content)
 					require.Equal(t, "timeout timeout", lines[1].Content)
 					require.Equal(t, "match", lines[tc.matchLine].Type)
 					require.NotEmpty(t, lines[tc.matchLine].Starts)
@@ -189,7 +191,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 						require.Equal(t, []int{0, 8}, lines[1].Starts)
 					} else {
 						require.Equal(t, "context", lines[1-tc.matchLine].Type)
-						require.Nil(t, lines[1-tc.matchLine].Starts)
+						require.Empty(t, lines[1-tc.matchLine].Starts)
 					}
 					require.Equal(t, 2, lines[1].LineNumber)
 					require.Equal(t, 8, lines[1].LineStartOffset)
@@ -215,11 +217,13 @@ func TestGrepSegmentAdapter(t *testing.T) {
 					require.Equal(t, []int{0}, result.Positions)
 					var lines []struct {
 						Type    string  `json:"type"`
-						Content string  `json:"content"`
+						Content string  `json:"text"`
 						Starts  []int64 `json:"starts"`
 						Ends    []int64 `json:"ends"`
 					}
-					require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(0), &lines))
+					require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(0), &struct {
+						Items any `json:"items"`
+					}{Items: &lines}))
 					require.Len(t, lines, 1)
 					require.Equal(t, "match", lines[0].Type)
 					require.Equal(t, "nothing", lines[0].Content)
@@ -259,7 +263,9 @@ func TestGrepSegmentAdapter(t *testing.T) {
 							Type   string `json:"type"`
 							Starts []int  `json:"starts"`
 						}
-						require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(1), &lines))
+						require.NoError(t, json.Unmarshal(result.Details.(*array.Binary).Value(1), &struct {
+							Items any `json:"items"`
+						}{Items: &lines}))
 						require.Len(t, lines, tc.lastLines)
 						if tc.lastLines == 2 {
 							require.Equal(t, "match", lines[1].Type)
@@ -422,9 +428,11 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			require.Equal(t, []int64{2}, output.Column(types.SegOffsetFieldName).Chunk(0).(*array.Int64).Int64Values())
 			details := output.Column("matches").Chunk(0).(*array.Binary)
 			var lines []struct {
-				Content string `json:"content"`
+				Content string `json:"text"`
 			}
-			require.NoError(t, json.Unmarshal(details.Value(0), &lines))
+			require.NoError(t, json.Unmarshal(details.Value(0), &struct {
+				Items any `json:"items"`
+			}{Items: &lines}))
 			require.Equal(t, "超时 timeout", lines[0].Content)
 			// Exercise native Binary -> Op logical metadata -> JSON FieldData.
 			finalBuilder := chain.NewDataFrameBuilder().SetChunkSizes(output.ChunkSizes())
@@ -443,7 +451,7 @@ func TestGrepSegmentAdapter(t *testing.T) {
 			require.Len(t, exported.ComputedResults, 1)
 			require.Equal(t, schemapb.DataType_JSON, exported.ComputedResults[0].Type)
 			require.Zero(t, exported.ComputedResults[0].FieldId)
-			require.JSONEq(t, `[{"type":"match","content":"超时 timeout","line_number":1,"line_start_offset":0,"starts":[7],"ends":[14]}]`,
+			require.JSONEq(t, `{"items":[{"type":"match","line_number":1,"starts":[7],"ends":[14],"text":"超时 timeout","absolute_offset":0}]}`,
 				string(exported.ComputedResults[0].GetScalars().GetJsonData().Data[0]))
 			t.Run("JSON output budgets", func(t *testing.T) {
 				// Escaping makes the C++ JSON output larger than the Rust result.

@@ -27,7 +27,16 @@ pub enum Boundary {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ResultMode {
+    #[default]
+    Details,
+    Count,
+    Exists,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MatchOptions {
+    pub result_mode: ResultMode,
     pub pattern_kind: PatternKind,
     pub case_mode: CaseMode,
     pub boundary: Boundary,
@@ -50,6 +59,7 @@ pub struct Plan(Arc<PlanData>);
 
 #[derive(Debug)]
 struct PlanData {
+    result_mode: ResultMode,
     matcher: RegexMatcher,
     max_count: Option<u64>,
     before_context: u64,
@@ -123,6 +133,7 @@ impl Plan {
         })?;
         let condition_payload = crate::condition_proto::encode(&condition)?;
         Ok(Self(Arc::new(PlanData {
+            result_mode: options.result_mode,
             matcher,
             max_count: options.max_count,
             before_context: options.before_context,
@@ -151,6 +162,10 @@ impl Plan {
 
     pub(crate) fn context(&self) -> (u64, u64) {
         (self.0.before_context, self.0.after_context)
+    }
+
+    pub(crate) fn result_mode(&self) -> ResultMode {
+        self.0.result_mode
     }
 
     pub(crate) fn max_count(&self) -> Option<u64> {

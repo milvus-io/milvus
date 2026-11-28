@@ -32,6 +32,12 @@
 
 #define MG_GREP_BOUNDARY_LINE 2
 
+#define MG_GREP_RESULT_DETAILS 0
+
+#define MG_GREP_RESULT_COUNT 1
+
+#define MG_GREP_RESULT_EXISTS 2
+
 typedef struct MgGrepPlan MgGrepPlan;
 
 typedef struct MgGrepResult MgGrepResult;
@@ -64,6 +70,7 @@ typedef struct {
   uint64_t max_count;
   uint64_t before_context;
   uint64_t after_context;
+  uint32_t result_mode;
 } MgGrepMatchOptions;
 
 /**
@@ -102,9 +109,9 @@ typedef struct {
 } MgGrepSpan;
 
 /**
- * Complete matching or context line, minus only its terminal LF. Other bytes remain.
+ * Complete matching or context line, including its original terminal LF.
  * Context lines have zero spans; matching spans are line-local and include
- * zero-length matches at the end of the line. Selection depends on line_count.
+ * zero-length matches at the end of the line. Selection is carried separately by MgGrepTextResult.matched.
  * Empty content is {NULL,0}.
  */
 typedef struct {
@@ -126,12 +133,15 @@ typedef struct {
 } MgGrepLine;
 
 /**
- * One entry per input. line_count > 0 means selected; lines are in original
- * order. Empty arrays have NULL pointers. No silently truncated results.
+ * One entry per input. matched means selected, even when no lines are returned.
+ * Count/complete describe summary modes; detail lines are in original order. Empty arrays have NULL pointers. No silently truncated results.
  */
 typedef struct {
   const MgGrepLine *lines;
   size_t line_count;
+  uint64_t count;
+  bool matched;
+  bool complete;
 } MgGrepTextResult;
 
 typedef struct {

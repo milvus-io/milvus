@@ -6,7 +6,7 @@ pub struct Span {
     pub end: u64,
 }
 
-/// A matching or context line, excluding only its terminal LF. Spans never refer
+/// A matching or context line, including its original terminal LF. Spans never refer
 /// to the original field coordinates. An empty match is represented explicitly.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Line {
@@ -24,6 +24,10 @@ pub struct Line {
 
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct TextResult {
+    pub matched: bool,
+    /// Populated only for summary modes; details do not compute a summary.
+    pub count: u64,
+    pub complete: bool,
     pub lines: Box<[Line]>,
 }
 

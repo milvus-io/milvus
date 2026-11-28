@@ -155,7 +155,7 @@ mg_grep_execute_batch(MgGrepSession*,
     if (!faults.null_result &&
         (faults.execute == MG_GREP_OK || faults.partial_handle)) {
         auto* result = new MgGrepResult;
-        result->texts.assign(count, {&result->line, 1});
+        result->texts.assign(count, {&result->line, 1, 0, true, false});
         result->view = {result->texts.data(),
                         count + (faults.wrong_count ? 1 : 0)};
         if (faults.bad_span) {

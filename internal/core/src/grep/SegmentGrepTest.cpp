@@ -471,6 +471,78 @@ TEST_P(GrepScanTest, SoftScanThresholdCountsAfterNgramAndAcrossProbe) {
     EXPECT_EQ(probe->queries, 1);
 }
 
+TEST_P(GrepScanTest, SummaryModesPreserveSelectionAcrossRoutes) {
+    std::vector<std::string> texts(40, "ordinary");
+    texts[38] = "timeout ignored NULL";
+    texts[39] = "before\ntimeout timeout\nmiss\ntimeout\n";
+    std::vector<bool> valid(40, true);
+    valid[38] = false;
+    Load(texts, valid);
+    options.before_context = options.after_context = 100;
+    options.limit = 1;
+    std::vector<int64_t> offsets(40);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    for (uint32_t mode : {1u, 2u}) {
+        Load(texts, valid);
+        options.result_mode = mode;
+        auto raw = Scan(offsets);
+        ASSERT_NE(raw, nullptr);
+        ASSERT_EQ(raw->num_rows(), 1);
+        EXPECT_EQ(std::static_pointer_cast<arrow::Int64Array>(raw->column(0))
+                      ->Value(0),
+                  39);
+        const auto payload =
+            std::static_pointer_cast<arrow::BinaryArray>(raw->column(1))
+                ->GetString(0);
+        EXPECT_EQ(nlohmann::json::parse(payload),
+                  nlohmann::json::parse(
+                      mode == 1 ? R"({"count":2,"complete":true})" : "{}"));
+        if (!std::get<0>(GetParam())) {
+            auto probe = AttachNgram(texts, valid);
+            auto indexed = Scan(offsets);
+            ASSERT_NE(indexed, nullptr);
+            EXPECT_TRUE(raw->Equals(*indexed));
+            EXPECT_EQ(probe->queries, 1);
+        }
+        options.has_max_count = 1;
+        options.max_count = 1;
+        auto capped = Scan(offsets);
+        ASSERT_NE(capped, nullptr);
+        const auto limited =
+            std::static_pointer_cast<arrow::BinaryArray>(capped->column(1))
+                ->GetString(0);
+        EXPECT_EQ(nlohmann::json::parse(limited),
+                  nlohmann::json::parse(
+                      mode == 1 ? R"({"count":1,"complete":false})" : "{}"));
+        options.max_count = 0;
+        auto empty = Scan(offsets, "[");
+        ASSERT_NE(empty, nullptr);
+        EXPECT_EQ(empty->num_rows(), 0);
+        options.has_max_count = 0;
+    }
+}
+
+TEST_P(GrepScanTest, SummariesDoNotMaterializeLargeDetails) {
+    Load({std::string(10000, 'x') + "timeout timeout\ntimeout"}, {true});
+    options.max_result_bytes = 1024;
+    EXPECT_EQ(Scan({0}, "timeout", InvalidParameter), nullptr);
+    options.result_mode = 1;
+    auto count = Scan({0});
+    ASSERT_NE(count, nullptr);
+    EXPECT_EQ(nlohmann::json::parse(
+                  std::static_pointer_cast<arrow::BinaryArray>(count->column(1))
+                      ->GetString(0)),
+              nlohmann::json::parse(R"({"count":2,"complete":true})"));
+    options.result_mode = 2;
+    auto exists = Scan({0});
+    ASSERT_NE(exists, nullptr);
+    EXPECT_EQ(std::static_pointer_cast<arrow::BinaryArray>(exists->column(1))
+                  ->GetString(0),
+              "{}");
+    options.max_result_bytes = 1;
+    EXPECT_EQ(Scan({0}, "timeout", InvalidParameter), nullptr);
+}
+
 TEST_P(GrepScanTest, ContextPreservesRowsAndDetailsAcrossRoutes) {
     std::vector<std::string> texts(40, "unrelated");
     texts.back() = "before\ntimeout\nmid\ntimeout timeout\nafter\n";
@@ -487,19 +559,19 @@ TEST_P(GrepScanTest, ContextPreservesRowsAndDetailsAcrossRoutes) {
     ASSERT_NE(raw, nullptr);
     ASSERT_EQ(raw->num_rows(), 1);
     auto details = std::static_pointer_cast<arrow::BinaryArray>(raw->column(1));
-    const auto lines = nlohmann::json::parse(details->GetString(0));
+    const auto lines = nlohmann::json::parse(details->GetString(0))["items"];
     ASSERT_EQ(lines.size(), 3);
-    EXPECT_EQ(lines[0]["content"], "before");
+    EXPECT_EQ(lines[0]["text"], "before\n");
     EXPECT_EQ(lines[0]["type"], "context");
-    EXPECT_FALSE(lines[0].contains("starts"));
-    EXPECT_FALSE(lines[0].contains("ends"));
+    EXPECT_TRUE(lines[0]["starts"].empty());
+    EXPECT_TRUE(lines[0]["ends"].empty());
     EXPECT_EQ(lines[1]["starts"], nlohmann::json::array({0}));
-    EXPECT_EQ(lines[1]["line_start_offset"], 7);
-    EXPECT_EQ(lines[2]["content"], "mid");
+    EXPECT_EQ(lines[1]["absolute_offset"], 7);
+    EXPECT_EQ(lines[2]["text"], "mid\n");
     EXPECT_EQ(lines[1]["type"], "match");
     EXPECT_EQ(lines[2]["type"], "context");
-    EXPECT_FALSE(lines[2].contains("starts"));
-    EXPECT_FALSE(lines[2].contains("ends"));
+    EXPECT_TRUE(lines[2]["starts"].empty());
+    EXPECT_TRUE(lines[2]["ends"].empty());
     if (!std::get<0>(GetParam())) {
         auto probe = AttachNgram(texts, valid);
         auto indexed = Scan(offsets);
@@ -524,7 +596,7 @@ TEST_P(GrepScanTest, ContextPreservesRowsAndDetailsAcrossRoutes) {
     EXPECT_EQ(
         nlohmann::json::parse(
             std::static_pointer_cast<arrow::BinaryArray>(single->column(1))
-                ->GetString(0))
+                ->GetString(0))["items"]
             .size(),
         1);
 }
@@ -540,25 +612,20 @@ TEST_P(GrepScanTest, ContextAndLineLocalAnchorSpans) {
     ASSERT_EQ(result->num_rows(), 1);
     auto details =
         std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
-    EXPECT_EQ(nlohmann::json::parse(details->GetString(0)),
-              nlohmann::json::parse(R"([
-                {"type":"context","content":"starting","line_number":1,"line_start_offset":0},
-                {"type":"match","content":"error error","line_number":2,"line_start_offset":9,"starts":[0,6],"ends":[5,11]},
-                {"type":"context","content":"working","line_number":3,"line_start_offset":21},
-                {"type":"match","content":"error again","line_number":4,"line_start_offset":29,"starts":[0],"ends":[5]},
-                {"type":"context","content":"finished","line_number":5,"line_start_offset":41}
-              ])"));
+    EXPECT_EQ(
+        nlohmann::json::parse(details->GetString(0)),
+        nlohmann::json::parse(
+            R"({"items":[{"type":"context","line_number":1,"text":"starting\n","absolute_offset":0,"starts":[],"ends":[]},{"type":"match","line_number":2,"starts":[0,6],"ends":[5,11],"text":"error error\n","absolute_offset":9},{"type":"context","line_number":3,"text":"working\n","absolute_offset":21,"starts":[],"ends":[]},{"type":"match","line_number":4,"starts":[0],"ends":[5],"text":"error again\n","absolute_offset":29},{"type":"context","line_number":5,"text":"finished","absolute_offset":41,"starts":[],"ends":[]}]})"));
 
     // Absolute anchors use the selected line, independently of reader buffers.
     result = Scan({1}, R"(\Aerror)");
     ASSERT_NE(result, nullptr);
     ASSERT_EQ(result->num_rows(), 1);
     details = std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
-    EXPECT_EQ(nlohmann::json::parse(details->GetString(0)),
-              nlohmann::json::parse(R"([
-                {"type":"context","content":"before","line_number":1,"line_start_offset":0},
-                {"type":"match","content":"error","line_number":2,"line_start_offset":7,"starts":[0],"ends":[5]}
-              ])"));
+    EXPECT_EQ(
+        nlohmann::json::parse(details->GetString(0)),
+        nlohmann::json::parse(
+            R"({"items":[{"type":"context","line_number":1,"text":"before\n","absolute_offset":0,"starts":[],"ends":[]},{"type":"match","line_number":2,"starts":[0],"ends":[5],"text":"error","absolute_offset":7}]})"));
 }
 
 TEST_P(GrepScanTest, ContextBytesFailTheExistingOutputBudget) {
@@ -703,7 +770,7 @@ TEST_P(GrepScanTest, MaxCountIsPerRecordAndIndependentOfQueryLimit) {
             auto details =
                 std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
             const auto expected = nlohmann::json::parse(
-                R"([{"type":"match","content":"error error","line_number":2,"line_start_offset":5,"starts":[0,6],"ends":[5,11]}])");
+                R"({"items":[{"type":"match","line_number":2,"starts":[0,6],"ends":[5,11],"text":"error error\n","absolute_offset":5}]})");
             EXPECT_EQ(nlohmann::json::parse(details->GetString(0)), expected);
             EXPECT_EQ(nlohmann::json::parse(details->GetString(1)), expected);
             options.max_count = 0;
@@ -713,7 +780,8 @@ TEST_P(GrepScanTest, MaxCountIsPerRecordAndIndependentOfQueryLimit) {
             ASSERT_NE(unlimited, nullptr);
             auto all = std::static_pointer_cast<arrow::BinaryArray>(
                 unlimited->column(1));
-            EXPECT_EQ(nlohmann::json::parse(all->GetString(0)).size(), 2);
+            EXPECT_EQ(nlohmann::json::parse(all->GetString(0))["items"].size(),
+                      2);
         }
     }
 }
@@ -1317,8 +1385,8 @@ TEST_P(GrepScanTest, PositionsDetailsAndOwnership) {
         .reset();  // exported Arrow arrays must not borrow segment or Rust buffers
     auto details =
         std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
-    auto lines = nlohmann::json::parse(details->GetString(0));
-    EXPECT_EQ(lines[0]["content"], "超时 timeout");
+    auto lines = nlohmann::json::parse(details->GetString(0))["items"];
+    EXPECT_EQ(lines[0]["text"], "超时 timeout");
     EXPECT_EQ(lines[0]["starts"], nlohmann::json::array({7}));
     EXPECT_EQ(lines[0]["ends"], nlohmann::json::array({14}));
     auto logical =
@@ -1339,11 +1407,11 @@ TEST_P(GrepScanTest, OriginalLineCoordinates) {
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(0)),
         nlohmann::json::parse(
-            R"([{"type":"match","content":"foo","line_number":3,"line_start_offset":9,"starts":[0],"ends":[3]},{"type":"match","content":"foo","line_number":5,"line_start_offset":18,"starts":[0],"ends":[3]}])"));
+            R"({"items":[{"type":"match","line_number":3,"starts":[0],"ends":[3],"text":"foo\n","absolute_offset":9},{"type":"match","line_number":5,"starts":[0],"ends":[3],"text":"foo","absolute_offset":18}]})"));
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(1)),
         nlohmann::json::parse(
-            R"([{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
+            R"({"items":[{"type":"match","line_number":1,"starts":[0],"ends":[3],"text":"foo\n","absolute_offset":0}]})"));
 }
 
 TEST_P(GrepScanTest, JSONDocumentsAndSpans) {
@@ -1359,11 +1427,11 @@ TEST_P(GrepScanTest, JSONDocumentsAndSpans) {
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(0)),
         nlohmann::json::parse(
-            R"([{"type":"match","content":"foo bar foo","line_number":1,"line_start_offset":0,"starts":[0,8],"ends":[3,11]},{"type":"match","content":"hello foo","line_number":2,"line_start_offset":12,"starts":[6],"ends":[9]}])"));
+            R"({"items":[{"type":"match","line_number":1,"starts":[0,8],"ends":[3,11],"text":"foo bar foo\n","absolute_offset":0},{"type":"match","line_number":2,"starts":[6],"ends":[9],"text":"hello foo","absolute_offset":12}]})"));
     EXPECT_EQ(
         nlohmann::json::parse(details->GetString(1)),
         nlohmann::json::parse(
-            R"([{"type":"match","content":"foo","line_number":1,"line_start_offset":0,"starts":[0],"ends":[3]}])"));
+            R"({"items":[{"type":"match","line_number":1,"starts":[0],"ends":[3],"text":"foo","absolute_offset":0}]})"));
     auto empty = Scan({1}, "foo");
     ASSERT_NE(empty, nullptr);
     EXPECT_EQ(empty->num_rows(), 0);
@@ -1378,8 +1446,8 @@ TEST_P(GrepScanTest, JSONEscapingAndEncodedBudget) {
     ASSERT_NE(result, nullptr);
     auto details =
         std::static_pointer_cast<arrow::BinaryArray>(result->column(1));
-    auto lines = nlohmann::json::parse(details->GetString(0));
-    EXPECT_EQ(lines[0]["content"], text);
+    auto lines = nlohmann::json::parse(details->GetString(0))["items"];
+    EXPECT_EQ(lines[0]["text"], text);
     EXPECT_EQ(lines[0]["starts"], nlohmann::json::array({1}));
     EXPECT_EQ(lines[0]["ends"], nlohmann::json::array({4}));
     // Each control character becomes six JSON bytes. Charge the encoded size,
@@ -1395,6 +1463,14 @@ TEST_P(GrepScanTest, JSONEscapingAndEncodedBudget) {
     auto recovered = Scan({0}, "foo");
     ASSERT_NE(recovered, nullptr);
     EXPECT_EQ(recovered->num_rows(), 1);
+    // Charge the complete object envelope, not only its items array.
+    const auto encoded =
+        std::static_pointer_cast<arrow::BinaryArray>(recovered->column(1))
+            ->GetString(0);
+    options.max_result_bytes = encoded.size() + 16;
+    ASSERT_NE(Scan({0}, "foo"), nullptr);
+    --options.max_result_bytes;
+    EXPECT_EQ(Scan({0}, "foo", InvalidParameter), nullptr);
 }
 
 TEST_P(GrepScanTest, StopsBeforeUnreadInvalidOffset) {
@@ -1490,9 +1566,10 @@ TEST_P(GrepScanTest, SparseAndRepeatedOffsetsAcrossChunkBoundaries) {
                 continue;
             ASSERT_LT(row, result->num_rows());
             EXPECT_EQ(positions->Value(row), i);
-            auto lines = nlohmann::json::parse(details->GetString(row));
+            auto lines =
+                nlohmann::json::parse(details->GetString(row))["items"];
             ASSERT_EQ(lines.size(), 1);
-            EXPECT_EQ(lines[0]["content"], texts[offsets[i]]);
+            EXPECT_EQ(lines[0]["text"], texts[offsets[i]]);
             ++row;
         }
         EXPECT_EQ(result->num_rows(), row);
@@ -1575,9 +1652,9 @@ TEST_P(GrepScanTest, MixedInlineAndFileTextPreservesOrder) {
             "超时 timeout", "timeout file", "timeout inline", "超时 timeout"};
         for (int64_t i = 0; i < result->num_rows(); ++i) {
             EXPECT_EQ(positions->Value(i), expected_positions[i]);
-            auto lines = nlohmann::json::parse(details->GetString(i));
+            auto lines = nlohmann::json::parse(details->GetString(i))["items"];
             ASSERT_EQ(lines.size(), 1);
-            EXPECT_EQ(lines[0]["content"], expected[i]);
+            EXPECT_EQ(lines[0]["text"], expected[i]);
         }
     }
 }

@@ -79,7 +79,8 @@ func (s *grepSegment) ScanGrep(ctx context.Context, input arrow.Record, req nati
 		lengths[i] = C.uint64_t(len(pattern))
 	}
 	options := C.CGrepScanOptions{
-		field_id: C.int64_t(req.FieldID), limit: C.int64_t(req.Limit), batch_size: C.int64_t(e.BatchSize),
+		result_mode: C.uint32_t(req.Spec.ResultMode()),
+		field_id:    C.int64_t(req.FieldID), limit: C.int64_t(req.Limit), batch_size: C.int64_t(e.BatchSize),
 		pattern_kind: C.uint32_t(req.Spec.PatternKind()), case_mode: C.uint32_t(req.Spec.CaseMode()), boundary: C.uint32_t(req.Spec.Boundary()),
 		max_regex_bytes: C.uint64_t(c.MaxRegexBytes), max_dfa_cache_bytes: C.uint64_t(c.MaxDFACacheBytes),
 		max_result_bytes: C.uint64_t(e.MaxResultBytes),

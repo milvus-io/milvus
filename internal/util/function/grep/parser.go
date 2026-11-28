@@ -131,7 +131,7 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 				continue
 			}
 			switch name {
-			case "--fixed-strings", "--ignore-case", "--case-sensitive", "--word-regexp", "--line-regexp":
+			case "--fixed-strings", "--ignore-case", "--case-sensitive", "--word-regexp", "--line-regexp", "--count", "--files-with-matches":
 				if hasValue {
 					return nil, merr.WrapErrParameterInvalidMsg("grep option %s does not accept a value", name)
 				}
@@ -139,6 +139,12 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 				return nil, merr.WrapErrParameterInvalidMsg("unsupported grep option %q at token starting byte %d", name, t.start)
 			}
 			switch name {
+			case "--count":
+				if spec.resultMode != ResultExists {
+					spec.resultMode = ResultCount
+				}
+			case "--files-with-matches":
+				spec.resultMode = ResultExists
 			case "--fixed-strings":
 				spec.patternKind = PatternLiteral
 			case "--ignore-case":
@@ -170,6 +176,12 @@ func Parse(arguments string, maxArgumentBytes int64) (*Spec, error) {
 				}
 				err = setContext(value[j], count)
 				j = len(value)
+			case 'c':
+				if spec.resultMode != ResultExists {
+					spec.resultMode = ResultCount
+				}
+			case 'l':
+				spec.resultMode = ResultExists
 			case 'F':
 				spec.patternKind = PatternLiteral
 			case 'i':

@@ -7,12 +7,12 @@
 #if UINTPTR_MAX == UINT64_MAX
 _Static_assert(sizeof(MgGrepError) == 512, "error layout");
 _Static_assert(sizeof(MgGrepBytes) == 16 && offsetof(MgGrepBytes, len) == 8, "bytes layout");
-_Static_assert(sizeof(MgGrepMatchOptions) == 40 && offsetof(MgGrepMatchOptions, boundary) == 8 && offsetof(MgGrepMatchOptions, has_max_count) == 12 && offsetof(MgGrepMatchOptions, max_count) == 16 && offsetof(MgGrepMatchOptions, before_context) == 24 && offsetof(MgGrepMatchOptions, after_context) == 32, "options layout");
-_Static_assert(sizeof(MgGrepSpecView) == 56 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
+_Static_assert(sizeof(MgGrepMatchOptions) == 48 && offsetof(MgGrepMatchOptions, boundary) == 8 && offsetof(MgGrepMatchOptions, has_max_count) == 12 && offsetof(MgGrepMatchOptions, max_count) == 16 && offsetof(MgGrepMatchOptions, before_context) == 24 && offsetof(MgGrepMatchOptions, after_context) == 32 && offsetof(MgGrepMatchOptions, result_mode) == 40, "options layout");
+_Static_assert(sizeof(MgGrepSpecView) == 64 && offsetof(MgGrepSpecView, options) == 16, "spec layout");
 _Static_assert(sizeof(MgGrepCompileLimits) == 16 && offsetof(MgGrepCompileLimits, max_regex_bytes) == 0 && offsetof(MgGrepCompileLimits, max_dfa_cache_bytes) == 8, "compile limits layout");
 _Static_assert(sizeof(MgGrepSpan) == 16 && offsetof(MgGrepSpan, end) == 8, "span layout");
 _Static_assert(sizeof(MgGrepLine) == 56 && offsetof(MgGrepLine, spans) == 16 && offsetof(MgGrepLine, span_count) == 24 && offsetof(MgGrepLine, line_number) == 32 && offsetof(MgGrepLine, line_start_offset) == 40 && offsetof(MgGrepLine, is_match) == 48, "line layout");
-_Static_assert(sizeof(MgGrepTextResult) == 16 && offsetof(MgGrepTextResult, line_count) == 8, "text layout");
+_Static_assert(sizeof(MgGrepTextResult) == 32 && offsetof(MgGrepTextResult, line_count) == 8 && offsetof(MgGrepTextResult, count) == 16 && offsetof(MgGrepTextResult, matched) == 24 && offsetof(MgGrepTextResult, complete) == 25, "text layout");
 _Static_assert(sizeof(MgGrepBatchView) == 16 && offsetof(MgGrepBatchView, text_count) == 8, "batch layout");
 #endif
 
@@ -55,11 +55,32 @@ int main(void) {
     assert(view->texts[2].line_count == 0 && view->texts[2].lines == NULL);
     const MgGrepLine *line = view->texts[1].lines;
     assert(view->texts[1].line_count == 1);
-    assert(line->content.len == 13 && memcmp(line->content.data, "error: error\r", 13) == 0);
+    assert(line->content.len == 14 && memcmp(line->content.data, "error: error\r\n", 14) == 0);
     assert(line->line_number == 2 && line->line_start_offset == 5);
     assert(line->span_count == 2 && line->spans[0].start == 0 && line->spans[0].end == 5);
     assert(line->spans[1].start == 7 && line->spans[1].end == 12);
     mg_grep_result_free(result);
+
+    /* Summary results select inputs without returning line arrays. */
+    for (uint32_t mode = MG_GREP_RESULT_COUNT; mode <= MG_GREP_RESULT_EXISTS; ++mode) {
+        MgGrepBytes pattern = bytes("error");
+        MgGrepSpecView summary_spec = {&pattern, 1, {0}};
+        summary_spec.options.result_mode = mode;
+        summary_spec.options.before_context = 100;
+        summary_spec.options.after_context = 100;
+        assert(mg_grep_compile(&summary_spec, &cl, &plan, &error) == MG_GREP_OK);
+        assert(mg_grep_session_create(plan, &session, &error) == MG_GREP_OK);
+        MgGrepBytes input = bytes("error error\nmiss\nerror");
+        assert(mg_grep_execute_batch(session, &input, 1, el, &result, &error) == MG_GREP_OK);
+        view = mg_grep_result_view(result);
+        assert(view->texts[0].matched);
+        assert(view->texts[0].line_count == 0 && view->texts[0].lines == NULL);
+        assert(view->texts[0].count == (mode == MG_GREP_RESULT_COUNT ? 2 : 1));
+        assert(view->texts[0].complete == (mode == MG_GREP_RESULT_COUNT));
+        mg_grep_result_free(result);
+        mg_grep_session_free(session);
+        mg_grep_plan_free(plan);
+    }
 
     /* Absolute anchors enumerate spans on the selected logical line. */
     MgGrepBytes anchor_pattern = bytes("\\Aerror");
@@ -74,7 +95,7 @@ int main(void) {
     assert(view->texts[0].line_count == 1);
     line = view->texts[0].lines;
     assert(line->line_number == 2 && line->line_start_offset == 7);
-    assert(line->content.len == 5 && memcmp(line->content.data, "error", 5) == 0);
+    assert(line->content.len == 6 && memcmp(line->content.data, "error\n", 6) == 0);
     assert(line->is_match && line->span_count == 1);
     assert(line->spans[0].start == 0 && line->spans[0].end == 5);
     mg_grep_result_free(result);
@@ -156,7 +177,7 @@ int main(void) {
     view = mg_grep_result_view(result);
     line = view->texts[0].lines;
     assert(line->span_count == 3 && line->spans[0].start == 0 && line->spans[1].start == 1 && line->spans[2].start == 2);
-    assert(view->texts[1].lines[0].content.data == NULL && view->texts[1].lines[0].content.len == 0);
+    assert(view->texts[1].lines[0].content.len == 1 && view->texts[1].lines[0].content.data[0] == '\n');
     assert(view->texts[1].lines[0].span_count == 1);
     assert(view->texts[2].lines == NULL);
     mg_grep_result_free(result);

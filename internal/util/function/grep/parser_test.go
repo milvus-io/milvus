@@ -341,3 +341,37 @@ func TestParseContext(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSummaryModes(t *testing.T) {
+	for _, tc := range []struct {
+		args string
+		mode ResultMode
+	}{
+		{"-c -e hit", ResultCount},
+		{"--count -e hit", ResultCount},
+		{"-l -e hit", ResultExists},
+		{"--files-with-matches -e hit", ResultExists},
+		{"-cl -e hit", ResultExists},
+		{"-lc -e hit", ResultExists},
+		{"--files-with-matches --count -e hit", ResultExists},
+		{"-cic -C2 -m1 -e hit", ResultCount},
+		{"-lc -m0 -e '['", ResultExists},
+		{"-e -l", ResultDetails},
+		{"--regexp=-c", ResultDetails},
+	} {
+		t.Run(tc.args, func(t *testing.T) {
+			spec, err := Parse(tc.args, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if spec.ResultMode() != tc.mode {
+				t.Fatalf("mode=%v, want %v", spec.ResultMode(), tc.mode)
+			}
+		})
+	}
+	for _, args := range []string{"--count=true -e hit", "--files-with-matches=1 -e hit", "-c -C-1 -e hit", "-l -m-1 -e hit", "-l --unknown -e hit", "-c -e 'a\nb'"} {
+		if _, err := Parse(args, 65536); err == nil {
+			t.Fatalf("accepted invalid arguments %q", args)
+		}
+	}
+}

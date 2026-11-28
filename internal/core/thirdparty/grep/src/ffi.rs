@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     session::ResultOverhead, BatchResult, Boundary, CancellationToken, CaseMode, CompileLimits,
-    Error, LimitKind, MatchOptions, PatternKind, Plan, Session, TextResult,
+    Error, LimitKind, MatchOptions, PatternKind, Plan, ResultMode, Session, TextResult,
 };
 
 pub type MgGrepStatus = u32;
@@ -39,6 +39,9 @@ pub const MG_GREP_CASE_INSENSITIVE: u32 = 1;
 pub const MG_GREP_BOUNDARY_NONE: u32 = 0;
 pub const MG_GREP_BOUNDARY_WORD: u32 = 1;
 pub const MG_GREP_BOUNDARY_LINE: u32 = 2;
+pub const MG_GREP_RESULT_DETAILS: u32 = 0;
+pub const MG_GREP_RESULT_COUNT: u32 = 1;
+pub const MG_GREP_RESULT_EXISTS: u32 = 2;
 
 /// Optional caller-owned UTF-8 diagnostic; always NUL terminated. Success
 /// clears it. Messages may be truncated; branch on status, never on text.
@@ -69,6 +72,7 @@ pub struct MgGrepMatchOptions {
     pub max_count: u64,
     pub before_context: u64,
     pub after_context: u64,
+    pub result_mode: u32,
 }
 
 /// At least one pattern; ordered OR. Empty patterns are valid. No literal
@@ -97,9 +101,9 @@ pub struct MgGrepSpan {
     pub end: u64,
 }
 
-/// Complete matching or context line, minus only its terminal LF. Other bytes remain.
+/// Complete matching or context line, including its original terminal LF.
 /// Context lines have zero spans; matching spans are line-local and include
-/// zero-length matches at the end of the line. Selection depends on line_count.
+/// zero-length matches at the end of the line. Selection is carried separately by MgGrepTextResult.matched.
 /// Empty content is {NULL,0}.
 #[repr(C)]
 pub struct MgGrepLine {
@@ -114,12 +118,15 @@ pub struct MgGrepLine {
     pub is_match: bool,
 }
 
-/// One entry per input. line_count > 0 means selected; lines are in original
-/// order. Empty arrays have NULL pointers. No silently truncated results.
+/// One entry per input. matched means selected, even when no lines are returned.
+/// Count/complete describe summary modes; detail lines are in original order. Empty arrays have NULL pointers. No silently truncated results.
 #[repr(C)]
 pub struct MgGrepTextResult {
     pub lines: *const MgGrepLine,
     pub line_count: usize,
+    pub count: u64,
+    pub matched: bool,
+    pub complete: bool,
 }
 
 #[repr(C)]
@@ -415,6 +422,9 @@ fn make_result(
         texts.push(MgGrepTextResult {
             lines: nullable(&lines[line_at..line_at + n]),
             line_count: n,
+            count: text.count,
+            matched: text.matched,
+            complete: text.complete,
         });
         line_at += n;
     }
@@ -498,6 +508,12 @@ unsafe fn inputs<'a>(
 
 fn options(o: MgGrepMatchOptions) -> Result<MatchOptions, Error> {
     Ok(MatchOptions {
+        result_mode: match o.result_mode {
+            0 => ResultMode::Details,
+            1 => ResultMode::Count,
+            2 => ResultMode::Exists,
+            _ => return Err(invalid("unknown result mode")),
+        },
         before_context: o.before_context,
         after_context: o.after_context,
         max_count: match o.has_max_count {
@@ -766,15 +782,16 @@ mod tests {
                 offset_of!(MgGrepMatchOptions, max_count),
                 offset_of!(MgGrepMatchOptions, before_context),
                 offset_of!(MgGrepMatchOptions, after_context),
+                offset_of!(MgGrepMatchOptions, result_mode),
             ),
-            (40, 8, 12, 16, 24, 32)
+            (48, 8, 12, 16, 24, 32, 40)
         );
         assert_eq!(
             (
                 size_of::<MgGrepSpecView>(),
                 offset_of!(MgGrepSpecView, options)
             ),
-            (56, 16)
+            (64, 16)
         );
         assert_eq!(
             (
@@ -802,9 +819,12 @@ mod tests {
         assert_eq!(
             (
                 size_of::<MgGrepTextResult>(),
-                offset_of!(MgGrepTextResult, line_count)
+                offset_of!(MgGrepTextResult, line_count),
+                offset_of!(MgGrepTextResult, count),
+                offset_of!(MgGrepTextResult, matched),
+                offset_of!(MgGrepTextResult, complete)
             ),
-            (16, 8)
+            (32, 8, 16, 24, 25)
         );
         assert_eq!(
             (
@@ -1063,4 +1083,14 @@ mod tests {
             mg_grep_session_free(session);
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn invalid_summary_mode_is_rejected() {
+    assert!(options(MgGrepMatchOptions {
+        result_mode: 3,
+        ..Default::default()
+    })
+    .is_err());
 }

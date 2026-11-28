@@ -31,6 +31,7 @@ typedef struct {
     // Per-field matching-line cap, distinct from the Query document limit.
     uint64_t max_count;
     uint64_t before_context, after_context;
+    uint32_t result_mode;  // 0: details, 1: count matching lines, 2: existence
 } CGrepScanOptions;
 // Borrowed only for ScanGrep. Go callers pin the pattern and length buffers
 // while this request (which contains pointers to them) is passed through cgo.
@@ -48,12 +49,15 @@ typedef struct {
 // Patterns are concatenated bytes with one length per pattern. Inputs and
 // segment are borrowed through return. Outputs own their Arrow buffers.
 // Record columns: positions:Int64 and details:Binary (milvus.data_type=JSON).
-// Each Binary row is one document's UTF-8 JSON array of matching/context lines:
-// [{"type":"match","content":"...","line_number":1,"line_start_offset":0,
-//   "starts":[...],"ends":[...]}]. Line numbers are one-based; offsets are
-// zero-based UTF-8 bytes within the original field; spans remain line-relative.
-// Context lines have type="context" and omit starts/ends. Matching lines always
-// have starts/ends arrays with line-local spans, including empty EOF matches.
+// Each Binary row is a UTF-8 JSON object. Summary modes return
+// {"count":N,"complete":bool} or {} for existence.
+// Details mode returns matching/context items:
+// {"items":[{"type":"match","text":"...","line_number":1,"absolute_offset":0,
+//   "starts":[...],"ends":[...]}]}. Text retains its original line terminator.
+// Line numbers are one-based; absolute offsets are zero-based UTF-8 bytes within
+// the original field. Paired starts/ends are byte ranges relative to text.
+// Context items have type="context" and empty starts/ends arrays. Matching
+// spans are enumerated without terminal LF, including empty EOF matches.
 CStatus
 ScanGrep(void* segment,
          struct ArrowSchema* input_schema,

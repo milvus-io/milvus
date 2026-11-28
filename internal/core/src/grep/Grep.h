@@ -71,6 +71,7 @@ class GrepError : public SegcoreError {
 enum class PatternKind { Regex, Literal };
 enum class CaseMode { Sensitive, Insensitive };
 enum class Boundary { None, Word, Line };
+enum class ResultMode { Details, Count, Exists };
 
 struct MatchOptions {
     PatternKind pattern_kind = PatternKind::Regex;
@@ -79,6 +80,7 @@ struct MatchOptions {
     std::optional<uint64_t> max_count;
     uint64_t before_context = 0;
     uint64_t after_context = 0;
+    ResultMode result_mode = ResultMode::Details;
 };
 
 // Compile limits have no production defaults; callers supply positive budgets.
@@ -159,7 +161,11 @@ class Result {
 
     bool
     Selected(size_t text) const;
-    // Includes context lines. A selected document always contains a match.
+    uint64_t
+    MatchingLineCount(size_t text) const;
+    bool
+    CountComplete(size_t text) const;
+    // Includes context lines in Details mode; summary modes return no lines.
     size_t
     LineCount(size_t text) const;
     // Original field coordinates: one-based line and zero-based UTF-8 byte offset.

@@ -111,7 +111,7 @@ func indexComputedResults(results []*internalpb.RetrieveResults) ([]*schemapb.Fi
 
 // indexComputedResults has already checked that fd is non-nil.
 // Computed scalar/JSON columns carry one value per result row. JSON content
-// remains opaque through reduction; native Grep validates it before export.
+// remains opaque through reduction; native Grep owns its construction.
 func validateComputedField(fd *schemapb.FieldData, rows int) error {
 	if !typeutil.ValidateAndNormalizeFieldDataValidData(fd) {
 		return merr.WrapErrServiceInternalMsg("conflicting computed field validity masks")
