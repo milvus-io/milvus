@@ -8,11 +8,12 @@ This design extends row-level null support to elements of scalar `Array` and
 first Array element, and the nested scalar leaf uses its `TypeSchema.nullable`.
 
 The design targets Storage V2. Storage V1 rejects all new-format fields.
-Nested Arrays, vector Arrays, and element-nullable Arrays are allowed only as
-`StructArrayField` sub-fields. Top-level `Array<nullable T>`,
-`Array<Array<T>>`, and `Array<Vector>` are rejected. Nesting is limited to
-`Array<Array<scalar leaf>>`; the leaf cannot be a vector, and a Struct object
-cannot itself be null.
+
+A single-level scalar Array can set `element_nullable=true` on a top-level
+field or a Struct sub-field. See [Nullable elements in scalar ARRAY fields](./20261119-scalar-array-nullable-elements.md)
+for the top-level schema, storage and update rules. Nested `Array<Array<T>>`
+and vector Arrays are supported only as Struct sub-fields. A nested Array
+has a scalar leaf, and every Struct object in the array must be present.
 
 ## Semantics
 

@@ -390,8 +390,8 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 		if err := typeutil.ValidateFieldTypeSchema(fieldSchema); err != nil {
 			return err
 		}
-		if fieldSchema.GetElementNullable() {
-			return merr.WrapErrParameterInvalidMsg("element_nullable is only supported for Array and ArrayOfVector sub-fields of a struct array field, field name = %s", fieldSchema.GetName())
+		if fieldSchema.GetElementNullable() && fieldSchema.GetDataType() != schemapb.DataType_Array {
+			return merr.WrapErrParameterInvalidMsg("element_nullable requires an Array field, field name = %s", fieldSchema.GetName())
 		}
 		if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
 			return merr.WrapErrParameterInvalidMsg("nested array can only be in a struct array field, field name: %s", fieldSchema.GetName())

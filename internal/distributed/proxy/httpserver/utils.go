@@ -1275,7 +1275,19 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Array:
-					// A null element has nowhere to go: an array has no
+					if field.GetElementNullable() {
+						array := gjson.Parse(dataString)
+						if !array.IsArray() {
+							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("field %s requires an array", fieldName)
+						}
+						scalar, err := parseStructSubScalars(field, field.GetElementType(), array.Array(), true, compatibilityMode)
+						if err != nil {
+							return reallyDataArray, validDataMap, err
+						}
+						reallyData[fieldName] = scalar
+						break
+					}
+					// An array without element nullability has no
 					// element-level validity, so it can only be dropped into the
 					// element's zero value. sonic already refuses one for an
 					// integer or string element, but accepts it for a boolean or
@@ -1653,6 +1665,9 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			return nil, merr.WrapErrParameterInvalidMsg("data[%d] must be a JSON object", rowIndex)
 		}
 		for _, field := range arrayFields {
+			if field.GetElementNullable() {
+				continue
+			}
 			rawValue := gjson.Get(row.Raw, field.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				continue
