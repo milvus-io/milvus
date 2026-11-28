@@ -145,6 +145,36 @@ func TestStartOrResumeAzureCopySourceIdentityIgnoresQuery(t *testing.T) {
 	require.Equal(t, 1, *calls)
 }
 
+func TestWaitAzureCopyCompleteSourceURL(t *testing.T) {
+	const host = "src-account.blob.core.windows.net"
+	const path = "/src-container/srcobj"
+	for _, tc := range []struct {
+		name     string
+		scheme   string
+		echo     string
+		mismatch bool
+	}{
+		{name: "HTTPS default port", scheme: "https", echo: host + ":443" + path},
+		{name: "HTTP default port", scheme: "http", echo: host + ":80" + path},
+		{name: "host case", scheme: "https", echo: "SRC-ACCOUNT.BLOB.CORE.WINDOWS.NET" + path},
+		{name: "non-default port", scheme: "https", echo: host + ":80" + path, mismatch: true},
+		{name: "different account", scheme: "https", echo: "other-account.blob.core.windows.net:443" + path, mismatch: true},
+		{name: "different blob", scheme: "https", echo: host + ":443/src-container/SrcObj", mismatch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const copyID = "copy-id"
+			client, _ := mockAzureCopyStatuses(t, []blob.CopyStatusType{blob.CopyStatusTypeSuccess}, tc.scheme+"://"+tc.echo, copyID, "")
+
+			err := waitAzureCopyComplete(context.Background(), client, "dst", tc.scheme+"://"+host+path+"?sig=abc", copyID)
+			if tc.mismatch {
+				require.ErrorContains(t, err, "azure copy source mismatch")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestAzureObjectStorageCopyObjectCrossBucketSourceSAS(t *testing.T) {
 	newStorage := func(t *testing.T, sourceEndpoint, sourceSAS string, sourceUseSSL bool) *AzureObjectStorage {
 		t.Helper()

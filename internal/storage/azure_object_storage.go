@@ -391,6 +391,14 @@ func azureCopySourceIdentity(sourceURL string) string {
 	if i := strings.Index(sourceURL, "?"); i >= 0 {
 		sourceURL = sourceURL[:i]
 	}
+	if u, err := url.Parse(sourceURL); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+		port := u.Port()
+		if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+			u.Host = strings.TrimSuffix(u.Host, ":"+port)
+		}
+		u.Host = strings.ToLower(u.Host)
+		sourceURL = u.String()
+	}
 	// Compare the unescaped form: the service may echo an equivalent source
 	// URL with different percent-encoding than the request carried.
 	if unescaped, err := url.PathUnescape(sourceURL); err == nil {
