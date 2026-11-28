@@ -239,3 +239,21 @@ func TestPrepareRestoreCollectionAllowsStructSubFieldOriginMarker(t *testing.T) 
 	require.True(t, captured.preserveFieldID)
 	require.True(t, captured.allowStructSubFieldOriginMarker)
 }
+
+func TestRestoreCompletionInvalidatesQuotaMetadata(t *testing.T) {
+	setQuotaTestParam(t, &Params.QuotaConfig.CollectionStatsCacheEnabled, "true")
+	setQuotaTestParam(t, &Params.QuotaConfig.LocalQuotaCalculationEnabled, "true")
+	collection := &model.Collection{CollectionID: 10, DBID: 1, DBName: "default", Name: "restored", State: etcdpb.CollectionState_CollectionRestoring}
+	mt := &MetaTable{catalog: &kvrootcoord.Catalog{}, collID2Meta: map[int64]*model.Collection{10: collection}}
+	baseline := mt.readQuotaMetadata(true)
+	require.Nil(t, baseline.Collections[10].Collection, "a restoring collection is not available")
+	mt.acknowledgeQuotaMetadata(baseline)
+	require.Empty(t, mt.readQuotaMetadata(false).Collections)
+
+	patch := mockey.Mock((*kvrootcoord.Catalog).AlterCollection).Return(nil).Build()
+	defer patch.UnPatch()
+	require.NoError(t, mt.CompleteRestoreCollection(t.Context(), 10))
+	changed := mt.readQuotaMetadata(false)
+	require.Contains(t, changed.Collections, int64(10))
+	require.NotNil(t, changed.Collections[10].Collection)
+}

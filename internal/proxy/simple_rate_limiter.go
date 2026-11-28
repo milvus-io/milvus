@@ -44,6 +44,7 @@ type SimpleLimiter struct {
 	// setRatesMu serializes controller updates without blocking request checks.
 	setRatesMu  sync.Mutex
 	rateLimiter *rlinternal.RateLimiterTree
+	quotaSync   quotaReceiver
 
 	// for alloc
 	allocWaitInterval time.Duration
@@ -53,7 +54,7 @@ type SimpleLimiter struct {
 // NewSimpleLimiter returns a new SimpleLimiter.
 func NewSimpleLimiter(allocWaitInterval time.Duration, allocRetryTimes uint) *SimpleLimiter {
 	rootRateLimiter := newClusterLimiter()
-	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter), allocWaitInterval: allocWaitInterval, allocRetryTimes: allocRetryTimes}
+	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter), allocWaitInterval: allocWaitInterval, allocRetryTimes: allocRetryTimes, quotaSync: newQuotaReceiver()}
 	return m
 }
 
@@ -68,6 +69,9 @@ func (m *SimpleLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPar
 func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil
+	}
+	if m.quotaSync.enabled && !m.quotaSync.ready.Load() {
+		return merr.WrapErrServiceNotReadyMsg("quota baseline has not been installed")
 	}
 	if n <= 0 {
 		return nil
@@ -93,7 +97,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 
 	// 2. check database level rate limits
 	if dbID != util.InvalidDBID {
-		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
+		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, m.quotaFactory(internalpb.RateScope_Database))
 		ret = dbRateLimiters.Check(rt, n)
 		if ret != nil {
 			cancelAllLimiters()
@@ -110,7 +114,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 			}
 			// only dml and dql have collection level rate limits
 			collectionRateLimiters := m.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
-				newDatabaseLimiter, newCollectionLimiters)
+				m.quotaFactory(internalpb.RateScope_Database), m.quotaFactory(internalpb.RateScope_Collection))
 			ret = collectionRateLimiters.Check(rt, n)
 			if ret != nil {
 				cancelAllLimiters()
@@ -128,7 +132,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 					continue
 				}
 				partitionRateLimiters := m.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partID,
-					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
+					m.quotaFactory(internalpb.RateScope_Database), m.quotaFactory(internalpb.RateScope_Collection), m.quotaFactory(internalpb.RateScope_Partition))
 				ret = partitionRateLimiters.Check(rt, n)
 				if ret != nil {
 					cancelAllLimiters()
@@ -189,6 +193,17 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 	m.setRatesMu.Lock()
 	defer m.setRatesMu.Unlock()
 
+	if m.quotaSync.version.Valid() {
+		return nil
+	} // Late legacy requests cannot downgrade a versioned session.
+	if err := m.setLegacyRates(rootLimiter); err != nil {
+		return err
+	}
+	m.quotaSync.ready.Store(true)
+	return nil
+}
+
+func (m *SimpleLimiter) setLegacyRates(rootLimiter *proxypb.LimiterNode) error {
 	// Apply configuration defaults together with the requested rates. Publishing
 	// defaults first could temporarily clear an existing quota denial while Check
 	// runs concurrently with this update.
