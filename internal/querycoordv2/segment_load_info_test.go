@@ -71,8 +71,10 @@ func TestGetQueryViewSegmentLoadInfoRPC(t *testing.T) {
 		require.Empty(t, resp.Results[1].GetManifestIndexes().GetSummaries())
 		short, stop := context.WithTimeout(ctx, 30*time.Millisecond)
 		defer stop()
-		_, err = client.GetQueryViewSegmentLoadInfo(short, &querypb.GetQueryViewSegmentLoadInfoRequest{CollectionID: 1, SegmentIDs: []int64{3}})
-		require.Error(t, err)
+		resp, err = client.GetQueryViewSegmentLoadInfo(short, &querypb.GetQueryViewSegmentLoadInfoRequest{CollectionID: 1, SegmentIDs: []int64{3}})
+		// The server can return the cancellation in Status before the client
+		// observes its own deadline. Both representations must report failure.
+		require.Error(t, merr.CheckRPCCall(resp, err))
 		resp, err = client.GetQueryViewSegmentLoadInfo(ctx, &querypb.GetQueryViewSegmentLoadInfoRequest{CollectionID: 1, SegmentIDs: []int64{1}})
 		require.NoError(t, merr.CheckRPCCall(resp, err))
 		require.EqualValues(t, 1, resp.Results[0].LoadInfo.CollectionID)

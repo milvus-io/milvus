@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -360,7 +360,7 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 
 func estimateLoadResourceForLoadConfig(ctx context.Context, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64) (autoscaleResourceUsage, error) {
 	if schema != nil {
-		schema = task.ApplyCollectionMmapSetting(typeutil.Clone(schema), collectionProperties)
+		schema = utils.ApplyCollectionMmapSetting(typeutil.Clone(schema), collectionProperties)
 	}
 	usage, err := autoscale.EstimateSegmentsLoadResourceForLoadConfig(ctx, schema, segments, indexes, loadFields, autoscale.DefaultEstimateOptions())
 	if err != nil {

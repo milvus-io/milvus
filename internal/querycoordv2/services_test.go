@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -45,13 +46,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
-	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
@@ -101,20 +99,14 @@ type ServiceSuite struct {
 	nodes         []int64
 
 	// Dependencies
-	kv                 kv.MetaKv
-	store              metastore.QueryCoordCatalog
-	dist               *meta.DistributionManager
-	meta               *meta.Meta
-	targetMgr          *meta.TargetManager
-	broker             *meta.MockBroker
-	targetObserver     *observers.TargetObserver
-	collectionObserver *observers.CollectionObserver
-	cluster            *session.MockCluster
-	nodeMgr            *session.NodeManager
-	taskScheduler      *task.MockScheduler
-
-	distMgr        *meta.DistributionManager
-	distController *dist.MockController
+	kv        kv.MetaKv
+	store     metastore.QueryCoordCatalog
+	dist      *meta.DistributionManager
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	broker    *meta.MockBroker
+	cluster   *session.MockCluster
+	nodeMgr   *session.NodeManager
 
 	proxyManager *proxyutil.MockProxyClientManager
 
@@ -255,16 +247,6 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.cluster = session.NewMockCluster(suite.T())
-	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
-	suite.targetObserver = observers.NewTargetObserver(
-		suite.meta,
-		suite.targetMgr,
-		suite.dist,
-		suite.broker,
-		suite.cluster,
-		suite.nodeMgr,
-	)
-	suite.targetObserver.Start()
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 			NodeID:   node,
@@ -273,21 +255,7 @@ func (suite *ServiceSuite) SetupTest() {
 		}))
 		suite.meta.HandleNodeUp(context.TODO(), node)
 	}
-	suite.taskScheduler = task.NewMockScheduler(suite.T())
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
-	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
-	suite.distController = dist.NewMockController(suite.T())
-
-	suite.collectionObserver = observers.NewCollectionObserver(
-		suite.dist,
-		suite.meta,
-		suite.targetMgr,
-		suite.targetObserver,
-		suite.proxyManager,
-	)
-	suite.collectionObserver.Start()
 
 	suite.server = &Server{
 		idAllocator:         params.RandomIncrementIDAllocator(),
@@ -300,26 +268,12 @@ func (suite *ServiceSuite) SetupTest() {
 		meta:                suite.meta,
 		targetMgr:           suite.targetMgr,
 		broker:              suite.broker,
-		targetObserver:      suite.targetObserver,
-		collectionObserver:  suite.collectionObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
-		taskScheduler:       suite.taskScheduler,
-		distController:      suite.distController,
 		ctx:                 context.Background(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
 		proxyClientManager:  suite.proxyManager,
 	}
-
-	// Initialize checkerController to prevent nil pointer dereference in handleNodeUp
-	suite.server.checkerController = checkers.NewCheckerController(
-		suite.meta,
-		suite.dist,
-		suite.targetMgr,
-		suite.nodeMgr,
-		suite.taskScheduler,
-		suite.broker,
-	)
 
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -743,10 +697,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
-	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist, server.targetMgr)
-	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
-	defer server.replicaObserver.Stop()
 
 	_, err := server.meta.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -758,16 +709,6 @@ func (suite *ServiceSuite) TestTransferNode() {
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
 	})
 	suite.NoError(err)
-	suite.meta.PutCollection(ctx, utils.CreateTestCollection(1, 2))
-	suite.meta.Put(ctx, meta.NewReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  1,
-			Nodes:         []int64{},
-			ResourceGroup: "rg1",
-		},
-		typeutil.NewUniqueSet(),
-	))
 	// test transfer node
 	resp, err := server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
@@ -779,22 +720,8 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	suite.Eventually(func() bool {
 		nodes, err := server.meta.GetNodes(ctx, "rg1")
-		if err != nil || len(nodes) != 1 {
-			return false
-		}
-		nodesInReplica := server.meta.ReplicaManager.Get(ctx, 1).GetNodes()
-		return len(nodesInReplica) == 1
+		return err == nil && len(nodes) == 1
 	}, 5*time.Second, 100*time.Millisecond)
-
-	suite.meta.Put(ctx, meta.NewReplica(
-		&querypb.Replica{
-			ID:            2,
-			CollectionID:  1,
-			Nodes:         []int64{},
-			ResourceGroup: "rg2",
-		},
-		typeutil.NewUniqueSet(),
-	))
 
 	// test transfer node meet non-exist source rg
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
@@ -1449,6 +1376,16 @@ func (suite *ServiceSuite) TestGetMetrics() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
+	// Keep the legacy management endpoint's empty-list response after removing
+	// its unused scheduler.
+	metricReq[metricsinfo.MetricTypeKey] = metricsinfo.AllTaskKey
+	req, err = json.Marshal(metricReq)
+	suite.Require().NoError(err)
+	resp, err = server.GetMetrics(ctx, &milvuspb.GetMetricsRequest{Request: string(req)})
+	suite.NoError(err)
+	suite.NoError(merr.Error(resp.GetStatus()))
+	suite.Equal("[]", resp.GetResponse())
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err = server.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
@@ -1457,6 +1394,21 @@ func (suite *ServiceSuite) TestGetMetrics() {
 	})
 	suite.NoError(err)
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestLegacyMetadataMetrics() {
+	for _, request := range []map[string]string{
+		{metricsinfo.MetricTypeKey: metricsinfo.DistKey},
+		{metricsinfo.MetricTypeKey: metricsinfo.TargetKey},
+		{metricsinfo.MetricTypeKey: metricsinfo.TargetKey, metricsinfo.MetricRequestParamTargetScopeKey: strconv.Itoa(int(meta.NextTarget))},
+		{metricsinfo.MetricTypeKey: metricsinfo.ResourceGroupKey},
+	} {
+		payload, err := json.Marshal(request)
+		suite.Require().NoError(err)
+		resp, err := suite.server.GetMetrics(context.Background(), &milvuspb.GetMetricsRequest{Request: string(payload)})
+		suite.Require().NoError(merr.CheckRPCCall(resp, err))
+		suite.True(json.Valid([]byte(resp.GetResponse())), "legacy metadata metrics must remain valid JSON: %v", request)
+	}
 }
 
 func (suite *ServiceSuite) TestGetReplicas() {
@@ -1711,31 +1663,19 @@ func (suite *ServiceSuite) TestGetShardLeadersWithUnserviceableShards() {
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {
-	suite.server.replicaObserver = observers.NewReplicaObserver(
-		suite.server.meta,
-		suite.server.dist,
-		suite.server.targetMgr,
-	)
 	suite.server.resourceObserver = observers.NewResourceObserver(
 		suite.server.meta,
 	)
-	suite.server.replicaObserver.Start()
-	defer suite.server.replicaObserver.Stop()
 	suite.server.resourceObserver.Start()
 	defer suite.server.resourceObserver.Stop()
 
 	ctx := context.Background()
 	server := suite.server
-	suite.server.meta.PutCollection(ctx, utils.CreateTestCollection(1, 1))
-	suite.server.meta.Put(ctx, meta.NewReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  1,
-			Nodes:         []int64{},
-			ResourceGroup: meta.DefaultResourceGroupName,
-		},
-		typeutil.NewUniqueSet(),
-	))
+	// A node that disappeared before its event is handled must not be registered.
+	server.handleNodeUp(111)
+	nodesBefore, err := server.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.Require().NoError(err)
+	suite.NotContains(nodesBefore, int64(111))
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   111,
@@ -1743,15 +1683,9 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 		Hostname: "localhost",
 	}))
 	server.handleNodeUp(111)
-	// wait for async update by observer
-	suite.Eventually(func() bool {
-		nodes := suite.server.meta.ReplicaManager.Get(ctx, 1).GetNodes()
-		nodesInRG, _ := suite.server.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
-		return len(nodes) == len(nodesInRG)
-	}, 5*time.Second, 100*time.Millisecond)
-	nodes := suite.server.meta.ReplicaManager.Get(ctx, 1).GetNodes()
-	nodesInRG, _ := suite.server.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
-	suite.ElementsMatch(nodes, nodesInRG)
+	nodes, err := server.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
+	suite.Require().NoError(err)
+	suite.ElementsMatch(append(nodesBefore, int64(111)), nodes)
 }
 
 // loadLegacyMetadata seeds retained legacy RPC fixtures explicitly. QueryView
@@ -2057,8 +1991,6 @@ func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 
 func (suite *ServiceSuite) TearDownTest() {
 	suite.server.qviewsRuntime.stop()
-	suite.targetObserver.Stop()
-	suite.collectionObserver.Stop()
 }
 
 func TestService(t *testing.T) {
