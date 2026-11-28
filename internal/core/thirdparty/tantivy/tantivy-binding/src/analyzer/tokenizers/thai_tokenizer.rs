@@ -1,16 +1,21 @@
 use icu_segmenter::options::WordBreakOptions;
 use icu_segmenter::WordSegmenter;
+use serde_json as json;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+
+use super::position_mode::PositionMode;
+use crate::error::Result;
 
 /// Thai tokenizer using ICU4X WordSegmenter with LSTM model.
 /// Uses try_new_lstm which provides Thai word segmentation via LSTM while
 /// not segmenting CJK text (no dictionary model loaded), keeping it Thai-focused.
 /// Unlike the generic IcuTokenizer, this also filters out whitespace and punctuation,
 /// returning only meaningful word tokens — matching ES Thai tokenizer behavior.
-/// Positions are character-based (Unicode scalar values) from the start of the input,
-/// including skipped segments, consistent with IcuTokenizer and Jieba.
+/// Positions default to character offsets, including skipped segments; token mode
+/// counts emitted words instead.
 pub struct ThaiTokenizer {
     segmenter: WordSegmenter,
+    position_mode: PositionMode,
 }
 
 impl Clone for ThaiTokenizer {
@@ -18,6 +23,7 @@ impl Clone for ThaiTokenizer {
         ThaiTokenizer {
             segmenter: WordSegmenter::try_new_lstm(WordBreakOptions::default())
                 .expect("failed to create ICU LSTM word segmenter"),
+            position_mode: self.position_mode,
         }
     }
 }
@@ -60,7 +66,16 @@ impl ThaiTokenizer {
         ThaiTokenizer {
             segmenter: WordSegmenter::try_new_lstm(WordBreakOptions::default())
                 .expect("failed to create ICU LSTM word segmenter"),
+            position_mode: PositionMode::Char,
         }
+    }
+
+    pub(crate) fn from_json(params: &json::Map<String, json::Value>) -> Result<Self> {
+        let position_mode = PositionMode::from_json(params.get("position_mode"))?;
+        Ok(Self {
+            position_mode,
+            ..Self::new()
+        })
     }
 
     fn tokenize(&self, text: &str) -> Vec<Token> {
@@ -76,22 +91,26 @@ impl ThaiTokenizer {
             let start = pair[0];
             let end = pair[1];
             let segment = &text[start..end];
-            let char_len = segment.chars().count();
-
-            // Skip whitespace, punctuation, and empty segments (still advance position)
             if !is_word_segment(segment) {
-                position += char_len;
+                if self.position_mode == PositionMode::Char {
+                    position += segment.chars().count();
+                }
                 continue;
             }
+
+            let position_length = match self.position_mode {
+                PositionMode::Char => segment.chars().count(),
+                PositionMode::Token => 1,
+            };
 
             tokens.push(Token {
                 text: segment.to_string(),
                 offset_from: start,
                 offset_to: end,
                 position,
-                position_length: char_len,
+                position_length,
             });
-            position += char_len;
+            position += position_length;
         }
 
         tokens

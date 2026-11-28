@@ -133,6 +133,134 @@ mod tests {
 
     use crate::{index_writer::IndexWriterWrapper, util::set_bitset, TantivyIndexVersion};
     #[test]
+    fn test_tokenizer_position_mode_phrase_match_after_reopen() {
+        use crate::{analyzer::create_analyzer, index_reader::IndexReaderWrapper};
+        use serde_json::json;
+
+        for name in ["icu", "thai", "jieba"] {
+            for mode in [None, Some("char"), Some("token")] {
+                let mut tokenizer = json!({"type": name, "mode": "exact"});
+                if let Some(mode) = mode {
+                    tokenizer["position_mode"] = json!(mode);
+                }
+                let params = json!({"tokenizer": tokenizer}).to_string();
+                let dir = TempDir::new().unwrap();
+                let path = dir.path().to_str().unwrap();
+                let mut writer = IndexWriterWrapper::create_text_writer(
+                    "text",
+                    path,
+                    "position_mode",
+                    &params,
+                    "",
+                    1,
+                    50_000_000,
+                    false,
+                    false,
+                    TantivyIndexVersion::default_version(),
+                )
+                .unwrap();
+                for (id, text) in ["alpha beta", "alpha x beta", "alpha longer beta"]
+                    .iter()
+                    .enumerate()
+                {
+                    writer.add(*text, Some(id as i64)).unwrap();
+                }
+                writer.commit().unwrap();
+                let growing_reader = writer.create_reader(set_bitset).unwrap();
+                let reloaded_reader = IndexReaderWrapper::load(path, true, set_bitset).unwrap();
+                reloaded_reader.register_tokenizer(
+                    "position_mode".to_string(),
+                    create_analyzer(&params, "").unwrap(),
+                );
+                for reader in [&growing_reader, &reloaded_reader] {
+                    // ICU and Jieba retain spaces; Thai emits only words.
+                    let slop = if name == "thai" { 1 } else { 2 };
+                    for (slop, expected) in [
+                        (0, vec![0]),
+                        (
+                            slop,
+                            if mode == Some("token") {
+                                vec![0, 1, 2]
+                            } else if name == "thai" {
+                                vec![0]
+                            } else {
+                                vec![0, 1]
+                            },
+                        ),
+                    ] {
+                        let mut result: HashSet<u32> = HashSet::new();
+                        reader
+                            .phrase_match_query(
+                                "alpha beta",
+                                slop,
+                                &mut result as *mut _ as *mut c_void,
+                            )
+                            .unwrap();
+                        assert_eq!(
+                            result,
+                            expected.into_iter().collect(),
+                            "{name}: {mode:?}, slop {slop}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_icu_keep_types_preserves_phrase_gaps_after_reopen() {
+        use crate::{analyzer::create_analyzer, index_reader::IndexReaderWrapper};
+        use serde_json::json;
+
+        for mode in ["char", "token"] {
+            let params = json!({"tokenizer": {
+                "type": "icu", "position_mode": mode,
+                "skip_none": true, "keep_types": ["letter"]
+            }})
+            .to_string();
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().to_str().unwrap();
+            let mut writer = IndexWriterWrapper::create_text_writer(
+                "text",
+                path,
+                "icu",
+                &params,
+                "",
+                1,
+                50_000_000,
+                false,
+                false,
+                TantivyIndexVersion::default_version(),
+            )
+            .unwrap();
+            for (id, text) in ["a b", "a,  b", "a 123 b", "a 🔥 b"].iter().enumerate() {
+                writer.add(*text, Some(id as i64)).unwrap();
+            }
+            writer.commit().unwrap();
+            let growing_reader = writer.create_reader(set_bitset).unwrap();
+            let reloaded_reader = IndexReaderWrapper::load(path, true, set_bitset).unwrap();
+            reloaded_reader
+                .register_tokenizer("icu".to_string(), create_analyzer(&params, "").unwrap());
+            for reader in [&growing_reader, &reloaded_reader] {
+                for (query, expected) in [
+                    ("a b", vec![0, 1]),
+                    (
+                        "a 123 b",
+                        if mode == "token" { vec![2, 3] } else { vec![2] },
+                    ),
+                    ("a 🔥 b", if mode == "token" { vec![2, 3] } else { vec![3] }),
+                ] {
+                    let mut result: HashSet<u32> = HashSet::new();
+                    reader
+                        .phrase_match_query(query, 0, &mut result as *mut _ as *mut c_void)
+                        .unwrap();
+                    assert_eq!(result, expected.into_iter().collect(), "{mode}: {query}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_jeba() {
         let params = "{\"tokenizer\": \"jieba\"}".to_string();
         let dir = TempDir::new().unwrap();

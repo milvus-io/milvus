@@ -7,6 +7,7 @@ use std::io::BufReader;
 use std::{path::PathBuf, sync::Arc};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
+use super::position_mode::PositionMode;
 use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 
@@ -27,6 +28,7 @@ pub enum JiebaMode {
 pub struct JiebaTokenizer {
     mode: JiebaMode,
     hmm: bool,
+    position_mode: PositionMode,
     tokenizer: Arc<jieba_rs::Jieba>,
 }
 
@@ -153,6 +155,7 @@ impl JiebaTokenizer {
         JiebaTokenizer {
             mode: JiebaMode::Search,
             hmm: true,
+            position_mode: PositionMode::Char,
             tokenizer: JIEBA.clone(),
         }
     }
@@ -161,6 +164,13 @@ impl JiebaTokenizer {
         params: &json::Map<String, json::Value>,
         helper: &mut FileResourcePathHelper,
     ) -> Result<JiebaTokenizer> {
+        let mode = get_jieba_mode(params)?;
+        let position_mode = PositionMode::from_json(params.get("position_mode"))?;
+        if matches!(mode, JiebaMode::Search) && position_mode == PositionMode::Token {
+            return Err(TantivyBindingError::InvalidArgument(
+                "jieba tokenizer position_mode \"token\" requires mode \"exact\"; search mode emits overlapping tokens".to_string(),
+            ));
+        }
         let (words, system_dict, user_dict) = get_jieba_dict(params, helper)?;
 
         let mut tokenizer =
@@ -196,12 +206,12 @@ impl JiebaTokenizer {
             })?;
         }
 
-        let mode = get_jieba_mode(params)?;
         let hmm = get_jieba_hmm(params)?;
 
         Ok(JiebaTokenizer {
             mode: mode,
             hmm: hmm,
+            position_mode,
             tokenizer: Arc::new(tokenizer),
         })
     }
@@ -222,12 +232,16 @@ impl JiebaTokenizer {
 
         let mut tokens = Vec::with_capacity(ori_tokens.len());
         for token in ori_tokens {
+            let (position, position_length) = match self.position_mode {
+                PositionMode::Char => (token.start, token.end - token.start),
+                PositionMode::Token => (tokens.len(), 1),
+            };
             tokens.push(Token {
                 offset_from: indices[token.start].0,
                 offset_to: indices[token.end].0,
-                position: token.start,
+                position,
                 text: String::from(&text[(indices[token.start].0)..(indices[token.end].0)]),
-                position_length: token.end - token.start,
+                position_length,
             });
         }
         tokens
