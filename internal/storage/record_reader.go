@@ -433,8 +433,9 @@ type ManifestReader struct {
 	externalSpecContext  packed.ExternalSpecContext
 	textColumnConfigs    []packed.TextColumnConfig
 
-	neededColumns  []string
-	resolveTextLob bool
+	neededColumns     []string
+	resolveTextLob    bool
+	milvusTableSource bool
 }
 
 type manifestArrowReader interface {
@@ -607,8 +608,9 @@ func newManifestReader(
 		externalSpecContext:  extfs,
 		textColumnConfigs:    textColumnConfigs,
 
-		neededColumns:  neededColumns,
-		resolveTextLob: rwOptions.resolveTextLob,
+		neededColumns:     neededColumns,
+		resolveTextLob:    rwOptions.resolveTextLob,
+		milvusTableSource: rwOptions.milvusTableSource,
 	}
 
 	err = prr.init()
@@ -653,7 +655,11 @@ func (mr *ManifestReader) init() error {
 		mr.reader = reader
 		return nil
 	}
-	reader, err := packed.NewFFIPackedReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
+	newReader := packed.NewFFIPackedReader
+	if mr.milvusTableSource {
+		newReader = packed.NewMilvusTableSourceFFIPackedReader
+	}
+	reader, err := newReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 		mr.bufferSize,
 		mr.storageConfig,
 		mr.storagePluginContext,

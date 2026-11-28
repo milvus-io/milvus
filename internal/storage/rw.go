@@ -79,6 +79,7 @@ type rwOptions struct {
 	textRefsAsBinary  bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
 	resolveTextLob    bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
 	externalReader    packed.ExternalReaderContext
+	milvusTableSource bool // manifest is a milvus-table source manifest named by externalReader
 	writerFormat      string
 	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 	pkStatsConfig     *PkStatsConfig
@@ -262,6 +263,14 @@ func WithTextColumnConfigs(configs []packed.TextColumnConfig) RwOption {
 func WithTextRefsAsBinary() RwOption {
 	return func(options *rwOptions) {
 		options.textRefsAsBinary = true
+	}
+}
+
+// WithMilvusTableSourceManifest makes a manifest reader read a milvus-table
+// source manifest, whose files are resolved against the external source.
+func WithMilvusTableSourceManifest() RwOption {
+	return func(options *rwOptions) {
+		options.milvusTableSource = true
 	}
 }
 

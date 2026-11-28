@@ -153,7 +153,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 		}
 		manifestPath, err := resolveManifestPath(manifest.GetManifest())
 		if err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "resolve source segment manifest %s", manifest.GetManifest())
+			return nil, merr.Wrapf(err, "resolve source segment manifest %s", manifest.GetManifest())
 		}
 		sourceSegment, ok := sourceSegments[manifest.GetSegmentId()]
 		if !ok {

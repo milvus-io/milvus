@@ -149,6 +149,12 @@ func (t *RefreshExternalCollectionTask) milvusTableDeltalogFragments(
 	workFragments := make([]packed.Fragment, len(fragments))
 	copy(workFragments, fragments)
 	for i := range workFragments {
+		// Snapshot-level deltalogs come from the explore result; source
+		// manifest deltas are checked when the source manifest is read.
+		if err := packed.CheckMilvusTableSourceDeltalogPaths(workFragments[i].Deltalogs,
+			t.req.GetStorageConfig(), t.milvusTableExternalSpecContext()); err != nil {
+			return nil, err
+		}
 		clonedDeltalogs := cloneFieldBinlogs(workFragments[i].Deltalogs)
 		if includeSourceManifestDeltas {
 			sourceDeltalogs, err := t.getMilvusTableSourceManifestDeltalogs(workFragments[i].FilePath)
