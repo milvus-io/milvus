@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json as json;
@@ -14,7 +14,96 @@ use crate::error::{Result, TantivyBindingError};
 /// existing offset corrections.
 #[derive(Clone)]
 pub(crate) struct MappingCharFilter {
-    mappings: Arc<HashMap<char, Vec<(String, String)>>>,
+    trie: Arc<MappingTrie>,
+}
+
+#[derive(Default)]
+struct MappingTrie {
+    // Node 0 is the root. Each edge creates one node.
+    edges: HashMap<(usize, u8), MappingEdge>,
+    rules: Vec<(String, String)>,
+}
+
+#[derive(Clone, Copy)]
+struct MappingEdge {
+    child: usize,
+    prefix_len: usize,
+    // The shortest rule below this edge supplies its label and the minimum input length.
+    shortest_rule: usize,
+}
+
+impl MappingTrie {
+    fn insert(&mut self, mapping: (String, String)) -> Result<()> {
+        let rule = self.rules.len();
+        self.rules.push(mapping);
+        let source = self.rules[rule].0.as_bytes();
+        let mut parent = 0;
+        let mut start = 0;
+        while start < source.len() {
+            let key = (parent, source[start]);
+            let next = self.edges.len() + 1;
+            let Some(edge) = self.edges.get_mut(&key) else {
+                self.edges.insert(
+                    key,
+                    MappingEdge {
+                        child: next,
+                        prefix_len: source.len(),
+                        shortest_rule: rule,
+                    },
+                );
+                break;
+            };
+            let old = *edge;
+            let shortest = self.rules[old.shortest_rule].0.as_bytes();
+            let shared = source[start..]
+                .iter()
+                .zip(&shortest[start..old.prefix_len])
+                .take_while(|(a, b)| a == b)
+                .count();
+            start += shared;
+            if start == source.len() && start == shortest.len() {
+                return Err(TantivyBindingError::InvalidArgument(format!(
+                    "mapping char_filter source must be unique: {:?}",
+                    self.rules[rule].0
+                )));
+            }
+            if source.len() < shortest.len() {
+                edge.shortest_rule = rule;
+            }
+            if start < old.prefix_len {
+                // Split the edge at the common prefix without copying either source.
+                edge.prefix_len = start;
+                edge.child = next;
+                self.edges.insert((next, shortest[start]), old);
+                parent = next;
+            } else {
+                parent = old.child;
+            }
+        }
+        Ok(())
+    }
+
+    fn next_edge(&self, node: usize, start: usize, text: &[u8]) -> Option<&MappingEdge> {
+        let edge = self.edges.get(&(node, *text.get(start)?))?;
+        let source = self.rules[edge.shortest_rule].0.as_bytes();
+        (source.len() <= text.len() && text[start..].starts_with(&source[start..edge.prefix_len]))
+            .then_some(edge)
+    }
+
+    fn longest_match(&self, text: &str) -> Option<(usize, &str)> {
+        let mut node = 0;
+        let mut offset = 0;
+        let mut longest = None;
+        while let Some(edge) = self.next_edge(node, offset, text.as_bytes()) {
+            offset = edge.prefix_len;
+            node = edge.child;
+            let (source, target) = &self.rules[edge.shortest_rule];
+            if offset == source.len() {
+                longest = Some((offset, target.as_str()));
+            }
+        }
+        longest
+    }
 }
 
 impl MappingCharFilter {
@@ -33,56 +122,25 @@ impl MappingCharFilter {
                 )
             })?;
 
-        let mut parsed = HashMap::with_capacity(mappings.len());
+        let mut trie = MappingTrie::default();
         for mapping in mappings {
             let mapping = mapping.as_str().ok_or_else(|| {
                 TantivyBindingError::InvalidArgument(
                     "mapping char_filter mapping item must be string".to_string(),
                 )
             })?;
-            let (source, target) = parse_mapping(mapping)?;
-            match parsed.entry(source) {
-                Entry::Vacant(entry) => {
-                    entry.insert(target);
-                }
-                Entry::Occupied(entry) => {
-                    return Err(TantivyBindingError::InvalidArgument(format!(
-                        "mapping char_filter source must be unique: {:?}",
-                        entry.key()
-                    )));
-                }
-            }
-        }
-
-        let mut mappings: HashMap<char, Vec<(String, String)>> = HashMap::new();
-        for (source, target) in parsed {
-            let first_char = source.chars().next().unwrap();
-            mappings
-                .entry(first_char)
-                .or_default()
-                .push((source, target));
-        }
-        for rules in mappings.values_mut() {
-            rules.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+            trie.insert(parse_mapping(mapping)?)?;
         }
 
         Ok(MappingCharFilter {
-            mappings: Arc::new(mappings),
+            trie: Arc::new(trie),
         })
     }
 }
 
 impl CharFilter for MappingCharFilter {
     fn apply(&self, input: FilteredText) -> FilteredText {
-        input.replace_matches(|text| {
-            let next = text.chars().next().unwrap();
-            self.mappings
-                .get(&next)
-                .into_iter()
-                .flatten()
-                .find(|(source, _)| text.starts_with(source))
-                .map(|(source, target)| (source.len(), target.as_str()))
-        })
+        input.replace_matches(|text| self.trie.longest_match(text))
     }
 
     fn box_clone(&self) -> BoxCharFilter {
@@ -230,6 +288,48 @@ mod tests {
 
         assert_eq!(output.text, "y");
         assert_eq!(output.correct_offsets(0, 1), (0, 2));
+    }
+
+    #[test]
+    fn test_mapping_char_filter_falls_back_to_longest_complete_prefix() {
+        let params = json::json!({"mappings": ["中ab=>x", "中文=>", "中=>y", "中ac=>z"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let output = filter.apply(FilteredText::new("中ab中ac中ad中文丰"));
+
+        assert_eq!(output.text, "xzyad丰");
+        assert_eq!(output.correct_offsets(2, 3), (10, 13));
+    }
+
+    #[test]
+    fn test_short_input_skips_unreachable_mapping_prefixes() {
+        let params = json::json!({"mappings": ["aaaaaa=>long", "a=>short", "bbbb=>other"]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let trie = &filter.trie;
+        assert!(trie.next_edge(0, 0, b"bbb").is_none());
+        let a = trie.next_edge(0, 0, b"aaa").unwrap();
+        assert!(trie.next_edge(a.child, a.prefix_len, b"aaa").is_none());
+        assert_eq!(trie.longest_match("aaa"), Some((1, "short")));
+        assert_eq!(trie.longest_match("aaaaaa"), Some((6, "long")));
+    }
+
+    #[test]
+    fn test_mapping_trie_compresses_long_shared_prefixes() {
+        let prefix = "中".repeat(256);
+        let params = json::json!({"mappings": [
+            format!("{prefix}甲=>a"), format!("{prefix}申=>b"), format!("{prefix}=>c")
+        ]});
+        let filter = MappingCharFilter::from_json(params.as_object().unwrap()).unwrap();
+        let trie = &filter.trie;
+        // 甲 and 申 share their first two UTF-8 bytes.
+        assert_eq!(trie.edges.len(), 4);
+        assert_eq!(
+            trie.longest_match(&format!("{prefix}申")),
+            Some((prefix.len() + 3, "b"))
+        );
+        assert_eq!(
+            trie.longest_match(&format!("{prefix}田")),
+            Some((prefix.len(), "c"))
+        );
     }
 
     #[test]
