@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -686,9 +688,8 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
 	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(merr.WrapErrServiceInternal("mocked")).Once()
 
-	suite.Panics(func() {
-		suite.manager.HandleNodeDown(ctx, 1)
-	})
+	suite.ErrorIs(suite.manager.HandleNodeDown(ctx, 1), merr.ErrServiceInternal)
+	suite.Equal("rg1", suite.manager.GetResourceGroupByNodeID(1))
 }
 
 func (suite *ResourceManagerSuite) TestUnassignRetriesTransientEtcdError() {
@@ -1322,6 +1323,23 @@ func TestResourceManager_CheckNodesInResourceGroup(t *testing.T) {
 	assert.Contains(t, finalNodes, int64(1003), "New node should be added")
 }
 
+func TestCheckNodesInResourceGroupCleansFilteredOfflineMember(t *testing.T) {
+	ctx := t.Context()
+	manager := createTestResourceManager(t)
+	cfg := newResourceGroupConfig(1, 1)
+	cfg.NodeFilter = &rgpb.ResourceGroupNodeFilter{NodeLabels: []*commonpb.KeyValuePair{{Key: "zone", Value: "a"}}}
+	// Recreate the persisted membership before discovering any live sessions.
+	rg := NewResourceGroup("filtered", cfg, manager.nodeMgr).CopyForWrite()
+	rg.AssignNode(42)
+	manager.setupInMemResourceGroup(rg.ToResourceGroup())
+	require.Empty(t, manager.groups["filtered"].GetNodes())
+	require.Equal(t, "filtered", manager.GetResourceGroupByNodeID(42))
+
+	manager.CheckNodesInResourceGroup(ctx)
+	require.Empty(t, manager.groups["filtered"].GetAllNodes())
+	require.Empty(t, manager.GetResourceGroupByNodeID(42))
+}
+
 // TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy tests CheckNodesInResourceGroup with all healthy nodes
 func TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy(t *testing.T) {
 	// Arrange
@@ -1635,4 +1653,105 @@ func (suite *ResourceManagerSuite) TestSetupInMemResourceGroup_NodeIDMapCleanup(
 	suite.Equal("rg1", suite.manager.nodeIDMap[1])
 	_, exists := suite.manager.nodeIDMap[2]
 	suite.False(exists, "nodeIDMap should not contain node 2 after it was removed from rg1")
+}
+
+func TestReconcileNodeRemovalAfterLostReply(t *testing.T) {
+	paramtable.Init()
+	nodes := session.NewNodeManager()
+	manager := NewResourceManager(querycoord.NewCatalog(nil), nodes)
+	var persisted []int64
+	var loseReply bool
+	save := mockey.Mock(querycoord.Catalog.SaveResourceGroup).To(func(_ querycoord.Catalog, _ context.Context, groups ...*querypb.ResourceGroup) error {
+		persisted = groups[0].GetNodes()
+		if loseReply {
+			return merr.WrapErrIoFailedErr(context.DeadlineExceeded, "save resource group")
+		}
+		return nil
+	}).Build()
+	defer save.UnPatch()
+
+	ctx := t.Context()
+	node := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10})
+	nodes.Add(node)
+	manager.HandleNodeUp(ctx, 10)
+	require.Equal(t, []int64{10}, persisted)
+
+	nodes.Remove(10)
+	loseReply = true
+	require.ErrorIs(t, manager.HandleNodeDown(ctx, 10), context.DeadlineExceeded)
+	require.Empty(t, persisted, "the removal committed before its response was lost")
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(10))
+
+	nodes.Add(node)
+	manager.HandleNodeUp(ctx, 10)
+	loseReply = false
+	require.NoError(t, manager.ReconcileNodeRemovals(ctx, DefaultResourceGroupName))
+	require.Equal(t, []int64{10}, persisted)
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(10))
+}
+
+func TestReconcileNodeRemovalAfterResourceGroupSwap(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	const (
+		source         = "source"
+		target         = "destination" // Published before source when swap groups are sorted by name.
+		departed int64 = 10
+		spare    int64 = 11
+	)
+	nodes := session.NewNodeManager()
+	catalog := metastoremocks.NewQueryCoordCatalog(t)
+	persisted := make(map[string][]int64)
+	var saveErr error
+	save := func(_ context.Context, groups ...*querypb.ResourceGroup) error {
+		if saveErr == nil {
+			for _, group := range groups {
+				persisted[group.GetName()] = group.GetNodes()
+			}
+		}
+		return saveErr
+	}
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).RunAndReturn(save)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(save)
+	catalog.EXPECT().RemoveResourceGroup(mock.Anything, source).Return(nil).Once()
+	manager := NewResourceManager(catalog, nodes)
+	require.NoError(t, manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		source: newResourceGroupConfig(1, 1),
+		target: newResourceGroupConfig(0, 0),
+	}))
+	for _, id := range []int64{departed, spare} {
+		nodes.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: id}))
+		manager.HandleNodeUp(ctx, id)
+	}
+	require.Equal(t, source, manager.GetResourceGroupByNodeID(departed))
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(spare))
+
+	nodes.Remove(departed)
+	saveErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+	require.Error(t, manager.HandleNodeDown(ctx, departed))
+	swap := map[string]*rgpb.ResourceGroupConfig{
+		source: newResourceGroupConfig(0, 0),
+		target: newResourceGroupConfig(1, 1),
+	}
+	require.Error(t, manager.AlterResourceGroups(ctx, swap))
+	require.Equal(t, source, manager.GetResourceGroupByNodeID(departed))
+
+	saveErr = nil
+	require.NoError(t, manager.AlterResourceGroups(ctx, swap))
+	require.Equal(t, []int64{departed}, persisted[target])
+	require.NoError(t, manager.RemoveResourceGroup(ctx, source))
+
+	saveErr = merr.WrapErrServiceUnavailableMsg("catalog unavailable")
+	require.Error(t, manager.ReconcileNodeRemovals(ctx, target))
+	require.Equal(t, target, manager.GetResourceGroupByNodeID(departed))
+	require.Equal(t, []int64{departed}, persisted[target])
+
+	saveErr = nil
+	require.NoError(t, manager.ReconcileNodeRemovals(ctx, target))
+	require.Empty(t, persisted[target])
+	require.Empty(t, manager.GetResourceGroupByNodeID(departed))
+	require.NoError(t, manager.AutoRecoverResourceGroup(ctx, target))
+	require.NoError(t, manager.MeetRequirement(ctx, target))
+	require.Equal(t, []int64{spare}, persisted[target])
+	require.Equal(t, []int64{spare}, manager.GetResourceGroup(ctx, target).GetAllNodes())
 }

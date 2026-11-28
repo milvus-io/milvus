@@ -336,7 +336,9 @@ func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeReques
 		return merr.Status(err), nil
 	}
 
-	s.meta.HandleNodeDown(ctx, req.GetNodeID())
+	if err := s.meta.HandleNodeDown(ctx, req.GetNodeID()); err != nil {
+		return merr.Status(merr.Wrap(err, errMsg)), nil
+	}
 	return merr.Success(), nil
 }
 

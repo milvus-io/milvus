@@ -785,7 +785,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.HandleNodeDown(context.Background(), node)
+	_ = s.meta.HandleNodeDown(s.ctx, node) // The resource observer retries failed removals.
 
 	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
@@ -797,7 +797,7 @@ func (s *Server) handleNodeStopping(node int64) {
 	s.nodeMgr.Stopping(node)
 
 	// mark node as stopping in resource manager
-	s.meta.HandleNodeStopping(context.Background(), node)
+	s.meta.HandleNodeStopping(s.ctx, node)
 
 	// trigger checker to check stopping node
 	s.checkerController.Check()
