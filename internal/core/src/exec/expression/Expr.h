@@ -461,6 +461,21 @@ class Expr : public std::enable_shared_from_this<Expr> {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
+    void
+    SetLogicalExpression(expr::TypedExprPtr logical) {
+        logical_expression_ = std::move(logical);
+    }
+
+    ExprCacheSignature
+    CacheSignature() const {
+        if (logical_expression_) {
+            return logical_expression_->CacheSignature();
+        }
+        // Directly constructed physical expressions (e.g. backend tests).
+        std::call_once(signature_once_, [this] { signature_ = ToString(); });
+        return signature_;
+    }
+
     // check if this expression can be executed all at once without batch iteration.
     virtual bool
     CanExecuteAllAtOnce() const {
@@ -507,6 +522,18 @@ class Expr : public std::enable_shared_from_this<Expr> {
             }
         }
         return true;
+    }
+
+    // Per-node result-cache policy copied from the logical expression.
+    // Backend enablement and raw-adapter support are checked separately.
+    void
+    SetResultCacheAllowed(bool allowed) {
+        result_cache_allowed_ = allowed;
+    }
+
+    bool
+    IsResultCacheAllowed() const {
+        return result_cache_allowed_;
     }
 
     virtual bool
@@ -565,6 +592,10 @@ class Expr : public std::enable_shared_from_this<Expr> {
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
     bool has_offset_input_ = false;
+    bool result_cache_allowed_{true};
+    expr::TypedExprPtr logical_expression_;
+    mutable std::once_flag signature_once_;
+    mutable ExprCacheSignature signature_;
 };
 
 using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
@@ -870,13 +901,12 @@ class SegmentExpr : public Expr {
         return false;
     }
 
-    std::string
+    ExprCacheSignature
     GetSignatureForRawExprCache() const {
         // Null-rejecting scans may omit validity for skipped chunks. Keep
         // their entries separate from evaluations that must preserve UNKNOWN,
         // and namespace both modes away from other execution paths' keys.
-        return fmt::format(
-            "raw:null_rejecting={}:{}", null_rejecting_, ToString());
+        return CacheSignature().Derive(null_rejecting_ ? 2 : 1);
     }
 
     void
@@ -1202,11 +1232,12 @@ class SegmentExpr : public Expr {
 
     bool
     HasExprCacheIdentity() const {
-        return ExprCacheHelper::HasCacheIdentity(segment_, snapshot_);
+        return IsResultCacheAllowed() &&
+               ExprCacheHelper::HasCacheIdentity(segment_, snapshot_);
     }
 
     ExprResCacheManager::Key
-    MakeExprCacheKey(std::string signature) const {
+    MakeExprCacheKey(ExprCacheSignature signature) const {
         return ExprCacheHelper::MakeKey(
             segment_, snapshot_, std::move(signature));
     }
@@ -1225,7 +1256,7 @@ class SegmentExpr : public Expr {
             if (!manager.CanCacheSegment(segment_->type())) {
                 return;
             }
-            auto key = MakeExprCacheKey(this->ToString());
+            auto key = MakeExprCacheKey(CacheSignature());
             ExprResCacheManager::Value got;
             got.active_count = active_count_;
             if (manager.Get(key, got)) {
@@ -1256,7 +1287,7 @@ class SegmentExpr : public Expr {
             if (!manager.CanCacheSegment(segment_->type())) {
                 return;
             }
-            auto key = MakeExprCacheKey(this->ToString());
+            auto key = MakeExprCacheKey(CacheSignature());
             ExprResCacheManager::Value v;
             v.result = cached_index_chunk_res_;
             v.valid_result = cached_index_chunk_valid_res_;
@@ -1461,9 +1492,8 @@ class SegmentExpr : public Expr {
                    int64_t(cached_index_chunk_valid_res_->size()) ==
                        active_count_) {
             current_index_chunk_pos_ += cached_index_chunk_res_->size();
-            return std::make_shared<ColumnVector>(
-                std::move(*cached_index_chunk_res_),
-                std::move(*cached_index_chunk_valid_res_));
+            return ExprCacheHelper::MoveToColumn(cached_index_chunk_res_,
+                                                 cached_index_chunk_valid_res_);
         } else {
             const auto data_pos = current_index_chunk_pos_;
             const auto size = std::min(active_count_ - data_pos, batch_size_);
@@ -3362,9 +3392,9 @@ class SegmentExpr : public Expr {
             cached_is_nested_index_ = selected_element_level_result_;
 
             auto cached = ExprCacheHelper::GetOrCompute(
-                segment_,
+                IsResultCacheAllowed() ? segment_ : nullptr,
                 snapshot_,
-                [this]() { return this->ToString(); },
+                [this]() { return CacheSignature(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
                     TargetBitmap res = func(predicate, values...);
@@ -3428,7 +3458,8 @@ class SegmentExpr : public Expr {
                             }
                             return validity;
                         };
-                        if (ExprResCacheManager::IsEnabled()) {
+                        if (IsResultCacheAllowed() &&
+                            ExprResCacheManager::IsEnabled()) {
                             auto validity = ExprCacheHelper::GetOrComputeBitmap(
                                 segment_,
                                 snapshot_,
@@ -4270,7 +4301,7 @@ class SegmentExpr : public Expr {
 
     // Record the execution path DetermineExecPath() chose, once per
     // expression per segment. Determined is not always executed: a later
-    // whole-filter cache hit or a conjunction that runs out of rows can skip
+    // leaf cache hit or a conjunction that runs out of rows can skip
     // the evaluation. The report counts feature use, so that only affects
     // how often, never whether.
     void

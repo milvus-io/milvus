@@ -4,7 +4,8 @@
 - **Author(s):** @luzhang
 - **Status:** Under Review
 - **Component:** QueryNode / Segcore
-- **Related Issues:** N/A
+- **Related Issues:** #55658
+- **Follow-up design:** [sealed leaf cache, disk lifetime, signatures and selective reads](20261118-expression-cache-followups.md)
 - **Released:** N/A
 
 ## Summary
@@ -46,7 +47,7 @@ Recomputing the same bitmap wastes CPU and increases tail latency. Caching the f
 
 - Sharing cache entries across QueryNodes.
 - Persisting disk cache files across process restarts or config rebuilds.
-- Supporting growing segments in disk mode.
+- Supporting growing segments in either backend.
 - Caching final search results or vector-search intermediate results.
 - Replacing specialized scalar, text, JSON, or vector indexes.
 
@@ -66,7 +67,6 @@ queryNode:
     memory:
       maxBytes: 268435456
       compressionEnabled: true
-      enableGrowing: false
     disk:
       maxBytes: 10737418240
       maxFileSizeBytes: 268435456
@@ -81,8 +81,7 @@ queryNode:
 | `queryNode.exprCache.materialization.maxBytes` | `268435456` | yes | Maximum heap bytes retained by decoded cache-hit bitmap pairs and RawData miss-capture pairs across both storage modes. |
 | `queryNode.exprCache.memory.maxBytes` | `268435456` | yes | Maximum memory budget for memory mode. |
 | `queryNode.exprCache.memory.compressionEnabled` | `true` | yes | Enable adaptive bitmap compression in memory mode. |
-| `queryNode.exprCache.memory.enableGrowing` | `false` | yes | Allow memory mode to cache eligible growing-segment snapshots. Text-index expressions remain excluded. |
-| `queryNode.exprCache.disk.maxBytes` | `10737418240` | yes | Maximum logical used-slot disk budget for disk mode. |
+| `queryNode.exprCache.disk.maxBytes` | `10737418240` | yes | Maximum reserved header/allocated-slot bytes, including reader-held detached files. |
 | `queryNode.exprCache.disk.maxFileSizeBytes` | `268435456` | yes | Maximum cache file size per sealed segment in disk mode. |
 
 ### C API
@@ -97,7 +96,6 @@ void SetExprResCacheConfig(const char* mode,
                            int64_t materialization_max_bytes,
                            int64_t mem_max_bytes,
                            bool compression_enabled,
-                           bool mem_enable_growing,
                            int32_t admission_threshold,
                            int64_t mem_min_eval_duration_us,
                            int64_t disk_max_bytes,
@@ -112,7 +110,7 @@ void SetExprResCacheConfig(const char* mode,
 ```cpp
 struct Key {
     int64_t segment_id;
-    std::string signature;
+    ExprCacheSignature signature; // XXH3-128 + shared canonical identity
     ExprCacheGenerationPtr generation;
 };
 
@@ -145,7 +143,8 @@ void PutAdmitted(const Key& key,
                  const Value& value,
                  const AdmissionTicket& ticket);
 void Clear();
-size_t EraseSegment(int64_t segment_id);
+RetiredGeneration RetireGeneration(int64_t segment_id,
+                                   const ExprCacheGenerationPtr& generation);
 bool SetConfig(const CacheConfig& config);
 ```
 
@@ -164,7 +163,7 @@ Expression execution
   |
   | ExprCacheHelper::GetOrCompute
   | SegmentExpr::TryCacheGet / CachePut
-  | FilterBitsNode whole-filter cache
+  | RawExprCacheAdapter
   v
 ExprResCacheManager
   |
@@ -186,11 +185,17 @@ ExprResCacheManager
 
 The external cache key is `(segment_id, generation, expression_signature)`.
 Sealed queries take `generation` from their pinned `SegmentReadSnapshot`;
-missing snapshots bypass caching. Growing segments retain generation zero and
-the existing active-count checks. `MATCH` signatures include the complete child
+missing snapshots and growing segments bypass caching. Manager entries without
+a live snapshot token are rejected. `MATCH` signatures include the complete child
 predicate as well as struct name, match type, and count.
 
-The expression signature is normally `expr->ToString()` or `this->ToString()`. It must include every parameter that can affect the result:
+The expression signature retains a shared immutable canonical input alongside
+its XXH3-128 hash, lazily memoized with `call_once` on the logical expression and
+reused across segment executions. Most leaves use `ToString()`; IN signatures
+sort and deduplicate typed serialized values without changing evaluation order.
+Hashes locate candidate entries, but equality checks the full canonical input
+and derivation domains. Hash collisions cannot by themselves establish a hit.
+The signature input must include every parameter that can affect the result:
 
 - field id,
 - operator type,
@@ -200,13 +205,12 @@ The expression signature is normally `expr->ToString()` or `this->ToString()`. I
 - match options,
 - query-time context when relevant.
 
-RawData adapters use
-`raw:null_rejecting=<true|false>:<leaf ToString()>`. The leaf's null-rejection
-mode is part of the signature because a null-rejecting scan may omit validity
-for skipped chunks. `ExprSet` propagates this mode before prefetch or evaluation;
-propagation stops at `NOT`. Lookup, frequency admission, and insertion use the
-same mode-specific key. Both modes have an explicit RawData prefix, separating
-them from other execution paths and earlier keys that omitted this distinction.
+RawData adapters derive a domain-specific hash from the logical signature and
+null-rejection mode, retaining both the shared canonical input and the complete
+domain sequence for exact comparison. A null-rejecting scan may omit validity for skipped chunks;
+its identity must differ from a scan preserving UNKNOWN and from index results.
+`ExprSet` propagates the mode before prefetch/evaluation and stops at `NOT`.
+Lookup, admission and insertion use the same derived identity.
 
 The cached value stores:
 
@@ -227,20 +231,12 @@ If `active_count` mismatches, the entry is treated as stale and the request fall
 
 Memory mode uses `EntryPool`.
 
-It always supports sealed segments. Growing-segment caching is opt-in through
-`queryNode.exprCache.memory.enableGrowing`, which defaults to `false`.
-Internally, `EntryPool` keys entries by:
-
-- segment id,
-- signature hash,
-- full signature.
-
-The active count is entry metadata used for staleness validation rather than
-part of the hash key. A put for the same segment and signature replaces the
-previous snapshot only when its active count is not older. This prevents an
-out-of-order growing query from overwriting a newer snapshot. The memory
-backend indexes at most one snapshot for that expression. An ongoing lookup
-may still hold the previous snapshot until its decode finishes.
+Both backends require sealed snapshot generations. `EntryPool` keys contain
+segment id, generation, a 128-bit hash and shared exact signature storage. Active
+count remains entry metadata for defensive shape validation. The memory budget
+conservatively charges the full retained key per entry, even when its string is
+shared; replacing an entry charges the capacity of the map key that survives. In-flight readers can retain a
+replaced immutable payload until their last use.
 
 Memory mode stores payloads in heap memory. `CacheCompressor` independently
 chooses the encoding for each of the result and validity bitmaps:
@@ -272,8 +268,13 @@ uses Roaring; they need no intermediate payload copy.
 Decoding writes Roaring containers directly into the output bitmap: bitmap
 containers are copied, array containers set their positions, and run containers
 set their ranges. It never expands all set positions into a temporary row-id
-array. The materialization budget reserves the two output bitmaps; temporary
-Roaring objects created by deserialization are not included in that reservation.
+array. Roaring payloads use the portable serialization format. Each immutable
+EntryPool payload validates its bytes once and retains a read-only container
+index pointing into the serialized buffer. Full decode reuses this index without
+constructing CRoaring objects or copying containers. Serialized container values
+use unaligned-safe loads. View vector capacities are charged to memory.maxBytes,
+and remain charged with the payload through its last reader. The materialization
+budget reserves only the produced result/validity bitmaps.
 
 Each entry owns an immutable payload through `shared_ptr<const Payload>`.
 The payload contains the row count, encoding, compressed bytes, and its memory
@@ -283,12 +284,12 @@ state lock before reserving output capacity and decoding. No compressed
 buffer copy is needed on a hit.
 
 Eviction uses an intrusive doubly linked Clock ring. Each entry links to its
-neighbors and points to the key owned by its hash-map node; the full signature
-is stored and charged once. Inserts and erases update only the affected links,
+neighbors and points to the key owned by its hash-map node. Inserts and erases update only the affected links,
 and replacement retains the node and its Clock position. Hash-map rehashing
 preserves key addresses. Lookups update an atomic usage counter; puts take the
 exclusive index lock. Clock skips payloads held by readers, since removing
-their entries would not immediately free memory. A bounded sweep temporarily
+their entries would not immediately free memory. A sweep examines at most
+3072 entries (including second-chance visits), independent of cache size. It temporarily
 moves candidates to another ring using the same links, without allocating a
 key snapshot. It checks their combined reclaimable bytes against the shared
 budget and removes them only if the put can fit; otherwise it rejoins the
@@ -305,7 +306,8 @@ entries immediately; old readers can finish without accessing the retired
 pool. The buffer is freed before its charge is returned. Lowering capacity
 does not cancel existing readers, but prevents new entries from exceeding the
 new limit. This is a retained-payload budget, not a bound on total process RSS
-or temporary compression/deserialization allocations.
+or temporary compression allocations during insertion. Retained read-view metadata
+is included; cache-hit reads do not allocate temporary Roaring containers.
 
 ### 4. Disk Backend
 
@@ -320,39 +322,61 @@ File layout:
 Slot layout:
 
 ```text
-[SlotHeader 17B][raw result bitmap][raw valid bitmap]
+[SlotHeader 25B][raw result bitmap][raw valid bitmap]
 ```
 
 Each segment owns one cache file:
 
 ```text
-<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>.cache
+<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>_p<pid>_<process_nonce>_<file_sequence>.cache
 ```
 
-Disk files are temporary process-local cache files. Signature-to-slot metadata is kept in memory, so old `.cache` files are removed when disk config is applied or rebuilt.
+The in-memory slot index retains the exact canonical identity and derivation
+domains, and verifies them before selecting a slot. The header hash is an
+additional check; it is not the sole expression identity. Colliding signatures
+can occupy distinct slots. Disk files are temporary and never restored.
+Config rebuild detaches current
+files and cleans abandoned files outside manager locks. Unique process/file
+identities prevent delayed cleanup from deleting a replacement file; files
+retained by in-flight readers are closed and deletion is attempted by their last
+owner. Unlink failure is logged with the path and errno, without retry; destruction
+still releases the reservation. Leftovers therefore fall outside the cache budget.
 
 Never-used slots are allocated incrementally with a cursor. The free-slot list
 stores only recycled IDs, so its memory does not scale with the file's maximum
-slot count. Allocation reuses a recycled ID first and runs Clock eviction only
-when no recycled or never-used slots remain.
+slot count. Allocation reuses a recycled ID first. Clock eviction supplies a slot
+when the file is full, or when the global budget cannot charge a new slot.
 
 If the same segment later appears with a different row count, the fixed slot file no longer matches the bitmap shape. The manager removes the file and marks the segment ineligible for disk caching until the segment or config is reset.
 
 Disk mode has two size limits:
 
 - `queryNode.exprCache.disk.maxFileSizeBytes` limits one sealed segment file and determines how many fixed slots the segment file can hold.
-- `queryNode.exprCache.disk.maxBytes` limits total logical used-slot bytes across disk cache files. The budget counts `FileHeader + used_slots * slot_size`, not the full preallocated file capacity.
+- `queryNode.exprCache.disk.maxBytes` limits reserved header/allocated-slot bytes across live disk cache files, including detached files. Each file retains `FileHeader + charged_slots * slot_size` until destruction, including staging/recycled slots that may retain disk blocks. Sparse preallocated capacity and filesystem block rounding are not included. Zero preserves the unlimited-budget configuration.
 
-Within one `DiskSlotFile`, slot eviction uses Clock. Across segment files, `Get` hits and `Put` writes touch a segment-level Clock usage counter. After a disk `Put`, the manager checks total used-slot bytes. If usage exceeds `disk.maxBytes`, it scans segment files with a second-chance Clock policy and evicts whole segment files whose usage counter has decayed to zero, skipping the segment that was just written.
+Within one `DiskSlotFile`, slot eviction uses Clock. Across segment files, `Get`
+hits and `Put` writes touch a segment-level Clock usage counter. Before writing a
+header or previously uncharged slot, the writer reserves capacity from a shared
+budget. On exhaustion the manager detaches Clock victims other than the writing
+segment, destroys them outside its locks, and retries. Reader/writer-held files
+are skipped and keep their reservations. If growth still fails, the writing file
+reuses a free charged slot, or evicts a local Clock victim for a new expression.
+This reuse neither grows nor releases the reservation. The file's exclusive lock
+waits for active reads before unpublishing a victim; its slot is overwritten only
+afterward. An update to an existing expression is skipped if no charged staging
+slot is available, preserving its old result. Partial/failed writes keep their
+slot reservation until file destruction and return the slot for reuse.
+The shared budget survives Clear, retirement and backend/configuration rebuilds.
+Shrinking below retained usage blocks growth until enough owners release it.
 
-Disk puts complete segment-level Clock registration before creating a segment
-file or writing a slot. If registration allocation fails, no file is created
-and no slot is written. A new file remains provisional until its first slot
-write completes: exceptions and empty writes caused by open/pwrite failures
-remove both the new file and its Clock registration. Cleanup reuses the
-prepared path without allocating another path string. Failed puts into an
-existing file retain that file's Clock registration, so it remains eligible
-for global eviction.
+Global manager locks cover metadata only. A file is created outside those locks
+and registered after its config epoch and generation are rechecked. Readers
+retain shared file ownership and release manager locks before taking a file lock.
+Writers serialize per file, reserve an unpublished slot, release the file index
+lock for pwrite, then publish under that lock. Replacement retains its old slot
+until success and is skipped when no staging slot exists. New empty/failed files
+are detached; delayed writes cannot republish a retired generation or modify a
+replacement backend. Detachment/eviction releases the last owner outside locks.
 
 ### 4.1 Full-Bitmap Materialization Budget
 
@@ -365,7 +389,8 @@ Each backend first finds the matching entry or slot and checks its active
 count under a shared lock. Missing or stale entries return `Miss` without
 reserving bitmap capacity or allocating a result holder. Memory lookup retains
 an immutable payload reference and releases both manager and pool locks;
-disk lookup retains its locks to protect slot metadata and file access.
+disk lookup retains the file owner and uses only its per-file shared lock
+during pread. Prefetch retains a metadata handle without allocating bitmaps.
 Immediately before decoding or reading the value, the manager
 reserves `2 * ceil(active_count / 64) * 8` bytes for the result/validity pair
 and allocates its holder. The reservation is non-blocking. If it would exceed
@@ -383,12 +408,19 @@ adapter evaluates normally one batch at a time but neither decodes a cache hit
 nor captures a full-segment miss. Allocation and exception paths destroy the
 buffers before releasing the reservation.
 
-The compressed payload reference is released when decoding finishes; returned
-bitmaps own only their materialization reservation. Exceptions release the
-lookup's payload reference and materialization reservation through ownership
+Returned bitmaps own their materialization reservation. Raw adapters retain the
+complete decoded pair for later batches, releasing the backend handle after
+materialization. Exceptions release the lookup's payload reference and materialization reservation through ownership
 cleanup. The storage reservation remains while the payload is still indexed
 or held by another reader. Neither reservation's release path acquires the
 manager or pool lock.
+
+Offset inputs also require a complete cached pair and its full materialization
+reservation. Subsequent batches gather positions from the private in-memory
+bitmaps, preserving caller order and duplicates. Disk reads fetch the header
+and both complete bitmaps once; no per-word disk read path remains. A sequential
+batch covering the entire segment moves the private pair into its output, retaining
+the lease with that output rather than copying the bitmap buffers.
 
 ### 5. Admission Control
 
@@ -404,12 +436,10 @@ admission is enabled, every 10,000 admission records trigger a synchronous
 scan that halves all counters. The decay interval is independent of the slot
 count, keeping old observations from accumulating as the table grows.
 
-Existing signatures do not trigger a secondary cache scan or bypass latency
-admission. A growing snapshot with a different active row count has its own
-frequency hash; an admitted replacement still has to satisfy the latency
-threshold. The bounded frequency tracker is approximate: hash-slot collisions
-can share counters, as before. The storage key remains `(segment_id, signature)`
-and retains only one snapshot per expression.
+Existing keys do not bypass admission. The bounded tracker is approximate:
+hash-slot collisions can share counters. Hashes combine segment id, generation,
+the 128-bit hash and active count; exact storage identity also checks canonical
+input and domains, but excludes active count.
 
 ### 6. Dynamic Refresh Semantics
 
@@ -431,8 +461,8 @@ When thresholds such as `admissionThreshold` or `minEvalDurationUs` change, exis
 The common integration path is `ExprCacheHelper::GetOrCompute`:
 
 1. Check whether cache is enabled and the segment is eligible.
-2. Reject growing segments unless memory-mode growing caching is enabled.
-3. Build the `(segment_id, signature)` key.
+2. Reject growing segments, missing snapshots and non-cacheable system TTL predicates.
+3. Reuse the logical signature to form `(segment_id, generation, signature)`.
 4. Attempt cache `Get`.
 5. On miss, compute the full-segment bitmap.
 6. Measure evaluation duration when cache admission may need it.
@@ -442,10 +472,9 @@ For Volcano-style batched expressions, `BatchedCachedMixin` loads or computes th
 
 #### Current sub-expression support
 
-This subsection describes the process-level sub-expression cache controlled by
-`queryNode.exprCache`. It intentionally excludes the two-stage whole-filter
-cache in `FilterBitsNode`, which is described separately in
-[Relationship with Two-Stage FilterBits Cache](#13-relationship-with-two-stage-filterbits-cache).
+This subsection describes the process-level leaf cache controlled by
+`queryNode.exprCache`. Two-stage search uses this same cache, as described in
+[Two-Stage Search and Entity TTL](#13-two-stage-search-and-entity-ttl).
 
 The current implementation is not a generic cache around every expression
 evaluator. It is integrated only into execution paths that produce a reusable
@@ -457,7 +486,7 @@ execution paths below.
 |----------------|------------------------|---------------------------|
 | Scalar index, including JSON path indexes | `UnaryRangeExpr` (comparisons, supported string pattern operations, and indexed array equality), `BinaryRangeExpr`, `TermExpr`, `JsonContainsExpr` (`Contains`, `ContainsAny`, and `ContainsAll`), JSON `ExistsExpr`, and the scalar-index branches of `BinaryArithOpEvalRangeExpr` and `TimestamptzArithCompareExpr` | The concrete scalar index must accept the operator. The generic integration covers normal scalar indexes and compatible JSON flat/path indexes. An operator rejected by `ShouldUseOp` or an incompatible JSON path/type may fall back to `RawData`; it then participates only when it is in the RawData adapter's supported scope. NGRAM is explicitly routed to its own execution path. |
 | JSON statistics | JSON `UnaryRangeExpr`, `BinaryRangeExpr`, `TermExpr`, all implemented `JsonContainsExpr` variants, and `ExistsExpr` | Sealed segments only. `plan_options.expr_use_json_stats` must be enabled, JSON stats must exist, and the nested path must be non-empty and contain no numeric path component. |
-| Text index | `TextMatch`, `PhraseMatch`, and `TextMatchFuzzy` in `UnaryRangeExpr` | Uses `segment->GetTextIndex()`. Sealed segments only in both memory and disk modes. Growing text-index results bypass cache reads and writes even when `memory.enableGrowing=true`. |
+| Text index | `TextMatch`, `PhraseMatch`, and `TextMatchFuzzy` in `UnaryRangeExpr` | Uses `segment->GetTextIndex()`. Sealed segments only in both memory and disk modes. Growing text-index results bypass cache reads and writes. |
 | RawData, including scans assisted by `SkipIndex` | Row-level `UnaryRangeExpr`, `BinaryRangeExpr`, `TermExpr`, `BinaryArithOpEvalRangeExpr` (primitive scalars, JSON, and ARRAY), `JsonContainsExpr` (JSON and ARRAY contains/any/all), JSON `ExistsExpr`, and `TimestamptzArithCompareExpr` | The resolved path must be `RawData`. Element-level output, VECTOR_ARRAY arithmetic, text-index operators, and NGRAM execution remain unsupported. A miss is inserted only after contiguous, unmasked full-segment coverage. |
 
 The following paths do **not** currently write or read sub-expression entries:
@@ -496,27 +525,12 @@ must both be considered:
 | Scalar / JSON path index | yes | no current production path | yes | no |
 | JSON statistics | yes | no | yes | no |
 | Text index | yes | no | yes | no |
-| Eligible row-level RawData, with or without `SkipIndex` assistance | yes | opt-in | yes | no |
+| Eligible row-level RawData, with or without `SkipIndex` assistance | yes | no | yes | no |
 | PK / NGRAM / GIS and other excluded paths | no | no | no | no |
 
-Memory mode can store one growing-segment snapshot per segment and signature
-when `queryNode.exprCache.memory.enableGrowing=true`. Growing segments expose
-interim indexes through `HasIndex()` only for vector and geometry fields,
-growing segments do not expose JSON path indexes, and the geometry execution
-path does not use the expression cache. Vector indexes are outside scalar
-filter-expression caching. Consequently, excluding the whole-filter cache,
-the currently effective opt-in growing-segment users are the eligible RawData
-expressions. `TextMatch`, `PhraseMatch`, and `TextMatchFuzzy` bypass growing
-cache reads and writes: commit/reload can change text-index visibility without
-changing `active_count`, so row-count validation cannot detect stale results.
-Their per-request bitmap reuse across batches remains unchanged.
-
-Disk mode rejects growing segments before lookup or insertion. It can cache any
-of the integrated scalar-index, JSON-statistics, text-index, or eligible
-RawData expressions when the source segment is sealed.
-
-Whole-filter reuse through `FilterBitsNode` is an additional integration point,
-but it is not included in either table above.
+Both backends reject growing segments before lookup or insertion. Scalar-index,
+JSON-statistics, text-index and eligible RawData expressions can use the sealed
+leaf cache. Two-stage requests can additionally use whole-filter caching.
 
 #### RawData and SkipIndex integration
 
@@ -524,7 +538,8 @@ but it is not included in either table above.
 
 This implementation extends the memory and disk expression-cache modes to selected
 row-level `SegmentExpr` implementations whose resolved execution path is
-`ExprExecPath::RawData`. It does not change the two-stage whole-filter cache.
+`ExprExecPath::RawData`. Two-stage search can read these leaf entries, while
+requesting whole-filter caching and suppressing raw leaf writes.
 It also does not cache `SkipIndex` decisions. The reusable artifact remains the
 complete expression result for `[0, active_count)`: one result bitmap and one
 validity bitmap, interpreted under the null-rejection mode recorded in the key.
@@ -538,8 +553,9 @@ The main constraints are:
 - avoid raw-data prefetch and all raw/SkipIndex work on a cache hit;
 - write an entry only after one expression instance has observed every row's
   unmasked result in contiguous order;
-- keep cache lookup enabled when a request disables sub-expression writes;
-  read-only misses must not enter admission or allocate capture bitmaps;
+- retain an internal read-only adapter policy for callers that disable writes;
+  ordinary requests enable raw leaf writes; two-stage requests suppress them
+  to favor whole-filter entries;
 - keep the cache best-effort: lookup, capture, admission, or storage failures
   must fall back to the normal raw path;
 - when expression cache is disabled, preserve the original expression objects
@@ -556,12 +572,12 @@ ExprSet construction, after normal compilation and optimization
 Driver prefetch
   -> cache adapter determines the wrapped expression's execution path
   -> RawData + eligible: adapter looks up the expression cache
-       -> hit: retain the full result/validity bitmaps; do not prefetch raw data
+       -> hit: retain a metadata read handle; do not prefetch raw data
        -> miss: delegate to the wrapped expression's existing raw-data prefetch
 
 Eval
   -> adapter repeats the lookup lazily when the caller did not run prefetch
-  -> hit: slice the next batch, or gather requested offsets
+  -> hit: decode on demand; move a whole batch, slice batches, or read requested bits
   -> miss: delegate to the existing RawData evaluator, including SkipIndex
            -> writes enabled: passively append the returned unmasked batch
               and put only after exact full-segment coverage
@@ -578,7 +594,7 @@ physical expression, not as cache code embedded in every `SegmentExpr`. After
 normal expression optimization, `CompileExpressions()` samples the process
 cache enable flag once. If it is false, it returns immediately without walking
 or rewriting the expression tree. If it is true, a decoration pass wraps only
-supported leaves and passes the request's write policy into each adapter. The
+supported leaves. Ordinary request compilation enables leaf writes. The internal write
 policy gates admission, capture, and put, but not lookup. This keeps dynamic
 casts and optimizer behavior unchanged and keeps the disabled Eval path
 identical to the pre-feature path.
@@ -611,7 +627,8 @@ enum class RawCacheLookupState { Unchecked, Ineligible, Miss, Hit };
 struct RawExprCacheState {
     RawCacheLookupState lookup_state{RawCacheLookupState::Unchecked};
 
-    // Full-segment value retained on a hit.
+    // Metadata retained by prefetch; a sequential hit decodes lazily.
+    ExprResCacheManager::ReadHandle reader;
     std::shared_ptr<TargetBitmap> result;
     std::shared_ptr<TargetBitmap> valid_result;
 
@@ -766,31 +783,12 @@ though it cannot be captured.
 With `admissionThreshold=2`, the first actual occurrence of a snapshot is
 observed but does not allocate capture buffers; its second occurrence receives
 an admitted ticket and may capture, subject to the frequency tracker's
-approximate counting. Observations of different growing row counts use
-different frequency hashes. `PutAdmitted()` skips the duplicate frequency check
-but retains latency admission, backend/mode eligibility, capacity checks,
-compression, and eviction.
-
-Every miss goes through frequency admission. A stale active-count snapshot does
-not bypass frequency or latency admission. An admitted snapshot replaces the
-previous memory entry only if its active count is not older.
-
-Tickets are bound to the admission hash (segment id, expression signature,
-and active count) and the manager's config epoch. `ObserveMiss()` checks segment
-eligibility and stamps the epoch under the same `state_mutex_` lock. Growing
-segments are admitted only in memory mode with growing caching enabled, even
-if the config changed after the caller's earlier eligibility check.
-`SetConfig()` increments the epoch and resets the frequency tracker;
-`PutAdmitted()` rejects a stale ticket
-or one issued for a different segment, signature, or active count. Both normal
-`Put()` and forward admission use this hash. The storage key deliberately omits
-active count so an admitted growing snapshot replaces the previous one instead
-of accumulating versions. Including active count in admission prevents a hot
-expression from automatically admitting every new growing snapshot, even when
-none of those snapshots is queried twice. Latency admission cannot be decided
-before evaluation, so it is still checked after the full accumulated duration
-is known. Remembering that a frequent expression is consistently cheap is a
-separate future optimization.
+approximate counting. `PutAdmitted()` skips only the duplicate frequency check;
+latency, shape, generation, capacity, compression and eviction checks remain.
+Tickets bind the admission hash to the config epoch. Growing segments and
+retired/missing tokens cannot receive an admitted ticket. A config refresh or
+disable/enable transition invalidates previous tickets. Latency admission still
+runs after evaluation because its full duration is not known at first admission.
 
 ##### SkipIndex behavior
 
@@ -893,7 +891,7 @@ bitmap pair into the existing memory or disk backend.
 
 | Raw result source | Memory, sealed | Memory, growing | Disk, sealed | Disk, growing |
 |-------------------|----------------|-----------------|--------------|---------------|
-| Eligible row-level RawData expression, with or without SkipIndex assistance | yes | opt-in, one validated `active_count` snapshot | yes | no |
+| Eligible row-level RawData expression, with or without SkipIndex assistance | yes | no | yes | no |
 
 This target matrix does not override expression-level exclusions or the mutable
 column restriction. Disk remains sealed-only and retains its fixed row-count
@@ -906,7 +904,7 @@ value and the work bypassed by a hit:
 
 - **Admission:** threshold 2 observes once per expression instance rather than
   once per batch; frequency hashes include segment id, signature, and active
-  count; a new growing snapshot skips full-bitmap capture until admitted;
+  count; one-off keys skip full-bitmap capture until admitted;
   never-evaluated `MoveCursor()` instances do not count; tickets reject a
   different segment, signature, active count, or config epoch; latency tests use
   synthetic durations rather than sleeps.
@@ -932,12 +930,11 @@ value and the work bypassed by a hit:
   paths; nullable ARRAY fields and out-of-bounds element arithmetic;
   JSON/ARRAY length comparisons; and timestamp interval comparisons. Check
   disabled evaluation, full-segment capture, read-only hits, offset gathers,
-  skipped/masked batches, NOT, distinct signatures, and growing snapshot
+  skipped/masked batches, NOT, distinct signatures, and sealed generation
   invalidation. Counters must prove that hits bypass the actual evaluator and
   raw prefetch. Invalid JSON arithmetic must still throw without caching.
-- **Backend/segment matrix:** memory sealed, memory growing disabled by
-  default, explicit memory growing enablement, disk sealed, and disk growing
-  rejection.
+- **Backend/segment matrix:** memory sealed, disk sealed, and growing rejection
+  in both backends.
 - **Bypassed work:** mocks or counters prove a hit does not call
   `PrefetchRawData`, `prefetch_chunks`, `chunk_data`, `get_batch_views`,
   `GetSkipIndex`, or the raw evaluator.
@@ -978,17 +975,17 @@ All online state publications pass through `PublishStateOnline`. After acquiring
 the exclusive `PublishLease` and draining old readers, it retires the previous
 token with an atomic flag and publishes the new state before releasing the
 lease. Backend detachment happens after releasing the lease, because acquiring
-the manager lock can wait for unrelated disk cache I/O. Gate acquisition failures
+backend cleanup must not hold a segment publication lease. Gate acquisition failures
 and cancellation leave the previous token and
 cache intact. Successful publications conservatively invalidate the entire
 segment generation, including schema/index-only changes. The sealed destructor
 retires its own final token; it never erases a newer instance with the same ID.
-The C API `ExprResCacheEraseLegacySegment(segment_id)` is for generation-zero/growing
-entries; sealed lifecycle cleanup uses the exact token instead.
+There is no generation-zero erase API; cleanup uses the exact sealed token.
 
 `Get`, admission, and `Put` check the atomic retirement flag under the manager
 state lock. Puts that passed the check before retirement may finish in the old
-generation; detachment takes the exclusive state lock to drain and remove them.
+generation. Disk detachment does not wait for their I/O; they retain an owner
+but cannot republish themselves. Memory detachment drains its pool operations.
 Retirement remains effective across `Clear`, config rebuild, and disable/enable
 because the flag belongs to the token rather than the cache backend. A delayed
 writer carries its original snapshot token; it cannot recreate retired entries
@@ -1001,9 +998,11 @@ Clock, and returns an allocation-free ownership chain. Disk retirement removes
 that generation's file and Clock/ineligible metadata from the manager. Payload
 and file destruction happen after both cache locks and the PublishLease are
 released. Reader-held payloads remain charged until their last owner releases
-them. Logical disk usage drops at detachment; physical unlink can finish later.
+them. Disk reservations likewise survive detachment until file cleanup finishes.
 Generation-specific filenames keep delayed cleanup from deleting a new file.
-Failed unlinks leave disposable files for directory cleanup on rebuild.
+Failed unlinks are logged without retry. Rebuild skips all current-process files,
+so it does not reclaim current-process leftovers. A later process using the same
+directory may clean them up; successful reclamation is not guaranteed.
 
 The tradeoffs are extra per-entry list links/index metadata, a shared token per
 snapshot, and cache warming after every publication. Retiring a heavily cached
@@ -1020,18 +1019,21 @@ The cache reports storage and materialization usage, and successful lookups:
 | Metric | Meaning |
 |--------|---------|
 | `internal_cache_loaded_bytes{data_type="OTHER", location="MEMORY"}` | Live compressed payload capacity plus estimated entry metadata, including reader-held retired payloads, and reserved bytes for decoded hit bitmaps and RawData capture buffers in both backends. |
-| `internal_cache_loaded_bytes{data_type="OTHER", location="DISK"}` | Current expression cache disk used-slot logical bytes. |
+| `internal_cache_loaded_bytes{data_type="OTHER", location="DISK"}` | Reserved file headers and allocated slots, including staged writes and reader-held detached files. |
 | `internal_expr_cache_hit_total` | Total successful expression cache lookups across memory and disk modes. |
 
 The shared memory budget updates the memory gauge when a payload's reservation
 is acquired or released. Clear, rebuild, config failure, and switching to disk
 do not reset charges for payloads still held by readers. `GetMemoryBytes()`
 exposes this counter even when the current backend is disk.
-`ExprResCacheManager::SyncDiskUsageMetrics` tracks the last reported disk usage
-and updates its gauge by delta.
+The shared disk budget increments its gauge on reservation and decrements it
+when the owning file is destroyed after close/unlink is attempted, including when
+unlink fails. Index detachment and backend switches do not reset this gauge.
+Failed-unlink leftovers are not charged; this is not a strict physical disk cap.
 
 `internal_expr_cache_hit_total` increments exactly once when
-`ExprResCacheManager::GetWithStatus` returns `Hit`. Misses, stale entries, and
+`ExprResCacheManager::ReadWithStatus` returns `Hit`. Metadata lookup alone does
+not increment the hit counter. Misses, stale entries, and
 materialization-budget rejections do not increment it.
 
 Decoded hit values and RawData capture buffers are accounted separately by
@@ -1063,8 +1065,8 @@ Disk usage is synchronized after:
 - `disk_clock_mutex_` for segment-level disk Clock metadata;
 - the shared compressed-payload budget mutex for short accounting updates;
 - the materialization-budget mutex for non-blocking byte reservations;
-- atomic `enabled_`;
-- atomic reported disk metric bytes.
+- the shared disk-budget mutex for reservation and gauge updates;
+- atomic `enabled_`.
 
 `Get` and `Put` re-check `IsEnabled()` after acquiring `state_mutex_`. Memory
 lookups that already acquired an immutable snapshot may finish after disable,
@@ -1075,8 +1077,9 @@ Backend concurrency:
 - `EntryPool` retains a shared index lock only while finding and retaining the
   payload. Decoding holds neither the pool lock nor the manager state lock;
   puts and erases take the exclusive pool lock.
-- `DiskSlotFile` uses a shared mutex around slot metadata and file operations.
-- Disk used-byte accounting reads `DiskSlotFile` metadata under its shared mutex.
+- `DiskSlotFile` readers hold a shared file lock during pread; writers hold a
+  separate writer mutex and publish completed slots under the index lock.
+- Disk accounting reads the shared reservation counter without acquiring file locks.
 
 ### 11. Disabled Path Performance
 
@@ -1136,32 +1139,44 @@ Failure behavior:
   cache boundary; source-of-truth expression evaluation remains outside that
   boundary and its exceptions continue to propagate normally.
 
-### 13. Relationship with Two-Stage FilterBits Cache
+### 13. Two-Stage Search and Entity TTL
 
-Expression result cache and `FilterBitsNode` cache are different cache layers.
+`FilterBitsNode` retains the existing whole-predicate bitmap cache. The two-stage
+request builders set `EnableExprCache` in both stages; stage 1 can insert the
+filtered-row bitmap and stage 2 can reuse it before vector search. This skips
+combining/evaluating the predicate tree again. Ordinary leaf entries are not
+an equivalent replacement, since masked children of a compound expression may
+not produce a cacheable full-segment result.
 
-- Expression-level cache key: a sub-expression signature, such as a TextMatch expression.
-- `FilterBitsNode` cache key: the whole filter expression plus dynamic filter context such as entity TTL physical time.
+`autoIndex.twoStageSearch.enabled` controls the two-stage algorithm (default
+false, also subject to eligibility thresholds). `queryNode.exprCache.enabled`
+controls the shared expression cache backend (default false). Whole-filter
+reuse requires both the backend and request opt-in. The two-stage algorithm
+can execute without caching; ordinary requests can use leaf caching without
+enabling two-stage search. Request/proto flags and merge compatibility checks
+are retained. Two-stage requests suppress raw/TextMatch leaf writes to avoid
+duplicating these entries with whole-filter results.
 
-Both can reuse `ExprResCacheManager`.
+Whole-filter entries use domain 3 of the memoized logical signature and include
+the TTL field and physical time when applicable. They share snapshot generation
+identity, admission, storage and materialization budgets with leaf entries.
+Hits move the private decoded pair into the output with its lease. Misses and
+budget failures evaluate the predicate normally; downstream MVCC/deletion
+visibility still applies.
 
-For two-stage search, `QueryContext` can allow whole-filter cache reads and
-writes while disabling sub-expression cache writes. This prevents caching both
-a full-filter bitmap and duplicate child-expression bitmaps for the same
-request path. Existing sub-expression entries remain readable; on a miss, the
-request evaluates normally without affecting admission or populating the
-sub-expression cache.
+Generated TTL comparison/OR nodes carry a local non-cacheable policy,
+honored by raw decoration and indexed leaf paths. This does not propagate to
+the user filter or its enclosing AND, nor disable the whole-filter cache;
+whole-filter TTL correctness relies on the dynamic context in its key.
+The stable `TTL IS NULL` child retains its default cache policy. Currently
+`PhyNullExpr` reads field/index validity without using the shared result cache;
+removing a policy restriction does not add a new cache integration.
 
 ## Correctness Guarantees
 
 - **No stale row-count reuse.** Every cache hit verifies `active_count`.
 - **Nullable correctness.** Result and validity bitmaps are cached together.
-- **Growing is opt-in.** Memory mode rejects growing segments unless
-  `queryNode.exprCache.memory.enableGrowing=true`.
-- **Growing text indexes are excluded.** Text-index expressions bypass cache
-  reads and writes regardless of `memory.enableGrowing`, because index
-  visibility can change without changing the active row count.
-- **Disk mode sealed-only.** Growing segments are rejected before disk cache usage.
+- **Sealed only.** Both backends require a live sealed snapshot generation.
 - **Best-effort fallback.** Misses and cache failures fall back to regular expression evaluation.
 - **Config changes do not reinterpret entries.** Config refresh rebuilds the backend and drops existing entries.
 
@@ -1187,13 +1202,16 @@ The feature does not change client-facing API or query semantics.
 - Disk mode segment-level Clock eviction.
 - Disk mode config rebuild and old `.cache` file cleanup.
 - Disk directory creation failure disables cache.
-- Disk row-count mismatch rejects unstable/growing segment usage.
+- Disk row-count mismatch rejects inconsistent snapshot shapes.
 - Concurrent `SetConfig` with get/put.
 - Expression integration tests for TextMatch, JSON, Exists, Term, Range, and index/stat paths.
 - Growing TextMatch, PhraseMatch, and TextMatchFuzzy bypass both cache writes
-  and pre-existing stale entries even when growing caching is enabled.
+  and unrelated backend entries with the same segment ID.
 - RawData disabled-path structural, allocation, and CPU equivalence tests.
-- Two-stage `FilterBitsNode` tests to verify outer filter cache does not duplicate sub-expression entries.
+- Two-stage requests preserve whole-filter reuse, dynamic TTL keys and snapshot
+  invalidation, while ordinary requests retain leaf caching.
+- TTL evaluation, typed IN normalization, full-pair offset-hit budgets,
+  moved-output leases, staging failures and retirement during blocked disk I/O.
 
 ## Known Limitations and Follow-Ups
 
@@ -1202,8 +1220,10 @@ Current limitations:
 - Disk cache files are temporary process-local cache files and are not reused after restart.
 - Disk mode stores raw bitmaps; compression is memory-only.
 - Disk mode supports sealed segments only.
-- Cache key quality depends on expression signature stability and completeness.
-- Current metrics report usage bytes only, not hit rate or admission/eviction counts.
+- Cache key quality depends on canonical signature stability and completeness;
+  complete identity is checked even when 128-bit hashes collide.
+- Metrics report usage bytes and successful reads; misses, admission and eviction
+  counters remain follow-ups.
 
 Potential follow-ups:
 

@@ -99,19 +99,14 @@ EntryPool::Configure(size_t max_bytes,
 
 bool
 EntryPool::Payload::Decode(TargetBitmap& result, TargetBitmap& valid) const {
-    return CacheCompressor::Decompress(data.data(),
-                                       static_cast<uint32_t>(data.size()),
-                                       comp_type,
-                                       result,
-                                       valid);
+    return view_.Decode(result, valid);
 }
 
 EntryPool::Handle
 EntryPool::Lookup(ExprCacheSegmentKey segment_id,
-                  const std::string& signature,
+                  ExprCacheSignature signature,
                   int64_t active_count) {
-    const uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-    Key key{segment_id, sig_hash, signature};
+    Key key{segment_id, signature};
     std::shared_lock lock(mutex_);
     auto it = entries_.find(key);
     if (it == entries_.end() ||
@@ -128,13 +123,12 @@ EntryPool::Lookup(ExprCacheSegmentKey segment_id,
 
 void
 EntryPool::Put(ExprCacheSegmentKey segment_id,
-               const std::string& signature,
+               ExprCacheSignature signature,
                int64_t active_count,
                const TargetBitmap& result,
                const TargetBitmap& valid,
                int64_t eval_duration_us) {
-    const uint64_t sig_hash = XXH64(signature.data(), signature.size(), 0);
-    Key key{segment_id, sig_hash, signature};
+    Key key{segment_id, signature};
     bool compression_enabled;
     {
         std::shared_lock lock(mutex_);
@@ -158,26 +152,26 @@ EntryPool::Put(ExprCacheSegmentKey segment_id,
     }
     auto payload = std::make_shared<Payload>(
         active_count, comp_type, std::move(compressed));
+    if (!payload->IsValid()) {
+        return;
+    }
     auto entry = std::make_unique<Entry>();
     // Charge buffer capacity exactly; metadata and shared-control-block costs
     // are estimates. Retired payloads conservatively retain the whole entry's
-    // estimate until their last reader releases them.
+    // estimate until their last reader releases them. Charge the canonical key
+    // even though multiple entries can share its immutable storage. On an
+    // update the map keeps the existing key, whose retained capacity may differ
+    // from that of the equal incoming signature.
     std::unique_lock lock(mutex_);
     auto existing = entries_.find(key);
-    const size_t key_capacity = existing == entries_.end()
-                                    ? key.signature.capacity()
-                                    : existing->first.signature.capacity();
+    const auto& retained_signature =
+        existing == entries_.end() ? key.signature : existing->first.signature;
     const size_t entry_mem = sizeof(Entry) + sizeof(Payload) +
                              2 * sizeof(void*) + payload->data.capacity() +
-                             sizeof(Key) + key_capacity +
-                             sizeof(ExprCacheSegmentKey) + 4 * sizeof(void*);
+                             payload->ReadViewBytes() + sizeof(Key) +
+                             sizeof(ExprCacheSegmentKey) + 4 * sizeof(void*) +
+                             retained_signature.RetainedBytes();
     if (entry_mem > max_bytes_) {
-        return;
-    }
-    // Growing queries may complete out of order. Recheck after compression
-    // so an older snapshot cannot overwrite a concurrently published one.
-    if (existing != entries_.end() &&
-        active_count < existing->second->payload->active_count) {
         return;
     }
     // Allocate the map node (and any rehash) before evicting. The provisional
@@ -367,8 +361,12 @@ EntryPool::EvictForPut(size_t bytes,
     const size_t entry_count =
         entries_.size() - (protected_entry->next == nullptr ? 1 : 0);
     // Give entries two second-chance passes, then select any unheld entry.
-    const size_t second_chance_scan = entry_count * 2;
-    const size_t max_scan = second_chance_scan + entry_count;
+    // Bound work under the exclusive pool lock, independent of cache size.
+    // A large admission may be rejected; later requests can retry it.
+    constexpr size_t kMaxCandidates = 1024;
+    const size_t scan_entries = std::min(entry_count, kMaxCandidates);
+    const size_t second_chance_scan = scan_entries * 2;
+    const size_t max_scan = second_chance_scan + scan_entries;
     bool can_fit = false;
     for (size_t i = 0; i < max_scan && clock_hand_ != nullptr; ++i) {
         auto& entry = *clock_hand_;
@@ -398,7 +396,7 @@ EntryPool::EvictForPut(size_t bytes,
         auto it = entries_.find(*candidates->key);
         LOG_DEBUG("EntryPool::EvictForPut segment_id={}, sig_hash={}",
                   it->first.segment_id.segment_id,
-                  it->first.sig_hash);
+                  it->first.signature);
         UnlinkClockEntry(candidates, it->second.get());
         UnlinkSegmentEntry(it->second.get());
         entries_.erase(it);

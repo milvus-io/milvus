@@ -139,11 +139,11 @@ TEST_F(EntryPoolClockTest, LongKeysSurviveRehashAndEviction) {
     const auto capacity = pool_.GetCurrentBytes();
     const auto* hand = EntryPoolTestPeer::Hand(pool_);
     const auto* key = hand->key;
-    const auto* signature_data = key->signature.data();
+    const auto signature_hash = key->signature;
     EntryPoolTestPeer::Rehash(pool_);
     EXPECT_EQ(EntryPoolTestPeer::Hand(pool_), hand);
     EXPECT_EQ(hand->key, key);
-    EXPECT_EQ(hand->key->signature.data(), signature_data);
+    EXPECT_EQ(hand->key->signature, signature_hash);
     EntryPoolTestPeer::AssertValid(pool_);
 
     pool_.Configure(capacity, false, 0);
@@ -233,7 +233,10 @@ TEST_F(EntryPoolClockTest, RejectedMultiVictimPutRestoresRing) {
     for (int64_t segment = 0; segment < 8; segment += 2) {
         held.push_back(pool_.Lookup(segment, "expr", kRows));
     }
-    TargetBitmap large(kRows * 12, true);
+    // With all-valid elision, only the result bitmap consumes payload bytes.
+    // Size it from the measured budget so metadata changes do not invalidate
+    // the requirement that the four unpinned entries cannot fund this put.
+    TargetBitmap large(capacity * 4, true);
     EntryPool probe(kCapacity);
     probe.Configure(kCapacity, false, 0);
     probe.Put(8, "expr", large.size(), large, large);

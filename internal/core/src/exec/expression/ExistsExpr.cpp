@@ -130,9 +130,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
 
         // Use ExprResCache for the full-segment bitset.
         auto cached = ExprCacheHelper::GetOrCompute(
-            segment_,
+            IsResultCacheAllowed() ? segment_ : nullptr,
             snapshot_,
-            [this]() { return this->ToString(); },
+            [this]() { return CacheSignature(); },
             active_count_,
             [&]() -> ExprCacheHelper::ComputeResult {
                 auto pointer =
@@ -249,9 +249,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
         cached_index_chunk_id_ = 0;
 
         auto cached = ExprCacheHelper::GetOrCompute(
-            segment_,
+            IsResultCacheAllowed() ? segment_ : nullptr,
             snapshot_,
-            [this]() { return this->ToString(); },
+            [this]() { return CacheSignature(); },
             active_count_,
             [&]() -> ExprCacheHelper::ComputeResult {
                 auto segment =

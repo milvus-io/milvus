@@ -43,8 +43,8 @@ DecorateOne(const ExprPtr& expr,
     }
 
     auto segment_expr = std::dynamic_pointer_cast<SegmentExpr>(expr);
-    if (segment_expr == nullptr || !segment_expr->SupportsRawExprCache() ||
-        !segment_expr->IsCacheable()) {
+    if (segment_expr == nullptr || !segment_expr->IsResultCacheAllowed() ||
+        !segment_expr->SupportsRawExprCache() || !segment_expr->IsCacheable()) {
         return expr;
     }
     const auto* segment = segment_expr->GetSegment();
@@ -128,11 +128,6 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
     if (state_.lookup_state != LookupState::Hit) {
         return false;
     }
-    // Served from the cache: the wrapped expression's own evaluation is
-    // bypassed, so its cache-hit hook never runs. Recorded through its
-    // recorder (null when the request does not collect).
-    MarkFeature(input_->feature_recorder(), FeatureBit::ExprCacheHit);
-
     const auto abandon_hit = [this]() {
         state_.result.reset();
         state_.valid_result.reset();
@@ -145,9 +140,15 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
             result = nullptr;
             return true;
         }
+        if (!state_.result || !state_.valid_result) {
+            // A preceding whole-segment output may have taken the pair.
+            abandon_hit();
+            return false;
+        }
         try {
             result = input_->GatherCachedResultByOffsets(
                 *state_.result, *state_.valid_result, *offsets);
+            MarkFeature(input_->feature_recorder(), FeatureBit::ExprCacheHit);
             return true;
         } catch (...) {
             abandon_hit();
@@ -166,18 +167,24 @@ RawExprCacheAdapter::TryServeCacheHit(EvalCtx& context, VectorPtr& result) {
 
     ColumnVectorPtr sliced_result;
     try {
-        TargetBitmap sliced;
-        TargetBitmap sliced_valid;
-        sliced.append(*state_.result, state_.sequential_pos, actual_rows);
-        sliced_valid.append(
-            *state_.valid_result, state_.sequential_pos, actual_rows);
-        sliced_result = std::make_shared<ColumnVector>(std::move(sliced),
-                                                       std::move(sliced_valid));
+        if (state_.sequential_pos == 0 && actual_rows == active_count) {
+            sliced_result = ExprCacheHelper::MoveToColumn(
+                std::move(state_.result), std::move(state_.valid_result));
+        } else {
+            TargetBitmap sliced;
+            TargetBitmap sliced_valid;
+            sliced.append(*state_.result, state_.sequential_pos, actual_rows);
+            sliced_valid.append(
+                *state_.valid_result, state_.sequential_pos, actual_rows);
+            sliced_result = std::make_shared<ColumnVector>(
+                std::move(sliced), std::move(sliced_valid));
+        }
     } catch (...) {
         abandon_hit();
         return false;
     }
 
+    MarkFeature(input_->feature_recorder(), FeatureBit::ExprCacheHit);
     state_.sequential_pos += actual_rows;
     input_->MoveCursor();
     result = std::move(sliced_result);
@@ -346,8 +353,14 @@ RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
 
     WaitPrefetch();
     EnsureLookup();
+    const bool had_hit = state_.lookup_state == LookupState::Hit;
     if (TryServeCacheHit(context, result)) {
         return;
+    }
+    if (had_hit) {
+        // Serving the private cached pair failed. Prefetch was skipped for
+        // the hit, so prepare the real evaluator before falling back.
+        input_->PrefetchOnCurrentThread();
     }
 
     if (state_.lookup_state != LookupState::Miss) {

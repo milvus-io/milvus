@@ -135,6 +135,12 @@ CreateTTLFieldFilterExpression(QueryContext* query_context) {
         ttl_is_null_expr,
         ttl_greater_expr);
 
+    // The comparison and its enclosing OR depend on the request's physical
+    // time. Skip their result-cache work, but leave the stable IS NULL child
+    // and the user filter under their normal cache policies.
+    ttl_greater_expr->SetResultCacheAllowed(false);
+    ttl_or_expr->SetResultCacheAllowed(false);
+
     return ttl_or_expr;
 }
 
@@ -498,6 +504,8 @@ CompileExpression(const expr::TypedExprPtr& expr,
     // non-pinned paths) to this expression. Runs for the whole compiled tree
     // because CompileExpression is recursive over inputs.
     result->SetSnapshot(context->get_read_snapshot().get());
+    result->SetResultCacheAllowed(expr->IsResultCacheAllowed());
+    result->SetLogicalExpression(expr);
     if (plan_options.feature_recorder) {
         result->SetFeatureRecorder(plan_options.feature_recorder.get(),
                                    *context->get_read_schema());

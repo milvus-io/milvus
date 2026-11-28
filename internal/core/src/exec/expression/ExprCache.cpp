@@ -18,7 +18,9 @@
 
 #include <folly/ScopeGuard.h>
 #include <unistd.h>
+#include <array>
 #include <filesystem>
+#include <chrono>
 #include <functional>
 #include <limits>
 #include <utility>
@@ -119,14 +121,28 @@ struct MaterializedBitmapPair {
 uint64_t
 AdmissionKeyHash(const ExprResCacheManager::Key& key, int64_t active_count) {
     // Count reuse of the same expression snapshot. Different segments or
-    // growing row counts must not make a one-off snapshot look recurrent.
+    // generations must not make a one-off snapshot look recurrent.
     // Storage still keeps only one snapshot per (segment_id, signature).
-    const auto key_hash = XXH64(key.signature.data(),
-                                key.signature.size(),
+    // Hash the stable digest, never the signature object: its shared identity
+    // contains allocation addresses that differ across equivalent expressions.
+    const std::array<uint64_t, 2> signature_hash{key.signature.low,
+                                                 key.signature.high};
+    const auto key_hash = XXH64(signature_hash.data(),
+                                sizeof(signature_hash),
                                 static_cast<uint64_t>(key.segment_id));
     const auto generation = key.SegmentKey().generation;
     const auto snapshot_hash = XXH64(&generation, sizeof(generation), key_hash);
     return XXH64(&active_count, sizeof(active_count), snapshot_hash);
+}
+
+const std::string&
+DiskProcessTag() {
+    static const std::string tag =
+        "_p" + std::to_string(::getpid()) + "_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) +
+        "_";
+    return tag;
 }
 
 void
@@ -149,6 +165,10 @@ RemoveCacheFilesInDir(const std::string& base_path) {
     std::filesystem::directory_iterator end;
     for (; !ec && it != end; it.increment(ec)) {
         auto& entry = *it;
+        if (entry.path().filename().string().find(DiskProcessTag()) !=
+            std::string::npos) {
+            continue;
+        }
         if (entry.path().extension() == ".cache") {
             std::filesystem::remove(entry.path(), ec);
             if (ec) {
@@ -184,11 +204,7 @@ ExprCacheGeneration::ExprCacheGeneration()
 ExprResCacheManager::RetiredGeneration::RetiredGeneration() = default;
 ExprResCacheManager::RetiredGeneration::RetiredGeneration(
     RetiredGeneration&&) noexcept = default;
-ExprResCacheManager::RetiredGeneration::~RetiredGeneration() {
-    if (disk) {
-        disk->Remove();
-    }
-}
+ExprResCacheManager::RetiredGeneration::~RetiredGeneration() = default;
 
 ExprResCacheManager::RetiredGeneration
 ExprResCacheManager::RetireGeneration(
@@ -214,28 +230,11 @@ ExprResCacheManager::RetireGeneration(
         }
         disk_ineligible_segments_.erase(key);
         RemoveDiskClockSegment(key);
-        if (retired.disk) {
-            SyncDiskUsageMetrics(reported_disk_bytes_.load() -
-                                 retired.disk->GetUsedBytes());
-        }
     }
     return retired;
 }
 
 std::atomic<bool> ExprResCacheManager::enabled_{false};
-
-namespace {
-
-void
-UpdateGauge(prometheus::Gauge& gauge, int64_t delta) {
-    if (delta > 0) {
-        gauge.Increment(delta);
-    } else if (delta < 0) {
-        gauge.Decrement(-delta);
-    }
-}
-
-}  // namespace
 
 ExprResCacheManager::MaterializationLease::MaterializationLease(
     std::shared_ptr<ExprCacheMaterializationBudgetState> budget, size_t bytes)
@@ -276,6 +275,8 @@ ExprResCacheManager::MaterializationLease::Release() {
 ExprResCacheManager::ExprResCacheManager()
     : memory_budget_(std::make_shared<ExprCacheMemoryBudget>(
           config_.mem_max_bytes, /*report_metrics=*/true)),
+      disk_budget_(
+          std::make_shared<ExprCacheDiskBudget>(config_.disk_max_bytes)),
       materialization_budget_(
           std::make_shared<ExprCacheMaterializationBudgetState>(
               config_.materialization_max_bytes)) {
@@ -311,38 +312,35 @@ ExprResCacheManager::IsEnabled() noexcept {
 
 bool
 ExprResCacheManager::SetConfig(const CacheConfig& config) {
-    std::unique_lock state_lock(state_mutex_);
-    config_epoch_.fetch_add(1, std::memory_order_relaxed);
-    const auto old_mode = config_.mode;
-    const auto old_disk_base_path = config_.disk_base_path;
-
+    // Filesystem work happens before publication and never holds state_mutex_.
+    std::error_code error;
     if (config.mode == CacheMode::Disk && !config.disk_base_path.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(config.disk_base_path, ec);
-        if (ec) {
-            LOG_WARN("ExprResCacheManager: failed to create cache dir {}: {}",
-                     config.disk_base_path,
-                     ec.message());
-            SetEnabled(false);
-            entry_pool_.reset();
-            {
-                std::unique_lock lock(disk_files_mutex_);
-                disk_files_.clear();
-                disk_ineligible_segments_.clear();
-            }
-            {
-                std::lock_guard lock(disk_clock_mutex_);
-                disk_clock_segments_.clear();
-                disk_clock_index_.clear();
-                disk_segment_usage_.clear();
-                disk_clock_hand_ = 0;
-            }
-            SyncDiskUsageMetrics(0);
-            return false;
+        std::filesystem::create_directories(config.disk_base_path, error);
+        if (!error) {
+            RemoveCacheFilesInDir(config.disk_base_path);
         }
     }
-
+    decltype(disk_files_) detached;
+    std::unique_ptr<EntryPool> old_pool;
+    std::unique_lock state_lock(state_mutex_);
+    config_epoch_.fetch_add(1, std::memory_order_relaxed);
+    old_pool = std::move(entry_pool_);
+    {
+        std::unique_lock files_lock(disk_files_mutex_);
+        disk_files_.swap(detached);
+        disk_ineligible_segments_.clear();
+        std::lock_guard clock_lock(disk_clock_mutex_);
+        disk_clock_segments_.clear();
+        disk_clock_index_.clear();
+        disk_segment_usage_.clear();
+        disk_clock_hand_ = 0;
+    }
+    if (error) {
+        SetEnabled(false);
+        return false;
+    }
     config_ = config;
+    disk_budget_->SetCapacity(config_.disk_max_bytes);
     materialization_budget_->SetCapacity(config_.materialization_max_bytes);
     frequency_tracker_.Reset();
     if (config_.mode == CacheMode::Memory) {
@@ -351,48 +349,8 @@ ExprResCacheManager::SetConfig(const CacheConfig& config) {
         entry_pool_->Configure(config_.mem_max_bytes,
                                config_.compression_enabled,
                                config_.mem_min_eval_duration_us);
-        {
-            std::unique_lock lock(disk_files_mutex_);
-            disk_files_.clear();
-            disk_ineligible_segments_.clear();
-        }
-        {
-            std::lock_guard lock(disk_clock_mutex_);
-            disk_clock_segments_.clear();
-            disk_clock_index_.clear();
-            disk_segment_usage_.clear();
-            disk_clock_hand_ = 0;
-        }
-        if (old_mode == CacheMode::Disk) {
-            RemoveCacheFilesInDir(old_disk_base_path);
-        }
-        SyncDiskUsageMetrics(0);
-        return true;
-    } else {
-        entry_pool_.reset();
-        {
-            std::unique_lock lock(disk_files_mutex_);
-            disk_files_.clear();
-            disk_ineligible_segments_.clear();
-        }
-        {
-            std::lock_guard lock(disk_clock_mutex_);
-            disk_clock_segments_.clear();
-            disk_clock_index_.clear();
-            disk_segment_usage_.clear();
-            disk_clock_hand_ = 0;
-        }
-        // Disk cache metadata is process-local; old files are not reusable.
-        if (!config_.disk_base_path.empty()) {
-            RemoveCacheFilesInDir(config_.disk_base_path);
-        }
-        if (old_mode == CacheMode::Disk && !old_disk_base_path.empty() &&
-            old_disk_base_path != config_.disk_base_path) {
-            RemoveCacheFilesInDir(old_disk_base_path);
-        }
-        SyncDiskUsageMetrics(0);
-        return true;
     }
+    return true;
 }
 
 CacheMode
@@ -414,9 +372,7 @@ ExprResCacheManager::CanCacheSegment(SegmentType segment_type) const noexcept {
 bool
 ExprResCacheManager::CanCacheSegmentLocked(
     SegmentType segment_type) const noexcept {
-    return segment_type == SegmentType::Sealed ||
-           (segment_type == SegmentType::Growing &&
-            config_.mode == CacheMode::Memory && config_.mem_enable_growing);
+    return segment_type == SegmentType::Sealed;
 }
 
 void
@@ -454,7 +410,6 @@ ExprResCacheManager::SetCapacityBytes(size_t capacity_bytes) {
     config_.mode = CacheMode::Memory;
     config_.mem_max_bytes = capacity_bytes;
     config_.materialization_max_bytes = capacity_bytes;
-    config_.mem_enable_growing = false;
     config_.admission_threshold = 1;
     config_.mem_min_eval_duration_us = 0;
     if (!entry_pool_) {
@@ -541,85 +496,99 @@ ExprResCacheManager::LookupResult
 ExprResCacheManager::GetWithStatus(const Key& key,
                                    Value& out_value,
                                    const std::function<void()>& before_decode) {
+    return ReadWithStatus(
+        Lookup(key, out_value.active_count), out_value, before_decode);
+}
+
+ExprResCacheManager::ReadHandle
+ExprResCacheManager::Lookup(const Key& key, int64_t active_count) {
+    ReadHandle handle;
+    handle.signature = key.signature;
+    handle.active_count = active_count;
+    {
+        std::shared_lock state_lock(state_mutex_);
+        if (!IsEnabled() || (!key.generation || key.generation->IsRetired())) {
+            return {};
+        }
+        if (config_.mode == CacheMode::Memory) {
+            if (entry_pool_) {
+                handle.memory = entry_pool_->Lookup(
+                    key.SegmentKey(), key.signature, active_count);
+            }
+        } else {
+            std::shared_lock files_lock(disk_files_mutex_);
+            const auto it = disk_files_.find(key.SegmentKey());
+            if (it != disk_files_.end()) {
+                handle.disk = it->second;
+            }
+        }
+    }
+    // No manager lock may cover a file lock: even a metadata lookup can wait
+    // for readers completing pread on that file.
+    if (handle.disk) {
+        if (!handle.disk->Contains(key.signature, active_count)) {
+            return {};
+        }
+        TryTouchDiskSegment(key.SegmentKey());
+    }
+    return handle;
+}
+
+ExprResCacheManager::LookupResult
+ExprResCacheManager::ReadWithStatus(
+    const ReadHandle& handle,
+    Value& out_value,
+    const std::function<void()>& before_decode) {
     out_value.result.reset();
     out_value.valid_result.reset();
     out_value.bytes = 0;
-    if (!IsEnabled()) {
+    if (!handle) {
         return LookupResult::Miss;
     }
-
     std::shared_ptr<MaterializedBitmapPair> materialized;
-    // Free partially decoded buffers before their reservation on every exit.
-    TargetBitmap result{0};
-    TargetBitmap valid{0};
+    TargetBitmap result, valid;
     auto failure = LookupResult::Miss;
-    auto before_materialize = [&]() {
-        auto lease = TryAcquireMaterialization(out_value.active_count);
-        if (!lease.has_value()) {
+    const auto reserve = [&]() {
+        auto lease = TryAcquireMaterialization(handle.active_count);
+        if (!lease) {
             failure = LookupResult::ResourceLimit;
             return false;
         }
         materialized =
             std::make_shared<MaterializedBitmapPair>(std::move(*lease));
+        if (before_decode) {
+            before_decode();
+        }
         return true;
     };
-
-    {
-        std::shared_lock state_lock(state_mutex_);
-        if (!IsEnabled() || (key.generation && key.generation->IsRetired())) {
+    if (handle.memory) {
+        if (!reserve()) {
+            return failure;
+        }
+        const auto& payload = *handle.memory;
+        const bool decoded = payload.Decode(result, valid);
+        if (!decoded) {
             return LookupResult::Miss;
         }
-        if (config_.mode == CacheMode::Memory) {
-            if (!entry_pool_) {
-                return LookupResult::Miss;
-            }
-            auto payload = entry_pool_->Lookup(
-                key.SegmentKey(), key.signature, out_value.active_count);
-            if (!payload) {
-                return LookupResult::Miss;
-            }
-            // Lookup has released the pool lock. The immutable payload owns
-            // its bytes and charge independently of the pool/config lifetime.
-            state_lock.unlock();
-            if (!before_materialize()) {
-                return failure;
-            }
-            if (before_decode) {
-                before_decode();
-            }
-            if (!payload->Decode(result, valid)) {
-                return LookupResult::Miss;
-            }
-        } else {
-            // Disk slots still require their file/metadata locks during I/O.
-            std::shared_lock lock(disk_files_mutex_);
-            auto it = disk_files_.find(key.SegmentKey());
-            if (it == disk_files_.end() || !it->second) {
-                return LookupResult::Miss;
-            }
-            if (!it->second->Get(
-                    key.signature, out_value.active_count, result, valid, [&] {
-                        if (!before_materialize()) {
-                            return false;
-                        }
-                        if (before_decode) {
-                            before_decode();
-                        }
-                        return true;
-                    })) {
-                return failure;
-            }
-            TryTouchDiskSegment(key.SegmentKey());
-        }
+    } else if (!handle.disk->Get(handle.signature,
+                                 handle.active_count,
+                                 result,
+                                 valid,
+                                 reserve)) {
+        return failure;
     }
-
+    if (result.size() != handle.active_count ||
+        valid.size() != handle.active_count) {
+        return LookupResult::Miss;
+    }
     materialized->result = std::move(result);
     materialized->valid = std::move(valid);
+    out_value.active_count = handle.active_count;
     out_value.result =
         std::shared_ptr<TargetBitmap>(materialized, &materialized->result);
     out_value.valid_result =
         std::shared_ptr<TargetBitmap>(materialized, &materialized->valid);
-    out_value.bytes = FullBitmapPairBytes(out_value.active_count).value_or(0);
+    out_value.bytes = FullBitmapPairBytes(handle.active_count).value_or(0);
     ::milvus::monitor::internal_expr_cache_hit_total.Increment();
     return LookupResult::Hit;
 }
@@ -640,7 +609,7 @@ ExprResCacheManager::ObserveMiss(const Key& key,
 
     std::shared_lock state_lock(state_mutex_);
     if (!IsEnabled() || !CanCacheSegmentLocked(segment_type) ||
-        (key.generation && key.generation->IsRetired())) {
+        (!key.generation || key.generation->IsRetired())) {
         return ticket;
     }
 
@@ -691,8 +660,11 @@ ExprResCacheManager::PutInternal(const Key& key,
         return;
     }
 
+    // Declared before locks: dropping the last file reference may close/unlink.
+    std::vector<std::shared_ptr<DiskSlotFile>> detached;
+    std::shared_ptr<DiskSlotFile> file;
     std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled() || (key.generation && key.generation->IsRetired())) {
+    if (!IsEnabled() || (!key.generation || key.generation->IsRetired())) {
         return;
     }
 
@@ -726,7 +698,6 @@ ExprResCacheManager::PutInternal(const Key& key,
                          *value.result,
                          *value.valid_result,
                          value.eval_duration_us);
-        SyncDiskUsageMetrics(0);
     } else {
         // Disk mode
         if (config_.disk_base_path.empty()) {
@@ -757,84 +728,115 @@ ExprResCacheManager::PutInternal(const Key& key,
             return;
         }
 
-        std::unique_lock lock(disk_files_mutex_);
-        if (disk_ineligible_segments_.find(key.SegmentKey()) !=
-            disk_ineligible_segments_.end()) {
-            return;
-        }
-        std::string path =
-            config_.disk_base_path + "/seg_" + std::to_string(key.segment_id) +
-            (key.generation ? "_" + std::to_string(key.generation->id) : "") +
-            ".cache";
-        auto file_it = disk_files_.find(key.SegmentKey());
-        if (file_it != disk_files_.end() && file_it->second &&
-            file_it->second->GetRowCount() !=
-                static_cast<int64_t>(value.result->size())) {
-            // Disk cache is sealed-only. A row-count change identifies a
-            // growing/unstable segment for this backend, so drop the old fixed
-            // file and skip future disk puts until the segment/config resets.
-            RemoveDiskSegmentFile(key.SegmentKey());
-            disk_ineligible_segments_.insert(key.SegmentKey());
-            SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
-            return;
-        }
-        const bool create_file =
-            file_it == disk_files_.end() || !file_it->second;
-        // Finish the allocating Clock registration before creating a file or
-        // committing a slot. A failed registration must leave no disk write.
-        TouchDiskSegment(key.SegmentKey(), hook);
-        auto rollback_new_file = folly::makeGuard([&]() {
-            if (create_file) {
-                disk_files_.erase(key.SegmentKey());
-                // Reuse the prepared path: exception cleanup must not allocate
-                // another path string while handling an allocation failure.
-                ::unlink(path.c_str());
-                RemoveDiskClockSegment(key.SegmentKey());
+        const auto epoch = config_epoch_.load(std::memory_order_relaxed);
+        const auto base_path = config_.disk_base_path;
+        const auto max_file_size = config_.disk_max_file_size;
+        {
+            std::shared_lock files_lock(disk_files_mutex_);
+            const auto it = disk_files_.find(key.SegmentKey());
+            if (it != disk_files_.end()) {
+                file = it->second;
             }
-        });
-        if (create_file) {
+        }
+        state_lock.unlock();
+        if (!file) {
             if (hook) {
                 hook(DiskPutStage::FileCreate);
             }
-            auto new_file = std::make_unique<DiskSlotFile>(
+            static std::atomic<uint64_t> next_file{0};
+            const auto path =
+                base_path + "/seg_" + std::to_string(key.segment_id) + "_" +
+                std::to_string(key.SegmentKey().generation) + DiskProcessTag() +
+                std::to_string(next_file.fetch_add(1)) + ".cache";
+            file = std::make_shared<DiskSlotFile>(
                 key.segment_id,
                 path,
-                static_cast<int64_t>(value.result->size()),
-                config_.disk_max_file_size);
-            if (hook) {
-                hook(DiskPutStage::FilePublish);
-            }
-            if (file_it == disk_files_.end()) {
-                file_it =
-                    disk_files_.emplace(key.SegmentKey(), std::move(new_file))
-                        .first;
-            } else {
-                file_it->second = std::move(new_file);
-            }
+                value.active_count,
+                max_file_size,
+                std::make_unique<DiskSlotFile::Reservation>(
+                    disk_budget_,
+                    [this, segment = key.SegmentKey(), epoch](size_t bytes) {
+                        return TryAcquireDiskBytes(bytes, segment, epoch);
+                    }));
         }
-        if (hook) {
-            hook(DiskPutStage::SlotWrite);
-        }
-        file_it->second->Put(key.signature,
-                             value.active_count,
-                             *value.result,
-                             *value.valid_result);
-        if (hook) {
-            hook(DiskPutStage::SlotWritten);
-        }
-        if (create_file && file_it->second->GetUsedCount() == 0) {
-            // Open/pwrite failures are reported by leaving the file empty.
-            // Roll back its registration and file before returning as well.
+        bool registered = false;
+        state_lock.lock();
+        if (!IsEnabled() ||
+            epoch != config_epoch_.load(std::memory_order_relaxed) ||
+            (!key.generation || key.generation->IsRetired())) {
             return;
         }
-        rollback_new_file.dismiss();
-        EvictDiskSegmentsUntilWithinBudget(key.SegmentKey());
-        SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
+        {
+            std::unique_lock files_lock(disk_files_mutex_);
+            if (disk_ineligible_segments_.count(key.SegmentKey())) {
+                return;
+            }
+            const auto it = disk_files_.find(key.SegmentKey());
+            if (it != disk_files_.end() && it->second != file) {
+                detached.push_back(file);
+                file = it->second;
+            }
+            if (file->GetRowCount() != value.active_count) {
+                RemoveDiskSegmentFile(key.SegmentKey(), detached);
+                disk_ineligible_segments_.insert(key.SegmentKey());
+                return;
+            }
+            if (it == disk_files_.end()) {
+                TouchDiskSegment(key.SegmentKey(), hook);
+                auto rollback_clock = folly::makeGuard(
+                    [&] { RemoveDiskClockSegment(key.SegmentKey()); });
+                if (hook) {
+                    hook(DiskPutStage::FilePublish);
+                }
+                disk_files_.emplace(key.SegmentKey(), file);
+                registered = true;
+                rollback_clock.dismiss();
+            } else {
+                TouchDiskSegment(key.SegmentKey(), hook);
+            }
+        }
+        state_lock.unlock();
+        bool completed = false;
+        auto finish = [&] {
+            // A detached/reconfigured file can finish its I/O, but cannot
+            // republish itself into the replacement backend. Its reservation
+            // remains charged independently until the last owner releases it.
+            std::shared_lock finish_state(state_mutex_);
+            std::unique_lock files_lock(disk_files_mutex_);
+            const auto it = disk_files_.find(key.SegmentKey());
+            if (epoch != config_epoch_.load(std::memory_order_relaxed) ||
+                it == disk_files_.end() || it->second != file) {
+                return;
+            }
+            if (registered && (!completed || file->GetUsedCount() == 0)) {
+                RemoveDiskSegmentFile(key.SegmentKey(), detached);
+            }
+        };
+        try {
+            file->Put(key.signature,
+                      value.active_count,
+                      *value.result,
+                      *value.valid_result,
+                      [&] {
+                          if (hook) {
+                              hook(DiskPutStage::SlotWrite);
+                          }
+                      });
+            if (hook) {
+                hook(DiskPutStage::SlotWritten);
+            }
+            completed = true;
+        } catch (...) {
+            finish();
+            throw;
+        }
+        finish();
     }
 }
 
 void
 ExprResCacheManager::Clear() {
+    decltype(disk_files_) detached;
     std::unique_lock state_lock(state_mutex_);
     config_epoch_.fetch_add(1, std::memory_order_relaxed);
     if (entry_pool_) {
@@ -843,7 +845,7 @@ ExprResCacheManager::Clear() {
     frequency_tracker_.Reset();
     {
         std::unique_lock lock(disk_files_mutex_);
-        disk_files_.clear();
+        disk_files_.swap(detached);
         disk_ineligible_segments_.clear();
     }
     {
@@ -853,114 +855,72 @@ ExprResCacheManager::Clear() {
         disk_segment_usage_.clear();
         disk_clock_hand_ = 0;
     }
-    if (!config_.disk_base_path.empty()) {
-        RemoveCacheFilesInDir(config_.disk_base_path);
-    }
-    SyncDiskUsageMetrics(0);
-}
-
-size_t
-ExprResCacheManager::EraseLegacySegment(int64_t segment_id) {
-    std::unique_lock state_lock(state_mutex_);
-    if (config_.mode == CacheMode::Memory) {
-        size_t erased = entry_pool_ ? entry_pool_->EraseSegment(segment_id) : 0;
-        SyncDiskUsageMetrics(0);
-        return erased;
-    } else {
-        std::unique_lock lock(disk_files_mutex_);
-        if (disk_files_.find(segment_id) == disk_files_.end()) {
-            disk_ineligible_segments_.erase(segment_id);
-            RemoveDiskClockSegment(segment_id);
-            return 0;
-        }
-        RemoveDiskSegmentFile(segment_id);
-        SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
-        return 1;
-    }
 }
 
 size_t
 ExprResCacheManager::GetDiskCurrentBytesLocked() const {
-    size_t total = 0;
-    for (const auto& [_, file] : disk_files_) {
-        if (file) {
-            total += file->GetUsedBytes();
-        }
-    }
-    return total;
+    return disk_budget_->GetUsedBytes();
 }
 
-size_t
-ExprResCacheManager::EvictDiskSegmentsUntilWithinBudget(
-    ExprCacheSegmentKey protected_segment_id) {
-    if (config_.disk_max_bytes == 0) {
-        return 0;
-    }
-
-    size_t total = GetDiskCurrentBytesLocked();
-    size_t erased = 0;
-    while (total > config_.disk_max_bytes) {
-        ExprCacheSegmentKey victim_segment_id;
-        bool found_victim = false;
+bool
+ExprResCacheManager::TryAcquireDiskBytes(
+    size_t bytes, ExprCacheSegmentKey protected_segment_id, uint64_t epoch) {
+    for (;;) {
+        // Destruction can close/unlink files. Always release locks first.
+        std::vector<std::shared_ptr<DiskSlotFile>> detached;
+        std::shared_lock state_lock(state_mutex_);
+        if (!IsEnabled() || config_.mode != CacheMode::Disk ||
+            epoch != config_epoch_.load(std::memory_order_relaxed)) {
+            return false;
+        }
+        if (disk_budget_->TryAcquire(bytes)) {
+            return true;
+        }
+        if (config_.disk_max_bytes != 0 && bytes > config_.disk_max_bytes) {
+            return false;
+        }
+        std::unique_lock files_lock(disk_files_mutex_);
+        ExprCacheSegmentKey victim;
+        bool found = false;
         {
-            std::lock_guard lock(disk_clock_mutex_);
-            if (disk_clock_segments_.empty()) {
-                break;
-            }
-
-            bool has_evictable_segment = false;
-            for (auto segment_id : disk_clock_segments_) {
-                if (segment_id != protected_segment_id) {
-                    has_evictable_segment = true;
-                    break;
+            std::lock_guard clock_lock(disk_clock_mutex_);
+            // Each entry has at most five Clock usage credits; one extra pass
+            // selects a victim. Also bounded when every file is pinned.
+            const auto scan_limit = disk_clock_segments_.size() * 6;
+            for (size_t scanned = 0; scanned < scan_limit; ++scanned) {
+                if (disk_clock_hand_ >= disk_clock_segments_.size()) {
+                    disk_clock_hand_ = 0;
                 }
-            }
-            if (!has_evictable_segment) {
+                const auto segment = disk_clock_segments_[disk_clock_hand_++];
+                if (segment == protected_segment_id) {
+                    continue;
+                }
+                const auto it = disk_files_.find(segment);
+                // Lookup and PutInternal acquire owners under this directory
+                // lock. With no weak owners, a directory-only reference cannot
+                // gain another owner before removal under the same lock.
+                // Check the stored pointer without copying it or taking a file
+                // lock: a writer may be holding that lock while reserving space.
+                if (it == disk_files_.end() || it->second.use_count() != 1) {
+                    continue;
+                }
+                auto usage = disk_segment_usage_.find(segment);
+                if (usage != disk_segment_usage_.end() && usage->second > 0) {
+                    --usage->second;
+                    continue;
+                }
+                victim = segment;
+                found = true;
                 break;
             }
-
-            if (disk_clock_hand_ >= disk_clock_segments_.size()) {
-                disk_clock_hand_ = 0;
-            }
-
-            const auto segment_id = disk_clock_segments_[disk_clock_hand_];
-            if (segment_id == protected_segment_id) {
-                disk_clock_hand_ =
-                    (disk_clock_hand_ + 1) % disk_clock_segments_.size();
-                continue;
-            }
-
-            auto usage_it = disk_segment_usage_.find(segment_id);
-            if (usage_it != disk_segment_usage_.end() && usage_it->second > 0) {
-                --usage_it->second;
-                disk_clock_hand_ =
-                    (disk_clock_hand_ + 1) % disk_clock_segments_.size();
-                continue;
-            }
-
-            victim_segment_id = segment_id;
-            found_victim = true;
         }
-
-        if (!found_victim) {
-            continue;
+        if (!found) {
+            return false;
         }
-
-        const size_t file_size = RemoveDiskSegmentFile(victim_segment_id);
-        total = file_size > total ? 0 : total - file_size;
-        ++erased;
+        RemoveDiskSegmentFile(victim, detached);
+        // Release the directory's last owner after unlocking, then recheck
+        // reservations: another writer may acquire the reclaimed space first.
     }
-
-    if (total > config_.disk_max_bytes) {
-        LOG_WARN(
-            "ExprResCacheManager: disk cache usage {} exceeds budget {}, "
-            "protected segment {} is kept",
-            total,
-            config_.disk_max_bytes,
-            protected_segment_id.segment_id);
-    }
-
-    return erased;
 }
 
 void
@@ -1046,35 +1006,22 @@ ExprResCacheManager::RemoveDiskClockSegment(ExprCacheSegmentKey segment_id) {
     }
 }
 
-size_t
-ExprResCacheManager::RemoveDiskSegmentFile(ExprCacheSegmentKey segment_id) {
+void
+ExprResCacheManager::RemoveDiskSegmentFile(
+    ExprCacheSegmentKey segment_id,
+    std::vector<std::shared_ptr<DiskSlotFile>>& detached) {
     auto it = disk_files_.find(segment_id);
     if (it == disk_files_.end()) {
         RemoveDiskClockSegment(segment_id);
         disk_ineligible_segments_.erase(segment_id);
-        return 0;
+        return;
     }
 
-    auto* file = it->second.get();
-    const size_t file_size = file ? file->GetUsedBytes() : 0;
-    if (file) {
-        file->Remove();
-    }
+    detached.push_back(it->second);
 
     disk_files_.erase(it);
     disk_ineligible_segments_.erase(segment_id);
     RemoveDiskClockSegment(segment_id);
-    return file_size;
-}
-
-void
-ExprResCacheManager::SyncDiskUsageMetrics(size_t disk_bytes) {
-    const auto old_disk =
-        reported_disk_bytes_.exchange(disk_bytes, std::memory_order_relaxed);
-    UpdateGauge(
-        cachinglayer::monitor::cache_loaded_bytes(
-            cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK),
-        static_cast<int64_t>(disk_bytes) - static_cast<int64_t>(old_disk));
 }
 
 }  // namespace exec

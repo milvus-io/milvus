@@ -221,7 +221,9 @@ class FilterBitsTraceTest : public testing::Test {
     std::string
     Run(expression::FilterFunctionPtr function,
         const std::vector<bool>& expected,
-        bool batched = false) {
+        bool batched = false,
+        bool whole_cache = true,
+        int64_t expected_materialization = -1) {
         std::vector<expr::TypedExprPtr> inputs;
         if (batched) {
             expr::ColumnInfo column(
@@ -245,7 +247,7 @@ class FilterBitsTraceTest : public testing::Test {
                                                       query::PlanOptions{},
                                                       config);
         context->set_read_snapshot(segment_->CaptureReadSnapshot());
-        context->set_enable_expr_cache(true);
+        context->set_enable_expr_cache(whole_cache);
         auto task = Task::Create(
             "filter-trace", plan::PlanFragment(logical), 0, context);
         DriverContext driver(task, 0, 0, 0, 0);
@@ -262,6 +264,13 @@ class FilterBitsTraceTest : public testing::Test {
             EXPECT_EQ(ToVector(TargetBitmapView(column->GetRawData(),
                                                 column->size())),
                       expected);
+        }
+        if (expected_materialization >= 0) {
+            EXPECT_EQ(ExprResCacheManager::Instance().GetMaterializationBytes(),
+                      expected_materialization);
+            output.reset();
+            EXPECT_EQ(ExprResCacheManager::Instance().GetMaterializationBytes(),
+                      0);
         }
         EXPECT_EQ(node.GetOutput(), nullptr);
         auto provider = opentelemetry::trace::Provider::GetTracerProvider();
@@ -329,12 +338,55 @@ TEST_F(FilterBitsTraceTest, IncludesWholeFilterCacheHit) {
     const std::vector<bool> expected{
         false, true, true, false, true, false, true, true};
     Run(PartialTracePredicate, expected);
-    const auto trace = Run(PartialTracePredicate, expected);
+    const auto trace = Run(PartialTracePredicate, expected, false, true, 16);
     EXPECT_TRUE(trace.find("cache_hit:true") != std::string::npos ||
                 trace.find("cache_hit:1") != std::string::npos);
     EXPECT_NE(trace.find("passed_rows:3"), std::string::npos);
     EXPECT_NE(trace.find("prefetch_wait_us:0"), std::string::npos);
     EXPECT_NE(trace.find("filter_scalar_work_us:0"), std::string::npos);
+}
+
+TEST_F(FilterBitsTraceTest, WholeFilterRequiresBothSwitches) {
+    auto& cache = ExprResCacheManager::Instance();
+    CacheConfig config;
+    config.mode = CacheMode::Memory;
+    config.admission_threshold = 1;
+    ASSERT_TRUE(cache.SetConfig(config));
+    const std::vector<bool> expected{
+        false, true, true, false, true, false, true, true};
+    // Global off still executes the predicate even when the request opts in.
+    Run(PartialTracePredicate, expected);
+    EXPECT_EQ(cache.GetEntryCount(), 0);
+    ExprResCacheManager::SetEnabled(true);
+    Run(PartialTracePredicate, expected, false, false);
+    EXPECT_EQ(cache.GetEntryCount(), 0);
+    Run(PartialTracePredicate, expected);
+    EXPECT_EQ(cache.GetEntryCount(), 1);
+    const auto bypass = Run(PartialTracePredicate, expected, false, false);
+    EXPECT_TRUE(bypass.find("cache_hit:false") != std::string::npos ||
+                bypass.find("cache_hit:0") != std::string::npos);
+}
+
+TEST_F(FilterBitsTraceTest, WholeFilterBudgetFailureReevaluatesPredicate) {
+    auto& cache = ExprResCacheManager::Instance();
+    CacheConfig config;
+    config.mode = CacheMode::Memory;
+    config.admission_threshold = 1;
+    auto restore_budget = folly::makeGuard([&] {
+        config.materialization_max_bytes =
+            CacheConfig{}.materialization_max_bytes;
+        EXPECT_TRUE(cache.SetConfig(config));
+    });
+    config.materialization_max_bytes = 1;
+    ASSERT_TRUE(cache.SetConfig(config));
+    ExprResCacheManager::SetEnabled(true);
+    const std::vector<bool> expected{
+        false, true, true, false, true, false, true, true};
+    Run(PartialTracePredicate, expected);
+    EXPECT_EQ(cache.GetEntryCount(), 1);
+    const auto trace = Run(PartialTracePredicate, expected, false, true, 0);
+    EXPECT_TRUE(trace.find("cache_hit:false") != std::string::npos ||
+                trace.find("cache_hit:0") != std::string::npos);
 }
 
 TEST_F(FilterBitsTraceTest, DisabledTracingPreservesResultsWithoutSpans) {

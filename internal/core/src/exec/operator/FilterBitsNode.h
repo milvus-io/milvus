@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "common/Types.h"
@@ -98,7 +99,7 @@ class PhyFilterBitsNode : public Operator {
     // Expression filter cache for two-stage search.
     // Cache backend is the process-level ExprResCacheManager.
     bool enable_expr_cache_ = false;
-    std::string expr_cache_key_;
+    std::optional<ExprCacheSignature> expr_cache_key_;
 };
 }  // namespace exec
 }  // namespace milvus

@@ -17,6 +17,7 @@
 #include "exec/expression/CacheCompressor.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -48,7 +49,7 @@ constexpr size_t kEncodingHeaderSize = 2 + sizeof(uint32_t);
 constexpr double kRoaringDensityMax = 0.03;     // <= 3%  → Roaring
 constexpr double kRoaringInvDensityMin = 0.97;  // >= 97% → invert + Roaring
 
-// ---- Roaring V2 zero-copy encode ----
+// ---- Portable Roaring encode ----
 
 std::vector<char>
 CacheCompressor::CompressRoaring(const TargetBitmap& bset, bool inverted) {
@@ -131,82 +132,10 @@ CacheCompressor::CompressRoaring(const TargetBitmap& bset, bool inverted) {
     // runOptimize: convert bitmap/array → run containers where smaller
     roaring_bitmap_run_optimize(r.get());
 
-    size_t ser_size = roaring_bitmap_size_in_bytes(r.get());
+    size_t ser_size = roaring_bitmap_portable_size_in_bytes(r.get());
     std::vector<char> buf(ser_size);
-    roaring_bitmap_serialize(r.get(), buf.data());
+    roaring_bitmap_portable_serialize(r.get(), buf.data());
     return buf;
-}
-
-// ---- Roaring decode ----
-
-bool
-CacheCompressor::DecompressRoaring(const char* data,
-                                   uint32_t data_len,
-                                   uint32_t num_bits,
-                                   TargetBitmap& out) {
-    using namespace roaring::internal;
-
-    std::unique_ptr<roaring_bitmap_t, decltype(&roaring_bitmap_free)> r(
-        roaring_bitmap_deserialize_safe(data, data_len), roaring_bitmap_free);
-    if (!r) {
-        LOG_WARN("CacheCompressor::DecompressRoaring: deserialize failed");
-        return false;
-    }
-
-    TargetBitmap result(num_bits, false);
-    auto* words = reinterpret_cast<uint64_t*>(result.data());
-    const auto& containers = r->high_low_container;
-    // Write containers directly into the output. Expanding all set positions
-    // to uint32_t would require up to 32 times the bitmap's memory as scratch.
-    for (int32_t i = 0; i < containers.size; ++i) {
-        const size_t bit_start = size_t{containers.keys[i]} << 16;
-        if (bit_start >= num_bits) {
-            continue;
-        }
-        const uint32_t bits = std::min<size_t>(65536, num_bits - bit_start);
-        auto* dst = words + bit_start / 64;
-        uint8_t type = containers.typecodes[i];
-        const auto* container =
-            container_unwrap_shared(containers.containers[i], &type);
-        switch (type) {
-            case BITSET_CONTAINER_TYPE: {
-                const auto* src = const_CAST_bitset(container);
-                std::memcpy(dst, src->words, ((bits + 63) / 64) * 8);
-                break;
-            }
-            case ARRAY_CONTAINER_TYPE: {
-                const auto* src = const_CAST_array(container);
-                for (int32_t j = 0; j < src->cardinality; ++j) {
-                    const uint32_t pos = src->array[j];
-                    if (pos < bits) {
-                        dst[pos / 64] |= uint64_t{1} << (pos % 64);
-                    }
-                }
-                break;
-            }
-            case RUN_CONTAINER_TYPE: {
-                const auto* src = const_CAST_run(container);
-                for (int32_t j = 0; j < src->n_runs; ++j) {
-                    const auto& run = src->runs[j];
-                    if (run.value < bits) {
-                        bitset_set_lenrange(
-                            dst,
-                            run.value,
-                            std::min<uint32_t>(run.length,
-                                               bits - run.value - 1));
-                    }
-                }
-                break;
-            }
-            default:
-                return false;
-        }
-    }
-    if (num_bits % 64 != 0) {
-        words[num_bits / 64] &= (uint64_t{1} << (num_bits % 64)) - 1;
-    }
-    out = std::move(result);
-    return true;
 }
 
 // ---- Public API ----
@@ -299,33 +228,265 @@ CacheCompressor::Compress(const TargetBitmap& result,
     return buf;
 }
 
+namespace {
+// Portable Roaring is little-endian. memcpy avoids alignment assumptions for
+// containers embedded after the cache's 14-byte header or another container.
+template <typename T>
+T
+ReadLE(const char* bytes) {
+    T value;
+    if constexpr (std::endian::native == std::endian::little) {
+        std::memcpy(&value, bytes, sizeof(T));
+    } else {
+        value = 0;
+        for (size_t i = 0; i < sizeof(T); ++i) {
+            value |= T{static_cast<uint8_t>(bytes[i])} << (8 * i);
+        }
+    }
+    return value;
+}
+}  // namespace
+
 bool
-CacheCompressor::DecompressBitmap(const char* data,
-                                  uint32_t data_len,
-                                  uint32_t num_bits,
-                                  uint8_t comp_type,
-                                  TargetBitmap& out) {
-    if (comp_type == kCompTypeRaw) {
-        const size_t bytes = ((size_t{num_bits} + 63) / 64) * 8;
-        if (data_len != bytes) {
+CacheCompressor::ReadView::BitmapView::Init(const char* data,
+                                            size_t size,
+                                            uint8_t codec,
+                                            uint32_t rows) {
+    encoding = codec;
+    if (codec == kCompTypeRaw) {
+        if (size != ((size_t{rows} + 63) / 64) * 8) {
             return false;
         }
-        TargetBitmap result(num_bits, false);
-        if (bytes > 0) {
-            std::memcpy(result.data(), data, bytes);
-        }
-        out = std::move(result);
+        raw = data;
         return true;
     }
-    if (comp_type != kCompTypeRoaring && comp_type != kCompTypeRoaringInv) {
+    if ((codec != kCompTypeRoaring && codec != kCompTypeRoaringInv) ||
+        size < 4) {
         return false;
     }
-    if (!DecompressRoaring(data, data_len, num_bits, out)) {
+    // https://github.com/RoaringBitmap/RoaringFormatSpec
+    constexpr uint32_t no_run_cookie = 12346;
+    constexpr uint16_t run_cookie = 12347;
+    const auto cookie = ReadLE<uint32_t>(data);
+    const bool has_runs = (cookie & 0xffff) == run_cookie;
+    size_t cursor = 4;
+    uint32_t count;
+    const char* run_flags = nullptr;
+    if (has_runs) {
+        count = (cookie >> 16) + 1;
+        const size_t flags_size = (count + 7) / 8;
+        if (flags_size > size - cursor) {
+            return false;
+        }
+        run_flags = data + cursor;
+        cursor += flags_size;
+    } else {
+        if (cookie != no_run_cookie || size < 8) {
+            return false;
+        }
+        count = ReadLE<uint32_t>(data + cursor);
+        cursor += 4;
+    }
+    if (count > 65536 || count > (uint64_t{rows} + 65535) / 65536 ||
+        size_t{count} * 4 > size - cursor) {
         return false;
     }
-    if (comp_type == kCompTypeRoaringInv) {
-        out.flip();
+    const char* descriptors = data + cursor;
+    cursor += size_t{count} * 4;
+    if (!has_runs || count >= 4) {
+        // Like CRoaring's safe reader, derive locations from the container
+        // lengths, not untrusted offsets in the redundant offset table.
+        if (size_t{count} * 4 > size - cursor) {
+            return false;
+        }
+        cursor += size_t{count} * 4;
     }
+    containers.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto key = ReadLE<uint16_t>(descriptors + 4 * i);
+        const uint32_t cardinality =
+            ReadLE<uint16_t>(descriptors + 4 * i + 2) + 1;
+        const uint64_t base = uint64_t{key} << 16;
+        if (base >= rows ||
+            (!containers.empty() && key <= containers.back().key)) {
+            return false;
+        }
+        const uint32_t bits = std::min<uint64_t>(65536, rows - base);
+        const bool run = has_runs && (static_cast<uint8_t>(run_flags[i / 8]) &
+                                      (1u << (i % 8)));
+        Container container{
+            data + cursor, cardinality, key, ContainerType::Array};
+        if (run) {
+            if (size - cursor < 2) {
+                return false;
+            }
+            const uint32_t runs = ReadLE<uint16_t>(data + cursor);
+            cursor += 2;
+            if (runs == 0 || size_t{runs} * 4 > size - cursor) {
+                return false;
+            }
+            container = {data + cursor, runs, key, ContainerType::Run};
+            uint32_t actual = 0, previous_end = 0;
+            for (uint32_t j = 0; j < runs; ++j) {
+                const uint32_t start = ReadLE<uint16_t>(data + cursor + j * 4);
+                const uint32_t length =
+                    ReadLE<uint16_t>(data + cursor + j * 4 + 2);
+                const uint32_t end = start + length;
+                if (end >= bits || (j != 0 && start <= previous_end)) {
+                    return false;
+                }
+                actual += length + 1;
+                previous_end = end;
+            }
+            if (actual != cardinality) {
+                return false;
+            }
+            cursor += size_t{runs} * 4;
+        } else if (cardinality > 4096) {
+            if (size - cursor < 8192) {
+                return false;
+            }
+            container.type = ContainerType::Bitset;
+            uint32_t actual = 0;
+            for (uint32_t word = 0; word < 1024; ++word) {
+                const auto value = ReadLE<uint64_t>(data + cursor + word * 8);
+                actual += std::popcount(value);
+                if (value != 0 && (word * 64 >= bits ||
+                                   (bits - word * 64 < 64 &&
+                                    (value >> (bits - word * 64)) != 0))) {
+                    return false;
+                }
+            }
+            if (actual != cardinality) {
+                return false;
+            }
+            cursor += 8192;
+        } else {
+            if (size_t{cardinality} * 2 > size - cursor) {
+                return false;
+            }
+            uint32_t previous = 0;
+            for (uint32_t j = 0; j < cardinality; ++j) {
+                const uint32_t value = ReadLE<uint16_t>(data + cursor + j * 2);
+                if (value >= bits || (j != 0 && value <= previous)) {
+                    return false;
+                }
+                previous = value;
+            }
+            cursor += size_t{cardinality} * 2;
+        }
+        containers.push_back(container);
+    }
+    return cursor == size;
+}
+
+TargetBitmap
+CacheCompressor::ReadView::BitmapView::Decode(uint32_t rows) const {
+    TargetBitmap result(rows, false);
+    if (encoding == kCompTypeRaw) {
+        if (rows != 0) {
+            std::memcpy(result.data(), raw, result.size_in_bytes());
+        }
+        return result;
+    }
+    auto* words = reinterpret_cast<uint64_t*>(result.data());
+    for (const auto& container : containers) {
+        const size_t base = size_t{container.key} << 16;
+        if (container.type == ContainerType::Array) {
+            for (uint32_t j = 0; j < container.count; ++j) {
+                result[base + ReadLE<uint16_t>(container.data + j * 2)] = true;
+            }
+        } else if (container.type == ContainerType::Run) {
+            for (uint32_t j = 0; j < container.count; ++j) {
+                roaring::internal::bitset_set_lenrange(
+                    words + base / 64,
+                    ReadLE<uint16_t>(container.data + j * 4),
+                    ReadLE<uint16_t>(container.data + j * 4 + 2));
+            }
+        } else {
+            const size_t count =
+                (std::min<size_t>(65536, rows - base) + 63) / 64;
+            for (size_t j = 0; j < count; ++j) {
+                words[base / 64 + j] = ReadLE<uint64_t>(container.data + j * 8);
+            }
+        }
+    }
+    if (encoding == kCompTypeRoaringInv) {
+        result.flip();
+    }
+    return result;
+}
+
+CacheCompressor::ReadView::ReadView(const char* data,
+                                    size_t size,
+                                    uint8_t encoding,
+                                    int64_t rows) {
+    valid_ = Init(data, size, encoding, rows);
+}
+
+bool
+CacheCompressor::ReadView::Init(const char* data,
+                                size_t size,
+                                uint8_t encoding,
+                                int64_t rows) {
+    if (size < kHeaderSize || rows < 0) {
+        return false;
+    }
+    uint32_t result_bits, valid_header;
+    std::memcpy(&result_bits, data, 4);
+    std::memcpy(&valid_header, data + 4, 4);
+    if (result_bits != rows || (valid_header & ~kValidAllOnesMask) != rows) {
+        return false;
+    }
+    rows_ = result_bits;
+    all_valid_ = valid_header & kValidAllOnesMask;
+    data += kHeaderSize;
+    size -= kHeaderSize;
+    uint8_t result_type = kCompTypeRaw, valid_type = kCompTypeRaw;
+    size_t result_size = ((size_t{rows_} + 63) / 64) * 8;
+    if (encoding == kCompTypeIndependent) {
+        if (size < kEncodingHeaderSize) {
+            return false;
+        }
+        result_type = static_cast<uint8_t>(data[0]);
+        valid_type = static_cast<uint8_t>(data[1]);
+        uint32_t length;
+        std::memcpy(&length, data + 2, 4);
+        result_size = length;
+        data += kEncodingHeaderSize;
+        size -= kEncodingHeaderSize;
+    } else if (encoding != kCompTypeRaw) {
+        return false;
+    }
+    if (result_size > size ||
+        (all_valid_ && (valid_type != kCompTypeRaw || size != result_size))) {
+        return false;
+    }
+    if (!result_.Init(data, result_size, result_type, rows_)) {
+        return false;
+    }
+    return all_valid_ ||
+           validity_.Init(
+               data + result_size, size - result_size, valid_type, rows_);
+}
+
+size_t
+CacheCompressor::ReadView::HeapBytes() const {
+    return (result_.containers.capacity() + validity_.containers.capacity()) *
+           sizeof(Container);
+}
+
+bool
+CacheCompressor::ReadView::Decode(TargetBitmap& result,
+                                  TargetBitmap& valid) const {
+    if (!valid_) {
+        return false;
+    }
+    auto decoded = result_.Decode(rows_);
+    auto decoded_valid =
+        all_valid_ ? TargetBitmap(rows_, true) : validity_.Decode(rows_);
+    result = std::move(decoded);
+    valid = std::move(decoded_valid);
     return true;
 }
 
@@ -336,108 +497,12 @@ CacheCompressor::Decompress(const char* data,
                             TargetBitmap& out_result,
                             TargetBitmap& out_valid) {
     if (data_len < kHeaderSize) {
-        LOG_WARN("CacheCompressor::Decompress: data_len ({}) < header size",
-                 data_len);
         return false;
     }
-
-    uint32_t result_bits = 0;
-    uint32_t valid_bits_raw = 0;
-    std::memcpy(&result_bits, data, 4);
-    std::memcpy(&valid_bits_raw, data + 4, 4);
-
-    bool valid_all_ones = (valid_bits_raw & kValidAllOnesMask) != 0;
-    uint32_t valid_bits = valid_bits_raw & ~kValidAllOnesMask;
-
-    const char* payload = data + kHeaderSize;
-    const uint32_t payload_len = data_len - kHeaderSize;
-
-    if (comp_type == kCompTypeIndependent) {
-        if (payload_len < kEncodingHeaderSize) {
-            return false;
-        }
-        const auto result_type = static_cast<uint8_t>(payload[0]);
-        const auto valid_type = static_cast<uint8_t>(payload[1]);
-        auto valid_encoding = [](uint8_t encoding) {
-            return encoding == kCompTypeRaw || encoding == kCompTypeRoaring ||
-                   encoding == kCompTypeRoaringInv;
-        };
-        if (!valid_encoding(result_type) || !valid_encoding(valid_type)) {
-            return false;
-        }
-        uint32_t result_size = 0;
-        std::memcpy(&result_size, payload + 2, sizeof(result_size));
-        if (result_size > payload_len - kEncodingHeaderSize) {
-            return false;
-        }
-        const uint32_t valid_size =
-            payload_len - kEncodingHeaderSize - result_size;
-        if (valid_all_ones && (valid_type != kCompTypeRaw || valid_size != 0)) {
-            return false;
-        }
-        const char* result_data = payload + kEncodingHeaderSize;
-        if (!DecompressBitmap(result_data,
-                              result_size,
-                              result_bits,
-                              result_type,
-                              out_result)) {
-            return false;
-        }
-        if (valid_all_ones) {
-            out_valid = TargetBitmap(valid_bits, true);
-            return true;
-        }
-        return DecompressBitmap(result_data + result_size,
-                                valid_size,
-                                valid_bits,
-                                valid_type,
-                                out_valid);
-    }
-
-    // --- Raw path ---
-    if (comp_type != kCompTypeRaw) {
-        LOG_WARN("CacheCompressor::Decompress: unknown comp_type={}",
-                 comp_type);
-        return false;
-    }
-
-    auto bits_to_bytes = [](uint32_t bits) -> uint32_t {
-        return static_cast<uint32_t>(((bits + 63) / 64) * 8);
-    };
-    const uint32_t result_bytes = bits_to_bytes(result_bits);
-    const uint32_t valid_bytes = valid_all_ones ? 0 : bits_to_bytes(valid_bits);
-    const uint32_t raw_total = result_bytes + valid_bytes;
-
-    if (payload_len < raw_total) {
-        LOG_WARN(
-            "CacheCompressor::Decompress: raw payload too short "
-            "(payload_len={}, expected={})",
-            payload_len,
-            raw_total);
-        return false;
-    }
-    const char* raw = payload;
-
-    out_result = TargetBitmap(result_bits, false);
-    if (result_bytes > 0) {
-        std::memcpy(
-            reinterpret_cast<char*>(out_result.data()), raw, result_bytes);
-    }
-
-    if (valid_all_ones) {
-        // Construct minimal bitmap and set all bits.
-        // Note: TargetBitmap(n, true) does one write pass (init to all-1s),
-        // vs TargetBitmap(n) + set() which does two (zero-init then set).
-        out_valid = TargetBitmap(valid_bits, true);
-    } else {
-        out_valid = TargetBitmap(valid_bits, false);
-        if (valid_bytes > 0) {
-            std::memcpy(reinterpret_cast<char*>(out_valid.data()),
-                        raw + result_bytes,
-                        valid_bytes);
-        }
-    }
-    return true;
+    uint32_t rows;
+    std::memcpy(&rows, data, 4);
+    return ReadView(data, data_len, comp_type, rows)
+        .Decode(out_result, out_valid);
 }
 
 }  // namespace exec

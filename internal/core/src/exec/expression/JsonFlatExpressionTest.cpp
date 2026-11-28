@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "test_utils/ExprCacheTestUtils.h"
 #include <gtest/gtest.h>
 #include <fmt/core.h>
 
@@ -529,7 +530,7 @@ TEST_F(JsonFlatExpressionTest, ReusesValidityAcrossLiteralsAndOperators) {
               2);
     EXPECT_EQ(cache.GetEntryCount(), 2);
 
-    exec::ExprResCacheManager::Key artifact_key{
+    milvus::test::ExprCacheKey artifact_key{
         segment_->get_segment_id(),
         fmt::format("json-flat-validity:field={}:path-length=2:"
                     "path=/a:family={}",
@@ -821,4 +822,75 @@ TEST(JsonFlatPrefixSelectionTest, LongerRootBreaksEqualScoreTie) {
     EXPECT_TRUE(decision.key->identity == narrow.key.identity);
 }
 
+}  // namespace milvus::test
+
+namespace milvus::test {
+TEST_F(JsonFlatExpressionTest, ExprCacheOffsetRangeReusesFullPair) {
+    auto& cache = exec::ExprResCacheManager::Instance();
+    exec::CacheConfig config;
+    config.mode = exec::CacheMode::Memory;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(cache.SetConfig(config));
+    exec::ExprResCacheManager::SetEnabled(true);
+    // Resident raw JSON deliberately takes a candidate-local offset path.
+    // Remove it before warming the cache to exercise the index-only gather
+    // path with the same sealed generation on the cold and warm evaluations.
+    segment_->DropFieldData(json_fid_);
+    ASSERT_FALSE(segment_->HasFieldData(json_fid_));
+    proto::plan::GenericValue lower, upper;
+    lower.set_float_val(1.0);
+    upper.set_float_val(3.0);
+    auto logical = std::make_shared<expr::BinaryRangeFilterExpr>(
+        expr::ColumnInfo(json_fid_, DataType::JSON, {"a"}),
+        lower,
+        upper,
+        true,
+        true);
+    auto expected =
+        EvalExprInBatches(logical, segment_.get(), json_data_.size()).result;
+    auto snapshot = segment_->CaptureReadSnapshot();
+    ASSERT_TRUE(cache.Lookup({segment_->get_segment_id(),
+                              logical->CacheSignature(),
+                              snapshot->GetExprCacheGeneration()},
+                             json_data_.size()));
+    ASSERT_EQ(cache.GetMaterializationBytes(), 0);
+
+    auto query = std::make_shared<exec::QueryContext>(
+        DEAFULT_QUERY_ID, segment_.get(), json_data_.size(), MAX_TIMESTAMP);
+    query->set_read_snapshot(snapshot);
+    exec::ExecContext context(query.get());
+    auto compiled = exec::CompileExpressions({logical}, &context, {}, false);
+    exec::OffsetVector offsets(65);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        offsets[i] = (i * 7) % json_data_.size();
+    }
+    exec::EvalCtx evaluation(&context, &offsets);
+    VectorPtr output;
+    compiled[0]->Eval(evaluation, output);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(output);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), offsets.size());
+    TargetBitmapView actual(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    TargetBitmapView expected_bits(expected->GetRawData(), expected->size());
+    TargetBitmapView expected_valid(expected->GetValidRawData(),
+                                    expected->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(actual[i], expected_bits[offsets[i]]);
+        EXPECT_EQ(valid[i], expected_valid[offsets[i]]);
+    }
+    // Offset outputs are gathered from the private full-segment pair retained
+    // by the evaluator. Releasing an output must not release that pair early.
+    const auto pair_bytes = 2 * ((json_data_.size() + 63) / 64) * 8;
+    EXPECT_EQ(cache.GetMaterializationBytes(), pair_bytes);
+    output.reset();
+    column.reset();
+    cache.Clear();
+    compiled[0]->Eval(evaluation, output);
+    ASSERT_NE(output, nullptr);
+    EXPECT_EQ(cache.GetMaterializationBytes(), pair_bytes);
+    compiled.clear();
+    EXPECT_EQ(cache.GetMaterializationBytes(), 0);
+}
 }  // namespace milvus::test

@@ -402,11 +402,6 @@ Delete(CSegmentInterface c_segment,
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
 
-// Clears generation-zero entries only. Sealed instances retire their own
-// generation when publishing a successor or being destroyed.
-CStatus
-ExprResCacheEraseLegacySegment(int64_t segment_id);
-
 //////////////////////////////    interfaces for growing segment flush    //////////////////////////////
 
 /**

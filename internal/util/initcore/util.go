@@ -121,7 +121,6 @@ func UpdateExprResCacheConfig() {
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMaterializationMaxBytes.GetAsInt64()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMemMaxBytes.GetAsInt64()),
 		C.bool(params.QueryNodeCfg.ExprResCacheMemCompressionEnabled.GetAsBool()),
-		C.bool(params.QueryNodeCfg.ExprResCacheMemEnableGrowing.GetAsBool()),
 		C.int32_t(params.QueryNodeCfg.ExprResCacheAdmissionThreshold.GetAsInt32()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()),
 		C.int64_t(params.QueryNodeCfg.ExprResCacheDiskMaxBytes.GetAsInt64()),
