@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -85,4 +86,17 @@ func (node *Proxy) authorizeCollectionMetadata(ctx context.Context, req interfac
 		return ctx, merr.WrapErrPrivilegeNotPermitted("%s", status.Convert(err).Message())
 	}
 	return nextCtx, err
+}
+
+// getQuotaMetricsFullMethod is the method GetQuotaMetrics reports under. It is
+// served to users over HTTP only, under the MilvusService name.
+const getQuotaMetricsFullMethod = "/milvus.proto.milvus.MilvusService/GetQuotaMetrics"
+
+// authorizeClusterDiagnostics guards diagnostics that describe the whole
+// cluster: node addresses and hardware, and the size and row count of every
+// collection in every database. They need the grant DumpMessages needs: root,
+// the built-in admin role, or the global ManageOwnership privilege that the
+// ClusterAdmin privilege group carries.
+func authorizeClusterDiagnostics(ctx context.Context, req interface{}, fullMethod string) error {
+	return CheckClusterPrivilege(ctx, req, fullMethod, commonpb.ObjectPrivilege_PrivilegeManageOwnership.String())
 }

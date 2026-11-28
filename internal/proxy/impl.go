@@ -4388,6 +4388,11 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			Status: merr.Status(err),
 		}, nil
 	}
+	if err := authorizeClusterDiagnostics(ctx, req, milvuspb.MilvusService_GetMetrics_FullMethodName); err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 
 	ret := gjson.Parse(req.GetRequest())
 	metricType, err := metricsinfo.ParseMetricRequestType(ret)
@@ -6396,8 +6401,13 @@ func DeregisterSubLabel(subLabel string) {
 
 // RegisterRestRouter registers the router for the proxy
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
+	// Routes that read coordinator metrics report cluster-wide data and can
+	// select other metrics actions through their query parameters, so all of
+	// them need the grant GetMetrics needs.
+	diagnosticsAuth := ConsoleDiagnosticsAuthMiddleware()
+
 	// Cluster request that executed by proxy
-	router.GET(http.ClusterInfoPath, getClusterInfo(node))
+	router.GET(http.ClusterInfoPath, diagnosticsAuth, getClusterInfo(node))
 	router.GET(http.ClusterConfigsPath, getProjectedConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
@@ -6409,29 +6419,29 @@ func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
 
 	// QueryCoord requests that are forwarded from proxy
-	router.GET(http.QCTargetPath, getQueryComponentMetrics(node, metricsinfo.TargetKey))
-	router.GET(http.QCDistPath, getQueryComponentMetrics(node, metricsinfo.DistKey))
-	router.GET(http.QCReplicaPath, getQueryComponentMetrics(node, metricsinfo.ReplicaKey))
-	router.GET(http.QCResourceGroupPath, getQueryComponentMetrics(node, metricsinfo.ResourceGroupKey))
-	router.GET(http.QCAllTasksPath, getQueryComponentMetrics(node, metricsinfo.AllTaskKey))
-	router.GET(http.QCSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQC))
+	router.GET(http.QCTargetPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.TargetKey))
+	router.GET(http.QCDistPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.DistKey))
+	router.GET(http.QCReplicaPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.ReplicaKey))
+	router.GET(http.QCResourceGroupPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.ResourceGroupKey))
+	router.GET(http.QCAllTasksPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.AllTaskKey))
+	router.GET(http.QCSegmentsPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQC))
 
 	// QueryNode requests that are forwarded from querycoord
-	router.GET(http.QNSegmentsPath, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQN))
-	router.GET(http.QNChannelsPath, getQueryComponentMetrics(node, metricsinfo.ChannelKey))
+	router.GET(http.QNSegmentsPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInQN))
+	router.GET(http.QNChannelsPath, diagnosticsAuth, getQueryComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// DataCoord requests that are forwarded from proxy
-	router.GET(http.DCDistPath, getDataComponentMetrics(node, metricsinfo.DistKey))
-	router.GET(http.DCCompactionTasksPath, getDataComponentMetrics(node, metricsinfo.CompactionTaskKey))
-	router.GET(http.DCImportTasksPath, getDataComponentMetrics(node, metricsinfo.ImportTaskKey))
-	router.GET(http.DCBuildIndexTasksPath, getDataComponentMetrics(node, metricsinfo.BuildIndexTaskKey))
-	router.GET(http.IndexListPath, getDataComponentMetrics(node, metricsinfo.IndexKey))
-	router.GET(http.DCSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDC))
+	router.GET(http.DCDistPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.DistKey))
+	router.GET(http.DCCompactionTasksPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.CompactionTaskKey))
+	router.GET(http.DCImportTasksPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.ImportTaskKey))
+	router.GET(http.DCBuildIndexTasksPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.BuildIndexTaskKey))
+	router.GET(http.IndexListPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.IndexKey))
+	router.GET(http.DCSegmentsPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDC))
 
 	// Datanode requests that are forwarded from datacoord
-	router.GET(http.DNSyncTasksPath, getDataComponentMetrics(node, metricsinfo.SyncTaskKey))
-	router.GET(http.DNSegmentsPath, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDN))
-	router.GET(http.DNChannelsPath, getDataComponentMetrics(node, metricsinfo.ChannelKey))
+	router.GET(http.DNSyncTasksPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.SyncTaskKey))
+	router.GET(http.DNSegmentsPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.SegmentKey, metricsinfo.RequestParamsInDN))
+	router.GET(http.DNChannelsPath, diagnosticsAuth, getDataComponentMetrics(node, metricsinfo.ChannelKey))
 
 	// Database requests
 	router.GET(http.DatabaseListPath, listDatabase(node))
@@ -6663,6 +6673,11 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	defer sp.End()
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetQuotaMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err := authorizeClusterDiagnostics(ctx, req, getQuotaMetricsFullMethod); err != nil {
 		return &internalpb.GetQuotaMetricsResponse{
 			Status: merr.Status(err),
 		}, nil
