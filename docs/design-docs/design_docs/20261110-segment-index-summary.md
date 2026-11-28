@@ -108,6 +108,10 @@ one manifest revision at a time and check snapshot protection again at deletion.
 A pending snapshot blocks new index deletions in its collection and waits for
 already admitted deletions to finish before selecting revisions. The block lasts
 until publication installs the build pins or snapshot creation fails.
+The V0 orphan scan only knows the BuildID. Its prefix deletions wait until no
+collection has a pending snapshot, and every snapshot drains already admitted
+V0 orphan deletions before capture. The trailing slash confines each scan and
+deletion to its own build directory.
 
 Snapshot creation captures explicit Finished catalog records and the BuildIDs
 of manifest-backed summaries with the snapshot's exact manifest pointers. The snapshot metadata

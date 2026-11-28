@@ -2,23 +2,28 @@ package datacoord
 
 import (
 	"context"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2871,4 +2876,85 @@ func TestGenSnapshot_MixedIndexesNeedNoManifestRead(t *testing.T) {
 			t.Fatalf("unexpected explicit index build %d", info.GetBuildID())
 		}
 	}
+}
+
+func TestCreateSnapshotKeepsRetiredV0IndexFiles(t *testing.T) {
+	const collectionID, buildID = 1, 51
+	ctx := t.Context()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	mt, dm, err := index.NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	mt.ChunkManager = cm
+	sm, err := snapshot.NewSnapshotMeta(ctx, mt.Catalog, cm)
+	require.NoError(t, err)
+	t.Cleanup(sm.LoaderCancel)
+	collector := gc.NewGarbageCollector(mt, nil, gc.GcOption{Cli: cm, IndexMeta: dm.IndexMeta, SnapshotMeta: sm})
+	t.Cleanup(collector.Close)
+	handler := &ServerHandler{s: &Server{ctx: ctx, meta: mt, domainMetas: domainMetas{indexMeta: dm.IndexMeta}}}
+	seedCollections(handler.s, &meta.CollectionInfo{ID: collectionID, Schema: meta.NewTestSchema(), Partitions: []int64{2}})
+	require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{CollectionID: collectionID, IndexID: 4, FieldID: 100, IndexName: "legacy"}))
+	require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+		CollectionID: collectionID, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: buildID, IndexVersion: 1,
+		IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"legacy.bin"},
+	}))
+	base := path.Join(root, "insert_log", "1", "2", "3")
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	manifest, err := packed.CreateManifestForSegment(base, []string{"100"}, "parquet",
+		[]packed.Fragment{{FilePath: path.Join(base, "_data", "old.parquet"), EndRow: 10}}, cfg)
+	require.NoError(t, err)
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: collectionID, PartitionID: 2, InsertChannel: "ch-1", StorageVersion: storage.StorageV3,
+		State: commonpb.SegmentState_Flushed, ManifestPath: manifest, CommitTimestamp: 10, NumOfRows: 10,
+	})))
+	legacy := path.Join(root, "index_files", "51", "1", "2", "3", "legacy.bin")
+	// A build with a shorter, overlapping prefix can be collected while build 51 is pinned.
+	orphan := path.Join(root, "index_files", "5", "1", "2", "3", "orphan.bin")
+	for _, file := range []string{legacy, orphan} {
+		require.NoError(t, cm.Write(ctx, file, []byte("artifact")))
+	}
+
+	capture := meta.NewNMockHandler(t)
+	capture.EXPECT().GenSnapshot(mock.Anything, int64(collectionID), mock.Anything).
+		RunAndReturn(func(ctx context.Context, id int64, positions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
+			data, err := handler.GenSnapshot(ctx, id, positions)
+			require.NoError(t, err)
+			require.Len(t, data.Segments, 1)
+			files := data.Segments[0].GetIndexFiles()
+			require.Len(t, files, 1)
+			require.EqualValues(t, buildID, files[0].GetBuildID())
+			require.Equal(t, []string{legacy}, files[0].GetIndexFilePaths())
+
+			require.NoError(t, mt.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+				SegmentID: 3, StorageConfig: cfg, InspectedManifest: manifest,
+				Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+					DropColumns: []string{"100"},
+					ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{
+						Path: path.Join(base, "_data", "replacement.parquet"), StartIndex: 0, EndIndex: 10,
+					}}}},
+				}},
+			}))
+			require.False(t, dm.IndexMeta.HasBuildInfo(buildID))
+			rows, err := mt.Catalog.ListSegmentIndexes(ctx, collectionID)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			require.False(t, sm.IsBuildIDGCBlocked(-1, buildID), "the build is not pinned until SaveSnapshot")
+
+			collector.RecycleUnusedIndexFilesV0(ctx)
+			require.FileExists(t, legacy, "GC must keep the captured file while the snapshot is pending")
+			require.FileExists(t, orphan, "an orphan prefix has no collection identity")
+			return data, nil
+		}).Once()
+	manager := snapshot.NewSnapshotManager(mt, sm, nil, meta.NewMockAllocator(t), capture, nil, nil, nil)
+	_, err = manager.CreateSnapshot(ctx, collectionID, "v0-index", "", 0, []*msgpb.MsgPosition{{ChannelName: "ch-1", Timestamp: 20}})
+	require.NoError(t, err)
+	require.False(t, sm.IsCollectionCompactionBlocked(collectionID))
+	require.True(t, sm.IsBuildIDGCBlocked(-1, buildID))
+	collector.RecycleUnusedIndexFilesV0(ctx)
+	require.FileExists(t, legacy, "the committed build pin protects the captured file")
+	require.NoFileExists(t, orphan)
+
+	require.NoError(t, manager.DropSnapshot(ctx, collectionID, "v0-index"))
+	collector.RecycleUnusedIndexFilesV0(ctx)
+	require.NoFileExists(t, legacy, "the retired build is reclaimable once its last snapshot is dropped")
 }

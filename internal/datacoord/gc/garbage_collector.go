@@ -2290,6 +2290,8 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 parseIndexFileKey", mlog.Err(err))
 			return true
 		}
+		// Local listings omit the trailing slash. Keep the scan and delete within this build.
+		buildPrefix := strings.TrimSuffix(key, "/") + "/"
 		logger = logger.With(mlog.Int64("buildID", buildID))
 		logger.Info(ctx, "garbageCollector will recycle index files")
 		canRecycle, segIdx := gc.Option.IndexMeta.CheckCleanSegmentIndex(buildID)
@@ -2314,8 +2316,14 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 			if summaryBuilds.Contain(buildID) {
 				return true
 			}
-			// buildID no longer exists in meta. Orphan buildID walk has no collection context,
-			// so IsBuildIDGCBlocked(-1, buildID) fail-closes on ANY unloaded RefIndex globally.
+			// The row may have been retired after a snapshot captured its files.
+			// Without a collection ID, admit against pending snapshots globally.
+			release, ok := gc.guardIndexGC(-1)
+			if !ok {
+				return true
+			}
+			defer release()
+			// With no collection context, an unloaded RefIndex anywhere blocks GC.
 			if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(-1, buildID) {
 				logger.Info(ctx, "skip GC index files since buildID is protected by snapshot",
 					mlog.Int64("buildID", buildID))
@@ -2324,7 +2332,7 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 
 			// buildID no longer exists in meta, remove all index files
 			logger.Info(ctx, "garbageCollector recycleUnusedIndexFilesV0 find meta has not exist, remove index files")
-			err = gc.Option.Cli.RemoveWithPrefix(ctx, key)
+			err = gc.Option.Cli.RemoveWithPrefix(ctx, buildPrefix)
 			if err != nil {
 				logger.Warn(ctx, "garbageCollector recycleUnusedIndexFilesV0 remove index files failed", mlog.Err(err))
 				return true
@@ -2351,7 +2359,7 @@ func (gc *GarbageCollector) RecycleUnusedIndexFilesV0(ctx context.Context) {
 		fileNum := 0
 
 		futures := make([]*conc.Future[struct{}], 0)
-		err = gc.Option.Cli.WalkWithPrefix(ctx, key, true, func(indexFile *storage.ChunkObjectInfo) bool {
+		err = gc.Option.Cli.WalkWithPrefix(ctx, buildPrefix, true, func(indexFile *storage.ChunkObjectInfo) bool {
 			fileNum++
 			file := indexFile.FilePath
 			if _, ok := filesMap[file]; !ok {
