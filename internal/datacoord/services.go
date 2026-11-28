@@ -2541,6 +2541,15 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 	}
 	defer broadcaster.Close()
 
+	// The caller is authorized against req.CollectionId only, so every item must
+	// name a segment of that collection. Reject the whole batch otherwise; the
+	// error is the same whether the segment is missing or belongs to another
+	// collection. The check runs under the shared collection lock taken above.
+	if err := checkBatchUpdateManifestSegments(ctx, s.meta, req); err != nil {
+		mlog.Warn(ctx, "BatchUpdateManifest rejected", mlog.FieldCollectionID(req.GetCollectionId()), mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	items := make([]*messagespb.BatchUpdateManifestItem, 0, len(req.GetItems()))
 	for _, item := range req.GetItems() {
 		items = append(items, &messagespb.BatchUpdateManifestItem{
@@ -2566,6 +2575,19 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 
 	mlog.Info(context.TODO(), "BatchUpdateManifest completed successfully")
 	return merr.Success(), nil
+}
+
+// checkBatchUpdateManifestSegments returns an input error for the first item
+// whose segment is not a segment of req.CollectionId in DataCoord meta.
+func checkBatchUpdateManifestSegments(ctx context.Context, m *meta.Meta, req *datapb.BatchUpdateManifestRequest) error {
+	for _, item := range req.GetItems() {
+		segment := m.GetSegment(ctx, item.GetSegmentId())
+		if segment == nil || segment.GetCollectionID() != req.GetCollectionId() {
+			return merr.WrapErrAsInputError(merr.WrapErrSegmentNotFound(item.GetSegmentId(),
+				fmt.Sprintf("segment is not in collection %d", req.GetCollectionId())))
+		}
+	}
+	return nil
 }
 
 func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotRequest) (*commonpb.Status, error) {
