@@ -233,6 +233,64 @@ func TestWorkerRerankStreamingMatchesBatch(t *testing.T) {
 	}
 }
 
+func TestSearchTaskBoostPromotesL2Match(t *testing.T) {
+	ts := setupTestSegments(t, 1, 2, setupOpts{
+		SkipSearchReq: true,
+		MutateInsertData: func(_ int, data *storage.InsertData) {
+			vectors := data.Data[107].(*storage.FloatVectorFieldData)
+			clear(vectors.Data)
+			vectors.Data[0] = 1
+			vectors.Data[vectors.Dim] = 2
+			pks := data.Data[109].(*storage.Int64FieldData)
+			copy(pks.Data, []int64{1, 2})
+		},
+	})
+	defer ts.cleanup()
+
+	ctx := context.Background()
+	req, err := mock_segcore.GenQueryRequest(ts.collection.GetCCollection(), ts.segIDs, 1, 2, testCollectionID)
+	require.NoError(t, err)
+	placeholder := &commonpb.PlaceholderGroup{}
+	require.NoError(t, proto.Unmarshal(req.Req.PlaceholderGroup, placeholder))
+	clear(placeholder.GetPlaceholders()[0].GetValues()[0])
+	req.Req.PlaceholderGroup, err = proto.Marshal(placeholder)
+	require.NoError(t, err)
+
+	// Let the loaded field's index resolve the metric.
+	plan := &planpb.PlanNode{}
+	require.NoError(t, proto.Unmarshal(req.Req.SerializedExprPlan, plan))
+	plan.GetVectorAnns().GetQueryInfo().MetricType = ""
+	req.Req.MetricType = ""
+
+	search := func() *schemapb.SearchResultData {
+		t.Helper()
+		req.Req.SerializedExprPlan, err = proto.Marshal(plan)
+		require.NoError(t, err)
+		task := NewSearchTask(ctx, ts.collection, ts.manager, req, 1)
+		require.NoError(t, task.ExecuteOnSegments(ts.segs))
+		data, err := segments.DecodeSearchResults(ctx, []*internalpb.SearchResults{task.SearchResult()})
+		require.NoError(t, err)
+		require.Len(t, data, 1)
+		return data[0]
+	}
+
+	baseline := search()
+	require.Equal(t, []int64{1, 2}, baseline.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{-1, -4}, baseline.GetScores())
+
+	plan.Scorers = []*planpb.ScoreFunction{{
+		Weight: 8,
+		Filter: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+			ColumnInfo: &planpb.ColumnInfo{FieldId: 109, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			Op:         planpb.OpType_Equal,
+			Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 2}},
+		}}},
+	}}
+	boosted := search()
+	require.Equal(t, []int64{2, 1}, boosted.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{-0.5, -1}, boosted.GetScores())
+}
+
 type rerankChunkStream struct {
 	chunks []*internalpb.SearchResults
 }
