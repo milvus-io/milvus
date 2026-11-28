@@ -24,12 +24,14 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -159,6 +161,12 @@ const (
 	VllmTruncateParamName string = "truncate_prompt_tokens"
 
 	TeiTruncateParamName string = "truncate"
+
+	// CredentialEndpointsConfKey is the provider configuration item (milvus.yaml)
+	// that lists the endpoints allowed to receive a credential configured on the
+	// server, for providers whose endpoint is set in the function params.
+	// #nosec G101 -- configuration key name, not a credential.
+	CredentialEndpointsConfKey string = "credential_endpoints"
 )
 
 // zilliz
@@ -218,6 +226,78 @@ func ParseAKAndURL(credentials *credentials.Credentials, params []*commonpb.KeyV
 	}
 
 	return apiKey, url, nil
+}
+
+// ParseAKForEndpoint resolves the API key like ParseAKAndURL, for a provider
+// whose requests go to endpoint, an address taken from the function params.
+// The key it resolves is always configured on the server (a named credential,
+// the provider credential, an environment variable or an integration ID), so
+// it is returned only when endpoint is listed in the provider's
+// credential_endpoints configuration; otherwise the function is rejected.
+// Without a key nothing is checked. confPrefix is the provider's configuration
+// key, such as function.rerank.model.providers.tei, used in the error message.
+func ParseAKForEndpoint(credentials *credentials.Credentials, params []*commonpb.KeyValuePair, confParams map[string]string, apiKeyEnv string, extraInfo *ModelExtraInfo, endpoint string, confPrefix string) (string, error) {
+	apiKey, _, err := ParseAKAndURL(credentials, params, confParams, apiKeyEnv, extraInfo)
+	if err != nil {
+		return "", err
+	}
+	if apiKey == "" {
+		return "", nil
+	}
+	if _, err := NewBaseURL(endpoint); err != nil {
+		return "", err
+	}
+	if !IsEndpointListed(endpoint, confParams[CredentialEndpointsConfKey]) {
+		return "", merr.WrapErrParameterInvalidMsg("endpoint [%s] is not listed in %s.%s, and credentials configured on the server are only sent to the listed endpoints", endpoint, confPrefix, CredentialEndpointsConfKey)
+	}
+	return apiKey, nil
+}
+
+// IsEndpointListed reports whether endpoint has the same scheme, host and port
+// as one of the comma-separated endpoints in listed. Paths are not compared:
+// the model clients replace the endpoint path with the API path. Host names
+// must be ASCII (use the punycode form): Unicode case mapping could make a
+// different host compare equal, while the HTTP client dials its IDNA form.
+func IsEndpointListed(endpoint string, listed string) bool {
+	target, ok := endpointOrigin(endpoint)
+	if !ok {
+		return false
+	}
+	for _, entry := range strings.Split(listed, ",") {
+		if origin, ok := endpointOrigin(strings.TrimSpace(entry)); ok && origin == target {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointOrigin returns endpoint as scheme://host:port, with the default
+// port filled in, or false if endpoint is not an http(s) URL with an ASCII host.
+func endpointOrigin(endpoint string) (string, bool) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Hostname() == "" {
+		return "", false
+	}
+	for _, c := range []byte(u.Hostname()) {
+		if c >= utf8.RuneSelf {
+			return "", false
+		}
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	switch scheme {
+	case "http":
+		if port == "" {
+			port = "80"
+		}
+	case "https":
+		if port == "" {
+			port = "443"
+		}
+	default:
+		return "", false
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port), true
 }
 
 func ParseAndCheckFieldDim(dimStr string, fieldDim int64, fieldName string) (int64, error) {
@@ -354,28 +434,54 @@ func PostRequest[T Response](ctx context.Context, req any, url string, headers m
 	return &res, err
 }
 
+// modelHTTPClient sends the requests to model services. It does not follow
+// redirects: a redirect response fails the call like any other non-200
+// response, so a request only reaches the endpoint it was built for.
+var modelHTTPClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// maxLoggedErrorBodyBytes bounds how much of a non-200 response is read and logged.
+const maxLoggedErrorBodyBytes = 1024
+
 func send(req *http.Request) ([]byte, error) {
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from configured model endpoints, not user input
+	// The URL may come from the function params (TEI, vLLM endpoints). Redirects
+	// are not followed, and server credentials are only attached for listed
+	// endpoints (see ParseAKForEndpoint).
+	resp, err := modelHTTPClient.Do(req) //nolint:gosec // see the comment above
 	if err != nil {
 		// transport failure (connection refused / timeout / DNS) is transient
 		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed")
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		// interrupted while reading the response body is transient
-		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed, read response failed")
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		msg := fmt.Sprintf("call service failed, errs:[%s, %s]", resp.Status, body)
+		// The response body and reason phrase are logged but not returned to
+		// the caller: the endpoint is not necessarily a model service.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxLoggedErrorBodyBytes))
+		mlog.RatedWarn(req.Context(), 1, "model service returned an error",
+			mlog.String("host", req.URL.Host),
+			mlog.String("status", resp.Status),
+			mlog.String("body", string(body)))
+		msg := fmt.Sprintf("call service failed, status code: %d", resp.StatusCode)
+		if text := http.StatusText(resp.StatusCode); text != "" {
+			msg += " " + text
+		}
 		// 429 / 5xx are transient and retryable; other 4xx are caused by the
-		// request/config (bad key, bad input) and are permanent.
+		// request/config (bad key, bad input) and are permanent, and so are
+		// redirects, which are not followed.
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
 			return nil, merr.WrapErrServiceUnavailable(msg)
 		}
 		return nil, merr.WrapErrFunctionFailedMsg("%s", msg)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// interrupted while reading the response body is transient
+		return nil, merr.WrapErrServiceUnavailable(err.Error(), "call service failed, read response failed")
 	}
 	return body, nil
 }

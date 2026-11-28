@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type teiProvider struct {
@@ -38,11 +39,7 @@ type teiProvider struct {
 }
 
 func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, credentials *credentials.Credentials) (ModelProvider, error) {
-	apiKey, _, err := models.ParseAKAndURL(credentials, params, conf, "", &models.ModelExtraInfo{})
-	if err != nil {
-		return nil, err
-	}
-
+	var err error
 	var endpoint string
 	// TEI default client batch size
 	maxBatch := 32
@@ -70,6 +67,12 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 			}
 		default:
 		}
+	}
+
+	confPrefix := paramtable.Get().FunctionCfg.RerankModelProviders.KeyPrefix + teiProviderName
+	apiKey, err := models.ParseAKForEndpoint(credentials, params, conf, "", &models.ModelExtraInfo{}, endpoint, confPrefix)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := tei.NewTEIClient(apiKey, endpoint)
