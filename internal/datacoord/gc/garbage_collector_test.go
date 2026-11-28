@@ -2885,6 +2885,177 @@ func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
 }
 
+func TestGarbageCollector_recycleDroppedSegments_Concurrent(t *testing.T) {
+	const segmentConcurrencyKey = "dataCoord.gc.droppedSegmentConcurrency"
+	require.NoError(t, Params.Save(segmentConcurrencyKey, "2"))
+	t.Cleanup(func() { require.NoError(t, Params.Reset(segmentConcurrencyKey)) })
+	require.NoError(t, Params.Save(Params.DataCoordCfg.GCRemoveConcurrent.Key, "4"))
+	t.Cleanup(func() { require.NoError(t, Params.Reset(Params.DataCoordCfg.GCRemoveConcurrent.Key)) })
+
+	ctx := context.Background()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	const segmentCount = 3
+	segmentIDs := make(map[string]int64, segmentCount)
+	for id := int64(1); id <= segmentCount; id++ {
+		key, err := binlog.BuildLogPath(storage.InsertBinlog, 100, 10, id, 20, 1)
+		require.NoError(t, err)
+		segmentIDs[key] = id
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  100,
+			PartitionID:   10,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+			DroppedAt:     uint64(time.Now().Add(-time.Hour).UnixNano()),
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogPaths(20, key)},
+		})))
+	}
+
+	started := make(chan string, segmentCount)
+	release := make(chan struct{})
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("root").Maybe()
+	cm.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, key string) error {
+		started <- key
+		<-release
+		return nil
+	}).Times(segmentCount)
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+		StreamingNodeCatalog: MockCheckpointCatalog(t, 1000),
+		Cli:                  cm,
+	}))
+	t.Cleanup(gc.Close)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gc.RecycleDroppedSegments(ctx, nil)
+	}()
+	t.Cleanup(func() {
+		close(release)
+		<-done
+	})
+
+	waitForDelete := func(message string) string {
+		t.Helper()
+		select {
+		case key := <-started:
+			return key
+		case <-time.After(2 * time.Second):
+			t.Fatal(message)
+			return ""
+		}
+	}
+	first := waitForDelete("first dropped segment never reached object deletion")
+	second := waitForDelete("second dropped segment never reached object deletion while the first was blocked")
+	require.NotEqual(t, first, second)
+	require.NotNil(t, m.GetSegment(ctx, segmentIDs[first]))
+	require.NotNil(t, m.GetSegment(ctx, segmentIDs[second]))
+	select {
+	case key := <-started:
+		t.Fatalf("object deletion started for %q with both segment slots occupied", key)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release <- struct{}{}
+	third := waitForDelete("third dropped segment never reached object deletion after a slot was freed")
+	require.NotContains(t, []string{first, second}, third)
+	release <- struct{}{}
+	release <- struct{}{}
+	<-done
+	for _, id := range segmentIDs {
+		require.Nil(t, m.GetSegment(ctx, id))
+	}
+}
+
+func TestGarbageCollector_recycleDroppedSegments_ConcurrentPause(t *testing.T) {
+	const key = "dataCoord.gc.droppedSegmentConcurrency"
+	require.NoError(t, Params.Save(key, "2"))
+	t.Cleanup(func() { require.NoError(t, Params.Reset(key)) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	const collectionID = int64(100)
+	for id := int64(1); id <= 4; id++ {
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  collectionID,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Dropped,
+		})))
+	}
+
+	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
+		StreamingNodeCatalog: MockCheckpointCatalog(t, 1000),
+	}))
+	t.Cleanup(gc.Close)
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	defer mockey.Mock((*GarbageCollector).RecycleDroppedSegment).To(
+		func(*GarbageCollector, context.Context, *packed.ManifestIOContext, int64) {
+			started <- struct{}{}
+			<-release
+		}).Build().UnPatch()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gc.runRecycleTaskWithPauser(ctx, "meta", time.Millisecond, gc.RecycleDroppedSegments)
+	}()
+	defer func() {
+		cancel()
+		close(release)
+		<-done
+	}()
+	testCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+	defer stop()
+	for range 2 {
+		select {
+		case <-started:
+		case <-testCtx.Done():
+			t.Fatal("two segments did not start reclamation")
+		}
+	}
+
+	paused := make(chan error, 1)
+	pauseDone := make(chan struct{})
+	go func() {
+		defer close(pauseDone)
+		paused <- gc.pause(gcCmd{
+			collectionID: collectionID,
+			duration:     time.Minute,
+			ctx:          testCtx,
+			timeout:      testCtx.Done(),
+		})
+	}()
+	defer func() {
+		stop()
+		<-pauseDone
+	}()
+	require.Eventually(t, func() bool { return gc.IsPaused(collectionID) }, time.Second, time.Millisecond)
+	for range 2 {
+		select {
+		case err := <-paused:
+			t.Fatalf("pause returned while a segment was still active: %v", err)
+		case <-started:
+			t.Fatal("a new segment started reclamation during the pause")
+		case <-time.After(30 * time.Millisecond):
+		}
+		release <- struct{}{}
+	}
+	select {
+	case err := <-paused:
+		require.NoError(t, err)
+	case <-started:
+		t.Fatal("a new segment started reclamation during the pause")
+	case <-testCtx.Done():
+		t.Fatal("pause was not acknowledged after reclamation drained")
+	}
+}
+
 func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T) {
 	checkpointCatalog := MockCheckpointCatalog(t, 1000)
 
