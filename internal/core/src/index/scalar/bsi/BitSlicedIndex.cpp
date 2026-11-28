@@ -150,6 +150,100 @@ BitSlicedIndex<T>::BitSlicedIndex(const ScalarBuildInput<T>& input) {
 }
 
 template <BitSlicedIndexValue T>
+BitSlicedIndex<T>
+BitSlicedIndex<T>::FromState(State state) {
+    const size_t rows = state.num_rows;
+    if (state.existence.size() != rows) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index existence bitmap has {} bits, expected {}",
+                  state.existence.size(),
+                  rows);
+    }
+    for (size_t i = 0; i < state.slices.size(); ++i) {
+        if (state.slices[i].size() != rows) {
+            ThrowInfo(DataFormatBroken,
+                      "bit-sliced index slice {} has {} bits, expected {}",
+                      i,
+                      state.slices[i].size(),
+                      rows);
+        }
+    }
+
+    BitSlicedIndex index;
+    index.num_rows_ = rows;
+    index.valid_count_ = state.existence.count();
+    index.existence_ = std::move(state.existence);
+    index.slices_ = std::move(state.slices);
+    if (index.valid_count_ == 0) {
+        // The constructor leaves min_ = max_ = 0 and no slices for this input;
+        // accept exactly that state, so the encoding stays unique.
+        if (state.min != 0 || state.max != 0) {
+            ThrowInfo(DataFormatBroken,
+                      "bit-sliced index has bounds [{}, {}] but no valid rows",
+                      state.min,
+                      state.max);
+        }
+        if (!index.slices_.empty()) {
+            ThrowInfo(DataFormatBroken,
+                      "bit-sliced index has {} slices but no valid rows",
+                      index.slices_.size());
+        }
+        return index;
+    }
+
+    if (state.min > state.max) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index min {} is above max {}",
+                  state.min,
+                  state.max);
+    }
+    index.min_ = state.min;
+    index.max_ = state.max;
+    const auto span = index.ToOffset(index.max_);
+    const auto expected_slices = static_cast<size_t>(std::bit_width(span));
+    if (index.slices_.size() != expected_slices) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index has {} slices for values in [{}, {}], "
+                  "expected {}",
+                  index.slices_.size(),
+                  index.min_,
+                  index.max_,
+                  expected_slices);
+    }
+    // NULL rows are 0 in every slice: the union of the slices is a subset of
+    // the EBM. One accumulator, so the check allocates one bitmap.
+    auto stray = index.Empty();
+    for (const auto& slice : index.slices_) {
+        stray |= slice;
+    }
+    stray -= index.existence_;
+    if (stray.any()) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index slices have bits on NULL rows");
+    }
+    // The bounds must be exact: every valid row encodes an offset in
+    // [0, max - min] (the <= walk with the span as its constant selects
+    // exactly those rows), and both ends are reached by some row.
+    if (index.LessEqualOffset(span, index.existence_.clone()).count() !=
+        index.valid_count_) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index slices encode a value above max {}",
+                  index.max_);
+    }
+    if (!index.EqualOffset(0, index.existence_.clone()).any()) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index has no row with value min {}",
+                  index.min_);
+    }
+    if (!index.EqualOffset(span, index.existence_.clone()).any()) {
+        ThrowInfo(DataFormatBroken,
+                  "bit-sliced index has no row with value max {}",
+                  index.max_);
+    }
+    return index;
+}
+
+template <BitSlicedIndexValue T>
 std::optional<T>
 BitSlicedIndex<T>::Min() const {
     if (valid_count_ == 0) {
