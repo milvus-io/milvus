@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cast"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -200,96 +201,120 @@ func strippedKey(key string) string {
 	return normalizeKey(key)
 }
 
-func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string) {
+func flattenAndMergeMap(prefix string, m map[string]interface{}, result map[string]string, seen typeutil.Set[string]) error {
 	for k, v := range m {
 		fullKey := k
 		if prefix != "" {
 			fullKey = prefix + "." + k
 		}
 
-		switch val := v.(type) {
-		case map[string]interface{}:
-			flattenAndMergeMap(fullKey, val, result)
-		case map[interface{}]interface{}:
-			flattenAndMergeMap(fullKey, cast.ToStringMap(val), result)
-		case []interface{}:
-			// Check if array contains complex types (maps/structs)
-			isComplexArray := false
-			for _, item := range val {
-				switch item.(type) {
-				case map[string]interface{}, map[interface{}]interface{}:
-					isComplexArray = true
-				}
-				if isComplexArray {
-					break
-				}
-			}
-
-			var str string
-			if isComplexArray {
-				// For complex arrays (containing objects), convert to JSON-compatible format and serialize
-				jsonCompatible := convertToJSONCompatible(val)
-				jsonBytes, err := json.Marshal(jsonCompatible)
-				if err != nil {
-					mlog.Warn(context.TODO(), "marshal configuration to json failed", mlog.String("error", RedactedValue))
-					continue
-				}
-				str = string(jsonBytes)
-			} else {
-				// For simple arrays, use comma-separated values
-				for i, item := range val {
-					itemStr, err := cast.ToStringE(item)
-					if err != nil {
-						continue
-					}
-					if i == 0 {
-						str = itemStr
-					} else {
-						str = str + "," + itemStr
-					}
-				}
-			}
-			result[lowerKey(fullKey)] = str
-			result[formatKey(fullKey)] = str
-		default:
-			str, err := cast.ToStringE(val)
-			if err != nil {
-				mlog.Warn(context.TODO(), "cast configuration to string failed", mlog.String("error", RedactedValue))
-				continue
-			}
-			result[lowerKey(fullKey)] = str
-			result[formatKey(fullKey)] = str
+		if child, ok := v.(map[interface{}]interface{}); ok {
+			v = cast.ToStringMap(child)
 		}
+		if child, ok := v.(map[string]any); ok {
+			if err := flattenAndMergeMap(fullKey, child, result, seen); err != nil {
+				return err
+			}
+			continue
+		}
+		str, err := configValueString(v, seen != nil)
+		if err != nil {
+			if seen != nil {
+				return merr.WrapErrParameterInvalidMsg("cannot convert value for configuration key %q", fullKey)
+			}
+			mlog.Warn(context.TODO(), "cannot convert configuration value", mlog.String("error", RedactedValue))
+			continue
+		}
+		spelling, identity := lowerKey(fullKey), formatKey(fullKey)
+		if seen != nil {
+			if seen.Contain(spelling) || seen.Contain(identity) {
+				return merr.WrapErrParameterInvalidMsg("conflicting configuration key %q", fullKey)
+			}
+			seen.Insert(spelling, identity)
+		}
+		result[spelling] = str
+		result[identity] = str
 	}
+	return nil
 }
 
-// convertToJSONCompatible converts map[interface{}]interface{} to map[string]interface{}
-// recursively to make it compatible with JSON marshaling
-func convertToJSONCompatible(v interface{}) interface{} {
-	switch val := v.(type) {
-	case map[interface{}]interface{}:
-		result := make(map[string]interface{})
-		for k, v := range val {
-			keyStr, err := cast.ToStringE(k)
+// Lists of objects are represented as JSON. Other lists use comma-separated scalars.
+func configValueString(value any, strict bool) (string, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return cast.ToStringE(value)
+	}
+	for _, item := range items {
+		switch item.(type) {
+		case map[string]any, map[any]any:
+			objects, err := convertToJSONCompatible(items, strict)
 			if err != nil {
+				return "", err
+			}
+			data, err := json.Marshal(objects)
+			return string(data), err
+		}
+	}
+	var result strings.Builder
+	for i, item := range items {
+		str, err := cast.ToStringE(item)
+		if err != nil {
+			if strict {
+				return "", err
+			}
+			continue
+		}
+		if i > 0 {
+			result.WriteByte(',')
+		}
+		result.WriteString(str)
+	}
+	return result.String(), nil
+}
+
+// Normalize keys in the decoded YAML tree before flattening or JSON encoding.
+func convertToJSONCompatible(v any, strict bool) (any, error) {
+	switch val := v.(type) {
+	case map[any]any:
+		result := make(map[string]any, len(val))
+		for k, item := range val {
+			key, err := cast.ToStringE(k)
+			if err != nil {
+				if strict {
+					return nil, merr.WrapErrParameterInvalidMsg("cannot convert YAML key to string")
+				}
 				continue
 			}
-			result[keyStr] = convertToJSONCompatible(v)
+			// Merges may bring differently typed keys into the same mapping.
+			if _, exists := result[key]; strict && exists {
+				return nil, merr.WrapErrParameterInvalidMsg("multiple YAML keys resolve to %q", key)
+			}
+			result[key], err = convertToJSONCompatible(item, strict)
+			if err != nil {
+				return nil, err
+			}
 		}
-		return result
-	case map[string]interface{}:
-		result := make(map[string]interface{})
-		for k, v := range val {
-			result[k] = convertToJSONCompatible(v)
+		return result, nil
+	case map[string]any:
+		result := make(map[string]any, len(val))
+		for k, item := range val {
+			converted, err := convertToJSONCompatible(item, strict)
+			if err != nil {
+				return nil, err
+			}
+			result[k] = converted
 		}
-		return result
-	case []interface{}:
-		result := make([]interface{}, len(val))
+		return result, nil
+	case []any:
+		result := make([]any, len(val))
 		for i, item := range val {
-			result[i] = convertToJSONCompatible(item)
+			converted, err := convertToJSONCompatible(item, strict)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = converted
 		}
-		return result
-	default:
-		return v
+		return result, nil
 	}
+	return v, nil
 }

@@ -157,6 +157,15 @@ func (p *ComponentParam) Init(bt *BaseTable) {
 	})
 }
 
+// NewComponentParamForConfigGeneration collects parameter definitions without
+// creating the server's storage directory or measuring the build host's disk.
+func NewComponentParamForConfigGeneration(bt *BaseTable) *ComponentParam {
+	p := &ComponentParam{}
+	p.QueryNodeCfg.skipDiskCapacityProbe = true
+	p.Init(bt)
+	return p
+}
+
 // init initialize the global param table
 
 func (p *ComponentParam) init(bt *BaseTable) {
@@ -4758,6 +4767,8 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
+	skipDiskCapacityProbe bool
+
 	MaterializeCodec           ParamItem `refreshable:"true"`
 	MaterializeZstdMinBodySize ParamItem `refreshable:"true"`
 
@@ -6065,6 +6076,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version: "2.2.0",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
+				if p.skipDiskCapacityProbe {
+					return ""
+				}
 				// use local storage path to check correct device
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {

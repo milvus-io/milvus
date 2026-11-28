@@ -19,6 +19,8 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +29,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -48,6 +51,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRepositoryTestConfigVectorIndexVersion(t *testing.T) {
+	t.Setenv("MILVUSCONF", filepath.Join("..", "..", "configs"))
+	overlay, err := paramtable.LoadRequiredYAML(config.TestConfigFile)
+	require.NoError(t, err)
+	t.Cleanup(overlay.Manager().Close)
+
+	const key = "dataCoord.targetVecIndexVersion"
+	target, err := strconv.ParseInt(overlay.GetWithDefault(key, "-1"), 10, 32)
+	require.NoError(t, err, key)
+	// QueryNode advertises this linked engine's range to DataCoord at startup.
+	minimum, _, maximum := getIndexEngineVersion()
+	if target != -1 {
+		require.GreaterOrEqual(t, target, int64(minimum), key)
+		require.LessOrEqual(t, target, int64(maximum), key)
+	}
+}
 
 type QueryNodeSuite struct {
 	suite.Suite

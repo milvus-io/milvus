@@ -27,9 +27,14 @@ type DocContent struct {
 	comment      string
 }
 
-func collect() []DocContent {
-	params := &paramtable.ComponentParam{}
-	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true)))
+func collect() ([]DocContent, error) {
+	// Generate release defaults even when the calling process opts in to CI overrides.
+	base, err := paramtable.LoadRequiredYAML("milvus.yaml")
+	if err != nil {
+		return nil, err
+	}
+	defer base.Manager().Close()
+	params := paramtable.NewComponentParamForConfigGeneration(base)
 
 	val := reflect.ValueOf(params).Elem()
 	data := make([]DocContent, 0)
@@ -46,7 +51,7 @@ func collect() []DocContent {
 		keySet.Insert(d.key)
 		result = append(result, d)
 	}
-	return result
+	return result, nil
 }
 
 func quoteIfNeeded(s string) string {
@@ -98,11 +103,10 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 	}
 }
 
-func WriteCsv(f io.Writer) {
+func WriteCsv(f io.Writer, result []DocContent) {
 	w := csv.NewWriter(f)
 	w.Write([]string{"key", "defaultValue", "sinceVersion", "refreshable", "exportToUser", "comment"})
 
-	result := collect()
 	w.WriteAll(lo.Map(result, func(d DocContent, _ int) []string {
 		return []string{d.key, d.defaultValue, d.sinceVersion, d.refreshable, fmt.Sprintf("%t", d.exportToUser), d.comment}
 	}))
@@ -192,9 +196,7 @@ func (m *YamlMarshaller) writeContent(key, value, comment string, level int) {
 	}
 }
 
-func WriteYaml(w io.Writer) {
-	result := collect()
-
+func WriteYaml(w io.Writer, result []DocContent) {
 	io.WriteString(w, `# Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
