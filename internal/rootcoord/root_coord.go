@@ -3016,7 +3016,6 @@ func (c *Core) CreatePrivilegeGroup(ctx context.Context, in *milvuspb.CreatePriv
 	ctxLog.Info(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPrivilegeGroups.Inc()
 	return merr.Success(), nil
 }
 
@@ -3043,7 +3042,6 @@ func (c *Core) DropPrivilegeGroup(ctx context.Context, in *milvuspb.DropPrivileg
 	ctxLog.Info(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPrivilegeGroups.Desc()
 	return merr.Success(), nil
 }
 
