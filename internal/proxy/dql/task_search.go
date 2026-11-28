@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -168,6 +169,10 @@ type SearchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
+	// hybridSubSearches carries each HybridSearch sub-request's function_score
+	// next to the converted sub-search. Nil for tasks not built from a
+	// HybridSearchRequest.
+	hybridSubSearches []hybridSubSearch
 
 	chMgr channelmgr.ChannelsMgr
 }
@@ -229,6 +234,72 @@ func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *schedule
 		mustUsePartitionKey:    paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool(),
 		chMgr:                  node.ChMgr(),
 	}
+}
+
+// NewHybridSearchTask constructs a search task for a HybridSearchRequest. Unlike
+// ConvertHybridSearchToSearch followed by NewSearchTask, it keeps each
+// sub-request's function_score so the sub-search plan can apply it. It also
+// returns the converted SearchRequest the task runs.
+func NewHybridSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *scheduler.TaskScheduler, request *milvuspb.HybridSearchRequest, optimizedSearch bool, tr *timerecord.TimeRecorder) (*SearchTask, *milvuspb.SearchRequest) {
+	searchRequest, subSearches := convertHybridSearch(request)
+	task := NewSearchTask(ctx, node, sched, searchRequest, optimizedSearch, false, tr)
+	task.hybridSubSearches = subSearches
+	return task, searchRequest
+}
+
+// hybridSubFunctionScore returns the function_score of the HybridSearch
+// sub-request that sub-search[index] was converted from.
+func (t *SearchTask) hybridSubFunctionScore(index int, subReq *milvuspb.SubSearchRequest) (*schemapb.FunctionScore, error) {
+	if t.hybridSubSearches == nil {
+		return nil, nil
+	}
+	if len(t.hybridSubSearches) != len(t.request.GetSubReqs()) || t.hybridSubSearches[index].request != subReq {
+		// Both come from one pass over HybridSearchRequest.requests; a mismatch
+		// means something rebuilt SubReqs after conversion.
+		return nil, merr.WrapErrServiceInternalMsg(
+			"sub-search[%d] is not paired with its hybrid search sub-request", index)
+	}
+	functionScore := t.hybridSubSearches[index].functionScore
+	if len(functionScore.GetFunctions()) == 0 {
+		// An empty function_score was a no-op before sub-request boost was
+		// supported. Keep it a no-op so clients that send an empty message
+		// instead of omitting the field keep working.
+		return nil, nil
+	}
+	return functionScore, nil
+}
+
+// validateHybridSubFunctionScore checks the function_score set on one
+// HybridSearch sub-request. Only boost is supported there: it is applied to the
+// sub-search hits on the QueryNode before fusion. Other rerankers would be
+// dropped, because the proxy reranks with the top-level ranker only.
+func validateHybridSubFunctionScore(index int, functionScore *schemapb.FunctionScore, subReq *milvuspb.SubSearchRequest, topLevel *schemapb.FunctionScore) error {
+	for i, function := range functionScore.GetFunctions() {
+		if function == nil {
+			return merr.WrapErrParameterInvalidMsg(
+				"sub-search[%d] function_score function[%d] is nil", index, i)
+		}
+		if name := rerank.GetRerankName(function); name != rerank.BoostName {
+			return merr.WrapErrParameterInvalidMsg(
+				"sub-search[%d] function_score only supports the boost reranker, got %q; set fusion and other rerankers in the top-level function_score", index, name)
+		}
+	}
+	// QueryNode requires boost scorers and querynode_function_chains to be
+	// mutually exclusive within one plan.
+	if len(subReq.GetFunctionChains()) > 0 {
+		return merr.WrapErrParameterInvalidMsg(
+			"sub-search[%d] function_score cannot be used with function_chains", index)
+	}
+	// A boost in the top-level function_score is applied to every sub-search.
+	// There is no defined order for applying it together with a sub-request's
+	// own boost, so reject the combination.
+	for _, function := range topLevel.GetFunctions() {
+		if function != nil && rerank.GetRerankName(function) == rerank.BoostName {
+			return merr.WrapErrParameterInvalidMsg(
+				"sub-search[%d] function_score cannot be used when the top-level function_score contains a boost function", index)
+		}
+	}
+	return nil
 }
 
 // Result returns the search result after execution.
@@ -741,13 +812,28 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg(
 				"sub-search[%d] function chains only support L0 and L1 stages", index)
 		}
+		// The sub-search plan takes its boost scorers from the sub-request's
+		// own function_score when set, otherwise from the top-level one.
+		planFunctionScore := t.request.GetFunctionScore()
+		subFunctionScore, err := t.hybridSubFunctionScore(index, subReq)
+		if err != nil {
+			return err
+		}
+		if subFunctionScore != nil {
+			if err := validateHybridSubFunctionScore(index, subFunctionScore, subReq, t.request.GetFunctionScore()); err != nil {
+				return err
+			}
+			collectFunctionScoreFeatures(subFunctionScore, t.featureSink())
+			planFunctionScore = subFunctionScore
+		}
 		// For hybrid search, order_by_fields comes from main search params, not sub-search params
 		plan, queryInfo, offset, subIsIterator, _, searchType, err := t.tryGeneratePlan(
 			subReq.GetSearchParams(),
 			subReq.GetDsl(),
 			subReq.GetExprTemplateValues(),
 			membershipPreflightBudget,
-			t.request.GetFunctionScore() != nil || len(querynodeFunctionChains) > 0,
+			planFunctionScore,
+			planFunctionScore != nil || len(querynodeFunctionChains) > 0,
 		)
 		if err != nil {
 			return err
@@ -1088,6 +1174,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		t.request.GetDsl(),
 		t.request.GetExprTemplateValues(),
 		nil,
+		t.request.GetFunctionScore(),
 		hasFunctionRerank(t.request),
 	)
 	if err != nil {
@@ -1390,6 +1477,7 @@ func (t *SearchTask) tryGeneratePlan(
 	dsl string,
 	exprTemplateValues map[string]*schemapb.TemplateValue,
 	membershipBudget *planparserv2.MembershipPreflightBudget,
+	functionScore *schemapb.FunctionScore,
 	functionRerank bool,
 ) (*planpb.PlanNode, *planpb.QueryInfo, int64, bool, []OrderByField, internalpb.SearchType, error) {
 	annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, params)
@@ -1444,7 +1532,7 @@ func (t *SearchTask) tryGeneratePlan(
 	}
 
 	start := time.Now()
-	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, t.request.GetFunctionScore(), visitorArgs)
+	plan, planErr := planparserv2.CreateSearchPlanArgs(t.schema.SchemaHelper, dsl, annsFieldName, searchInfo.planInfo, exprTemplateValues, functionScore, visitorArgs)
 	if planErr != nil {
 		mlog.Warn(t.ctx, "failed to create query plan", mlog.Err(planErr),
 			mlog.Int("dsl_bytes", len(dsl)),

@@ -94,6 +94,10 @@ func NewQueryTask(node taskmodel.TaskNode, ctx context.Context,
 func NewGetStatisticsTask(node taskmodel.TaskNode, ctx context.Context,
     request *milvuspb.GetStatisticsRequest, tr *timerecord.TimeRecorder) *GetStatisticsTask
 
+func NewHybridSearchTask(ctx context.Context, node taskmodel.TaskNode,
+    sched *scheduler.TaskScheduler, request *milvuspb.HybridSearchRequest,
+    optimizedSearch bool, tr *timerecord.TimeRecorder) (*SearchTask, *milvuspb.SearchRequest)
+
 func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest
 func PickFieldData(ids *schemapb.IDs, pkOffset map[any]int,
     fields []*schemapb.FieldData, schema *schemapb.CollectionSchema,
