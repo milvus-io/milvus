@@ -77,6 +77,7 @@ type Server struct {
 	session             sessionutil.SessionInterface
 	sessionWatcher      sessionutil.SessionWatcher
 	sessionWatcherMu    sync.Mutex
+	nodeLifecycleMu     sync.Mutex
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -668,44 +669,86 @@ func (s *Server) watchNodes(revision int64) {
 				return
 			}
 
-			nodeID := event.Session.ServerID
-			addr := event.Session.Address
-			log := mlog.With(
-				mlog.FieldNodeID(nodeID),
-				mlog.String("nodeAddr", addr),
-			)
-
-			switch event.EventType {
-			case sessionutil.SessionAddEvent:
-				s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-					NodeID:   nodeID,
-					Address:  addr,
-					Hostname: event.Session.HostName,
-					Version:  event.Session.Version,
-					Labels:   event.Session.GetServerLabel(),
-				}))
-				s.handleNodeUp(nodeID)
-				if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
-					s.fileResourceObserver.Notify()
-				}
-
-			case sessionutil.SessionUpdateEvent:
-				log.Info(s.ctx, "stopping the node")
-				s.nodeMgr.Stopping(nodeID)
-				s.handleNodeStopping(nodeID)
-
-			case sessionutil.SessionDelEvent:
-				log.Info(s.ctx, "a node down, remove it")
-				s.nodeMgr.Remove(nodeID)
-				s.handleNodeDown(nodeID)
-			}
+			s.handleSessionEvent(event)
 		}
 	}
+}
+
+func (s *Server) handleSessionEvent(event *sessionutil.SessionEvent) {
+	s.nodeLifecycleMu.Lock()
+	defer s.nodeLifecycleMu.Unlock()
+
+	nodeID := event.Session.ServerID
+	addr := event.Session.Address
+	log := mlog.With(
+		mlog.FieldNodeID(nodeID),
+		mlog.String("nodeAddr", addr),
+	)
+
+	switch event.EventType {
+	case sessionutil.SessionAddEvent:
+		s.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   nodeID,
+			Address:  addr,
+			Hostname: event.Session.HostName,
+			Version:  event.Session.Version,
+			Labels:   event.Session.GetServerLabel(),
+		}))
+		s.handleNodeUp(nodeID)
+		if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
+			s.fileResourceObserver.Notify()
+		}
+
+	case sessionutil.SessionUpdateEvent:
+		log.Info(s.ctx, "stopping the node")
+		s.nodeMgr.Stopping(nodeID)
+		s.handleNodeStopping(nodeID)
+
+	case sessionutil.SessionDelEvent:
+		if s.nodeMgr.Get(nodeID) == nil {
+			log.Info(s.ctx, "node already removed, skip duplicate SessionDelEvent")
+			return
+		}
+		log.Info(s.ctx, "a node down, remove it")
+		s.nodeMgr.Remove(nodeID)
+		s.handleNodeDown(nodeID)
+	}
+}
+
+// OnStreamingNodeLost handles a confirmed StreamingNode loss notification from StreamingCoord
+// after pchannel eviction, promptly removing the corresponding embedded QueryNode instead of
+// waiting for its etcd session lease to expire.
+func (s *Server) OnStreamingNodeLost(ctx context.Context, serverID int64) {
+	s.nodeLifecycleMu.Lock()
+	defer s.nodeLifecycleMu.Unlock()
+
+	if s.nodeMgr == nil || (s.ctx != nil && s.ctx.Err() != nil) {
+		return
+	}
+	nodeInfo := s.nodeMgr.Get(serverID)
+	if nodeInfo == nil {
+		return
+	}
+	if !nodeInfo.IsEmbeddedQueryNodeInStreamingNode() {
+		mlog.Warn(ctx, "ignore streaming node lost notification for non-embedded querynode",
+			mlog.FieldNodeID(serverID),
+			mlog.String("nodeAddr", nodeInfo.Addr()))
+		return
+	}
+
+	mlog.Info(ctx, "evict embedded querynode on confirmed streaming node loss",
+		mlog.FieldNodeID(serverID),
+		mlog.String("nodeAddr", nodeInfo.Addr()))
+	s.nodeMgr.Remove(serverID)
+	s.handleNodeDown(serverID)
 }
 
 // rewatchNodes is used to re-watch nodes when querycoord restart or reconnect to etcd
 // Note: may apply same node multiple times, so rewatchNodes must be idempotent
 func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
+	s.nodeLifecycleMu.Lock()
+	defer s.nodeLifecycleMu.Unlock()
+
 	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
 		return s.ServerID
 	})

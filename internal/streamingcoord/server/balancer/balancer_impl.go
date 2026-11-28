@@ -40,6 +40,7 @@ var errVersionWatchDone = errors.New("done")
 func RecoverBalancer(
 	ctx context.Context,
 	provider ChannelProvider,
+	opts ...Option,
 ) (Balancer, error) {
 	policyBuilder := mustGetPolicy(paramtable.Get().StreamingCfg.WALBalancerPolicyName.GetValue())
 	policy := policyBuilder.Build()
@@ -64,6 +65,11 @@ func RecoverBalancer(
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 		freezeNodes:            typeutil.NewConcurrentSet[int64](),
 		primaryRGChangedCh:     make(chan struct{}, 1),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(b)
+		}
 	}
 	b.SetLogger(logger)
 	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
@@ -90,6 +96,7 @@ type balancerImpl struct {
 	freezeNodes            *typeutil.ConcurrentSet[int64]        // freezeNodes is the nodes that will be frozen, no more wal will be assigned to these nodes and wal will be removed from these nodes.
 	primaryRGChangedCh     chan struct{}                         // primaryRGChangedCh wakes the balance loop when streaming.primaryResourceGroup changes.
 	primaryRGChangeHandler config.EventHandler
+	onNodeLost             NodeLostCallback // optional callback fired after confirmed pchannel eviction from a lost node.
 }
 
 func (b *balancerImpl) watchPrimaryResourceGroupChanges() {
@@ -651,12 +658,14 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 	// different channel can be execute concurrently.
 	g, _ := errgroup.WithContext(ctx)
 	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
+	notifiedLostNodes := typeutil.NewConcurrentSet[int64]()
 	// generate balance operations and applied them.
 	for _, channel := range modifiedChannels {
 		channel := channel
 		g.Go(func() error {
 			// ownerLost is true if the streaming node of any read-write assignment history has left the session view.
 			ownerLost := false
+			lostServerIDs := typeutil.NewUniqueSet()
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
 				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
@@ -666,6 +675,7 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 					if assignment.Channel.AccessMode == types.AccessModeRW {
 						ownerLost = true
 					}
+					lostServerIDs.Insert(assignment.Node.ServerID)
 					b.Logger().Warn(ctx, "streaming node of channel is not alive, wal close not confirmed", mlog.String("assignment", assignment.String()))
 					continue
 				}
@@ -694,6 +704,19 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 			if err := b.channelMetaManager.AssignPChannelsDone(ctx, []types.ChannelID{channel.ChannelID()}); err != nil {
 				b.Logger().Warn(ctx, "fail to bookkeep pchannel assignment done", mlog.String("assignment", channel.CurrentAssignment().String()))
 				return err
+			}
+
+			// Propagate confirmed node-loss eviction only after grace-period expiry and committed reassignment.
+			if b.onNodeLost != nil {
+				targetServerID := channel.CurrentAssignment().Node.ServerID
+				for serverID := range lostServerIDs {
+					if serverID == targetServerID {
+						continue
+					}
+					if notifiedLostNodes.Insert(serverID) {
+						b.onNodeLost(ctx, serverID)
+					}
+				}
 			}
 			return nil
 		})

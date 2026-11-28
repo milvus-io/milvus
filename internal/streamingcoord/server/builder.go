@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/types"
@@ -19,6 +20,7 @@ type ServerBuilder struct {
 	metaKV         kv.MetaKv
 	session        sessionutil.SessionInterface
 	mixCoordClient *syncutil.Future[types.MixCoordClient]
+	onNodeLost     balancer.NodeLostCallback
 }
 
 func NewServerBuilder() *ServerBuilder {
@@ -45,6 +47,11 @@ func (b *ServerBuilder) WithSession(session sessionutil.SessionInterface) *Serve
 	return b
 }
 
+func (b *ServerBuilder) WithNodeLostCallback(cb balancer.NodeLostCallback) *ServerBuilder {
+	b.onNodeLost = cb
+	return b
+}
+
 func (s *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
@@ -58,5 +65,6 @@ func (s *ServerBuilder) Build() *Server {
 		session:           s.session,
 		assignmentService: service.NewAssignmentService(),
 		broadcastService:  service.NewBroadcastService(),
+		onNodeLost:        s.onNodeLost,
 	}
 }
