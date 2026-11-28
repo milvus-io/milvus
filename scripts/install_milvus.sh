@@ -18,6 +18,16 @@
 
 set -e
 
+fips_provider_dir="$PWD/cmake_build/fips_provider/artifacts"
+fips_module_config=fipsmodule-validated.cnf
+fips_provider_config="$PWD/configs/ssl/$fips_module_config"
+if [[ "${MILVUS_FIPS_ENABLED:-OFF}" == "ON" ]]; then
+    if [[ ! -s "$fips_provider_dir/fips.so" || ! -s "$fips_provider_dir/$fips_module_config" ]]; then
+        echo "FIPS install requires the staged OpenSSL provider and integrity configuration" >&2
+        exit 1
+    fi
+fi
+
 mkdir -p "$GOPATH/bin" && cp -f "$PWD/bin/milvus" "$GOPATH/bin/milvus"
 mkdir -p "$LIBRARY_PATH"
 # Preserve linker and SONAME aliases instead of duplicating their library payloads.
@@ -58,7 +68,17 @@ shopt -u nullglob
 # internal/core/output/lib. Nothing at runtime loads them, so keep them out of
 # the runtime directory, including copies left there by an older installer.
 rm -f "$LIBRARY_PATH"/libmilvus-planparser*
-cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+if [[ "${MILVUS_FIPS_ENABLED:-OFF}" == "ON" ]]; then
+    install -d "$LIBRARY_PATH/ossl-modules"
+    install -m 0644 "$fips_provider_dir/fips.so" "$LIBRARY_PATH/ossl-modules/fips.so"
+    install -m 0644 "$fips_provider_dir/$fips_module_config" "$fips_provider_config"
+    rm -f -- "$LIBRARY_PATH/ossl-modules/legacy.so"
+else
+    if [[ -e "$fips_provider_config" ]]; then
+        rm -f -- "$LIBRARY_PATH/ossl-modules/fips.so" "$fips_provider_config"
+    fi
+    cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+fi
 for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/core/output/lib64/milvus-sanitizer"; do
     if [[ -f "$marker" ]]; then
         cp "$marker" "$LIBRARY_PATH/"

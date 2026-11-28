@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [[ -e /milvus/configs/ssl/fipsmodule-validated.cnf ]]; then
+    echo "FIPS requires the Milvus container layout and is unavailable for Debian packages" >&2
+    exit 1
+fi
+
 #Change config
 rm -rf milvus
 cp -r /milvus .
