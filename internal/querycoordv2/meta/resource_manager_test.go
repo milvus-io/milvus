@@ -83,6 +83,50 @@ func TestResourceManager(t *testing.T) {
 	suite.Run(t, new(ResourceManagerSuite))
 }
 
+func TestResourceManager_CheckIfResourceGroupDropableSerializesTransfer(t *testing.T) {
+	paramtable.Init()
+	ctx := t.Context()
+	const group = "rg-to-drop"
+	const nodeID int64 = 1
+	catalog := metastoremocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveResourceGroup(ctx, mock.Anything).Return(nil).Times(3)
+	catalog.EXPECT().SaveResourceGroup(ctx, mock.Anything, mock.Anything).Return(nil).Once()
+	nodes := session.NewNodeManager()
+	manager := NewResourceManager(catalog, nodes)
+
+	ignored, err := manager.AddResourceGroup(ctx, group, newResourceGroupConfig(1, 1))
+	require.NoError(t, err)
+	require.False(t, ignored)
+	nodes.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+	manager.HandleNodeUp(ctx, nodeID)
+	require.NoError(t, manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		group: newResourceGroupConfig(0, 0),
+	}))
+	require.Equal(t, group, manager.GetResourceGroupByNodeID(nodeID))
+
+	published := false
+	stop := manager.RegisterResourceGroupListener(func(name string, ids []int64) {
+		if name != group || len(ids) != 0 {
+			return
+		}
+		published = true
+		// Probe the same read lock used by node lookups while the transfer
+		// publishes its updated membership, without blocking the transfer.
+		canRead := manager.rwmutex.TryRLock()
+		if canRead {
+			manager.rwmutex.RUnlock()
+		}
+		assert.False(t, canRead, "node lookups must be excluded during the drop precheck's membership transfer")
+	})
+	defer stop()
+
+	ignored, err = manager.CheckIfResourceGroupDropable(ctx, group)
+	require.NoError(t, err)
+	require.False(t, ignored)
+	require.True(t, published)
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(nodeID))
+}
+
 func TestLoadDemandMetricsFollowResourceGroupLifecycle(t *testing.T) {
 	const rgName = "load-demand-metrics-lifecycle"
 	metrics.QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(rgName)
