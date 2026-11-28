@@ -11,6 +11,12 @@
 
 #pragma once
 
+#include <folly/coro/Task.h>
+
+#ifdef MILVUS_UNIT_TEST
+#include <folly/coro/BlockingWait.h>
+#endif
+
 #include <folly/ExceptionWrapper.h>
 #include <stdint.h>
 #include <any>
@@ -122,6 +128,65 @@ CheckStructProviderNotDropped(const SealedFieldLayout& schema,
                               const SegmentLoadInfo& load_info,
                               const std::string& struct_name,
                               int64_t segment_id);
+
+// Per-generation runtime state. All sealed index families share one
+// inventory; its slots and metadata are copied and published together.
+//
+// Array offsets remain column-derived runtime state: column load builds them,
+// struct fields share them, and column release/reopen replaces them. Do not
+// capture them in an index reader; a surviving reader could otherwise use a
+// stale mapping after column replacement.
+struct RuntimeResourceState {
+    std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>> fields;
+    std::unordered_map<std::string, std::shared_ptr<StructElementOffsetsSealed>>
+        struct_to_element_offsets;
+    std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
+        struct_element_offsets_map;
+    IndexInventory indexes;
+    uint64_t next_local_index_registration_id{0};
+    std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
+        vec_binlog_config;
+    std::unordered_map<FieldId, std::string> text_lob_paths;
+    std::unordered_map<
+        FieldId,
+        std::shared_ptr<milvus::cachinglayer::CacheSlot<index::JsonKeyStats>>>
+        json_stats;
+    std::shared_ptr<milvus_storage::api::Reader> reader;
+    std::shared_ptr<TimestampData> timestamps;
+    std::shared_ptr<const TimestampIndex> timestamp_index;
+    std::shared_ptr<CacheSlot<storagev2translator::TimestampIndexCell>>
+        timestamp_index_slot;
+    std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>> pk_index_slot;
+    std::shared_ptr<const OffsetMap> virtual_pk2offset;
+    std::unordered_set<FieldId> mmap_field_ids;
+    std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
+        variable_fields_avg_size;
+    // Sealed geometry caches are part of the immutable runtime snapshot.
+    // A replace/reopen stages the new column and cache in the same clone,
+    // then publishes both with one atomic PublishedSegmentState swap.
+    std::unordered_map<FieldId,
+                       std::shared_ptr<milvus::exec::SimpleGeometryCache>>
+        geometry_caches;
+    int64_t row_count{0};
+};
+
+struct PublishedSegmentState {
+    exec::ExprCacheGenerationPtr expr_cache_generation =
+        std::make_shared<exec::ExprCacheGeneration>();
+    SealedFieldLayoutPtr fields;
+    std::shared_ptr<const SegmentLoadInfo> load_info;
+    std::shared_ptr<const RuntimeResourceState> runtime;
+    Timestamp commit_ts{0};
+    bool use_take_for_output{false};
+    bool system_field_ready{false};
+    BitsetType published_index_ready_bitset;
+    BitsetType published_binlog_index_ready_bitset;
+    std::unordered_map<FieldId, bool> published_index_has_raw_data;
+    BitsetType field_data_ready_bitset;
+    BitsetType index_ready_bitset;
+    BitsetType binlog_index_bitset;
+    std::unordered_map<FieldId, bool> index_has_raw_data;
+};
 
 class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
@@ -350,69 +415,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     uint64_t
     GetCommitTimestamp() const override;
 
-    struct RuntimeResourceState;
-
-    // Per-generation runtime state. All sealed index families share one
-    // inventory; its slots and metadata are copied and published together.
-    //
-    // Array offsets remain column-derived runtime state: column load builds them,
-    // struct fields share them, and column release/reopen replaces them. Do not
-    // capture them in an index reader; a surviving reader could otherwise use a
-    // stale mapping after column replacement.
-    struct RuntimeResourceState {
-        std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
-            fields;
-        std::unordered_map<std::string,
-                           std::shared_ptr<StructElementOffsetsSealed>>
-            struct_to_element_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
-            struct_element_offsets_map;
-        IndexInventory indexes;
-        uint64_t next_local_index_registration_id{0};
-        std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
-            vec_binlog_config;
-        std::unordered_map<FieldId, std::string> text_lob_paths;
-        std::unordered_map<FieldId,
-                           std::shared_ptr<milvus::cachinglayer::CacheSlot<
-                               index::JsonKeyStats>>>
-            json_stats;
-        std::shared_ptr<milvus_storage::api::Reader> reader;
-        std::shared_ptr<TimestampData> timestamps;
-        std::shared_ptr<const TimestampIndex> timestamp_index;
-        std::shared_ptr<CacheSlot<storagev2translator::TimestampIndexCell>>
-            timestamp_index_slot;
-        std::shared_ptr<CacheSlot<storagev2translator::PkIndexCell>>
-            pk_index_slot;
-        std::shared_ptr<const OffsetMap> virtual_pk2offset;
-        std::unordered_set<FieldId> mmap_field_ids;
-        std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
-            variable_fields_avg_size;
-        // Sealed geometry caches are part of the immutable runtime snapshot.
-        // A replace/reopen stages the new column and cache in the same clone,
-        // then publishes both with one atomic PublishedSegmentState swap.
-        std::unordered_map<FieldId,
-                           std::shared_ptr<milvus::exec::SimpleGeometryCache>>
-            geometry_caches;
-        int64_t row_count{0};
-    };
-
-    struct PublishedSegmentState {
-        exec::ExprCacheGenerationPtr expr_cache_generation =
-            std::make_shared<exec::ExprCacheGeneration>();
-        SealedFieldLayoutPtr fields;
-        std::shared_ptr<const SegmentLoadInfo> load_info;
-        std::shared_ptr<const RuntimeResourceState> runtime;
-        Timestamp commit_ts{0};
-        bool use_take_for_output{false};
-        bool system_field_ready{false};
-        BitsetType published_index_ready_bitset;
-        BitsetType published_binlog_index_ready_bitset;
-        std::unordered_map<FieldId, bool> published_index_has_raw_data;
-        BitsetType field_data_ready_bitset;
-        BitsetType index_ready_bitset;
-        BitsetType binlog_index_bitset;
-        std::unordered_map<FieldId, bool> index_has_raw_data;
-    };
+    using RuntimeResourceState = milvus::segcore::RuntimeResourceState;
+    using PublishedSegmentState = milvus::segcore::PublishedSegmentState;
 
     struct StateDelta {
         std::optional<SealedFieldLayoutPtr> fields;
@@ -1528,6 +1532,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
               PublishedSegmentState* staged_state = nullptr,
               StagedStateCommitter* committer = nullptr);
 
+    // Only legacy direct/test entry points need a snapshot-based plan.
+    static std::vector<std::vector<FieldId>>
+    PlanDirectInterimIndexes(const PublishedSegmentState& current,
+                             const SealedFieldLayoutPtr& layout,
+                             const std::unordered_set<FieldId>& fields);
+
+    // Builds serially within each planned group after field loading and retirement.
+    void
+    BuildInterimIndexes(const std::vector<std::vector<FieldId>>& groups,
+                        const SealedFieldLayoutPtr& layout,
+                        milvus::OpContext* op_ctx,
+                        StagedStateCommitter& committer);
+
+    folly::coro::Task<void>
+    BuildInterimIndexesAsync(const std::vector<std::vector<FieldId>>& groups,
+                             const SealedFieldLayoutPtr& layout,
+                             milvus::OpContext* op_ctx,
+                             StagedStateCommitter& committer);
+
     bool
     generate_interim_index(
         const FieldMeta& field_meta,
@@ -1549,8 +1572,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const SegmentLoadInfo& segment_load_info,
         const SealedFieldLayoutPtr& schema_snapshot) const;
 
-    [[nodiscard]] std::vector<ManifestLoadTask>
-    PrepareManifestLoadTasks(
+    folly::coro::Task<std::vector<ManifestLoadTask>>
+    PrepareManifestLoadTasksAsync(
         const std::shared_ptr<milvus_storage::api::Reader>& reader,
         const SealedFieldLayoutPtr& schema_snapshot,
         const SegmentLoadInfo& segment_load_info,
@@ -1704,9 +1727,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             segment_.NormalizePublishedState(*staged_state_);
         }
 
-        bool
-        IsVectorIndexReady(FieldId field_id);
-
         void
         StageMemorySizeDeltaLocked(int64_t delta) {
             memory_size_delta_ += delta;
@@ -1823,8 +1843,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             info_proto,
         const std::string& shard);
 
-    void
-    LoadBatchJsonKeyIndexes(
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchJsonKeyIndexesAsync(
         milvus::OpContext* op_ctx,
         const std::unordered_map<
             FieldId,
@@ -2071,25 +2092,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                     bool is_replace,
                                     StagedStateCommitter& committer);
 
-    void
-    LoadBatchIndexes(milvus::tracer::TraceContext& trace_ctx,
-                     std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
-                         field_id_to_index_info,
-                     const SealedFieldLayoutPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx,
-                     bool is_replace,
-                     StagedStateCommitter& committer);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchIndexesAsync(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::unordered_map<FieldId, std::vector<LoadIndexInfo>>&
+            field_id_to_index_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer);
 
-    void
-    LoadBatchFieldData(milvus::tracer::TraceContext& trace_ctx,
-                       std::vector<std::pair<std::vector<FieldId>,
-                                             proto::segcore::FieldBinlog>>&
-                           field_binlog_to_load,
-                       const SegmentLoadInfo& segment_load_info,
-                       const SealedFieldLayoutPtr& schema_snapshot,
-                       milvus::OpContext* op_ctx,
-                       bool is_replace,
-                       StagedStateCommitter& committer);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchFieldDataAsync(
+        milvus::tracer::TraceContext& trace_ctx,
+        std::vector<
+            std::pair<std::vector<FieldId>, proto::segcore::FieldBinlog>>&
+            field_binlog_to_load,
+        const SegmentLoadInfo& segment_load_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer,
+        const std::unordered_set<FieldId>& index_raw_fields);
 
     void
     InitTextLobPaths(const std::string& manifest_path,
@@ -2126,13 +2152,28 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace,
         StagedStateCommitter& committer);
 
-    // Load external collection column groups from staged segment load info.
-    void
-    LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
-                     const SealedFieldLayoutPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx,
-                     bool is_replace,
-                     StagedStateCommitter& committer);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadColumnGroupsAsync(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> column_groups,
+        std::shared_ptr<const milvus_storage::api::Properties> properties,
+        std::vector<std::pair<int, std::vector<FieldId>>> eager_cg_field_ids,
+        std::vector<std::pair<int, std::vector<FieldId>>> lazy_cg_field_ids,
+        std::vector<VortexColumnGroupLocalFormat> local_formats,
+        const SegmentLoadInfo& segment_load_info,
+        const SealedFieldLayoutPtr& schema_snapshot,
+        milvus::OpContext* op_ctx,
+        bool is_replace,
+        StagedStateCommitter& committer);
+
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadColumnGroupsAsync(const SegmentLoadInfo& segment_load_info,
+                          const SealedFieldLayoutPtr& schema_snapshot,
+                          milvus::OpContext* op_ctx,
+                          bool is_replace,
+                          StagedStateCommitter& committer,
+                          std::shared_ptr<const PublishedSegmentState> current);
 
     void
     LoadColumnGroup(
@@ -2152,7 +2193,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             preopened_chunk_reader,
         bool enable_async_load,
         bool lazy_materialization,
-        bool use_vortex);
+        bool use_vortex,
+        const std::shared_ptr<milvus_storage::api::Reader>& reader);
 
     void
     LoadVortexColumnGroup(
@@ -2175,12 +2217,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
         const SealedFieldLayoutPtr& schema_snapshot) const;
 
-    void
-    ReloadColumns(const std::vector<FieldId>& field_ids_to_reload,
-                  milvus::OpContext* op_ctx = nullptr);
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    ReloadColumnsAsync(const std::vector<FieldId>& field_ids_to_reload,
+                       milvus::OpContext* op_ctx,
+                       std::shared_ptr<const PublishedSegmentState> current);
 
-    void
-    LoadBatchTextIndexes(
+    // Coroutine orchestration; blocking leaves are submitted to MIDDLE.
+    folly::coro::Task<void>
+    LoadBatchTextIndexesAsync(
         milvus::OpContext* op_ctx,
         std::unordered_map<FieldId,
                            std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>&
@@ -2234,14 +2279,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RecordTextIndexCreated(SegmentLoadInfo& segment_load_info,
                            FieldId field_id);
 
-    void
-    PrepareLoadDiffForReopen(
-        milvus::OpContext* op_ctx,
-        SegmentLoadInfo& segment_load_info,
-        LoadDiff& load_diff,
-        const SealedFieldLayoutPtr& schema_snapshot,
-        StagedStateCommitter& committer,
-        milvus::monitor::SegmentLoadTiming* timing = nullptr);
+    // Owns the preparation fan-out, dependent completion and final retirement.
+    folly::coro::Task<void>
+    ExecuteLoadDiffAsync(milvus::OpContext* op_ctx,
+                         SegmentLoadInfo& segment_load_info,
+                         LoadDiff& load_diff,
+                         const SealedFieldLayoutPtr& schema_snapshot,
+                         StagedStateCommitter& committer,
+                         std::shared_ptr<const PublishedSegmentState> current,
+                         milvus::monitor::SegmentLoadTiming* timing = nullptr);
 
     void
     FinalizeLoadDiffForReopen(milvus::OpContext* op_ctx,
@@ -2432,8 +2478,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         staged->runtime = runtime;
         StagedStateCommitter committer(*this, runtime.get(), staged.get());
         milvus::tracer::TraceContext trace_ctx{};
-        LoadBatchIndexes(
-            trace_ctx, indexes, current->fields, op_ctx, is_replace, committer);
+        folly::coro::blockingWait(LoadBatchIndexesAsync(trace_ctx,
+                                                        indexes,
+                                                        current->fields,
+                                                        op_ctx,
+                                                        is_replace,
+                                                        committer));
         auto delta = MakeStateDelta(current->fields,
                                     current->load_info,
                                     ToConstRuntimeState(std::move(runtime)),
@@ -2460,8 +2510,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId,
                            std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
             indexes{{FieldId(info->fieldid()), info}};
-        LoadBatchTextIndexes(
-            op_ctx, indexes, current->fields, *current->load_info, committer);
+        folly::coro::blockingWait(LoadBatchTextIndexesAsync(
+            op_ctx, indexes, current->fields, *current->load_info, committer));
         auto delta = MakeStateDelta(current->fields,
                                     current->load_info,
                                     ToConstRuntimeState(std::move(runtime)),
@@ -2578,8 +2628,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::vector<std::pair<int, std::vector<FieldId>>> lazy_cg_field_ids,
         const SegmentLoadInfo& segment_load_info,
         const TestFieldLayout& schema_snapshot,
-        std::shared_ptr<milvus_storage::api::Reader> reader) {
+        std::shared_ptr<milvus_storage::api::Reader> reader,
+        milvus::OpContext* op_ctx = nullptr) {
         auto current = CapturePublishedState();
+        std::unordered_set<FieldId> loaded_fields;
+        for (const auto* groups : {&eager_cg_field_ids, &lazy_cg_field_ids}) {
+            for (const auto& [index, fields] : *groups) {
+                loaded_fields.insert(fields.begin(), fields.end());
+            }
+        }
+        const auto interim_indexes =
+            PlanDirectInterimIndexes(*current, schema_snapshot, loaded_fields);
         auto runtime = CloneMutableRuntimeResourceState();
         runtime->reader = std::move(reader);
 
@@ -2600,10 +2659,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                                               schema_snapshot),
                          segment_load_info,
                          schema_snapshot,
-                         nullptr,
+                         op_ctx,
                          false,
                          committer);
 
+        BuildInterimIndexes(
+            interim_indexes, schema_snapshot, op_ctx, committer);
         std::vector<std::shared_ptr<ChunkedColumnInterface>> columns;
         for (const auto* cg_field_ids :
              {&eager_cg_field_ids, &lazy_cg_field_ids}) {
@@ -2776,6 +2837,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_proxy_column,
         Verifier&& verifier) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
+        const auto interim_indexes =
+            PlanDirectInterimIndexes(*current, schema_snapshot, {field_id});
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
         load_field_data_common(field_id,
                                column,
@@ -2788,6 +2851,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                nullptr,
                                /*is_replace=*/true,
                                committer);
+        BuildInterimIndexes(
+            interim_indexes, schema_snapshot, nullptr, committer);
         verifier();
         final_delta.runtime = ToConstRuntimeState(std::move(runtime));
         committer.Publish(current, final_delta);
@@ -2797,18 +2862,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     TestStageLoadIndexGenerateInterimThenPublish(
         LoadIndexInfo& info,
+        const std::vector<std::vector<FieldId>>& interim_indexes,
         bool is_replace,
         const TestFieldLayout& schema_snapshot,
         std::shared_ptr<RuntimeResourceState> runtime,
         PublishedSegmentState* staged_state,
         const std::shared_ptr<const PublishedSegmentState>& current,
         StateDelta& final_delta,
-        const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
-        int64_t num_rows,
         milvus::OpContext* op_ctx,
         Verifier&& verifier) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         StagedStateCommitter committer(*this, runtime.get(), staged_state);
+        // The plan must work even before the formal index is staged/ready.
+        BuildInterimIndexes(
+            interim_indexes, schema_snapshot, op_ctx, committer);
+        bool generated_interim =
+            runtime->vec_binlog_config.contains(FieldId(info.field_id));
         committer.Commit([&](RuntimeResourceState& staged_runtime,
                              PublishedSegmentState& staged) {
             LoadIndex(info,
@@ -2818,13 +2887,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                       &staged,
                       &committer);
         });
-        auto generated_interim = generate_interim_index(
-            (*staged_state->fields)[FieldId(info.field_id)],
-            staged_state->fields,
-            num_rows,
-            loaded_column,
-            op_ctx,
-            &committer);
+        BuildInterimIndexes(
+            interim_indexes, schema_snapshot, op_ctx, committer);
+        generated_interim =
+            generated_interim ||
+            runtime->vec_binlog_config.contains(FieldId(info.field_id));
         verifier(generated_interim);
         final_delta.runtime = ToConstRuntimeState(std::move(runtime));
         final_delta.published_index_ready_bitset =
@@ -2842,7 +2909,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         int64_t num_rows,
         const std::shared_ptr<ChunkedColumnInterface>& loaded_column,
         milvus::OpContext* op_ctx = nullptr) {
-        auto layout = CaptureFieldLayout();
+        auto current = CapturePublishedState();
+        auto layout = current->fields;
+        if (PlanDirectInterimIndexes(*current, layout, {field_id}).empty()) {
+            return false;
+        }
         return generate_interim_index((*layout)[field_id],
                                       layout,
                                       num_rows,

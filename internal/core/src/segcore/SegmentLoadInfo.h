@@ -42,6 +42,14 @@
 
 namespace milvus::segcore {
 
+struct PublishedSegmentState;
+
+// All field/index preparation is joined before Text builds; only defaults
+// require an additional ordering dependency.
+struct TextIndexBuildDependencies {
+    bool requires_default_fill{false};
+};
+
 /**
  * @brief Structure representing the difference between two SegmentLoadInfos,
  *       used for reopening segments.
@@ -85,6 +93,12 @@ struct LoadDiff {
 
     std::vector<FieldId> fields_to_reload;
 
+    // Attempt interim construction after these raw fields are prepared. Target
+    // persisted indexes and interim indexes retained from the input snapshot
+    // are excluded before any load task starts; data/config checks remain local.
+    // A group builds serially, preserving the field loader's peak concurrency.
+    std::vector<std::vector<FieldId>> interim_indexes_to_build;
+
     // Indexes that need to be dropped (field_id set)
     std::set<FieldId> indexes_to_drop;
 
@@ -121,8 +135,9 @@ struct LoadDiff {
     // JSON stats that need to be dropped
     std::unordered_set<FieldId> json_stats_to_drop;
 
-    // Text fields that need text indexes created from raw data
-    std::unordered_set<FieldId> text_indexes_to_create;
+    // Text builds and their field-data/index preparation dependencies.
+    std::unordered_map<FieldId, TextIndexBuildDependencies>
+        text_indexes_to_create;
 
     // External collections with manifest should bypass ComputeDiffColumnGroups
     // (their column names are parquet field names, not numeric field IDs)
@@ -143,9 +158,9 @@ struct LoadDiff {
                !column_groups_to_replace.empty() ||
                !column_groups_to_lazyload.empty() ||
                !column_groups_to_lazyreplace.empty() ||
-               !fields_to_reload.empty() || !indexes_to_drop.empty() ||
-               !json_indexes_to_drop.empty() || !field_data_to_drop.empty() ||
-               !fields_to_fill_default.empty() ||
+               !fields_to_reload.empty() || !interim_indexes_to_build.empty() ||
+               !indexes_to_drop.empty() || !json_indexes_to_drop.empty() ||
+               !field_data_to_drop.empty() || !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
                !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
                !text_indexes_to_create.empty() || manifest_updated ||
@@ -375,11 +390,28 @@ struct LoadDiff {
         // text_indexes_to_create
         oss << "text_indexes_to_create=[";
         first = true;
-        for (const auto& field_id : text_indexes_to_create) {
+        for (const auto& [field_id, dependencies] : text_indexes_to_create) {
             if (!first)
                 oss << ", ";
             first = false;
-            oss << field_id.get();
+            oss << field_id.get() << "(requires_default_fill="
+                << dependencies.requires_default_fill << ")";
+        }
+        oss << "], ";
+
+        oss << "interim_indexes_to_build=[";
+        first = true;
+        for (const auto& group : interim_indexes_to_build) {
+            if (!first)
+                oss << ", ";
+            first = false;
+            oss << "[";
+            for (size_t i = 0; i < group.size(); ++i) {
+                if (i != 0)
+                    oss << ", ";
+                oss << group[i].get();
+            }
+            oss << "]";
         }
         oss << "], ";
 
@@ -1054,14 +1086,21 @@ class SegmentLoadInfo {
      * - Caller should reload all fields via the new manifest at runtime
      *   (since manifest content can only be obtained through runtime APIs)
      *
+     * @param existing_snapshot Immutable state captured before this load;
+     * nullptr means there are no existing runtime resources.
      * @param new_info The new SegmentLoadInfo to compare against
      * @return LoadDiff containing the differences
      */
     [[nodiscard]] LoadDiff
-    ComputeDiff(SegmentLoadInfo& new_info, const SealedFieldLayoutPtr& fields);
+    ComputeDiff(SegmentLoadInfo& new_info,
+                const SealedFieldLayoutPtr& fields,
+                const std::shared_ptr<const PublishedSegmentState>&
+                    existing_snapshot = {});
 
     /**
      * @brief Get the LoadDiff from the current SegmentLoadInfo
+     * @param existing_snapshot Immutable state captured before this load;
+     * nullptr means there are no existing runtime resources.
      *
      * This method produces a LoadDiff that describes what needs to be loaded when 
      * load with current load info.
@@ -1069,7 +1108,9 @@ class SegmentLoadInfo {
      * @return LoadDiff containing the differences
      */
     [[nodiscard]] LoadDiff
-    GetLoadDiff(const SealedFieldLayoutPtr& fields);
+    GetLoadDiff(const SealedFieldLayoutPtr& fields,
+                const std::shared_ptr<const PublishedSegmentState>&
+                    existing_snapshot = {});
 
     // ==================== Underlying Proto Access ====================
 
@@ -1316,13 +1357,19 @@ class SegmentLoadInfo {
                             SegmentLoadInfo& new_info,
                             const SealedFieldLayoutPtr& fields);
 
+    // Plan construction from the target index identities and raw-field actions.
     void
-    ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
+    ComputeInterimIndexes(LoadDiff& diff,
+                          const SealedFieldLayoutPtr& fields,
+                          const std::shared_ptr<const PublishedSegmentState>&
+                              existing_snapshot) const;
 
     void
-    ComputeDiffDefaultFields(LoadDiff& diff,
-                             SegmentLoadInfo& new_info,
-                             const SealedFieldLayoutPtr& fields);
+    ComputeDiffDefaultFields(
+        LoadDiff& diff,
+        SegmentLoadInfo& new_info,
+        const SealedFieldLayoutPtr& fields,
+        const std::shared_ptr<const PublishedSegmentState>& existing_snapshot);
 
     void
     ComputeDiffTextIndexes(LoadDiff& diff,

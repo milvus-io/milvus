@@ -47,33 +47,36 @@ preparation attempts are different populations, especially on failures or retrie
 ## Native Load phases and parallel tasks
 
 `internal_core_segment_load_duration_seconds{stage,result}` records one sample
-for each of 14 phases and `total` per invocation of
+for each of 15 phases and `total` per invocation of
 `ChunkedSegmentSealedImpl::Load`. These phases partition native Load wall time,
 share its final success/error outcome, and include time up to an exceptional
 exit. Phases not reached are zero. Empty diff phases still include their checks.
 Native cancellation is included in `error`, matching the native stage family.
 
-| Phase, in execution order | Boundary |
+| Active phase | Boundary |
 |---|---|
 | `lock_wait` | Existing reopen mutex acquisition. |
 | `prepare` | Published snapshot, mutable load-info copy, GetLoadDiff. |
 | `clone_state` | Clone runtime/published state, construct staged committer. |
-| `indexes` | Load and replace index batches, including all worker waits. |
-| `reload_columns` | Reload existing columns. |
-| `column_groups` | Manifest column groups, reader creation, eager/lazy group batches. |
-| `text_lob` | Initialize text LOB paths. |
-| `field_data` | Load and replace legacy binlog batches. |
-| `text_indexes` | Load text-index batches. |
-| `json_stats` | Load and replace JSON stats/indexes. |
+| `parallel_prepare` | ASYNC_LOAD dispatch, preparation setup (including LOB metadata), and the complete fan-out/join of index, reload, column-group, binlog, pre-built Text and JSON tasks. |
+| `finalize` | Joined dependent work: struct offsets, retirement of obsolete resources, and interim index groups. Accumulates intervals around default filling and Text creation. |
+| `create_text_indexes` | Create missing Text indexes before or after default filling according to the plan; both visits accumulate in the same sample. |
 | `default_fields` | Fill default-value fields. |
-| `create_text_indexes` | Create missing text indexes. |
-| `finalize` | Drop/retire obsolete resources and finalize staged state. |
 | `publish` | Compact runtime info, build delta, publish, return cleanup. |
+
+The old `indexes`, `reload_columns`, `column_groups`, `text_lob`, `field_data`,
+`text_indexes`, and `json_stats` phase labels are retained and record zero on the
+fan-out path. Their work overlaps within `parallel_prepare`; attributing that
+shared wait to any one old phase would be misleading. Existing metric names,
+label keys and outcomes are unchanged; `parallel_prepare` is one new fixed stage
+value. Sum all phases except `total` when checking the wall-time partition.
+The Load caller owns the timer; only sequential orchestration and its joined
+dependent leaf update it. Parallel preparation workers never mutate it.
 
 The existing `internal_core_query_stage_duration_seconds` family adds:
 
 - `load_indexes_batch`, `load_column_groups_batch`: whole batch wall time.
-- `load_indexes_wait`, `load_column_groups_wait`: the contained WaitAllFutures.
+- `load_indexes_wait`, `load_column_groups_wait`: the contained dispatch and asynchronous join of batch tasks.
 - `load_index_queue/run`, `load_column_group_queue/run`: MIDDLE pool submission
   to worker entry, then the complete worker body, including staged commit.
 

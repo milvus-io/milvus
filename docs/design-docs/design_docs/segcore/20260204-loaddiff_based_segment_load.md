@@ -103,13 +103,15 @@ The `SegmentLoadInfo` class wraps the protobuf `SegmentLoadInfo` message and pro
 ```cpp
 class SegmentLoadInfo {
 public:
-    explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema);
+    explicit SegmentLoadInfo(const ProtoType& info);
 
-    // Compute diff between current and new load info (for Reopen)
-    LoadDiff ComputeDiff(SegmentLoadInfo& new_info);
-
-    // Compute diff from empty state (for initial Load)
-    LoadDiff GetLoadDiff();
+    // Snapshot inputs describe retained resources, not in-flight load progress.
+    LoadDiff ComputeDiff(
+        SegmentLoadInfo& new_info, const SealedFieldLayoutPtr& fields,
+        const std::shared_ptr<const PublishedSegmentState>& existing_snapshot = {});
+    LoadDiff GetLoadDiff(
+        const SealedFieldLayoutPtr& fields,
+        const std::shared_ptr<const PublishedSegmentState>& existing_snapshot = {});
 
     // Column groups support (Storage V3)
     std::shared_ptr<milvus_storage::api::ColumnGroups> GetColumnGroups();
@@ -119,7 +121,6 @@ private:
     void ComputeDiffIndexes(LoadDiff& diff, SegmentLoadInfo& new_info);
     void ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info);
     void ComputeDiffColumnGroups(LoadDiff& diff, SegmentLoadInfo& new_info);
-    void ComputeDiffReloadFields(LoadDiff& diff, SegmentLoadInfo& new_info);
 };
 ```
 
@@ -168,90 +169,20 @@ struct LoadDiff {
 
 Location: `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp`
 
-The `ApplyLoadDiff` method executes incremental changes based on the computed diff:
-
-```cpp
-void ChunkedSegmentSealedImpl::ApplyLoadDiff(
-    SegmentLoadInfo& segment_load_info,
-    LoadDiff& diff,
-    milvus::OpContext* op_ctx) {
-
-    // 1. Load new indexes
-    if (!diff.indexes_to_load.empty()) {
-        LoadBatchIndexes(trace_ctx, diff.indexes_to_load, op_ctx);
-    }
-
-    // 2. Reload fields (MUST before drop index)
-    if (!diff.fields_to_reload.empty()) {
-        ReloadColumns(diff.fields_to_reload, op_ctx);
-    }
-
-    // 3. Drop indexes (MUST after reload to maintain data availability)
-    if (!diff.indexes_to_drop.empty()) {
-        for (auto field_id : diff.indexes_to_drop) {
-            DropIndex(field_id);
-        }
-    }
-
-    // 4. Load column groups (eager + lazy)
-    if (!diff.column_groups_to_load.empty()) {
-        LoadColumnGroups(..., diff.column_groups_to_load, true, op_ctx);
-    }
-    if (!diff.column_groups_to_lazyload.empty()) {
-        LoadColumnGroups(..., diff.column_groups_to_lazyload, false, op_ctx);
-    }
-
-    // 5. Load field binlogs (Storage V1/V2)
-    if (!diff.binlogs_to_load.empty()) {
-        LoadBatchFieldData(trace_ctx, diff.binlogs_to_load, op_ctx);
-    }
-
-    // 6. Fill default values for schema evolution
-    if (!diff.fields_to_fill_default.empty()) {
-        FillDefaultValueFields(diff.fields_to_fill_default);
-    }
-
-    // 7. Drop field data
-    if (!diff.field_data_to_drop.empty()) {
-        for (auto field_id : diff.field_data_to_drop) {
-            DropFieldData(field_id);
-        }
-    }
-}
-```
+`ApplyLoadDiff()` prepares a cloned runtime state and uses the same
+`ExecuteLoadDiffAsync()` orchestration as Reopen. It publishes the new snapshot
+only after all preparation and resource finalization succeeds. Existing readers
+retain their original snapshot while the new state is prepared.
 
 ### 4. Unified Load and Reopen
 
 Both Load and Reopen operations now use the same diff-based mechanism:
 
-**Initial Load:**
-```cpp
-void ChunkedSegmentSealedImpl::Load(
-    milvus::tracer::TraceContext& trace_ctx,
-    milvus::OpContext* op_ctx) {
-
-    auto diff = segment_load_info_.GetLoadDiff();
-    ApplyLoadDiff(segment_load_info_, diff, op_ctx);
-}
-```
-
-**Reopen (Incremental Update):**
-```cpp
-void ChunkedSegmentSealedImpl::Reopen(
-    const milvus::proto::segcore::SegmentLoadInfo& new_load_info,
-    SchemaPtr new_schema) {
-
-    auto current = std::atomic_load(&segment_load_info_);
-    SegmentLoadInfo current_mutable(*current);
-    SegmentLoadInfo new_seg_load_info(new_load_info, new_schema);
-
-    auto diff = current_mutable.ComputeDiff(new_seg_load_info);
-    std::atomic_store(&segment_load_info_,
-                      std::make_shared<const SegmentLoadInfo>(new_seg_load_info));
-    ApplySchemaForReopen(new_schema);
-    ApplyLoadDiff(new_seg_load_info, diff);
-}
-```
+Load calls `GetLoadDiff()`; Reopen calls `ComputeDiff()` with the target load
+info and field layout. Both pass their immutable input state as
+`existing_snapshot`; planning reads retained runtime resources directly from that
+snapshot. They execute the resulting plan against staged resources and publish it
+once preparation succeeds.
 
 **Schema-aware Reopen:**
 
@@ -395,21 +326,95 @@ message SegmentLoadInfo {
 }
 ```
 
-## Execution Order
+## Planning and Execution
 
-The order of operations in `ApplyLoadDiff()` is critical:
+### One raw-data action per field
 
-1. **Load/replace indexes** - Load new indexes or replacements first
-2. **Reload columns** - Restore fields that lost raw-data index coverage
-3. **Load/replace column groups** - Eager and lazy loading for Storage V3
-4. **Load/replace field binlogs** - For Storage V1/V2
-5. **Drop indexes** - Drop old indexes only after replacement data/indexes are available
-6. **Load text/JSON stats indexes** - Apply pre-built text and JSON stats changes
-7. **Fill default values** - For schema evolution fields without data sources
-8. **Create text indexes from raw data** - For enable_match fields without pre-built index files
-9. **Drop field data** - Clean up removed fields
+`ComputeDiffBinlogs()` and `ComputeDiffColumnGroups()` classify each target field
+using its previous source, target files, default-filled state, and previous/target
+index raw-data capability. Losing index raw-data coverage is another reason for
+the same field action, rather than a second pass that appends a duplicate
+replacement. Grouped binlogs and eager manifest fields stay grouped; lazy
+manifest entries remain one per field so unrelated lazy columns are not loaded
+together. Eager versus lazy preparation follows the target field layout.
 
-Current implementation loads or replaces raw field data before dropping old indexes, so queries can always fall back to a valid data source during index transitions.
+For example, if both an index change and new manifest files require field 101 to
+be restored, the diff contains one replacement for 101. It does not first eagerly
+restore the old selection and then replace it again with a lazy target column.
+External manifests retain their dedicated loading path and select changed or
+newly required data using the input snapshot.
+
+### Text and interim prerequisites
+
+`text_indexes_to_create` records whether each Text build requires default-value
+filling. All field and formal-index preparation tasks are joined before any Text
+build starts, so existing and newly loaded sources need no separate dependency
+states. Builds marked `requires_default_fill` run after default filling; the
+others run before it. The Text builder supports both columns and scalar value
+readers.
+
+Default planning uses the input snapshot's normalized field-ready bits to exclude
+existing physical columns, even when a legacy direct load did not record them in
+binlog metadata. Reopen no longer
+rewrites the default actions or Text dependencies after computing the diff.
+Loading an existing Text index from files remains independent of creating one
+from raw values.
+
+`interim_indexes_to_build` groups supported vector fields being prepared without
+a persisted index in the complete target metadata or an interim index retained
+from the input snapshot. Persisted-index identity survives metadata compaction.
+Unchanged external columns do not cause new interim attempts. Execution still
+checks configuration, supported index types, row thresholds, and nullable data;
+it no longer uses another task's current ready state to decide whether to build.
+Legacy direct `LoadFieldData()` constructs its fixed plan from its entry snapshot.
+Each group builds serially, retaining the original data loader's grouping;
+distinct groups may run in parallel. In particular, moving interim construction
+out of an eager multi-vector column group does not fan its fields out into
+additional concurrent builds. Lazy fields keep their separate groups.
+
+### Execution boundary
+
+Load and both Reopen paths retain their caller-side lock, input snapshot, staged
+resources, and final publication. A single outer `blockingWait` runs
+`ExecuteLoadDiffAsync()` on ASYNC_LOAD:
+
+1. Capture source columns and index raw-data capabilities from the input snapshot
+   and the target's cached metadata capabilities before starting any tasks.
+   Explicit prepared resource requests retain precedence over metadata estimates;
+   sorted-PK and retained-index snapshot handling are unchanged.
+   Initialize shared LOB metadata
+   before concurrent readers can access it.
+2. Start independent formal-index, raw-field, reload, pre-built Text, and JSON
+   preparation tasks together. Their task vector is joined before dependent
+   operations begin.
+3. Build struct offsets, create Text indexes using existing/loaded data, fill
+   defaults, and create Text indexes requiring defaults in an ordered MIDDLE task.
+4. Finalize resource removals in staged state, then execute the planned interim
+   groups. Each group's fields build serially; separate groups may overlap.
+5. Return to the caller and publish the complete snapshot.
+
+ASYNC_LOAD runs orchestration and asynchronous reader waits. MIDDLE runs the
+synchronous leaves, including materialization, cache-slot construction, and index
+Deserialize. A MIDDLE leaf does not submit more MIDDLE work and block waiting for
+it. Batch orchestration awaits futures without occupying a MIDDLE worker. Native
+Load phase timing counts the overlapping preparation tree once as
+`parallel_prepare`; existing batch and worker metrics retain their own timings.
+Default filling, Text creation, finalization and publication remain sequential
+phase intervals.
+Test-only index loading accessors block directly on the coroutine implementations.
+
+Preparation failures are collected only after every started task finishes.
+Submission failures also drain work already submitted by that batch. Awaiting
+those borrowed-state operations suppresses early coroutine cancellation; the
+operations retain their existing `OpContext` cancellation checks. The caller's
+snapshot and staged state therefore outlive all workers, and failed preparation
+does not publish a partial result.
+
+Concurrent preparation can make more categories of work active at once; existing
+load budgets continue to govern admission. This change does not claim a lower
+peak memory footprint. It does not introduce asynchronous cache-slot APIs or
+remove MIDDLE, and preserves the restriction against dropping a vector index
+while retaining its field.
 
 ## Testing
 

@@ -17,6 +17,7 @@
 #include <folly/FBVector.h>
 #include <folly/ScopeGuard.h>
 #include <folly/coro/BlockingWait.h>
+#include <folly/futures/Future.h>
 #include <folly/system/ThreadName.h>
 #include <nlohmann/json.hpp>
 #include <stdlib.h>
@@ -634,6 +635,73 @@ class RendezvousTestReader : public WarmupTestReader {
     mutable std::mutex mutex_;
     mutable std::condition_variable cv_;
     mutable int arrived_{0};
+};
+
+// Each async open stays pending until the test completes it. Completion ignores
+// cancellation, like an already issued blocking read that must be drained.
+class ControlledAsyncTestReader : public WarmupTestReader {
+ public:
+    using OpenResult =
+        arrow::Result<std::unique_ptr<milvus_storage::api::ChunkReader>>;
+    explicit ControlledAsyncTestReader(
+        std::shared_ptr<milvus_storage::api::ColumnGroups> groups)
+        : WarmupTestReader(std::move(groups)) {
+    }
+
+    folly::SemiFuture<OpenResult>
+    get_chunk_reader_async(int64_t index,
+                           const std::shared_ptr<std::vector<std::string>>&,
+                           folly::CancellationToken) const override {
+        std::lock_guard lock(mutex_);
+        if (released_) {
+            return folly::makeSemiFuture<OpenResult>(
+                WarmupTestReader::get_chunk_reader(index, nullptr));
+        }
+        folly::Promise<OpenResult> promise;
+        auto future = promise.getSemiFuture();
+        pending_.emplace(index, std::move(promise));
+        cv_.notify_all();
+        return future;
+    }
+
+    bool
+    WaitForOpens(size_t count) {
+        std::unique_lock lock(mutex_);
+        return cv_.wait_for(lock, std::chrono::seconds(10), [&] {
+            return pending_.size() == count;
+        });
+    }
+
+    void
+    Fail(int64_t index) {
+        folly::Promise<OpenResult> promise;
+        {
+            std::lock_guard lock(mutex_);
+            promise = std::move(pending_.at(index));
+            pending_.erase(index);
+        }
+        promise.setValue(arrow::Status::Invalid("injected reader failure"));
+    }
+
+    void
+    Release() {
+        std::map<int64_t, folly::Promise<OpenResult>> pending;
+        {
+            std::lock_guard lock(mutex_);
+            released_ = true;
+            pending.swap(pending_);
+        }
+        for (auto& [index, promise] : pending) {
+            promise.setValue(
+                WarmupTestReader::get_chunk_reader(index, nullptr));
+        }
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    mutable std::condition_variable cv_;
+    mutable std::map<int64_t, folly::Promise<OpenResult>> pending_;
+    mutable bool released_{false};
 };
 
 class CancellationObservingIndex final : public index::IIndex {
@@ -5083,6 +5151,91 @@ TEST(SealedSegmentLoad, LoadPublishesDefaultFilledStateAfterCompact) {
         sealed->TestGetSegmentLoadInfo()->IsFieldFilledWithDefault(new_field));
 }
 
+TEST(SealedSegmentLoad, CachedIndexCapabilitySkipsUnavailableRawBinlog) {
+    LazyIndexSlotConfigGuard enabled(true);
+    auto& config = SegcoreConfig::default_config();
+    const auto prefer_field_data =
+        config.get_prefer_field_data_when_index_has_raw_data();
+    auto restore_config = folly::makeGuard([&] {
+        config.set_prefer_field_data_when_index_has_raw_data(prefer_field_data);
+    });
+    config.set_prefer_field_data_when_index_has_raw_data(false);
+    auto [schema, scalar] = MakeLazyScalarSchema();
+    auto schema_proto = schema->ToProto();
+    AddWarmupProperty(schema_proto, "warmup.scalarField", "sync");
+    schema = Schema::ParseFrom(schema_proto);
+    const auto dataset = DataGen(schema, 3);
+    const auto raw =
+        PrepareInsertBinlog(kCollectionID,
+                            kPartitionID,
+                            kSegmentID,
+                            dataset,
+                            storage::RemoteChunkManagerSingleton::GetInstance()
+                                .GetRemoteChunkManager());
+    proto::segcore::SegmentLoadInfo target;
+    target.set_segmentid(kSegmentID);
+    target.set_partitionid(kPartitionID);
+    target.set_collectionid(kCollectionID);
+    target.set_num_of_rows(3);
+    target.set_storageversion(1);
+    for (const auto& [field_id, field_info] : raw.field_infos) {
+        if (field_id < START_USER_FIELDID) {
+            continue;
+        }
+        auto* binlog = target.add_binlog_paths();
+        binlog->set_fieldid(field_id);
+        for (size_t i = 0; i < field_info.insert_files.size(); ++i) {
+            auto* file = binlog->add_binlogs();
+            file->set_log_path(field_id == scalar.get()
+                                   ? field_info.insert_files[i] + "-missing"
+                                   : field_info.insert_files[i]);
+            file->set_entries_num(field_info.entries_nums[i]);
+            file->set_memory_size(field_info.memory_sizes[i]);
+        }
+    }
+    auto* index = target.add_index_infos();
+    index->set_fieldid(scalar.get());
+    index->set_indexid(8001);
+    index->set_buildid(8001);
+    index->set_current_scalar_index_version(3);
+    index->add_index_file_paths("/lazy-index-not-pinned");
+    auto* param = index->add_index_params();
+    param->set_key(milvus::index::INDEX_TYPE);
+    param->set_value(milvus::index::ASCENDING_SORT);
+    param = index->add_index_params();
+    param->set_key("warmup");
+    param->set_value("disable");
+    param = index->add_index_params();
+    param->set_key(milvus::LOAD_PRIORITY);
+    param->set_value("HIGH");
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetLoadInfo(target);
+    milvus::tracer::TraceContext trace_ctx{};
+    OpContext context;
+    ASSERT_NO_THROW(sealed->Load(trace_ctx, &context));
+    EXPECT_TRUE(sealed->HasIndex(scalar));
+    EXPECT_FALSE(sealed->HasFieldData(scalar));
+
+    target.mutable_index_infos(0)->set_indexid(8002);
+    target.mutable_index_infos(0)->set_buildid(8002);
+    for (auto& binlog : *target.mutable_binlog_paths()) {
+        if (binlog.fieldid() == scalar.get()) {
+            binlog.mutable_binlogs(0)->set_log_path("/replacement-raw-missing");
+        }
+    }
+    ASSERT_NO_THROW(sealed->Reopen(&context, target));
+    EXPECT_TRUE(sealed->HasIndex(scalar));
+    EXPECT_FALSE(sealed->HasFieldData(scalar));
+
+    // Without the target index, the missing raw data must fail the reopen.
+    const auto before = sealed->TestGetPublishedStateSnapshot();
+    target.clear_index_infos();
+    EXPECT_THROW(sealed->Reopen(&context, target), std::exception);
+    EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+}
+
 TEST(SealedSegmentReopen, SchemaAwareReopenDiscardsOlderSchema) {
     auto old_schema = std::make_shared<Schema>();
     auto pk_id = old_schema->AddDebugField("pk", DataType::INT64);
@@ -5261,6 +5414,188 @@ TEST(SealedSegmentReopen, SchemaOnlyReopenPreservesCreatedTextIndexState) {
     auto snapshot = sealed->TestGetLoadInfoSnapshot();
     EXPECT_TRUE(snapshot->HasTextIndexCreated(text_fid));
     EXPECT_TRUE(snapshot->HasFieldInSchema(new_field));
+}
+
+TEST(SealedSegmentReopen, TextBuildUsesPlannedDataPreparation) {
+    auto& middle = ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
+    const auto previous_threads = middle.numThreads();
+    middle.setNumThreads(1);
+    auto restore_threads =
+        folly::makeGuard([&] { middle.setNumThreads(previous_threads); });
+    enum class TextSource { Existing, Load, FillDefault };
+    for (const auto preparation :
+         {TextSource::Existing, TextSource::Load, TextSource::FillDefault}) {
+        SCOPED_TRACE(static_cast<int>(preparation));
+        auto make_schema = [](bool with_text, int64_t version) {
+            auto schema = std::make_shared<Schema>();
+            const auto pk = schema->AddDebugField("pk", DataType::INT64);
+            schema->set_primary_field_id(pk);
+            schema->set_schema_version(version);
+            if (with_text) {
+                DefaultValueType default_value;
+                default_value.set_string_data("omega");
+                std::map<std::string, std::string> analyzer_params;
+                schema->AddDebugVarcharField(FieldName("text"),
+                                             DataType::VARCHAR,
+                                             64,
+                                             false,
+                                             true,
+                                             true,
+                                             analyzer_params,
+                                             default_value);
+            }
+            return schema;
+        };
+        const FieldId text(101);
+        const auto initial_schema =
+            make_schema(preparation != TextSource::FillDefault, 100);
+        const auto target_schema = make_schema(true, 200);
+        constexpr int64_t rows = 4;
+        auto dataset = DataGen(target_schema, rows);
+        for (auto& field : *dataset.raw_->mutable_fields_data()) {
+            if (field.field_id() == text.get()) {
+                auto* values = field.mutable_scalars()->mutable_string_data();
+                for (int i = 0; i < values->data_size(); ++i) {
+                    values->set_data(i, "alpha");
+                }
+            }
+        }
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        const auto raw_load = PrepareInsertBinlog(
+            kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+        auto initial_load = raw_load;
+        if (preparation != TextSource::Existing) {
+            initial_load.field_infos.erase(text.get());
+        }
+        auto segment = CreateSealedSegment(initial_schema);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->LoadFieldData(initial_load);
+        proto::segcore::SegmentLoadInfo previous;
+        previous.set_segmentid(kSegmentID);
+        previous.set_collectionid(kCollectionID);
+        previous.set_partitionid(kPartitionID);
+        previous.set_num_of_rows(rows);
+        previous.set_storageversion(1);
+        auto add_binlog = [](auto& proto, int64_t id, const auto& info) {
+            auto* binlog = proto.add_binlog_paths();
+            binlog->set_fieldid(id);
+            for (size_t i = 0; i < info.insert_files.size(); ++i) {
+                auto* file = binlog->add_binlogs();
+                file->set_log_path(info.insert_files[i]);
+                file->set_entries_num(info.entries_nums[i]);
+                file->set_log_size(info.memory_sizes[i]);
+            }
+        };
+        for (const auto& [id, info] : initial_load.field_infos) {
+            // The planner must preserve direct-loaded columns absent from metadata.
+            if (id != text.get()) {
+                add_binlog(previous, id, info);
+            }
+        }
+        sealed->SetLoadInfo(previous);
+        const auto before = sealed->TestGetPublishedStateSnapshot();
+        auto target = previous;
+        if (preparation == TextSource::Load) {
+            add_binlog(target, text.get(), raw_load.field_infos.at(text.get()));
+        }
+        OpContext context;
+        ASSERT_NO_THROW(sealed->Reopen(&context, target, target_schema));
+        const auto after = sealed->TestGetPublishedStateSnapshot();
+        EXPECT_TRUE(after->load_info->HasTextIndexCreated(text));
+        EXPECT_FALSE(before->load_info->HasTextIndexCreated(text));
+        if (preparation == TextSource::Existing) {
+            EXPECT_EQ(before->runtime->fields.at(text),
+                      after->runtime->fields.at(text));
+        }
+        const auto pin = CreateTestTextReader(*sealed, text);
+        ASSERT_TRUE(pin);
+        const auto* reader =
+            dynamic_cast<const index::ITextMatchReader*>(pin.get());
+        ASSERT_NE(reader, nullptr);
+        const auto matches = reader->MatchQuery(
+            preparation == TextSource::FillDefault ? "omega" : "alpha", 1);
+        EXPECT_EQ(matches.size(), rows);
+        EXPECT_EQ(matches.count(), rows);
+    }
+}
+
+TEST(SealedSegmentReopen, FailedFieldFanoutDoesNotPublishAndCanRetry) {
+    const FieldId pk(100);
+    const FieldId first(101);
+    const FieldId second(102);
+    proto::schema::CollectionSchema schema_proto;
+    for (const auto field_id : {pk, first, second}) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(field_id.get());
+        field->set_name("field_" + std::to_string(field_id.get()));
+        field->set_data_type(proto::schema::DataType::Int64);
+        field->set_is_primary_key(field_id == pk);
+    }
+    // The missing file must be read during Reopen, not deferred until a query.
+    AddWarmupProperty(schema_proto, "warmup.scalarField", "sync");
+    auto schema = Schema::ParseFrom(schema_proto);
+    constexpr int64_t rows = 4;
+    auto dataset = DataGen(schema, rows);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    const auto raw = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    auto initial = raw;
+    initial.field_infos.erase(first.get());
+    initial.field_infos.erase(second.get());
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->LoadFieldData(initial);
+    proto::segcore::SegmentLoadInfo previous;
+    previous.set_segmentid(kSegmentID);
+    previous.set_collectionid(kCollectionID);
+    previous.set_partitionid(kPartitionID);
+    previous.set_num_of_rows(rows);
+    previous.set_storageversion(1);
+    auto add_binlog = [](auto& proto, int64_t field, const auto& info) {
+        auto* binlog = proto.add_binlog_paths();
+        binlog->set_fieldid(field);
+        for (size_t i = 0; i < info.insert_files.size(); ++i) {
+            auto* file = binlog->add_binlogs();
+            file->set_log_path(info.insert_files[i]);
+            file->set_entries_num(info.entries_nums[i]);
+            file->set_log_size(info.memory_sizes[i]);
+        }
+    };
+    for (const auto& [field, info] : initial.field_infos) {
+        add_binlog(previous, field, info);
+    }
+    sealed->SetLoadInfo(previous);
+    ASSERT_EQ(sealed->TestResolveFieldDataWarmupPolicy(
+                  second, *sealed->TestGetLoadInfoSnapshot(), schema),
+              "sync");
+    const auto before = sealed->TestGetPublishedStateSnapshot();
+    auto good_target = previous;
+    add_binlog(good_target, first.get(), raw.field_infos.at(first.get()));
+    add_binlog(good_target, second.get(), raw.field_infos.at(second.get()));
+    auto bad_target = good_target;
+    // Both fields are independent jobs. The first can stage successfully while
+    // the second fails; neither staged result may become externally visible.
+    auto* invalid =
+        bad_target.mutable_binlog_paths(bad_target.binlog_paths_size() - 1);
+    invalid->mutable_binlogs(0)->set_log_path(
+        raw.field_infos.at(second.get()).insert_files.front() + "-missing");
+    OpContext context;
+    EXPECT_THROW(sealed->Reopen(&context, bad_target), std::exception);
+    EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+    EXPECT_EQ(before->runtime->fields.count(first), 0);
+    EXPECT_EQ(before->runtime->fields.count(second), 0);
+
+    ASSERT_NO_THROW(sealed->Reopen(&context, good_target));
+    const auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_NE(after, before);
+    EXPECT_EQ(after->runtime->fields.at(first)->NumRows(), rows);
+    EXPECT_EQ(after->runtime->fields.at(second)->NumRows(), rows);
+    EXPECT_EQ(before->runtime->fields.count(first), 0);
+    EXPECT_EQ(before->runtime->fields.count(second), 0);
 }
 
 // Reproducer for issue #49076.
@@ -6235,6 +6570,124 @@ TEST(SealedSegmentCowState, StagedEagerAndLazyManifestTasksOpenInOneBatch) {
     EXPECT_EQ(columns[1]->DataByteSize(), 1);
 }
 
+TEST(SealedSegmentCowState,
+     AsyncManifestFailureAndCancellationDrainPendingOpen) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetLoadAsyncReadForTest(true);
+    for (const bool cancel : {false, true}) {
+        SCOPED_TRACE(cancel);
+        auto schema = std::make_shared<Schema>();
+        const auto first = schema->AddDebugField("first", DataType::INT64);
+        const auto second = schema->AddDebugField("second", DataType::INT64);
+        auto segment = CreateSealedSegment(schema);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        const auto before = sealed->TestGetPublishedStateSnapshot();
+        proto::segcore::SegmentLoadInfo proto;
+        proto.set_segmentid(1010);
+        proto.set_num_of_rows(1);
+        SegmentLoadInfo info(proto, schema);
+        auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+        for (const auto field : {first, second}) {
+            auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+            group->columns = {std::to_string(field.get())};
+            groups->push_back(std::move(group));
+        }
+        auto reader = std::make_shared<ControlledAsyncTestReader>(groups);
+        folly::CancellationSource cancellation;
+        OpContext context;
+        context.cancellation_token = cancellation.getToken();
+        auto load = std::async(std::launch::async, [&] {
+            return sealed->TestStageLoadColumnGroupsWithReader(
+                groups,
+                std::make_shared<milvus_storage::api::Properties>(),
+                {{0, {first}}, {1, {second}}},
+                {},
+                info,
+                schema,
+                reader,
+                &context);
+        });
+        auto release = folly::makeGuard([&] { reader->Release(); });
+        ASSERT_TRUE(reader->WaitForOpens(2));
+        if (cancel) {
+            cancellation.requestCancellation();
+        } else {
+            reader->Fail(0);
+        }
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+        reader->Release();
+        EXPECT_THROW(load.get(), SegcoreError);
+        EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), before);
+    }
+}
+
+TEST(SealedSegmentCowState,
+     AsyncManifestOpenProgressesWithOnlyMiddleWorkerBusy) {
+    LazyColumnGroupConfigGuard lazy_group_guard(false);
+    auto async_guard = SetLoadAsyncReadForTest(true);
+    auto& middle = ThreadPools::GetExecutor(ThreadPoolPriority::MIDDLE);
+    const auto previous_threads = middle.numThreads();
+    middle.setNumThreads(1);
+    auto restore_threads =
+        folly::makeGuard([&] { middle.setNumThreads(previous_threads); });
+    auto schema = std::make_shared<Schema>();
+    const auto first = schema->AddDebugField("first", DataType::INT64);
+    const auto second = schema->AddDebugField("second", DataType::INT64);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo proto;
+    proto.set_segmentid(1011);
+    proto.set_num_of_rows(1);
+    SegmentLoadInfo info(proto, schema);
+    auto groups = std::make_shared<milvus_storage::api::ColumnGroups>();
+    for (const auto field : {first, second}) {
+        auto group = std::make_shared<milvus_storage::api::ColumnGroup>();
+        group->columns = {std::to_string(field.get())};
+        groups->push_back(std::move(group));
+    }
+    auto reader = std::make_shared<ControlledAsyncTestReader>(groups);
+    std::promise<void> worker_started;
+    std::promise<void> unblock;
+    auto unblocked = unblock.get_future();
+    auto blocker = folly::via(&middle, [&] {
+        worker_started.set_value();
+        unblocked.wait();
+    });
+    worker_started.get_future().wait();
+    auto load = std::async(std::launch::async, [&] {
+        return sealed->TestStageLoadColumnGroupsWithReader(
+            groups,
+            std::make_shared<milvus_storage::api::Properties>(),
+            {{0, {first}}, {1, {second}}},
+            {},
+            info,
+            schema,
+            reader);
+    });
+    bool released = false;
+    auto release = folly::makeGuard([&] {
+        reader->Release();
+        if (!released) {
+            unblock.set_value();
+        }
+    });
+    ASSERT_TRUE(reader->WaitForOpens(2));
+    reader->Release();
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    unblock.set_value();
+    released = true;
+    std::move(blocker).get();
+    const auto columns = load.get();
+    ASSERT_EQ(columns.size(), 2);
+    EXPECT_EQ(columns[0]->DataByteSize(), 1);
+    EXPECT_EQ(columns[1]->DataByteSize(), 1);
+}
+
 TEST(SealedSegmentCowState, ResolvesVortexColumnGroupLocalFormatFallback) {
     const FieldId pk(100);
     const FieldId raw(101);
@@ -6383,7 +6836,8 @@ TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
               next_expected);
 }
 
-TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
+TEST(SealedSegmentCowState,
+     PlannedVectorIndexSkipsInterimBeforeAndAfterStaging) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto vec = schema->AddDebugField(
@@ -6425,6 +6879,13 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     ASSERT_NE(unstaged, nullptr);
     ASSERT_TRUE(
         unstaged->TestGenerateInterimIndex(vec, row_count, loaded_column));
+    auto existing_interim = unstaged->TestGetPublishedStateSnapshot()
+                                ->runtime->vec_binlog_config.at(vec);
+    EXPECT_FALSE(
+        unstaged->TestGenerateInterimIndex(vec, row_count, loaded_column));
+    EXPECT_EQ(unstaged->TestGetPublishedStateSnapshot()
+                  ->runtime->vec_binlog_config.at(vec),
+              existing_interim);
 
     auto segment = CreateSealedSegment(schema, index_meta, 0, config);
     auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
@@ -6467,17 +6928,43 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     final_delta.load_info = staged_load_info;
     final_delta.commit_ts = current->commit_ts;
 
+    proto::segcore::SegmentLoadInfo target_proto;
+    target_proto.set_segmentid(0);
+    target_proto.set_num_of_rows(row_count);
+    target_proto.set_storageversion(1);
+    auto* binlog = target_proto.add_binlog_paths();
+    binlog->set_fieldid(vec.get());
+    auto* file = binlog->add_binlogs();
+    file->set_log_path("planned-vector-field");
+    file->set_entries_num(row_count);
+    auto* formal_index = target_proto.add_index_infos();
+    formal_index->set_fieldid(vec.get());
+    formal_index->set_indexid(1001);
+    formal_index->set_buildid(1001);
+    formal_index->add_index_file_paths("planned-vector-index");
+    for (const auto& [key, value] : load_info.index_params) {
+        auto* param = formal_index->add_index_params();
+        param->set_key(key);
+        param->set_value(value);
+    }
+    auto target_layout = std::make_shared<const SealedFieldLayout>(
+        schema, LoadScope::FromLegacySchema(*schema), index_meta);
+    SegmentLoadInfo target_info(target_proto, target_layout);
+    const auto plan = target_info.GetLoadDiff(target_layout);
+    ASSERT_TRUE(plan.indexes_to_load.contains(vec));
+    ASSERT_TRUE(plan.interim_indexes_to_build.empty());
+    ASSERT_FALSE(sealed->TestVectorIndexReady(vec));
+
     milvus::OpContext op_ctx;
     ASSERT_NO_THROW(sealed->TestStageLoadIndexGenerateInterimThenPublish(
         load_info,
+        plan.interim_indexes_to_build,
         false,
         schema,
         runtime,
         staged.get(),
         current,
         final_delta,
-        loaded_column,
-        row_count,
         &op_ctx,
         [&](bool generated_interim) {
             EXPECT_FALSE(generated_interim);
@@ -6491,6 +6978,87 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
     EXPECT_FALSE(GetFieldBit(final_state->binlog_index_bitset, vec));
     EXPECT_TRUE(final_state->index_has_raw_data.at(vec));
     EXPECT_TRUE(sealed->TestVectorIndexReady(vec));
+}
+
+TEST(SealedSegmentReopen, NewRawVectorBuildsPlannedInterim) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    const auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    FieldIndexMeta vector_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+         {"metric_type", knowhere::metric::L2},
+         {"nlist", "16"}},
+        {{"dim", "4"}});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100000, std::map<FieldId, FieldIndexMeta>{{vec, vector_meta}});
+    auto config = SegcoreConfig::default_config();
+    config.set_enable_interim_segment_index(true);
+    config.set_chunk_rows(1024);
+    config.set_dense_vector_intermin_index_type(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC);
+    config.set_nlist(16);
+    config.set_nprobe(16);
+    constexpr int64_t rows = 1000;
+    const auto dataset = DataGen(schema, rows);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto raw_load = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    auto initial_load = raw_load;
+    initial_load.field_infos.erase(vec.get());
+    auto segment = CreateSealedSegment(schema, index_meta, kSegmentID, config);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->LoadFieldData(initial_load);
+    const auto vectors = dataset.get_col<float>(vec);
+    proto::segcore::SegmentLoadInfo previous;
+    previous.set_segmentid(kSegmentID);
+    previous.set_collectionid(kCollectionID);
+    previous.set_partitionid(kPartitionID);
+    previous.set_num_of_rows(rows);
+    previous.set_storageversion(1);
+    for (const auto& [id, info] : initial_load.field_infos) {
+        auto* binlog = previous.add_binlog_paths();
+        binlog->set_fieldid(id);
+        for (size_t i = 0; i < info.insert_files.size(); ++i) {
+            auto* file = binlog->add_binlogs();
+            file->set_log_path(info.insert_files[i]);
+            file->set_entries_num(info.entries_nums[i]);
+            file->set_log_size(info.memory_sizes[i]);
+        }
+    }
+    sealed->SetLoadInfo(previous);
+    const auto before = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_FALSE(before->runtime->fields.contains(vec));
+
+    auto target = previous;
+    auto* added = target.add_binlog_paths();
+    added->set_fieldid(vec.get());
+    const auto& vector_data = raw_load.field_infos.at(vec.get());
+    for (size_t i = 0; i < vector_data.insert_files.size(); ++i) {
+        auto* file = added->add_binlogs();
+        file->set_log_path(vector_data.insert_files[i]);
+        file->set_entries_num(vector_data.entries_nums[i]);
+        file->set_log_size(vector_data.memory_sizes[i]);
+    }
+    OpContext ctx;
+    ASSERT_NO_THROW(sealed->Reopen(&ctx, target));
+    const auto after = sealed->TestGetPublishedStateSnapshot();
+    EXPECT_TRUE(after->runtime->fields.contains(vec));
+    EXPECT_FALSE(GetFieldBit(after->index_ready_bitset, vec));
+    EXPECT_TRUE(GetFieldBit(after->binlog_index_bitset, vec));
+    EXPECT_TRUE(after->runtime->vec_binlog_config.contains(vec));
+    const int64_t offsets[] = {0, rows - 1};
+    const auto result = sealed->bulk_subscript(nullptr, vec, offsets, 2);
+    const auto& loaded = result->vectors().float_vector().data();
+    ASSERT_EQ(loaded.size(), 8);
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_FLOAT_EQ(loaded.Get(i), vectors[i]);
+        EXPECT_FLOAT_EQ(loaded.Get(4 + i), vectors[(rows - 1) * 4 + i]);
+    }
 }
 
 TEST(SealedSegmentCowState,

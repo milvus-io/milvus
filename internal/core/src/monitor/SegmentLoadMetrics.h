@@ -32,12 +32,14 @@ enum class SegmentLoadPhase {
     CreateTextIndexes,
     Finalize,
     Publish,
+    ParallelPrepare,
     Count,
 };
 
 // One histogram observation per phase per Load attempt, including zero for
 // skipped phases. Phases partition total wall time and share its final outcome.
-// Owned only by the calling Load thread; parallel task metrics are separate.
+// Owned by Load; updated by sequential orchestration and its joined dependent
+// leaf only. Parallel preparation workers use separate task metrics.
 class SegmentLoadTiming {
  public:
     using Clock = std::chrono::steady_clock;
