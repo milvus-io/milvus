@@ -2,13 +2,14 @@ use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
 use serde_json as json;
-use std::fs;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader};
 use std::{path::PathBuf, sync::Arc};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
-use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
+use crate::analyzer::options::{get_resource_path, read_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
+
+const USER_DICT_KEY: &str = "jieba extra dict file";
 
 lazy_static! {
     static ref JIEBA: Arc<jieba_rs::Jieba> = Arc::new(jieba_rs::Jieba::new());
@@ -84,6 +85,12 @@ fn get_jieba_dict(
                 if text.len() == 0 {
                     continue;
                 }
+                // The dictionary trie cannot store a NUL byte inside a word.
+                if text.contains('\0') {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "jieba tokenizer dict item must not contain NUL"
+                    )));
+                }
 
                 if text == "_default_" || text == "_extend_default_" {
                     if system_dict.is_some() {
@@ -102,13 +109,63 @@ fn get_jieba_dict(
 
     match params.get("extra_dict_file") {
         Some(v) => {
-            let path = get_resource_path(helper, v, "jieba extra dict file")?;
+            let path = get_resource_path(helper, v, USER_DICT_KEY)?;
             user_dict = Some(path)
         }
         _ => {}
     };
 
     Ok((words, system_dict, user_dict))
+}
+
+// Checks the user dictionary entries the way jieba-rs parses them
+// ("word [freq [tag]]" per line), so that a bad entry is reported by line
+// number only. jieba-rs' own error quotes the whole line.
+fn check_user_dict(data: &[u8]) -> Result<()> {
+    for (index, line) in data.lines().enumerate() {
+        let line_no = index + 1;
+        let line = line.map_err(|e| {
+            TantivyBindingError::InvalidArgument(format!(
+                "read {} failed at line {}: {}",
+                USER_DICT_KEY, line_no, e
+            ))
+        })?;
+        let mut fields = line.split_whitespace();
+        if let Some(word) = fields.next() {
+            // The dictionary trie cannot store a NUL byte inside a word.
+            if word.contains('\0') {
+                return Err(TantivyBindingError::InvalidArgument(format!(
+                    "{} has an invalid word at line {}",
+                    USER_DICT_KEY, line_no
+                )));
+            }
+            if let Some(freq) = fields.next() {
+                if freq.parse::<usize>().is_err() {
+                    return Err(TantivyBindingError::InvalidArgument(format!(
+                        "{} has an invalid frequency at line {}",
+                        USER_DICT_KEY, line_no
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_user_dict(tokenizer: &mut jieba_rs::Jieba, path: &PathBuf) -> Result<()> {
+    let data = read_resource_file(path, USER_DICT_KEY)?;
+    check_user_dict(&data)?;
+    tokenizer.load_dict(&mut &data[..]).map_err(|e| {
+        // Never include the jieba-rs message: it quotes the dictionary line.
+        let reason = match e {
+            jieba_rs::Error::Io(e) => e.to_string(),
+            jieba_rs::Error::InvalidDictEntry(_) => "invalid dictionary entry".to_string(),
+        };
+        TantivyBindingError::InvalidArgument(format!(
+            "jieba tokenizer load dict file failed with error: {}",
+            reason
+        ))
+    })
 }
 
 fn get_jieba_mode(params: &json::Map<String, json::Value>) -> Result<JiebaMode> {
@@ -185,15 +242,8 @@ impl JiebaTokenizer {
             tokenizer.add_word(word.as_str(), None, None);
         }
 
-        if user_dict.is_some() {
-            let file = fs::File::open(user_dict.unwrap())?;
-            let mut reader = BufReader::new(file);
-            tokenizer.load_dict(&mut reader).map_err(|e| {
-                TantivyBindingError::InvalidArgument(format!(
-                    "jieba tokenizer load dict file failed with error: {:?}",
-                    e
-                ))
-            })?;
+        if let Some(path) = user_dict {
+            load_user_dict(&mut tokenizer, &path)?;
         }
 
         let mode = get_jieba_mode(params)?;
@@ -249,6 +299,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::JiebaTokenizer;
+    use crate::analyzer::options::test_util::helper_allowing;
+    use crate::analyzer::options::test_util::{assert_invalid_argument, assert_not_allowed};
     use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
 
     use tantivy::tokenizer::TokenStream;
@@ -325,5 +377,106 @@ mod tests {
         }
 
         print!("test tokens :{:?}\n", results)
+    }
+
+    fn jieba_with_user_dict(
+        path: &str,
+        helper: &mut FileResourcePathHelper,
+    ) -> crate::error::Result<JiebaTokenizer> {
+        let params = json::json!({
+            "type": "jieba",
+            "extra_dict_file": {"type": "local", "path": path}
+        });
+        JiebaTokenizer::from_json(params.as_object().unwrap(), helper)
+    }
+
+    fn tokens(tokenizer: &mut JiebaTokenizer, text: &str) -> Vec<String> {
+        let mut stream = tokenizer.token_stream(text);
+        let mut results = Vec::new();
+        while stream.advance() {
+            results.push(stream.token().text.clone());
+        }
+        results
+    }
+
+    #[test]
+    fn test_jieba_user_dict_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("user_dict.txt");
+        std::fs::write(&path, "\u{6c34}\u{5e95}\u{6708}\u{5149} 100000 n\n").unwrap();
+        let mut tokenizer =
+            jieba_with_user_dict(path.to_str().unwrap(), &mut helper_allowing(&[dir.path()]))
+                .unwrap();
+        assert!(tokens(&mut tokenizer, "\u{6c34}\u{5e95}\u{6708}\u{5149}")
+            .contains(&"\u{6c34}\u{5e95}\u{6708}\u{5149}".to_string()));
+    }
+
+    #[test]
+    fn test_jieba_user_dict_errors_do_not_contain_file_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let cases: [&[u8]; 3] = [
+            b"word 1\nroot:x:0:0:root:/root:/bin/bash secret-value\n",
+            b"word 1\nsecret\0value 1\n",
+            b"word 1\nsecret \xff\n",
+        ];
+        for (i, content) in cases.iter().enumerate() {
+            let path = dir.path().join(format!("user_dict_{}.txt", i));
+            std::fs::write(&path, content).unwrap();
+            let err =
+                jieba_with_user_dict(path.to_str().unwrap(), &mut helper_allowing(&[dir.path()]))
+                    .err()
+                    .unwrap();
+            let msg = err.to_string();
+            assert_invalid_argument(&err, &msg);
+            assert!(msg.contains("line 2"), "{}", msg);
+            assert!(!msg.contains("secret"), "{}", msg);
+            assert!(!msg.contains("root"), "{}", msg);
+        }
+    }
+
+    #[test]
+    fn test_jieba_words_with_nul_are_rejected() {
+        // Several such words corrupt the dictionary trie and panic.
+        let words: Vec<String> = (0..50).map(|i| format!("k{}\0v{}", i, i)).collect();
+        let mut dict = vec!["_default_".to_string()];
+        dict.extend(words.iter().cloned());
+        let params = json::json!({"type": "jieba", "dict": dict});
+        let err = JiebaTokenizer::from_json(
+            params.as_object().unwrap(),
+            &mut FileResourcePathHelper::new(Arc::new(ResourceInfo::new())),
+        )
+        .err()
+        .unwrap();
+        assert_invalid_argument(&err, "inline dict");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("user_dict.txt");
+        std::fs::write(&path, words.join(" 1\n")).unwrap();
+        let err = jieba_with_user_dict(path.to_str().unwrap(), &mut helper_allowing(&[dir.path()]))
+            .err()
+            .unwrap();
+        assert_invalid_argument(&err, "user dict");
+        assert!(err.to_string().contains("line 1"), "{}", err);
+    }
+
+    #[test]
+    fn test_jieba_user_dict_outside_allowed_dirs_is_rejected() {
+        let allowed = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let outside = other.path().join("user_dict.txt");
+        std::fs::write(&outside, "root:x:0:0:root:/root:/bin/bash secret-value\n").unwrap();
+        for path in [
+            outside.to_str().unwrap(),
+            "/etc/passwd",
+            "/proc/self/environ",
+            "relative/user_dict.txt",
+            "/dev/zero",
+        ] {
+            let err = jieba_with_user_dict(path, &mut helper_allowing(&[allowed.path()]))
+                .err()
+                .unwrap();
+            assert_not_allowed(&err, path);
+            assert!(!err.to_string().contains("secret"), "{}", err);
+        }
     }
 }

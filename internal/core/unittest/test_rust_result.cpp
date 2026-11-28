@@ -39,9 +39,12 @@ using milvus::tantivy::RustArrayWrapper;
 using milvus::tantivy::RustResultWrapper;
 
 TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
-    // An empty local path cannot be opened; no shared filesystem fixture needed.
+    // Local files are read only under allowed directories; allow one that
+    // exists and name a file in it that does not.
+    milvus::tantivy::set_tokenizer_options(
+        R"({"allowed_local_resource_dirs":["/tmp"]})");
     const char* params =
-        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})";
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"/tmp/milvus-analyzer-test-missing-dir/missing.txt"}}]})";
     RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
     ASSERT_FALSE(validation.result_->success);
     EXPECT_EQ(validation.result_->error_code,
@@ -66,6 +69,27 @@ TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
     EXPECT_EQ(
         milvus::tantivy::TantivyErrorToErrorCode(creation.result_->error_code),
         milvus::ErrorCode::FileReadFailed);
+}
+
+TEST(RustResultTest, AnalyzerLocalPathOutsideAllowedDirsIsInvalidParameter) {
+    milvus::tantivy::set_tokenizer_options(
+        R"({"allowed_local_resource_dirs":["/tmp"]})");
+    const char* cases[] = {
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"/etc/passwd"}}]})",
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})",
+    };
+    for (const char* params : cases) {
+        RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
+        ASSERT_FALSE(validation.result_->success);
+        EXPECT_EQ(validation.result_->error_code,
+                  TantivyBindingErrorCode::InvalidArgument);
+
+        RustResultWrapper creation(tantivy_create_analyzer(params, ""));
+        ASSERT_FALSE(creation.result_->success);
+        EXPECT_EQ(milvus::tantivy::TantivyErrorToErrorCode(
+                      creation.result_->error_code),
+                  milvus::ErrorCode::InvalidParameter);
+    }
 }
 
 static_assert(std::is_nothrow_constructible_v<RustResultWrapper, RustResult>);

@@ -464,7 +464,10 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		conn, err := grpc.NewClient("passthrough:///missing-validation-file", grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
-		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + filepath.Join(t.TempDir(), "missing.txt") + `"}}]}`
+		// The directory must be allowed for a missing file to reach the filesystem check.
+		dir := t.TempDir()
+		allowLocalResourceDir(t, dir)
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + filepath.Join(dir, "missing.txt") + `"}}]}`
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		resp, err := streamingpb.NewStreamingNodeHandlerServiceClient(conn).ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: []*streamingpb.StreamingAnalyzerInfo{{Params: params, Field: "body"}}})
@@ -477,6 +480,49 @@ func TestValidateAnalyzerMissingFileStatus(t *testing.T) {
 		require.Contains(t, resp.GetStatus().GetReason(), "missing.txt")
 		require.Contains(t, resp.GetStatus().GetReason(), "No such file or directory")
 		require.Empty(t, resp.GetResourceIds())
+	})
+}
+
+// allowLocalResourceDir lets analyzers in this test read local files under dir.
+func allowLocalResourceDir(t *testing.T, dir string) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	require.NoError(t, analyzer.InitOptions())
+	require.NoError(t, pt.Save(pt.FunctionCfg.AllowedLocalResourceDirs.Key, dir))
+	t.Cleanup(func() { pt.Reset(pt.FunctionCfg.AllowedLocalResourceDirs.Key) })
+}
+
+func TestRunInlineAnalyzerLocalFiles(t *testing.T) {
+	mockey.PatchConvey("inline analyzers read local files only under allowed directories", t, func() {
+		mockey.Mock(fileresource.Acquire).Return(&fileresource.Resources{}, nil).Build()
+		allowed := t.TempDir()
+		allowLocalResourceDir(t, allowed)
+		stopWords := filepath.Join(allowed, "stop.txt")
+		require.NoError(t, os.WriteFile(stopWords, []byte("Hello\n"), 0o600))
+		secret := filepath.Join(t.TempDir(), "secret.txt")
+		require.NoError(t, os.WriteFile(secret, []byte("root:x:0:0:root:/root:/bin/bash secret-value\n"), 0o600))
+
+		synonyms := func(path string) string {
+			return `{"tokenizer":"standard","filter":[{"type":"synonym","synonyms_file":{"type":"local","path":"` + path + `"}}]}`
+		}
+		for _, path := range []string{secret, "/etc/passwd", "/dev/zero"} {
+			resp, err := NewHandlerService(nil).RunAnalyzer(t.Context(), inlineAnalyzerRequest(synonyms(path)))
+			require.NoError(t, err)
+			require.Error(t, merr.Error(resp.GetStatus()), path)
+			require.Contains(t, resp.GetStatus().GetReason(), "allowed_local_resource_dirs", path)
+			require.NotContains(t, resp.GetStatus().GetReason(), "secret-value", path)
+			require.NotContains(t, resp.GetStatus().GetReason(), "root:x", path)
+		}
+
+		params := `{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"` + stopWords + `"}}]}`
+		resp, err := NewHandlerService(nil).RunAnalyzer(t.Context(), inlineAnalyzerRequest(params))
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		var tokens []string
+		for _, token := range resp.GetTokenize().GetResults()[0].GetTokens() {
+			tokens = append(tokens, token.GetToken())
+		}
+		require.Equal(t, []string{"world"}, tokens)
 	})
 }
 
