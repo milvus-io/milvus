@@ -564,40 +564,45 @@ func (q *QuotaCenter) collectMetrics() error {
 			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
-			if collectionMetrics == nil {
-				return true
-			}
-			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				if aggregateCollectionMetrics {
-					numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
-				} else {
-					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
-				}
-				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
-				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
-					if _, ok := fields[indexInfo.FieldID]; !ok {
-						continue
-					}
-					field := fields[indexInfo.FieldID]
-					isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
-					if aggregateCollectionMetrics {
-						key := indexedEntitiesKey{
-							dbName:        coll.DBName,
-							indexName:     indexInfo.IndexName,
-							isVectorIndex: isVectorIndex,
-						}
-						indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
-					} else {
-						metrics.RootCoordIndexedNumEntities.WithLabelValues(
-							coll.DBName,
-							coll.Name,
-							indexInfo.IndexName,
-							isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
-					}
-				}
-			}
 			return true
 		})
+
+		// DataNodes no longer enumerate collections; publish entity metrics from DataCoord.
+		for collectionID, datacoordCollectionMetric := range collectionMetrics {
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+			if getErr != nil {
+				// The collection may have been removed since DataCoord collected its metrics.
+				continue
+			}
+
+			if aggregateCollectionMetrics {
+				numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
+			} else {
+				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+			}
+			fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
+			for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
+				if _, ok := fields[indexInfo.FieldID]; !ok {
+					continue
+				}
+				field := fields[indexInfo.FieldID]
+				isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
+				if aggregateCollectionMetrics {
+					key := indexedEntitiesKey{
+						dbName:        coll.DBName,
+						indexName:     indexInfo.IndexName,
+						isVectorIndex: isVectorIndex,
+					}
+					indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
+				} else {
+					metrics.RootCoordIndexedNumEntities.WithLabelValues(
+						coll.DBName,
+						coll.Name,
+						indexInfo.IndexName,
+						isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
+				}
+			}
+		}
 
 		for _, collectionID := range datacoordQuotaCollections {
 			if collections.Contain(collectionID) {

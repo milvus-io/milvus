@@ -1203,7 +1203,7 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 			ConnectedDataNodes: []metricsinfo.DataNodeInfos{{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{ID: 12},
 				QuotaMetrics: &metricsinfo.DataNodeQuotaMetrics{
-					Effect: metricsinfo.NodeEffect{NodeID: 12, CollectionIDs: []int64{1, 2}},
+					Effect: metricsinfo.NodeEffect{NodeID: 12},
 				},
 			}},
 		},
@@ -1225,6 +1225,7 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 
 	quotaCenter := NewQuotaCenter(proxyManager, mixCoord, nil, meta)
 	require.NoError(t, quotaCenter.collectMetrics())
+	assert.Empty(t, quotaCenter.writableCollections)
 	assert.Equal(t, float64(30), testutil.ToFloat64(
 		metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.LoadedLabel)))
 	assert.Equal(t, float64(300), testutil.ToFloat64(
@@ -1232,6 +1233,69 @@ func TestQuotaCenterAggregatesCollectionEntityMetrics(t *testing.T) {
 	assert.Equal(t, float64(240), testutil.ToFloat64(
 		metrics.RootCoordIndexedNumEntities.WithLabelValues(
 			databaseName, metrics.AllLabel, "vector-index", "true")))
+}
+
+func TestQuotaCenterReportsTotalEntityMetricsWithoutDataNodes(t *testing.T) {
+	for _, mode := range []string{metrics.CollectionLevelMetricsModeFull, metrics.CollectionLevelMetricsModeAggregate} {
+		t.Run(mode, func(t *testing.T) {
+			previousMode := metrics.CollectionLevelMetricsMode()
+			metrics.SetCollectionLevelMetricsMode(mode)
+			metrics.RootCoordNumEntities.Reset()
+			t.Cleanup(func() {
+				metrics.SetCollectionLevelMetricsMode(previousMode)
+				metrics.RootCoordNumEntities.Reset()
+				metrics.RootCoordIndexedNumEntities.Reset()
+			})
+
+			const databaseName = "test-db"
+			mixCoord := mocks.NewMixCoord(t)
+			mixCoord.EXPECT().GetQueryCoordTopology(mock.Anything, mock.Anything).
+				Return(&metricsinfo.QueryCoordTopology{}, nil).Once()
+			mixCoord.EXPECT().GetDataCoordTopology(mock.Anything, mock.Anything).
+				Return(&metricsinfo.DataCoordTopology{
+					Cluster: metricsinfo.DataClusterTopology{
+						Self: metricsinfo.DataCoordInfos{
+							CollectionMetrics: &metricsinfo.DataCoordCollectionMetrics{
+								Collections: map[int64]*metricsinfo.DataCoordCollectionInfo{
+									1: {NumEntitiesTotal: 100},
+									2: {NumEntitiesTotal: 0},
+									3: {NumEntitiesTotal: 200},
+								},
+							},
+						},
+					},
+				}, nil).Once()
+			meta := mockrootcoord.NewIMetaTable(t)
+			meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, collectionID int64) (*model.Collection, error) {
+					if collectionID == 3 {
+						return nil, merr.ErrCollectionNotFound
+					}
+					return &model.Collection{
+						DBID:         10,
+						DBName:       databaseName,
+						CollectionID: collectionID,
+						Name:         fmt.Sprintf("collection-%d", collectionID),
+					}, nil
+				}).Times(3)
+			meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+			quotaCenter := NewQuotaCenter(proxyutil.NewMockProxyClientManager(t), mixCoord, nil, meta)
+			require.NoError(t, quotaCenter.collectMetrics())
+			assert.Empty(t, quotaCenter.writableCollections)
+			if mode == metrics.CollectionLevelMetricsModeAggregate {
+				require.Equal(t, 1, testutil.CollectAndCount(metrics.RootCoordNumEntities))
+				assert.Equal(t, float64(100), testutil.ToFloat64(
+					metrics.RootCoordNumEntities.WithLabelValues(databaseName, metrics.AllLabel, metrics.TotalLabel)))
+			} else {
+				require.Equal(t, 2, testutil.CollectAndCount(metrics.RootCoordNumEntities))
+				assert.Equal(t, float64(100), testutil.ToFloat64(
+					metrics.RootCoordNumEntities.WithLabelValues(databaseName, "collection-1", metrics.TotalLabel)))
+				assert.Zero(t, testutil.ToFloat64(
+					metrics.RootCoordNumEntities.WithLabelValues(databaseName, "collection-2", metrics.TotalLabel)))
+			}
+		})
+	}
 }
 
 func TestQuotaCenterKeepsAggregateEntityMetricsOnFailedRefresh(t *testing.T) {
