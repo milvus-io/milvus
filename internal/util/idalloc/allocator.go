@@ -62,19 +62,37 @@ type Allocator interface {
 	BarrierUntil(ctx context.Context, barrier uint64) error
 
 	// Sync expire the local allocator messages,
-	// syncs the local allocator and remote allocator.
+	// next allocate call only uses a range requested from the remote allocator after Sync returns.
 	Sync()
 
-	// SyncIfExpired syncs the local allocator and remote allocator if the duration since last sync operation is greater than expire.
+	// SyncIfExpired starts a background refresh of the local allocator if the duration
+	// since last sync operation is greater than expire. It never waits for the remote allocator:
+	// the cached ids stay usable until the refreshed range is published, and if the refresh fails.
 	SyncIfExpired(expire time.Duration)
+
+	// WaitRefresh waits until the remote request in flight, if any, has finished, so a following
+	// allocate call can see its range. Allocations from other goroutines are not blocked meanwhile.
+	// It returns the error of that request or the cause of ctx, the cached ids stay usable either way.
+	WaitRefresh(ctx context.Context) error
+}
+
+// remoteFetch is a request for a new range from the remote allocator.
+// All fields but seq and cancel are protected by the cond lock of the allocator.
+type remoteFetch struct {
+	seq    uint64 // order in which the fetches were started.
+	cancel context.CancelFunc
+	done   bool  // the fetch is finished or abandoned by Sync, waiters can make progress.
+	err    error // the result of a finished fetch, an abandoned fetch has no error.
 }
 
 type allocatorImpl struct {
 	cond            *syncutil.ContextCond
 	remoteAllocator remoteBatchAllocator
-	lastSyncTime    time.Time
+	lastSyncTime    time.Time // when the last remote fetch finished, even if failed, it paces the background refresh.
 	lastAllocated   uint64
 	localAllocator  *localAllocator
+	fetch           *remoteFetch // the only fetch in flight which is allowed to publish its range, nil if there's none.
+	fetchSeq        uint64       // seq of the last started fetch.
 }
 
 func (ta *allocatorImpl) Allocate(ctx context.Context) (uint64, error) {
@@ -108,70 +126,164 @@ func (ta *allocatorImpl) barrierFastPath(ctx context.Context, barrier uint64) er
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
-	for i := 0; i < 2; i++ {
-		id, err := ta.allocateOne(ctx)
-		if err != nil {
-			return err
-		}
+	id, err := ta.allocateOne(ctx)
+	if err != nil {
+		return err
+	}
+	if id >= barrier {
+		return nil
+	}
 
-		// check if the allocated id is greater than barrier.
-		if id >= barrier {
-			return nil
-		}
-		if i == 0 {
-			// force to syncup the local allocator and remote allocator at first time.
-			// It's the fast path if the barrier is allocated from same remote allocator.
-			ta.localAllocator.exhausted()
-		}
+	// force to syncup the local allocator and remote allocator.
+	// It's the fast path if the barrier is allocated from same remote allocator.
+	// The fetch in flight may be served before the barrier is allocated, so only a later one can be trusted.
+	if err := ta.waitNewFetch(ctx); err != nil {
+		return err
+	}
+	id, err = ta.allocateOne(ctx)
+	if err != nil {
+		return err
+	}
+	if id >= barrier {
+		return nil
 	}
 	return errFastPathFailed
 }
 
 func (ta *allocatorImpl) allocateOne(ctx context.Context) (uint64, error) {
-	// allocate one from local allocator first.
-	if id, err := ta.localAllocator.allocateOne(); err == nil {
-		ta.lastAllocated = id
-		ta.cond.UnsafeBroadcast()
-		return id, nil
+	for {
+		// allocate one from local allocator first.
+		if id, err := ta.localAllocator.allocateOne(); err == nil {
+			ta.lastAllocated = id
+			ta.cond.UnsafeBroadcast()
+			return id, nil
+		}
+		// allocate from remote.
+		f, err := ta.joinFetch(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if f.err != nil {
+			return 0, f.err
+		}
 	}
-	// allocate from remote.
-	id, err := ta.allocateRemote(ctx)
-	if err != nil {
-		return 0, err
-	}
-	ta.lastAllocated = id
-	ta.cond.UnsafeBroadcast()
-	return id, nil
 }
 
 // Sync expire the local allocator messages,
-// syncs the local allocator and remote allocator.
+// next allocate call only uses a range requested from the remote allocator after Sync returns.
 func (ta *allocatorImpl) Sync() {
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
 	ta.localAllocator.exhausted()
+	// The fetch in flight may be served before the Sync, so its range can not satisfy the Sync.
+	// Don't wait for it, the next allocate call starts a new one.
+	if f := ta.fetch; f != nil {
+		f.cancel()
+		f.done = true
+		ta.fetch = nil
+		ta.cond.UnsafeBroadcast()
+	}
 }
 
 func (ta *allocatorImpl) SyncIfExpired(expire time.Duration) {
 	ta.cond.L.Lock()
 	defer ta.cond.L.Unlock()
 
-	if time.Since(ta.lastSyncTime) > expire {
-		ta.localAllocator.exhausted()
+	if ta.fetch == nil && time.Since(ta.lastSyncTime) > expire {
+		ta.startFetch()
 	}
 }
 
-// allocateRemote allocates timestamp from remote root coordinator.
-func (ta *allocatorImpl) allocateRemote(ctx context.Context) (uint64, error) {
-	// Update local allocator from remote.
-	start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
-	if err != nil {
-		return 0, err
-	}
-	ta.localAllocator.update(start, count)
-	ta.lastSyncTime = time.Now()
+func (ta *allocatorImpl) WaitRefresh(ctx context.Context) error {
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
 
-	// Get from local again.
-	return ta.localAllocator.allocateOne()
+	f := ta.fetch
+	if f == nil {
+		return nil
+	}
+	if err := ta.waitFetch(ctx, f); err != nil {
+		return err
+	}
+	return f.err
+}
+
+// joinFetch waits until the fetch in flight is finished, a new fetch is started if there's none.
+// The cond lock is released while waiting and held when it returns.
+func (ta *allocatorImpl) joinFetch(ctx context.Context) (*remoteFetch, error) {
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
+	f := ta.fetch
+	if f == nil {
+		f = ta.startFetch()
+	}
+	if err := ta.waitFetch(ctx, f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// waitNewFetch waits until a fetch started after this call is finished, and returns its error.
+// Concurrent callers share the same next fetch, and the cached ids stay usable while waiting.
+func (ta *allocatorImpl) waitNewFetch(ctx context.Context) error {
+	minSeq := ta.fetchSeq + 1
+	for {
+		f, err := ta.joinFetch(ctx)
+		if err != nil {
+			return err
+		}
+		if f.seq >= minSeq {
+			return f.err
+		}
+	}
+}
+
+// waitFetch waits until the fetch is done, the only error is the cause of ctx.
+// The cond lock is released while waiting and held when it returns.
+func (ta *allocatorImpl) waitFetch(ctx context.Context, f *remoteFetch) error {
+	for !f.done {
+		if err := ta.cond.Wait(ctx); err != nil {
+			// ContextCond.Wait returns without the lock on failure.
+			ta.cond.L.Lock()
+			return err
+		}
+	}
+	return nil
+}
+
+// startFetch starts a remote fetch which doesn't hold any lock while waiting for the remote allocator.
+// It tries only once, the duration is bounded by the timeout of the remote allocator.
+// It's independent of the context of its waiters, so its range can be used after they leave.
+func (ta *allocatorImpl) startFetch() *remoteFetch {
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // Ownership transfers to remoteFetch; runFetch and Sync cancel it.
+	ta.fetchSeq++
+	f := &remoteFetch{seq: ta.fetchSeq, cancel: cancel}
+	ta.fetch = f
+	go ta.runFetch(ctx, f)
+	return f
+}
+
+// runFetch allocates a range from the remote allocator and publishes it atomically.
+func (ta *allocatorImpl) runFetch(ctx context.Context, f *remoteFetch) {
+	defer f.cancel()
+	start, count, err := ta.remoteAllocator.batchAllocate(ctx, batchAllocateSize)
+
+	ta.cond.L.Lock()
+	defer ta.cond.L.Unlock()
+
+	if ta.fetch != f {
+		// The fetch was abandoned by Sync, a late response must not be used.
+		return
+	}
+	if err == nil && !ta.localAllocator.update(start, count) {
+		// keep the cached range, and report it to the waiters which have nothing to allocate from.
+		err = errExhausted
+	}
+	f.err = err
+	f.done = true
+	ta.fetch = nil
+	ta.lastSyncTime = time.Now()
+	ta.cond.UnsafeBroadcast()
 }
