@@ -113,6 +113,71 @@ func NewFFIPackedReaderWithExtfs(
 		})
 }
 
+// NewMilvusTableSourceFFIPackedReader opens a source StorageV3 manifest of a
+// milvus-table external collection. With an external source, its column-group
+// files are resolved against the source as the import records them; relative
+// paths are never read from this cluster's own storage.
+func NewMilvusTableSourceFFIPackedReader(
+	manifestPath string,
+	schema *arrow.Schema,
+	neededColumns []string,
+	bufferSize int64,
+	storageConfig *indexpb.StorageConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+	extfs ExternalSpecContext,
+) (*FFIPackedReader, error) {
+	if extfs.Source == "" {
+		return NewFFIPackedReaderWithExtfs(manifestPath, schema, neededColumns, bufferSize,
+			storageConfig, storagePluginContext, extfs)
+	}
+	if err := checkMilvusTableSourceManifestPath(manifestPath, extfs); err != nil {
+		return nil, err
+	}
+	cLoonManifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to get manifest")
+	}
+	defer C.loon_manifest_destroy(cLoonManifest)
+	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_properties_free(cProperties)
+	if err := injectExternalSpecProperties(cProperties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, merr.Wrap(err, "inject extfs")
+	}
+	cColumnGroups, err := resolveMilvusTableSourceColumnGroups(&cLoonManifest.column_groups, cProperties, extfs)
+	if err != nil {
+		return nil, merr.Wrap(err, "resolve milvus-table source column groups")
+	}
+	defer C.loon_column_groups_destroy(cColumnGroups)
+
+	return openFFIPackedReader(schema, neededColumns, bufferSize, storageConfig, storagePluginContext, extfs,
+		func(cSchema *C.struct_ArrowSchema,
+			cNeededColumnArray **C.char,
+			cNumColumns C.int64_t,
+			cPackedReader *C.CFFIPackedReader,
+			cStorageConfig C.CStorageConfig,
+			pluginContextPtr *C.CPluginContext,
+			collectionID C.int64_t,
+			cExternalSource *C.char,
+			cExternalSpec *C.char,
+		) C.CStatus {
+			return C.NewPackedFFIReaderWithColumnGroups(
+				cColumnGroups,
+				cSchema,
+				cNeededColumnArray,
+				cNumColumns,
+				cPackedReader,
+				cStorageConfig,
+				pluginContextPtr,
+				collectionID,
+				cExternalSource,
+				cExternalSpec,
+			)
+		})
+}
+
 // NewFFIPackedReaderWithFragments opens a packed reader from explicit physical
 // fragments. It is used for StorageV3 deltalogs where the manifest already
 // provides each file's EntriesNum and the caller must preserve those row

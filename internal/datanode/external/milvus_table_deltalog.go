@@ -489,6 +489,7 @@ func (t *RefreshExternalCollectionTask) loadMilvusTableFragmentSourcePKOffsets(
 		t.req.GetStorageConfig(),
 		nil,
 		t.milvusTableExternalSpecContext(),
+		storage.WithMilvusTableSourceManifest(),
 	)
 	if err != nil {
 		return merr.Wrapf(err, "read milvus-table source primary key column %s", fragment.FilePath)
