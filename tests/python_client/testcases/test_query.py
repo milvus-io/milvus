@@ -357,7 +357,6 @@ class TestQueryString(TestcaseBase):
         assert len(res) == 2
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue 24637")
     def test_query_after_insert_multi_threading(self):
         """
         target: test data consistency after multi threading insert
@@ -523,7 +522,6 @@ class TestQueryCount(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.repeat(3)
-    @pytest.mark.skip(reason="issue #36538")
     def test_count_query_search_after_release_partition_load(self):
         """
         target: test query count(*) after release collection and load partition
@@ -1049,7 +1047,6 @@ class TestQueryNoneAndDefaultData(TestcaseBase):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #36538")
     def test_query_none_count(self, null_data_percent):
         """
         target: test query count(*) with None and default data

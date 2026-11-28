@@ -1262,7 +1262,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #26820")
     @pytest.mark.parametrize("consistency_level", ["Bounded", "Session", "Eventually"])
     def test_delete_flush_query_consistency_not_strong(self, consistency_level):
         """

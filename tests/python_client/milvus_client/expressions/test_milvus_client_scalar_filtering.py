@@ -1699,7 +1699,6 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         assert 1 not in ids, f"id=1 should not return (NOT(T)=F). Got {ids}"
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Known bug #48441: 3VL NOT bitmap incorrect when all nullable values are NULL in segment")
     def test_3vl_not_all_null_segment(self):
         """Regression #48441: bug triggers when ALL nullable values in segment are NULL."""
         client = self._client(alias=self.shared_alias)
@@ -1778,7 +1777,6 @@ class TestCornerCaseExpressions(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="Known bug #48442: JSON IN with mixed int/float coerces to Float64 causing precision loss")
     def test_json_mixed_type_in_precision(self):
         """Regression #48442: mixed int/float IN list should not cause INT64 precision loss."""
         client = self._client(alias=self.shared_alias)

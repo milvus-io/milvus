@@ -2169,7 +2169,6 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("new_field_data_type", [DataType.INT64, DataType.INT8, DataType.INT16, DataType.INT32])
     @pytest.mark.parametrize("is_flush", [True])
-    @pytest.mark.skip(reason="issue #42629")
     def test_milvus_client_search_query_add_new_field_with_default_value_int(self, new_field_data_type, is_flush):
         """
         target: test search with add field using default value
