@@ -25,8 +25,10 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/cdc/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	mock_message "github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -179,6 +182,44 @@ func TestReplicateStreamClient_Replicate_UnreplicableMessageIgnored(t *testing.T
 	err := client.Replicate(mockMsg)
 	assert.ErrorIs(t, err, ErrReplicateIgnored)
 	assert.Equal(t, 0, client.pendingMessages.Len())
+}
+
+func TestReplicateStreamClient_ConcurrentCloseKeepsLiveConnection(t *testing.T) {
+	target := t.Name()
+	t.Cleanup(func() { metrics.CDCStreamRPCReconnectTimes.DeleteLabelValues(target) })
+	client := cluster.NewMockMilvusClient(t)
+	client.EXPECT().CreateReplicateStream(mock.Anything).RunAndReturn(func(ctx context.Context, _ ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+		stream := newMockReplicateStreamClient(t)
+		go func() {
+			<-ctx.Done()
+			stream.Close()
+		}()
+		return stream, nil
+	}).Times(3)
+
+	var streams []ReplicateStreamClient
+	for _, channel := range []string{"ch1", "ch2", "ch3"} {
+		info := newTestReplicateInfo(channel, channel)
+		info.TargetCluster.ClusterId = target
+		stream := NewReplicateStreamClient(context.Background(), client, &meta.ReplicateChannel{Key: channel, Value: info})
+		t.Cleanup(stream.Close)
+		streams = append(streams, stream)
+	}
+	connected := func() float64 {
+		return testutil.ToFloat64(metrics.CDCStreamRPCConnections.WithLabelValues(target, metrics.CDCStatusConnected))
+	}
+	require.Eventually(t, func() bool { return connected() == 3 }, 5*time.Second, 10*time.Millisecond)
+
+	var closing sync.WaitGroup
+	closing.Go(streams[0].Close)
+	closing.Go(streams[1].Close)
+	closing.Wait()
+	require.Equal(t, 1.0, connected())
+	require.Zero(t, testutil.ToFloat64(metrics.CDCStreamRPCConnections.WithLabelValues(target, metrics.CDCStatusDisconnected)))
+
+	streams[2].Close()
+	require.False(t, metrics.CDCStreamRPCConnections.DeleteLabelValues(target, metrics.CDCStatusConnected))
+	require.False(t, metrics.CDCStreamRPCConnections.DeleteLabelValues(target, metrics.CDCStatusDisconnected))
 }
 
 func TestReplicateStreamClient_Reconnect(t *testing.T) {
