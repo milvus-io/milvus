@@ -11,9 +11,29 @@ Milvus supports multi-cluster WAL replication via a star topology: one PRIMARY c
 - **PRIMARY**: Accepts client writes (DML/DDL/DCL). The Replicate Interceptor **rejects** any message carrying a replicate header.
 - **SECONDARY**: Only accepts replicated messages forwarded from the primary. The Replicate Interceptor **rejects** any message without a replicate header, with two exceptions: WAL self-controlled messages like TimeTick/CreateSegment/Flush, which bypass the interceptor entirely since they are locally generated regardless of role, and messages carrying the `Unreplicable` (`_ur`) property, which are local to the cluster: the secondary WAL appends them and CDC never forwards them. The broadcaster issues them through `StartUnreplicableBroadcastWithResourceKeys`, which skips the primary check (used for resource group DDL and local Flush/FlushAll, see [Cluster Messages](../message/message-semantic-cluster.md)).
 
+## Component placement
+
+The CDC ChannelReplicator runs in the CDC component, a separate role from
+StreamingNode. The two are started independently: the `streamingnode` server
+type starts StreamingNode, while the `cdc` server type starts the CDC component
+(`components.NewCDC` in `cmd/roles/roles.go`). The Milvus Operator deploys CDC
+as dedicated pods (`spec.components.cdc`, see the CDC user docs under
+`docs/design-docs/design_docs/cdc/user_docs/`). Standalone and StreamingNode
+processes never start CDC themselves.
+
+- **StreamingNode** owns the WAL on both sides: appending local writes on the
+  primary, and validating and acking replicated appends through the Replicate
+  Interceptor on the secondary.
+- **CDC** owns outgoing replication: its controller watches the replicate
+  PChannel metadata in etcd and runs one ChannelReplicator per PChannel whose
+  source cluster is the current one.
+
+A cluster with no running CDC component does not replicate, even when every
+StreamingNode is up.
+
 ## Data Flow
 
-1. **Primary WAL** → **CDC ChannelReplicator** (per-PChannel, runs on primary StreamingNode): reads messages from the primary WAL starting at the secondary's `ReplicateCheckpoint`. Self-controlled messages (TimeTick, CreateSegment, Flush) and messages carrying the `Unreplicable` (`_ur`) property are skipped.
+1. **Primary WAL** → **CDC ChannelReplicator** (per-PChannel, runs in the CDC component of the primary cluster): reads messages from the primary WAL starting at the secondary's `ReplicateCheckpoint`. Self-controlled messages (TimeTick, CreateSegment, Flush) and messages carrying the `Unreplicable` (`_ur`) property are skipped.
 2. **ChannelReplicator** → **Secondary Proxy** via `CreateReplicateStream` gRPC bidirectional stream: sends each message with its original `MessageID`, `Properties`, and `Payload`, along with the `SourceClusterID`.
 3. **Secondary Proxy** → **Secondary WAL**: the Proxy remaps VChannel names and appends to the local WAL. The **Replicate Interceptor** validates the incoming message (cluster ID match, TimeTick deduplication) and tracks checkpoint.
 
