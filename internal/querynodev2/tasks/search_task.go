@@ -53,6 +53,7 @@ type SearchTask struct {
 	ctx              context.Context
 	collection       *segments.Collection
 	segmentManager   *segments.Manager
+	selected         []segments.Segment // pinned by the QueryView caller until Wait returns
 	req              *querypb.SearchRequest
 	result           *internalpb.SearchResults
 	merged           bool
@@ -63,6 +64,7 @@ type SearchTask struct {
 	originTopks      []int64
 	originNqs        []int64
 	others           []*SearchTask
+	queueBudget      scheduler.QueueBudget
 	notifier         chan error
 	serverID         int64
 
@@ -157,8 +159,15 @@ func (t *SearchTask) PreExecute() error {
 	return nil
 }
 
+// NewSearchTaskOnSegments binds execution to the caller's pinned view.
+func NewSearchTaskOnSegments(ctx context.Context, collection *segments.Collection, selected []segments.Segment, req *querypb.SearchRequest, serverID int64) *SearchTask {
+	t := NewSearchTask(ctx, collection, nil, req, serverID)
+	t.selected = selected
+	return t
+}
+
 func (t *SearchTask) Execute() error {
-	return t.execute(nil)
+	return t.execute(t.selected)
 }
 
 // TODO(#40451): move selected-segment search and reduction into the shared
@@ -515,7 +524,16 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 	return true
 }
 
+// CanMerge reports whether the search can participate in scheduler batching.
+func (t *SearchTask) CanMerge() bool {
+	return t.selected == nil
+}
+
 func (t *SearchTask) canMerge(other *SearchTask) bool {
+	// Even equal segment IDs may refer to handles from different view versions.
+	if t.selected != nil || other.selected != nil {
+		return false
+	}
 	var (
 		nq        = t.nq
 		topk      = t.topk
@@ -586,6 +604,15 @@ func (t *SearchTask) resetGroup() {
 	t.nq = t.originNqs[0]
 }
 
+func (t *SearchTask) SetQueueBudget(budget scheduler.QueueBudget) { t.queueBudget = budget }
+
+func (t *SearchTask) QueueBudget() scheduler.QueueBudget { return t.queueBudget }
+
+// PruneQueued preserves each member's own expiry and completion error.
+func (t *SearchTask) PruneQueued(now time.Time) (scheduler.Task, int, error) {
+	return t.pruneMembers(func(m *SearchTask) error { return m.queueBudget.ExpiryError(m.ctx, now) })
+}
+
 // PruneCanceled implements scheduler.PrunableTask. It must run before
 // Execute, while every member still holds its own placeholder group.
 //
@@ -594,11 +621,15 @@ func (t *SearchTask) resetGroup() {
 // first of them as the new owner, so that canceling the owner does not end
 // the requests merged behind it.
 func (t *SearchTask) PruneCanceled() (scheduler.Task, int, error) {
+	return t.pruneMembers(func(m *SearchTask) error { return cancellationOf(m.ctx) })
+}
+
+func (t *SearchTask) pruneMembers(expiryError func(*SearchTask) error) (scheduler.Task, int, error) {
 	members := t.members()
 	alive := make([]*SearchTask, 0, len(members))
 	var cause error
 	for _, m := range members {
-		if err := cancellationOf(m.ctx); err != nil {
+		if err := expiryError(m); err != nil {
 			m.finishPruned(err)
 			if cause == nil {
 				cause = err
@@ -611,7 +642,7 @@ func (t *SearchTask) PruneCanceled() (scheduler.Task, int, error) {
 	if dropped == 0 {
 		return t, 0, nil
 	}
-	if cancellationOf(t.ctx) != nil {
+	if len(alive) == 0 || alive[0] != t {
 		// The old owner is finished; drop its references to the survivors.
 		t.resetGroup()
 	}

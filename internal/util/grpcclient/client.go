@@ -105,6 +105,17 @@ func WithFailFastOnConnectionError(ctx context.Context) context.Context {
 	return context.WithValue(ctx, failFastOnConnectionErrorKey{}, true)
 }
 
+type failFastOnOverloadKey struct{}
+
+// WithFailFastOnOverload makes a call return the response of a server that
+// refuses the request as overloaded (ErrServiceTooManyRequests) instead of
+// sending the request again. Reads use it: the Proxy ends the request, and
+// work already done for its other parts is not held while this part keeps
+// trying.
+func WithFailFastOnOverload(ctx context.Context) context.Context {
+	return context.WithValue(ctx, failFastOnOverloadKey{}, true)
+}
+
 // connectionAttempt publishes one dial result to all concurrent waiters.
 type connectionAttempt[T GrpcComponent] struct {
 	done    chan struct{}
@@ -574,6 +585,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	var mismatched *clientConnWrapper[T]
 	attempts := retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))
 	failFastOnConnectionError, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
+	failFastOnOverload, _ := ctx.Value(failFastOnOverloadKey{}).(bool)
 	// Single-attempt calls skip auxiliary session checks. retry.Handle owns
 	// the attempt limit and skips backoff after the final failure.
 	canRetry := attempts != 1
@@ -642,6 +654,10 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		}
 
 		err = merr.Error(status)
+		if failFastOnOverload && errors.Is(err, merr.ErrServiceTooManyRequests) {
+			// The caller gets the response and its status.
+			return false, nil
+		}
 		if err != nil && merr.IsRetryableErr(err) {
 			return canRetry, err
 		}

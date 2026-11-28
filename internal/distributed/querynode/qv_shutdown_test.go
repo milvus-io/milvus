@@ -18,7 +18,7 @@ import (
 func TestQueryViewShutdownClosesSyncStream(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	h := registerQueryViewServers(server, noopQNSegmentManager{}, 100)
+	h := registerQueryViewServers(server, noopQNSegmentManager{}, nil)
 	t.Cleanup(server.Stop)
 	go func() { _ = server.Serve(listener) }()
 	conn, err := grpc.NewClient("passthrough:///queryview", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))

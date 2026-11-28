@@ -1,0 +1,237 @@
+# Latency-weighted QueryView replica selection and hedged reads
+
+Related issue: [#55587](https://github.com/milvus-io/milvus/issues/55587).
+The time-decayed latency, failure accrual, p99 trigger, and hedge win-rate
+algorithms originate in [#55588](https://github.com/milvus-io/milvus/pull/55588)
+by @xiaofan-luan. This implementation applies them to master's QueryView client
+with live-refreshable policy selection, orthogonal hedging configuration, and
+concurrent speculative load bounding.
+
+## Problem and scope
+
+The QueryView client retries unavailable views and workers, but a selected
+QueryNode that does not return can hold up a shard despite another ready
+replica. The existing replica directory already supplies eligible replica IDs
+and versions; it does not rank them by observed request latency or race a slow
+attempt against another replica.
+
+Replica selection (`proxy.replicaSelectionPolicy`) and hedged execution
+(`proxy.hedging.*`) are configured orthogonally and cover shard Search and Query
+in both QueryView client entry points. Statistics and requery bound to retained
+Search plans keep their existing execution paths. Defaults remain unchanged
+(`proxy.replicaSelectionPolicy: look_aside`, which preserves QueryView's
+round-robin router, and `proxy.hedging.enabled: false`). Both can be toggled
+live for new shard requests without restarting the proxy. This is a local proxy
+routing choice, with no durable metadata, WAL message, or cross-cluster
+replication change.
+
+When either latency-weighted selection or hedging is enabled, legacy Search and
+Query use Batch execution even if `proxy.queryView.enableReduceStream` is enabled.
+The streaming path does not yet implement adaptive attempt selection, isolated
+result publication, or replica feedback. Batch execution keeps these features
+effective, at the cost of buffering results instead of streaming their reduction.
+With both features disabled, the existing streaming configuration takes effect.
+Requery using retained plans keeps its existing path.
+
+## Selection and feedback
+
+When `proxy.replicaSelectionPolicy` is `latency_weighted`, a proxy records
+observations separately for each channel, operation, and consistency level. Each
+replica has a time-decayed successful latency mean, consecutive negative
+observations, a decaying penalty, and an in-flight count. Selection weight is
+`1 / (latency * (in-flight count + 1))`. Unknown or stale replicas inherit the
+mean of known eligible replicas. A probability floor preserves exploration.
+Inactivity alone does not count as failure or create a penalty.
+
+Three consecutive negative observations apply a penalty. Only failures from
+QueryNode execution, or a hedge overtaking an attempt with currently outstanding
+QueryNode execution, are attributed to a replica. Input errors and caller
+cancellation do not provide failure evidence. A shared WAL-owner planning or
+growing-side stall alone does not penalize any replica. A single attempt cannot
+record both an overtake and a late error as two negative observations. A late
+success still records its measured latency and resets consecutive failures.
+
+Note that `retryableQueryError` intentionally retains QueryView's existing retry
+classification (view/session changes and transport unavailability) rather than
+retrying worker business errors such as `CodeMemAllocateFailed` (OOM) across
+replicas inside `shard_client`, avoiding cascading OOM amplification while still
+recording negative replica feedback for subsequent routing.
+
+Selections retain the configuration sampled at shard-request entry. Live
+configuration changes cannot leave unmatched accounting for dispatched work.
+Idle replica entries are pruned even when their channel remains active. Idle
+channel/class entries are also reclaimed. Cleanup is lazy, at most once per
+minute; no additional background goroutine is required.
+
+## Hedged execution and speculative load budget
+
+Hedging can be enabled under any `proxy.replicaSelectionPolicy` (using weighted
+selection under `latency_weighted` and QueryView round-robin otherwise). After
+the greater of `proxy.hedging.minDelay` and the recent successful request p99,
+the client may dispatch one speculative attempt to another replica from the
+current subscribed directory snapshot. The lookup performs no coordinator RPC
+and never waits for a refreshed directory. An invalid snapshot or absence of
+another eligible replica skips that hedge.
+
+To prevent retry-times-hedge multiplication and overload cascades, speculative
+work is bounded by two mechanisms:
+
+1. **Single hedge per shard request**: At most one hedge attempt is dispatched
+   across the entire lifecycle of a shard request (across all failure-retry
+   rounds), keeping `proxy.hedging.*` orthogonal to sequential error retries.
+2. **Win-rate guard**: Recent hedge outcomes cut unproductive hedges
+   (win rate below 30% over at least 10 samples in 10s) to 10% recovery probes.
+
+Every attempt owns its GetQueryPlan request payload, plan, response buffers,
+and two-stage Search state. All workers must succeed before an attempt can
+publish. The first complete successful attempt adds its responses to the shard
+reducer and returns that same attempt's complete ShardPlan, including version,
+MVCC, work nodes, segment selections, and execution summary. If reducer
+publication fails, the shard's partial publication is reset and the request
+fails. A loser never reaches the request reducer or replaces the retained plan.
+
+A failed attempt does not abort an already dispatched sibling: that sibling
+can still publish a successful result even when the first error is not
+retryable. Once all dispatched attempts fail, any non-retryable error ends the
+request; otherwise the existing retry rules apply. InputError also waits for
+already dispatched siblings: result-size limits can depend on the serving
+node or snapshot. If no attempt succeeds, an input error takes precedence
+over other attempt errors and prevents another round. Caller cancellation
+still ends the request immediately.
+
+A supplied MVCC or BarrierMVCC is preserved by every attempt. Ordinary requests
+continue sampling consistency on the primary WAL owner as before. Internal
+requery uses only the retained winning plan; a retired view returns an error
+rather than selecting a new replica or snapshot. Empty Query results still
+retain their successful plan.
+
+Selecting a winner does not cancel already dispatched loser RPCs. Existing
+caller cancellation and per-attempt error cancellation remain in force. This
+avoids introducing an earlier cancellation that could interact with QueryNode
+SearchTask merging. Consequently, speculative work can continue after a winner
+is known until it completes or the request context ends.
+
+All replicas share the primary WAL owner for planning and growing data.
+Hedging therefore cannot bypass that common dependency; the per-shard
+single-hedge limit bounds amplification to at most one extra attempt per shard
+request, and the win-rate guard suppresses unproductive hedging after 10
+outcomes via completion-based feedback (rather than a global concurrency cap).
+
+## Overload
+
+Under load above what the replicas get done, read tasks wait in the QueryNode
+read scheduler queue (`queryNode.scheduler.unsolvedQueueSize`, 1024), turning
+excess traffic into long queue latency. Four pieces bound answered-request
+queue time and fail the excess fast:
+
+**QueryNode queue wait limit.** `queryNode.scheduler.maxQueueWaitRatio`
+(default `0`, off; refreshable) bounds how long a read task may wait in the
+queue (`min(maxQueueWait, maxQueueWaitRatio * time left until the deadline)`,
+where `queryNode.scheduler.maxQueueWait` defaults to `1s` and also applies to
+tasks without a deadline). A new task is refused immediately with
+`ErrServiceTooManyRequests` when the next task at the head of the queue (`head`)
+has waited more than half of the new task's limit. Already-expired tasks fail
+as expired rather than overloaded, and tasks waiting beyond their limit by
+dequeue time are refused then (`read_task_queue_duration{outcome="overloaded"}`).
+
+With a positive ratio, QueryNode also submits QueryView Search and Query tasks
+to its read scheduler. The view retains its selected segment handles until
+the task completes or the queue refuses it. The scheduler executes those
+exact handles and keeps each view's Search separate from other tasks. With
+the default zero ratio, QueryView continues to execute directly. StreamingNode
+growing reads use their own executor.
+
+**One extra attempt, then the refusal goes to the client.** Across both the
+default router (`executeShard`) and the adaptive selector (`executeAdaptiveShard`),
+a shard read gets at most one extra attempt on another replica across hedging
+and overload failover combined. When a replica refuses as overloaded, the
+client moves immediately (without retry backoff or waiting for hedge delay) to
+an untried replica once; a second overload refusal or exhaustion of untried
+replicas ends the request immediately with `ErrServiceTooManyRequests`.
+Overload refusals do not record replica failure penalties, and non-overload
+replica failures do not consume the extra-attempt slot. Once an actual hedge
+has used that slot, an overload refusal from either attempt ends the request
+when its sibling also fails with a retryable non-overload error, regardless of
+completion order. There need not be two overload refusals: no third replica is
+tried in this mixed-error case. Existing terminal-error precedence still applies.
+Ordinary non-overload retries remain available when the round has no overload
+refusal and no terminal error.
+
+**No resending inside worker RPC clients.** `grpcclient.WithFailFastOnOverload`
+stops Proxy and Delegator `ClientBase` retries on `ErrServiceTooManyRequests`
+so overload refusals propagate back immediately.
+
+**A failed shard stops the others.** `client_impl.go` and `legacy_client.go`
+fan out across shards under `errgroup.WithContext`, canceling sibling shards as
+soon as one fails.
+
+## Configuration and observability
+
+All settings are live-refreshable (`refreshable: true`) and apply to new shard
+requests:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `proxy.replicaSelectionPolicy` | `look_aside` | Replica selection policy (`round_robin`, `look_aside`, `refined_look_aside`, or `latency_weighted`); QueryView uses round-robin unless `latency_weighted` is selected. |
+| `proxy.latencyWeighted.decay` | `10s` | Exponential decay time constant for replica latency samples and failure penalties. |
+| `proxy.latencyWeighted.minShare` | `0.001` | Minimum selection share per eligible replica, capped by replica count. |
+| `proxy.hedging.enabled` | `false` | Enable hedged Search/Query attempts across replicas, independent of `replicaSelectionPolicy`. |
+| `proxy.hedging.minDelay` | `200ms` | Lower bound of the p99-based hedge trigger delay. |
+| `queryNode.scheduler.maxQueueWaitRatio` | `0` | Share of remaining deadline a read task may wait in the QueryNode queue (`0` disables). |
+| `queryNode.scheduler.maxQueueWait` | `1s` | Maximum queue wait for any read task (and limit when without deadline). |
+
+`milvus_proxy_replica_hedge_total` uses only proxy node ID and decision labels:
+`sent`, `won`, `skipped_low_win_rate`, and
+`skipped_no_replica`. It does not create per-channel or per-replica metric
+series. Master currently exposes no resource group selection in this QueryView
+request contract; the policy uses only the replicas offered by its existing
+directory.
+
+## Verification
+
+Deterministic tests hold the first QueryNode dispatch open to demonstrate the
+baseline wait and the enabled hedge's complete winner, both with
+`latency_weighted` and with decoupled round-robin hedging. Additional tests verify single-hedge-per-shard enforcement across retry rounds, fixed MVCC,
+exact retained selections, empty Query, isolated late loser results, two-stage
+Search, retained requery failure, local target selection, feedback attribution,
+and idle replica cleanup. Search and Query regression tests cover wire-encoded
+worker OOM followed by sibling success, both failure orders, retry exhaustion,
+InputError followed by sibling success, all-attempt failure, single-attempt
+InputError, and caller cancellation while the sibling is pending.
+
+Queue wait is checked again when a worker starts, before `PreExecute` and
+`Execute`, including time blocked handing off to the worker pool. The
+`scheduled` queue-duration observation is recorded at that point. Rejection
+occurs when the worker becomes available; queue budgets do not install timers.
+Compatible legacy Searches may merge with different queue budgets. Each original
+request retains its enqueue time and captured queue limit. At dequeue and worker
+start, cancellation, deadline expiry, and queue-budget expiry remove only the
+affected members; surviving members retain their own budgets after owner
+promotion. Existing NQ, request compatibility, and deadline-gap merge rules still
+apply. Queue-duration observations remain per scheduler entry: a partially
+pruned group does not add a separate observation for every rejected member. Pinned QueryView tasks on master remain separate.
+
+Unknown replica latency uses the candidate fallback before applying the current
+failure penalty. A recent penalty still suppresses a replica with no successes;
+a small decayed penalty cannot make an unknown replica appear faster than the
+fallback. Hedge-delay samples continue to be collected while hedging is disabled
+so live enabling can use the observed workload latency.
+
+## Default behavior and streaming boundary
+
+Queue wait limiting remains disabled by default (`maxQueueWaitRatio=0`), and
+hedging remains disabled by default. Overload propagation and the bounded serial
+failover are active independently of those switches: existing queue-capacity
+refusals can therefore return sooner, with less retry amplification, than before
+this PR. A refusal is a transient capacity signal; bounded failover can trade
+requests that might have succeeded after a longer wait for lower queue latency.
+
+For ordinary Search and Query streams, an overload surfaced by the first
+`Recv()` is eligible for the same single extra attempt as an overload during
+stream setup. The state and exclusions survive stream reopening; a second
+refusal cannot obtain another extra attempt. Once a result chunk has been
+emitted, the stream terminates on error without restarting. Advanced/Hybrid
+Search streams currently have no shard-local receive-phase restart: some child
+streams may already have published results. Their receive-phase overload is
+returned to the caller. Setup-phase failover and the adaptive batch path retain
+their existing bounded retry behavior.

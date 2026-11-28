@@ -166,6 +166,7 @@ func newLegacyClient(
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	shardClient.queryHook = cfg.QueryHook
+	shardClient.selectionConfig = cfg.ReplicaSelection
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{
 		shardClient:   shardClient,
@@ -179,8 +180,13 @@ func (c *legacyClient) MaxRetries() int {
 
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
 	defer func() { err = ToMilvusError(err) }()
+	// Adaptive attempts buffer results until a winner is selected. Streaming
+	// does not yet implement the same selection and feedback lifecycle.
 	if req.AllowStreaming {
-		return c.searchStream(ctx, req, req.ReduceStreamChunkBytes)
+		cfg := c.shardClient.replicaSelectionConfig()
+		if !cfg.LatencyWeighted && !cfg.HedgeEnabled {
+			return c.searchStream(ctx, req, req.ReduceStreamChunkBytes)
+		}
 	}
 
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
@@ -341,7 +347,10 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 		return c.queryRetainedPlans(ctx, req)
 	}
 	if req.AllowStreaming {
-		return c.queryStream(ctx, req, req.ReduceStreamChunkBytes)
+		cfg := c.shardClient.replicaSelectionConfig()
+		if !cfg.LatencyWeighted && !cfg.HedgeEnabled {
+			return c.queryStream(ctx, req, req.ReduceStreamChunkBytes)
+		}
 	}
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {

@@ -87,8 +87,9 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 	)
 	client := queryclient.NewLegacyViewQueryClient(
 		queryclient.ViewQueryClientConfig{
-			LoadInfoClient: loadInfoClient,
-			QueryHook:      hook,
+			LoadInfoClient:   loadInfoClient,
+			QueryHook:        hook,
+			ReplicaSelection: proxyReplicaSelectionConfig(),
 		},
 		queryPlanClient,
 		queryServiceClient,
@@ -101,4 +102,20 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 		queryNodeClient.Close()
 	}
 	return client, closeFunc, nil
+}
+
+// proxyReplicaSelectionConfig samples live replica-selection and hedging
+// settings once per shard request, keeping outstanding attempts on their
+// captured mode.
+func proxyReplicaSelectionConfig() func() queryclient.ReplicaSelectionConfig {
+	p := &paramtable.Get().ProxyCfg
+	return func() queryclient.ReplicaSelectionConfig {
+		return queryclient.ReplicaSelectionConfig{
+			LatencyWeighted: p.ReplicaSelectionPolicy.GetValue() == "latency_weighted",
+			Decay:           p.LatencyWeightedDecay.GetAsDurationByParse(),
+			MinShare:        p.LatencyWeightedMinShare.GetAsFloat(),
+			HedgeEnabled:    p.HedgingEnabled.GetAsBool(),
+			HedgeMinDelay:   p.HedgingMinDelay.GetAsDurationByParse(),
+		}
+	}
 }

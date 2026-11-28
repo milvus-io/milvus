@@ -486,6 +486,13 @@ proxy:
   enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests and before writes that read existing rows
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
+  replicaSelectionPolicy: look_aside # Replica selection policy: round_robin, look_aside, refined_look_aside, or latency_weighted. Live changes apply to new shard requests. QueryView uses its existing round-robin router unless latency_weighted is selected.
+  latencyWeighted:
+    decay: 10s # Time constant of the exponential decay for replica latency samples and failure penalties.
+    minShare: 0.001 # Minimum selection share of each eligible replica so slow or recovering replicas keep being probed.
+  hedging:
+    enabled: false # Enable hedged Search/Query attempts across replicas, independent of proxy.replicaSelectionPolicy. Sends at most one hedge per shard request across all retry rounds.
+    minDelay: 200ms # Minimum wait before dispatching a hedged attempt; actual delay is max(minDelay, recent p99 latency).
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   resolveAliasForPrivilege: true # switch for whether proxy shall resolve alias to actual collection name during RBAC privilege checks
   maxArrayCapacity: 4096 # maximum number of elements in an array field for a single row
@@ -788,6 +795,11 @@ queryNode:
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
     unsolvedQueueSize: 1024
+    # The share of the time a read task has left when it is queued that it may wait in the queue.
+    # A task that would wait longer is refused as too many requests, so that the Proxy can turn to another replica.
+    # 0 disables the limit: a task waits until it is executed or its deadline passes.
+    maxQueueWaitRatio: 0
+    maxQueueWait: 1s # The longest a read task may wait in the queue when maxQueueWaitRatio is positive, whatever its deadline, and what a task without a deadline may wait. It supports duration strings such as 500ms and 1s.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.

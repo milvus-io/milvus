@@ -19,6 +19,7 @@ package grpcproxy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -134,4 +135,43 @@ func TestDefaultProxyViewQueryClientHookInitFailure(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 		require.Zero(t, watch.Times())
 	})
+}
+
+func TestProxyReplicaSelectionConfiguration(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	cfg := &params.ProxyCfg
+	for _, item := range []*paramtable.ParamItem{&cfg.ReplicaSelectionPolicy, &cfg.LatencyWeightedDecay, &cfg.LatencyWeightedMinShare, &cfg.HedgingEnabled, &cfg.HedgingMinDelay} {
+		key, value := item.Key, item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
+	}
+	provider := proxyReplicaSelectionConfig()
+	require.NotNil(t, provider)
+
+	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "look_aside"))
+	require.NoError(t, params.Save(cfg.HedgingEnabled.Key, "false"))
+	defaults := provider()
+	require.False(t, defaults.LatencyWeighted, "default preserves the existing QueryView router")
+	require.False(t, defaults.HedgeEnabled, "hedging defaults to disabled")
+
+	// Hedging can be enabled independently while keeping round-robin/look_aside selection.
+	require.NoError(t, params.Save(cfg.HedgingEnabled.Key, "true"))
+	hedgedOnly := provider()
+	require.False(t, hedgedOnly.LatencyWeighted)
+	require.True(t, hedgedOnly.HedgeEnabled)
+
+	// Live policy switch to latency_weighted applies to new shard requests without restart.
+	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "latency_weighted"))
+	for key, value := range map[string]string{cfg.LatencyWeightedDecay.Key: "10s", cfg.LatencyWeightedMinShare.Key: "0.001", cfg.HedgingMinDelay.Key: "200ms"} {
+		require.NoError(t, params.Save(key, value))
+	}
+	captured := provider()
+	require.True(t, captured.LatencyWeighted)
+	require.Equal(t, 10*time.Second, captured.Decay)
+	require.Equal(t, .001, captured.MinShare)
+	require.True(t, captured.HedgeEnabled)
+	require.Equal(t, 200*time.Millisecond, captured.HedgeMinDelay)
+	require.NoError(t, params.Save(cfg.ReplicaSelectionPolicy.Key, "look_aside"))
+	require.False(t, provider().LatencyWeighted)
+	require.True(t, captured.LatencyWeighted, "previous requests retain their captured mode")
 }

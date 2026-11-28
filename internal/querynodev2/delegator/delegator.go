@@ -455,9 +455,10 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 }
 
 // workerReadContext retries one transient RPC error on a pinned worker, but
-// returns immediately on a failed connection so Proxy can try another replica.
+// returns immediately on a failed connection so Proxy can try another replica,
+// and on a worker that refuses the request as overloaded.
 func workerReadContext(ctx context.Context) context.Context {
-	return grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+	return grpcclient.WithFailFastOnOverload(grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2)))
 }
 
 // executeSearchSubTasks is a helper that encapsulates the common pattern of

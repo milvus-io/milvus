@@ -8,8 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func registerQueryViewQueryServer(grpcServer *grpc.Server, queryViewHandler sharedviewquery.TaskProvider, serverID int64) {
-	executor := qnviewquery.NewDirectSegmentTaskExecutor(serverID)
+func registerQueryViewQueryServer(grpcServer *grpc.Server, queryViewHandler sharedviewquery.TaskProvider, executor qnviewquery.SegmentTaskExecutor) {
 	scheduler := qnviewquery.NewScheduler(executor)
 	viewpb.RegisterViewQueryServiceServer(grpcServer, sharedviewquery.NewServer(queryViewHandler, scheduler))
 }

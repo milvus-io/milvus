@@ -5,15 +5,23 @@ package viewquery
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
+	readscheduler "github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSchedulerSearchDelegatesQNTasks(t *testing.T) {
@@ -95,6 +103,94 @@ func TestSchedulerReturnsExecutorError(t *testing.T) {
 	_, err := scheduler.Search(context.Background(), tasks)
 
 	require.ErrorIs(t, err, executorErr)
+}
+
+// Holding PreExecute stalls the consumer of the scheduler's unbuffered execChan.
+type holdReadTask struct {
+	readscheduler.Task
+	release <-chan struct{}
+}
+
+func (t holdReadTask) PreExecute() error {
+	select {
+	case <-t.release:
+		return nil
+	case <-t.Context().Done():
+		return t.Context().Err()
+	}
+}
+
+func (holdReadTask) Execute() error { return nil }
+
+type pinnedReadProvider struct {
+	sharedviewquery.TaskProvider
+	handle qnview.SealedSegmentHandle
+}
+
+func (p pinnedReadProvider) AcquireSearchSegmentTasks(_ context.Context, _ qviews.ShardID, _ qviews.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC, req *internalpb.SearchRequest, _ *viewpb.SegmentSelection) (sharedviewquery.SearchSegmentTasks, error) {
+	return qnview.NewQNSearchSegmentTasks([]qnview.QNSearchSegmentTask{{Handle: p.handle, MVCC: mvcc, Request: req}}), nil
+}
+
+func (p pinnedReadProvider) AcquireQuerySegmentTasks(_ context.Context, _ qviews.ShardID, _ qviews.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC, req *internalpb.RetrieveRequest, _ *viewpb.SegmentSelection) (sharedviewquery.QuerySegmentTasks, error) {
+	return qnview.NewQNQuerySegmentTasks([]qnview.QNQuerySegmentTask{{Handle: p.handle, MVCC: mvcc, Request: req}}), nil
+}
+
+type releaseCountingHandle struct {
+	fakeSealedSegmentHandle
+	releases int
+}
+
+func (h *releaseCountingHandle) Release() { h.releases++ }
+
+func TestViewReadsRefusedByReadQueue(t *testing.T) {
+	paramtable.Init()
+	cfg := paramtable.Get()
+	cfg.Save(cfg.QueryNodeCfg.MaxQueueWaitRatio.Key, "0")
+	t.Cleanup(func() {
+		cfg.Reset(cfg.QueryNodeCfg.MaxQueueWaitRatio.Key)
+		cfg.Reset(cfg.QueryNodeCfg.MaxQueueWait.Key)
+	})
+	queue := readscheduler.NewScheduler("fifo")
+	queue.Start()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		queue.Stop()
+	})
+	newHeldTask := func() holdReadTask {
+		return holdReadTask{Task: tasks.NewQueryTask(ctx, nil, nil, &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{}}), release: release}
+	}
+	require.NoError(t, queue.Add(newHeldTask()))
+	// Once the first task reaches PreExecute, the second becomes the waiting head.
+	require.Eventually(t, func() bool { return queue.GetWaitingTaskTotal() == 0 }, time.Second, time.Millisecond)
+	require.NoError(t, queue.Add(newHeldTask()))
+	// Synchronize with the scheduling loop after it picks the second task.
+	_, err := queue.ClearQueued(ctx, func(readscheduler.Task) bool { return false }, "")
+	require.NoError(t, err)
+	cfg.Save(cfg.QueryNodeCfg.MaxQueueWait.Key, "1ns")
+	cfg.Save(cfg.QueryNodeCfg.MaxQueueWaitRatio.Key, "0.1")
+
+	handle := &releaseCountingHandle{fakeSealedSegmentHandle: fakeSealedSegmentHandle{id: 1, segment: fakeReadableSegment{id: 1, vchannel: "v1"}}}
+	executor := NewDirectSegmentTaskExecutor(1, func(task readscheduler.Task) error {
+		if err := queue.Add(task); err != nil {
+			return err
+		}
+		return task.Wait()
+	})
+	server := sharedviewquery.NewServer(pinnedReadProvider{handle: handle}, NewScheduler(executor))
+	shard := &viewpb.ShardID{Vchannel: "v1"}
+	version := &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{}}
+	mvcc := &viewpb.QueryPlanMVCC{TransformingTimetick: 10}
+	_, err = server.SearchOnView(ctx, &viewpb.SearchOnViewRequest{ShardId: shard, Version: version, Mvcc: mvcc, LegacyReq: &internalpb.SearchRequest{Nq: 1}})
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.ErrorIs(t, viewerror.ConvertViewError("SearchOnView", viewerror.NewGRPCStatusFromError(err).Err()), merr.ErrServiceTooManyRequests)
+	require.Equal(t, 1, handle.releases)
+	_, err = server.QueryOnView(ctx, &viewpb.QueryOnViewRequest{ShardId: shard, Version: version, Mvcc: mvcc, LegacyReq: &internalpb.RetrieveRequest{}})
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.ErrorIs(t, viewerror.ConvertViewError("QueryOnView", viewerror.NewGRPCStatusFromError(err).Err()), merr.ErrServiceTooManyRequests)
+	require.Equal(t, 2, handle.releases)
 }
 
 type fakeQNSegmentTaskExecutor struct {

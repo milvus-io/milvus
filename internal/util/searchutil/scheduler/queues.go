@@ -177,6 +177,9 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 	if mergeTask == nil {
 		return false
 	}
+	if candidate, ok := task.Task.(interface{ CanMerge() bool }); ok && !candidate.CanMerge() {
+		return false
+	}
 	// No need to perform any merge if task.nq is greater than maxNQ.
 	if mergeTask.NQ() >= maxNQ {
 		return false

@@ -121,7 +121,7 @@ func (s *SchedulerSuite) TestConsumeRecvChan() {
 		scheduler := &scheduler{
 			policy:           newFIFOPolicy(),
 			receiveChan:      ch,
-			execChan:         make(chan Task),
+			execChan:         make(chan *queuedTask),
 			pool:             conc.NewPool[any](10, conc.WithPreAlloc(true)),
 			schedulerCounter: schedulerCounter{},
 			lifetime:         lifetime.NewLifetime(lifetime.Initializing),
@@ -357,7 +357,7 @@ func (s *SchedulerSuite) TestSetupExecListenerRecordsPoppedExpiredTask() {
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		schedulerCounter: schedulerCounter{},
 	}
 
@@ -388,7 +388,7 @@ func (s *SchedulerSuite) TestClearQueuedTasksRemovesPolicyAndCurrentTask() {
 	now := time.Now()
 	scheduler := &scheduler{
 		policy:           newFIFOPolicy(),
-		execChan:         make(chan Task),
+		execChan:         make(chan *queuedTask),
 		schedulerCounter: schedulerCounter{},
 	}
 
@@ -573,7 +573,7 @@ func (s *SchedulerSuite) TestPruneCanceledRightBeforeExec() {
 		// to log it, so the log line may not be there yet when Wait returns.
 		s.Eventually(func() bool {
 			out := logs.String()
-			return strings.Contains(out, "task canceled before executing") &&
+			return strings.Contains(out, "task discarded before executing") &&
 				strings.Contains(out, context.Canceled.Error())
 		}, time.Second, 10*time.Millisecond)
 	})
@@ -609,7 +609,7 @@ func (s *SchedulerSuite) TestPruneCanceledRightBeforeExec() {
 		s.Eventually(func() bool {
 			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
 		}, time.Second, 10*time.Millisecond, "the group was credited with 5 and must be debited with 5")
-		s.Contains(logs.String(), "canceled requests dropped from a search group before executing")
+		s.Contains(logs.String(), "requests dropped from a search group before executing")
 	})
 }
 
@@ -737,7 +737,7 @@ func (s *SchedulerSuite) TestPruneCanceledAtDequeueIsLogged() {
 		s.NoError(scheduler.Add(group))
 		s.ErrorIs(group.(*MockTask).Wait(), context.Canceled)
 		s.NoError(survivor.(*MockTask).Wait())
-		s.Contains(logs.String(), "canceled requests dropped from a search group as it left the queue")
+		s.Contains(logs.String(), "requests dropped from a search group as it left the queue")
 		s.Contains(logs.String(), context.Canceled.Error())
 	})
 
@@ -760,7 +760,7 @@ func (s *SchedulerSuite) TestPruneCanceledAtDequeueIsLogged() {
 		// As above: the task is told inside the prune, before the log is written.
 		s.Eventually(func() bool {
 			out := logs.String()
-			return strings.Contains(out, "task canceled before it left the queue") &&
+			return strings.Contains(out, "task discarded before it left the queue") &&
 				strings.Contains(out, context.DeadlineExceeded.Error())
 		}, time.Second, 10*time.Millisecond)
 		s.Eventually(func() bool {

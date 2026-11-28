@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -2313,7 +2314,7 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+	ctx = grpcclient.WithFailFastOnOverload(retry.WithMaxAttemptsContext(ctx, 1))
 	searchReq := shallowcopy.ShallowCopySearchRequest(t.SearchRequest, nodeID)
 	req := &querypb.SearchRequest{
 		Req:             searchReq,
