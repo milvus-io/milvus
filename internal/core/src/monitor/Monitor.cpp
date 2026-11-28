@@ -307,6 +307,56 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency,
                             internal_core_search_latency,
                             strictGroupSearchLatencyLabels)
 
+// growing interim index async first-build metrics
+std::map<std::string, std::string> growingIndexBuildLabels{
+    {"type", "first_build"}};
+std::map<std::string, std::string> growingIndexCatchupLabels{
+    {"type", "catchup"}};
+std::map<std::string, std::string> growingIndexSubmitFailureLabels{
+    {"type", "submit"}};
+std::map<std::string, std::string> growingIndexFailureLabels{{"type", "build"}};
+std::map<std::string, std::string> growingIndexDeadlineFailureLabels{
+    {"type", "deadline"}};
+
+const prometheus::Histogram::BucketBoundaries growingIndexLatencyBuckets = {
+    1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 60000};  // ms
+
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(
+    internal_core_growing_index_latency,
+    "[cpp]latency(ms) of growing interim index async build")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_growing_index_build_latency,
+    internal_core_growing_index_latency,
+    growingIndexBuildLabels,
+    growingIndexLatencyBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_core_growing_index_catchup_latency,
+    internal_core_growing_index_latency,
+    growingIndexCatchupLabels,
+    growingIndexLatencyBuckets)
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_core_growing_index_failures,
+    "[cpp]growing interim index failures (index disabled)")
+DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_submit_failures,
+                          internal_core_growing_index_failures,
+                          growingIndexSubmitFailureLabels)
+DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_build_failures,
+                          internal_core_growing_index_failures,
+                          growingIndexFailureLabels)
+DEFINE_PROMETHEUS_COUNTER(internal_core_growing_index_deadline_failures,
+                          internal_core_growing_index_failures,
+                          growingIndexDeadlineFailureLabels)
+
+std::map<std::string, std::string> growingIndexPoolQueueDepthLabels{
+    {"type", "queue_depth"}};
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(
+    internal_core_growing_index_pool,
+    "[cpp]growing interim index async build queue depth")
+DEFINE_PROMETHEUS_GAUGE(internal_core_growing_index_pool_queue_depth,
+                        internal_core_growing_index_pool,
+                        growingIndexPoolQueueDepthLabels)
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};

@@ -337,6 +337,25 @@ class VectorBase {
     virtual void
     clear() = 0;
 
+    // Serialize the ownership handoff with writers that already chose the
+    // raw column. Readers retain independent chunk-generation pins.
+    std::shared_lock<std::shared_mutex>
+    LockRawChunkWrite() const {
+        return std::shared_lock(raw_chunk_mutex_);
+    }
+
+    void
+    ReclaimRawChunks() {
+        std::unique_lock lock(raw_chunk_mutex_);
+        if (num_chunk() > 0) {
+            clear();
+        }
+    }
+
+ private:
+    mutable std::shared_mutex raw_chunk_mutex_;
+
+ public:
     virtual bool
     is_mapping_storage() const {
         return false;

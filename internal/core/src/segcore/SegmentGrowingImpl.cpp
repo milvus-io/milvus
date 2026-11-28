@@ -101,6 +101,8 @@ namespace milvus::segcore {
 
 namespace {
 
+thread_local std::function<void()> before_raw_chunk_check_hook;
+
 // Call only after selecting raw storage: index APIs must keep logical IDs even
 // if an interim index takes over between NULL filtering and vector retrieval.
 std::vector<int64_t>
@@ -512,6 +514,28 @@ SegmentGrowingImpl::mask_with_delete(BitsetTypeView& bitset,
 }
 
 void
+SegmentGrowingImpl::SetBeforeRawChunkCheckHookForTest(
+    std::function<void()> hook) {
+    before_raw_chunk_check_hook = std::move(hook);
+}
+
+bool
+SegmentGrowingImpl::HasRawData(int64_t field_id) const {
+    const FieldId field(field_id);
+    if (!indexing_record_.is_in(field) || indexing_record_.HasRawData(field)) {
+        return true;
+    }
+
+    if (before_raw_chunk_check_hook) {
+        before_raw_chunk_check_hook();
+    }
+    // The worker publishes the index before reclaiming the raw generation.
+    // An empty column can mean the handoff raced the first index check.
+    return insert_record_.get_data_base(field)->num_chunk() > 0 ||
+           indexing_record_.HasRawData(field);
+}
+
+void
 SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
     //remove the chunk data to reduce memory consumption
     auto& field_meta = schema.operator[](fieldId);
@@ -520,14 +544,7 @@ SegmentGrowingImpl::try_remove_chunks(FieldId fieldId, const Schema& schema) {
         if (indexing_record_.HasRawData(fieldId)) {
             auto vec_data_base = insert_record_.get_data_base(fieldId);
             if (vec_data_base && vec_data_base->num_chunk() > 0) {
-                // No lock, and no try_lock: clear() swaps the container's
-                // internal chunk collection under the container's own mutex,
-                // and every reader holds a ChunkSnapshot pinning the
-                // generation it is walking. Reclamation therefore always
-                // proceeds -- the previous try_lock made it fail under query
-                // load and only retry on the next insert, so a segment that
-                // stopped taking writes never got its memory back.
-                vec_data_base->clear();
+                vec_data_base->ReclaimRawChunks();
             }
         }
     }
@@ -951,40 +968,47 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         // later batches directly. Do not repopulate chunks reclaimed by
         // try_remove_chunks. Scalar indexes do not take over raw-data
         // ownership from ConcurrentVector.
-        const bool index_owns_raw_data =
-            IsVectorDataType(field_meta.get_data_type()) &&
-            indexing_record_.HasRawData(field_id);
-        if (!index_owns_raw_data) {
-            if (field_meta.get_data_type() == DataType::TEXT) {
-                auto spillover = GetTextLobSpillover(field_id);
-                AssertInfo(spillover != nullptr,
-                           "TEXT field must have spillover");
-                const auto& field_data =
-                    insert_record_proto->fields_data(data_offset);
-                const auto& string_data = field_data.scalars().string_data();
+        {
+            auto raw_write = field_meta.is_vector()
+                                 ? insert_record_.get_data_base(field_id)
+                                       ->LockRawChunkWrite()
+                                 : std::shared_lock<std::shared_mutex>{};
+            const bool index_owns_raw_data =
+                IsVectorDataType(field_meta.get_data_type()) &&
+                indexing_record_.HasRawData(field_id);
+            if (!index_owns_raw_data) {
+                if (field_meta.get_data_type() == DataType::TEXT) {
+                    auto spillover = GetTextLobSpillover(field_id);
+                    AssertInfo(spillover != nullptr,
+                               "TEXT field must have spillover");
+                    const auto& field_data =
+                        insert_record_proto->fields_data(data_offset);
+                    const auto& string_data =
+                        field_data.scalars().string_data();
 
-                std::vector<std::string> ref_strings(num_rows);
-                for (int64_t i = 0; i < num_rows; i++) {
-                    const auto& text = string_data.data(i);
-                    ref_strings[i] = spillover->WriteAndEncode(text);
+                    std::vector<std::string> ref_strings(num_rows);
+                    for (int64_t i = 0; i < num_rows; i++) {
+                        const auto& text = string_data.data(i);
+                        ref_strings[i] = spillover->WriteAndEncode(text);
+                    }
+
+                    auto* vec_base = insert_record_.get_data_base(field_id);
+                    auto* string_vec =
+                        dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
+                    AssertInfo(
+                        string_vec != nullptr,
+                        "TEXT field must use ConcurrentVector<std::string>");
+                    string_vec->set_data_raw(
+                        reserved_offset, ref_strings.data(), num_rows);
+                } else {
+                    insert_record_.get_data_base(field_id)->set_data_raw(
+                        reserved_offset,
+                        num_rows,
+                        &insert_record_proto->fields_data(data_offset),
+                        field_meta);
                 }
-
-                auto* vec_base = insert_record_.get_data_base(field_id);
-                auto* string_vec =
-                    dynamic_cast<ConcurrentVector<std::string>*>(vec_base);
-                AssertInfo(string_vec != nullptr,
-                           "TEXT field must use ConcurrentVector<std::string>");
-                string_vec->set_data_raw(
-                    reserved_offset, ref_strings.data(), num_rows);
-            } else {
-                insert_record_.get_data_base(field_id)->set_data_raw(
-                    reserved_offset,
-                    num_rows,
-                    &insert_record_proto->fields_data(data_offset),
-                    field_meta);
             }
         }
-
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
             indexing_record_.AppendingIndex(
@@ -1273,12 +1297,18 @@ SegmentGrowingImpl::load_field_data_common(
     // Keep the load path aligned with Insert: once a vector interim index owns
     // raw data, append the loaded batch to the index without rebuilding raw
     // chunks. Scalar indexes do not take over raw-data ownership.
-    const bool index_owns_raw_data =
-        IsVectorDataType(field_meta.get_data_type()) &&
-        indexing_record_.HasRawData(field_id);
-    if (!index_owns_raw_data) {
-        insert_record_.get_data_base(field_id)->set_data_raw(reserved_offset,
-                                                             field_data);
+    {
+        auto raw_write =
+            field_meta.is_vector()
+                ? insert_record_.get_data_base(field_id)->LockRawChunkWrite()
+                : std::shared_lock<std::shared_mutex>{};
+        const bool index_owns_raw_data =
+            IsVectorDataType(field_meta.get_data_type()) &&
+            indexing_record_.HasRawData(field_id);
+        if (!index_owns_raw_data) {
+            insert_record_.get_data_base(field_id)->set_data_raw(
+                reserved_offset, field_data);
+        }
     }
     if (segcore_config_.get_enable_interim_segment_index()) {
         auto offset = reserved_offset;
