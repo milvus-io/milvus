@@ -264,7 +264,8 @@ func TestPChannelExclusiveWaitsForSharedWriter(t *testing.T) {
 	exclusiveEntered := make(chan struct{})
 	exclusiveDone := make(chan error, 1)
 	go func() {
-		_, err := interceptor.DoAppend(context.Background(), exclusive, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		_, err := interceptor.DoAppend(context.Background(), exclusive, func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			msg.WithTimeTick(2)
 			close(exclusiveEntered)
 			return nil, nil
 		})
@@ -434,7 +435,7 @@ func TestTopologyChangeAbortAfterAppend(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := txn.NewTxnManager(types.PChannelInfo{Name: testPChannelName}, nil)
-			defer manager.FailTxnAtVChannel("")
+			defer manager.FailTxnAtVChannel("", 1)
 			begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(testVChannel).
 				WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
 				MustBuildMutable().WithTimeTick(1).
@@ -446,7 +447,7 @@ func TestTopologyChangeAbortAfterAppend(t *testing.T) {
 			interceptor.txnManager = manager
 			msg := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
 				WithHeader(&message.AlterReplicateConfigMessageHeader{ForcePromote: tc.force, Ignore: tc.ignore}).
-				WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+				WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable().WithTimeTick(2)
 			_, err = interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 				require.Equal(t, message.TxnStateInFlight, session.State(), "abort must follow durable append")
 				return walimplstest.NewTestMessageID(2), tc.err

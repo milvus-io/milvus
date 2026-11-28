@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -42,6 +43,8 @@ func (r *recoveryStorageImpl) recoverFromStream(
 			return
 		}
 	}()
+	tombstones := utility.NewTxnTombstones()
+	tombstones.Advance(lastTimeTickMessage.TimeTick())
 L:
 	for {
 		select {
@@ -55,6 +58,8 @@ L:
 			if err := ValidateCreateSegmentStorageVersion(msg); err != nil {
 				return nil, err
 			}
+			// Recover results before ObserveMessage filters already checkpointed effects.
+			tombstones.Observe(msg)
 			r.ObserveMessage(ctx, msg)
 		}
 	}
@@ -63,6 +68,7 @@ L:
 	}
 	snapshot = r.getSnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
+	snapshot.TxnTombstones = tombstones
 	logFields := []mlog.Field{
 		mlog.String("channel", recoveryStreamBuilder.Channel().String()),
 		mlog.Int("vchannels", len(snapshot.VChannels)),

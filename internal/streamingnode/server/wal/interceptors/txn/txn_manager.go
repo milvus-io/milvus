@@ -62,6 +62,7 @@ type TxnManager struct {
 	recoveredSessions         map[message.TxnID]struct{}
 	recoveredSessionsDoneChan chan struct{}
 	sessions                  map[message.TxnID]*TxnSession
+	expired                   expiredTxns
 	closed                    lifetime.SafeChan
 	metrics                   *metricsutil.TxnMetrics
 }
@@ -91,6 +92,9 @@ func (m *TxnManager) BeginNewTxn(ctx context.Context, msg message.MutableBeginTx
 		return nil, status.NewTransactionExpired("manager closed")
 	}
 	session := newTxnSession(vchannel, *txnCtx, timetick, m.metrics.BeginTxn())
+	m.expired.advance(timetick)
+	// CDC may begin a new receiving attempt with the same source TxnID.
+	m.expired.remove(session.TxnContext().TxnID)
 	m.sessions[session.TxnContext().TxnID] = session
 	return session, nil
 }
@@ -126,14 +130,17 @@ func (m *TxnManager) buildTxnContext(ctx context.Context, msg message.MutableBeg
 
 // FailTxnAtVChannel aborts all transactions in the specified VChannel.
 // An empty VChannel covers the whole PChannel, regardless of transaction origin.
-func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
+func (m *TxnManager) FailTxnAtVChannel(vchannel string, ts uint64) {
 	// avoid the txn to be committed.
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.expired.advance(ts)
 	ids := make([]int64, 0, len(m.sessions))
 	for id, session := range m.sessions {
 		if vchannel == "" || session.VChannel() == vchannel {
-			session.abort()
+			if session.abort() {
+				m.expired.add(id)
+			}
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 			ids = append(ids, int64(id))
@@ -152,10 +159,13 @@ func (m *TxnManager) FailTxnAtVChannel(vchannel string) {
 func (m *TxnManager) CleanupTxnUntil(ts uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.expired.advance(ts)
 
 	for id, session := range m.sessions {
-		if session.IsExpiredOrDone(ts) {
-			session.Cleanup()
+		if cleaned, expired := session.cleanupIfExpiredOrDone(ts); cleaned {
+			if expired {
+				m.expired.add(id)
+			}
 			delete(m.sessions, id)
 			delete(m.recoveredSessions, id)
 		}
@@ -184,7 +194,12 @@ func (m *TxnManager) GetSessionOfTxn(id message.TxnID) (*TxnSession, error) {
 
 	session, ok := m.sessions[id]
 	if !ok {
-		return nil, status.NewTransactionExpired("txn %d not found in manager", id)
+		if m.expired.contains(id) {
+			return nil, status.NewTransactionExpired("txn %d expired or aborted before commit", id)
+		}
+		// Cleanup removes committed as well as expired transactions. Absence is
+		// not evidence that a Commit failed; its result may also have aged out.
+		return nil, status.NewTransactionNotFound(id)
 	}
 	return session, nil
 }
