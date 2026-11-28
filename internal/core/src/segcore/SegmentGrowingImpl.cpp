@@ -3816,7 +3816,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id,
     }
 
     auto appender = growing_indexes_.StageAppender(
-        field_meta, index_meta_, segcore_config_, id_);
+        *schema, field_id, index_meta_, segcore_config_, id_);
     AssertInfo(appender.has_value() && appender->caps.text_match,
                "field {} is not configured for growing text match",
                field_id.get());
@@ -3986,7 +3986,8 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             }
             const auto field_id = field_meta.get_id();
             auto appender = growing_indexes_.StageAppender(
-                field_meta,
+                *sch,
+                field_id,
                 index_meta_,
                 segcore_config_,
                 id_,

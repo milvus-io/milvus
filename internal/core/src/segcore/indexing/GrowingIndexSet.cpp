@@ -255,7 +255,8 @@ GrowingIndexSet::Initialize(const Schema& schema,
         if (!include_field(field_id)) {
             continue;
         }
-        auto appender = StageAppender(field_meta,
+        auto appender = StageAppender(schema,
+                                      field_id,
                                       index_meta,
                                       segcore_config,
                                       segment_id,
@@ -268,11 +269,13 @@ GrowingIndexSet::Initialize(const Schema& schema,
 }
 
 std::optional<GrowingIndexSet::Appender>
-GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
+GrowingIndexSet::StageAppender(const Schema& schema,
+                               FieldId field_id,
                                const IndexMetaPtr& index_meta,
                                const SegcoreConfig& segcore_config,
                                int64_t segment_id,
                                const VectorBase* field_raw_data) const {
+    const auto& field_meta = schema[field_id];
     if (IsStringDataType(field_meta.get_data_type()) &&
         field_meta.enable_match()) {
         const auto unique_id = UniqueFieldId(segment_id, field_meta.get_id());
@@ -294,7 +297,10 @@ GrowingIndexSet::StageAppender(const FieldMeta& field_meta,
         scalar_type == DataType::INT64 ||
         scalar_type == DataType::TIMESTAMPTZ ||
         scalar_type == DataType::VARCHAR;
-    if (field_meta.get_id().get() >= START_USER_FIELDID && mutable_scalar &&
+    // Primary-key lookup already has its own growing PK-to-offsets mapping.
+    // Do not build a second value directory for that field.
+    if (field_id.get() >= START_USER_FIELDID &&
+        schema.get_primary_field_id() != field_id && mutable_scalar &&
         segcore_config.get_enable_mutable_scalar_index()) {
         auto owner = index::CreateMutableScalarGrowingIndex(scalar_type);
         // VARCHAR exposes IPatternMatchReader for literal PrefixMatch only.

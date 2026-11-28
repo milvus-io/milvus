@@ -38,9 +38,10 @@ lifetime follows the physical Growing resource and its outstanding readers.
 
 ## Field storage and append
 
-- Initial types are BOOL, INT8/16/32/64, TIMESTAMPTZ, and VARCHAR. System fields and VARCHAR fields
-  with text match are excluded. FLOAT/DOUBLE, ARRAY, JSON, TEXT, and spatial/vector types keep
-  their existing paths. This feature is append-only and does not implement PK-update histories.
+- Initial types are BOOL, INT8/16/32/64, TIMESTAMPTZ, and VARCHAR. Primary-key fields, system fields,
+  and VARCHAR fields with text match are excluded. PK lookup retains the existing PK-to-offsets
+  mapping without building another B-tree. FLOAT/DOUBLE, ARRAY, JSON, TEXT, and spatial/vector
+  types keep their existing paths. This feature is append-only and does not implement PK-update histories.
 - The first backend uses `absl::btree_map<value, stable Posting handle>`. Postings hold increasing `uint32_t`
   row offsets in an inline-capacity vector; append rejects row ranges exceeding 2^32 rows before
   modifying storage. Distinct string keys are owned; borrowed append batches are not
@@ -70,6 +71,8 @@ Do not add a second index manager or per-posting MVCC timestamps.
 - Each Posting has its own reader/writer lock for offsets traversal and append/reallocation.
   Heap-allocated Postings keep stable addresses through Abseil node movement; the storage owns
   them and each reader retains the storage. Posting allocations use the existing charged allocator.
+  Keep InlinedVector and this lock: append-only values do not prevent vector reallocation from
+  invalidating a concurrent reader. A separate completed length alone would not make it safe.
 - Point queries take a Posting address under the tree read lock, then release that lock before
   emission. Range/prefix queries collect at most 256 addresses per lock interval, copy a resume
   key, and emit after unlocking. They retain no tree iterators or key references across unlocks;
@@ -81,20 +84,27 @@ Do not add a second index manager or per-posting MVCC timestamps.
 
 - Adapt the existing BitmapIndex `UnionKeyRange` rule: either set matching non-NULL offsets
   in an empty result, or start with the pinned validity bitmap and clear excluded offsets.
-  Single-bound and interval ranges choose the side with fewer visible offsets. Equality/IN
+  Single-bound and interval ranges estimate the cheaper side. Equality/IN
   and literal prefix retain their existing positive paths; NOT IN/inequality retain inversion.
 - Do not rebuild the sealed index's static `range_prefix` table on append. Query-local cursors
   enumerate the inside and the two outside ranges, advancing the side with the smaller count
-  accumulated so far. Once a complete side is no larger than the other's known lower bound,
-  selection is exact and counting stops. Counts use the pinned prefix, not latest row counts.
-- A Posting wholly below the reader's count uses its size; a partially visible Posting uses
-  binary search. Counting holds only that Posting's read lock. The chosen cursor(s) rewind
-  for emission using the same owned upper-key bound. Appended rows outside the prefix do not
-  affect counts or results, even when a new key appears between the two passes.
+  accumulated so far. Once a complete side's estimate is no larger than the other's accumulated
+  estimate, counting stops. Each Posting exposes a separate atomic count, updated after a
+  successful offsets append and read with relaxed ordering without taking the Posting lock.
+- Counts are cost hints: they may lag an append or include rows newer than the pinned prefix.
+  They never authorize access to offsets or determine result visibility. An inaccurate estimate
+  may choose a more expensive direction; both directions remain correct. The chosen cursor(s)
+  rewind for emission using the same owned upper-key bound. Emit retains its Posting read lock
+  and checks the pinned row boundary, including when new keys appear between the two passes.
+- Set and clear emission are separate compile-time specializations using the existing bitmap
+  `set`/`reset` operations. The selected direction is fixed outside the Posting loop; query
+  semantics, NULL handling, locks, and prefix checks are unchanged. Per-word grouping is deferred
+  until its benefit is measured for sparse as well as clustered offsets.
 - Memory stays bounded to three small cursor buffers; no per-key prefix statistics or bitmap
   cache is added. The query-local probing policy is an implementation choice to validate,
   not a claimed industry standard or measured speedup. Near-balanced ranges can count both
-  sides before emission; old snapshots may encounter many keys with zero visible offsets.
+  sides before emission; old snapshots may encounter many keys with no visible offsets even
+  though their latest count hints are nonzero.
 
 ## Publication and query bounds
 
@@ -147,16 +157,28 @@ allocation counts, not process RSS. Automatic whole-index eviction is outside th
 
 ## Draft verification and follow-up
 
-This draft's verification scope is C++ and Go compilation plus static source review. No runtime
-tests or performance POC are claimed. Before production enablement, validate reference-scan
-equivalence, concurrent append/read, older snapshots, NULL/logical composition, explicit offsets,
-recovery/schema reopen, allocation/publication failure, and lifetime/accounting behavior. Compare
-scan, B-tree, and ART with identical postings and workloads, including insert cost and SN RSS.
+The 2026-11-29 follow-up excludes primary keys at the shared initialization/reopen factory and
+specializes set/clear emission. Local source hash `4bf04e44e693` passed the full Release C++/Go
+build (GCC 12.3); runtime validation and performance measurements are pending. The results below
+apply to the earlier atomic-count revision, not this follow-up.
 
-The 2026-11-27 lock-splitting, hinted insertion, nullable-feed, cache-removal, and range-complement
-changes have not been compiled or executed in Milvus, per user instruction. Static ownership,
-lock-order, boundary, and failure-path review was performed. An independent Python model checked
-14,641 cost-selection cases and 51,285 integer/string range queries against direct evaluation,
-including NULLs, inclusive/exclusive bounds, and older prefixes. This is algorithm-model
-validation only; it does not validate the C++ implementation or concurrency. Earlier builds
-and emission microbenchmarks do not validate this revision's runtime behavior or performance.
+On 2026-11-28, the atomic-count revision passed a full Release C++/Go build and static E2E
+comparison against commit `938e3ae23ba87fb543a84bde42a230b938129757`. The new image used local
+source hash `ad5f07a8031a`. Both 1-CU instances served the same frozen 10,570,000-row dataset in
+one Growing segment, with no Sealed segments and expression cache disabled. IN and two range
+cases each ran three single-client measurement windows after warmup, with alternating version
+order. All queries returned the independent oracle's expected counts and used the scalar-index
+path. For the historically named 10% and 90% range cases, p50 decreased by 18.2% and 12.7%, and
+process CPU per query decreased by 16.8% and 12.9%; IN was essentially unchanged. These are
+workload-specific static measurements, not concurrent-write or general performance guarantees.
+
+Static ownership, lock-order, boundary, and failure-path review was performed. The earlier
+independent Python model checked 14,641 cost-selection cases and 51,285 integer/string range
+queries, including NULLs, inclusive/exclusive bounds, and older prefixes. An additional model
+checked 10,000 cases with inaccurate count hints: 693 changed execution direction, with no
+result mismatch. These are algorithm-model checks, not C++ concurrency or fault-injection tests.
+
+Before production enablement, validate full reference-scan equivalence, concurrent append/read,
+older snapshots, NULL/logical composition, explicit offsets, recovery/schema reopen,
+allocation/publication failure, and lifetime/accounting behavior. Compare scan, B-tree, and ART
+with identical postings and workloads, including insert cost and SN RSS.

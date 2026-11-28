@@ -158,6 +158,9 @@ struct MutableScalarStorage {
         }
         mutable std::shared_mutex mutex;
         Offsets offsets;
+        // Cost hint only: readers must not use it to access offsets or decide
+        // visibility. A relaxed load may observe a different append prefix.
+        std::atomic<size_t> estimated_count{0};
     };
     using PostingPtr = std::shared_ptr<Posting>;
     using Pair = std::pair<const ScalarKey<T>, PostingPtr>;
@@ -212,32 +215,28 @@ struct MutableScalarStorage {
     }
 
     size_t
-    VisibleCount(const Posting& posting, int64_t count) const {
-        std::shared_lock posting_lock(posting.mutex);
+    EstimatedCount(const Posting& posting) const {
         CheckHealthy();
-        const auto& offsets = posting.offsets;
-        if (offsets.empty() || offsets.front() >= count)
-            return 0;
-        if (offsets.back() < count)
-            return offsets.size();
-        return std::lower_bound(offsets.begin(), offsets.end(), count) -
-               offsets.begin();
+        return posting.estimated_count.load(std::memory_order_relaxed);
     }
 
     // Emit the pinned reader's prefix into a query-private result. Later
-    // appends cannot change existing offsets.
+    // appends cannot change existing offsets. Fix set/clear at compile time
+    // instead of carrying a runtime bool through each bitmap assignment.
+    template <bool Matched>
     void
-    Emit(const Posting& posting,
-         TargetBitmap& result,
-         int64_t count,
-         bool matched = true) const {
+    Emit(const Posting& posting, TargetBitmap& result, int64_t count) const {
         std::shared_lock posting_lock(posting.mutex);
         CheckHealthy();
         for (const auto offset : posting.offsets) {
             if (offset >= count) {
                 break;
             }
-            result[offset] = matched;
+            if constexpr (Matched) {
+                result.set(offset);
+            } else {
+                result.reset(offset);
+            }
         }
     }
 
@@ -310,7 +309,7 @@ class MutableScalarReader final
                     posting = it->second.get();
             }
             if (posting != nullptr)
-                storage_->Emit(*posting, result, count_);
+                storage_->template Emit<true>(*posting, result, count_);
         }
         storage_->CheckHealthy();
         return result;
@@ -507,11 +506,11 @@ class MutableScalarReader final
         bool done_;
     };
 
-    template <typename Cursor>
+    template <bool Matched, typename Cursor>
     void
-    EmitCursor(Cursor& cursor, TargetBitmap& result, bool matched) const {
+    EmitCursor(Cursor& cursor, TargetBitmap& result) const {
         while (const auto* posting = cursor.Next())
-            storage_->Emit(*posting, result, count_, matched);
+            storage_->template Emit<Matched>(*posting, result, count_);
     }
 
     // Prefix matching retains the positive path. Ordinary ranges can choose
@@ -523,16 +522,18 @@ class MutableScalarReader final
         PostingCursor<Seek, InRange> cursor(
             *storage_, std::move(seek), std::move(in_range), last_key);
         TargetBitmap result(count_, false);
-        EmitCursor(cursor, result, true);
+        EmitCursor<true>(cursor, result);
         storage_->CheckHealthy();
         return result;
     }
 
     // Adapt BitmapIndexReader::UnionKeyRange's clear-the-smaller-side rule.
-    // Abseil has no maintained row ranks: probe exact pinned-prefix posting
-    // counts on the side with the smaller accumulated count until one side
-    // finishes below the other's lower bound. This avoids a mutable prefix
-    // table, a full-key prepass for selective ranges, or query-sized buffers.
+    // Abseil has no maintained row ranks: probe atomic posting-count
+    // estimates on the side with the smaller accumulated count until one side
+    // finishes below the other's accumulated estimate. This avoids a mutable
+    // prefix table, a full-key prepass for selective ranges, or query-sized buffers.
+    // Estimates may include newer rows or lag an append; they choose only the
+    // execution direction. Emit still enforces the pinned prefix under lock.
     template <typename SeekLower,
               typename BeforeLower,
               typename SeekUpper,
@@ -573,13 +574,13 @@ class MutableScalarReader final
                  (inside_rows == outside_rows && prefer_inside))) {
                 prefer_inside = false;
                 if (const auto* posting = inside.Next())
-                    inside_rows += storage_->VisibleCount(*posting, count_);
+                    inside_rows += storage_->EstimatedCount(*posting);
                 else
                     inside_done = true;
             } else {
                 prefer_inside = true;
                 if (const auto* posting = next_outside())
-                    outside_rows += storage_->VisibleCount(*posting, count_);
+                    outside_rows += storage_->EstimatedCount(*posting);
                 else
                     outside_done = true;
             }
@@ -590,11 +591,11 @@ class MutableScalarReader final
         if (complement) {
             left.Reset();
             right.Reset();
-            EmitCursor(left, result, false);
-            EmitCursor(right, result, false);
+            EmitCursor<false>(left, result);
+            EmitCursor<false>(right, result);
         } else {
             inside.Reset();
-            EmitCursor(inside, result, true);
+            EmitCursor<true>(inside, result);
         }
         storage_->CheckHealthy();
         return result;
@@ -721,6 +722,8 @@ class MutableScalarGrowingIndex final : public IGrowingIndex,
                 std::unique_lock posting_lock(posting.mutex);
                 try {
                     posting.offsets.push_back(static_cast<uint32_t>(offset));
+                    posting.estimated_count.store(posting.offsets.size(),
+                                                  std::memory_order_relaxed);
                 } catch (...) {
                     storage_->RecordFailure();
                     throw;
