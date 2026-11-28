@@ -12,7 +12,6 @@ from pathlib import Path
 
 PACKAGES = {
     "folly": ["libfolly.so*"],
-    "milvus-common": ["libmilvus-common.so*"],
     "libevent": ["libevent_core*.so*", "libevent_pthreads*.so*"],
     "onetbb": ["libtbb.so*"],
     "geos": ["libgeos.so*", "libgeos_c.so*"],

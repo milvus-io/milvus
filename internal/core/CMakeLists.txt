@@ -178,7 +178,6 @@ find_package(unordered_dense REQUIRED)
 find_package(absl REQUIRED)
 find_package(bson-1.0 REQUIRED)
 find_package(simde REQUIRED)
-find_package(milvus-common REQUIRED)
 if (LINUX)
     find_package(OpenBLAS CONFIG REQUIRED)
 endif()
@@ -413,6 +412,13 @@ ADD_DEFINITIONS(-DBOOST_GEOMETRY_INDEX_DETAIL_EXPERIMENTAL)
 # otherwise cpp code coverage tool will miss src folder
 using_ccache_if_defined(MILVUS_USE_CCACHE)
 add_subdirectory( thirdparty )
+# Fail at configure time rather than silently no-op'ing if the source-built
+# milvus-common include dir was not set (it is defined by the FetchContent
+# wrapper in thirdparty/milvus-common).
+if(NOT MILVUS_COMMON_INCLUDE_DIR)
+    message(FATAL_ERROR "MILVUS_COMMON_INCLUDE_DIR is unset; thirdparty/milvus-common did not configure")
+endif()
+include_directories(SYSTEM ${MILVUS_COMMON_INCLUDE_DIR})
 # Vendored projects may set global launch rules while they configure. Their
 # targets already retain the compiler launcher configured above.
 clear_global_ccache_launchers()
@@ -487,11 +493,9 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/rescores/
 )
 
 # cgo consumers need milvus-common headers in the core output include path.
-foreach(MILVUS_COMMON_INCLUDE_DIR IN LISTS milvus-common_INCLUDE_DIRS)
-    install(DIRECTORY ${MILVUS_COMMON_INCLUDE_DIR}/
-            DESTINATION include
-    )
-endforeach()
+install(DIRECTORY ${MILVUS_COMMON_INCLUDE_DIR}/
+        DESTINATION include
+)
 
 # Install monitor
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/monitor/

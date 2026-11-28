@@ -25,8 +25,9 @@ include_directories(
 # Plan parser shared library
 set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
 set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
-# Prefer the linked Conan package over headers left by an earlier installation.
-include_directories(BEFORE SYSTEM ${milvus-common_INCLUDE_DIRS})
+# Prefer the source-built milvus-common headers over any leftovers from an
+# earlier installation.
+include_directories(BEFORE SYSTEM ${MILVUS_COMMON_INCLUDE_DIR})
 include_directories(${PLANPARSER_INCLUDE_DIR})
 link_directories(${PLANPARSER_LIB_DIR})
 
@@ -248,14 +249,6 @@ find_library(INDEX_TEST_FOLLY_LIBRARY
         NO_DEFAULT_PATH
         NO_CACHE
         REQUIRED)
-set(INDEX_TEST_MILVUS_COMMON_DIRS
-        "${milvus-common_LIB_DIRS_${INDEX_TEST_BUILD_TYPE}}")
-find_library(INDEX_TEST_MILVUS_COMMON_LIBRARY
-        NAMES milvus-common
-        PATHS ${INDEX_TEST_MILVUS_COMMON_DIRS}
-        NO_DEFAULT_PATH
-        NO_CACHE
-        REQUIRED)
 set(INDEX_TEST_FMT_DIRS "${fmt_fmt_fmt_LIB_DIRS_${INDEX_TEST_BUILD_TYPE}}")
 find_library(INDEX_TEST_FMT_LIBRARY
         NAMES fmt
@@ -272,7 +265,7 @@ target_link_libraries(
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        "$<TARGET_FILE:milvus-common>"
         gRPC::grpc++
         Boost::filesystem
         glog::glog
@@ -297,7 +290,7 @@ target_link_libraries(index_runtime_acceptance_test
         "$<TARGET_FILE:milvus_core>"
         "$<TARGET_FILE:milvus-storage>"
         "$<TARGET_FILE:knowhere>"
-        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        "$<TARGET_FILE:milvus-common>"
         gRPC::grpc++
         Boost::filesystem
         glog::glog
