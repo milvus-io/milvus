@@ -242,9 +242,7 @@ func (si *Inspector) triggerTextStatsTask() {
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
-			// TODO @longjiquan: please replace it to fieldSchemaHelper.EnableMath
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if !h.EnableMatch() {
+			if !typeutil.IsTextMatchEnabled(field) {
 				continue
 			}
 			needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
@@ -306,8 +304,7 @@ func (si *Inspector) triggerJSONKeyIndexStatsTask() {
 		}
 		needTriggerFieldIDs := make([]UniqueID, 0)
 		for _, field := range collection.Schema.GetFields() {
-			h := typeutil.CreateFieldSchemaHelper(field)
-			if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+			if typeutil.IsJSONType(field.GetDataType()) && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 				needTriggerFieldIDs = append(needTriggerFieldIDs, field.GetFieldID())
 			}
 		}
@@ -522,12 +519,10 @@ func statsTaskFieldIDs(schema *schemapb.CollectionSchema, subJobType indexpb.Sta
 	switch subJobType {
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		predicate = func(field *schemapb.FieldSchema) bool {
-			return typeutil.CreateFieldSchemaHelper(field).EnableJSONKeyStatsIndex()
+			return typeutil.IsJSONType(field.GetDataType())
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
-		predicate = func(field *schemapb.FieldSchema) bool {
-			return typeutil.CreateFieldSchemaHelper(field).EnableMatch()
-		}
+		predicate = typeutil.IsTextMatchEnabled
 	default:
 		return nil
 	}

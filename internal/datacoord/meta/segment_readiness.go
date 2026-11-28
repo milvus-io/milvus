@@ -90,11 +90,10 @@ func (m *Meta) PrepareReadiness(collection *CollectionInfo) *segmentReadiness {
 		if typeutil.IsVectorType(field.GetDataType()) {
 			vectorFieldIDs = append(vectorFieldIDs, field.GetFieldID())
 		}
-		h := typeutil.CreateFieldSchemaHelper(field)
-		if h.EnableMatch() {
+		if typeutil.IsTextMatchEnabled(field) {
 			r.textStatsFieldIDs = append(r.textStatsFieldIDs, field.GetFieldID())
 		}
-		if h.EnableJSONKeyStatsIndex() && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
+		if typeutil.IsJSONType(field.GetDataType()) && Params.CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 			r.jsonKeyStatsFieldIDs = append(r.jsonKeyStatsFieldIDs, field.GetFieldID())
 		}
 	}
