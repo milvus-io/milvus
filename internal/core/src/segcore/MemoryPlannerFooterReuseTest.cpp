@@ -14,8 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include <atomic>
+#include <chrono>
 #include <future>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -284,6 +286,12 @@ TEST_F(MemoryPlannerFooterReuseTest, StrategyReusesMetadataProbeAcrossCalls) {
     EXPECT_EQ(fs_->counts->footer_reads, footer_reads_);
     EXPECT_EQ(fs_->counts->handles, 0);
     files.clear();
+    // A ready future does not imply that the executor released its task captures.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!owner.expired() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     EXPECT_TRUE(owner.expired());
 }
 
