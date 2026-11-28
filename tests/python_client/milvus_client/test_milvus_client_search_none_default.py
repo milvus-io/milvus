@@ -683,7 +683,6 @@ class TestSearchNoneDefaultIndependent(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #37547")
     @pytest.mark.parametrize("is_flush", [False, True])
     def test_search_none_data_expr_cache(self, is_flush):
         """
@@ -766,8 +765,7 @@ class TestSearchNoneDefaultIndependent(TestMilvusClientV2Base):
             check_task=CheckTasks.err_res,
             check_items={
                 "err_code": 1100,
-                "err_msg": "failed to create query plan: cannot parse expression: float == 0, "
-                "error: comparisons between VarChar and Int64 are not supported: "
-                "invalid parameter",
+                "err_msg": "cannot parse expression: float == 0: "
+                "comparisons between VarChar and Int64 are not supported",
             },
         )
