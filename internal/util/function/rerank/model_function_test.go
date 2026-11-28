@@ -136,6 +136,16 @@ func (s *RerankModelSuite) TestNewProvider() {
 	}
 	{
 		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: sglangProviderName},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.ModelNameParamKey, Value: "BAAI/bge-reranker-v2-m3"},
+		}
+		provider, err := NewModelProvider(params, &models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"})
+		s.NoError(err)
+		s.IsType(&sglangProvider{}, provider)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "tei"},
 			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: models.TruncateParamKey, Value: "unknow"},

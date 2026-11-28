@@ -17,11 +17,14 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFunctionConfig(t *testing.T) {
@@ -90,6 +93,9 @@ func TestFunctionConfig(t *testing.T) {
 		"huggingface.credential",
 		"huggingface.url",
 		"huggingface.enable",
+		"sglang.credential",
+		"sglang.url",
+		"sglang.enable",
 	}
 	for _, key := range keys {
 		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")
@@ -104,6 +110,33 @@ func TestFunctionConfig(t *testing.T) {
 	assert.Equal(t, 1, cfg.GetAnalyzerRunnerConcurrency())
 
 	assert.Equal(t, 30*time.Second, cfg.ModelRequestTimeout.GetAsDurationByParse())
+}
+
+func TestFunctionConfigSGLangProvider(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	filename := filepath.Join(dir, "milvus.yaml")
+	content := `function:
+  rerank:
+    model:
+      providers:
+        sglang:
+          credential: sglang
+          enable: true
+          url: http://sglang:30000
+`
+	require.NoError(t, os.WriteFile(filename, []byte(content), 0o600))
+
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipRemote(true), SkipEnv(true), Interval(0))
+	t.Cleanup(base.Manager().Close)
+	params := ComponentParam{}
+	params.Init(base)
+
+	assert.Equal(t, map[string]string{
+		"credential": "sglang",
+		"enable":     "true",
+		"url":        "http://sglang:30000",
+	}, params.FunctionCfg.GetRerankModelProviders("sglang"))
 }
 
 func TestFunctionConfigPyUDF(t *testing.T) {
