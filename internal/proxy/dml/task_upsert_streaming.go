@@ -188,10 +188,7 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 			return err
 		}
 	}
-	appendErr := resp.UnwrapFirstError()
-	if ut.req.GetPartialUpdate() {
-		appendErr = unwrapPartialUpdateAppendError(resp)
-	}
+	appendErr := unwrapStreamingMutationError(resp, messages)
 	if appendErr != nil {
 		logger.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
 		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
@@ -202,24 +199,6 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 	// Update result.Timestamp for session consistency.
 	ut.result.Timestamp = resp.MaxTimeTick()
 	return nil
-}
-
-// unwrapPartialUpdateAppendError returns a CAS retry signal only when no
-// vchannel reported a failure with an unknown or non-CAS outcome.
-func unwrapPartialUpdateAppendError(resp streaming.AppendResponses) error {
-	var casErr error
-	for _, response := range resp.Responses {
-		if response.Error == nil {
-			continue
-		}
-		if !isPartialUpdateCASRetry(response.Error) {
-			return response.Error
-		}
-		if casErr == nil {
-			casErr = response.Error
-		}
-	}
-	return casErr
 }
 
 func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {

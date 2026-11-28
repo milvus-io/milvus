@@ -81,7 +81,7 @@ func TestPartialUpdateRecoveryCleanupPreservesOriginalLease(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(tsoutil.AddPhysicalDurationOnTs(lastBodyTS, 100*time.Millisecond))
 	require.Nil(t, env.partial.state.getTxn(1), "snapshot recovery must not renew the old lease")
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	requireTransactionExpired(t, err)
+	requirePartialUpdateCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED)
 }
 
 func TestPartialUpdateRecoveryUnsupportedBodyOnlyRejectsItsTransaction(t *testing.T) {
@@ -128,7 +128,7 @@ func TestPartialUpdateRecoveryPayloadUsesBoundedWALOpenContext(t *testing.T) {
 	builders := map[message.TxnID]*message.ImmutableTxnMessageBuilder{1: builder}
 	manager := txn.NewTxnManager(types.PChannelInfo{Name: "p1", Term: 1}, builders)
 	t.Cleanup(func() {
-		manager.FailTxnAtVChannel("")
+		manager.FailTxnAtVChannel("", 1)
 		require.NoError(t, manager.GracefulClose(context.Background()))
 	})
 	txnBuffer := utility.NewTxnBuffer(nil, nil)
@@ -144,7 +144,7 @@ func TestPartialUpdateRecoveryPayloadUsesBoundedWALOpenContext(t *testing.T) {
 	requireTransactionExpired(t, err)
 	_, durableBodies := builder.Messages()
 	require.Len(t, durableBodies, 1, "an optional PK decode failure must retain durable body data")
-	manager.FailTxnAtVChannel("v1")
+	manager.FailTxnAtVChannel("v1", 1)
 	require.Nil(t, i.state.getTxn(1), "a failed recovery still needs its session cleanup callback")
 }
 

@@ -71,7 +71,7 @@ func TestLocalFlushDoesNotBlockOtherVChannels(t *testing.T) {
 				return err
 			}
 			flush := message.NewManualFlushMessageBuilderV2().WithVChannel("target_v1").WithUnreplicable().
-				WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable()
+				WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(2)
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			flushDone := make(chan error, 1)
@@ -170,7 +170,7 @@ func TestLocalFlushReleasesRecoveredSessionBeforeReplay(t *testing.T) {
 	require.True(t, status.AsStreamingError(err).IsIgnoredOperation())
 	require.Zero(t, cleaned)
 	require.Equal(t, message.TxnStateInFlight, session.State())
-	flush := message.NewManualFlushMessageBuilderV2().WithVChannel("target_v1").WithUnreplicable().WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable()
+	flush := message.NewManualFlushMessageBuilderV2().WithVChannel("target_v1").WithUnreplicable().WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(2)
 	_, err = appendMessage(ctx, flush, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		require.Zero(t, cleaned, "references stay held until the abort record is durable")
 		return nil, context.Canceled
@@ -200,7 +200,7 @@ func TestLocalFlushReleasesRecoveredSessionBeforeReplay(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, cleaned)
-	manager.FailTxnAtVChannel("")
+	manager.FailTxnAtVChannel("", 1)
 	require.Equal(t, 2, cleaned)
 	require.NoError(t, manager.GracefulClose(ctx))
 }

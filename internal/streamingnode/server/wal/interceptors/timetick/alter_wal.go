@@ -50,7 +50,7 @@ func (impl *timeTickAppendInterceptor) appendAlterWAL(ctx context.Context, msg m
 	if err != nil {
 		panic(err)
 	} // the wrapper wrote this property under this lock
-	impl.txnManager.FailTxnAtVChannel("")
+	impl.txnManager.FailTxnAtVChannel("", msg.TimeTick())
 	op.interceptorBuildParam.WriteAheadBuffer.Append(batch, immutable)
 	op.ackDetails.Clear()
 	manager.CompleteWALSwitch(boundary, start)
