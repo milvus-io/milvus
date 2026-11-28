@@ -273,6 +273,17 @@ Manifest is not complete until its associated historical deltas are applied.
 External formats follow their storage-specific contracts; milvus-table source
 deletes and real-PK filtering remain part of preparation when applicable.
 
+With `queryNode.segcore.tieredStorage.lazyBloomFilterEnabled` (default
+`false`), ordinary sealed segments register a PK candidate during preparation
+and read its optional Bloom filter stats on the first PK check. This check can
+occur during delete catch-up. A failed read leaves deletes unfiltered. Later PK
+checks can retry after an exponential per-segment backoff from 1 to 30 seconds.
+The candidate reserves loading memory when tiered eviction is enabled and
+accounts for loaded stats. Release
+cancels the candidate and prevents an in-flight read from publishing stats.
+The legacy delegator loads sealed stats before admitting a segment, keeping
+storage reads outside its delete lock.
+
 Readiness is capability-based: ordinary missing nullable/default columns can
 use supported projections; BM25/MinHash outputs require their actual derived
 values and required statistics/indexes. A schema number is not proof of either.

@@ -765,6 +765,7 @@ queryNode:
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
       lazyIndexSlotEnabled: false # When enabled, sealed scalar, vector, and text index translators and cache slots with warmup=disable are created on first access instead of segment load.
       lazyColumnGroupEnabled: false # When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.
+      lazyBloomFilterEnabled: false # Defer ordinary sealed segment Bloom filter loading in QueryView until the first primary-key check.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     chainPoolSizeFactor: 1 # size factor (CPUNum * factor) of the native function-chain pool; isolated from ordinary query field retrieval; values below 1 use 1
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes

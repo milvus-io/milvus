@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -1030,6 +1031,11 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 }
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
+	params := paramtable.Get()
+	lazyConfig := &params.QueryNodeCfg.TieredLazyBloomFilterEnabled
+	suite.Require().NoError(params.Save(lazyConfig.Key, "true"))
+	defer params.Reset(lazyConfig.Key)
+
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
@@ -1062,11 +1068,108 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	suite.NoError(err)
 
 	for _, bf := range bfs {
+		suite.Positive(bf.MemSize(), "legacy loader still reads stats during preparation")
 		for pk := 0; pk < 100; pk++ {
 			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
 			exist := bf.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
+	}
+}
+
+func TestLoadSealedBloomFilterOnDemand(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, initcore.InitTieredStorage(params))
+	lazyConfig := &params.QueryNodeCfg.TieredLazyBloomFilterEnabled
+	require.False(t, lazyConfig.GetAsBool())
+	require.NoError(t, params.Save(lazyConfig.Key, "true"))
+	t.Cleanup(func() { params.Reset(lazyConfig.Key) })
+
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager()
+	loader := &segmentLoader{cm: cm}
+	schema := mock_segcore.GenTestCollectionSchema("sealed-stats", schemapb.DataType_Int64, false)
+	pkFieldID := GetPkField(schema).GetFieldID()
+	pk := storage.NewInt64PrimaryKey(42)
+	stat, err := storage.NewPrimaryKeyStats(pkFieldID, int64(schemapb.DataType_Int64), 1)
+	require.NoError(t, err)
+	stat.Update(pk)
+	writer := &storage.StatsWriter{}
+	require.NoError(t, writer.Generate(stat))
+
+	path := filepath.Join(t.TempDir(), "100")
+	info := &querypb.SegmentLoadInfo{
+		SegmentID:   1,
+		PartitionID: 2,
+		Statslogs: []*datapb.FieldBinlog{{
+			FieldID: pkFieldID,
+			Binlogs: []*datapb.Binlog{{LogPath: path}},
+		}},
+	}
+	bfs, err := loader.LoadBloomFilterSetWithSchema(ctx, schema, info)
+	require.NoError(t, err)
+	require.Len(t, bfs, 1)
+	t.Cleanup(bfs[0].Refund)
+	require.Zero(t, bfs[0].MemSize())
+
+	// No stats file exists during preparation. The first check reads the
+	// stats file created after preparation returns.
+	require.NoError(t, cm.Write(ctx, path, writer.GetBuffer()))
+	require.True(t, bfs[0].PkCandidateExist())
+	require.True(t, bfs[0].IsResourceCharged())
+	require.Equal(t, []bool{true, false}, bfs[0].BatchPkExist(storage.NewBatchLocationsCache(
+		[]storage.PrimaryKey{pk, storage.NewInt64PrimaryKey(43)})))
+}
+
+func TestLoadSealedBloomFilterWithUnreadableStats(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	lazyConfig := &params.QueryNodeCfg.TieredLazyBloomFilterEnabled
+	require.NoError(t, params.Save(lazyConfig.Key, "true"))
+	t.Cleanup(func() { params.Reset(lazyConfig.Key) })
+
+	ctx := context.Background()
+	cm := storage.NewLocalChunkManager()
+	loader := &segmentLoader{cm: cm}
+	schema := mock_segcore.GenTestCollectionSchema("sealed-stats", schemapb.DataType_Int64, false)
+	pkFieldID := GetPkField(schema).GetFieldID()
+	for _, tc := range []struct {
+		name         string
+		manifestPath string
+		payload      []byte
+	}{
+		{name: "invalid manifest", manifestPath: "invalid-manifest-path"},
+		{name: "missing file"},
+		{name: "empty file", payload: []byte{}},
+		{name: "incomplete JSON", payload: []byte(`{"fieldID":1}`)},
+		{name: "missing field ID", payload: []byte(`{}`)},
+		{name: "missing bloom filter", payload: []byte(`{"fieldID":1,"min":42,"max":42}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "100")
+			if tc.payload != nil {
+				require.NoError(t, cm.Write(ctx, path, tc.payload))
+			}
+			bfs, err := loader.LoadBloomFilterSetWithSchema(ctx, schema, &querypb.SegmentLoadInfo{
+				SegmentID:    1,
+				PartitionID:  2,
+				ManifestPath: tc.manifestPath,
+				Statslogs: []*datapb.FieldBinlog{{
+					FieldID: pkFieldID,
+					Binlogs: []*datapb.Binlog{{LogPath: path}},
+				}},
+			})
+			require.NoError(t, err)
+			require.Len(t, bfs, 1)
+			t.Cleanup(bfs[0].Refund)
+
+			require.False(t, bfs[0].PkCandidateExist())
+			require.Equal(t, []bool{true}, bfs[0].BatchPkExist(storage.NewBatchLocationsCache(
+				[]storage.PrimaryKey{storage.NewInt64PrimaryKey(42)})))
+			require.Zero(t, bfs[0].MemSize())
+			require.False(t, bfs[0].IsResourceCharged())
+		})
 	}
 }
 
@@ -1859,6 +1962,11 @@ func (suite *SegmentLoaderSuite) makeExternalRealPKBFLoadInfo(ctx context.Contex
 }
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExternalStats() {
+	params := paramtable.Get()
+	lazyConfig := &params.QueryNodeCfg.TieredLazyBloomFilterEnabled
+	suite.Require().NoError(params.Save(lazyConfig.Key, "true"))
+	defer params.Reset(lazyConfig.Key)
+
 	ctx := context.Background()
 	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
 
@@ -1875,7 +1983,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExterna
 		}).Build()
 	defer patchRead.UnPatch()
 
-	bfs, err := suite.loader.LoadBloomFilterSet(ctx, suite.collectionID, loadInfo)
+	bfs, err := suite.loader.LoadBloomFilterSetWithSchema(ctx, suite.schema, loadInfo)
 
 	suite.NoError(err)
 	suite.Len(bfs, 1)
