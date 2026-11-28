@@ -44,14 +44,12 @@ import (
 )
 
 func TestKeyPropagationAnalyzeAndClustering(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, stage := range []string{"analyze", "clustering"} {
 		t.Run(stage, func(t *testing.T) { suite.Run(t, &propagationAnalyzeSuite{faultStage: stage}) })
 	}
 }
 
 func TestKeyPropagationCompaction(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
 		for _, kind := range []datapb.CompactionType{datapb.CompactionType_SortCompaction, datapb.CompactionType_MixCompaction} {
 			for _, fault := range []bool{false, true} {
@@ -64,7 +62,6 @@ func TestKeyPropagationCompaction(t *testing.T) {
 }
 
 func TestKeyPropagationFlush(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
 		for _, fault := range []bool{false, true} {
 			t.Run(fmt.Sprintf("v%d/key_unavailable=%t", version, fault), func(t *testing.T) {
@@ -75,7 +72,6 @@ func TestKeyPropagationFlush(t *testing.T) {
 }
 
 func TestKeyPropagationImport(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, protocol := range []int{2, 3} {
 		for _, source := range []bool{false, true} {
 			for _, target := range []bool{false, true} {
@@ -97,9 +93,8 @@ func TestKeyPropagationImport(t *testing.T) {
 }
 
 func TestKeyPropagationIndex(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, version := range []int64{2, 3} {
-		for _, kind := range []string{"vector", "scalar", "default"} {
+		for _, kind := range []string{"scalar", "default"} {
 			if version == 2 && kind == "default" {
 				continue // The explicit default-value adapter case uses V3.
 			}
@@ -113,7 +108,6 @@ func TestKeyPropagationIndex(t *testing.T) {
 }
 
 func TestKeyPropagationSchema(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, rewrite := range []bool{false, true} {
 		stages := []string{"none", "schema"}
 		if !rewrite {
@@ -126,7 +120,6 @@ func TestKeyPropagationSchema(t *testing.T) {
 }
 
 func TestKeyPropagationJSONStats(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	for _, fault := range []bool{false, true} {
 		t.Run(fmt.Sprintf("key_unavailable=%t", fault), func(t *testing.T) { suite.Run(t, &propagationJSONSuite{fault: fault}) })
 	}
@@ -354,19 +347,42 @@ func (s *rawDataSuite) inspectPropagationRaw(ctx context.Context, segments []*da
 
 func (s *rawDataSuite) reloadPropagation(ctx context.Context, description *milvuspb.DescribeCollectionResponse, segments []*datapb.SegmentInfo) {
 	collection := description.GetCollectionName()
+	collectionID := description.GetCollectionID()
+	isParquet := segments[0].GetStorageVersion() == 3
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, "float_vector")
 	status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
-	s.CheckCollectionCacheReleased(description.GetCollectionID())
+	if isParquet {
+		s.assertParquetReleased(ctx, collectionID)
+	} else {
+		s.CheckCollectionCacheReleased(collectionID)
+	}
 	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoadWithDB(ctx, s.dbName, collection)
-	s.assertRawLoadedSegments(ctx, description.GetCollectionID(), segments)
-	if segments[0].GetStorageVersion() == 3 {
-		expected := s.manifestIdentity(segments)
-		s.Require().Eventually(func() bool {
-			return s.parquetReadSnapshot(ctx, description.GetCollectionID()).matches(expected, s.manifestIdentity(s.currentParquetSegments(ctx, description.GetCollectionID())))
-		}, time.Minute, 200*time.Millisecond)
+	if !isParquet {
+		s.assertRawLoadedSegments(ctx, collectionID, segments)
+		return
+	}
+
+	expected := s.manifestIdentity(segments)
+	// Compaction publishes the output before the QueryView switches from
+	// the input segments. Wait for both serving placement and physical data.
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		current := s.manifestIdentity(s.currentParquetSegments(ctx, collectionID))
+		snapshot := s.parquetReadSnapshot(ctx, collectionID)
+		if snapshot.matches(expected, current) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.T().Fatalf("loaded data differs from inspected output: expected=%v current=%v actual=%+v: %v", expected, current, snapshot, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
