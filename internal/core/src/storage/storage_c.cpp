@@ -356,6 +356,10 @@ InitPluginLoader(const char* plugin_path) {
 CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context) {
     try {
+        if (!c_plugin_context.key || !*c_plugin_context.key) {
+            return milvus::FailureCStatus(milvus::InvalidParameter,
+                                          "missing plugin context key");
+        }
         auto cipherPluginPtr =
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         if (!cipherPluginPtr) {

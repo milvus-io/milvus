@@ -53,9 +53,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// An immutable job/task source mismatch cannot be repaired by rescheduling.
-var errSnapshotTaskSource = errors.New("invalid snapshot task source")
-
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
 		mlog.FieldTaskID(task.GetTaskID()),
@@ -101,6 +98,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 			JobID:        job.GetJobID(),
 			TaskID:       idStart + int64(i),
 			CollectionID: job.GetCollectionID(),
+			NodeID:       meta.NullNodeID,
 			State:        datapb.ImportTaskStateV2_Pending,
 			FileStats:    fileStats,
 			CreatedTime:  time.Now().Format(time.RFC3339),
@@ -427,7 +425,6 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		Options:          job.GetOptions(),
 		TaskSlot:         task.GetTaskSlot(),
 		StorageConfig:    meta.CreateStorageConfig(),
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
 		SnapshotL0Source: l0Source,
 	}
 	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
@@ -442,8 +439,33 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	})
 	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
 	if err != nil {
-		return nil, merr.Mark(err, errSnapshotTaskSource)
+		return nil, err
 	}
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	storageVersion := importStorageVersion(isL0Import)
+	useLoonFFI := importUseLoonFFI(isL0Import)
+
+	// Resolve source and target encryption contexts before allocating timestamps
+	// or ID ranges so dispatch retries do not consume allocator resources.
+	req := &datapb.ImportRequest{
+		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		Files:            importFiles,
+		Options:          job.GetOptions(),
+		StorageConfig:    meta.CreateStorageConfig(),
+		StorageVersion:   storageVersion,
+		UseLoonFfi:       useLoonFFI,
+		SnapshotL0Source: l0Source,
+	}
+	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
+
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*Task).GetSegmentIDs() {
 		segment := mt.GetSegment(context.TODO(), segmentID)
@@ -462,7 +484,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	if ts == 0 {
 		ts, err = alloc.AllocTimestamp(ctx)
 		if err != nil {
-			return nil, err
+			if !merr.IsRetryableErr(err) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, merr.ErrParameterInvalid) {
+				return nil, merr.WrapErrServiceUnavailableErr(err, "allocate import timestamp")
+			}
+			return nil, merr.Wrap(err, "allocate import timestamp")
 		}
 	}
 
@@ -478,6 +504,12 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
 		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
+		if !errors.Is(err, importid.ErrIDRangeTooSmall) &&
+			!errors.Is(err, merr.ErrParameterInvalid) &&
+			!merr.IsRetryableErr(err) &&
+			!errors.Is(err, context.Canceled) {
+			return nil, merr.WrapErrServiceUnavailableErr(err, "reserve import log IDs")
+		}
 		return nil, err
 	}
 
@@ -488,33 +520,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		mlog.Uint64("ts", ts))...,
 	)
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	storageVersion := importStorageVersion(isL0Import)
-	useLoonFFI := importUseLoonFFI(isL0Import)
-
-	req := &datapb.ImportRequest{
-		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:            task.GetJobID(),
-		TaskID:           task.GetTaskID(),
-		CollectionID:     task.GetCollectionID(),
-		PartitionIDs:     importTaskPartitionIDs(task, job),
-		Vchannels:        job.GetVchannels(),
-		Schema:           job.GetSchema(),
-		Files:            importFiles,
-		Options:          job.GetOptions(),
-		Ts:               ts,
-		IDRange:          idRange,
-		RequestSegments:  requestSegments,
-		StorageConfig:    meta.CreateStorageConfig(),
-		TaskSlot:         task.GetTaskSlot(),
-		StorageVersion:   storageVersion,
-		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:       useLoonFFI,
-		SnapshotL0Source: l0Source,
-	}
-	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		return nil, err
-	}
+	req.Ts = ts
+	req.IDRange = idRange
+	req.RequestSegments = requestSegments
+	req.TaskSlot = task.GetTaskSlot()
 	return req, nil
 }
 

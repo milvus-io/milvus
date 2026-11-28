@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -158,9 +159,16 @@ func (p *PreImportTask) setFileStats(fileStats []*datapb.ImportFileStats) {
 func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
-		// Request assembly validates source inventory and required writer context.
+		mlog.Warn(context.TODO(), "assemble preimport request failed", WrapTaskLog(p, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
+			return
+		}
 		if updateErr := p.ImportMeta.UpdateJob(context.TODO(), p.GetJobID(),
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)

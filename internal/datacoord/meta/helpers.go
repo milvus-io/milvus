@@ -275,46 +275,58 @@ type ChanPartSegments struct {
 	Segments     []*SegmentInfo
 }
 
-// Return None nil slice
-func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair {
-	importEzk, _ := importutilv2.GetEZK(options)
-	return hookutil.GetReadStoragePluginContext(importEzk)
+func WrapImportPluginContext(collectionID int64, properties, options []*commonpb.KeyValuePair, msg proto.Message) error {
+	artifact, err := importutilv2.GetEZK(options)
+	if err != nil {
+		return err
+	}
+	pluginContext, err := hookutil.GetImportStoragePluginContext(artifact, properties, collectionID)
+	if err != nil {
+		return err
+	}
+	if len(pluginContext) == 0 {
+		return nil
+	}
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	case *datapb.PreImportRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	case *datapb.ReshardTaskRequest:
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
+	}
+	return nil
 }
 
 func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	switch msg := msg.(type) {
+	case *datapb.ImportRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetOptions(), msg)
+	case *datapb.PreImportRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetOptions(), msg)
+	case *datapb.ReshardTaskRequest:
+		return WrapImportPluginContext(collectionID, properties, msg.GetPlan().GetOptions(), msg)
+	}
+
 	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
 	if err != nil {
 		return err
 	}
-	if pluginContext == nil {
+	if len(pluginContext) == 0 {
 		return nil
 	}
 
 	switch msg := msg.(type) {
 	case *datapb.CompactionPlan:
-		plan := msg
-		plan.PluginContext = append(plan.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateJobRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.AnalyzeRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *workerpb.CreateStatsRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.PreImportRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
-	case *datapb.ReshardTaskRequest:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	case *datapb.ImportTaskV3Request:
-		job := msg
-		job.PluginContext = append(job.PluginContext, pluginContext...)
+		msg.PluginContext = append(msg.PluginContext, pluginContext...)
 	default:
 		return nil
 	}

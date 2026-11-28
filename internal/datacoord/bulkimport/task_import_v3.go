@@ -165,6 +165,23 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		t.Fail(err.Error())
 		return
 	}
+	// Resolve target encryption context before dropping superseded segments or
+	// creating the new segment record so dispatch retries never mutate segment
+	// metadata.
+	req := &datapb.ImportTaskV3Request{
+		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
+		LogRange: p.GetLogRange(), Slot: slot,
+		StorageConfig: meta.CreateStorageConfig(),
+		Plan:          plan,
+	}
+	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			return
+		}
+		t.Fail(err.Error())
+		return
+	}
 	// Drop the segments a superseded run used to own but this run no longer
 	// references. The list is cleared in the same write that binds this run, so a
 	// transient drop failure is retried on the next tick with the list still in
@@ -189,17 +206,6 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 				WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
-	}
-	req := &datapb.ImportTaskV3Request{
-		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(), SegmentId: p.GetSegmentId(),
-		LogRange: p.GetLogRange(), Slot: slot,
-		StorageConfig: meta.CreateStorageConfig(),
-		PluginContext: meta.GetReadPluginContext(job.GetOptions()),
-		Plan:          plan,
-	}
-	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
-		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
 	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.

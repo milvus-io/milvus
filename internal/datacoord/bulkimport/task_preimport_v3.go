@@ -180,13 +180,17 @@ func (p *preImportV3Task) setV3FileStats(fileStats []*datapb.ImportV3FileStats) 
 func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 	mlog.Info(context.TODO(), "processing pending preimport v3 task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
+	if job == nil || job.GetState() == internalpb.ImportJobState_Failed || job.GetState() == internalpb.ImportJobState_Completed {
+		return
+	}
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
-		// Request assembly validates source inventory and required writer context.
-		if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
-			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
-			mlog.Warn(context.TODO(), "failed to mark preimport v3 job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
+		mlog.Warn(context.TODO(), "assemble preimport v3 request failed", WrapTaskLog(p, mlog.Err(err))...)
+		if merr.IsRetryableErr(err) || merr.IsCanceledOrTimeout(err) {
+			p.retryTimes++
+			return
 		}
+		p.Fail(err.Error())
 		return
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)

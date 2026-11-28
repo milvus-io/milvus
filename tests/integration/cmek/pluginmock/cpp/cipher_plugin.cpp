@@ -290,22 +290,7 @@ class FixtureCipherPlugin final : public ICipherPlugin {
             record(ez_id, coll_id, "release");
             return;
         }
-        auto expected_key = base64Encode(deriveEZKey(ez_id));
-        if (!constantTimeEqual(root_key, expected_key)) {
-            throw std::runtime_error(
-                "fixture cipher received an unexpected EZ key for EZ " +
-                std::to_string(ez_id));
-        }
-        std::string key(3 * (root_key.size() / 4), '\0');
-        auto size = EVP_DecodeBlock(
-            reinterpret_cast<unsigned char*>(key.data()),
-            reinterpret_cast<const unsigned char*>(root_key.data()),
-            root_key.size());
-        if (size < 0) {
-            throw std::runtime_error("fixture cipher EZ key is not base64");
-        }
-        // The validated fixture EZK is exactly SHA256Size bytes.
-        key.resize(kSHA256Size);
+        auto key = checkedEZKey(ez_id, root_key);
         std::lock_guard<std::mutex> lock(context_mutex_);
         contexts_[{ez_id, coll_id}] = std::move(key);
         record(ez_id, coll_id, "register");
@@ -313,7 +298,54 @@ class FixtureCipherPlugin final : public ICipherPlugin {
 
     std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
-        auto ezk = registeredKey(ez_id, coll_id, false);
+        return makeEncryptor(
+            registeredKey(ez_id, coll_id, false), ez_id, coll_id);
+    }
+
+    std::pair<std::shared_ptr<IEncryptor>, std::string>
+    GetEncryptorForKeyset(int64_t ez_id,
+                          int64_t coll_id,
+                          const std::string& key) override {
+        auto result = makeEncryptor(checkedEZKey(ez_id, key), ez_id, coll_id);
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        record(ez_id, coll_id, "write_keyset");
+        return result;
+    }
+
+    std::shared_ptr<IDecryptor>
+    GetDecryptor(int64_t ez_id,
+                 int64_t coll_id,
+                 const std::string& safe_key) const override {
+        return makeDecryptor(
+            registeredKey(ez_id, coll_id, true), ez_id, coll_id, safe_key);
+    }
+
+    std::shared_ptr<IDecryptor>
+    GetDecryptorForKeyset(int64_t ez_id,
+                          int64_t coll_id,
+                          const std::string& key,
+                          const std::string& safe_key) const override {
+        auto decryptor =
+            makeDecryptor(checkedEZKey(ez_id, key), ez_id, coll_id, safe_key);
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        record(ez_id, coll_id, "read_keyset");
+        return decryptor;
+    }
+
+ private:
+    static std::string
+    checkedEZKey(int64_t ez_id, const std::string& key) {
+        auto raw = deriveEZKey(ez_id);
+        if (!constantTimeEqual(key, base64Encode(raw))) {
+            throw std::runtime_error(
+                "fixture cipher received an unexpected EZ key for EZ " +
+                std::to_string(ez_id));
+        }
+        return raw;
+    }
+
+    static std::pair<std::shared_ptr<IEncryptor>, std::string>
+    makeEncryptor(const std::string& ezk, int64_t ez_id, int64_t coll_id) {
         auto nonce = newNonce();
         auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         auto tag = deriveEDEKTag(ezk, nonce, ez_id, coll_id);
@@ -323,11 +355,11 @@ class FixtureCipherPlugin final : public ICipherPlugin {
                 std::move(edek)};
     }
 
-    std::shared_ptr<IDecryptor>
-    GetDecryptor(int64_t ez_id,
-                 int64_t coll_id,
-                 const std::string& safe_key) const override {
-        auto ezk = registeredKey(ez_id, coll_id, true);
+    static std::shared_ptr<IDecryptor>
+    makeDecryptor(const std::string& ezk,
+                  int64_t ez_id,
+                  int64_t coll_id,
+                  const std::string& safe_key) {
         auto decoded = decodeEDEK(safe_key);
         auto expected_tag = deriveEDEKTag(ezk, decoded.nonce, ez_id, coll_id);
         if (!constantTimeEqual(decoded.tag, expected_tag)) {
@@ -340,7 +372,6 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         return std::make_shared<FixtureDecryptor>(std::move(dek));
     }
 
- private:
     std::string
     registeredKey(int64_t ez_id, int64_t coll_id, bool read) const {
         std::lock_guard<std::mutex> lock(context_mutex_);
@@ -367,9 +398,9 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         }
         const char* node = std::getenv("MILVUS_NODE_ID_FOR_TESTING");
         auto node_id = node == nullptr ? 0 : std::stoll(node);
-        std::ofstream log(std::string(dir) + "/cpp-" +
-                              std::to_string(getpid()) + ".jsonl",
-                          std::ios::app);
+        std::ofstream log(
+            std::string(dir) + "/cpp-" + std::to_string(getpid()) + ".jsonl",
+            std::ios::app);
         log << "{\"pid\":" << getpid() << ",\"node_id\":" << node_id
             << ",\"ez_id\":" << ez_id << ",\"collection_id\":" << coll_id
             << ",\"operation\":\"" << operation << "\"}\n";

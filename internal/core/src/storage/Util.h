@@ -676,6 +676,11 @@ std::vector<int64_t>
 GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
                             const std::string& filepath);
 
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath,
+                            const parquet::ReaderProperties& reader_properties);
+
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.

@@ -75,16 +75,12 @@ func TestReshardSeparatesSourceAndTargetEncryption(t *testing.T) {
 				mockReshardBoundaries(t, map[int64]reshardReaderBuilder{
 					1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{batch}}),
 				}, recorder)
-				require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, target, NewMetrics(1), nil))
+				require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, source, target, NewMetrics(1), nil))
 				require.Equal(t, []*indexcgopb.StoragePluginContext{source}, recorder.readContexts)
 				require.Equal(t, []*indexcgopb.StoragePluginContext{target}, recorder.writeContexts)
 				require.Equal(t, []int64{2}, recorder.rows)
 				require.EqualValues(t, 1, recorder.publishCalled.Load())
-				if sourceEncrypted {
-					require.Equal(t, [][2]int64{{31, 0}}, cipher.lookups)
-				} else {
-					require.Empty(t, cipher.lookups)
-				}
+				require.Empty(t, cipher.lookups)
 			})
 		}
 	}
@@ -93,14 +89,13 @@ func TestReshardSeparatesSourceAndTargetEncryption(t *testing.T) {
 func TestReshardRejectsInvalidSourceEncryptionBeforeIO(t *testing.T) {
 	initReshardPipelineParams(t)
 	for _, tc := range []struct {
-		name       string
-		ezk        string
-		wantError  string
-		wantLookup bool
+		name      string
+		ezk       string
+		wantError string
 	}{
-		{"invalid base64", "!", "failed to decode EZK", false},
-		{"invalid JSON", base64.StdEncoding.EncodeToString([]byte("not JSON")), "failed to unmarshal EZK", false},
-		{"unavailable source key", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":31}`)), "cannot get ez key", true},
+		{"invalid base64", "!", "failed to decode EZK"},
+		{"invalid JSON", base64.StdEncoding.EncodeToString([]byte("not JSON")), "failed to unmarshal EZK"},
+		{"missing dispatched source", base64.StdEncoding.EncodeToString([]byte(`{"ez_id":31}`)), "missing a source keyset"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fix := newReshardPipelineFixture()
@@ -112,18 +107,12 @@ func TestReshardRejectsInvalidSourceEncryptionBeforeIO(t *testing.T) {
 			t.Cleanup(func() { plugin.UnPatch() })
 			recorder := &reshardCallRecorder{}
 			mockReshardBoundaries(t, nil, recorder)
-			// A usable target context must not hide a source-context failure.
-			target := &indexcgopb.StoragePluginContext{EncryptionZoneId: 37, CollectionId: 23, EncryptionKey: base64.StdEncoding.EncodeToString([]byte("target-key"))}
-			err := executeReshardPlan(context.Background(), nil, fix.request(plan, 1), plan, target, NewMetrics(1), nil)
+			_, err := hookutil.PrepareImportCipher(tc.ezk, plan.GetCollectionSchema().GetProperties(), nil, plan.GetCollectionId())
 			require.ErrorContains(t, err, tc.wantError)
 			require.Empty(t, recorder.readContexts)
 			require.Empty(t, recorder.writeContexts)
 			require.Zero(t, recorder.publishCalled.Load())
-			if tc.wantLookup {
-				require.Equal(t, [][2]int64{{31, 0}}, cipher.lookups)
-			} else {
-				require.Empty(t, cipher.lookups)
-			}
+			require.Empty(t, cipher.lookups)
 		})
 	}
 }

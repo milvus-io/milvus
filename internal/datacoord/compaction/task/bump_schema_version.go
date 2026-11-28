@@ -160,15 +160,16 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 		segments = append(segments, segInfo)
 	}
 
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
+
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskProto.GetSchema())
 	if err != nil {
 		return nil, err
 	}
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
-	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
-		return nil, err
-	}
 	return plan, nil
 }
 

@@ -24,10 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -190,6 +193,38 @@ func TestSubmitImportTaskV3ValidatesRequest(t *testing.T) {
 	status, err := node.submitImportTaskV3(ctx, validImportV3Request(), taskcommon.Resource{CPU: 1, Memory: 1})
 	require.NoError(t, err)
 	require.True(t, merr.Ok(status))
+}
+
+func TestSubmitImportTaskV3RegistersTargetOnly(t *testing.T) {
+	node, _ := newImportV3ServicesNode(t, false)
+	ctx := context.Background()
+	cipher := &importContextReceiver{}
+	patch := mockey.Mock(hookutil.GetCipher).Return(cipher).Build()
+	defer patch.UnPatch()
+
+	req := validImportV3Request()
+	req.Plan.CollectionId = 23
+	req.Plan.CollectionSchema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	// Extra source keyset entry must be rejected because ImportTaskV3 only expects target.
+	req.PluginContext = []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:c291cmNl"},
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:dGFyZ2V0"},
+	}
+	status, err := node.submitImportTaskV3(ctx, req, taskcommon.Resource{CPU: 1, Memory: 1})
+	require.NoError(t, err)
+	require.False(t, merr.Ok(status))
+	require.Contains(t, status.GetReason(), "unexpected cipher.ezk entries")
+	require.Empty(t, cipher.calls)
+
+	req.PluginContext = []*commonpb.KeyValuePair{
+		{Key: hookutil.CipherConfigUnsafeEZK, Value: "17:dGFyZ2V0"},
+	}
+	status, err = node.submitImportTaskV3(ctx, req, taskcommon.Resource{CPU: 1, Memory: 1})
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status), status.GetReason())
+	require.Equal(t, []map[string]string{
+		{hookutil.CipherConfigCreateEZ: "17", hookutil.CipherConfigUnsafeEZK: "dGFyZ2V0"},
+	}, cipher.calls)
 }
 
 // TestSubmitImportV3WorkerTaskNotReady pins the not-initialized guard of the

@@ -18,10 +18,12 @@ package syncmgr
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -43,6 +45,7 @@ import (
 
 type BulkPackWriterV2 struct {
 	*BulkPackWriter
+
 	bufferSize          int64
 	multiPartUploadSize int64
 
@@ -171,8 +174,11 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+func (bw *BulkPackWriterV2) getPluginContext(pack *SyncPack) (*indexcgopb.StoragePluginContext, error) {
+	if pack.pluginContext != nil {
+		return pack.pluginContext, nil
+	}
+	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), pack.collectionID)
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -204,30 +210,53 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
-	if err != nil {
-		return nil, "", err
+	if pack.pluginContext == nil {
+		if ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID); ez != nil && !hookutil.IsClusterEncryptionEnabled() {
+			return nil, "", merr.WrapErrServiceUnavailable(fmt.Sprintf("cipher plugin is not enabled for ezID=%d, collectionID=%d", ez.EzID, ez.CollectionID))
+		}
 	}
 
-	// Allocate logIDs once, before the retry loop. writeInsertsIntoStorage builds the
-	// actual writer and performs the IO; retries must only repeat the IO, never draw
-	// fresh IDs from the task's fixed IDRange.
-	paths, err := bw.allocInsertLogPaths(pack)
-	if err != nil {
-		return nil, "", err
-	}
-
-	var logs map[int64]*datapb.FieldBinlog
-	var manifestPath string
+	var (
+		pluginContextPtr      *indexcgopb.StoragePluginContext
+		pluginContextResolved bool
+		paths                 []string
+		logs                  map[int64]*datapb.FieldBinlog
+		manifestPath          string
+	)
 
 	if err := retry.Do(ctx, func() error {
 		var err error
+		if !pluginContextResolved {
+			pluginContextPtr, err = bw.getPluginContext(pack)
+			if err != nil {
+				mlog.Warn(ctx, "failed to get plugin context for insert write",
+					mlog.FieldCollectionID(pack.collectionID),
+					mlog.FieldSegmentID(pack.segmentID),
+					mlog.Err(err))
+				if !merr.IsRetryableErr(err) && !merr.IsCanceledOrTimeout(err) {
+					return retry.Unrecoverable(err)
+				}
+				return err
+			}
+			pluginContextResolved = true
+		}
+		// Allocate logIDs once after resolving encryption context. Retried
+		// storage writes reuse the same paths instead of consuming fresh IDs.
+		if paths == nil {
+			paths, err = bw.allocInsertLogPaths(pack)
+			if err != nil {
+				return retry.Unrecoverable(err)
+			}
+		}
 		logs, manifestPath, err = bw.writeInsertsIntoStorage(ctx, pluginContextPtr, pack, rec, tsFrom, tsTo, paths)
 		if err != nil {
 			mlog.Warn(ctx, "failed to write inserts into storage",
 				mlog.FieldCollectionID(pack.collectionID),
 				mlog.FieldSegmentID(pack.segmentID),
 				mlog.Err(err))
+			if pack.pluginContext != nil && (errors.Is(err, merr.ErrSegcoreUnsupported) || errors.Is(err, merr.ErrServiceUnimplemented)) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		return nil
@@ -237,9 +266,9 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, manifestPath, nil
 }
 
-// allocInsertLogPaths reserves exactly one logID per column group for the whole write. It
-// is deliberately called outside retry.Do: a retried storage write must reuse the same
-// paths instead of consuming a fresh logID on every attempt.
+// allocInsertLogPaths reserves exactly one logID per column group for the whole write.
+// Callers reserve paths once after resolving the encryption context and reuse them
+// across storage write retries instead of consuming a fresh logID on every attempt.
 func (bw *BulkPackWriterV2) allocInsertLogPaths(pack *SyncPack) ([]string, error) {
 	paths := make([]string, 0, len(bw.columnGroups))
 	for _, columnGroup := range bw.columnGroups {

@@ -23,20 +23,34 @@
 #include <arrow/result.h>
 #include <arrow/status.h>
 #include <arrow/type.h>
+#include <arrow/util/base64.h>
 #include <arrow/util/key_value_metadata.h>
+#include <folly/ScopeGuard.h>
+#include <gmock/gmock.h>
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/reader.h"
 #include "segcore/column_groups_c.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
+#include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_reader_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+#include "test_utils/PlannerCipherPlugin.h"
 
 TEST(CPackedTest, PackedWriterAndReader) {
     std::vector<int64_t> test_data(5);
@@ -141,7 +155,8 @@ namespace {
 void
 WriteInt64File(const std::string& file_path,
                int64_t num_rows,
-               std::shared_ptr<arrow::Schema>* out_schema) {
+               std::shared_ptr<arrow::Schema>* out_schema,
+               CPluginContext* target = nullptr) {
     std::vector<int64_t> values(num_rows);
     std::iota(values.begin(), values.end(), 0);
     arrow::Int64Builder builder;
@@ -155,7 +170,6 @@ WriteInt64File(const std::string& file_path,
                       arrow::key_value_metadata(
                           {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
     *out_schema = schema;
-    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
 
     struct ArrowSchema c_write_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_write_schema).ok());
@@ -169,12 +183,12 @@ WriteInt64File(const std::string& file_path,
 
     CPackedWriter writer = nullptr;
     auto status = NewPackedWriter(
-        &c_write_schema, 10 * 1024 * 1024, paths, 1, 0, cgs, &writer, nullptr);
-    ASSERT_EQ(status.error_code, 0);
+        &c_write_schema, 10 * 1024 * 1024, paths, 1, 0, cgs, &writer, target);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
 
     struct ArrowArray carray;
     struct ArrowSchema cschema;
-    ASSERT_TRUE(arrow::ExportRecordBatch(*batch, &carray, &cschema).ok());
+    ASSERT_TRUE(arrow::ExportArray(*array, &carray, &cschema).ok());
     struct ArrowArray arrays[] = {carray};
     struct ArrowSchema array_schemas[] = {cschema};
     status = WriteRecordBatch(writer, arrays, array_schemas, &c_origin_schema);
@@ -184,7 +198,208 @@ WriteInt64File(const std::string& file_path,
     FreeCColumnSplits(cgs);
 }
 
+class TestParquetKey : public milvus::test::PlannerIdentityEncryptor,
+                       public milvus::test::PlannerIdentityDecryptor {
+ public:
+    std::string
+    GetKey() const override {
+        return std::string(32, '\0');
+    }
+};
+
+class PackedImportCipher : public milvus::test::PlannerCipherPlugin {
+ public:
+    using EncryptorResult =
+        std::pair<std::shared_ptr<milvus::storage::plugin::IEncryptor>,
+                  std::string>;
+    MOCK_METHOD(void,
+                Update,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(std::shared_ptr<milvus::storage::plugin::IDecryptor>,
+                GetDecryptor,
+                (int64_t, int64_t, const std::string&),
+                (const, override));
+    MOCK_METHOD(std::shared_ptr<milvus::storage::plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
+                (const, override));
+};
+
+arrow::Result<int64_t>
+ReadImportFFIFile(const std::string& path,
+                  std::shared_ptr<arrow::Schema> schema,
+                  CPluginContext* source) {
+    const char* columns[] = {"int64"};
+    char format[] = "parquet";
+    char* paths[] = {const_cast<char*>(path.c_str())};
+    int64_t start = 0;
+    int64_t end = 3;
+    LoonColumnGroups* groups = nullptr;
+    auto result = loon_column_groups_create(
+        columns, 1, format, paths, &start, &end, nullptr, 1, &groups);
+    auto release_result =
+        folly::makeGuard([&] { loon_ffi_free_result(&result); });
+    if (!loon_ffi_is_success(&result)) {
+        return arrow::Status::Invalid("could not create column group");
+    }
+    auto release_groups =
+        folly::makeGuard([&] { loon_column_groups_destroy(groups); });
+    CStorageConfig config{};
+    config.storage_type = "local";
+    config.root_path = "/";
+    ArrowSchema exported{};
+    ARROW_RETURN_NOT_OK(arrow::ExportSchema(*schema, &exported));
+    CFFIPackedReader reader = nullptr;
+    char column[] = "int64";
+    char* needed[] = {column};
+    auto status = NewPackedFFIReaderWithColumnGroups(groups,
+                                                     &exported,
+                                                     needed,
+                                                     1,
+                                                     &reader,
+                                                     config,
+                                                     source,
+                                                     0,
+                                                     nullptr,
+                                                     nullptr);
+    auto close = folly::makeGuard([&] {
+        if (reader)
+            CloseFFIReader(reader);
+    });
+    ArrowArrayStream stream{};
+    if (status.error_code == 0) {
+        status = GetFFIReaderStream(reader, 1024, &stream);
+    }
+    if (status.error_code != 0) {
+        auto error = arrow::Status::Invalid(status.error_msg);
+        free(const_cast<char*>(status.error_msg));
+        return error;
+    }
+    ARROW_ASSIGN_OR_RAISE(auto batch_reader,
+                          arrow::ImportRecordBatchReader(&stream));
+    ARROW_ASSIGN_OR_RAISE(auto batch, batch_reader->Next());
+    return batch ? batch->num_rows() : 0;
+}
+
 }  // namespace
+
+TEST(CPackedTest, ImportWriterAndReadersUseTaskKeysets) {
+    auto& loader = milvus::storage::PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+    auto cipher = std::make_shared<testing::StrictMock<PackedImportCipher>>();
+    loader.registerPluginForTest(cipher);
+    auto dek = std::make_shared<TestParquetKey>();
+    CPluginContext target{17, 23, "dGFyZ2V0"};
+    CPluginContext source{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, "dGFyZ2V0"))
+        .WillOnce(testing::Return(
+            PackedImportCipher::EncryptorResult{dek, "target-edek"}));
+    EXPECT_CALL(*cipher,
+                GetDecryptorForKeyset(17, 23, "c291cmNl", "target-edek"))
+        .Times(testing::AtLeast(3))
+        .WillRepeatedly(testing::Return(dek));
+    EXPECT_CALL(*cipher, GetDecryptor(17, 23, "target-edek"))
+        .Times(testing::AtLeast(2))
+        .WillRepeatedly(testing::Return(dek));
+
+    auto path = TestLocalPath + "import_task_keysets";
+    std::shared_ptr<arrow::Schema> schema;
+    ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema, &target));
+    char* paths[] = {path.data()};
+    // Each open uses the bound source keyset statelessly via GetDecryptorForKeyset.
+    int64_t* ids = nullptr;
+    int64_t* counts = nullptr;
+    auto status =
+        GetPackedFileFieldIDs(paths, 1, nullptr, &source, &ids, &counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto free_footer = folly::makeGuard([&] {
+        free(ids);
+        free(counts);
+    });
+    ASSERT_EQ(counts[0], 1);
+    EXPECT_EQ(ids[0], 100);
+
+    ArrowSchema read_schema{};
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
+    CPackedReader reader = nullptr;
+    status = NewPackedReader(
+        paths, 1, &read_schema, 1 << 20, false, &reader, &source);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto close_reader = folly::makeGuard([&] { CloseReader(reader); });
+    ArrowArray batch{};
+    status = ReadNext(reader, &batch, &read_schema);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto read = arrow::ImportRecordBatch(&batch, &read_schema);
+    ASSERT_TRUE(read.ok()) << read.status().ToString();
+    EXPECT_EQ((*read)->num_rows(), 3);
+    auto ffi_rows = ReadImportFFIFile(path, schema, &source);
+    ASSERT_TRUE(ffi_rows.ok()) << ffi_rows.status();
+    EXPECT_EQ(*ffi_rows, 3);
+
+    // Mismatched EZ falls back to GetDecryptor; FFI reader with nullptr skips key retriever.
+    CPluginContext other{29, 0, "b3RoZXI="};
+    auto other_rows = ReadImportFFIFile(path, schema, &other);
+    ASSERT_TRUE(other_rows.ok()) << other_rows.status();
+    EXPECT_EQ(*other_rows, 3);
+
+    auto nil_ctx_rows = ReadImportFFIFile(path, schema, nullptr);
+    EXPECT_FALSE(nil_ctx_rows.ok());
+
+    int64_t* file_ids = nullptr;
+    int64_t* file_counts = nullptr;
+    status = GetPackedFileFieldIDs(
+        paths, 1, nullptr, nullptr, &file_ids, &file_counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(file_counts[0], 1);
+    EXPECT_EQ(file_ids[0], 100);
+    free(file_ids);
+    free(file_counts);
+}
+
+TEST(CPackedTest, PlaintextImportOpensPackedDataAndFooterWithoutCipher) {
+    auto path = TestLocalPath + "plaintext_import_source";
+    std::shared_ptr<arrow::Schema> schema;
+    ASSERT_NO_FATAL_FAILURE(WriteInt64File(path, 3, &schema));
+    char* paths[] = {path.data()};
+    int64_t* ids = nullptr;
+    int64_t* counts = nullptr;
+    auto status =
+        GetPackedFileFieldIDs(paths, 1, nullptr, nullptr, &ids, &counts);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto free_footer = folly::makeGuard([&] {
+        free(ids);
+        free(counts);
+    });
+    ASSERT_EQ(counts[0], 1);
+    EXPECT_EQ(ids[0], 100);
+    ArrowSchema read_schema{};
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &read_schema).ok());
+    CPackedReader reader = nullptr;
+    status = NewPackedReader(
+        paths, 1, &read_schema, 1 << 20, false, &reader, nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto close_reader = folly::makeGuard([&] { CloseReader(reader); });
+    ArrowArray batch{};
+    status = ReadNext(reader, &batch, &read_schema);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    auto rows = arrow::ImportRecordBatch(&batch, &read_schema);
+    ASSERT_TRUE(rows.ok()) << rows.status();
+    EXPECT_EQ((*rows)->num_rows(), 3);
+    auto ffi_rows = ReadImportFFIFile(path, schema, nullptr);
+    ASSERT_TRUE(ffi_rows.ok()) << ffi_rows.status();
+    EXPECT_EQ(*ffi_rows, 3);
+}
 
 // The eager mode must return the same rows, in the same order, as the lazy
 // mode. The last mode uses a read buffer smaller than the data, so the reader
@@ -247,3 +462,303 @@ TEST(CPackedTest, PackedReaderEagerPrebuffer) {
         EXPECT_EQ(status.error_code, 0);
     }
 }
+
+namespace {
+namespace plugin = milvus::storage::plugin;
+using EncryptorResult =
+    std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>;
+using ::testing::AtLeast;
+using ::testing::Return;
+using ::testing::StrictMock;
+
+class OrdinaryCipher : public plugin::ICipherPlugin {
+ public:
+    std::string
+    getPluginName() const override {
+        return "CipherPlugin";
+    }
+    MOCK_METHOD(void,
+                Update,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptor,
+                (int64_t, int64_t),
+                (const, override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptor,
+                (int64_t, int64_t, const std::string&),
+                (const, override));
+};
+
+class ImportCipher : public OrdinaryCipher {
+ public:
+    MOCK_METHOD(EncryptorResult,
+                GetEncryptorForKeyset,
+                (int64_t, int64_t, const std::string&),
+                (override));
+    MOCK_METHOD(std::shared_ptr<plugin::IDecryptor>,
+                GetDecryptorForKeyset,
+                (int64_t, int64_t, const std::string&, const std::string&),
+                (const, override));
+};
+
+class ParquetFileKey : public plugin::IEncryptor, public plugin::IDecryptor {
+ public:
+    MOCK_METHOD(std::string, GetKey, (), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (const std::string&), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (std::string_view), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (const void*, size_t), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (const std::string&), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (std::string_view), (const, override));
+    MOCK_METHOD(std::string, Decrypt, (const void*, size_t), (const, override));
+};
+
+::testing::AssertionResult
+CheckStatus(CStatus status) {
+    if (status.error_code == 0) {
+        return ::testing::AssertionSuccess();
+    }
+    auto failure = ::testing::AssertionFailure() << status.error_msg;
+    free(const_cast<char*>(status.error_msg));
+    return failure;
+}
+
+class CPackedImportTest : public ::testing::Test {
+ protected:
+    void
+    SetUp() override {
+        int column = 0;
+        ASSERT_TRUE(AddCColumnSplit(splits, &column, 1));
+    }
+    void
+    TearDown() override {
+        FreeCColumnSplits(splits);
+        milvus::storage::PluginLoader::GetInstance().unregisterPluginForTest(
+            "CipherPlugin");
+    }
+
+    static constexpr int64_t buffer_size = 1 << 20;
+    CColumnSplits splits = NewCColumnSplits();
+    std::shared_ptr<arrow::Schema> schema = arrow::schema(
+        {arrow::field("int64",
+                      arrow::int64(),
+                      false,
+                      arrow::key_value_metadata(
+                          {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
+};
+
+TEST_F(CPackedImportTest, ReportsWriterKeysetErrors) {
+    CPluginContext target{17, 23, "dGFyZ2V0"};
+    char* enc_key = nullptr;
+    char* enc_meta = nullptr;
+    auto missing_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(missing_enc.error_code, milvus::ErrorCode::Unsupported);
+    free(const_cast<char*>(missing_enc.error_msg));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    CPluginContext null_key{17, 23, nullptr};
+    CPluginContext empty_key{17, 23, ""};
+    for (auto* context :
+         {static_cast<CPluginContext*>(nullptr), &null_key, &empty_key}) {
+        auto invalid = GetEncParams(context, &enc_key, &enc_meta);
+        EXPECT_EQ(invalid.error_code, milvus::ErrorCode::InvalidParameter);
+        EXPECT_FALSE(CheckStatus(invalid));
+        EXPECT_EQ(enc_key, nullptr);
+        EXPECT_EQ(enc_meta, nullptr);
+    }
+
+    auto cipher = std::make_shared<StrictMock<ImportCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    auto file_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*file_key, GetKey())
+        .WillOnce(Return(std::string(32, 'a')))
+        .WillOnce(Return(std::string(32, 'a')))
+        .WillOnce(Return("short"));
+    EXPECT_CALL(*cipher, GetEncryptorForKeyset(17, 23, target.key))
+        .WillOnce(Return(EncryptorResult{}))
+        .WillOnce(Return(EncryptorResult{file_key, ""}))
+        .WillOnce(
+            Return(EncryptorResult{file_key, std::string("wrapped\0key", 11)}))
+        .WillOnce(Return(EncryptorResult{file_key, "wrapped"}))
+        .WillOnce(Return(EncryptorResult{}))
+        .WillOnce(::testing::Throw(milvus::SegcoreError(
+            milvus::ErrorCode::Unsupported, "writer keysets are unsupported")));
+    std::string file = TestLocalPath + "rejected-target.parquet";
+    char* path = file.data();
+    for (const auto* reason : {"cipher plugin returned no encryptor",
+                               "unusable encryption parameters",
+                               "unusable encryption parameters",
+                               "unusable encryption parameters"}) {
+        SCOPED_TRACE(reason);
+        ArrowSchema c_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        CPackedWriter writer = nullptr;
+        auto status = NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, splits, &writer, &target);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        if (status.error_msg != nullptr) {
+            EXPECT_THAT(status.error_msg, ::testing::HasSubstr(reason));
+        }
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(writer, nullptr);
+        if (writer != nullptr) {
+            EXPECT_TRUE(CheckStatus(CloseWriter(writer)));
+        }
+    }
+
+    auto bad_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(bad_enc.error_code, milvus::ErrorCode::InvalidParameter);
+    if (bad_enc.error_msg != nullptr) {
+        EXPECT_THAT(
+            bad_enc.error_msg,
+            ::testing::HasSubstr("cipher plugin returned no encryptor"));
+    }
+    EXPECT_FALSE(CheckStatus(bad_enc));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+
+    auto unsupported_enc = GetEncParams(&target, &enc_key, &enc_meta);
+    EXPECT_EQ(unsupported_enc.error_code, milvus::ErrorCode::Unsupported);
+    EXPECT_FALSE(CheckStatus(unsupported_enc));
+    EXPECT_EQ(enc_key, nullptr);
+    EXPECT_EQ(enc_meta, nullptr);
+}
+
+TEST_F(CPackedImportTest, DecryptsStatelessWithBoundKeysetAndFallsBack) {
+    auto cipher = std::make_shared<StrictMock<ImportCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    CPluginContext source{17, 0, "c291cmNl"};
+    auto bound_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    auto fallback_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, "c291cmNl", "wrapped"))
+        .WillOnce(Return(bound_key));
+    EXPECT_CALL(*bound_key, GetKey()).WillOnce(Return("bound-file-key"));
+    EXPECT_CALL(*cipher, GetDecryptor(18, 23, "wrapped"))
+        .WillOnce(Return(fallback_key));
+    EXPECT_CALL(*fallback_key, GetKey()).WillOnce(Return("fallback-file-key"));
+
+    auto properties = milvus::storage::GetReaderProperties(&source);
+    auto retriever = properties.file_decryption_properties()->key_retriever();
+    EXPECT_EQ(retriever->GetKey(
+                  milvus::storage::EncodeKeyMetadata(17, 23, "wrapped")),
+              "bound-file-key");
+    EXPECT_EQ(retriever->GetKey(
+                  milvus::storage::EncodeKeyMetadata(18, 23, "wrapped")),
+              "fallback-file-key");
+
+    // Default ICipherPlugin::GetDecryptorForKeyset falls back to GetDecryptor.
+    auto ordinary = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(
+        ordinary);
+    auto ordinary_key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*ordinary, GetDecryptor(17, 23, "wrapped"))
+        .WillOnce(Return(ordinary_key));
+    EXPECT_CALL(*ordinary_key, GetKey()).WillOnce(Return("ordinary-file-key"));
+    auto ordinary_props = milvus::storage::GetReaderProperties(&source);
+    EXPECT_EQ(
+        ordinary_props.file_decryption_properties()->key_retriever()->GetKey(
+            milvus::storage::EncodeKeyMetadata(17, 23, "wrapped")),
+        "ordinary-file-key");
+}
+
+TEST_F(CPackedImportTest, ReportsReaderKeysetErrors) {
+    auto cipher = std::make_shared<StrictMock<ImportCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    std::string file = TestLocalPath + "rejected-reader.parquet";
+    char* path = file.data();
+
+    CPluginContext null_key{17, 0, nullptr};
+    CPluginContext empty_key{17, 0, ""};
+    for (auto* ctx : {&null_key, &empty_key}) {
+        ArrowSchema c_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        CPackedReader reader = nullptr;
+        auto status =
+            NewPackedReader(&path, 1, &c_schema, 1024, false, &reader, ctx);
+        if (c_schema.release != nullptr) {
+            c_schema.release(&c_schema);
+        }
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(reader, nullptr);
+    }
+
+    CPluginContext bad_key{17, 0, "c291cmNl"};
+    EXPECT_CALL(*cipher, GetDecryptorForKeyset(17, 23, bad_key.key, "wrapped"))
+        .WillOnce(::testing::Throw(std::runtime_error("invalid keyset")))
+        .WillOnce(Return(nullptr));
+    auto retriever = milvus::storage::GetReaderProperties(&bad_key)
+                         .file_decryption_properties()
+                         ->key_retriever();
+    auto meta = milvus::storage::EncodeKeyMetadata(17, 23, "wrapped");
+    EXPECT_THROW(retriever->GetKey(meta), std::runtime_error);
+    EXPECT_THROW(retriever->GetKey(meta), milvus::SegcoreError);
+}
+
+TEST_F(CPackedImportTest, PluginContextUpdateExceptionsReturnStatus) {
+    for (CPluginContext invalid :
+         {CPluginContext{17, 23, nullptr}, CPluginContext{17, 23, ""}}) {
+        auto status = PutOrRefPluginContext(invalid);
+        EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+        EXPECT_FALSE(CheckStatus(status));
+    }
+    auto cipher = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    CPluginContext context{17, 23, "dGFyZ2V0"};
+
+    EXPECT_CALL(*cipher, Update(17, 23, context.key))
+        .WillOnce(::testing::Throw(milvus::SegcoreError(
+            milvus::ErrorCode::InvalidParameter, "invalid plugin context")));
+    auto status = PutOrRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::InvalidParameter);
+    EXPECT_FALSE(CheckStatus(status));
+
+    EXPECT_CALL(*cipher, Update(17, 23, ""))
+        .WillOnce(::testing::Throw(std::runtime_error("unref failed")));
+    status = UnRefPluginContext(context);
+    EXPECT_EQ(status.error_code, milvus::ErrorCode::UnexpectedError);
+    EXPECT_FALSE(CheckStatus(status));
+}
+
+TEST_F(CPackedImportTest, FileImportUsesEncryptedLegacyTarget) {
+    std::string file = TestLocalPath + "legacy-file-import.parquet";
+    char* path = file.data();
+    CPluginContext target{17, 45, "dGFyZ2V0"};
+    CPackedWriter writer = nullptr;
+    auto open = [&](CPluginContext* context) {
+        ArrowSchema c_schema;
+        EXPECT_TRUE(arrow::ExportSchema(*schema, &c_schema).ok());
+        return NewPackedWriter(
+            &c_schema, buffer_size, &path, 1, 0, splits, &writer, context);
+    };
+    auto expect_rejected = [&](CStatus status, milvus::ErrorCode code) {
+        EXPECT_EQ(status.error_code, code);
+        EXPECT_FALSE(CheckStatus(status));
+        EXPECT_EQ(writer, nullptr);
+        if (writer) {
+            EXPECT_TRUE(CheckStatus(CloseWriter(writer)));
+            writer = nullptr;
+        }
+    };
+    expect_rejected(open(&target), milvus::ErrorCode::Unsupported);
+
+    auto cipher = std::make_shared<StrictMock<OrdinaryCipher>>();
+    milvus::storage::PluginLoader::GetInstance().registerPluginForTest(cipher);
+    CPluginContext missing_key{17, 45, ""};
+    expect_rejected(open(&missing_key), milvus::ErrorCode::InvalidParameter);
+
+    auto key = std::make_shared<StrictMock<ParquetFileKey>>();
+    EXPECT_CALL(*key, GetKey()).WillRepeatedly(Return(std::string(32, 'k')));
+    {
+        ::testing::InSequence ordered;
+        EXPECT_CALL(*cipher, Update(17, 45, "dGFyZ2V0"));
+        EXPECT_CALL(*cipher, GetEncryptor(17, 45))
+            .WillOnce(Return(EncryptorResult{key, "wrapped-target"}));
+    }
+    ASSERT_TRUE(CheckStatus(open(&target)));
+    ASSERT_TRUE(CheckStatus(CloseWriter(writer)));
+    writer = nullptr;
+}
+}  // namespace

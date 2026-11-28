@@ -413,6 +413,11 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 	return merr.Success(), nil
 }
 
+func prepareImportCipher(options, properties, entries []*commonpb.KeyValuePair, collectionID int64) (hookutil.ImportCipherContext, error) {
+	artifact, _ := importutilv2.GetEZK(options)
+	return hookutil.PrepareImportCipher(artifact, properties, entries, collectionID)
+}
+
 // PreImport is the pre-CreateTask entry point. A coordinator reaching it
 // directly carries no resource estimate, so the task books zero.
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
@@ -426,6 +431,11 @@ func (node *DataNode) preImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
+	cipher, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -436,9 +446,9 @@ func (node *DataNode) preImport(ctx context.Context, req *datapb.PreImportReques
 
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, resource)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm, resource, cipher)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, resource)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm, resource, cipher)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -454,6 +464,10 @@ func (node *DataNode) preImportV3(ctx context.Context, req *datapb.PreImportRequ
 	mlog.Info(ctx, "datanode receive preimport v3 request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	if _, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID()); err != nil {
 		return merr.Status(err), nil
 	}
 
@@ -481,6 +495,11 @@ func (node *DataNode) importV2(ctx context.Context, req *datapb.ImportRequest, r
 		return merr.Status(err), nil
 	}
 
+	cipher, err := prepareImportCipher(req.GetOptions(), req.GetSchema().GetProperties(), req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
 	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
 	if err != nil {
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
@@ -490,9 +509,9 @@ func (node *DataNode) importV2(ctx context.Context, req *datapb.ImportRequest, r
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource, cipher)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm, resource, cipher)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -934,17 +953,11 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("PreImport", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.preImport(ctx, req, resource)
 	case taskcommon.PreImportV3:
 		req := &datapb.PreImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("PreImportV3", err), nil
-		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
 		}
 		return node.preImportV3(ctx, req, resource)
 	case taskcommon.Import:
@@ -952,26 +965,17 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("Import", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.importV2(ctx, req, resource)
 	case taskcommon.Reshard:
 		req := &datapb.ReshardTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("Reshard", err), nil
 		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
-		}
 		return node.submitReshardTask(ctx, req, resource)
 	case taskcommon.ImportV3:
 		req := &datapb.ImportTaskV3Request{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return invalidTaskPayload("ImportV3", err), nil
-		}
-		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
-			return merr.Status(err), nil
 		}
 		return node.submitImportTaskV3(ctx, req, resource)
 	case taskcommon.Compaction:

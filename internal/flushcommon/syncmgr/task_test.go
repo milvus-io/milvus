@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -243,6 +245,63 @@ func (s *SyncTaskSuite) TestRunNormalWithStorageV2() {
 
 func (s *SyncTaskSuite) TestRunNormalWithStorageV3() {
 	s.runTestRunNormal(storage.StorageV3)
+}
+
+type emptyUnsafeKeyCipher struct {
+	hook.Cipher
+	calls int
+}
+
+func (c *emptyUnsafeKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
+	c.calls++
+	return nil
+}
+
+func (s *SyncTaskSuite) TestEncryptedWriteRejectsMissingUnsafeKey() {
+	for _, tc := range []struct {
+		name           string
+		storageVersion int64
+	}{
+		{name: "StorageV2", storageVersion: storage.StorageV2},
+		{name: "StorageV3", storageVersion: storage.StorageV3},
+	} {
+		s.Run(tc.name, func() {
+			s.metacache.ExpectedCalls = nil
+			s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
+			seg := s.createSegment(tc.storageVersion)
+			s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+			s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
+			s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Maybe()
+
+			origSchema := s.schema
+			s.schema = &schemapb.CollectionSchema{
+				Name:       origSchema.GetName(),
+				Fields:     origSchema.GetFields(),
+				Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}},
+			}
+			s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+			defer func() { s.schema = origSchema }()
+
+			s.Run("missing_cipher_plugin", func() {
+				s.T().Cleanup(hookutil.SetTestCipher(nil))
+				pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.AttemptAlways())
+				err := task.Run(context.Background())
+				s.ErrorIs(err, merr.ErrServiceUnavailable)
+			})
+
+			s.Run("empty_unsafe_key_retries_under_policy", func() {
+				cipher := &emptyUnsafeKeyCipher{}
+				s.T().Cleanup(hookutil.SetTestCipher(cipher))
+
+				pack := new(SyncPack).WithInsertData([]*storage.InsertData{s.getInsertBuffer()})
+				task := s.getSuiteSyncTask(pack).WithWriteRetryOptions(retry.Attempts(2), retry.Sleep(0))
+				err := task.Run(context.Background())
+				s.ErrorIs(err, merr.ErrServiceUnavailable)
+				s.Equal(2, cipher.calls)
+			})
+		})
+	}
 }
 
 func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {

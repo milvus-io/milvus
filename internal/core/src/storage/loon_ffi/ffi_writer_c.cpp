@@ -21,53 +21,25 @@
 
 #include <arrow/util/base64.h>
 
-#include "PluginInterface.h"
 #include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "storage/KeyRetriever.h"
-#include "storage/PluginLoader.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 
-/**
- * @brief Implementation of GetEncParams - retrieves encryption parameters for CMEK.
- *
- * @details This function performs the following steps:
- *   1. Loads the cipher plugin from PluginLoader singleton
- *   2. Updates the plugin with encryption zone ID, collection ID, and key
- *   3. Retrieves the encryptor for the given zone and collection
- *   4. Encodes key metadata containing zone ID, collection ID, and key version
- *   5. Returns the Base64-encoded key and metadata as newly allocated strings
- *
- * @see GetEncParams declaration in ffi_writer_c.h for parameter documentation
- */
 CStatus
-GetEncParams(CPluginContext* c_plugin_context,
-             char** out_key,
-             char** out_meta) {
+GetEncParams(CPluginContext* context, char** out_key, char** out_meta) {
     try {
         AssertInfo(out_key != nullptr && out_meta != nullptr,
                    "encryption parameter outputs must not be null");
         *out_key = nullptr;
         *out_meta = nullptr;
-        AssertInfo(c_plugin_context != nullptr, "c_plugin_context is nullptr");
-        auto plugin_ptr =
-            milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
-        AssertInfo(plugin_ptr != nullptr, "plugin_ptr is nullptr");
-
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
-        auto got = plugin_ptr->GetEncryptor(c_plugin_context->ez_id,
-                                            c_plugin_context->collection_id);
-        auto metadata =
-            milvus::storage::EncodeKeyMetadata(c_plugin_context->ez_id,
-                                               c_plugin_context->collection_id,
-                                               got.second);
+        auto [raw_key, metadata] =
+            milvus::storage::GetWriterEncryptionParams(context);
         // Both cgo and Loon properties use NUL-terminated strings. Encode the
         // binary DEK before crossing either boundary. The Parquet writer
         // decodes it when constructing its encryption configuration.
-        auto key = arrow::util::base64_encode(got.first->GetKey());
+        auto key = arrow::util::base64_encode(raw_key);
         auto key_buffer =
             std::unique_ptr<char, decltype(&free)>(strdup(key.c_str()), free);
         auto metadata_buffer = std::unique_ptr<char, decltype(&free)>(

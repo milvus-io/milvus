@@ -66,7 +66,7 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 	// destination schema. Neither a source EZK nor a source context is given.
 	reader, err := NewReader(context.Background(), nil, target,
 		&indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
-		storage.StorageV2, []string{"backup/segment"}, 0, math.MaxUint64, 1024, "", nil)
+		storage.StorageV2, []string{"backup/segment"}, 0, math.MaxUint64, 1024, SourceEncryption{})
 	require.NoError(t, err)
 	defer reader.Close()
 	require.Zero(t, cipher.lookups, "a plaintext source must not resolve the destination's key")

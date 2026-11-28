@@ -59,6 +59,7 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	if cColumnSplits == nil {
 		return nil, merr.WrapErrServiceInternalMsg("failed to allocate column splits")
 	}
+	defer C.FreeCColumnSplits(cColumnSplits)
 	for _, group := range columnGroups {
 		cGroup := C.malloc(C.size_t(len(group.Columns)) * C.size_t(unsafe.Sizeof(C.int(0))))
 		if cGroup == nil {
@@ -71,7 +72,6 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		ok := C.AddCColumnSplit(cColumnSplits, (*C.int)(cGroup), C.int(len(group.Columns)))
 		C.free(cGroup)
 		if !bool(ok) {
-			C.FreeCColumnSplits(cColumnSplits)
 			return nil, merr.WrapErrServiceInternalMsg("failed to record column split group")
 		}
 	}

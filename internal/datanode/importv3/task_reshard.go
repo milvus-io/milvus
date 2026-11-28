@@ -18,16 +18,16 @@ import (
 // and write the sorted fragments plus the manifest.
 type reshardTask struct {
 	workerTaskBase
-	req           *datapb.ReshardTaskRequest
-	cm            storage.ChunkManager
-	pluginContext *indexcgopb.StoragePluginContext
-	metrics       *Metrics
-	progress      *ReshardProgress
+	req            *datapb.ReshardTaskRequest
+	cm             storage.ChunkManager
+	source, target *indexcgopb.StoragePluginContext
+	metrics        *Metrics
+	progress       *ReshardProgress
 }
 
 // NewReshardTask builds one ReshardTask run. The Scheduler admits it once the
 // node has free slots.
-func NewReshardTask(req *datapb.ReshardTaskRequest, cm storage.ChunkManager, pluginContext *indexcgopb.StoragePluginContext, metrics *Metrics, resource taskcommon.Resource) Task {
+func NewReshardTask(req *datapb.ReshardTaskRequest, cm storage.ChunkManager, source, target *indexcgopb.StoragePluginContext, metrics *Metrics, resource taskcommon.Resource) Task {
 	return &reshardTask{
 		workerTaskBase: workerTaskBase{
 			taskID:   req.GetTaskId(),
@@ -35,11 +35,11 @@ func NewReshardTask(req *datapb.ReshardTaskRequest, cm storage.ChunkManager, plu
 			slot:     req.GetSlot(),
 			resource: resource,
 		},
-		req:           req,
-		cm:            cm,
-		pluginContext: pluginContext,
-		metrics:       metrics,
-		progress:      NewReshardProgress(),
+		req:    req,
+		cm:     cm,
+		source: source, target: target,
+		metrics:  metrics,
+		progress: NewReshardProgress(),
 	}
 }
 
@@ -52,5 +52,5 @@ func (t *reshardTask) Progress() TaskProgress {
 }
 
 func (t *reshardTask) Execute(ctx context.Context) (any, error) {
-	return nil, executeReshardPlan(ctx, t.cm, t.req, t.req.GetPlan(), t.pluginContext, t.metrics, t.progress)
+	return nil, executeReshardPlan(ctx, t.cm, t.req, t.req.GetPlan(), t.source, t.target, t.metrics, t.progress)
 }
