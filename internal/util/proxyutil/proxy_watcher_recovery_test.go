@@ -377,38 +377,78 @@ func TestProxyWatcher_StopDuringInitialList(t *testing.T) {
 	require.NoError(t, ctx.Err())
 }
 
-func TestProxyWatcher_SnapshotTimeoutAborts(t *testing.T) {
+func TestProxyWatcher_SnapshotTimeoutRecovery(t *testing.T) {
 	paramtable.Init()
 	key := paramtable.Get().EtcdCfg.RequestTimeout.Key
 	old := paramtable.Get().EtcdCfg.RequestTimeout.GetValue()
 	require.NoError(t, paramtable.Get().Save(key, "100"))
 	t.Cleanup(func() { paramtable.Get().Save(key, old) })
-	blockUntilTimeout := func(ctx context.Context, _ int32) (*etcdserverpb.RangeResponse, error) {
-		<-ctx.Done()
-		return nil, ctx.Err()
+	for _, tc := range []struct {
+		name        string
+		timeoutCall int32
+		grpcTimeout bool
+	}{
+		{name: "initial", timeoutCall: 1},
+		{name: "recovery", timeoutCall: 2},
+		{name: "initial_grpc_deadline", timeoutCall: 1, grpcTimeout: true},
+		{name: "recovery_grpc_deadline", timeoutCall: 2, grpcTimeout: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			t.Cleanup(cancel)
+			requestDeadline := make(chan time.Time, 1)
+			retryStarted := make(chan time.Time, 1)
+			cli, service := newProxyRecoveryClient(t, func(ctx context.Context, call int32) (*etcdserverpb.RangeResponse, error) {
+				if call == tc.timeoutCall {
+					if tc.grpcTimeout {
+						// A server deadline can arrive before the local request
+						// context expires, leaving a raw gRPC status in clientv3.
+						requestDeadline <- time.Now()
+						return nil, status.Error(codes.DeadlineExceeded, "snapshot request timed out")
+					}
+					deadline, _ := ctx.Deadline()
+					requestDeadline <- deadline
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				if call == tc.timeoutCall+1 {
+					retryStarted <- time.Now()
+				}
+				return proxySnapshot(), nil
+			})
+			var snapshots [][]int64
+			var added []int64
+			p := NewProxyWatcher(cli, func(sessions []*sessionutil.Session) {
+				var ids []int64
+				for _, session := range sessions {
+					ids = append(ids, session.ServerID)
+				}
+				snapshots = append(snapshots, ids)
+			})
+			p.AddSessionFunc(func(session *sessionutil.Session) {
+				added = append(added, session.ServerID)
+				cancel()
+			})
+			t.Cleanup(p.Stop)
+			events, err := p.listAndWatch(ctx)
+			require.NoError(t, err)
+			// Run the loop on this goroutine so a regression reports a test
+			// failure instead of terminating the entire test process.
+			require.NotPanics(t, func() { p.startWatchEtcd(ctx, events) })
+			require.Equal(t, [][]int64{{200}, {200}}, snapshots)
+			require.Equal(t, []int64{201}, added, "watch must deliver events after recovering")
+			require.EqualValues(t, 3, service.rangeCalls.Load())
+			// Allow for transport overhead in the server's propagated deadline.
+			require.GreaterOrEqual(t, (<-retryStarted).Sub(<-requestDeadline), 150*time.Millisecond,
+				"a request timeout must use the recovery backoff")
+			require.Len(t, service.watchRequests, 2)
+			for range 2 {
+				req := <-service.watchRequests
+				require.EqualValues(t, 21, req.StartRevision, "watch must resume after the snapshot revision")
+				require.True(t, req.PrevKv)
+			}
+		})
 	}
-
-	t.Run("initial", func(t *testing.T) {
-		cli, service := newProxyRecoveryClient(t, blockUntilTimeout)
-		p := NewProxyWatcher(cli)
-		t.Cleanup(p.Stop)
-		err := p.WatchProxy(context.Background())
-		// Depending on which deadline fires first, clientv3 returns the local
-		// context error or the server's gRPC DeadlineExceeded status.
-		if status.Code(err) != codes.DeadlineExceeded {
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-		}
-		require.EqualValues(t, 1, service.rangeCalls.Load(), "a snapshot timeout must not be retried")
-	})
-	t.Run("recovery", func(t *testing.T) {
-		cli, service := newProxyRecoveryClient(t, blockUntilTimeout)
-		p := NewProxyWatcher(cli)
-		t.Cleanup(p.Stop)
-		events := make(chan clientv3.WatchResponse, 1)
-		events <- clientv3.WatchResponse{CompactRevision: 1}
-		require.Panics(t, func() { p.startWatchEtcd(context.Background(), events) })
-		require.EqualValues(t, 1, service.rangeCalls.Load(), "a snapshot timeout must not be retried")
-	})
 }
 
 func TestProxyWatcher_RetryInitialSnapshot(t *testing.T) {
@@ -440,6 +480,62 @@ func TestProxyWatcher_RetryInitialSnapshot(t *testing.T) {
 	}
 	require.EqualValues(t, 3, service.rangeCalls.Load(), "two initial attempts, then one resnapshot after compaction")
 	require.NoError(t, ctx.Err())
+}
+
+func TestProxyWatcher_SnapshotTimeoutParentDeadline(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().EtcdCfg.RequestTimeout.Key
+	old := paramtable.Get().EtcdCfg.RequestTimeout.GetValue()
+	require.NoError(t, paramtable.Get().Save(key, "100"))
+	t.Cleanup(func() { paramtable.Get().Save(key, old) })
+
+	for _, recovery := range []bool{false, true} {
+		name := "initial"
+		if recovery {
+			name = "recovery"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+			t.Cleanup(cancel)
+			cli, service := newProxyRecoveryClient(t, func(ctx context.Context, _ int32) (*etcdserverpb.RangeResponse, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+			p := NewProxyWatcher(cli)
+			t.Cleanup(p.Stop)
+			if recovery {
+				events := make(chan clientv3.WatchResponse, 1)
+				events <- clientv3.WatchResponse{CompactRevision: 1}
+				require.NotPanics(t, func() { p.startWatchEtcd(ctx, events) })
+			} else {
+				require.ErrorIs(t, p.WatchProxy(ctx), context.DeadlineExceeded)
+			}
+			require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded, "only the parent deadline may end recovery")
+			require.GreaterOrEqual(t, service.rangeCalls.Load(), int32(2), "request deadlines must be retried")
+		})
+	}
+}
+
+func TestProxyWatcher_InvalidSnapshotAborts(t *testing.T) {
+	paramtable.Init()
+	cli, service := newProxyRecoveryClient(t, func(context.Context, int32) (*etcdserverpb.RangeResponse, error) {
+		response := proxySnapshot()
+		response.Kvs[0].Value = []byte(`{"ServerID":`)
+		return response, nil
+	})
+	p := NewProxyWatcher(cli)
+	t.Cleanup(p.Stop)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	require.Error(t, p.WatchProxy(ctx))
+	require.NoError(t, ctx.Err(), "invalid session data must abort before the parent deadline")
+	require.EqualValues(t, 1, service.rangeCalls.Load())
+
+	events := make(chan clientv3.WatchResponse, 1)
+	events <- clientv3.WatchResponse{CompactRevision: 1}
+	require.Panics(t, func() { p.startWatchEtcd(ctx, events) })
+	require.NoError(t, ctx.Err())
+	require.EqualValues(t, 2, service.rangeCalls.Load(), "invalid session data must not be retried")
 }
 
 func TestProxyWatcher_RecoveryPermissionDenied(t *testing.T) {
