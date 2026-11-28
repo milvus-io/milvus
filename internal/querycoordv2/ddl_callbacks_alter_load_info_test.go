@@ -99,8 +99,8 @@ func TestLoadCallbacksRecordDemandAfterBroadcast(t *testing.T) {
 				bapi.EXPECT().Close().Return().Once()
 				mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(bapi, nil).Build()
 
-				memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName)
-				diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName)
+				memoryCounter := metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
+				diskCounter := metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(meta.DefaultResourceGroupName, metrics.LoadDemandSourceLoad)
 				memoryBefore := testutil.ToFloat64(memoryCounter)
 				diskBefore := testutil.ToFloat64(diskCounter)
 				broadcastErr := errors.New("broadcast failed")

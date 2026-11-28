@@ -271,18 +271,39 @@ responsible for those node-level decisions.
 
 ### Demand metrics
 
-QueryCoord exposes two counters, each with the single application label `rg`:
+QueryCoord exposes two counters with the application labels `rg` and `source`:
 
 | Metric | Meaning |
 |---|---|
-| `milvus_querycoord_load_demand_memory_bytes` | Cumulative accepted incremental memory demand whose load-config broadcast returned success. |
-| `milvus_querycoord_load_demand_disk_bytes` | Cumulative accepted incremental local-disk demand whose load-config broadcast returned success. |
+| `milvus_querycoord_load_demand_memory_bytes` | Cumulative estimated incremental memory demand. |
+| `milvus_querycoord_load_demand_disk_bytes` | Cumulative estimated incremental local-disk demand. |
 
-A counter increases only when precheck produces positive accepted demand and
+`source="load"` increases when precheck produces positive accepted demand and
 the broadcast succeeds. Disabled checks, unchanged configurations, zero demand,
 metadata or estimation failures, resource rejections, and failed broadcasts
 produce no increment. Fail-open requests caused by unavailable capacity metrics
 retain their estimated demand and increment counters after successful broadcast.
+
+`source="import"` records demand for imported segments in DataView.
+`publishImportDataView` acquires a reference to the resulting snapshot before
+releasing the publication lock.
+QueryCoord uses shared in-memory collection metadata and the public load-state
+readiness criterion to check the collection's load state. If any configured
+replica lacks an Up view for a shard at the current load-config version, the
+callback skips the estimate. A later readiness transition does not replay the
+skipped demand. For a loaded collection, the commit callback filters the
+current job's outputs against the
+referenced snapshot after releasing the DataView publication lock. Candidates
+include task output IDs and sort candidates. Staged imports, including CDC,
+also include the members of the job's committed groups. After saving
+`Completed`, the callback synchronously calls the QueryCoord recorder once
+with the selected IDs. The estimate uses the
+selected segments and finished indexes, applies partitions and preload fields
+from the load configuration obtained by the readiness check, and attributes
+demand to each configured replica's RG.
+`precheckEnabled` enables this estimate. Import demand recording is best-effort
+and does not check capacity or affect the commit decision.
+
 Load completion and release do not decrement the counters.
 
 Default and named RG series are initialized at zero during registration and
@@ -296,8 +317,8 @@ to avoid acting repeatedly on the same demand or counting demand already
 reflected in usage. Overlapping rolling-window queries are not a one-time
 consumption protocol.
 
-Counters are best-effort telemetry. A process failure between broadcast,
-recording, and scraping can lose an observation; the metric is not a durable
+Counters are best-effort telemetry. A process failure between committing,
+recording, and scraping can lose an observation. They do not provide a durable
 event log or a ledger of outstanding loads.
 
 ### Failure and response semantics

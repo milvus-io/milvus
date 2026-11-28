@@ -52,24 +52,22 @@ func TestRegisterMetrics(t *testing.T) {
 }
 
 func TestRegisterQueryCoordInitializesLoadDemandMetrics(t *testing.T) {
-	QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
-	QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
-	t.Cleanup(func() {
-		QueryCoordLoadDemandMemoryBytes.DeleteLabelValues(common.DefaultResourceGroupName)
-		QueryCoordLoadDemandDiskBytes.DeleteLabelValues(common.DefaultResourceGroupName)
-	})
+	DeleteQueryCoordLoadDemand(common.DefaultResourceGroupName)
+	t.Cleanup(func() { DeleteQueryCoordLoadDemand(common.DefaultResourceGroupName) })
 
 	registry := prometheus.NewRegistry()
 	RegisterQueryCoord(registry)
 
 	require.NoError(t, testutil.GatherAndCompare(
 		registry,
-		strings.NewReader(`# HELP milvus_querycoord_load_demand_disk_bytes cumulative estimated disk bytes required by load configuration changes successfully broadcast after resource precheck
+		strings.NewReader(`# HELP milvus_querycoord_load_demand_disk_bytes cumulative estimated disk bytes required by accepted load demand
 # TYPE milvus_querycoord_load_demand_disk_bytes counter
-milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group"} 0
-# HELP milvus_querycoord_load_demand_memory_bytes cumulative estimated memory bytes required by load configuration changes successfully broadcast after resource precheck
+milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group",source="import"} 0
+milvus_querycoord_load_demand_disk_bytes{rg="__default_resource_group",source="load"} 0
+# HELP milvus_querycoord_load_demand_memory_bytes cumulative estimated memory bytes required by accepted load demand
 # TYPE milvus_querycoord_load_demand_memory_bytes counter
-milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group"} 0
+milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group",source="import"} 0
+milvus_querycoord_load_demand_memory_bytes{rg="__default_resource_group",source="load"} 0
 `),
 		"milvus_querycoord_load_demand_memory_bytes",
 		"milvus_querycoord_load_demand_disk_bytes",

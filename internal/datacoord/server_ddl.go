@@ -40,7 +40,7 @@ func RegisterDDLCallbacks(s *Server) {
 func newDDLCallbacks(s *Server) *ddl.Callbacks {
 	return &ddl.Callbacks{Deps: ddl.Deps{
 		Meta:                             s.meta,
-		RefreshDataView:                  s.RefreshDataView,
+		RefreshImportDataView:            s.refreshImportDataView,
 		ImportMeta:                       s.importMeta,
 		IndexMeta:                        s.indexMeta,
 		SnapshotMeta:                     s.snapshotMeta,
@@ -50,5 +50,6 @@ func newDDLCallbacks(s *Server) *ddl.Callbacks {
 		NotifyIndexChan:                  s.notifyIndexChan,
 		CreateImportJobFromAck:           s.createImportJobFromAck,
 		StageImportChange:                s.stageImportChangeFromSource,
+		GetImportLoadDemandRecorder:      s.getImportLoadDemandRecorder,
 	}}
 }

@@ -55,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -930,7 +929,7 @@ func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAs
 }
 
 func newTestImportMeta(t *testing.T) (bulkimport.ImportMeta, *mocks.DataCoordCatalog) {
-	publication := mockey.Mock((*Server).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+	publication := mockey.Mock((*Server).refreshImportDataView).Return(nil, nil).Build()
 	t.Cleanup(func() { publication.UnPatch() })
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()

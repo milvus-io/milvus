@@ -7862,8 +7862,18 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 		SegmentId: 105,
 	}, nil, nil, nil)
 	importMetaMock := bulkimport.NewMockImportMeta(t)
-	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).
-		Return([]bulkimport.ImportTask{completed, running})
+	tasks := []bulkimport.ImportTask{completed, running}
+	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, jobID, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, filters ...bulkimport.ImportTaskFilter) []bulkimport.ImportTask {
+			return lo.Filter(tasks, func(task bulkimport.ImportTask, _ int) bool {
+				for _, filter := range filters {
+					if !filter(task) {
+						return false
+					}
+				}
+				return true
+			})
+		})
 
 	store := metacache.NewMetaStore(nil)
 	segments := meta.NewSegmentsInfo(store)

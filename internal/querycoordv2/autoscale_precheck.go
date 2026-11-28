@@ -28,11 +28,15 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/autoscale"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -240,11 +244,69 @@ func (s *Server) evaluateLoadResource(ctx context.Context, req *job.AlterLoadCon
 	return requiredByRG, nil
 }
 
-func recordLoadResourceDemand(requiredByRG map[string]autoscaleResourceUsage) {
+func recordLoadResourceDemand(source string, requiredByRG map[string]autoscaleResourceUsage) {
 	for rgName, usage := range requiredByRG {
-		metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName).Add(float64(usage.memoryBytes))
-		metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName).Add(float64(usage.diskBytes))
+		metrics.QueryCoordLoadDemandMemoryBytes.WithLabelValues(rgName, source).Add(float64(usage.memoryBytes))
+		metrics.QueryCoordLoadDemandDiskBytes.WithLabelValues(rgName, source).Add(float64(usage.diskBytes))
 	}
+}
+
+// GetImportLoadDemandRecorder binds the current load config for a loaded
+// collection. A nil recorder lets DataCoord skip collecting segment IDs.
+func (s *Server) GetImportLoadDemandRecorder(ctx context.Context, collectionID int64) func([]int64) {
+	store := s.qviewsRuntime.loadConfigStore
+	if !store.Contains(collectionID) {
+		return nil
+	}
+	collection, err := s.meta.GetCollectionInfo(collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to check collection load state for import demand", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		return nil
+	}
+	progress := loadstatus.Get(store, s.qviewsRuntime.shardViewRegistry, collectionID, collection.VChannelNames)
+	if !progress.Ready() {
+		return nil
+	}
+	return func(segmentIDs []int64) {
+		ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		requiredByRG, err := s.requiredImportLoadResourceByRG(ctx, collection, progress.Config, segmentIDs)
+		if err != nil {
+			mlog.Warn(ctx, "failed to estimate import load demand", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			return
+		}
+		recordLoadResourceDemand(metrics.LoadDemandSourceImport, requiredByRG)
+	}
+}
+
+func (s *Server) requiredImportLoadResourceByRG(ctx context.Context, collection *metacache.CollectionInfo, config *loadmgr.LoadConfig, segmentIDs []int64) (map[string]autoscaleResourceUsage, error) {
+	segments, err := s.broker.GetSegmentInfo(ctx, segmentIDs...)
+	if err != nil {
+		return nil, err
+	}
+	segments = filterSegmentsByPartitionIDs(segments, typeutil.NewUniqueSet(config.PartitionIDs...))
+	if len(segments) == 0 {
+		return nil, nil
+	}
+	segmentIDs = lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	})
+	indexes, err := getIndexInfoBySegments(ctx, s.broker, collection.ID, segmentIDs)
+	if err != nil {
+		return nil, err
+	}
+	// The estimator interprets an empty field list as all fields. A load
+	// configuration with no preload fields still includes the system fields.
+	loadFields := append(qviewsLoadFieldIDs(config), common.RowIDField, common.TimeStampField)
+	usage, err := estimateLoadResourceForLoadConfig(ctx, collection.Schema, collection.Properties, segments, indexes, loadFields)
+	if err != nil || usage.isZero() {
+		return nil, err
+	}
+	replicasByRG := make(map[string]int)
+	for _, replica := range config.Replicas {
+		replicasByRG[replica.ResourceGroup]++
+	}
+	return buildRequiredLoadResourceByRG(usage, replicasByRG), nil
 }
 
 func resourceUsageByRGToMB(usages map[string]autoscaleResourceUsage) map[string]map[string]float64 {
