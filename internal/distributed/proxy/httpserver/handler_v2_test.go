@@ -5530,6 +5530,177 @@ func TestQueryOrderByFields(t *testing.T) {
 	assert.Equal(t, []string{"word_count:desc,book_id:asc"}, orderByValues)
 }
 
+func TestRESTV2QueryDefaultLimit(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	queryDefaultLimit := &params.HTTPCfg.QueryDefaultLimit
+	quotaEnabled := &params.QuotaConfig.QuotaAndLimitsEnabled
+	originalLimit, originalQuota := queryDefaultLimit.GetValue(), quotaEnabled.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, params.Save(queryDefaultLimit.Key, originalLimit))
+		assert.NoError(t, params.Save(quotaEnabled.Key, originalQuota))
+	})
+	require.NoError(t, params.Reset(queryDefaultLimit.Key))
+	require.Equal(t, int32(-1), queryDefaultLimit.GetAsInt32())
+	require.NoError(t, params.Save(quotaEnabled.Key, "false"))
+
+	const omitted = `{"collectionName":"book","filter":"book_id > 0"}`
+	const explicit = `{"collectionName":"book","filter":"book_id > 0","limit":10}`
+	for _, tc := range []struct {
+		name         string
+		defaultLimit string
+		body         string
+		wantLimits   []string
+	}{
+		{name: "omitted by default", body: omitted},
+		{name: "omitted with default 100", defaultLimit: "100", body: omitted, wantLimits: []string{"100"}},
+		{name: "omitted with default 200", defaultLimit: "200", body: omitted, wantLimits: []string{"200"}},
+		{name: "out-of-range default", defaultLimit: "4294967396", body: omitted},
+		{name: "explicit by default", body: explicit, wantLimits: []string{"10"}},
+		{name: "explicit with default 100", defaultLimit: "100", body: explicit, wantLimits: []string{"10"}},
+		{name: "zero with default 100", defaultLimit: "100", body: `{"collectionName":"book","filter":"book_id > 0","limit":0}`},
+		{name: "count with default 100", defaultLimit: "100", body: `{"collectionName":"book","outputFields":["count(*)"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.defaultLimit != "" {
+				require.NoError(t, params.Save(queryDefaultLimit.Key, tc.defaultLimit))
+				t.Cleanup(func() { assert.NoError(t, params.Reset(queryDefaultLimit.Key)) })
+			}
+			mp := mocks.NewMockProxy(t)
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				CollectionName: DefaultCollectionName,
+				Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+				Status:         &StatusSuccess,
+			}, nil).Once()
+			var limits []string
+			mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+				for _, param := range req.GetQueryParams() {
+					if param.GetKey() == proxy.LimitKey {
+						limits = append(limits, param.GetValue())
+					}
+				}
+				return &milvuspb.QueryResults{Status: commonSuccessStatus}, nil
+			}).Once()
+			validateTestCases(t, initHTTPServerV2(mp, false), []requestBodyTestCase{{
+				path:        QueryAction,
+				requestBody: []byte(tc.body),
+			}}, false)
+			assert.Equal(t, tc.wantLimits, limits)
+		})
+	}
+}
+
+func TestRESTV2SearchDefaultLimit(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	searchDefaultLimit := &params.HTTPCfg.SearchDefaultLimit
+	quotaEnabled := &params.QuotaConfig.QuotaAndLimitsEnabled
+	originalLimit, originalQuota := searchDefaultLimit.GetValue(), quotaEnabled.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, params.Save(searchDefaultLimit.Key, originalLimit))
+		assert.NoError(t, params.Save(quotaEnabled.Key, originalQuota))
+	})
+	require.NoError(t, params.Reset(searchDefaultLimit.Key))
+	require.Equal(t, -1, searchDefaultLimit.GetAsInt())
+	require.NoError(t, params.Save(quotaEnabled.Key, "false"))
+
+	checkLimit := func(t *testing.T, pairs []*commonpb.KeyValuePair, key, want string) {
+		t.Helper()
+		var values []string
+		for _, pair := range pairs {
+			if pair.GetKey() == key {
+				values = append(values, pair.GetValue())
+			}
+		}
+		if want == "" {
+			assert.Empty(t, values, key)
+			return
+		}
+		assert.Equal(t, []string{want}, values, key)
+	}
+	for _, tc := range []struct {
+		name         string
+		defaultLimit string
+		limit        any
+		subLimit     any
+		flatTopK     int
+		wantSearch   string
+		wantRank     string
+		wantSub      string
+	}{
+		{name: "omitted"},
+		{name: "omitted with default 100", defaultLimit: "100", wantSearch: "100", wantRank: "100"},
+		{name: "explicit with default 100", defaultLimit: "100", limit: 10, subLimit: 20, wantSearch: "10", wantRank: "10", wantSub: "20"},
+		{name: "explicit zero", defaultLimit: "100", limit: 0, subLimit: 0, wantSearch: "0", wantRank: "0", wantSub: "0"},
+		{name: "explicit negative", defaultLimit: "100", limit: -1, subLimit: -1, wantSearch: "-1", wantRank: "-1", wantSub: "-1"},
+		{name: "flat topk with default 100", defaultLimit: "100", flatTopK: 7, wantSearch: "7", wantRank: "100", wantSub: "7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.defaultLimit != "" {
+				require.NoError(t, params.Save(searchDefaultLimit.Key, tc.defaultLimit))
+				t.Cleanup(func() { assert.NoError(t, params.Reset(searchDefaultLimit.Key)) })
+			}
+			for _, action := range []string{SearchAction, HybridSearchAction, AdvancedSearchAction} {
+				t.Run(action, func(t *testing.T) {
+					mp := mocks.NewMockProxy(t)
+					mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+						Status: commonSuccessStatus,
+						Schema: generateCollectionSchema(schemapb.DataType_Int64, false, true),
+					}, nil).Once()
+					body := gin.H{"collectionName": "book"}
+					if tc.limit != nil {
+						body["limit"] = tc.limit
+					}
+					vectors := [][]float32{{0.1, 0.2}}
+					result := &milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{}}
+					var search *milvuspb.SearchRequest
+					var hybrid *milvuspb.HybridSearchRequest
+					if action == SearchAction {
+						body["data"] = vectors
+						body["annsField"] = FieldBookIntro
+						if tc.flatTopK != 0 {
+							body["searchParams"] = gin.H{"topk": tc.flatTopK}
+						}
+						mp.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+							search = req
+							return result, nil
+						}).Once()
+					} else {
+						subSearch := gin.H{"data": vectors, "annsField": FieldBookIntro}
+						if tc.subLimit != nil {
+							subSearch["limit"] = tc.subLimit
+						}
+						if tc.flatTopK != 0 {
+							subSearch["params"] = gin.H{"topk": tc.flatTopK}
+						}
+						body["search"] = []gin.H{subSearch}
+						body["rerank"] = gin.H{"strategy": "rrf", "params": gin.H{"k": 60}}
+						mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+							hybrid = req
+							return result, nil
+						}).Once()
+					}
+					payload, err := json.Marshal(body)
+					require.NoError(t, err)
+					validateTestCases(t, initHTTPServerV2(mp, false), []requestBodyTestCase{{
+						path:        action,
+						requestBody: payload,
+					}}, false)
+					if action == SearchAction {
+						require.NotNil(t, search)
+						checkLimit(t, search.GetSearchParams(), common.TopKKey, tc.wantSearch)
+						return
+					}
+					require.NotNil(t, hybrid)
+					checkLimit(t, hybrid.GetRankParams(), proxy.LimitKey, tc.wantRank)
+					require.Len(t, hybrid.GetRequests(), 1)
+					checkLimit(t, hybrid.GetRequests()[0].GetSearchParams(), common.TopKKey, tc.wantSub)
+				})
+			}
+		})
+	}
+}
+
 func TestQueryGroupByFields(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -5569,8 +5740,6 @@ func TestQueryGroupByFields(t *testing.T) {
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "limit": 10}`),
 		},
 		{
-			// Global mixed count aggregates keep master behavior: REST forwards its
-			// default limit and Proxy rejects count(*) pagination.
 			path:        QueryAction,
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)", "sum(word_count)"]}`),
 		},
@@ -5586,18 +5755,19 @@ func TestQueryGroupByFields(t *testing.T) {
 
 	require.Len(t, queryParams, 6)
 	assert.Equal(t, "word_count,book_id", queryParams[0][proxy.GroupByFieldsKey])
-	assert.Equal(t, "100", queryParams[0][proxy.LimitKey])
+	assert.NotContains(t, queryParams[0], proxy.LimitKey)
 	assert.Equal(t, "word_count", queryParams[1][proxy.GroupByFieldsKey])
 	assert.Equal(t, "10", queryParams[1][proxy.LimitKey])
 	assert.Equal(t, "2", queryParams[1][proxy.OffsetKey])
 	assert.NotContains(t, queryParams[2], proxy.GroupByFieldsKey)
 	assert.NotContains(t, queryParams[2], proxy.LimitKey)
 	assert.NotContains(t, queryParams[3], proxy.GroupByFieldsKey)
-	assert.Equal(t, "100", queryParams[3][proxy.LimitKey])
+	assert.NotContains(t, queryParams[3], proxy.LimitKey)
 	assert.Equal(t, "word_count", queryParams[4][proxy.GroupByFieldsKey])
 	assert.Equal(t, "10", queryParams[4][proxy.LimitKey])
 	assert.Equal(t, "word_count", queryParams[5][proxy.GroupByFieldsKey])
 	assert.Equal(t, "word_count:asc", queryParams[5][proxy.OrderByFieldsKey])
+	assert.NotContains(t, queryParams[5], proxy.LimitKey)
 }
 
 func TestSearchOrderByFields(t *testing.T) {

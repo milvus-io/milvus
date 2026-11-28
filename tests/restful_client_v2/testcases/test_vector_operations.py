@@ -2610,13 +2610,13 @@ class TestSearchVector(TestBase):
         payload = {
             "collectionName": name,
             "data": [vector_to_search],
+            "limit": 100,
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp["code"] == 0
         res = rsp["data"]
         logger.info(f"res: {len(res)}")
-        limit = int(payload.get("limit", 100))
-        assert len(res) == limit
+        assert len(res) == payload["limit"]
         ids = [item["id"] for item in res]
         assert len(ids) == len(set(ids))
         distance = [item["distance"] for item in res]
@@ -3055,7 +3055,13 @@ class TestSearchVector(TestBase):
             expr = f"text_match({field}, '{token}')"
             logger.info(f"expr: {expr}")
             rsp = self.vector_client.vector_search(
-                {"collectionName": name, "data": vector_to_search, "filter": f"{expr}", "outputFields": ["*"]}
+                {
+                    "collectionName": name,
+                    "data": vector_to_search,
+                    "filter": f"{expr}",
+                    "outputFields": ["*"],
+                    "limit": 100,
+                }
             )
             assert rsp["code"] == 0, rsp
             for d in rsp["data"]:
@@ -3185,7 +3191,13 @@ class TestSearchVector(TestBase):
             expr = f"phrase_match({field}, '{phrase}')"
             logger.info(f"expr: {expr}")
             rsp = self.vector_client.vector_search(
-                {"collectionName": name, "data": vector_to_search, "filter": f"{expr}", "outputFields": ["*"]}
+                {
+                    "collectionName": name,
+                    "data": vector_to_search,
+                    "filter": f"{expr}",
+                    "outputFields": ["*"],
+                    "limit": 100,
+                }
             )
             assert rsp["code"] == 0, rsp
             for d in rsp["data"]:
@@ -3322,6 +3334,7 @@ class TestSearchVectorNegative(TestBase):
             "collectionName": name,
             "data": [preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()],
             "searchParams": {"metricType": invalid_metric_type},
+            "limit": 100,
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp["code"] != 0
@@ -5105,13 +5118,13 @@ class TestGetVector(TestBase):
         payload = {
             "collectionName": name,
             "data": [vector_to_search],
+            "limit": 100,
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp["code"] == 0
         res = rsp["data"]
         logger.info(f"res: {len(res)}")
-        limit = int(payload.get("limit", 100))
-        assert len(res) == limit
+        assert len(res) == payload["limit"]
         ids = [item["id"] for item in res]
         assert len(ids) == len(set(ids))
         payload = {

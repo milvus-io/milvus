@@ -121,6 +121,34 @@ class TestSearchOrderBy(TestBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize(
+        "method,error_code,error_message",
+        [
+            ("vector_search", 1101, "topk is required"),
+            ("vector_hybrid_search", 1100, "limit not found in rank_params"),
+            ("vector_advanced_search", 1100, "limit not found in rank_params"),
+        ],
+        ids=["search", "hybrid-search", "advanced-search"],
+    )
+    def test_search_requires_explicit_limit(self, method, error_code, error_message):
+        payload = {"collectionName": self.collection_name, "consistencyLevel": "Strong"}
+        search_request = {"data": [[1.0, 0.0]], "annsField": "vector"}
+        if method == "vector_search":
+            payload.update(search_request)
+        else:
+            payload["search"] = [{**search_request, "limit": len(ROWS)}]
+            payload["rerank"] = {"strategy": "rrf", "params": {"k": 60}}
+
+        search = getattr(self.vector_client, method)
+        rsp = search(payload)
+        assert rsp["code"] == error_code, rsp
+        assert error_message in rsp["message"], rsp
+
+        rsp = search({**payload, "limit": 2})
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) == 2
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize(
         "order_by,field_name,expected_values,expected_ids",
         [
             (["price"], "price", [5, 10, 20, 25, 30], [4, 2, 3, 5, 1]),

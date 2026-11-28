@@ -299,7 +299,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// Query
 	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
-			Limit:        100,
+			Limit:        max(0, paramtable.Get().HTTPCfg.QueryDefaultLimit.GetAsInt32()),
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.query))), true)))
@@ -323,21 +323,15 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
 	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
-		return &SearchReqV2{
-			Limit: 100,
-		}
+		return &SearchReqV2{}
 	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
 	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
-		return &HybridSearchReq{
-			Limit: 100,
-		}
+		return &HybridSearchReq{}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
 	// HybridSearch
 	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
-		return &HybridSearchReq{
-			Limit: 100,
-		}
+		return &HybridSearchReq{}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listPartitions))))
@@ -2187,6 +2181,20 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 	return params, nil
 }
 
+func appendSearchLimit(params []*commonpb.KeyValuePair, key string, limit *int32, fallback int32) []*commonpb.KeyValuePair {
+	// A flat topk in the search parameters has historically taken precedence.
+	if _, exists := funcutil.TryGetAttrByKeyFromRepeatedKV(key, params); exists {
+		return params
+	}
+	if limit == nil {
+		if fallback <= 0 {
+			return params
+		}
+		limit = &fallback
+	}
+	return append(params, &commonpb.KeyValuePair{Key: key, Value: strconv.FormatInt(int64(*limit), 10)})
+}
+
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
 	if err != nil {
@@ -2351,7 +2359,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		})
 		return nil, err
 	}
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
+	searchParams = appendSearchLimit(searchParams, common.TopKKey, httpReq.Limit, paramtable.Get().HTTPCfg.SearchDefaultLimit.GetAsInt32())
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {
@@ -2586,7 +2594,8 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			})
 			return nil, err
 		}
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
+		// The proxy derives an omitted sub-search topK from the rank limit and offset.
+		searchParams = appendSearchLimit(searchParams, common.TopKKey, subReq.Limit, 0)
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
 		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
@@ -2637,10 +2646,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
 		{Key: proxy.ParamsKey, Value: string(bs)},
-		{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
 		{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
 	}
+	req.RankParams = appendSearchLimit(req.RankParams, proxy.LimitKey, httpReq.Limit, paramtable.Get().HTTPCfg.SearchDefaultLimit.GetAsInt32())
 	if len(httpReq.FunctionChains) > 0 {
 		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})

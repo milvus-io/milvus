@@ -586,6 +586,8 @@ proxy:
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
     enableWebUI: true # Whether to enable setting the WebUI middleware on the metrics port
+    queryDefaultLimit: -1 # Default limit for REST v2 Query requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.
+    searchDefaultLimit: -1 # Default limit for REST v2 Search and HybridSearch requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.
   ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
   port: 19530 # TCP port of proxy
   internalPort: 19529

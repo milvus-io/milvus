@@ -268,24 +268,41 @@ class TestQueryOrderBy(TestBase):
         self._assert_expected_ids(rows, expected)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_query_order_by_default_limit(self):
+    def test_query_order_by_requires_explicit_limit(self):
         """
-        target: verify REST query applies the default limit when orderByFields omits limit
-        method: send orderByFields and omit limit
-        expected: request succeeds with 100 ordered rows
+        target: verify ORDER BY requires an explicit limit under the default REST settings
+        method: send orderByFields without a limit, then retry with an explicit limit of 100
+        expected: the first request is rejected and the second returns 100 ordered rows
         """
-        rows = self._query(
-            {
-                "collectionName": self.collection_name,
-                "filter": "id >= 0",
-                "outputFields": ["id", "score"],
-                "orderByFields": ["score:desc"],
-            }
-        )
+        payload = {
+            "collectionName": self.collection_name,
+            "filter": "id >= 0",
+            "outputFields": ["id", "score"],
+            "orderByFields": ["score:desc"],
+        }
+        rsp = self.vector_client.vector_query(payload)
+        assert rsp["code"] == 1100, rsp
+        assert "ORDER BY requires explicit limit" in rsp["message"], rsp
+
+        rows = self._query({**payload, "limit": 100})
         assert len(rows) == 100
         self._assert_ordered(rows, "score", descending=True)
         expected = _expected_rows(["score:desc"], limit=100)
         self._assert_expected_ids(rows, expected)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_without_filter_requires_explicit_limit(self):
+        """
+        target: verify an empty filter requires an explicit limit under the default REST settings
+        method: query without a filter or limit, then retry with a limit
+        expected: the first request is rejected and the second returns 10 rows
+        """
+        payload = {"collectionName": self.collection_name, "outputFields": ["id"]}
+        rsp = self.vector_client.vector_query(payload)
+        assert rsp["code"] == 1100, rsp
+        assert "empty expression should be used with limit" in rsp["message"], rsp
+
+        assert len(self._query({**payload, "limit": 10})) == 10
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_order_by_with_offset(self):

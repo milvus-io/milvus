@@ -313,19 +313,20 @@ class TestQueryAggregation(TestBase):
         assert rows == [{"count(*)": NB}]
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_global_mixed_count_aggregates_keep_legacy_limit_behavior(self):
+    def test_query_global_mixed_count_aggregates_without_limit(self):
         """
-        target: verify mixed global count aggregates retain the legacy REST default-limit behavior
-        method: query count(*) and sum(score) without groupByFields or an explicit limit
-        expected: Proxy rejects the REST default limit because global count(*) cannot use pagination
+        target: verify mixed global count aggregates work without pagination
+        method: query count(*) and sum(score) without a limit, then retry with an explicit limit
+        expected: the first request returns exact aggregates and the second rejects pagination
         """
-        rsp = self.vector_client.vector_query(
-            {
-                "collectionName": self.collection_name,
-                "filter": "id >= 0",
-                "outputFields": ["count(*)", "sum(score)"],
-            }
-        )
+        payload = {
+            "collectionName": self.collection_name,
+            "filter": "id >= 0",
+            "outputFields": ["count(*)", "sum(score)"],
+        }
+        assert self._query(payload) == _expected_grouped_rows([])
+
+        rsp = self.vector_client.vector_query({**payload, "limit": 100})
         assert rsp["code"] == 1100, rsp
         assert "count entities with pagination is not allowed" in rsp["message"], rsp
 
