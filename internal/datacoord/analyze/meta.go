@@ -58,21 +58,23 @@ func (m *AnalyzeMeta) reloadFromKV() error {
 	record := timerecord.NewTimeRecorder("analyzeMeta-reloadFromKV")
 
 	// load analyze stats
-	analyzeTasks, err := m.Catalog.ListAnalyzeTasks(m.Ctx)
+	listed, err := m.Catalog.List(m.Ctx, metastore.AnalyzeTaskType, nil, metastore.ListOptions{})
 	if err != nil {
 		mlog.Warn(m.Ctx, "analyzeMeta reloadFromKV load analyze tasks failed", mlog.Err(err))
 		return err
 	}
 
-	for _, analyzeTask := range analyzeTasks {
-		m.Tasks[analyzeTask.TaskID] = analyzeTask
+	// List returns values of the type's Go type only.
+	for _, v := range listed.Values {
+		task := v.(*indexpb.AnalyzeTask)
+		m.Tasks[task.GetTaskID()] = task
 	}
 	mlog.Info(m.Ctx, "analyzeMeta reloadFromKV done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
 func (m *AnalyzeMeta) saveTask(newTask *indexpb.AnalyzeTask) error {
-	if err := m.Catalog.SaveAnalyzeTask(m.Ctx, newTask); err != nil {
+	if err := m.Catalog.Update(m.Ctx, metastore.SaveAnalyzeTask(newTask)); err != nil {
 		return err
 	}
 	m.Tasks[newTask.TaskID] = newTask

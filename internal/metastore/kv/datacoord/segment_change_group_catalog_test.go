@@ -56,9 +56,8 @@ func newMemoryMetaKv() *memoryMetaKv {
 	return &memoryMetaKv{values: make(map[string]string)}
 }
 
-// TestCatalog_SegmentChangeGroupLifecycle verifies the composite Update entry
-// encoding and the List/Drop catalog methods used for recovery and collection
-// drop.
+// TestCatalog_SegmentChangeGroupLifecycle verifies the encoding of group
+// saves and deletes through Update and the List used for recovery.
 func TestCatalog_SegmentChangeGroupLifecycle(t *testing.T) {
 	ctx := context.Background()
 	backing := newMemoryMetaKv()
@@ -90,24 +89,13 @@ func TestCatalog_SegmentChangeGroupLifecycle(t *testing.T) {
 			}
 			return nil
 		})
-	metakv.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, prefix string) error {
-			backing.mu.Lock()
-			defer backing.mu.Unlock()
-			for k := range backing.values {
-				if strings.HasPrefix(k, prefix) {
-					delete(backing.values, k)
-				}
-			}
-			return nil
-		})
 
 	catalog := NewCatalog(metakv, "", "")
 
 	group := newTestCatalogGroup()
 	require.NoError(t, catalog.Update(ctx, metastore.SaveSegmentChangeGroup(group)))
 
-	groups, err := catalog.ListSegmentChangeGroups(ctx)
+	groups, err := listTestGroups(ctx, catalog)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	require.Equal(t, group, groups[0])
@@ -116,24 +104,24 @@ func TestCatalog_SegmentChangeGroupLifecycle(t *testing.T) {
 	ready := group.Clone()
 	ready.State = model.SegmentChangeStateReady
 	require.NoError(t, catalog.Update(ctx, metastore.SaveSegmentChangeGroup(ready)))
-	groups, err = catalog.ListSegmentChangeGroups(ctx)
+	groups, err = listTestGroups(ctx, catalog)
 	require.NoError(t, err)
 	require.Equal(t, model.SegmentChangeStateReady, groups[0].State)
 
-	// Collection-scoped delete removes every group of the collection.
+	// A delete removes that one group.
 	other := newTestCatalogGroup()
 	other.GroupID = 2
 	other.CollectionID = 11
 	require.NoError(t, catalog.Update(ctx, metastore.SaveSegmentChangeGroup(other)))
-	require.NoError(t, catalog.DropSegmentChangeGroups(ctx, 10))
-	groups, err = catalog.ListSegmentChangeGroups(ctx)
+	require.NoError(t, catalog.Update(ctx, metastore.DeleteSegmentChangeGroup(10, ready.GroupID)))
+	groups, err = listTestGroups(ctx, catalog)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	require.Equal(t, int64(11), groups[0].CollectionID)
 
 	// Per-record delete.
 	require.NoError(t, catalog.Update(ctx, metastore.DeleteSegmentChangeGroup(11, 2)))
-	groups, err = catalog.ListSegmentChangeGroups(ctx)
+	groups, err = listTestGroups(ctx, catalog)
 	require.NoError(t, err)
 	require.Empty(t, groups)
 }
@@ -178,10 +166,10 @@ func TestCatalog_SegmentChangeGroupCorruptValueFailsClosed(t *testing.T) {
 	catalog := NewCatalog(metakv, "", "")
 	require.NoError(t, catalog.Update(ctx, metastore.SaveSegmentChangeGroup(newTestCatalogGroup())))
 	backing.mu.Lock()
-	backing.values[buildSegmentChangeGroupKey(99, 1)] = "not-json"
+	backing.values[scgKey("99/1")] = "not-json"
 	backing.mu.Unlock()
 
-	_, err := catalog.ListSegmentChangeGroups(ctx)
+	_, err := listTestGroups(ctx, catalog)
 	require.Error(t, err, "a malformed persisted group must fail recovery, not be skipped")
 }
 

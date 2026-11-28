@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -234,6 +236,25 @@ func (kv *etcdKV) Load(ctx context.Context, key string) (string, error) {
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation load", mlog.String("key", key))
 	return string(resp.Kvs[0].Value), nil
+}
+
+// LoadWithRevision returns the value of key and the revision it was read
+// at, the revision of the whole store rather than of the key. A missing key
+// fails with an error matching merr.ErrIoKeyNotFound.
+func (kv *etcdKV) LoadWithRevision(ctx context.Context, key string) (string, int64, error) {
+	start := time.Now()
+	key = kv.GetPath(key)
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	defer cancel()
+	resp, err := kv.getEtcdMeta(ctx1, key)
+	if err != nil {
+		return "", 0, err
+	}
+	if resp.Count <= 0 {
+		return "", 0, merr.WrapErrIoKeyNotFound(key)
+	}
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation load", mlog.String("key", key))
+	return string(resp.Kvs[0].Value), resp.Header.GetRevision(), nil
 }
 
 // LoadBytes returns value of the key.
@@ -506,7 +527,7 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and remove", mlog.Strings("keys", keys))
 	if !resp.Succeeded {
 		mlog.Warn(context.TODO(), "failed to executeTxn", mlog.Any("resp", resp))
-		return merr.WrapErrIoFailedReason("failed to execute transaction")
+		return errors.Mark(merr.WrapErrIoFailedReason("failed to execute transaction"), predicates.ErrNotMet)
 	}
 	return nil
 }
@@ -568,6 +589,73 @@ func (kv *etcdKV) WatchWithRevision(ctx context.Context, key string, revision in
 	return rch
 }
 
+// WalkPrefixPage reads one page of the keys under prefix: up to limit keys
+// (0: no limit, as for WalkWithPrefix's paginationSize) after the key after
+// (relative to the root path; "" starts at the prefix), in ascending key order, at revision (0 reads the latest). It passes
+// relative keys to fn and returns the revision it read and whether more keys
+// follow. A walk over several pages passes the first page's revision to the
+// later ones, so every page reads one snapshot. If etcd has compacted
+// revision, the read fails with an merr IO failure that errors.Is also
+// matches to kv.ErrCompacted.
+func (kv *etcdKV) WalkPrefixPage(ctx context.Context, prefix, after string, limit int, revision int64,
+	fn func(key, value []byte) error,
+) (int64, bool, error) {
+	start := time.Now()
+	fullPrefix := kv.GetPath(prefix)
+	from := fullPrefix
+	if after != "" {
+		from = kv.GetPath(after) + "\x00"
+	}
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(int64(limit)),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(fullPrefix)),
+	}
+	if revision > 0 {
+		opts = append(opts, clientv3.WithRev(revision))
+	}
+	ctx1, cancel := getContextWithTimeout(ctx, kv.requestTimeout)
+	resp, err := kv.getEtcdMeta(ctx1, from, opts...)
+	cancel()
+	if err != nil {
+		return 0, false, err
+	}
+	for _, item := range resp.Kvs {
+		if err := fn(kv.trimRootPath(item.Key), item.Value); err != nil {
+			return 0, false, err
+		}
+	}
+	CheckElapseAndWarn(ctx, start, "Slow etcd operation(WalkPrefixPage)", mlog.String("prefix", fullPrefix))
+	// With WithRev the header carries the store's current revision, not the
+	// one read.
+	if revision == 0 {
+		revision = resp.Header.Revision
+	}
+	return revision, resp.More, nil
+}
+
+// WatchWithPrefixFromRevision watches keys under prefix starting at revision
+// (0 starts at the current revision). Unlike WatchWithRevision, the watch
+// ends when ctx is done. Event keys are absolute.
+func (kv *etcdKV) WatchWithPrefixFromRevision(ctx context.Context, prefix string, revision int64) clientv3.WatchChan {
+	opts := []clientv3.OpOption{clientv3.WithPrefix()}
+	if revision > 0 {
+		opts = append(opts, clientv3.WithRev(revision))
+	}
+	return kv.client.Watch(ctx, kv.GetPath(prefix), opts...)
+}
+
+// trimRootPath returns the part of an absolute etcd key below the root path,
+// without copying it.
+func (kv *etcdKV) trimRootPath(key []byte) []byte {
+	// GetPath accepts a root path with or without a trailing "/".
+	root := strings.TrimSuffix(kv.rootPath, "/")
+	if len(key) > len(root) && string(key[:len(root)]) == root && key[len(root)] == '/' {
+		return key[len(root)+1:]
+	}
+	return key
+}
+
 // MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
 	cmps, err := parsePredicates(kv.rootPath, preds...)
@@ -602,7 +690,7 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 	}
 	CheckElapseAndWarn(ctx, start, "Slow etcd operation multi save and move with prefix", mlog.Strings("keys", keys))
 	if !resp.Succeeded {
-		return merr.WrapErrIoFailedReason("failed to execute transaction")
+		return errors.Mark(merr.WrapErrIoFailedReason("failed to execute transaction"), predicates.ErrNotMet)
 	}
 	return nil
 }
@@ -731,7 +819,11 @@ func (kv *etcdKV) getEtcdMeta(ctx context.Context, key string, opts ...clientv3.
 	// translate the raw etcd/grpc transport error into a typed merr at this
 	// boundary so callers never receive an untyped error (key-not-found is
 	// classified by the callers via resp.Count).
-	return resp, merr.WrapErrIoFailed(key, err)
+	if err == nil {
+		return resp, nil
+	}
+	wrapped := merr.WrapErrIoFailed(key, err)
+	return resp, markCompacted(err, wrapped)
 }
 
 func (kv *etcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {

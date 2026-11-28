@@ -50,13 +50,6 @@ const (
 	ActionDelete
 )
 
-// Entry is a primitive metadata model targeted by an UpdateAction. It is a
-// pure data-model reference - it carries no action verb. Sealed to this
-// package via the unexported isEntry marker.
-type Entry interface {
-	isEntry()
-}
-
 // SegmentEntry targets a single segment.
 //
 // For ActionAdd, Segment is the full new segment: its record and its binlog
@@ -128,11 +121,6 @@ type RefreshJobEntry struct {
 	JobID int64
 }
 
-// AnalyzeTaskEntry targets a single analyze task's removal.
-type AnalyzeTaskEntry struct {
-	TaskID int64
-}
-
 // PartitionStatsEntry targets a partition-stats info. For an ActionAdd, Info
 // is persisted as a new stats record (compose it before the
 // SavePartitionStatsVersion that repoints the current version to it). For an
@@ -165,24 +153,6 @@ type ReplicaKeyEntry struct {
 	ReplicaID    int64
 }
 
-// SegmentChangeGroupEntry targets a segment change group record.
-//
-// For ActionUpdate, Group is the full already-mutated group and its record is
-// persisted. The commit-marker semantics are STATE-qualified (C13): a TERMINAL
-// group (COMMITTED/FAILED/ABORTED) is the visibility marker of a batch publish
-// txn — compose it AFTER the segment/DataView actions so a visible terminal
-// record implies they landed — while an ALIVE group (STAGED/READY) must land
-// BEFORE its staged members (the kv dispatch emits a plain in-order Save for
-// it, and the composite write orders it ahead of the member actions), so a
-// chunked-fallback crash can never leave invisible members with no group
-// record. For ActionDelete, CollectionID/GroupID identify the record to remove
-// (a COMMITTED group cleanup or a collection drop).
-type SegmentChangeGroupEntry struct {
-	Group        *model.SegmentChangeGroup
-	CollectionID int64
-	GroupID      int64
-}
-
 // DataViewEntry targets a persisted DataView snapshot. An ActionAdd writes the
 // snapshot under its immutable version key; the entry is composed into a
 // catalog.Update together with the SegmentMeta actions of the same mutation so
@@ -191,28 +161,46 @@ type DataViewEntry struct {
 	DataView *viewpb.DataViewOfCollection
 }
 
-func (SegmentEntry) isEntry()               {}
-func (SegmentIndexEntry) isEntry()          {}
-func (ChannelEntry) isEntry()               {}
-func (CollectionEntry) isEntry()            {}
-func (RefreshTaskEntry) isEntry()           {}
-func (RefreshJobEntry) isEntry()            {}
-func (AnalyzeTaskEntry) isEntry()           {}
-func (PartitionStatsEntry) isEntry()        {}
-func (PartitionStatsVersionEntry) isEntry() {}
-func (ReplicaEntry) isEntry()               {}
-func (ReplicaKeyEntry) isEntry()            {}
-func (SegmentChangeGroupEntry) isEntry()    {}
-func (DataViewEntry) isEntry()              {}
-
 // UpdateAction is a single composable write against a metastore catalog,
-// applied via that catalog's composite Update. Type and Entry together
-// determine the kv encoding a catalog applies; a catalog that does not
-// recognize an Entry kind (or a Type/Entry combination) for its own metadata
-// domain rejects the action.
+// applied via that catalog's composite Update. Entry is what to write: a
+// value of a registered ModelType, or a typed entry (SegmentEntry,
+// CollectionEntry, ...) of a type not migrated yet. A catalog rejects, before
+// any write, an entry it does not recognize for its own metadata domain or a
+// Type it does not support.
+//
+// For a value of a ModelType, found by the value's Go type, the action says
+// only how to write: the type owns the coordinate and encoding. ActionAdd
+// and ActionUpdate store the value at its coordinate (both replace the
+// record); ActionDelete removes that one record. There is no prefix delete:
+// delete each record. An Update that fits the backend's txn limit is one
+// atomic txn. Over the limit it is split into chunks in the order given,
+// except that the commit-marked ops of the typed entries not migrated yet
+// land in one final txn (see kv/txn.Commit); a value of a model type is
+// never a commit marker, so a write that must land last goes in a later
+// Update.
 type UpdateAction struct {
 	Type  ActionType
-	Entry Entry
+	Entry any
+}
+
+// Precondition is the Entry of an UnchangedSince action: the Update it is in
+// is conditional on a read at ReadRevision.
+type Precondition struct {
+	ReadRevision Revision
+}
+
+// UnchangedSince returns an UpdateAction that makes its Update a
+// read-modify-write on records read at revision (a Get or List revision):
+// the Update applies only when no record it writes changed after revision,
+// and otherwise fails with an error matching predicates.ErrNotMet
+// (pkg/kv/predicates) and writes nothing.
+// For a value saved with ActionUpdate the record must also still exist, so a
+// record deleted after the read is not written back; ActionAdd and
+// ActionDelete do not require that. The Update is always atomic: one that
+// does not fit a single transaction fails without writing. At most one UnchangedSince per Update; revision must be
+// positive.
+func UnchangedSince(revision Revision) UpdateAction {
+	return UpdateAction{Entry: Precondition{ReadRevision: revision}}
 }
 
 // AddSegment returns an UpdateAction that persists seg as a new segment
@@ -309,11 +297,6 @@ func DropRefreshJob(jobID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: RefreshJobEntry{JobID: jobID}}
 }
 
-// DropAnalyzeTask returns an UpdateAction that removes an analyze task.
-func DropAnalyzeTask(taskID int64) UpdateAction {
-	return UpdateAction{Type: ActionDelete, Entry: AnalyzeTaskEntry{TaskID: taskID}}
-}
-
 // AddPartitionStats returns an UpdateAction that persists info as a new
 // partition-stats info record. Compose it before the SavePartitionStatsVersion
 // action that repoints the current version to it, so the version pointer - the
@@ -349,24 +332,4 @@ func SaveReplica(r *querypb.Replica) UpdateAction {
 // ReleaseReplica returns an UpdateAction that removes a replica's kv record.
 func ReleaseReplica(collectionID, replicaID int64) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: ReplicaKeyEntry{CollectionID: collectionID, ReplicaID: replicaID}}
-}
-
-// SaveSegmentChangeGroup returns an UpdateAction that persists g as a segment
-// change group upsert (full-value replace). It is the write used both for a
-// standalone state transition and for composing into a batch write. The kv
-// dispatch makes the commit-marker semantics STATE-qualified (C13): a TERMINAL
-// group (COMMITTED/FAILED/ABORTED) is commit-marked and must be composed AFTER
-// the segment/DataView actions as the visibility marker; an ALIVE group
-// (STAGED/READY) is persisted as a plain in-order Save and must be composed
-// BEFORE its staged member actions so a fallback crash cannot orphan invisible
-// members.
-func SaveSegmentChangeGroup(g *model.SegmentChangeGroup) UpdateAction {
-	return UpdateAction{Type: ActionUpdate, Entry: SegmentChangeGroupEntry{Group: g}}
-}
-
-// DeleteSegmentChangeGroup returns an UpdateAction that removes a segment
-// change group record. Compose it after the group's members and superseded
-// segments are fully retired.
-func DeleteSegmentChangeGroup(collectionID, groupID int64) UpdateAction {
-	return UpdateAction{Type: ActionDelete, Entry: SegmentChangeGroupEntry{CollectionID: collectionID, GroupID: groupID}}
 }

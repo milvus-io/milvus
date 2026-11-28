@@ -806,7 +806,7 @@ func TestTxnWithKeyNotExistPredicate(t *testing.T) {
 			err = tc.write(map[string]string{key: "second"}, predicates.KeyNotExist(key))
 			assert.Error(t, err)
 			assert.ErrorIs(t, err, merr.ErrIoFailed)
-			assert.True(t, errors.Is(err, errPredicateNotMet))
+			assert.True(t, errors.Is(err, predicates.ErrNotMet))
 			assert.Equal(t, merr.Code(valueEqualErr), merr.Code(err))
 			value, err = kv.Load(ctx, key)
 			assert.NoError(t, err)
@@ -863,7 +863,7 @@ func TestTxnWithKeyNotExistPredicate(t *testing.T) {
 		assert.True(t, raced)
 		assert.Equal(t, 3, begins)
 		assert.ErrorIs(t, err, merr.ErrIoFailed)
-		assert.True(t, errors.Is(err, errPredicateNotMet))
+		assert.True(t, errors.Is(err, predicates.ErrNotMet))
 		value, err := kv.Load(ctx, key)
 		assert.NoError(t, err)
 		assert.Equal(t, "other", value)
@@ -883,14 +883,41 @@ func TestTxnWithKeyNotExistPredicate(t *testing.T) {
 		defer func() {
 			beginTxn = tiTxnBegin
 		}()
-		getMock := mockey.Mock((*transaction.KVTxn).Get).Return(nil, errors.New("epoch_not_match")).Build()
-		defer getMock.UnPatch()
+		for _, tc := range []struct {
+			name string
+			// mock fails the read of the predicate key
+			mock func() *mockey.Mocker
+			pred predicates.Predicate
+		}{
+			{
+				// a guard on the written key stays optimistic and reads it
+				"written key read by Get",
+				func() *mockey.Mocker {
+					return mockey.Mock((*transaction.KVTxn).Get).Return(nil, errors.New("epoch_not_match")).Build()
+				},
+				predicates.KeyNotExist("read_error_save"),
+			},
+			{
+				// a guard on an unwritten key reads it by the pessimistic lock
+				"unwritten key read by LockKeys",
+				func() *mockey.Mocker {
+					return mockey.Mock((*transaction.KVTxn).LockKeys).Return(errors.New("epoch_not_match")).Build()
+				},
+				predicates.KeyNotExist("read_error_key"),
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				begins = 0
+				m := tc.mock()
+				defer m.UnPatch()
 
-		err := kv.MultiSaveAndRemove(ctx, map[string]string{"read_error_save": "v"}, nil, predicates.KeyNotExist("read_error_key"))
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrIoFailed)
-		assert.False(t, errors.Is(err, errPredicateNotMet))
-		assert.Equal(t, int(writeTxnRetryAttempts), begins)
+				err := kv.MultiSaveAndRemove(ctx, map[string]string{"read_error_save": "v"}, nil, tc.pred)
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrIoFailed)
+				assert.False(t, errors.Is(err, predicates.ErrNotMet))
+				assert.Equal(t, int(writeTxnRetryAttempts), begins)
+			})
+		}
 	})
 }
 
@@ -905,17 +932,14 @@ func TestTxnWithInvalidPredicate(t *testing.T) {
 	badTarget := predicates.NewMockPredicate(t)
 	badTarget.EXPECT().Key().Return("bad_target_key").Maybe()
 	badTarget.EXPECT().Target().Return(0).Maybe()
-	badExistenceType := predicates.NewMockPredicate(t)
-	badExistenceType.EXPECT().Key().Return("bad_type_key").Maybe()
-	badExistenceType.EXPECT().Target().Return(predicates.PredTargetKeyExistence).Maybe()
-	badExistenceType.EXPECT().Type().Return(0).Maybe()
 
 	for _, tc := range []struct {
 		tag  string
 		pred predicates.Predicate
+		want error
 	}{
-		{"unknown_target", badTarget},
-		{"unknown_key_existence_type", badExistenceType},
+		{"unknown_target", badTarget, merr.ErrParameterInvalid},
+		{"unchanged_since_unsupported", predicates.UnchangedSince("bad_type_key", 7), merr.ErrServiceUnimplemented},
 	} {
 		t.Run(tc.tag, func(t *testing.T) {
 			begins := 0
@@ -932,9 +956,9 @@ func TestTxnWithInvalidPredicate(t *testing.T) {
 			defer getMock.UnPatch()
 
 			err := kv.MultiSaveAndRemove(ctx, map[string]string{"invalid_save": "v"}, nil, tc.pred)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, tc.want)
 			err = kv.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"invalid_save": "v"}, nil, tc.pred)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, tc.want)
 			assert.Equal(t, 2, begins)
 			assert.Equal(t, 0, getMock.Times())
 			_, err = kv.Load(ctx, "invalid_save")
@@ -1450,14 +1474,14 @@ func TestTxnGuardKeyChangedDuringWrite(t *testing.T) {
 
 	err := kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/a": "v"}, nil, predicates.ValueEqual(guard, "t1"))
 	require.True(t, raised)
-	assert.True(t, errors.Is(err, errPredicateNotMet), "%v", err)
+	assert.True(t, errors.Is(err, predicates.ErrNotMet), "%v", err)
 	_, err = kv.Load(ctx, "pointer/a")
 	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 
 	// without the pessimistic lock, the snapshot read at the start timestamp
 	// would see "t1" and the write would succeed
 	err = kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/b": "v"}, nil, predicates.ValueEqual(guard, "t1"))
-	assert.True(t, errors.Is(err, errPredicateNotMet), "%v", err)
+	assert.True(t, errors.Is(err, predicates.ErrNotMet), "%v", err)
 	require.NoError(t, kv.MultiSaveAndRemove(ctx, map[string]string{"pointer/b": "v"}, nil, predicates.ValueEqual(guard, "t2")))
 }
 

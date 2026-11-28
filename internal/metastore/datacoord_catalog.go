@@ -68,15 +68,12 @@ func (m *BinlogsIncrement) cloneBinlogs(binlogs []*datapb.FieldBinlog) []*datapb
 
 //go:generate mockery --name=DataCoordCatalog --with-expecter
 type DataCoordCatalog interface {
+	GenericCatalog
+
 	ListSegments(ctx context.Context, collectionID int64) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
 	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo, binlogs ...BinlogsIncrement) error
-	// Update applies a composite set of UpdateActions as a single atomic
-	// write (or, when the op count exceeds the txn size limit, via a
-	// caller-ordered chunked fallback). See kv/txn.Commit for the exact
-	// atomicity contract.
-	Update(ctx context.Context, actions ...UpdateAction) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 
@@ -135,9 +132,6 @@ type DataCoordCatalog interface {
 	UpdateCompactionTargetState(ctx context.Context, targetID int64, state datapb.TargetState, inactivatedAtTS uint64) error
 	DropCompactionTarget(ctx context.Context, record *datapb.CompactionTarget) error
 
-	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
-	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
-
 	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
 
 	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
@@ -160,13 +154,6 @@ type DataCoordCatalog interface {
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
-
-	// SegmentChangeGroup persistence. Per-record writes go through the
-	// composite Update (metastore.SaveSegmentChangeGroup / DeleteSegmentChangeGroup)
-	// so they can be composed atomically with segment and DataView actions;
-	// List/Drop provide recovery scanning and collection-drop cleanup.
-	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
-	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
 
 	// Import V3 control-plane records.
 	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error

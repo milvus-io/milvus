@@ -32,9 +32,9 @@ import (
 // composite write commits atomically on TiKV where it would have to chunk on
 // etcd. Commit is storage-agnostic - it never hard-codes a backend limit.
 //
-// When the whole op set (every Save/Remove/RemovePrefix/CommitSave/
-// CommitRemove call) fits within that limit, it is applied atomically, in a
-// single guarded txn.
+// When the whole op set (every Save/Remove/CommitSave/CommitRemove call)
+// fits within that limit, it is applied atomically, in a
+// single txn.
 //
 // Otherwise Commit falls back to a caller-ordered, chunked flush: every
 // non-commit op is flushed first, in the order it was recorded. Consecutive
@@ -44,14 +44,17 @@ import (
 // key) AND within-kind ordering across batches (an earlier put group must
 // persist before a later one, e.g. compactTo before compactFrom) are
 // preserved. Finally, the commit ops (CommitSave/CommitRemove) are applied
-// together as the last guarded txn; this final txn is the sole visibility
+// together as the last txn; this final txn is the sole visibility
 // marker for the whole composite write; if the caller (or process) fails
 // partway through the flush, the non-commit ops sit inert until the commit
-// txn lands, since nothing but the commit txn is guarded/atomic.
+// txn lands, since nothing but the commit txn is atomic.
 func Commit(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 	total := len(b.ops)
 	if total == 0 {
 		return nil
+	}
+	if b.guarded() {
+		return CommitWithoutFallback(ctx, txn, b)
 	}
 	limit := txn.MaxTxnOps()
 	if limit <= 0 {
@@ -63,7 +66,7 @@ func Commit(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 	return commitFallback(ctx, txn, limit, b)
 }
 
-// CommitWithoutFallback applies b in one guarded txn, or returns an error
+// CommitWithoutFallback applies b in one txn, or returns an error
 // without writing anything when the backend's op limit cannot hold the whole
 // bundle. Use it for a composite metadata change whose records must never
 // become visible independently - the ordered chunked fallback that Commit
@@ -83,8 +86,8 @@ func CommitWithoutFallback(ctx context.Context, txn kv.TxnKV, b *Builder) error 
 	return commitAtomic(ctx, txn, b)
 }
 
-// commitAtomic applies every op in a single guarded txn.
-// commitAtomic folds every op into one guarded etcd txn. Note: puts and
+// commitAtomic applies every op in a single txn.
+// commitAtomic folds every op into one etcd txn. Note: puts and
 // exact removals are collected into a map/slice, so a Save and a Remove of the
 // SAME key within one Update do NOT preserve their recorded order here (unlike
 // the ordered fallback). No caller stages a same-key save+remove in one Update
@@ -93,33 +96,25 @@ func CommitWithoutFallback(ctx context.Context, txn kv.TxnKV, b *Builder) error 
 func commitAtomic(ctx context.Context, txn kv.TxnKV, b *Builder) error {
 	saves := make(map[string]string)
 	var removals []string
-	var prefixRemovals []string
 	for _, o := range b.ops {
 		switch o.kind {
 		case opPut:
 			saves[o.key] = o.value
 		case opDel:
 			removals = append(removals, o.key)
-		case opDelPrefix:
-			prefixRemovals = append(prefixRemovals, o.key)
 		}
 	}
-	preds := b.commitPredicates()
-	// A single etcd txn cannot express exact and prefix deletes together:
-	// MultiSaveAndRemoveWithPrefix deletes EVERY listed key by prefix, so an
-	// exact Remove("coll-1") routed through it would also nuke "coll-10" and
-	// "coll-1/x". Reject the mix rather than silently widen the delete.
-	if len(removals) > 0 && len(prefixRemovals) > 0 {
-		return merr.WrapErrParameterInvalidMsg("composite update cannot mix exact and prefix removals in one atomic transaction")
-	}
-	if len(prefixRemovals) > 0 {
-		return txn.MultiSaveAndRemoveWithPrefix(ctx, saves, prefixRemovals, preds...)
+	preds := b.atomicPredicates()
+	// etcd caps the compares of a txn by the same limit as its ops
+	if limit := txn.MaxTxnOps(); len(preds) > limit {
+		return merr.WrapErrServiceInternalMsg(
+			"atomic composite update needs %d predicates but the transaction limit is %d", len(preds), limit)
 	}
 	return txn.MultiSaveAndRemove(ctx, saves, removals, preds...)
 }
 
 // commitFallback flushes non-commit ops in recorded order, chunked by limit,
-// then applies the commit ops as the final guarded txn.
+// then applies the commit ops as the final txn.
 func commitFallback(ctx context.Context, txn kv.TxnKV, limit int, b *Builder) error {
 	nonCommit := make([]op, 0, len(b.ops))
 	commitSaves := make(map[string]string)
@@ -132,13 +127,7 @@ func commitFallback(ctx context.Context, txn kv.TxnKV, limit int, b *Builder) er
 		switch o.kind {
 		case opPut:
 			commitSaves[o.key] = o.value
-		case opDel, opDelPrefix:
-			// NOTE: commit-marked prefix removals are unsupported - the public
-			// Builder API only emits opDel for commit markers (CommitRemove), so
-			// opDelPrefix is unreachable here today. If a CommitRemovePrefix is
-			// ever added, this folds it into commitRemovals (flushed as an EXACT
-			// delete via MultiSaveAndRemove below), which is WRONG for a prefix.
-			// Revisit this branch before adding that method.
+		case opDel:
 			commitRemovals = append(commitRemovals, o.key)
 		}
 	}
@@ -155,23 +144,38 @@ func commitFallback(ctx context.Context, txn kv.TxnKV, limit int, b *Builder) er
 	}
 
 	// Nothing to commit: no commit-marked ops (the DataCoord over-limit case,
-	// which never attaches any). Issuing the final guarded txn here would just
+	// which never attaches any). Issuing the final txn here would just
 	// be an empty MultiSaveAndRemove round trip against etcd, so skip it.
 	if len(commitSaves)+len(commitRemovals) == 0 {
 		return nil
 	}
 
-	return txn.MultiSaveAndRemove(ctx, commitSaves, commitRemovals, b.commitPredicates()...)
+	return txn.MultiSaveAndRemove(ctx, commitSaves, commitRemovals)
 }
 
-// commitPredicates translates the builder's conditional-commit guard (see
-// CommitSaveIfValue) into a value-equality predicate. An empty slice when the
-// commit is unconditional.
-func (b *Builder) commitPredicates() []predicates.Predicate {
-	if b.cond == nil {
-		return nil
+// guarded reports whether the write carries predicates, which only an
+// atomic commit can honor.
+func (b *Builder) guarded() bool {
+	return b.readRevision > 0 || len(b.require) > 0
+}
+
+// atomicPredicates returns every predicate of an atomic commit: the
+// required predicates, and an unchanged-since guard on each written key when
+// the builder is guarded by a read revision.
+func (b *Builder) atomicPredicates() []predicates.Predicate {
+	preds := append([]predicates.Predicate(nil), b.require...)
+	if b.readRevision <= 0 {
+		return preds
 	}
-	return []predicates.Predicate{predicates.ValueEqual(b.cond.key, b.cond.oldValue)}
+	seen := make(map[string]struct{}, len(b.ops))
+	for _, o := range b.ops {
+		if _, ok := seen[o.key]; ok {
+			continue
+		}
+		seen[o.key] = struct{}{}
+		preds = append(preds, predicates.UnchangedSince(o.key, b.readRevision))
+	}
+	return preds
 }
 
 // flushNonCommitOps applies non-commit ops in recorded order. It groups
@@ -221,12 +225,6 @@ func flushRun(ctx context.Context, txn kv.TxnKV, limit int, kind opKind, run []o
 				keys = append(keys, o.key)
 			}
 			err = txn.MultiSaveAndRemove(ctx, nil, keys)
-		case opDelPrefix:
-			keys := make([]string, 0, len(chunk))
-			for _, o := range chunk {
-				keys = append(keys, o.key)
-			}
-			err = txn.MultiSaveAndRemoveWithPrefix(ctx, nil, keys)
 		}
 		if err != nil {
 			return err

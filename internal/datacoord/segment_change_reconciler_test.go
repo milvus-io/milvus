@@ -255,9 +255,13 @@ func TestSegmentChangeRecovery_ChunkedPublish(t *testing.T) {
 				store.loseResponse = true
 			}
 			catalog.MetaKv = store
-			// Record-only updates keep the original binlog keys. The first
-			// chunk flips two members; the second flips the third and retires
-			// the parent. Group + DataView are the final two commit ops.
+			// The first Update of a publish, as applySegmentChangesLocked
+			// builds it: record-only updates keep the original binlog keys.
+			// The first chunk flips two members; the second flips the third
+			// and retires the parent. The DataView is the commit op of the
+			// final txn. The terminal group is saved by a second Update only
+			// after this one succeeds, so every failure here leaves the group
+			// READY for the reconciler to complete.
 			actions := make([]metastore.UpdateAction, 0)
 			for _, id := range g.NewSegmentIDs {
 				seg := m.GetSegment(ctx, id).Clone()
@@ -268,10 +272,7 @@ func TestSegmentChangeRecovery_ChunkedPublish(t *testing.T) {
 			parent := m.GetSegment(ctx, 2001).Clone()
 			parent.State = commonpb.SegmentState_Dropped
 			actions = append(actions, metastore.AlterSegment(parent.SegmentInfo))
-			committed := g.Clone()
-			committed.State = model.SegmentChangeStateCommitted
-			committed.CommitTS = 500
-			actions = append(actions, metastore.SaveSegmentChangeGroup(committed), metastore.SaveDataView(&viewpb.DataViewOfCollection{
+			actions = append(actions, metastore.SaveDataView(&viewpb.DataViewOfCollection{
 				CollectionId: 10, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1},
 				Shards: []*viewpb.DataViewOfShard{{Vchannel: "ch-1", Partitions: []*viewpb.DataViewOfPartition{{
 					PartitionId: 100, SegmentIds: g.NewSegmentIDs, SegmentManifestVersions: []int64{0, 0, 0},
@@ -390,9 +391,9 @@ func TestSegmentChangeVisibilityAndCompactionOwnership(t *testing.T) {
 	require.True(t, exists)
 	require.True(t, allowed)
 	require.NoError(t, m.PublishGroup(ctx, g, meta.NewMockAllocator(t)))
-	ref, err := m.Catalog.ListSegmentChangeGroups(ctx)
+	ref, err := m.Catalog.List(ctx, metastore.SegmentGroupType, nil, metastore.ListOptions{})
 	require.NoError(t, err)
-	require.Equal(t, model.SegmentChangeStateCommitted, ref[0].State)
+	require.Equal(t, model.SegmentChangeStateCommitted, ref.Values[0].(*model.SegmentChangeGroup).State)
 }
 
 type segmentChangeReclaimCatalog struct {
@@ -547,7 +548,7 @@ func TestSegmentChangeRecovery_CollectionDropAndValidationFailure(t *testing.T) 
 	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 1))
 	require.NoError(t, m.ReconcileSegmentChangeGroups(ctx, nil, func(context.Context, int64) (bool, error) { return false, nil }))
 	require.Empty(t, m.GetSegmentChangeGroupsByCollection(ctx, 10))
-	groups, err := m.Catalog.ListSegmentChangeGroups(ctx)
+	groups, err := m.Catalog.List(ctx, metastore.SegmentGroupType, nil, metastore.ListOptions{})
 	require.NoError(t, err)
-	require.Empty(t, groups)
+	require.Empty(t, groups.Values)
 }

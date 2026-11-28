@@ -32,6 +32,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -574,8 +575,8 @@ func (s *EtcdKVSuite) TestTxnWithPredicates() {
 	s.Require().NoError(err)
 
 	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Type().Return(0)
-	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+	badPredicate.EXPECT().Key().Return("lease1")
+	badPredicate.EXPECT().Target().Return(0)
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string
@@ -658,6 +659,48 @@ func (s *EtcdKVSuite) TestTxnWithKeyNotExistPredicate() {
 		s.NoError(err)
 		s.Equal("new", value)
 	})
+}
+
+// TestTxnWithRevisionPredicates pins the guard of a read-modify-write: a
+// write applies only when its keys did not change after the read revision.
+func (s *EtcdKVSuite) TestTxnWithRevisionPredicates() {
+	etcdKV := s.etcdKV
+	ctx := context.TODO()
+
+	s.Require().NoError(etcdKV.Save(ctx, "rev_a", "1"))
+	_, readRev, err := etcdKV.LoadWithRevision(ctx, "rev_a")
+	s.Require().NoError(err)
+
+	// unchanged since the read: the guarded write applies
+	err = etcdKV.MultiSaveAndRemove(ctx, map[string]string{"rev_a": "2"}, nil,
+		predicates.KeyExist("rev_a"), predicates.UnchangedSince("rev_a", readRev))
+	s.Require().NoError(err)
+
+	// changed after the read (by the write above): rejected, nothing written
+	err = etcdKV.MultiSaveAndRemove(ctx, map[string]string{"rev_a": "3"}, nil,
+		predicates.UnchangedSince("rev_a", readRev))
+	s.True(errors.Is(err, predicates.ErrNotMet), "%v", err)
+	s.ErrorIs(err, merr.ErrIoFailed)
+	value, err := etcdKV.Load(ctx, "rev_a")
+	s.Require().NoError(err)
+	s.Equal("2", value)
+
+	// a key missing at and after the read has mod revision 0: it passes
+	err = etcdKV.MultiSaveAndRemoveWithPrefix(ctx, map[string]string{"rev_absent": "1"}, nil,
+		predicates.UnchangedSince("rev_absent_never", readRev))
+	s.NoError(err)
+
+	// deleted after the read: mod revision alone passes, KeyExist catches it
+	s.Require().NoError(etcdKV.Save(ctx, "rev_b", "1"))
+	_, readRev, err = etcdKV.LoadWithRevision(ctx, "rev_b")
+	s.Require().NoError(err)
+	s.Require().NoError(etcdKV.Remove(ctx, "rev_b"))
+	err = etcdKV.MultiSaveAndRemove(ctx, map[string]string{"rev_b": "2"}, nil,
+		predicates.KeyExist("rev_b"), predicates.UnchangedSince("rev_b", readRev))
+	s.True(errors.Is(err, predicates.ErrNotMet), "%v", err)
+
+	_, _, err = etcdKV.LoadWithRevision(ctx, "rev_b")
+	s.ErrorIs(err, merr.ErrIoKeyNotFound)
 }
 
 func (s *EtcdKVSuite) TestMultiSaveAndRemoveWithPrefix() {
@@ -811,6 +854,110 @@ func (s *EtcdKVSuite) TestLoadWithPrefixIsolation() {
 	})
 	s.NoError(err)
 	s.Len(walkedKeys, 2)
+}
+
+// currentRevision returns the store's latest revision.
+func (s *EtcdKVSuite) currentRevision(ctx context.Context) int64 {
+	resp, err := s.etcdCli.Get(ctx, "revision-probe")
+	s.Require().NoError(err)
+	return resp.Header.Revision
+}
+
+// TestWalkPrefixPage verifies paging from a cursor at a pinned revision:
+// pages read the first page's snapshot, keys come back relative to the root
+// path, the prefix bounds the range, fn errors stop the read, limit 0 reads
+// everything, and a compacted revision fails with kv.ErrCompacted.
+func (s *EtcdKVSuite) TestWalkPrefixPage() {
+	ctx := context.Background()
+	for _, k := range []string{"walk/a", "walk/b", "walk/c", "walk/d", "walk/e"} {
+		s.Require().NoError(s.etcdKV.Save(ctx, k, "v1"))
+	}
+	s.Require().NoError(s.etcdKV.Save(ctx, "walkother/a", "x"))
+
+	page := func(after string, rev int64) ([]string, []string, int64, bool) {
+		var keys, values []string
+		gotRev, more, err := s.etcdKV.WalkPrefixPage(ctx, "walk/", after, 2, rev, func(k, v []byte) error {
+			keys = append(keys, string(k))
+			values = append(values, string(v))
+			return nil
+		})
+		s.Require().NoError(err)
+		return keys, values, gotRev, more
+	}
+
+	keys, values, rev, more := page("", 0)
+	s.Equal([]string{"walk/a", "walk/b"}, keys)
+	s.Equal([]string{"v1", "v1"}, values)
+	s.True(more)
+	s.Equal(s.currentRevision(ctx), rev, "the first page reads the latest revision")
+
+	// Writes after the first page are invisible to pages read at its revision.
+	s.Require().NoError(s.etcdKV.Save(ctx, "walk/c", "v2"))
+	s.Require().NoError(s.etcdKV.Save(ctx, "walk/f", "v2"))
+	keys, values, rev2, more := page("walk/b", rev)
+	s.Equal([]string{"walk/c", "walk/d"}, keys)
+	s.Equal([]string{"v1", "v1"}, values)
+	s.True(more)
+	s.Equal(rev, rev2, "a pinned page reports the revision it read")
+	keys, _, _, more = page("walk/d", rev)
+	s.Equal([]string{"walk/e"}, keys, "the prefix bounds the range")
+	s.False(more)
+
+	stop := errors.New("stop")
+	_, _, err := s.etcdKV.WalkPrefixPage(ctx, "walk/", "", 2, 0, func([]byte, []byte) error { return stop })
+	s.ErrorIs(err, stop)
+	var all []string
+	_, more, err = s.etcdKV.WalkPrefixPage(ctx, "walk/", "", 0, rev, func(k, _ []byte) error {
+		all = append(all, string(k))
+		return nil
+	})
+	s.Require().NoError(err)
+	s.Len(all, 5, "limit 0 reads the whole range, as WalkWithPrefix does")
+	s.False(more)
+
+	_, err = s.etcdCli.Compact(ctx, s.currentRevision(ctx))
+	s.Require().NoError(err)
+	_, _, err = s.etcdKV.WalkPrefixPage(ctx, "walk/", "walk/b", 2, rev, func([]byte, []byte) error { return nil })
+	s.True(errors.Is(err, kv.ErrCompacted), "%v", err)
+	s.ErrorIs(err, merr.ErrIoFailed)
+}
+
+// TestWatchWithPrefixFromRevision verifies the watch starts at the requested
+// revision, groups one txn under one revision, and ends when its context is
+// done.
+func (s *EtcdKVSuite) TestWatchWithPrefixFromRevision() {
+	ctx := context.Background()
+	s.Require().NoError(s.etcdKV.Save(ctx, "watch/a", "v1"))
+	rev := s.currentRevision(ctx)
+
+	s.Require().NoError(s.etcdKV.MultiSave(ctx, map[string]string{"watch/a": "v2", "watch/b": "v1"}))
+	s.Require().NoError(s.etcdKV.Remove(ctx, "watch/a"))
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	ch := s.etcdKV.WatchWithPrefixFromRevision(watchCtx, "watch/", rev+1)
+	var events []*clientv3.Event
+	timeout := time.After(10 * time.Second)
+	for len(events) < 3 {
+		select {
+		case resp := <-ch:
+			s.Require().NoError(resp.Err())
+			events = append(events, resp.Events...)
+		case <-timeout:
+			s.FailNow("timed out waiting for watch events")
+		}
+	}
+	s.Equal(events[0].Kv.ModRevision, events[1].Kv.ModRevision, "one txn shares one revision")
+	// MultiSave builds its txn from a map, so the order inside it is random.
+	s.ElementsMatch([]string{"watch/a", "watch/b"}, []string{
+		string(s.etcdKV.trimRootPath(events[0].Kv.Key)),
+		string(s.etcdKV.trimRootPath(events[1].Kv.Key)),
+	})
+	s.Equal(clientv3.EventTypeDelete, events[2].Type)
+	s.Equal("watch/a", string(s.etcdKV.trimRootPath(events[2].Kv.Key)))
+
+	cancel()
+	for range ch {
+	}
 }
 
 func TestEtcdKV(t *testing.T) {

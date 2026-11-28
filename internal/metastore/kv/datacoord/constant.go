@@ -35,7 +35,6 @@ const (
 	CopySegmentTaskPrefix               = MetaPrefix + "/copy-segment-task"
 	CompactionTaskPrefix                = MetaPrefix + "/compaction-task"
 	CompactionTargetPrefix              = MetaPrefix + "/compaction-target"
-	AnalyzeTaskPrefix                   = MetaPrefix + "/analyze-task"
 	PartitionStatsInfoPrefix            = MetaPrefix + "/partition-stats"
 	PartitionStatsCurrentVersionPrefix  = MetaPrefix + "/current-partition-stats-version"
 	StatsTaskPrefix                     = MetaPrefix + "/stats-task"
@@ -43,7 +42,6 @@ const (
 	ExternalCollectionRefreshTaskPrefix = MetaPrefix + "/external-collection-refresh-task"
 	SnapshotPrefix                      = MetaPrefix + "/snapshot"
 	ExportSnapshotJobPrefix             = MetaPrefix + "/export-snapshot-job"
-	SegmentChangeGroupPrefix            = MetaPrefix + "/segment-change-group"
 	DataViewPrefix                      = "coord/dv"
 
 	NonRemoveFlagTomestone = "non-removed"

@@ -190,7 +190,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker() {
 
 		// Mock the UpdateVersion function
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+		catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 		s.am.Catalog = catalog
 
 		at.CreateTaskOnWorker(1, cluster, at.GetTaskResource())
@@ -237,7 +237,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentNil() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
 
@@ -274,7 +274,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 	// Must create task AFTER swapping collections so schema is the bad one
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 
 	at.CreateTaskOnWorker(1, session.NewMockCluster(s.T()), at.GetTaskResource())
@@ -289,7 +289,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DataTooSmall() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
 
@@ -308,10 +308,10 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_TerminalStateNotPersisted() {
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	// The first save is UpdateVersion, the second one is the terminal state transition.
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.On("Update", mock.Anything, mock.Anything).
 		Return(merr.WrapErrServiceInternalMsg("mock save error")).Once()
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 	defer s.restoreMetaTask(s.am.Tasks[s.taskID])
 	stateBefore := s.am.GetTask(s.taskID).GetState()
@@ -334,7 +334,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_NumClustersCapped() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 
 	charged := taskcommon.Resource{CPU: 3, Memory: 123 << 20}
@@ -361,7 +361,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_CreateAnalyzeError() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
@@ -380,7 +380,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_SegmentStatsPopulated() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
@@ -446,7 +446,7 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_ManifestPropagated() {
 
 	at := s.newTask()
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.On("SaveAnalyzeTask", mock.Anything, mock.Anything).Return(nil)
+	catalog.On("Update", mock.Anything, mock.Anything).Return(nil)
 	s.am.Catalog = catalog
 
 	cluster := session.NewMockCluster(s.T())
@@ -508,7 +508,7 @@ func (s *analyzeTaskSuite) TestQueryTaskOnWorker() {
 
 		// Mock the FinishTask function
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
-		catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil)
 		s.am.Catalog = catalog
 
 		at.QueryTaskOnWorker(cluster)

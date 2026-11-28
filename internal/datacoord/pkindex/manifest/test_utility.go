@@ -138,7 +138,7 @@ func (p *FakeMetaStore) Save(_ context.Context, saves map[string]string, preds .
 	}
 	for _, pred := range preds {
 		v, ok := p.kv[pred.Key()]
-		notExist := pred.Type() == predicates.PredTypeNotExist
+		notExist := pred.Target() == predicates.PredTargetKeyNotExist
 		switch {
 		case ok && notExist:
 			return errors.Wrapf(ErrFakeKeyExists, "key %s", pred.Key())

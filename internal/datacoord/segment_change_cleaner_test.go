@@ -44,7 +44,7 @@ type failNthSegmentChangeDeleteCatalog struct {
 func (c *failNthSegmentChangeDeleteCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	for _, action := range actions {
 		if action.Type == metastore.ActionDelete {
-			if entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry); ok {
+			if entry, ok := action.Entry.(*model.SegmentChangeGroup); ok {
 				c.deletedID = append(c.deletedID, entry.GroupID)
 				if len(c.deletedID) == c.failAt {
 					return merr.WrapErrServiceInternalMsg("injected segment change group deletion failure")

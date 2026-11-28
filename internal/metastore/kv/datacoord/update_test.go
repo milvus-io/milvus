@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -374,7 +375,7 @@ func TestCatalog_Update_DropPartitionStatsAndAnalyzeTask(t *testing.T) {
 			buildCurrentPartitionStatsVersionPath(1, 2, "ch-1"): "90",
 		}, saves)
 		assert.Equal(t, []string{
-			buildAnalyzeTaskKey(55),
+			"datacoord-meta/analyze-task/55",
 			buildPartitionStatsInfoPath(info),
 		}, removals)
 	})
@@ -399,7 +400,7 @@ func TestCatalog_Update_DropPartitionStatsAndAnalyzeTask(t *testing.T) {
 
 		assert.Empty(t, saves)
 		assert.Equal(t, []string{
-			buildAnalyzeTaskKey(55),
+			"datacoord-meta/analyze-task/55",
 			buildPartitionStatsInfoPath(info),
 		}, removals)
 	})
@@ -632,6 +633,11 @@ func TestCatalog_Update_DataViewEntryEncoding(t *testing.T) {
 	assert.True(t, proto.Equal(dv, decoded))
 }
 
+// TestCatalog_Update_ClusteringPublicationFallbackMarkers pins the markers
+// of a clustering publication over the txn limit: the partition stats
+// version pointer and the DataView land in the final txn; the stats info
+// and the group, a migrated type without markers, are flushed before it.
+// Meta publication writes a terminal group in a later Update of its own.
 func TestCatalog_Update_ClusteringPublicationFallbackMarkers(t *testing.T) {
 	metakv := mocks.NewMetaKv(t)
 	metakv.EXPECT().MaxTxnOps().Return(3).Maybe()
@@ -648,13 +654,13 @@ func TestCatalog_Update_ClusteringPublicationFallbackMarkers(t *testing.T) {
 	assert.NoError(t, err)
 	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, saves map[string]string) error {
 		assert.Contains(t, saves, statsKey)
+		assert.Contains(t, saves, recordKeyOf(t, metastore.SegmentGroupType, []string{"10", "5000"}))
 		assert.NotContains(t, saves, buildCurrentPartitionStatsVersionPath(10, 100, "ch-1"))
 		return nil
 	}).Once()
 	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, saves map[string]string, _ []string, _ ...predicates.Predicate) error {
-			assert.Len(t, saves, 3)
-			assert.Contains(t, saves, buildSegmentChangeGroupKey(10, 5000))
+			assert.Len(t, saves, 2)
 			assert.Contains(t, saves, buildCurrentPartitionStatsVersionPath(10, 100, "ch-1"))
 			assert.Contains(t, saves, buildDataViewVersionKey(10, 1, 1))
 			return nil
@@ -663,4 +669,11 @@ func TestCatalog_Update_ClusteringPublicationFallbackMarkers(t *testing.T) {
 	assert.NoError(t, c.Update(context.TODO(), metastore.AddPartitionStats(stats),
 		metastore.SavePartitionStatsVersion(10, 100, "ch-1", 5000),
 		metastore.SaveSegmentChangeGroup(group), metastore.SaveDataView(view)))
+}
+
+// recordKeyOf is the key of the record of t at coord.
+func recordKeyOf(t *testing.T, typ *metastore.ModelType, coord []string) string {
+	key, err := recordKey(typ, coord)
+	require.NoError(t, err)
+	return key
 }

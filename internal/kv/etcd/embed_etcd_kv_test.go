@@ -895,8 +895,8 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 	s.Require().NoError(err)
 
 	badPredicate := predicates.NewMockPredicate(s.T())
-	badPredicate.EXPECT().Type().Return(0)
-	badPredicate.EXPECT().Target().Return(predicates.PredTargetValue)
+	badPredicate.EXPECT().Key().Return("lease1")
+	badPredicate.EXPECT().Target().Return(0)
 
 	multiSaveAndRemovePredTests := []struct {
 		tag           string

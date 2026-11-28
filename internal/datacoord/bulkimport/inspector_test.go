@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -56,7 +57,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.collectionID = 1
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
-	s.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().List(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(metastore.ListResult{}, nil).Maybe()
 	s.catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
@@ -66,7 +67,6 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()

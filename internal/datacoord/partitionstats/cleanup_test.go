@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -89,7 +90,9 @@ func TestPartitionStatsCleaner_CleanPartitionStatsInfo(t *testing.T) {
 
 		require.Len(t, gotActions, 2)
 		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
-		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		task, ok := gotActions[0].Entry.(*indexpb.AnalyzeTask)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(&indexpb.AnalyzeTask{TaskID: 55}, task), "%v", task)
 		assert.Equal(t, metastore.ActionDelete, gotActions[1].Type)
 		psEntry, ok := gotActions[1].Entry.(metastore.PartitionStatsEntry)
 		require.True(t, ok)
@@ -136,7 +139,9 @@ func TestPartitionStatsCleaner_CleanPartitionStatsInfo(t *testing.T) {
 
 		require.Len(t, gotActions, 3)
 		assert.Equal(t, metastore.ActionDelete, gotActions[0].Type)
-		assert.Equal(t, metastore.AnalyzeTaskEntry{TaskID: 55}, gotActions[0].Entry)
+		task, ok := gotActions[0].Entry.(*indexpb.AnalyzeTask)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(&indexpb.AnalyzeTask{TaskID: 55}, task), "%v", task)
 		assert.Equal(t, metastore.ActionUpdate, gotActions[1].Type)
 		assert.Equal(t, metastore.PartitionStatsVersionEntry{
 			CollectionID: 1, PartitionID: 2, VChannel: "ch-1", Version: 90,

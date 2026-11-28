@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -505,7 +506,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 	}
 
 	if !resp.Succeeded {
-		return merr.WrapErrIoFailedReason("failed to execute transaction")
+		return errors.Mark(merr.WrapErrIoFailedReason("failed to execute transaction"), predicates.ErrNotMet)
 	}
 	return nil
 }
@@ -575,7 +576,7 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 	}
 
 	if !resp.Succeeded {
-		return merr.WrapErrIoFailedReason("failed to execute transaction")
+		return errors.Mark(merr.WrapErrIoFailedReason("failed to execute transaction"), predicates.ErrNotMet)
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 )
@@ -58,8 +60,14 @@ func TestRecycleChannelCPMetaReadsCollectionView(t *testing.T) {
 				catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, int64(-1)).Return(tc.confirm).Twice()
 			}
 			if tc.dropped {
-				// Each dropped collection's DataCoord meta goes before its checkpoints.
-				catalog.EXPECT().DropSegmentChangeGroups(mock.Anything, mock.Anything).Return(nil).Twice()
+				// Each dropped collection's DataCoord meta, its stored
+				// segment change group here, goes before its checkpoints.
+				for _, id := range []int64{123, 124} {
+					coll := strconv.FormatInt(id, 10)
+					catalog.EXPECT().List(mock.Anything, metastore.SegmentGroupType, []string{coll}, metastore.ListOptions{KeysOnly: true}).
+						Return(metastore.ListResult{Coordinates: [][]string{{coll, coll}}}, nil).Once()
+					catalog.EXPECT().Update(mock.Anything, metastore.DeleteSegmentChangeGroup(id, id)).Return(nil).Once()
+				}
 				catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Times(3)
 			}
 			store := metacache.NewMetaStore(catalog)
