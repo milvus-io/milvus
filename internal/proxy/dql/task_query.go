@@ -525,6 +525,12 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 			return nil, merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", LimitKey, limitStr)
 		}
 	}
+	// Query treats zero like an omitted limit. For an iterator, the limit
+	// is the batch size and still goes through the positive-limit check.
+	if isLimitProvided && limit == 0 && !isIterator {
+		limit = typeutil.Unlimited
+		isLimitProvided = false
+	}
 	if isLimitProvided {
 		offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair)
 		// if offset is provided
@@ -768,6 +774,30 @@ func (t *QueryTask) hasCountStar() bool {
 	return false
 }
 
+func (t *QueryTask) validateOffsetWithoutLimit() error {
+	if t.queryParams.limit != typeutil.Unlimited || t.queryParams.isIterator {
+		return nil
+	}
+	rawOffset, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(OffsetKey, t.request.GetQueryParams())
+	if !ok {
+		return nil
+	}
+	offset, err := strconv.ParseInt(rawOffset, 0, 64)
+	if err == nil && offset == 0 {
+		return nil
+	}
+	if t.hasCountStar() && len(t.GetGroupByFieldIds()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
+	}
+	if err != nil {
+		return merr.WrapErrParameterInvalidMsg("%s [%s] is invalid", OffsetKey, rawOffset)
+	}
+	if offset < 0 {
+		return merr.WrapErrParameterInvalidMsg("offset must be non-negative, got %d", offset)
+	}
+	return merr.WrapErrParameterInvalidMsg("offset requires a positive limit")
+}
+
 func (t *QueryTask) CanSkipAllocTimestamp() bool {
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()
@@ -941,6 +971,9 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: t.resolvedTimezoneStr, OnParsedExpr: exprFeatureObserver(t.featureSink())}
 	if err := t.createPlanArgs(ctx, visitorArgs); err != nil {
+		return err
+	}
+	if err := t.validateOffsetWithoutLimit(); err != nil {
 		return err
 	}
 	userPlanAlwaysTrue := planparserv2.IsAlwaysTruePlan(t.plan)

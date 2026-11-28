@@ -836,6 +836,38 @@ func TestQueryTask_all(t *testing.T) {
 			return task
 		}
 
+		for _, tc := range []struct {
+			name      string
+			limit     string
+			offset    string
+			wantLimit int64
+			wantError string
+		}{
+			{name: "zero offset without limit", offset: "0", wantLimit: typeutil.Unlimited},
+			{name: "positive offset without limit", offset: "2", wantError: "offset requires a positive limit"},
+			{name: "negative offset without limit", offset: "-1", wantError: "offset must be non-negative"},
+			{name: "malformed offset without limit", offset: "abc", wantError: "offset [abc] is invalid"},
+			{name: "zero offset with zero limit", limit: "0", offset: "0", wantLimit: typeutil.Unlimited},
+			{name: "positive offset with zero limit", limit: "0", offset: "2", wantError: "offset requires a positive limit"},
+			{name: "positive offset with positive limit", limit: "3", offset: "2", wantLimit: 5},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				task := makeTask(expr, []string{testInt64Field}, 0, "")
+				if tc.limit != "" {
+					task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{Key: LimitKey, Value: tc.limit})
+				}
+				task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{Key: OffsetKey, Value: tc.offset})
+				err := task.PreExecute(ctx)
+				if tc.wantError != "" {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.ErrorContains(t, err, tc.wantError)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantLimit, task.Limit)
+			})
+		}
+
 		// Case 1: count(*) + GROUP BY + limit → should PASS
 		{
 			task := makeTask(
@@ -1166,9 +1198,9 @@ func TestTaskQuery_functions(t *testing.T) {
 			{"empty input", []string{}, []string{}, false, typeutil.Unlimited, 0},
 			{"valid limit=1", []string{LimitKey}, []string{"1"}, false, 1, 0},
 			{"valid limit=1, offset=2", []string{LimitKey, OffsetKey}, []string{"1", "2"}, false, 1, 2},
-			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 0},
 			{"invalid limit str", []string{LimitKey}, []string{"a"}, true, 0, 0},
-			{"invalid limit zero", []string{LimitKey}, []string{"0"}, true, 0, 0},
+			{"valid limit zero", []string{LimitKey}, []string{"0"}, false, typeutil.Unlimited, 0},
+			{"invalid iterator limit zero", []string{IteratorField, LimitKey}, []string{"true", "0"}, true, 0, 0},
 			{"invalid limit negative", []string{LimitKey}, []string{"-1"}, true, 0, 0},
 			{"invalid limit 16385", []string{LimitKey}, []string{"16385"}, true, 0, 0},
 			{"invalid offset negative", []string{LimitKey, OffsetKey}, []string{"1", "-1"}, true, 0, 0},

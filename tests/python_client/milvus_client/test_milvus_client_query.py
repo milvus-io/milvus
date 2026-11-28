@@ -468,11 +468,12 @@ class TestMilvusClientQueryInvalidShared(TestMilvusClientV2Base):
         target: test query with None/empty filter and no limit
         method: 1. query with filter=None/"" without limit
                 2. query with filter=None/"" with offset but no limit
-        expected: raise error in both cases (empty filter requires explicit limit)
+        expected: require a limit for an empty filter or a positive offset
         """
         client = self._client()
         error = {ct.err_code: 0, ct.err_msg: "empty expression should be used with limit: invalid parameter"}
         self.query(client, INVALID_SHARED_COLLECTION, filter=filter, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100, ct.err_msg: "offset requires a positive limit"}
         self.query(
             client, INVALID_SHARED_COLLECTION, filter=filter, offset=1, check_task=CheckTasks.err_res, check_items=error
         )
@@ -3408,10 +3409,9 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_query_pagination_without_limit(self):
         """
-        target: test query pagination without limit
-        method: create collection and query with pagination params(only offset),
-                compare the result with query without pagination params
-        expected: query successfully
+        target: verify ordinary query pagination with an omitted or zero limit
+        method: compare zero limit and offset with an unpaginated query, then pass a positive offset
+        expected: zero values return the unpaginated result and a positive offset requires a positive limit
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -3429,7 +3429,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         self.load_collection(client, collection_name)
-        # 4. query with only offset parameter (no limit)
+        # 4. Compare zero pagination values with an unpaginated query.
         query_res_without_pagination = self.query(
             client,
             collection_name,
@@ -3437,16 +3437,27 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name},
         )[0]
-        for offset in [0, 10, 100]:
-            query_res_with_offset = self.query(
+        for pagination in ({"offset": 0}, {"limit": 0}, {"limit": 0, "offset": 0}):
+            query_res = self.query(
                 client,
                 collection_name,
                 filter="id in [0, 1]",
-                offset=offset,
                 check_task=CheckTasks.check_query_results,
                 check_items={exp_res: rows[:2], "with_vec": True, "pk_name": default_primary_key_field_name},
+                **pagination,
             )[0]
-            assert query_res_with_offset == query_res_without_pagination
+            assert query_res == query_res_without_pagination
+
+        for pagination in ({"offset": 10}, {"limit": 0, "offset": 10}):
+            err, _ = self.query(
+                client,
+                collection_name,
+                filter="id in [0, 1]",
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: "offset requires a positive limit"},
+                **pagination,
+            )
+            assert err.code == 1100
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -5791,9 +5802,9 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_count_with_pagination_param(self):
         """
-        target: test count with pagination params
-        method: count with pagination params: offset, limit
-        expected: exception
+        target: verify global count(*) rejects pagination
+        method: query count(*) with zero offset, then with positive limit and offset separately and together
+        expected: zero offset returns the full count and positive pagination fails
         """
         client = self._client()
         res = self.query(
@@ -5801,28 +5812,20 @@ class TestQueryCountDefaultShared(TestMilvusClientV2Base):
             QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
             filter=default_search_exp,
             output_fields=["count(*)"],
-            offset=10,
+            offset=0,
         )[0]
         assert res[0]["count(*)"] == default_nb
-        self.query(
-            client,
-            QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
-            filter=default_search_exp,
-            output_fields=["count(*)"],
-            limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
-        self.query(
-            client,
-            QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
-            filter=default_search_exp,
-            output_fields=["count(*)"],
-            offset=10,
-            limit=10,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1, ct.err_msg: "count entities with pagination is not allowed"},
-        )
+        for pagination in ({"limit": 10}, {"offset": 10}, {"limit": 10, "offset": 10}):
+            err, _ = self.query(
+                client,
+                QUERY_COUNT_DEFAULT_SHARED_COLLECTION,
+                filter=default_search_exp,
+                output_fields=["count(*)"],
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1100, ct.err_msg: "count entities with pagination is not allowed"},
+                **pagination,
+            )
+            assert err.code == 1100
 
 
 @pytest.mark.xdist_group("TestQueryCountExpressionShared")
