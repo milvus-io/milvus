@@ -105,6 +105,7 @@ type SegmentAction struct {
 	SegmentID typeutil.UniqueID
 	Scope     querypb.DataScope
 
+	rpcStarted  atomic.Bool
 	rpcReturned atomic.Bool
 }
 

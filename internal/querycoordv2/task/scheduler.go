@@ -818,6 +818,11 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
 	}
 	if old != nil {
+		if GetTaskType(task) == TaskTypeGrow {
+			if oldMove, ok := old.(*SegmentTask); ok && scheduler.canContinueMoveGrow(oldMove) {
+				return merr.WrapErrServiceInternal("segment move grow is still active")
+			}
+		}
 		// A replica update is not pushed to the scheduler. Revalidate the
 		// incumbent here so a plan made stale by one cannot hold the key until
 		// the next Dispatch of its node.
@@ -1160,11 +1165,15 @@ func (scheduler *taskScheduler) preProcess(task Task) (shouldProcess bool) {
 		task.Cancel(err)
 		return false
 	}
+	if segmentTask, ok := task.(*SegmentTask); ok && segmentTask.IsReduceSkipped() && !scheduler.canContinueMoveGrow(segmentTask) {
+		task.Cancel(merr.WrapErrServiceInternal("segment move grow is no longer eligible"))
+		return false
+	}
 
 	actions, step := task.Actions(), task.Step()
 	shouldProcess = true
 	for step < len(actions) {
-		finished, waitingDist := scheduler.checkActionFinish(actions[step])
+		finished, waitingDist := scheduler.checkActionFinish(task, actions[step])
 		if !finished {
 			if waitingDist {
 				shouldProcess = false
@@ -1212,10 +1221,13 @@ func (scheduler *taskScheduler) preProcess(task Task) (shouldProcess bool) {
 	return shouldProcess && task.Status() == TaskStatusStarted
 }
 
-func (scheduler *taskScheduler) checkActionFinish(action Action) (finished bool, waitingDist bool) {
+func (scheduler *taskScheduler) checkActionFinish(task Task, action Action) (finished bool, waitingDist bool) {
 	segmentAction, ok := action.(*SegmentAction)
 	if !ok {
 		return action.IsFinished(scheduler.distMgr), false
+	}
+	if segmentTask, ok := task.(*SegmentTask); ok && segmentTask.IsReduceSkipped() && action.Type() == ActionTypeReduce {
+		return true, false
 	}
 	if !segmentAction.rpcReturned.Load() {
 		return false, false
@@ -1270,10 +1282,63 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 		}
 		scheduler.collKeyLock.Lock(task.CollectionID())
 		defer scheduler.collKeyLock.Unlock(task.CollectionID())
+		if scheduler.preserveMoveGrowAfterSourceDown(task, node) {
+			return true
+		}
 		// remove is a no-op for a task that was retired meanwhile.
 		scheduler.remove(task)
 		return true
 	})
+}
+
+// preserveMoveGrowAfterSourceDown keeps a dispatched Grow alive when only the
+// source node of a segment Move leaves. The source Reduce is marked complete
+// because its node and distribution are already gone.
+func (scheduler *taskScheduler) preserveMoveGrowAfterSourceDown(task Task, node int64) bool {
+	segmentTask, ok := task.(*SegmentTask)
+	if !ok || task.Status() != TaskStatusStarted || GetTaskType(task) != TaskTypeMove || len(task.Actions()) != 2 {
+		return false
+	}
+	if segmentTask.Step() > 1 {
+		return false
+	}
+	grow, growOK := task.Actions()[0].(*SegmentAction)
+	reduce, reduceOK := task.Actions()[1].(*SegmentAction)
+	if !growOK || !reduceOK || grow.Type() != ActionTypeGrow || reduce.Type() != ActionTypeReduce || reduce.Node() != node || grow.Node() == node {
+		return false
+	}
+	if !scheduler.moveGrowWasDispatched(segmentTask, grow) || !scheduler.moveGrowEligible(segmentTask, grow) {
+		return false
+	}
+	segmentTask.SkipReduce()
+	return true
+}
+
+func (scheduler *taskScheduler) moveGrowWasDispatched(task *SegmentTask, grow *SegmentAction) bool {
+	return task.Step() > 0 || grow.rpcStarted.Load() || grow.rpcReturned.Load()
+}
+
+func (scheduler *taskScheduler) moveGrowEligible(task *SegmentTask, grow *SegmentAction) bool {
+	if !scheduler.targetMgr.CanSegmentBeMoved(scheduler.ctx, task.CollectionID(), task.SegmentID()) {
+		return false
+	}
+	nodeInfo := scheduler.nodeMgr.Get(grow.Node())
+	if nodeInfo == nil || nodeInfo.IsStoppingState() {
+		return false
+	}
+	replica := scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
+	return replica != nil && replica.ContainRWNode(grow.Node())
+}
+
+func (scheduler *taskScheduler) canContinueMoveGrow(task *SegmentTask) bool {
+	if !task.IsReduceSkipped() || task.Status() != TaskStatusStarted || GetTaskType(task) != TaskTypeMove || len(task.Actions()) != 2 {
+		return false
+	}
+	grow, ok := task.Actions()[0].(*SegmentAction)
+	if !ok || grow.Type() != ActionTypeGrow {
+		return false
+	}
+	return scheduler.moveGrowEligible(task, grow)
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
@@ -1463,6 +1528,22 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 		}
 	}
 
+	for _, action := range task.Actions() {
+		if segmentTask, ok := task.(*SegmentTask); ok && segmentTask.IsReduceSkipped() && action.Type() == ActionTypeReduce {
+			continue
+		}
+		// Orphan cleanup becomes stale when an RG change assigns the node back
+		// to a replica. The segment may have been released and reloaded between
+		// distribution reports, so waiting for its absence can block other cleanup.
+		if segmentAction, ok := action.(*SegmentAction); ok && task.ReplicaID() == -1 &&
+			action.Type() == ActionTypeReduce && segmentAction.GetScope() == querypb.DataScope_Historical {
+			// ReleaseCollection retains replica metadata until all copies are gone.
+			if scheduler.meta.Exist(scheduler.ctx, task.CollectionID()) &&
+				scheduler.meta.GetByCollectionAndNode(scheduler.ctx, task.CollectionID(), action.Node()) != nil {
+				return merr.WrapErrServiceInternal("orphan segment cleanup node reassigned to a replica")
+			}
+		}
+	}
 	return scheduler.checkNodeState(task)
 }
 
@@ -1470,6 +1551,9 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 // not to be stopping.
 func (scheduler *taskScheduler) checkNodeState(task Task) error {
 	for _, action := range task.Actions() {
+		if segmentTask, ok := task.(*SegmentTask); ok && segmentTask.IsReduceSkipped() && action.Type() == ActionTypeReduce {
+			continue
+		}
 		// Determine the target node for stale checking.
 		// For LeaderAction, we need to check the leader node (delegator) instead of the worker node.
 		// This is because LeaderAction.Node() returns the worker node where the segment resides,
