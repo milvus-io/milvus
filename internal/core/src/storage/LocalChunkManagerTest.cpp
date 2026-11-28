@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include <memory>
 #include <string>
 
+#include "common/EasyAssert.h"
 #include "gtest/gtest.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalChunkManager.h"
@@ -253,4 +255,59 @@ TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
     lcm->RemoveDir(test_dir);
     exist = lcm->DirExist(test_dir);
     EXPECT_EQ(exist, false);
+}
+
+TEST_F(LocalChunkManagerTest, GetSizeOfDirSkipsLostAndFound) {
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto test_dir = lcm->GetRootPath() + "/local-size-lost-found";
+    auto lost_found = test_dir + "/lost+found";
+    auto nested_lost_found = test_dir + "/nested/lost+found";
+    uint8_t data[] = {0x17, 0x32, 0x00, 0x34, 0x23, 0x23, 0x87, 0x98};
+
+    lcm->Write(test_dir + "/file", data, sizeof(data));
+    lcm->Write(test_dir + "/nested/file", data, sizeof(data));
+    lcm->Write(test_dir + "/lost+found-backup/file", data, sizeof(data));
+    lcm->Write(test_dir + "/files/lost+found", data, sizeof(data));
+    lcm->Write(lost_found + "/recovered", data, sizeof(data));
+    lcm->Write(nested_lost_found + "/recovered", data, sizeof(data));
+
+    // Nonempty recovery directories must be excluded even when running as root.
+    EXPECT_EQ(lcm->GetSizeOfDir(test_dir), 4 * sizeof(data));
+    EXPECT_EQ(lcm->GetSizeOfDir(lost_found), sizeof(data));
+
+    boost::filesystem::permissions(lost_found, boost::filesystem::no_perms);
+    boost::filesystem::permissions(nested_lost_found,
+                                   boost::filesystem::no_perms);
+    int64_t size = -1;
+    EXPECT_NO_THROW(size = lcm->GetSizeOfDir(test_dir));
+    boost::filesystem::permissions(lost_found, boost::filesystem::owner_all);
+    boost::filesystem::permissions(nested_lost_found,
+                                   boost::filesystem::owner_all);
+    lcm->RemoveDir(test_dir);
+
+    EXPECT_EQ(size, 4 * sizeof(data));
+}
+
+TEST_F(LocalChunkManagerTest, GetSizeOfDirPreservesPermissionErrors) {
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    auto test_dir = lcm->GetRootPath() + "/local-size-permission-errors";
+    auto restricted_dir = test_dir + "/segment";
+    uint8_t data[] = {0x17, 0x32, 0x00, 0x34, 0x23, 0x23, 0x87, 0x98};
+    lcm->Write(restricted_dir + "/file", data, sizeof(data));
+    boost::filesystem::permissions(restricted_dir, boost::filesystem::no_perms);
+
+    boost::system::error_code ec;
+    boost::filesystem::directory_iterator probe(restricted_dir, ec);
+    if (ec.value() == boost::system::errc::permission_denied) {
+        EXPECT_THROW(lcm->GetSizeOfDir(test_dir), SegcoreError);
+        EXPECT_THROW(lcm->GetSizeOfDir(restricted_dir), SegcoreError);
+    }
+
+    boost::filesystem::permissions(restricted_dir,
+                                   boost::filesystem::owner_all);
+    lcm->RemoveDir(test_dir);
+    if (!ec) {
+        GTEST_SKIP() << "This process can bypass directory permissions";
+    }
+    EXPECT_EQ(ec.value(), boost::system::errc::permission_denied);
 }
