@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -1361,5 +1362,96 @@ func TestGetTelemetryClientHistoryHandler(t *testing.T) {
 		var resp map[string]string
 		json.Unmarshal(w.Body.Bytes(), &resp)
 		assert.Equal(t, "client not found", resp["error"])
+	})
+}
+
+// ListClientCommands returns every pending command of every connected client,
+// so it is a management read and must be root-only like the other telemetry
+// command endpoints. With business authorization enabled and the management
+// gate off, the HTTP middleware admits any authenticated user, so the check has
+// to live on the RPC method itself.
+func TestListClientCommandsRequiresRoot(t *testing.T) {
+	authorizationKey := Params.CommonCfg.AuthorizationEnabled.Key
+	originalAuthorization := Params.CommonCfg.AuthorizationEnabled.GetValue()
+	t.Cleanup(func() {
+		_ = Params.Save(authorizationKey, originalAuthorization)
+	})
+
+	// Build the same credential metadata the HTTP middleware injects into the
+	// request context, so the handler exercises the real HTTP-to-Proxy path.
+	credentialCtx := func(username string) context.Context {
+		token := base64.StdEncoding.EncodeToString([]byte(username + ":s3cr3t"))
+		return contextutil.AppendToIncomingContext(
+			context.Background(), util.HeaderAuthorize, token)
+	}
+	newProxy := func(t *testing.T, forwarded bool) *Proxy {
+		t.Helper()
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		if forwarded {
+			mixCoord.EXPECT().ListClientCommands(mock.Anything, mock.Anything).Return(
+				&rootcoordpb.ListClientCommandsResponse{Status: merr.Success()}, nil)
+		}
+		proxy := &Proxy{mixCoord: mixCoord}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		return proxy
+	}
+	serve := func(t *testing.T, proxy *Proxy, ctx context.Context) *httptest.ResponseRecorder {
+		t.Helper()
+		router := gin.New()
+		router.GET("/commands", listTelemetryCommands(proxy))
+		req := httptest.NewRequest(http.MethodGet, "/commands", nil)
+		req = req.WithContext(ctx)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	t.Run("authorization disabled forwards", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "false")
+		resp, err := newProxy(t, true).ListClientCommands(
+			context.Background(), &rootcoordpb.ListClientCommandsRequest{})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()))
+	})
+
+	t.Run("anonymous is rejected", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "true")
+		resp, err := newProxy(t, false).ListClientCommands(
+			context.Background(), &rootcoordpb.ListClientCommandsRequest{})
+		require.NoError(t, err)
+		require.Equal(t, merr.Code(merr.ErrPrivilegeNotAuthenticated), resp.GetStatus().GetCode())
+	})
+
+	t.Run("non-root is rejected", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "true")
+		resp, err := newProxy(t, false).ListClientCommands(
+			credentialCtx("alice"), &rootcoordpb.ListClientCommandsRequest{})
+		require.NoError(t, err)
+		require.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), resp.GetStatus().GetCode())
+	})
+
+	t.Run("root passes", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "true")
+		resp, err := newProxy(t, true).ListClientCommands(
+			credentialCtx(util.UserRoot), &rootcoordpb.ListClientCommandsRequest{})
+		require.NoError(t, err)
+		require.True(t, merr.Ok(resp.GetStatus()))
+	})
+
+	// The handler is the path a caller actually reaches: the RPC method is not
+	// protected by external gRPC request annotations, so the denial has to hold
+	// after the request has crossed the HTTP layer.
+	t.Run("http handler rejects non-root", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "true")
+		recorder := serve(t, newProxy(t, false), credentialCtx("alice"))
+		require.NotEqual(t, http.StatusOK, recorder.Code)
+		require.NotContains(t, recorder.Body.String(), `"commands"`)
+	})
+
+	t.Run("http handler allows root", func(t *testing.T) {
+		_ = Params.Save(authorizationKey, "true")
+		recorder := serve(t, newProxy(t, true), credentialCtx(util.UserRoot))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.Contains(t, recorder.Body.String(), `"commands"`)
 	})
 }
