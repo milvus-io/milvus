@@ -26,6 +26,7 @@ import (
 
 func (c *Callbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result message.BroadcastResultBatchUpdateManifestMessageV2) error {
 	body := result.Message.MustBody()
+	collectionID := result.Message.Header().GetCollectionId()
 	var (
 		operators []meta.UpdateOperator
 		v2Count   int
@@ -33,6 +34,14 @@ func (c *Callbacks) batchUpdateManifestV2AckCallback(ctx context.Context, result
 	)
 	for _, item := range body.GetItems() {
 		segID := item.GetSegmentId()
+		// Apply an item only to a segment of the message's collection. The
+		// RPC entry rejects other items before broadcasting; this also covers
+		// messages broadcast before that check existed.
+		if segment := c.Meta.GetSegment(ctx, segID); segment == nil || segment.GetCollectionID() != collectionID {
+			mlog.Warn(ctx, "batch update manifest item segment is not in the message collection; skipping",
+				mlog.FieldCollectionID(collectionID), mlog.FieldSegmentID(segID))
+			continue
+		}
 		cg := item.GetV2ColumnGroups()
 		hasV3 := item.GetManifestVersion() > 0
 		hasV2 := cg != nil && len(cg.GetColumnGroups()) > 0
