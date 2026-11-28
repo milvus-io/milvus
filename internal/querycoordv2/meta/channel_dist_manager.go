@@ -150,7 +150,22 @@ type DmChannel struct {
 	*datapb.VchannelInfo
 	Node    int64
 	Version int64
-	View    *LeaderView
+	// ReplicaID is the replica the delegator was created for, as its QueryNode
+	// reports it; 0 when the QueryNode does not report it.
+	ReplicaID int64
+	View      *LeaderView
+}
+
+// BelongsTo reports whether the delegator serves replica: it runs on one of
+// the replica's nodes and, when its QueryNode reports it, was created for that
+// replica. A delegator that a removed replica left on a node now in this
+// replica routes to the removed replica's workers until the channel checker
+// removes it, so it must not lead this replica or count toward its load.
+func (ch *DmChannel) BelongsTo(replica *Replica) bool {
+	if replica == nil || ch.GetCollectionID() != replica.GetCollectionID() || !replica.Contains(ch.Node) {
+		return false
+	}
+	return ch.ReplicaID == 0 || ch.ReplicaID == replica.GetID()
 }
 
 func DmChannelFromVChannel(channel *datapb.VchannelInfo) *DmChannel {
@@ -164,6 +179,7 @@ func (channel *DmChannel) Clone() *DmChannel {
 		VchannelInfo: proto.Clone(channel.VchannelInfo).(*datapb.VchannelInfo),
 		Node:         channel.Node,
 		Version:      channel.Version,
+		ReplicaID:    channel.ReplicaID,
 		View: &LeaderView{
 			ID:           channel.View.ID,
 			CollectionID: channel.View.CollectionID,
@@ -381,7 +397,7 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 	var candidates *DmChannel
 	for _, nc := range m.channels {
 		for _, channel := range nc.collChannels[replica.GetCollectionID()] {
-			if channel.GetChannelName() == channelName && replica.Contains(channel.Node) {
+			if channel.GetChannelName() == channelName && channel.BelongsTo(replica) {
 				if candidates == nil {
 					candidates = channel
 				} else {

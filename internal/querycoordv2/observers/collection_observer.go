@@ -335,11 +335,14 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 	}
 
 	subChannelCount := 0
+	replicas := ob.meta.GetByCollection(ctx, collectionID)
 	for _, channel := range channelTargets {
 		delegatorList := ob.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel.GetChannelName()))
-		nodes := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) int64 { return v.Node })
-		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, collectionID, nodes)
-		subChannelCount += len(group)
+		// A delegator that another replica left on a node does not load the
+		// channel for the node's replica.
+		subChannelCount += lo.CountBy(replicas, func(replica *meta.Replica) bool {
+			return lo.ContainsBy(delegatorList, func(delegator *meta.DmChannel) bool { return delegator.BelongsTo(replica) })
+		})
 	}
 	return channelTargetNum, subChannelCount
 }
