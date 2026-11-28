@@ -40,6 +40,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// IsRequestTimeout reports whether a single etcd request exceeded its deadline.
+// A caller retrying a background read must also honor its own context.
+func IsRequestTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded
+}
+
 // IsRetriableWatchErr reports whether an etcd watch error can be recovered by
 // re-establishing the watch.
 //

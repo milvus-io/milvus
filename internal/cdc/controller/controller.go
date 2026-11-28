@@ -128,15 +128,17 @@ func (c *controller) startWatchLoop() {
 }
 
 // listReplicatePChannels lists the replicate pchannels, retrying transient etcd
-// errors (e.g. leader changed while etcd restarts). Any other error, including
-// a request timeout, is returned.
+// errors and per-request timeouts until the controller stops.
 func (c *controller) listReplicatePChannels() (*meta.ReplicateChannels, error) {
 	for {
 		m, err := meta.ListReplicatePChannels(c.ctx, resource.Resource().ETCD(), c.prefix)
 		if err == nil {
 			return m, nil
 		}
-		if c.ctx.Err() != nil || !etcd.IsRetriableEtcdErr(err) {
+		if c.ctx.Err() != nil {
+			return nil, c.ctx.Err()
+		}
+		if !etcd.IsRequestTimeout(err) && !etcd.IsRetriableEtcdErr(err) {
 			return nil, err
 		}
 		mlog.Warn(c.ctx, "failed to list replicate pchannels, retry", mlog.Err(err))
