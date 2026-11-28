@@ -77,6 +77,7 @@ type Manager struct {
 	gcTask                *summaryGCTask
 	lastAcked             uint64
 	lastObserved          uint64
+	uploadedFlushThrough  uint64 // flush markers whose preceding chunks have all uploaded
 	sealedThrough         uint64
 	latestCoveredTimeTick uint64
 	queryBarriers         map[string]uint64 // volatile per-vchannel coverage; never persisted
@@ -132,7 +133,7 @@ func NewManager(config ManagerConfig) *Manager {
 }
 
 // ObserveMessage copies one ordered WAL message into the summary without
-// retaining its source handle. Size thresholds and AlterWAL barriers schedule
+// retaining its source handle. Size thresholds, AlterWAL and FlushAll schedule
 // asynchronous writes.
 // DDL messages preserve the history of previously committed requests.
 func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) {
@@ -161,13 +162,24 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		m.notifyTransformMessageLocked(msg)
 		m.dispatchTransformMessageLocked(msg, entry)
 	}
+	typ := msg.MessageType()
+	flush := typ == message.MessageTypeAlterWAL || typ == message.MessageTypeFlushAll
+	if flush && len(m.pending) == 0 {
+		// A payload-free marker can arrive after its last record was sealed.
+		// Tie its acknowledgement to that chunk, independently of later records.
+		if n := len(m.pendingSealed); n > 0 {
+			tail := m.pendingSealed[n-1]
+			tail.flushThrough = max(tail.flushThrough, msg.TimeTick())
+		} else {
+			m.uploadedFlushThrough = max(m.uploadedFlushThrough, msg.TimeTick())
+		}
+	}
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
-	if msg.MessageType() == message.MessageTypeAlterWAL {
-		// The old WAL is fenced during a switch, so no later traffic may
-		// trigger sealing. Include this payload-free barrier in the coverage
-		// without waiting for object storage on the observation path.
+	if flush {
+		// Later writes may never arrive to seal a small batch. Cover the
+		// observed marker without waiting for storage on the consume path.
 		m.RequestFlushThrough(msg.TimeTick())
 	} else if overThreshold {
 		m.requestSeal()
@@ -409,6 +421,7 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 			}
 		}
 		m.latestCoveredTimeTick = m.manifest.GetCoverage().GetEndTimeTick()
+		m.uploadedFlushThrough = max(m.uploadedFlushThrough, head.flushThrough)
 		m.manifestVersion++
 		m.pendingSealed[0] = nil
 		m.pendingSealed = m.pendingSealed[1:]
@@ -689,6 +702,7 @@ type stagedRecord struct {
 type SealedChunk struct {
 	task              *chunkWriteTask
 	index             *indexedChunk
+	flushThrough      uint64 // guarded by Manager.mu; does not change the serialized chunk
 	Coverage          TimeTickRange
 	Transforms        map[string]*streamingpb.VChannelSummaryTransformIndex
 	Generation        uint64

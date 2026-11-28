@@ -82,7 +82,7 @@ func (m *Manager) advanceLastAckedLocked(timetick uint64) {
 func (m *Manager) refreshLastAckedLocked() {
 	// Current-term data is discoverable only after its first manifest PUT.
 	if m.manifestPublished {
-		m.advanceLastAckedLocked(m.manifest.GetCoverage().GetEndTimeTick())
+		m.advanceLastAckedLocked(max(m.manifest.GetCoverage().GetEndTimeTick(), m.uploadedFlushThrough))
 	}
 	// Non-record messages need no new object. But a first-term unpublished
 	// chunk must still pin confirmation even after leaving pendingSealed.

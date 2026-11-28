@@ -250,6 +250,13 @@ barrier, including during startup replay. It does not wait for object writes
 or change confirmation, catalog publication, or the switch's checkpoint wait.
 Ordinary TimeTick messages do not force sealing.
 
+FlushAll also requests a flush through the marker's TimeTick on each PChannel.
+Once preceding work is durable, periodic catalog publication can cover that
+channel's receipt even if application writes stop. If the last record was
+already sealed, its contiguous upload and the term's first manifest publication
+release the marker even when newer records are still pending. The RPC still completes
+on the existing L1/L0 broadcast acknowledgements.
+
 Sealed chunks and dirty manifests continue on their own scheduler retry paths;
 periodic persistence checks do not manufacture completion or bypass the first-manifest
 requirement. Empty backlog produces no new chunk.
