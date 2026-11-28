@@ -24,7 +24,7 @@ func NewSegmentAssignMetrics(pchannel string) *SegmentAssignMetrics {
 		collectionTotal:  metrics.WALCollectionTotal.With(constLabel),
 
 		insertRowsTotal: metrics.WALInsertRowsTotal.With(constLabel),
-		insertBytes:     metrics.WALInsertBytes.With(constLabel),
+		insertBytes:     metrics.WALInsertBytesTotal.With(constLabel),
 		deleteRowsTotal: metrics.WALDeleteRowsTotal.With(constLabel),
 	}
 }
@@ -69,7 +69,7 @@ func (m *SegmentAssignMetrics) ObserveInsert(rows uint64, bytes uint64) {
 	m.insertBytes.Add(float64(bytes))
 }
 
-// ObserveDelete observe a insert operation
+// ObserveDelete counts the rows declared by a delete message.
 func (m *SegmentAssignMetrics) ObserveDelete(rows uint64) {
 	m.deleteRowsTotal.Add(float64(rows))
 }
@@ -108,5 +108,5 @@ func (m *SegmentAssignMetrics) Close() {
 	metrics.WALCollectionTotal.Delete(m.constLabel)
 	metrics.WALInsertRowsTotal.Delete(m.constLabel)
 	metrics.WALDeleteRowsTotal.Delete(m.constLabel)
-	metrics.WALInsertBytes.Delete(m.constLabel)
+	metrics.WALInsertBytesTotal.Delete(m.constLabel)
 }
