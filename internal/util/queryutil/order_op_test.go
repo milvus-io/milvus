@@ -792,3 +792,67 @@ func TestOrderByLimitOperator_TimestamptzGroupTieBreaker(t *testing.T) {
 	sorted := outputs[0].(*internalpb.RetrieveResults)
 	assert.Equal(t, []int64{100}, sorted.GetFieldsData()[1].GetScalars().GetTimestamptzData().GetData())
 }
+
+// Aggregate rows have no PK. Heap selection must preserve the same tied rows
+// and row order as the full stable sort, including at the K boundary.
+func TestOrderByTopKMatchesStableSort(t *testing.T) {
+	const n = 257
+	ids, values, secondary := make([]int64, n), make([]int64, n), make([]int64, n)
+	valid := make([]bool, n)
+	for i := range ids {
+		ids[i], values[i], secondary[i], valid[i] = int64(i), int64((i*17)%7), int64(i%3), i%11 != 0
+	}
+	key, second := makePKField(values), makePKField(secondary)
+	key.FieldId, second.FieldId = 2, 3
+	typeutil.SetFieldDataValidData(key, valid)
+	input := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{makePKField(ids), key, second}}
+	for _, ascending := range []bool{false, true} {
+		for _, nullsFirst := range []bool{false, true} {
+			for _, multiKey := range []bool{false, true} {
+				fields := []*orderby.OrderByField{orderby.NewOrderByField(2, "", schemapb.DataType_Int64, orderby.WithAscending(ascending), orderby.WithNullsFirst(nullsFirst))}
+				positions := []int{1}
+				if multiKey {
+					fields = append(fields, orderby.NewOrderByField(3, "", schemapb.DataType_Int64))
+					positions = append(positions, 2)
+				}
+				full, err := NewOrderByLimitOperatorWithPositions(fields, positions, -1).Run(t.Context(), nil, input)
+				require.NoError(t, err)
+				for _, k := range []int64{1, 3, 17, 128, n, n + 1} {
+					got, err := NewOrderByLimitOperatorWithPositions(fields, positions, k).Run(t.Context(), nil, input)
+					require.NoError(t, err)
+					want, err := NewSliceOperator(k, 0).Run(t.Context(), nil, full[0])
+					require.NoError(t, err)
+					require.Equal(t, want[0].(*internalpb.RetrieveResults).FieldsData[0].GetScalars().GetLongData().Data,
+						got[0].(*internalpb.RetrieveResults).FieldsData[0].GetScalars().GetLongData().Data,
+						"ascending=%t nullsFirst=%t multiKey=%t K=%d", ascending, nullsFirst, multiKey, k)
+				}
+			}
+		}
+	}
+}
+
+type orderCancelContext struct {
+	context.Context
+	calls int
+}
+
+func (c *orderCancelContext) Err() error {
+	c.calls++
+	if c.calls > 2 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestOrderByTopKCancellation(t *testing.T) {
+	values := make([]int64, 4096)
+	input := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{makePKField(values)}}
+	op := NewOrderByLimitOperatorWithPositions([]*orderby.OrderByField{orderby.NewOrderByField(1, "", schemapb.DataType_Int64)}, []int{0}, 3)
+	ctx := &orderCancelContext{Context: t.Context()}
+	_, err := op.Run(ctx, nil, input)
+	require.ErrorIs(t, err, context.Canceled)
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = op.Run(canceled, nil, input)
+	require.ErrorIs(t, err, context.Canceled)
+}
