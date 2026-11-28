@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -33,7 +35,7 @@ func TestResourceGroupPublicationFollowsCommittedMembership(t *testing.T) {
 	save.UnPatch()
 	failure := mockey.Mock(querycoord.Catalog.SaveResourceGroup).Return(merr.WrapErrServiceUnavailableMsg("persistence failed")).Build()
 	defer failure.UnPatch()
-	require.Panics(t, func() { manager.HandleNodeDown(t.Context(), 10) })
+	require.ErrorIs(t, manager.HandleNodeDown(t.Context(), 10), merr.ErrServiceUnavailable)
 	require.Len(t, seen, 2, "failed persistence must not change published membership")
 	failure.UnPatch()
 	save = mockey.Mock(querycoord.Catalog.SaveResourceGroup).Return(nil).Build()
@@ -45,4 +47,39 @@ func TestResourceGroupPublicationFollowsCommittedMembership(t *testing.T) {
 	stop()
 	manager.HandleNodeUp(t.Context(), 10)
 	require.Len(t, seen, 3)
+}
+
+func TestReconcileNodeRemovalAfterLostReply(t *testing.T) {
+	paramtable.Init()
+	nodes := session.NewNodeManager()
+	manager := NewResourceManager(querycoord.NewCatalog(nil), nodes)
+	var persisted []int64
+	var loseReply bool
+	save := mockey.Mock(querycoord.Catalog.SaveResourceGroup).To(func(_ querycoord.Catalog, _ context.Context, groups ...*querypb.ResourceGroup) error {
+		persisted = groups[0].GetNodes()
+		if loseReply {
+			return merr.WrapErrIoFailedErr(context.DeadlineExceeded, "save resource group")
+		}
+		return nil
+	}).Build()
+	defer save.UnPatch()
+
+	ctx := t.Context()
+	node := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 10})
+	nodes.Add(node)
+	manager.HandleNodeUp(ctx, 10)
+	require.Equal(t, []int64{10}, persisted)
+
+	nodes.Remove(10)
+	loseReply = true
+	require.ErrorIs(t, manager.HandleNodeDown(ctx, 10), context.DeadlineExceeded)
+	require.Empty(t, persisted, "the removal committed before its response was lost")
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(10))
+
+	nodes.Add(node)
+	manager.HandleNodeUp(ctx, 10)
+	loseReply = false
+	require.NoError(t, manager.ReconcileNodeRemovals(ctx, DefaultResourceGroupName))
+	require.Equal(t, []int64{10}, persisted)
+	require.Equal(t, DefaultResourceGroupName, manager.GetResourceGroupByNodeID(10))
 }

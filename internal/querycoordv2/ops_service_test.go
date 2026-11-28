@@ -286,8 +286,17 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	nodes, err := suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.Contains(nodes, int64(1))
-	// test success
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+	// An unconfirmed removal must return the metastore error to the operator.
+	timeout := merr.WrapErrIoFailedErr(context.DeadlineExceeded, "save resource group")
+	save := mockey.Mock(querycoord.Catalog.SaveResourceGroup).Return(timeout).Build()
+	defer save.UnPatch()
+	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{NodeID: 1})
+	suite.NoError(err)
+	suite.Equal(merr.Code(timeout), resp.GetCode())
+	suite.False(suite.meta.IsNodeSuspended(1))
+	save.UnPatch()
+
+	// The original request and a repeated suspension are both safe to retry.
 	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{
 		NodeID: 1,
 	})
@@ -296,6 +305,10 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 	nodes, err = suite.meta.GetNodes(ctx, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	suite.NotContains(nodes, int64(1))
+
+	resp, err = suite.server.SuspendNode(ctx, &querypb.SuspendNodeRequest{NodeID: 1})
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
 
 	resp, err = suite.server.ResumeNode(ctx, &querypb.ResumeNodeRequest{
 		NodeID: 1,

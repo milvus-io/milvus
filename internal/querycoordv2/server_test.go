@@ -761,7 +761,7 @@ func TestHandleNodeDownMetricsCleanup(t *testing.T) {
 	mockInvalidateSystemInfoMetrics := mockey.Mock((*metricsinfo.MetricsCacheManager).InvalidateSystemInfoMetrics).Return().Build()
 	defer mockInvalidateSystemInfoMetrics.UnPatch()
 
-	mockResourceManagerHandleNodeDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).Return().Build()
+	mockResourceManagerHandleNodeDown := mockey.Mock((*meta.ResourceManager).HandleNodeDown).Return(nil).Build()
 	defer mockResourceManagerHandleNodeDown.UnPatch()
 
 	// Act: Call handleNodeDown which should clean up metrics

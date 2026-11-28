@@ -787,7 +787,7 @@ func (s *Server) handleNodeUp(node int64) {
 
 func (s *Server) handleNodeDown(node int64) {
 	if s.qviewsRuntime != nil {
-		s.meta.HandleNodeDown(context.Background(), node)
+		_ = s.meta.HandleNodeDown(s.ctx, node) // The resource observer retries failed removals.
 		metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 		return
@@ -803,7 +803,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
-	s.meta.HandleNodeDown(context.Background(), node)
+	_ = s.meta.HandleNodeDown(s.ctx, node) // The resource observer retries failed removals.
 
 	// clean node's metrics
 	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
@@ -815,12 +815,12 @@ func (s *Server) handleNodeStopping(node int64) {
 	s.nodeMgr.Stopping(node)
 
 	if s.qviewsRuntime != nil {
-		s.meta.HandleNodeStopping(context.Background(), node)
+		s.meta.HandleNodeStopping(s.ctx, node)
 		return
 	}
 
 	// mark node as stopping in resource manager
-	s.meta.HandleNodeStopping(context.Background(), node)
+	s.meta.HandleNodeStopping(s.ctx, node)
 }
 
 func (s *Server) watchLoadConfigChanges() {
