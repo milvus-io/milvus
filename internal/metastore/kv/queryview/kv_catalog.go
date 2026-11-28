@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -43,31 +44,50 @@ func NewQueryViewCatalog(metaKV kv.MetaKv, role string) QueryViewCatalog {
 	}
 }
 
+// ListQueryViews decodes each value as the prefix is walked rather than after
+// copying every key and value. The whole prefix is still read, and the first
+// invalid entry in key order fails the call.
 func (c *queryViewCatalog) ListQueryViews(ctx context.Context) ([]*viewpb.QueryViewOfShard, error) {
-	keys, values, err := c.metaKV.LoadWithPrefix(ctx, c.prefix)
+	views := make([]*viewpb.QueryViewOfShard, 0)
+	var invalid error
+	err := c.metaKV.WalkWithPrefix(ctx, c.prefix, paramtable.Get().MetaStoreCfg.PaginationSize.GetAsInt(), func(key, value []byte) error {
+		if invalid != nil {
+			return nil
+		}
+		view, err := c.decodeQueryView(string(key), value)
+		if err != nil {
+			invalid = err
+			return nil
+		}
+		views = append(views, view)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	views := make([]*viewpb.QueryViewOfShard, 0, len(values))
-	for idx, val := range values {
-		view := &viewpb.QueryViewOfShard{}
-		if err := proto.Unmarshal([]byte(val), view); err != nil {
-			return nil, merr.Wrap(err, "unmarshal persisted query view")
-		}
-		expectedKey, err := c.buildKey(view.GetMeta())
-		if err != nil {
-			return nil, err
-		}
-		if typeutil.After(keys[idx], c.prefix) != typeutil.After(expectedKey, c.prefix) {
-			return nil, merr.WrapErrDataIntegrityMsg(
-				"mismatched query view meta, key %s, vchannel %s",
-				keys[idx],
-				view.GetMeta().GetVchannel(),
-			)
-		}
-		views = append(views, view)
+	if invalid != nil {
+		return nil, invalid
 	}
 	return views, nil
+}
+
+func (c *queryViewCatalog) decodeQueryView(key string, value []byte) (*viewpb.QueryViewOfShard, error) {
+	view := &viewpb.QueryViewOfShard{}
+	if err := proto.Unmarshal(value, view); err != nil {
+		return nil, merr.Wrap(err, "unmarshal persisted query view")
+	}
+	expectedKey, err := c.buildKey(view.GetMeta())
+	if err != nil {
+		return nil, err
+	}
+	if typeutil.After(key, c.prefix) != typeutil.After(expectedKey, c.prefix) {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"mismatched query view meta, key %s, vchannel %s",
+			key,
+			view.GetMeta().GetVchannel(),
+		)
+	}
+	return view, nil
 }
 
 func (c *queryViewCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryViewOfShard) error {

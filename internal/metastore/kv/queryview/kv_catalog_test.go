@@ -2,9 +2,11 @@ package queryview
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -13,6 +15,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func newTestCatalog(t *testing.T) (QueryViewCatalog, kv.MetaKv) {
@@ -312,4 +315,64 @@ func TestMarshalForPersistence_ClearsReadySegmentIds(t *testing.T) {
 
 	// Verify segment_ids are preserved
 	assert.Equal(t, []int64{1001, 1002, 1003}, restored.QueryNode[0].Partitions[0].SegmentIds)
+}
+
+// listQueryViewsFromLoad is the former ListQueryViews: load every key and
+// value, then decode them in key order.
+func listQueryViewsFromLoad(t *testing.T, storage kv.MetaKv, prefix string) []*viewpb.QueryViewOfShard {
+	keys, values, err := storage.LoadWithPrefix(context.Background(), prefix)
+	require.NoError(t, err)
+	c := &queryViewCatalog{prefix: prefix}
+	views := make([]*viewpb.QueryViewOfShard, 0, len(values))
+	for i := range values {
+		view, err := c.decodeQueryView(keys[i], []byte(values[i]))
+		require.NoError(t, err)
+		views = append(views, view)
+	}
+	return views
+}
+
+func TestQueryViewCatalog_ListWalksSameViewsAsLoad(t *testing.T) {
+	catalog, storage := newTestCatalog(t)
+	ctx := context.Background()
+	states := []viewpb.QueryViewState{viewpb.QueryViewState_QueryViewStatePreparing, viewpb.QueryViewState_QueryViewStateUp, viewpb.QueryViewState_QueryViewStateDown, viewpb.QueryViewState_QueryViewStateUnrecoverable}
+	views := make([]*viewpb.QueryViewOfShard, 0, 600)
+	for i := int64(0); i < 600; i++ {
+		collection := 469710755538785624 + i%150
+		view := makeTestView(collection, 469872593869147457+i%3, fmt.Sprintf("by-dev-rootcoord-dml_%d_%dv%d", i%16, collection, i%2), 6+i%4, i%3, 1+i/150, states[i%4])
+		view.QueryNode[0].Partitions[0].SegmentIds = []int64{i, i + 1}
+		views = append(views, view)
+	}
+	for _, batch := range lo.Chunk(views, 64) {
+		require.NoError(t, catalog.SaveQueryViews(ctx, batch))
+	}
+
+	got, err := catalog.ListQueryViews(ctx)
+	require.NoError(t, err)
+	want := listQueryViewsFromLoad(t, storage, "test/qv/")
+	require.Len(t, want, len(views))
+	require.Len(t, got, len(want))
+	for i := range want {
+		require.True(t, proto.Equal(want[i], got[i]), "view %d differs", i)
+	}
+}
+
+func TestQueryViewCatalog_ListReportsFirstInvalidKey(t *testing.T) {
+	catalog, storage := newTestCatalog(t)
+	ctx := context.Background()
+	require.NoError(t, catalog.SaveQueryViews(ctx, []*viewpb.QueryViewOfShard{
+		makeTestView(1, 1, "p1_1v0", 1, 0, 1, viewpb.QueryViewState_QueryViewStateUp),
+		makeTestView(3, 1, "p1_3v0", 1, 0, 1, viewpb.QueryViewState_QueryViewStateUp),
+	}))
+	data, err := marshalForPersistence(makeTestView(2, 1, "p1_2v0", 1, 0, 1, viewpb.QueryViewState_QueryViewStateUp))
+	require.NoError(t, err)
+	// Both are invalid; the first in key order is reported, as before.
+	require.NoError(t, storage.Save(ctx, "test/qv/2/1/1/1/0/1", string(data)))
+	require.NoError(t, storage.Save(ctx, "test/qv/2/9/0/1/0/1", string(data)))
+	require.NoError(t, storage.Save(ctx, "test/qv/4/1/0/1/0/1", "invalid protobuf"))
+
+	views, err := catalog.ListQueryViews(ctx)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "test/qv/2/1/1/1/0/1")
+	require.Nil(t, views)
 }
