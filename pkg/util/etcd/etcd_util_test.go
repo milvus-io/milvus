@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +31,84 @@ import (
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestStartupErrorCategory(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{context.DeadlineExceeded, "DeadlineExceeded"},
+		{context.Canceled, "Canceled"},
+		{status.Error(codes.DeadlineExceeded, "private endpoint"), "DeadlineExceeded"},
+		{rpctypes.ErrAuthFailed, "AuthenticationFailed"},
+		{rpctypes.ErrPermissionDenied, "PermissionDenied"},
+		{&os.PathError{Op: "open", Path: "private certificate path", Err: os.ErrNotExist}, "FileNotFound"},
+		{os.ErrPermission, "FilePermissionDenied"},
+		{merr.WrapErrParameterInvalidMsg("private transport setting"), "InvalidConfiguration"},
+		{errors.New("private details"), "Unknown"},
+	} {
+		require.Equal(t, tc.want, StartupErrorCategory(errors.Wrap(tc.err, "private context")))
+	}
+}
+
+func TestRetryAtStartup(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		err     error
+		retries bool
+	}{
+		{"dial timeout", errors.Wrap(context.DeadlineExceeded, "dial"), true},
+		{"RPC timeout", status.Error(codes.DeadlineExceeded, "request timeout"), true},
+		{"leader election", rpctypes.ErrNoLeader, true},
+		{"authentication rejected", rpctypes.ErrAuthFailed, false},
+		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"local TLS configuration", os.ErrNotExist, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			err := RetryAtStartup(t.Context(), func() error {
+				calls++
+				if calls == 1 {
+					return tt.err
+				}
+				return nil
+			})
+			if tt.retries {
+				require.NoError(t, err)
+				require.Equal(t, 2, calls)
+			} else {
+				require.ErrorIs(t, err, tt.err)
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
+	t.Run("shutdown during backoff", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		attempted := make(chan struct{}, 1)
+		done := make(chan error, 1)
+		go func() {
+			done <- RetryAtStartup(ctx, func() error {
+				select {
+				case attempted <- struct{}{}:
+				default:
+				}
+				return rpctypes.ErrNoLeader
+			})
+		}()
+		<-attempted
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("startup retry did not stop")
+		}
+	})
+}
 
 func TestIsRetriableWatchErr(t *testing.T) {
 	cases := []struct {

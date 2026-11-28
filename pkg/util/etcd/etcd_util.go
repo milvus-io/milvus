@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -120,6 +121,58 @@ func IsRetriableEtcdErr(err error) bool {
 }
 
 type ClientOption func(*clientv3.Config)
+
+// IsRetriableStartupErr includes RPC deadlines while the component is waiting to serve.
+// The caller's context controls the lifetime of the retry loop.
+func IsRetriableStartupErr(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded || IsRetriableEtcdErr(err)
+}
+
+// StartupErrorCategory returns a diagnostic safe to log even when the wrapped
+// error contains credentials, certificate paths or transport details.
+func StartupErrorCategory(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return codes.DeadlineExceeded.String()
+	case errors.Is(err, context.Canceled):
+		return codes.Canceled.String()
+	case errors.IsAny(err, rpctypes.ErrAuthFailed, rpctypes.ErrGRPCAuthFailed):
+		return "AuthenticationFailed"
+	case errors.Is(err, os.ErrNotExist):
+		return "FileNotFound"
+	case errors.Is(err, os.ErrPermission):
+		return "FilePermissionDenied"
+	case errors.Is(err, merr.ErrParameterInvalid):
+		return "InvalidConfiguration"
+	}
+	var etcdErr rpctypes.EtcdError
+	if errors.As(err, &etcdErr) {
+		return etcdErr.Code().String()
+	}
+	return status.Code(err).String()
+}
+
+// RetryAtStartup waits for a temporarily unavailable etcd until startup is canceled.
+// Each individual operation must have its own deadline. Keep connection details
+// out of bootstrap logs (errors may include endpoints or certificate paths).
+func RetryAtStartup(ctx context.Context, operation func() error) error {
+	policy := backoff.NewExponentialBackOff()
+	policy.InitialInterval = 200 * time.Millisecond
+	policy.MaxInterval = 2 * time.Second // with jitter, at most three seconds
+	policy.MaxElapsedTime = 0
+	return backoff.RetryNotify(func() error {
+		if err := ctx.Err(); err != nil {
+			return backoff.Permanent(err)
+		}
+		err := operation()
+		if err != nil && !IsRetriableStartupErr(err) {
+			return backoff.Permanent(err)
+		}
+		return err
+	}, backoff.WithContext(policy, ctx), func(err error, delay time.Duration) {
+		mlog.RatedWarn(ctx, 0.2, "waiting for etcd during startup", mlog.String("errorCategory", StartupErrorCategory(err)), mlog.Duration("retryAfter", delay))
+	})
+}
 
 // WithDialTimeout overrides the etcd client dial timeout. A non-positive value keeps the default.
 func WithDialTimeout(dialTimeout time.Duration) ClientOption {

@@ -139,8 +139,9 @@ type ParamItem struct {
 	// for unittest.
 	tempValue atomic.Pointer[string]
 
-	callback  ParamChangeCallback
-	lastValue atomic.Pointer[string]
+	callback    ParamChangeCallback
+	lastValue   atomic.Pointer[string]
+	frozenValue atomic.Pointer[string]
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
@@ -149,9 +150,6 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 		// A version-gated item must declare its full semantics; a
 		// misconfigured switcher is a coding error and must fail fast.
 		pi.VersionGateSwitcher.Validate()
-	}
-	if pi.Forbidden {
-		pi.manager.ForbidUpdate(pi.Key)
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
@@ -176,6 +174,13 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 		pi.manager.RegisterConfigKey(key)
 	}
 
+	if pi.Forbidden {
+		manager.OnStartupSnapshot(func() {
+			manager.ForbidUpdate(pi.Key)
+			value, _, _ := pi.readValue(false)
+			pi.frozenValue.Store(&value)
+		})
+	}
 	currentValue := pi.GetValue()
 	pi.lastValue.Store(&currentValue)
 
@@ -270,6 +275,10 @@ func (pi *ParamItem) get() (string, error) {
 }
 
 func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
+	return pi.readValue(true)
+}
+
+func (pi *ParamItem) readValue(useFrozen bool) (result, raw string, err error) {
 	// For unittest.
 	if s := pi.tempValue.Load(); s != nil {
 		return pi.gateValue(*s), *s, nil
@@ -305,8 +314,8 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 	// change. Keep a forbidden item's formatted startup value when that happens.
 	// RuntimeSource remains an explicit process-local override used by tests and
 	// operational tooling.
-	if pi.Forbidden && effectiveSource != config.RuntimeSource {
-		if initial := pi.lastValue.Load(); initial != nil {
+	if useFrozen && effectiveSource != config.RuntimeSource {
+		if initial := pi.frozenValue.Load(); initial != nil {
 			return *initial, raw, nil
 		}
 	}

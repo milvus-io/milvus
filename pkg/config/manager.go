@@ -24,6 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/connectivity"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -85,6 +86,10 @@ func filterate(key string, filters ...Filter) (string, bool) {
 }
 
 type Manager struct {
+	startupMu        sync.Mutex
+	startupComplete  bool
+	startupCallbacks []func()
+
 	// snapshotMutex keeps source/overlay values and the spelling policy used
 	// by external reads in the same generation. Acquire it before a source
 	// lock; never retain it while refreshing sources or dispatching callbacks.
@@ -459,6 +464,60 @@ func (m *Manager) pullSourceConfigs(source string) error {
 
 	m.snapshotMutex.Lock()
 	defer m.snapshotMutex.Unlock()
+	m.indexSourceConfigs(configSource, configs)
+	return nil
+}
+
+// OnStartupSnapshot initializes state from the current sources. Packages can
+// initialize before Run, so repeat the initialization once with the first
+// authoritative startup snapshot, in dependency (registration) order.
+func (m *Manager) OnStartupSnapshot(init func()) {
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	init()
+	if !m.startupComplete {
+		m.startupCallbacks = append(m.startupCallbacks, init)
+	}
+}
+
+// LoadEtcdConfigsAtStartup completes the initial source load if etcd was
+// unreachable during package initialization. Index the full snapshot, even
+// for keys whose runtime update events are ignored.
+func (m *Manager) LoadEtcdConfigsAtStartup(ctx context.Context, source *EtcdSource) error {
+	// A lazy client keeps its own reconnect backoff across reads. Allow the
+	// startup retry to redial even after a long outage.
+	if conn := source.etcdCli.ActiveConnection(); conn != nil && conn.GetState() == connectivity.TransientFailure {
+		conn.ResetConnectBackoff()
+	}
+	if err := source.refreshConfigurationsWithOpts(ctx); err != nil {
+		return err
+	}
+	// A background refresh may have published a newer snapshot since the read.
+	source.updateMu.Lock()
+	defer source.updateMu.Unlock()
+	m.snapshotMutex.Lock()
+	m.indexSourceConfigs(source, source.currentConfigs)
+	m.keySourceMap.Range(func(key, indexedSource string) bool {
+		if _, present := source.currentConfigs[key]; !present && indexedSource == source.GetSourceName() {
+			m.restoreLowerPrioritySource(key, indexedSource)
+		}
+		return true
+	})
+	m.snapshotMutex.Unlock()
+	m.EvictCachedValue(source.GetSourceName())
+	m.startupMu.Lock()
+	defer m.startupMu.Unlock()
+	for _, init := range m.startupCallbacks {
+		init()
+	}
+	m.startupCallbacks = nil
+	m.startupComplete = true
+	return nil
+}
+
+// Caller holds snapshotMutex.
+func (m *Manager) indexSourceConfigs(configSource Source, configs map[string]string) {
+	source := configSource.GetSourceName()
 	sourcePriority := configSource.GetPriority()
 	m.rememberSourceSnapshot(configs, source)
 	for key := range configs {
@@ -479,8 +538,6 @@ func (m *Manager) pullSourceConfigs(source string) error {
 			m.keySourceMap.Insert(key, source)
 		}
 	}
-
-	return nil
 }
 
 func (m *Manager) getConfigValueBySource(configKey, sourceName string) (string, error) {
@@ -529,13 +586,7 @@ func (m *Manager) updateEvent(e *Event) error {
 				e.EventSource, sourceName))
 			return ErrIgnoreChange
 		} else if sourceName == e.EventSource {
-			// find less priority source or delete key
-			source := m.findNextBestSource(e.Key, sourceName)
-			if source == nil {
-				m.keySourceMap.Remove(e.Key)
-			} else {
-				m.keySourceMap.Insert(e.Key, source.GetSourceName())
-			}
+			m.restoreLowerPrioritySource(e.Key, sourceName)
 		}
 	}
 
@@ -583,6 +634,14 @@ func (m *Manager) OnEvent(event *Event) {
 
 func (m *Manager) GetIdentifier() string {
 	return "Manager"
+}
+
+func (m *Manager) restoreLowerPrioritySource(key, removedSource string) {
+	if source := m.findNextBestSource(key, removedSource); source != nil {
+		m.keySourceMap.Insert(key, source.GetSourceName())
+	} else {
+		m.keySourceMap.Remove(key)
+	}
 }
 
 func (m *Manager) findNextBestSource(configKey string, sourceName string) Source {

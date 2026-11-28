@@ -168,7 +168,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
-	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
+	p.QueryNodeCfg.init(bt, &p.LocalStorageCfg)
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
@@ -515,6 +515,19 @@ func (p *commonConfig) TalonNamespace() string {
 		caseMode = "all"
 	}
 	return strings.Join([]string{clusterID, namespaceType, caseMode}, "-")
+}
+
+// Estimate lengths are read outside paramtable. Publish the effective value
+// even if the first etcd pull emitted no event, or a later override is deleted.
+func (pi *ParamItem) watchEstimateLength(set func(int)) {
+	var mu sync.Mutex
+	publish := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		set(getAsInt(pi.GetValue()))
+	}
+	pi.manager.Dispatcher.Register(pi.Key, config.NewHandler(pi.Key+".estimate", func(*config.Event) { publish() }))
+	pi.manager.OnStartupSnapshot(publish)
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -1358,11 +1371,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.VarCharLengthAvg.Init(base.mgr)
-	typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
-	p.VarCharLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetVarCharEstimateLength(p.VarCharLengthAvg.GetAsInt())
-		return nil
-	})
+	p.VarCharLengthAvg.watchEstimateLength(typeutil.SetVarCharEstimateLength)
 
 	p.DynamicFieldLengthAvg = ParamItem{
 		Key:          "common.estimate.dynamicFieldLengthAvg",
@@ -1372,11 +1381,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.DynamicFieldLengthAvg.Init(base.mgr)
-	typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
-	p.DynamicFieldLengthAvg.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetDynamicFieldEstimateLength(p.DynamicFieldLengthAvg.GetAsInt())
-		return nil
-	})
+	p.DynamicFieldLengthAvg.watchEstimateLength(typeutil.SetDynamicFieldEstimateLength)
 
 	p.SparseFloatVectorSize = ParamItem{
 		Key:          "common.estimate.sparseFloatVectorSize",
@@ -1386,11 +1391,7 @@ Upgrade every node, and every cluster in a CDC topology, before selecting pbkdf2
 		Export:       true,
 	}
 	p.SparseFloatVectorSize.Init(base.mgr)
-	typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
-	p.SparseFloatVectorSize.RegisterCallback(func(_ context.Context, _, _, _ string) error {
-		typeutil.SetSparseFloatVectorEstimateLength(p.SparseFloatVectorSize.GetAsInt())
-		return nil
-	})
+	p.SparseFloatVectorSize.watchEstimateLength(typeutil.SetSparseFloatVectorEstimateLength)
 
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
@@ -1886,7 +1887,7 @@ The default matches the milvus-storage default.`,
 				updateFastPBEnabled()
 			}
 		}))
-		updateFastPBEnabled()
+		base.mgr.OnStartupSnapshot(updateFastPBEnabled)
 	}
 
 	p.PreferIPv6LocalIP = ParamItem{
@@ -1898,7 +1899,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Export: true,
 	}
 	p.PreferIPv6LocalIP.Init(base.mgr)
-	funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool())
+	base.mgr.OnStartupSnapshot(func() { funcutil.PreferIPv6LocalIP.Store(p.PreferIPv6LocalIP.GetAsBool()) })
 
 	p.SyncTaskPoolReleaseTimeoutSeconds = ParamItem{
 		Key:          "common.sync.taskPoolReleaseTimeoutSeconds",
@@ -4632,7 +4633,7 @@ func formatDurationWithMillisecondFallback(v string) string {
 	return v
 }
 
-func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
+func (p *queryNodeConfig) init(base *BaseTable, storage *LocalStorageConfig) {
 	p.StrictGroupStrategy = ParamItem{
 		Key:     "queryNode.groupBy.strictGroupStrategy",
 		Version: "2.6.23", DefaultValue: "per_group", Export: true,
@@ -5361,7 +5362,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				return path.Join(localStoragePath, "mmap")
+				return path.Join(storage.startupPath(), "mmap")
 			}
 			return v
 		},
@@ -5653,6 +5654,7 @@ A task that would wait longer is refused as too many requests, so that the Proxy
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
+				localStoragePath := storage.startupPath()
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						mlog.Fatal(context.TODO(), "failed to mkdir", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))

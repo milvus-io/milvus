@@ -91,3 +91,37 @@ func TestWaitForAllComponentsReadyStopsOnce(t *testing.T) {
 	require.NoError(t, mixCoord.Stop()) // shutdown after SIGTERM
 	assert.EqualValues(t, 1, inner.stops.Load())
 }
+
+func TestShutdownAtComponentReadiness(t *testing.T) {
+	t.Run("all ready", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		mr := NewMilvusRoles()
+		node := newCountingComponent(nil)
+		f := conc.Go(func() (component, error) { return node, nil })
+		<-f.Inner()
+		close(mr.closed)
+		for i := 0; i < 32; i++ {
+			roles, err := mr.waitForAllComponentsReady(cancel, map[string]*conc.Future[component]{"node": f})
+			require.NoError(t, err)
+			require.NoError(t, ctx.Err())
+			if i == 0 {
+				require.NoError(t, roles["node"].Stop())
+			}
+		}
+		require.EqualValues(t, 1, node.stops.Load())
+	})
+	t.Run("still starting", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		mr := NewMilvusRoles()
+		pending := conc.Go(func() (component, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		close(mr.closed)
+		_, err := mr.waitForAllComponentsReady(cancel, map[string]*conc.Future[component]{"node": pending})
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, pending.Err(), context.Canceled)
+	})
+}
