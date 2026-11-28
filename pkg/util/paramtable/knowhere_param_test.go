@@ -10,6 +10,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
+func TestKnowhereConfig_MRLRefineRatio(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+	assert.Equal(t, 1.0, cfg.MRLRefineRatio.GetAsFloat())
+	assert.NoError(t, bt.Save("knowhere.MRL.search.refine_ratio", "2.9"))
+	assert.Equal(t, 2.9, cfg.MRLRefineRatio.GetAsFloat())
+	// The MRL setting is consumed at startup, not merged into base-index params.
+	assert.Empty(t, cfg.getIndexParam("HNSW", SearchStage))
+}
+
 func TestKnowhereConfig_GetIndexParam(t *testing.T) {
 	bt := NewBaseTable(SkipRemote(true))
 	cfg := &knowhereConfig{}
