@@ -406,6 +406,9 @@ func (rm *ResourceManager) RemoveResourceGroup(ctx context.Context, rgName strin
 // Returns ignored=true if the resource group doesn't exist (idempotent
 // no-op for callers to translate to success).
 func (rm *ResourceManager) CheckIfResourceGroupDropable(ctx context.Context, rgName string) (ignored bool, err error) {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
 	if rm.groups[rgName] == nil {
 		// Idempotent promise: delete a non-exist rg should be ok
 		return true, nil
