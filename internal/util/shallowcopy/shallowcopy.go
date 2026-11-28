@@ -1,18 +1,29 @@
 package shallowcopy
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
+func copyMsgBase(src *commonpb.MsgBase, targetID int64) *commonpb.MsgBase {
+	base := &commonpb.MsgBase{}
+	if src != nil {
+		base = proto.Clone(src).(*commonpb.MsgBase)
+	}
+	base.TargetID = targetID
+	return base
+}
+
 // ShallowCopySearchRequest creates a lightweight copy of SearchRequest that shares
-// all slice/bytes fields with the original. Only Base is newly allocated with TargetID set.
+// all slice/bytes fields with the original. Base is cloned with TargetID replaced.
 func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
 	if src == nil {
 		return nil
 	}
 	return &internalpb.SearchRequest{
-		Base:                    &commonpb.MsgBase{TargetID: targetID},
+		Base:                    copyMsgBase(src.GetBase(), targetID),
 		ReqID:                   src.ReqID,
 		DbID:                    src.DbID,
 		CollectionID:            src.CollectionID,
@@ -51,13 +62,13 @@ func ShallowCopySearchRequest(src *internalpb.SearchRequest, targetID int64) *in
 }
 
 // ShallowCopyRetrieveRequest creates a lightweight copy of RetrieveRequest that shares
-// all slice/bytes fields with the original. Only Base is newly allocated with TargetID set.
+// all slice/bytes fields with the original. Base is cloned with TargetID replaced.
 func ShallowCopyRetrieveRequest(src *internalpb.RetrieveRequest, targetID int64) *internalpb.RetrieveRequest {
 	if src == nil {
 		return nil
 	}
 	return &internalpb.RetrieveRequest{
-		Base:                         &commonpb.MsgBase{TargetID: targetID},
+		Base:                         copyMsgBase(src.GetBase(), targetID),
 		ReqID:                        src.ReqID,
 		DbID:                         src.DbID,
 		CollectionID:                 src.CollectionID,
