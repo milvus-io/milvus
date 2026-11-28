@@ -16,6 +16,10 @@
 
 package paramtable
 
+import "strconv"
+
+const unsetRESTDefaultLimit = "-1"
+
 type httpConfig struct {
 	Enabled               ParamItem `refreshable:"false"`
 	EnableV1              ParamItem `refreshable:"false"`
@@ -38,6 +42,9 @@ type httpConfig struct {
 	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
 	EnableHSTS            ParamItem `refreshable:"false"`
 	EnableWebUI           ParamItem `refreshable:"false"`
+
+	QueryDefaultLimit  ParamItem `refreshable:"true"`
+	SearchDefaultLimit ParamItem `refreshable:"true"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -259,4 +266,32 @@ cost. Disabling restores the old always-decode behavior.`,
 		Export:       true,
 	}
 	p.EnableWebUI.Init(base.mgr)
+
+	p.QueryDefaultLimit = ParamItem{
+		Key:          "proxy.http.queryDefaultLimit",
+		DefaultValue: unsetRESTDefaultLimit,
+		Version:      "3.0.1",
+		Doc:          "Default limit for REST v2 Query requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.",
+		Formatter:    formatRESTDefaultLimit,
+		Export:       true,
+	}
+	p.QueryDefaultLimit.Init(base.mgr)
+
+	p.SearchDefaultLimit = ParamItem{
+		Key:          "proxy.http.searchDefaultLimit",
+		DefaultValue: unsetRESTDefaultLimit,
+		Version:      "3.0.1",
+		Doc:          "Default limit for REST v2 Search and HybridSearch requests that omit limit. Use -1 to leave it unset, or set a positive integer such as 100.",
+		Formatter:    formatRESTDefaultLimit,
+		Export:       true,
+	}
+	p.SearchDefaultLimit.Init(base.mgr)
+}
+
+func formatRESTDefaultLimit(value string) string {
+	limit, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || (limit <= 0 && limit != -1) {
+		return unsetRESTDefaultLimit
+	}
+	return value
 }

@@ -626,7 +626,7 @@ type SearchReqV2 struct {
 	GroupByField      string                     `json:"groupingField"`
 	GroupSize         *int32                     `json:"groupSize"`
 	StrictGroupSize   *bool                      `json:"strictGroupSize"`
-	Limit             int32                      `json:"limit"`
+	Limit             *int32                     `json:"limit"`
 	Offset            int32                      `json:"offset"`
 	OutputFields      []string                   `json:"outputFields"`
 	SearchParams      map[string]interface{}     `json:"searchParams"`
@@ -686,7 +686,7 @@ type SubSearchReq struct {
 	Filter            string                     `json:"filter"`
 	GroupByField      string                     `json:"groupingField"`
 	MetricType        string                     `json:"metricType"`
-	Limit             int32                      `json:"limit"`
+	Limit             *int32                     `json:"limit"`
 	Offset            int32                      `json:"offset"`
 	SearchParams      map[string]interface{}     `json:"params"`
 	ExprParams        map[string]json.RawMessage `json:"exprParams"`
@@ -700,7 +700,7 @@ type HybridSearchReq struct {
 	PartitionNames    []string              `json:"partitionNames"`
 	Search            []SubSearchReq        `json:"search"`
 	Rerank            Rand                  `json:"rerank"`
-	Limit             int32                 `json:"limit"`
+	Limit             *int32                `json:"limit"`
 	Offset            int32                 `json:"offset"`
 	GroupByField      string                `json:"groupingField"`
 	GroupSize         *int32                `json:"groupSize"`
