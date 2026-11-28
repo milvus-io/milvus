@@ -170,11 +170,12 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "compaction_latency",
-			Help:      "latency of compaction operation",
+			Help:      "Wall time of the complete Compact call in milliseconds by outcome",
 			Buckets:   longTaskBuckets,
 		}, []string{
 			nodeIDLabelName,
 			compactionTypeLabelName,
+			statusLabelName,
 		})
 
 	DataNodeCompactionLatencyInQueue = prometheus.NewHistogramVec(
@@ -182,10 +183,12 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "compaction_latency_in_queue",
-			Help:      "latency of compaction operation in queue",
+			Help:      "Milliseconds from compaction admission to worker start or queued cancellation",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
+			compactionTypeLabelName,
+			statusLabelName,
 		})
 
 	// DataNodeFlushReqCounter counts the num of calls of FlushSegments

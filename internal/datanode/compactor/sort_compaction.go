@@ -591,7 +591,6 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 	compType := t.plan.GetType().String()
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "create_text_index").Observe(float64(createTextIndexCost.Milliseconds()))
-	metrics.DataNodeCompactionLatency.WithLabelValues(nodeID, compType).Observe(float64(totalCost.Milliseconds()))
 	return res, nil
 }
 
