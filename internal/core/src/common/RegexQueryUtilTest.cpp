@@ -96,9 +96,10 @@ TEST(IsSpecial, Demo) {
     for (char b : special_bytes) {
         specials.insert(b);
     }
-    for (char c = std::numeric_limits<int8_t>::min();
-         c < std::numeric_limits<int8_t>::max();
-         c++) {
+    // Use an integer counter so this covers all bytes on both signed-char
+    // and unsigned-char platforms.
+    for (int byte = 0; byte < 256; ++byte) {
+        const char c = static_cast<char>(static_cast<unsigned char>(byte));
         if (specials.find(c) != specials.end()) {
             EXPECT_TRUE(milvus::is_special(c)) << c << static_cast<int>(c);
         } else {
