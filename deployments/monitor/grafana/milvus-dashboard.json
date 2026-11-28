@@ -11710,7 +11710,7 @@
             "type": "prometheus",
             "uid": "$datasource"
           },
-          "description": "per-second increasing rate of building index requests recived by IndexCoord.",
+          "description": "Current number of DataCoord index jobs by state.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -11746,20 +11746,6 @@
           "stack": false,
           "steppedLine": false,
           "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "$datasource"
-              },
-              "editorMode": "code",
-              "exemplar": true,
-              "expr": "sum(milvus_datacoord_index_task_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (index_task_status)",
-              "interval": "",
-              "legendFormat": "{{index_task_status}}",
-              "queryType": "randomWalk",
-              "range": true,
-              "refId": "A"
-            },
             {
               "datasource": {
                 "type": "prometheus",
@@ -13435,10 +13421,10 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The 99th percentile and average latency of build index over the last 2 minutes.",
+          "description": "Elapsed seconds from index task construction to the end of the reported attempt, including queue time.",
           "fieldConfig": {
             "defaults": {
-              "unit": "ms"
+              "unit": "s"
             },
             "overrides": []
           },
@@ -13504,7 +13490,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Build Index Latency",
+          "title": "Index Task Total Latency",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -13519,7 +13505,7 @@
           "yaxes": [
             {
               "$$hashKey": "object:246",
-              "format": "ms",
+              "format": "s",
               "logBase": 1,
               "min": "0",
               "show": true
@@ -13544,7 +13530,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The 99th percentile and average latency of encode index over the last 2 minutes.",
+          "description": "Seconds spent serializing and uploading the built index.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -13607,7 +13593,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Encode Index Latency",
+          "title": "Index Serialization and Upload Latency",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -13622,7 +13608,7 @@
           "yaxes": [
             {
               "$$hashKey": "object:275",
-              "format": "short",
+              "format": "s",
               "logBase": 1,
               "min": "0",
               "show": true
@@ -13647,7 +13633,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The 99th percentile of latency for save index over the last 2 minutes.",
+          "description": "Seconds spent releasing the index and recording uploaded file information and task statistics.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -13710,7 +13696,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Save Index Latency",
+          "title": "Post-Upload Index Bookkeeping Latency",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -13725,12 +13711,121 @@
           "yaxes": [
             {
               "$$hashKey": "object:331",
-              "format": "short",
+              "format": "s",
               "logBase": 1,
               "show": true
             },
             {
               "$$hashKey": "object:332",
+              "format": "short",
+              "logBase": 1,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Time index build tasks spend waiting for execution, in milliseconds.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms"
+            },
+            "overrides": []
+          },
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 330
+          },
+          "hiddenSeries": false,
+          "id": 123552,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "10.2.0",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "exemplar": true,
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_index_task_latency_in_queue_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "interval": "",
+              "legendFormat": "p99-{{pod}}-{{node_id}}",
+              "queryType": "randomWalk",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "exemplar": true,
+              "expr": "sum(increase(milvus_indexnode_index_task_latency_in_queue_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id) / sum(increase(milvus_indexnode_index_task_latency_in_queue_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id)",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "avg-{{pod}}-{{node_id}}",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeRegions": [],
+          "title": "Index Task Queue Latency",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "mode": "time",
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:246",
+              "format": "ms",
+              "logBase": 1,
+              "min": "0",
+              "show": true
+            },
+            {
+              "$$hashKey": "object:247",
               "format": "short",
               "logBase": 1,
               "show": true
