@@ -36,23 +36,26 @@ get_mallctl() {
 #endif
 }
 
-JemallocStats
-GetJemallocStats() {
-    JemallocStats stats;
-    std::memset(&stats, 0, sizeof(JemallocStats));
-    stats.success = false;
+bool
+GetJemallocStats(JemallocStats* stats) {
+    if (stats == nullptr) {
+        return false;
+    }
+
+    std::memset(stats, 0, sizeof(JemallocStats));
+    stats->success = false;
 
     mallctl_t mallctl_fn = get_mallctl();
     if (mallctl_fn == nullptr) {
         // jemalloc is not available, return zeros
-        return stats;
+        return false;
     }
 
     // refresh jemalloc stats epoch to get current values
     uint64_t epoch = 1;
     size_t epoch_sz = sizeof(epoch);
     if (mallctl_fn("epoch", &epoch, &epoch_sz, &epoch, epoch_sz) != 0) {
-        return stats;
+        return false;
     }
 
     size_t sz = sizeof(size_t);
@@ -65,49 +68,49 @@ GetJemallocStats() {
 
     // get allocated bytes (total allocated by application)
     if (mallctl_fn("stats.allocated", &allocated, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // get active bytes (in active pages, includes fragmentation)
     if (mallctl_fn("stats.active", &active, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // get metadata bytes (jemalloc's own overhead)
     if (mallctl_fn("stats.metadata", &metadata, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // get resident bytes (physically resident memory, RSS)
     if (mallctl_fn("stats.resident", &resident, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // get mapped bytes (total virtual memory mappings)
     if (mallctl_fn("stats.mapped", &mapped, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // get retained bytes (virtual memory that could be returned to OS)
     if (mallctl_fn("stats.retained", &retained, &sz, nullptr, 0) != 0) {
-        return stats;
+        return false;
     }
 
     // store core metrics
-    stats.allocated = static_cast<uint64_t>(allocated);
-    stats.active = static_cast<uint64_t>(active);
-    stats.metadata = static_cast<uint64_t>(metadata);
-    stats.resident = static_cast<uint64_t>(resident);
-    stats.mapped = static_cast<uint64_t>(mapped);
-    stats.retained = static_cast<uint64_t>(retained);
+    stats->allocated = static_cast<uint64_t>(allocated);
+    stats->active = static_cast<uint64_t>(active);
+    stats->metadata = static_cast<uint64_t>(metadata);
+    stats->resident = static_cast<uint64_t>(resident);
+    stats->mapped = static_cast<uint64_t>(mapped);
+    stats->retained = static_cast<uint64_t>(retained);
 
     // fragmentation: wasted space within allocated pages
-    stats.fragmentation = (active > allocated) ? (active - allocated) : 0;
+    stats->fragmentation = (active > allocated) ? (active - allocated) : 0;
 
     // overhead: additional memory for page alignment and metadata
-    stats.overhead = (resident > active) ? (resident - active) : 0;
+    stats->overhead = (resident > active) ? (resident - active) : 0;
 
-    stats.success = true;
+    stats->success = true;
 
-    return stats;
+    return true;
 }

@@ -12,6 +12,7 @@
 package segcore
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,4 +68,21 @@ func TestGetJemallocStats(t *testing.T) {
 
 		t.Log("Jemalloc is not available on this system (e.g., macOS)")
 	}
+}
+
+func TestGetJemallocStatsConcurrent(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				stats := GetJemallocStats()
+				if stats.Success {
+					assert.GreaterOrEqual(t, stats.Active, stats.Allocated)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
