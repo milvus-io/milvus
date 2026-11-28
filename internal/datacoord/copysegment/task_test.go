@@ -1604,20 +1604,16 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 	)
 
 	for _, tc := range []struct {
-		name     string
-		enabled  bool
-		rollback bool
+		name    string
+		enabled bool
 	}{
 		{name: "manifest writes disabled", enabled: false},
 		{name: "manifest writes enabled", enabled: true},
-		{name: "rollback drains manifest copy", enabled: true, rollback: true},
-		{name: "rollback accepts etcd copy", enabled: false, rollback: true},
 	} {
 		s.Run(tc.name, func() {
 			// The runtime switch has flipped by the time the result is handled.
 			// The task's persisted dispatch-time value must still win.
 			meta.WithSegmentIndexManifestWrites(s.T(), !tc.enabled)
-			index.WithManifestIndexRollback(s.T(), tc.rollback)
 			store := meta.NewFakeManifestStore(s.T())
 			ctx := context.Background()
 			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -1725,21 +1721,6 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
-			if tc.rollback {
-				inspector := index.NewManifestIndexRollbackInspector(ctx, m, dm.IndexMeta)
-				inspector.RunOnceForTest(ctx)
-				inspector.RunOnceForTest(ctx)
-				s.True(inspector.ReadyForTest())
-				s.False(m.GetSegment(ctx, segmentID).GetManifestHasIndex())
-				persisted, err = catalog.ListSegmentIndexes(ctx, collectionID)
-				s.Require().NoError(err)
-				s.Require().Len(persisted, 1)
-				s.EqualValues(buildID, persisted[0].BuildID)
-				final := m.GetSegment(ctx, segmentID).GetManifestPath()
-				s.Require().NoError(SyncCopySegmentTask(s.T().Context(), task, resp, copyMeta, m, nil))
-				s.Equal(final, m.GetSegment(ctx, segmentID).GetManifestPath())
-				s.False(index.IndexManifestPublished(s.T(), m.IndexCatalog.(*index.IndexMeta), buildID))
-			}
 		})
 	}
 }
@@ -2412,10 +2393,11 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestIgnoresCollectionProperties() {
 				defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
 				s.Require().NoError(SyncCopySegmentTask(s.T().Context(), task, resp, copyMeta, m, im))
 				s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(context.Background(), result.GetSegmentId()).GetState())
-				record, ok := im.GetIndexJob(9001)
-				s.Require().True(ok)
-				s.True(record.ManifestPublished)
-				s.EqualValues(300, record.IndexID)
+				s.False(im.HasBuildInfo(9001))
+				summaries := m.GetSegment(context.Background(), result.GetSegmentId()).GetIndexSummaries()
+				s.Require().Len(summaries, 1)
+				s.True(summaries[0].GetHasArtifact())
+				s.EqualValues(300, summaries[0].GetIndexId())
 			})
 		}
 	}
@@ -2427,16 +2409,16 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInsta
 	result := resp.GetSegmentResults()[0]
 	verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, m.GetSegment(ctx, result.GetSegmentId()), meta.CreateStorageConfig().GetRootPath(), []packed.ManifestIndexInfo{copiedManifestReviewEntry()})
 	s.Require().NoError(err)
-	// Recreate after verification but before the in-memory record is installed.
+	// Recreate after verification but before the summary is installed.
 	s.Require().NoError(im.MarkIndexAsDeleted(ctx, 100, []int64{300}))
 	s.Require().NoError(im.CreateIndex(ctx, &model.Index{
 		CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
 	}))
-	s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, im, nil, verified))
-	record, ok := im.GetIndexJob(9001)
-	s.Require().True(ok)
-	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
-	s.NotContains(im.GetSegmentIndexSummaries(100, 2001), int64(301))
+	var summaries []*datapb.SegmentIndexSummary
+	s.Require().NoError(syncVectorScalarIndexesWithSummary(ctx, result, task, m, im, nil, verified, &summaries))
+	s.Require().Len(summaries, 1)
+	s.EqualValues(300, summaries[0].GetIndexId(), "the artifact belongs to the retired definition")
+	s.False(im.HasBuildInfo(9001))
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {
@@ -2589,14 +2571,18 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			}
 			verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
 			require.NoError(t, err)
-			for _, published := range []map[int64]int64{nil, verified} {
-				require.NoError(t, syncVectorScalarIndexes(ctx, result, task, m, im, nil, published))
-				restored, ok := im.GetIndexJob(5001)
-				require.True(t, ok)
-				assert.Equal(t, indexType, restored.IndexType)
-				assert.EqualValues(t, 300, restored.IndexID)
-				assert.Equal(t, indexType, model.UnmarshalSegmentIndexModel(model.MarshalSegmentIndexModel(restored)).IndexType)
-			}
+			require.NoError(t, syncVectorScalarIndexes(ctx, result, task, m, im, nil, nil))
+			restored, ok := im.GetIndexJob(5001)
+			require.True(t, ok)
+			assert.Equal(t, indexType, restored.IndexType)
+			assert.EqualValues(t, 300, restored.IndexID)
+			assert.Equal(t, indexType, model.UnmarshalSegmentIndexModel(model.MarshalSegmentIndexModel(restored)).IndexType)
+
+			var summaries []*datapb.SegmentIndexSummary
+			require.NoError(t, syncVectorScalarIndexesWithSummary(ctx, result, task, m, im, nil, verified, &summaries))
+			require.Len(t, summaries, 1)
+			assert.Equal(t, indexType, summaries[0].GetIndexType())
+			assert.EqualValues(t, 300, summaries[0].GetIndexId())
 
 			entry.IndexType = "wrong_type"
 			entry.Properties[common.IndexTypeKey] = "wrong_type"

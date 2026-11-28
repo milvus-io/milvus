@@ -23,12 +23,16 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
-// FinishTask persists a result not published through the manifest. Summary-mode
-// completions without files atomically publish the summary and retire the task.
+// FinishTask stores the result for catalog-backed tasks. Segment-rooted
+// completions without files atomically publish a summary and retire the task.
 func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) error {
 	if !m.IndexCatalog.UsesSegmentSummaries() || result.GetState() != commonpb.IndexState_Finished {
 		return m.IndexCatalog.FinishTask(result)
@@ -37,24 +41,48 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 	if !ok {
 		return nil
 	}
+	segment := m.GetSegment(ctx, record.SegmentID)
+	if !IsSegmentHealthy(segment) || segment.GetStorageVersion() != storage.StorageV3 ||
+		segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return m.IndexCatalog.FinishTask(result)
+	}
+	if len(result.GetIndexFileKeys()) > 0 {
+		if metautil.IsSegmentRooted(record.IndexStorePathVersion) && m.IndexCatalog.IsIndexExist(record.CollectionID, record.IndexID) {
+			return merr.Wrapf(merr.ErrDataIntegrity, "StorageV3 build with segment-rooted artifacts requires manifest publication for build %d", result.GetBuildID())
+		}
+		return m.IndexCatalog.FinishTask(result)
+	}
+	if !metautil.IsSegmentRooted(record.IndexStorePathVersion) {
+		return m.IndexCatalog.FinishTask(result)
+	}
+	return m.publishIndexWithoutArtifact(ctx, record, result)
+}
+
+// MigrateIndexWithoutArtifact retires a legacy finished record without
+// changing the manifest. A concurrent build or artifact keeps its ownership.
+func (m *Meta) MigrateIndexWithoutArtifact(ctx context.Context, record *model.SegmentIndex) error {
+	return m.publishIndexWithoutArtifact(ctx, record, nil)
+}
+
+func (m *Meta) publishIndexWithoutArtifact(ctx context.Context, record *model.SegmentIndex, result *workerpb.IndexTaskInfo) error {
 	segmentID := record.SegmentID
 	locks := m.GetSegmentManifestLocks()
 	locks.Lock(segmentID)
 	defer locks.Unlock(segmentID)
-	if len(result.GetIndexFileKeys()) > 0 {
-		if segment := m.GetSegment(ctx, segmentID); IsSegmentHealthy(segment) && m.IndexCatalog.IsIndexExist(record.CollectionID, record.IndexID) {
-			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode requires manifest publication for build %d", result.GetBuildID())
-		}
-		return m.IndexCatalog.FinishTask(result)
-	}
 	finishAsTask := false
 	err := func() error {
-		ids := []int64{result.GetBuildID()}
+		ids := []int64{record.BuildID}
 		m.IndexCatalog.LockBuildIDs(ids)
 		defer m.IndexCatalog.UnlockBuildIDs(ids)
-		staged, err := m.IndexCatalog.StageSegmentIndexMutation(SegmentIndexMutation{
-			Type: SegmentIndexUpsert, BuildID: result.GetBuildID(), SegmentID: segmentID, FinishedTask: result,
-		})
+		mutation := SegmentIndexMutation{Type: SegmentIndexUpsert, BuildID: record.BuildID, SegmentID: segmentID, FinishedTask: result}
+		if result == nil {
+			current, ok := m.IndexCatalog.GetIndexJob(record.BuildID)
+			if !ok || len(current.IndexFileKeys) != 0 {
+				return ErrSegmentIndexBackfillSkipped
+			}
+			mutation.Type = SegmentIndexBackfill
+		}
+		staged, err := m.IndexCatalog.StageSegmentIndexMutation(mutation)
 		if errors.Is(err, ErrSegmentIndexRecordGone) {
 			return nil
 		}
@@ -79,12 +107,17 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		}
 		defer m.LockSegments(segmentID)()
 		segment := m.Segments.GetSegment(segmentID)
-		if !IsSegmentHealthy(segment) {
+		if !IsSegmentHealthy(segment) || segment.GetStorageVersion() != storage.StorageV3 ||
+			segment.GetLevel() == datapb.SegmentLevel_L0 ||
+			result == nil && (segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing) {
 			finishAsTask = true
 			return nil
 		}
 		for _, summary := range segment.GetIndexSummaries() {
 			if summary.GetIndexId() == record.IndexID && summary.GetHasArtifact() {
+				if result == nil {
+					return ErrSegmentIndexBackfillSkipped
+				}
 				return merr.WrapErrServiceInternalMsg("empty completion cannot replace a live index artifact")
 			}
 		}
@@ -98,6 +131,9 @@ func (m *Meta) FinishTask(ctx context.Context, result *workerpb.IndexTaskInfo) e
 		return nil
 	}()
 	if finishAsTask {
+		if result == nil {
+			return ErrSegmentIndexBackfillSkipped
+		}
 		return m.IndexCatalog.FinishTask(result)
 	}
 	return err

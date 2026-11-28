@@ -470,9 +470,12 @@ func (sm *Manager) CreateSnapshot(
 	// within the GenSnapshot → SaveSnapshot window, otherwise concurrent compaction
 	// could drop segments that the in-flight snapshot is about to reference, leaving
 	// the freshly-created snapshot immediately broken.
-	drained := sm.snapshotMeta.SetSnapshotPending(collectionID)
+	collectionGC, orphanGC := sm.snapshotMeta.SetSnapshotPending(collectionID)
 	defer sm.snapshotMeta.ClearSnapshotPending(collectionID)
-	if drained != nil {
+	for _, drained := range [...]<-chan struct{}{collectionGC, orphanGC} {
+		if drained == nil {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 		case <-drained:
@@ -940,11 +943,6 @@ func (sm *Manager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
-	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
-		if err := validateSummarySnapshot(ctx, sm.meta, snapshotData, foreignConfig); err != nil {
-			return 0, err
-		}
-	}
 	if sm.CollectionRestorer != nil {
 		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
 	}

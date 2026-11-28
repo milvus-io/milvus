@@ -290,11 +290,13 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 		IndexSummaries: []*datapb.SegmentIndexSummary{
 			{IndexId: 5, FieldId: 100, BuildId: 30, IndexVersion: 4, HasArtifact: true},
 			{IndexId: 6, FieldId: 101, BuildId: 31, IndexVersion: 4, HasArtifact: true},
+			{IndexId: 7, FieldId: 102, BuildId: 32, IndexVersion: 4, HasArtifact: true},
 		},
 	}
 	definitions := []*model.Index{
 		{CollectionID: 1, IndexID: 5, FieldID: 100, IndexName: "vector"},
 		{CollectionID: 1, IndexID: 6, FieldID: 101, IndexName: "retained"},
+		{CollectionID: 1, IndexID: 7, FieldID: 102, IndexName: "newer"},
 	}
 	collection := &meta.CollectionInfo{Schema: &schemapb.CollectionSchema{}}
 	defer mockey.Mock((*index.IndexMeta).UsesSegmentSummaries).Return(true).Build().UnPatch()
@@ -308,6 +310,10 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 			6: {
 				CollectionID: 1, PartitionID: 2, SegmentID: segmentID, IndexID: 6, BuildID: 31, IndexVersion: 4,
 				IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"retained-index"},
+			},
+			7: {
+				CollectionID: 1, PartitionID: 2, SegmentID: segmentID, IndexID: 7, BuildID: 33, IndexVersion: 5,
+				IndexState: commonpb.IndexState_Finished, IndexFileKeys: []string{"newer-index"},
 			},
 		}}
 	}).Build().UnPatch()
@@ -338,9 +344,15 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 	require.EqualValues(t, 100, local[0].GetLoadInfo().GetTransformStartAfterTimetick())
 	require.EqualValues(t, 512, local[0].GetLoadInfo().GetStats().GetInsertBinlogSize())
 	require.Empty(t, local[0].GetLoadInfo().GetIndexInfos())
-	require.Len(t, local[0].GetManifestIndexes().GetSummaries(), 2)
-	require.Len(t, local[0].GetManifestIndexes().GetFinishedTasks(), 1)
-	require.EqualValues(t, 31, local[0].GetManifestIndexes().GetFinishedTasks()[0].GetBuildID())
+	require.Len(t, local[0].GetManifestIndexes().GetSummaries(), 1)
+	require.EqualValues(t, 30, local[0].GetManifestIndexes().GetSummaries()[0].GetBuildId())
+	require.Len(t, local[0].GetManifestIndexes().GetFinishedTasks(), 2)
+	taskFiles := make(map[int64][]string)
+	for _, info := range local[0].GetManifestIndexes().GetFinishedTasks() {
+		taskFiles[info.GetBuildID()] = info.GetIndexFilePaths()
+	}
+	require.Contains(t, taskFiles, int64(31))
+	require.Contains(t, taskFiles, int64(33))
 	require.NoError(t, merr.Error(local[1].GetStatus()))
 	require.Nil(t, local[1].GetManifestIndexes())
 	require.ErrorIs(t, merr.Error(local[2].GetStatus()), merr.ErrSegmentNotFound)
@@ -351,26 +363,27 @@ func TestQueryViewNegotiatesLocalManifestIndexesWithoutCoordinatorRead(t *testin
 	require.Zero(t, open.Times())
 	require.Nil(t, diagnostics[0].GetManifestIndexes())
 	diagnosticIndexes := diagnostics[0].GetLoadInfo().GetIndexInfos()
-	require.Len(t, diagnosticIndexes, 2)
+	require.Len(t, diagnosticIndexes, 3)
 	names := make(map[int64]string)
 	for _, info := range diagnosticIndexes {
 		names[info.GetBuildID()] = info.GetIndexName()
 		require.Empty(t, info.GetIndexFilePaths())
 	}
-	require.Equal(t, map[int64]string{30: "vector", 31: "retained"}, names)
+	require.Equal(t, map[int64]string{30: "vector", 31: "retained", 33: "newer"}, names)
 
 	full, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(full[0].GetStatus()))
 	require.Equal(t, 1, open.Times())
 	require.Nil(t, full[0].GetManifestIndexes())
-	require.Len(t, full[0].GetLoadInfo().GetIndexInfos(), 2)
+	require.Len(t, full[0].GetLoadInfo().GetIndexInfos(), 3)
 	files := make(map[int64][]string)
 	for _, info := range full[0].GetLoadInfo().GetIndexInfos() {
 		files[info.GetBuildID()] = info.GetIndexFilePaths()
 	}
 	require.Equal(t, []string{base + "/_index/30/4/index.bin"}, files[30])
-	require.Equal(t, local[0].GetManifestIndexes().GetFinishedTasks()[0].GetIndexFilePaths(), files[31])
+	require.Equal(t, taskFiles[31], files[31])
+	require.Equal(t, taskFiles[33], files[33])
 
 	collection.Schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{ExternalField: "source_column"}}}
 	external, _, err := s.GetQueryViewSegmentLoadInfos(t.Context(), 1, []int64{segmentID}, types.QueryViewIndexResolveLocally)

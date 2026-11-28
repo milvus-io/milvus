@@ -7,6 +7,9 @@
 - **Index metadata migration:** [StorageV3 Manifest Index Backfill and Rollback](20260901-storagev3-manifest-index-backfill.md)
 - **Related upstream change:** [milvus-storage#620](https://github.com/milvus-io/milvus-storage/pull/620/), [milvus-storage#622](https://github.com/milvus-io/milvus-storage/pull/622/)
 
+The [current segment index summary design](20261110-segment-index-summary.md)
+supersedes this document's restart recovery and completed-index inventory rules.
+
 ## Summary
 
 A completed StorageV3 index artifact is recorded in the segment's manifest.

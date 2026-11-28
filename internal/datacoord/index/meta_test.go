@@ -2117,7 +2117,9 @@ func TestSegmentIndexMapUpdatesDoNotBlockOtherSegments(t *testing.T) {
 						return
 					}
 					m.KeyLock.Lock(other.BuildID)
-					m.updateSegmentIndexManifestPublished(other, true)
+					other = model.CloneSegmentIndex(other)
+					other.ManifestPublished = true
+					m.updateSegmentIndex(other)
 					m.KeyLock.Unlock(other.BuildID)
 					record, ok := m.GetIndexJob(other.BuildID)
 					published = ok && record.ManifestPublished

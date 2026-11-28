@@ -39,14 +39,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestEmptyCompletionKeepsLegacyPublication(t *testing.T) {
 	ctx := context.Background()
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
-	require.False(t, dm.IndexMeta.UsesSegmentSummaries())
+	require.True(t, dm.IndexMeta.UsesSegmentSummaries())
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 3, CollectionID: 1, PartitionID: 2,
 		State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
@@ -191,11 +190,6 @@ func TestFinishTaskSummaryModeFallback(t *testing.T) {
 }
 
 func TestSummaryModeRestartPreservesInventory(t *testing.T) {
-	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
-	params.Save(key, "true")
-	t.Cleanup(func() { params.Save(key, previous) })
 	meta.WithSegmentIndexManifestWrites(t, true)
 	manifests := meta.NewFakeManifestStore(t)
 	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
@@ -279,11 +273,6 @@ func TestSummaryColumnReplacementRetractsCompletedAndActiveBuilds(t *testing.T) 
 	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
 	// The definition has already been removed; the summary still owns the field identity.
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(t.Context(), &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 21, IndexState: commonpb.IndexState_InProgress}))
-	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
-	params.Save(key, "true")
-	t.Cleanup(func() { params.Save(key, previous) })
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(packed.ManifestUpdateResult{
 		ManifestPath: packed.MarshalManifestPath(base, 2), HasIndexes: proto.Bool(false),
 	}, nil).Build()
@@ -301,17 +290,15 @@ func TestSummaryColumnReplacementRetractsCompletedAndActiveBuilds(t *testing.T) 
 }
 
 func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) {
-	for _, summaryMode := range []bool{false, true} {
-		name := "legacy"
-		if summaryMode {
-			name = "summaries"
+	for _, writeToManifest := range []bool{false, true} {
+		name := "writes disabled"
+		if writeToManifest {
+			name = "writes enabled"
 		}
 		t.Run(name, func(t *testing.T) {
+			meta.WithSegmentIndexManifestWrites(t, writeToManifest)
 			mt, dm, err := NewMemoryMetaWithIndex(t)
 			require.NoError(t, err)
-			if summaryMode {
-				require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
-			}
 			mt.MetaStore.PutSegment(&datapb.SegmentInfo{
 				ID: 3, CollectionID: 1, PartitionID: 2,
 				IndexSummaries: []*datapb.SegmentIndexSummary{
@@ -345,14 +332,10 @@ func TestSegmentIndexSummariesPreserveTaskStateAndCompletedBuilds(t *testing.T) 
 			require.True(t, byBuild[20].IsDeleted)
 			require.True(t, byBuild[20].HasArtifact)
 			require.True(t, byBuild[21].IsDeleted, "task deletion marker wins over the same completed build")
-			if summaryMode {
-				require.Len(t, summaries, 4)
-				require.Equal(t, commonpb.IndexState_Finished, byBuild[19].IndexState)
-				require.True(t, byBuild[19].HasArtifact)
-				require.False(t, byBuild[22].HasArtifact)
-			} else {
-				require.Len(t, summaries, 2)
-			}
+			require.Len(t, summaries, 4)
+			require.Equal(t, commonpb.IndexState_Finished, byBuild[19].IndexState)
+			require.True(t, byBuild[19].HasArtifact)
+			require.False(t, byBuild[22].HasArtifact)
 			byBuild[20].IsDeleted = false
 			record, exists := dm.IndexMeta.GetIndexJob(20)
 			require.True(t, exists)
@@ -373,7 +356,9 @@ func TestSummaryOnlyRetirementStagesInventoryAndAccountsAfterCommit(t *testing.T
 			SerializedSize: 500, MemSize: 800, IndexVersion: 2, VectorEngineVersion: 3, ScalarEngineVersion: 4, IndexType: "HNSW",
 		}},
 	})
-	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	segment, exists := mt.MetaStore.GetSegment(3)
+	require.True(t, exists)
+	dm.IndexMeta.AccountCopiedIndexes(segment)
 	require.EqualValues(t, 1, dm.IndexMeta.taskCounts.snapshot()[indexTaskStateSlot(commonpb.IndexState_Finished)])
 	require.EqualValues(t, 500, dm.IndexMeta.taskCounts.activeSizes[1])
 	staged, err := dm.IndexMeta.StageSegmentIndexMutation(meta.SegmentIndexMutation{

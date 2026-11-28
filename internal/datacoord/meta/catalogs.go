@@ -61,9 +61,8 @@ type SegmentIndexCatalog interface {
 	// UnlockBuildIDs releases the locks taken by LockBuildIDs. buildIDs must
 	// not contain duplicates.
 	UnlockBuildIDs(buildIDs []int64)
-	// UpdateSegmentIndex stores the SegmentIndex record in memory. It does not
-	// take the build-ID lock; the only caller today is the startup reload from
-	// manifests, which does not hold it.
+	// UpdateSegmentIndex installs a record in memory for test fixtures.
+	// A caller using it concurrently must hold the build-ID lock.
 	UpdateSegmentIndex(segIdx *model.SegmentIndex)
 	// PublishStoredIndexSizes writes the stored index size of every collection
 	// whose size changed to the gauge. A write can wait for a Prometheus scrape,

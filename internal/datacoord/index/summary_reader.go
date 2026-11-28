@@ -28,17 +28,19 @@ type segmentIndexRecords struct {
 }
 
 func (r segmentIndexRecords) lookup(indexID int64) (*model.SegmentIndex, *datapb.SegmentIndexSummary) {
+	var task *model.SegmentIndex
 	if r.tasks != nil {
-		if task, ok := r.tasks.Get(indexID); ok {
-			return task, nil
-		}
+		task, _ = r.tasks.Get(indexID)
 	}
 	for _, summary := range r.segment.GetIndexSummaries() {
 		if summary.GetIndexId() == indexID {
-			return nil, summary
+			if task == nil || summary.GetBuildId() > task.BuildID {
+				return nil, summary
+			}
+			break
 		}
 	}
-	return nil, nil
+	return task, nil
 }
 
 func (r segmentIndexRecords) coversIndexes(indexIDs []int64, missing typeutil.UniqueSet) bool {
@@ -86,8 +88,8 @@ func (m *IndexMeta) readSegmentIndexRecords(segmentID int64, read func(segmentIn
 	read(records)
 }
 
-// segmentIndexSummaries returns the current build per index ID. A retained task
-// takes precedence over a completed summary for the same index ID.
+// segmentIndexSummaries returns the newest build per index ID. A retained task
+// takes precedence for the same build until retirement.
 func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.SegmentIndexSummary {
 	var summaries map[int64]*model.SegmentIndexSummary
 	m.readSegmentIndexRecords(segmentID, func(records segmentIndexRecords) {
@@ -101,7 +103,9 @@ func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.Segm
 		}
 		if records.tasks != nil {
 			records.tasks.Range(func(id int64, task *model.SegmentIndex) bool {
-				summaries[id] = model.SummarizeSegmentIndex(task)
+				if current := summaries[id]; current == nil || task.BuildID >= current.BuildID {
+					summaries[id] = model.SummarizeSegmentIndex(task)
+				}
 				return true
 			})
 		}

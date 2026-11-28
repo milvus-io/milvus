@@ -1242,8 +1242,6 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 		current := copyMeta.GetTask(ctx, task.GetTaskId())
 		if current != nil {
 			task = current
-		} else if meta.ManifestIndexRollbackEnabled() {
-			return nil
 		}
 		// Target finalization precedes both group staging and task completion.
 		// Compare known values before either fast path or cleanup admission.
@@ -1273,8 +1271,8 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 		// A failed task with a cleanup plan may already have lost its files,
 		// including after restart when CleanupRequired has been cleared.
 		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed &&
-			(len(task.GetCleanupPrefixes()) > 0 || meta.ManifestIndexRollbackEnabled()) {
-			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task after cleanup or during index rollback")
+			len(task.GetCleanupPrefixes()) > 0 {
+			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task after cleanup")
 		}
 		if staging {
 			expected := make(map[int64]bool, len(task.GetIdMappings()))
@@ -1437,8 +1435,14 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 
 	// Sync vector/scalar indexes
 	var summaries []*datapb.SegmentIndexSummary
-	summaryMode := indexMeta.UsesSegmentSummaries()
-	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, &summaries); err != nil {
+	writeToManifest, known := task.GetIndexWriteToManifest()
+	summaryMode := segment.GetStorageVersion() == storage.StorageV3 &&
+		((known && writeToManifest) || len(publishedBuilds) != 0)
+	var summaryTarget *[]*datapb.SegmentIndexSummary
+	if summaryMode {
+		summaryTarget = &summaries
+	}
+	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, summaryTarget); err != nil {
 		return err
 	}
 	if summaryMode {
@@ -1819,11 +1823,7 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 		return nil
 	}
 	var seenIndexIDs map[int64]struct{}
-	summaryMode := indexMeta.UsesSegmentSummaries()
-	if summaryMode {
-		if summaries == nil {
-			return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
-		}
+	if summaries != nil {
 		seenIndexIDs = make(map[int64]struct{}, len(result.GetIndexInfos()))
 	}
 
@@ -1887,9 +1887,9 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 		hasArtifact := len(indexInfo.GetIndexFilePaths()) > 0
 		manifestResident := storageV3 && published && hasArtifact
 
-		if summaryMode {
+		if summaries != nil {
 			if hasArtifact && !manifestResident {
-				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
+				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index artifact is missing from the target manifest")
 			}
 			if _, exists := seenIndexIDs[targetIndexID]; exists {
 				return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
@@ -1932,13 +1932,10 @@ func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.Copy
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
-		var err error
 		if manifestResident {
-			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)
-		} else {
-			err = indexMeta.AddSegmentIndex(ctx, segIndex)
+			return merr.WrapErrServiceInternalMsg("published copy index %d requires a segment summary", segIndex.BuildID)
 		}
-		if err != nil {
+		if err := indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 			mlog.Warn(ctx, "failed to add segment index",
 				WrapCopySegmentTaskLog(task,
 					mlog.FieldSegmentID(result.GetSegmentId()),

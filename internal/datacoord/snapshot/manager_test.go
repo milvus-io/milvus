@@ -206,32 +206,42 @@ func TestSnapshotManager_CreateSnapshot_DrainsIndexGC(t *testing.T) {
 
 func TestSnapshotManager_CreateSnapshot_CancelsIndexGCWait(t *testing.T) {
 	const collectionID int64 = 100
-	metadata := CreateTestSnapshotMetaLoaded(t)
-	t.Cleanup(metadata.LoaderCancel)
-	manager := NewSnapshotManager(nil, metadata, nil, allocator.NewMockAllocator(t), meta.NewNMockHandler(t), nil, nil, nil)
-	release, ok := metadata.TryGuardIndexGC(collectionID)
-	require.True(t, ok)
-	defer release()
+	for _, test := range []struct {
+		name         string
+		gcCollection int64
+	}{
+		{name: "collection", gcCollection: collectionID},
+		{name: "orphan", gcCollection: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			metadata := CreateTestSnapshotMetaLoaded(t)
+			t.Cleanup(metadata.LoaderCancel)
+			manager := NewSnapshotManager(nil, metadata, nil, allocator.NewMockAllocator(t), meta.NewNMockHandler(t), nil, nil, nil)
+			release, ok := metadata.TryGuardIndexGC(test.gcCollection)
+			require.True(t, ok)
+			defer release()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	result := make(chan error, 1)
-	go func() {
-		_, err := manager.CreateSnapshot(ctx, collectionID, "snap", "", 0, nil)
-		result <- err
-	}()
-	require.Eventually(t, func() bool { return metadata.IsCollectionCompactionBlocked(collectionID) }, time.Second, time.Millisecond)
-	cancel()
-	select {
-	case err := <-result:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		t.Fatal("snapshot did not cancel while the deletion was active")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				_, err := manager.CreateSnapshot(ctx, collectionID, "snap", "", 0, nil)
+				result <- err
+			}()
+			require.Eventually(t, func() bool { return metadata.IsCollectionCompactionBlocked(collectionID) }, time.Second, time.Millisecond)
+			cancel()
+			select {
+			case err := <-result:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("snapshot did not cancel while the deletion was active")
+			}
+			require.False(t, metadata.IsCollectionCompactionBlocked(collectionID))
+			releaseNext, ok := metadata.TryGuardIndexGC(test.gcCollection)
+			require.True(t, ok, "canceling the snapshot must unblock new deletes")
+			releaseNext()
+		})
 	}
-	require.False(t, metadata.IsCollectionCompactionBlocked(collectionID))
-	releaseNext, ok := metadata.TryGuardIndexGC(collectionID)
-	require.True(t, ok, "canceling the snapshot must unblock new deletes")
-	releaseNext()
 }
 
 func TestSnapshotManager_CreateSnapshot_WithCompactionProtection(t *testing.T) {

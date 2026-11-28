@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,14 +41,6 @@ func TestManifestCommitExecutorIndependentFromRecovery(t *testing.T) {
 	require.NoError(t, err)
 	defer release()
 	assertManifestCommitCapacity(t, io, 3)
-	reader := m.newManifestIndexReader(context.Background(), []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{ID: 1}), NewSegmentInfo(&datapb.SegmentInfo{ID: 2})}, 2, nil)
-	require.NotSame(t, io, reader.io)
-	require.Equal(t, 2, reader.limit, "use the supplied concurrency, not the global read setting")
-	reader.Close()
-	err = packed.SubmitManifestIndexInfos(context.Background(), reader.io, packed.MarshalManifestPath("/tmp/closed-reader", 1), nil, func([]packed.ManifestIndexInfo, error) {
-		t.Error("closed reader must not accept a callback")
-	})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	release()
 	Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("64")
 	reused, releaseAgain, err := executor.acquire(context.Background())

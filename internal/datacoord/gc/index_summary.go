@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (gc *GarbageCollector) recycleSummaryIndexes(ctx context.Context, io *packed.ManifestIOContext, signal <-chan gcCmd) {
@@ -47,6 +48,26 @@ func (gc *GarbageCollector) removeIndexRecordLocked(ctx context.Context, record 
 		return gc.Meta.RetireIndexSummaryLocked(ctx, record.SegmentID, record.BuildID)
 	}
 	return gc.Option.IndexMeta.RemoveSegmentIndex(ctx, record.BuildID)
+}
+
+// artifactSummaryBuildIDs protects build-rooted aliases of live artifacts.
+func (gc *GarbageCollector) artifactSummaryBuildIDs(ctx context.Context) typeutil.UniqueSet {
+	buildIDs := typeutil.NewUniqueSet()
+	if gc.Meta == nil || !gc.Option.IndexMeta.UsesSegmentSummaries() {
+		return buildIDs
+	}
+	gc.Meta.Segments.RangeReused(func(segment *meta.SegmentInfo) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		for _, summary := range segment.GetIndexSummaries() {
+			if summary.GetHasArtifact() {
+				buildIDs.Insert(summary.GetBuildId())
+			}
+		}
+		return true
+	})
+	return buildIDs
 }
 
 // Each orphan traversal keeps only the most recently read manifest revision.
@@ -86,7 +107,11 @@ func (gc *GarbageCollector) referencedSummaryBuild(ctx context.Context, cache *i
 			return nil, false
 		}
 		if files == nil {
-			files = make(map[string]struct{}, len(info.GetIndexFilePaths()))
+			files = gc.getRetainedIndexFilesOfIndex(&model.SegmentIndex{
+				SegmentID: segment.GetID(), CollectionID: segment.GetCollectionID(), PartitionID: segment.GetPartitionID(),
+				BuildID: buildID, IndexVersion: entry.IndexVersion, IndexStorePathVersion: entry.IndexStorePathVersion,
+				IndexFileKeys: entry.IndexFileKeys,
+			})
 		}
 		for _, file := range info.GetIndexFilePaths() {
 			files[file] = struct{}{}

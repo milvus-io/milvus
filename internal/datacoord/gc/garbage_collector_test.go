@@ -3202,7 +3202,7 @@ func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMet
 
 	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(nil).Build()
 	defer mockRemoveObjectFiles.UnPatch()
-	mockRemoveSegmentIndex := mockey.Mock((*index.IndexMeta).RemoveSegmentIndex).Return(errors.New("meta failed")).Build()
+	mockRemoveSegmentIndex := mockey.Mock((*meta.Meta).RetireIndexSummaryLocked).Return(errors.New("meta failed")).Build()
 	defer mockRemoveSegmentIndex.UnPatch()
 
 	gc.RecycleDroppedSegments(ctx, nil)
@@ -4647,11 +4647,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes_NonManifestKeepsLegacyOrder(t 
 	assert.True(t, ok, "files-first ordering must leave the record for the next cycle")
 }
 
-// Recovery must restore a retained dropped segment's index records. Also exercise
-// GC's manifest fallback independently of recovery by removing the in-memory
-// projection after checking it was restored: the manifest remains authoritative
-// when a caller has an incomplete record view.
-func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t *testing.T) {
+func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterSummaryRetirement(t *testing.T) {
 	meta.MockManifestIndexSubmissions(t)
 	meta.WithSegmentIndexManifestWrites(t, true)
 
@@ -4686,15 +4682,6 @@ func TestGarbageCollector_DroppedSegmentIndexFilesComeFromManifestAfterReload(t 
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
 	}}, nil).Build()
 	defer infos.UnPatch()
-
-	require.NoError(t, m.ReloadSegmentIndexesFromManifests(context.TODO()))
-	recovered := dm.IndexMeta.GetAllSegmentIndexSummaries(segmentID)
-	require.Len(t, recovered, 1, "retained dropped segments need their index records after restart")
-	require.EqualValues(t, 5300, recovered[0].BuildID)
-
-	// Model a missing projection separately from the restart contract.
-	dm.IndexMeta.SegmentBuildInfo.Remove(5300)
-	dm.IndexMeta.SegmentIndexes.Remove(segmentID)
 
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
 		Cli: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test")),

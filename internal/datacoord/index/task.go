@@ -325,12 +325,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	if err != nil {
 		return false, err
 	}
-	// Backstop: never commit an entry the fail-closed readers would refuse.
-	// GC's retraction resolve and the startup reload both gate on
-	// manifestIndexFilePathInfo, so an entry it rejects could never be retired
-	// and, with the record manifest-resident, would abort every restart. Fail
-	// this publish attempt - do NOT fall back to legacy - so the retry
-	// surfaces the metadata bug instead of papering over it.
+	// Reject entries that artifact loading and GC cannot resolve.
 	if err := meta.ValidateManifestIndexPublishable(it.SegmentID, manifestIndex); err != nil {
 		return false, err
 	}

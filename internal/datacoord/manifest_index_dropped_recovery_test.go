@@ -53,17 +53,20 @@ func TestManifestDroppedParentSurvivesRestart(t *testing.T) {
 			require.True(t, ok)
 			job.IndexStorePathVersion = layout
 			require.NoError(t, mDomains.IndexMeta.AddSegmentIndex(ctx, job))
+			job.IndexFileKeys = []string{"0", "1"}
+			segment := m.GetSegment(ctx, meta.RestartSegID)
+			files, err := meta.SegmentIndexFilePaths(m.ChunkManager.RootPath(), job, segment.SegmentInfo)
+			require.NoError(t, err)
+			for _, file := range files {
+				require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
+				t.Cleanup(func() { _ = m.ChunkManager.Remove(ctx, file) })
+			}
 			task := index.NewIndexBuildTask(job, 1, m, mDomains.IndexMeta, nil, nil, nil)
 			require.NoError(t, task.SetJobInfo(&workerpb.IndexTaskInfo{
 				BuildID: meta.RestartBuildID, State: commonpb.IndexState_Finished,
 				IndexFileKeys: []string{"0", "1"}, IndexStorePathVersion: layout,
 			}))
-			job, ok = mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
-			require.True(t, ok)
-			files := (&gc.GarbageCollector{Meta: m, Option: gc.GcTestDomainOption(mDomains, gc.GcOption{Cli: m.ChunkManager})}).GetAllIndexFilesOfIndex(job)
-			for file := range files {
-				require.NoError(t, m.ChunkManager.Write(ctx, file, []byte("index")))
-			}
+			require.Equal(t, !manifest, mDomains.IndexMeta.HasBuildInfo(meta.RestartBuildID))
 			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(meta.RestartSegID, commonpb.SegmentState_Dropped)))
 			// Disabling publication must not hide an existing manifest artifact.
 			meta.WithSegmentIndexManifestWrites(t, false)
@@ -80,7 +83,7 @@ func TestManifestDroppedParentSurvivesRestart(t *testing.T) {
 			gcx := gc.NewGarbageCollector(restarted, meta.NewMockHandler(), gc.GcTestDomainOption(restartedDomains, gc.GcOption{Cli: restarted.ChunkManager}))
 			defer gcx.Option.RemoveObjectPool.Release()
 			gcx.RecycleUnusedIndexFilesV0(ctx)
-			for file := range files {
+			for _, file := range files {
 				exists, err := restarted.ChunkManager.Exist(ctx, file)
 				require.NoError(t, err)
 				if !exists {

@@ -126,7 +126,8 @@ func (s *Server) packQueryViewManifestIndexes(segment *datapb.SegmentInfo, defin
 	}
 	result := &querypb.QueryViewManifestIndexes{}
 	for _, summary := range segment.GetIndexSummaries() {
-		if live(summary.GetIndexId()) {
+		id := summary.GetIndexId()
+		if live(id) && records[id] != tasks[id] {
 			result.Summaries = append(result.Summaries, summary)
 		}
 	}

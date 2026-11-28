@@ -183,7 +183,6 @@ func (p *ComponentParam) init(bt *BaseTable) {
 		Key:          "common.storage.useLoonFFI",
 		Version:      "2.6.7",
 		DefaultValue: "true",
-		Forbidden:    p.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool(),
 		Export:       true,
 	}
 	p.CommonCfg.UseLoonFFI.Init(bt.mgr)
@@ -6862,17 +6861,11 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
-	SegmentIndexSummariesEnabled        ParamItem `refreshable:"false"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
-	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
 	ManifestIndexBackfillInterval       ParamItem `refreshable:"true"`
 	ManifestIndexBackfillBatchSize      ParamItem `refreshable:"true"`
 	ManifestIndexBackfillConcurrency    ParamItem `refreshable:"true"`
-	ManifestIndexRollbackEnabled        ParamItem `refreshable:"false"`
-	ManifestIndexRollbackInterval       ParamItem `refreshable:"true"`
-	ManifestIndexRollbackBatchSize      ParamItem `refreshable:"true"`
-	ManifestIndexRollbackConcurrency    ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -7693,22 +7686,13 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
 
-	p.SegmentIndexSummariesEnabled = ParamItem{
-		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false", Forbidden: true,
-		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires common.storage.useLoonFFI=true, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
-	}
-	p.SegmentIndexSummariesEnabled.Init(base.mgr)
-	summaryMode := p.SegmentIndexSummariesEnabled.GetAsBool()
-
 	p.WriteSegmentIndexToManifest = ParamItem{
 		Key:          "dataCoord.index.writeSegmentIndexToManifest",
 		Version:      "3.0.0",
 		DefaultValue: "true",
-		Forbidden:    summaryMode,
-		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. On by default: successful builds with artifact files publish a new manifest revision, which advances the DataView and drives QueryView resource preparation; that commit atomically deletes the corresponding Finished etcd row. Unissued, InProgress, Failed, fake-finished, and other task states remain in etcd. Off keeps the legacy etcd-only path, which does not drive QueryView index refresh. StorageV1/V2 always use etcd.
-New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
-The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
-The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
+		Doc: `Publish completed StorageV3 indexes as SegmentInfo summaries and keep their file lists in segment manifests. This setting also enables background migration of eligible finished StorageV3 catalog rows. Requires Loon FFI.
+New StorageV3 tasks select path version 2 under the segment's _index directory. Tasks keep the layout selected at creation across restarts. Disabling publication stops forward migration and directs new tasks to etcd. Existing summaries remain readable.
+Keep the switch disabled during a mixed-binary rollout. Enable it after upgrading all coordinators, DataNodes and QueryNodes. StorageV1/V2 and historical local files that require relocation remain catalog-backed.`,
 		Export: true,
 	}
 	p.WriteSegmentIndexToManifest.Init(base.mgr)
@@ -7720,25 +7704,10 @@ The value must be exactly true or false. A value that does not parse as a boolea
 		Formatter: func(v string) string {
 			return strconv.Itoa(min(256, max(1, getAsInt(v))))
 		},
-		Doc: `Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
-Startup continuously schedules bounded concurrent reads and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.`,
+		Doc:    `Concurrency of on-demand StorageV3 manifest index reads. Values are clamped to [1, 256] and capped by positive minio.maxConnections values. Load, restore and GC share this budget.`,
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
-
-	p.ManifestIndexBackfillEnabled = ParamItem{
-		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
-		Version:      "3.0.1",
-		DefaultValue: "false",
-		Forbidden:    summaryMode,
-		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
-Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
-Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
-Enable only after all DataCoord replicas, workers and QueryNodes support path version 2 and manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
-Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.`,
-		Export: true,
-	}
-	p.ManifestIndexBackfillEnabled.Init(base.mgr)
 
 	p.ManifestIndexBackfillInterval = ParamItem{
 		Key:          "dataCoord.index.manifestIndexBackfill.interval",
@@ -7785,32 +7754,6 @@ Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no el
 		Export: true,
 	}
 	p.ManifestIndexBackfillConcurrency.Init(base.mgr)
-
-	p.ManifestIndexRollbackEnabled = ParamItem{
-		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
-		Forbidden: summaryMode,
-		Doc: `Copy StorageV3 path-version-2 index files to index_v1 with object-storage server-side Copy, then atomically restore etcd records with path version 1 and remove their manifest entries. Source files remain retained for readers and snapshots. Local-storage layout migration is unsupported. This restart-scoped switch overrides forward backfill and creation of new manifest index tasks; already-created version-2 tasks still finish in manifests and are then eligible for rollback.
-Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
-		Export: true,
-	}
-	p.ManifestIndexRollbackEnabled.Init(base.mgr)
-	p.ManifestIndexRollbackInterval = ParamItem{
-		Key: "dataCoord.index.manifestIndexRollback.interval", Version: "3.0.1", DefaultValue: "60",
-		Doc: "Seconds between rollback scans while manifest-resident records remain. Scans stop after readiness and resume on manifest-resident record notifications. Nonpositive durations use 60 seconds.", Export: true,
-	}
-	p.ManifestIndexRollbackInterval.Init(base.mgr)
-	p.ManifestIndexRollbackBatchSize = ParamItem{
-		Key: "dataCoord.index.manifestIndexRollback.batchSize", Version: "3.0.1", DefaultValue: "1000",
-		Formatter: func(v string) string { return strconv.Itoa(max(1, getAsInt(v))) },
-		Doc:       "Maximum segments visited per rollback scan. Each visit restores at most maxEtcdTxnNum-1 indexes atomically.", Export: true,
-	}
-	p.ManifestIndexRollbackBatchSize.Init(base.mgr)
-	p.ManifestIndexRollbackConcurrency = ParamItem{
-		Key: "dataCoord.index.manifestIndexRollback.concurrency", Version: "3.0.1", DefaultValue: "8",
-		Formatter: func(v string) string { return strconv.Itoa(min(256, max(1, getAsInt(v)))) },
-		Doc:       "Maximum segments processed concurrently during rollback, clamped to [1, 256].", Export: true,
-	}
-	p.ManifestIndexRollbackConcurrency.Init(base.mgr)
 
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",

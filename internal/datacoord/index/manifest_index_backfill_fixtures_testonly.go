@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type FailBackfillCatalogKV struct {
@@ -62,14 +64,6 @@ func IndexManifestPublished(t *testing.T, im *IndexMeta, buildID int64) bool {
 	record, ok := im.GetIndexJob(buildID)
 	require.True(t, ok)
 	return record.ManifestPublished
-}
-
-func WithManifestIndexBackfillEnabled(t *testing.T, enabled bool) {
-	t.Helper()
-	key := Params.DataCoordCfg.ManifestIndexBackfillEnabled.Key
-	previous := Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetValue()
-	Params.Save(key, fmt.Sprintf("%t", enabled))
-	t.Cleanup(func() { Params.Save(key, previous) })
 }
 
 func SeedBackfillIndexDefinition(t *testing.T, m *meta.Meta) {
@@ -141,4 +135,23 @@ func SeedLegacyBackfillIndexes(t *testing.T, m *meta.Meta, count int) []*model.S
 		records = append(records, record)
 	}
 	return records
+}
+
+func SetMigrationTestParam(t *testing.T, item *paramtable.ParamItem, value string) {
+	t.Helper()
+	previous := item.GetValue()
+	Params.Save(item.Key, value)
+	t.Cleanup(func() { Params.Save(item.Key, previous) })
+}
+
+func PublishedBackfillFixture(t *testing.T) (*meta.Meta, *metastorekv.Catalog, *meta.FakeManifestStore, *FailBackfillCatalogKV) {
+	t.Helper()
+	meta.WithSegmentIndexManifestWrites(t, false)
+	store := meta.NewFakeManifestStore(t)
+	kv := &FailBackfillCatalogKV{MetaMemoryKV: meta.NewMetaMemoryKV()}
+	catalog := metastorekv.NewCatalog(kv, "", "")
+	m := BootMigrationMeta(t, catalog, meta.RestartCollID)
+	SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
+	require.NoError(t, NewMigrationBackfillInspector(context.TODO(), m).backfillIndexes(context.TODO(), meta.RestartSegID, meta.RestartBuildID))
+	return m, catalog, store, kv
 }

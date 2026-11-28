@@ -42,16 +42,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	ctx := t.Context()
-	params := paramtable.Get()
-	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
-	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
-	params.Save(key, "true")
-	t.Cleanup(func() { params.Save(key, previous) })
 
 	root := t.TempDir()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
@@ -387,9 +381,10 @@ func TestSummaryGCDeletionGuardRespectsPendingAndCommittedSnapshot(t *testing.T)
 	releaseSecond, ok := sm.TryGuardIndexGC(1)
 	require.True(t, ok)
 
-	drained := sm.SetSnapshotPending(1)
+	drained, orphanGC := sm.SetSnapshotPending(1)
 	t.Cleanup(func() { sm.ClearSnapshotPending(1) })
 	require.NotNil(t, drained)
+	require.Nil(t, orphanGC)
 	require.True(t, sm.IsCollectionCompactionBlocked(1))
 	_, ok = sm.TryGuardIndexGC(1)
 	require.False(t, ok)
@@ -416,4 +411,82 @@ func TestSummaryGCDeletionGuardRespectsPendingAndCommittedSnapshot(t *testing.T)
 	require.True(t, ok)
 	defer release()
 	require.True(t, sm.IsBuildIDGCBlocked(1, 5), "a queued deletion must observe the committed pin")
+}
+
+type blockingV0OrphanRemove struct {
+	storage.ChunkManager
+	started chan struct{}
+	resume  chan struct{}
+}
+
+func (cm *blockingV0OrphanRemove) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	close(cm.started)
+	select {
+	case <-cm.resume:
+		return cm.ChunkManager.RemoveWithPrefix(ctx, prefix)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestV0OrphanGCDrainsForOverlappingSnapshots(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	mt, dm, err := newMemoryMetaWithSnapshot(t)
+	require.NoError(t, err)
+	root := t.TempDir()
+	cm := &blockingV0OrphanRemove{
+		ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath(root)),
+		started:      make(chan struct{}),
+		resume:       make(chan struct{}),
+	}
+	orphan := path.Join(root, "index_files", "5", "1", "2", "3", "orphan.bin")
+	require.NoError(t, cm.Write(ctx, orphan, []byte("orphan")))
+	collector := NewGarbageCollector(mt, nil, GcTestDomainOption(dm, GcOption{Cli: cm}))
+	t.Cleanup(collector.Close)
+	sm := dm.SnapshotMeta
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		collector.RecycleUnusedIndexFilesV0(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	select {
+	case <-cm.started:
+	case <-ctx.Done():
+		t.Fatal("V0 orphan deletion did not start")
+	}
+
+	localDrain, firstDrain := sm.SetSnapshotPending(1)
+	require.Nil(t, localDrain)
+	require.NotNil(t, firstDrain)
+	localDrain, secondDrain := sm.SetSnapshotPending(2)
+	require.Nil(t, localDrain)
+	require.Equal(t, firstDrain, secondDrain, "both snapshots must await the same deletion")
+	select {
+	case <-firstDrain:
+		t.Fatal("snapshot capture was unblocked before the orphan deletion finished")
+	default:
+	}
+	sm.ClearSnapshotPending(1)
+	_, ok := sm.TryGuardIndexGC(-1)
+	require.False(t, ok, "the second snapshot still blocks V0 orphan deletion")
+	release, ok := sm.TryGuardIndexGC(3)
+	require.True(t, ok, "a known build in an unrelated collection can still be admitted")
+	release()
+
+	close(cm.resume)
+	select {
+	case <-secondDrain:
+	case <-ctx.Done():
+		t.Fatal("snapshots were not unblocked after the orphan deletion finished")
+	}
+	require.NoFileExists(t, orphan)
+	sm.ClearSnapshotPending(2)
+	release, ok = sm.TryGuardIndexGC(-1)
+	require.True(t, ok)
+	release()
 }

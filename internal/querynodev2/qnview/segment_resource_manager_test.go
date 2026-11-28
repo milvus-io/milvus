@@ -553,7 +553,6 @@ func TestSegmentResourceSharesManifestWithinPreparation(t *testing.T) {
 func TestSegmentResourceLoadsStorageV3WithoutIndexSummaries(t *testing.T) {
 	mockey.PatchConvey("legacy index metadata and a shared StorageV3 manifest", t, func() {
 		params := paramtable.Get()
-		require.False(t, params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool())
 		require.True(t, params.CommonCfg.UseLoonFFI.GetAsBool())
 		dir := t.TempDir()
 		base := filepath.Join(dir, "segment")

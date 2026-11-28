@@ -215,7 +215,8 @@ type SnapshotMeta struct {
 	// same lock, rebuilt atomically by rebuildAllSegmentProtection.
 	SegmentProtectionMu sync.RWMutex
 
-	// In-flight index reclamation by collection, protected by SegmentProtectionMu.
+	// In-flight index reclamation by collection, including the group for unknown
+	// collections. Protected by SegmentProtectionMu.
 	activeIndexGC map[int64]indexGCGroup
 
 	// ===== Compaction protection (TTL-bound) =====
@@ -238,8 +239,8 @@ type SnapshotMeta struct {
 	buildIDReferencedByGC typeutil.UniqueSet
 
 	// snapshotPendingCollections: collections currently in the process of creating a snapshot.
-	// Blocks compaction commit for these collections to prevent segment state changes
-	// between GenSnapshot (segment list capture) and SaveSnapshot (protection setup).
+	// Blocks compaction commit and index reclamation from before GenSnapshot
+	// (segment list capture) until SaveSnapshot (protection setup) completes.
 	// This is independent of the rebuild pattern above — it is a short-lived flag set by
 	// CreateSnapshot and cleared by its defer.
 	SnapshotPendingCollections typeutil.UniqueSet
@@ -1280,12 +1281,21 @@ type indexGCGroup struct {
 	drained chan struct{}
 }
 
+const unknownIndexGCCollectionID = -1
+
 // TryGuardIndexGC admits a deletion only when no snapshot is pending for the
-// collection. The caller must still check the pins for the objects it deletes.
+// collection. With a negative collection ID the owner is unknown, so admission
+// requires no pending snapshots across all collections. The caller must still
+// check the pins for the objects it deletes.
 func (sm *SnapshotMeta) TryGuardIndexGC(collectionID int64) (release func(), ok bool) {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()
-	if sm.SnapshotPendingCollections.Contain(collectionID) {
+	if collectionID < 0 {
+		if sm.SnapshotPendingCollections.Len() != 0 {
+			return nil, false
+		}
+		collectionID = unknownIndexGCCollectionID
+	} else if sm.SnapshotPendingCollections.Contain(collectionID) {
 		return nil, false
 	}
 	if sm.activeIndexGC == nil {
@@ -1311,14 +1321,18 @@ func (sm *SnapshotMeta) TryGuardIndexGC(collectionID int64) (release func(), ok 
 }
 
 // SetSnapshotPending blocks compaction commit and new index reclamation until
-// ClearSnapshotPending. A non-nil channel closes when active deletions finish.
-// Snapshot creation must wait for it before selecting segments and indexes.
-func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) <-chan struct{} {
+// ClearSnapshotPending. Snapshot creation must wait for both groups of active
+// deletions before selecting segments and indexes. Nil means the group is idle.
+func (sm *SnapshotMeta) SetSnapshotPending(collectionID int64) (collectionGC, orphanGC <-chan struct{}) {
 	sm.SegmentProtectionMu.Lock()
 	defer sm.SegmentProtectionMu.Unlock()
 	sm.SnapshotPendingCollections.Insert(collectionID)
 	mlog.Info(context.TODO(), "collection marked as snapshot pending, compaction blocked",
 		mlog.Int64("collectionID", collectionID))
+	return sm.indexGCDrainLocked(collectionID), sm.indexGCDrainLocked(unknownIndexGCCollectionID)
+}
+
+func (sm *SnapshotMeta) indexGCDrainLocked(collectionID int64) <-chan struct{} {
 	group, active := sm.activeIndexGC[collectionID]
 	if !active {
 		return nil

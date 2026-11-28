@@ -119,7 +119,7 @@ func MakeTestCopySegmentBinlogs() []*datapb.FieldBinlog {
 type EmbeddedAllocator struct{ allocator.Allocator }
 
 var (
-	SyncVectorScalarIndexesForTest = syncVectorScalarIndexes
+	SyncVectorScalarIndexesForTest = syncVectorScalarIndexesWithSummary
 	SyncJSONKeyIndexesForTest      = syncJSONKeyIndexes
 )
 

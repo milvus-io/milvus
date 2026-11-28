@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"path"
-	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -36,22 +35,19 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-// Exercise the actual initMeta loop: healthy manifests are read once, a
-// transient read retries locally, and later recovery phases never replay newMeta.
-func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
-	for _, mode := range []string{"transient", "persistent", "invalid", "dataview-reload", "dataview-failure"} {
+func TestInitMetaRecoversIndexInventoryWithoutManifestReads(t *testing.T) {
+	for _, mode := range []string{"writes-off", "writes-on", "dataview-reload", "dataview-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			meta.MockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			// initMeta must persist the index metadata mode with a conditional write.
+			meta.WithSegmentIndexManifestWrites(t, mode != "writes-off")
 			kv := tikv.NewTiKV(globalTestTikv, "manifest-index-restart-"+uuid.NewString())
 			t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
 			catalog := datacoord.NewCatalog(kv, "", "")
@@ -61,27 +57,11 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 					CollectionID: 100, PartitionID: 10, ID: id, State: commonpb.SegmentState_Flushed,
 					StorageVersion: storage.StorageV3, ManifestHasIndex: true,
-					ManifestPath: packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, id)), 1),
+					ManifestPath:   packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, id)), 1),
+					IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 1, FieldId: 2, BuildId: id + 100, HasArtifact: true}},
 				})))
 			}
-			var mu sync.Mutex
-			reads := make(map[string]int)
-			good := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5001)), 1)
-			bad := packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, 5002)), 1)
-			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, pointer string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				reads[pointer]++
-				if pointer == bad {
-					if mode == "persistent" || (mode == "transient" && reads[pointer] == 1) {
-						return nil, merr.WrapErrIoFailedReason("throttled")
-					}
-					if mode == "invalid" {
-						return []packed.ManifestIndexInfo{{IndexID: 1, BuildID: 2, Path: "wrong"}}, nil
-					}
-				}
-				return nil, nil
-			}).Build()
+			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.WrapErrIoFailedReason("index storage unavailable")).Build()
 			defer reader.UnPatch()
 			b := broker.NewCoordinatorBroker(nil)
 			viewLoads := 0
@@ -106,32 +86,25 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				return true, nil
 			})
 			err := server.initMeta(cm)
-			require.Equal(t, 1, reads[good], "initMeta returned %v", err)
-			if mode == "transient" || mode == "dataview-reload" {
-				require.NoError(t, err)
-				require.NotNil(t, server.meta)
-				require.NotNil(t, server.dataViewManager)
-				wantReads, wantViews := 1, 1
-				switch mode {
-				case "transient":
-					wantReads = 2
-				case "dataview-reload":
-					wantViews = 2
-				}
-				require.Equal(t, wantReads, reads[bad])
-				require.Equal(t, wantViews, viewLoads)
-			} else {
-				require.Error(t, err)
+			require.Zero(t, reader.Times(), "initMeta returned %v", err)
+			if mode == "dataview-failure" {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.False(t, retry.IsRecoverable(err))
 				require.Nil(t, server.meta)
 				require.Nil(t, server.dataViewManager)
-				require.False(t, retry.IsRecoverable(err))
-				if mode == "invalid" || mode == "dataview-failure" {
-					require.ErrorIs(t, err, merr.ErrDataIntegrity)
-					require.Equal(t, 1, reads[bad])
-				} else {
-					require.Equal(t, 3, reads[bad])
-				}
+				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, server.dataViewManager)
+			if mode == "dataview-reload" {
+				require.Equal(t, 2, viewLoads)
+			} else {
+				require.Equal(t, 1, viewLoads)
+			}
+			summary, ok := server.indexMeta.GetSegmentIndexSummary(5001, 5101)
+			require.True(t, ok)
+			require.True(t, summary.HasArtifact)
+			require.False(t, server.indexMeta.HasBuildInfo(5101))
 		})
 	}
 }

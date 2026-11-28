@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -193,7 +192,6 @@ type Server struct {
 	statsInspector                   *stats.Inspector
 	indexInspector                   *index.IndexInspector
 	manifestIndexBackfillInspector   *index.ManifestIndexBackfillInspector
-	manifestIndexRollbackInspector   *index.ManifestIndexRollbackInspector
 	analyzeInspector                 *analyze.AnalyzeInspector
 	talonPrewarmInspector            *TalonPrewarmInspector
 	segmentChangeInspector           *segmentChangeInspector
@@ -413,7 +411,6 @@ func (s *Server) initDataCoord() (initErr error) {
 	s.initIndexInspector(storageCli)
 	mlog.Info(s.ctx, "init task scheduler done")
 
-	s.manifestIndexRollbackInspector = index.NewManifestIndexRollbackInspector(s.ctx, s.meta, s.indexMeta)
 	s.initManifestIndexBackfillInspector()
 	mlog.Info(s.ctx, "init manifest index backfill inspector done")
 
@@ -868,29 +865,6 @@ func loadDomainMetas(catalog metastore.DataCoordCatalog, chunkManager storage.Ch
 	}
 }
 
-func (s *Server) initIndexMetadataMode() error {
-	mode := &Params.DataCoordCfg.SegmentIndexSummariesEnabled
-	summaryMode, err := strconv.ParseBool(mode.GetValue())
-	if err != nil {
-		return merr.WrapErrServiceInternalMsg("%s requires a boolean value", mode.Key)
-	}
-	if summaryMode && !Params.CommonCfg.UseLoonFFI.GetAsBool() {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require common.storage.useLoonFFI=true")
-	}
-	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
-	}
-	if modeCatalog, ok := s.catalog.(interface {
-		EnsureIndexMetadataMode(context.Context, bool, bool) error
-	}); ok {
-		return modeCatalog.EnsureIndexMetadataMode(s.ctx, summaryMode, len(s.metaStore.GetCollectionIDs()) != 0)
-	}
-	if summaryMode {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "catalog cannot persist index metadata mode")
-	}
-	return nil
-}
-
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// MixCoord injects the shared catalog and MetaStore. A standalone
 	// DataCoord (e.g. in tests) builds its own over the local KV.
@@ -902,9 +876,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	if s.meta != nil {
 		return nil
-	}
-	if err := s.initIndexMetadataMode(); err != nil {
-		return err
 	}
 	// DataView persistence lives on the concrete KV catalog, not on the
 	// DataCoordCatalog interface.
@@ -1220,9 +1191,6 @@ func (s *Server) startTaskScheduler() {
 	s.indexInspector.Start()
 	if s.manifestIndexBackfillInspector != nil {
 		s.manifestIndexBackfillInspector.Start()
-	}
-	if s.manifestIndexRollbackInspector != nil {
-		s.manifestIndexRollbackInspector.Start()
 	}
 	s.analyzeInspector.Start()
 	s.segmentChangeInspector.Start()
@@ -1566,10 +1534,6 @@ func (s *Server) Stop() error {
 		s.manifestIndexBackfillInspector.Stop()
 	}
 	mlog.Info(s.ctx, "datacoord manifest index backfill inspector stopped")
-	if s.manifestIndexRollbackInspector != nil {
-		s.manifestIndexRollbackInspector.Stop()
-	}
-	mlog.Info(s.ctx, "datacoord manifest index rollback inspector stopped")
 
 	s.analyzeInspector.Stop()
 	mlog.Info(s.ctx, "datacoord analyze inspector stopped")

@@ -19,20 +19,21 @@ package gc
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/bytedance/mockey"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
-	m, _, _, _ := index.RollbackFixture(t)
+	meta.NewFakeManifestStore(t)
+	catalog := metastorekv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m := index.BootMigrationMeta(t, catalog, meta.RestartCollID)
+	index.SeedLegacyBackfillRecord(t, m, meta.RestartSegID, meta.RestartBuildID)
 	ctx := context.Background()
 	segment := m.GetSegment(ctx, meta.RestartSegID)
 	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
@@ -48,8 +49,7 @@ func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
 	for _, file := range files {
 		require.False(t, canReclaim(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
-	_, err := m.RollbackSegmentIndexes(ctx, NewGCManifestReadIO(t), meta.RestartSegID, meta.RestartBuildID)
-	require.NoError(t, err)
+	require.NoError(t, index.NewMigrationBackfillInspector(ctx, m).BackfillIndexesForTest(ctx, meta.RestartSegID, meta.RestartBuildID))
 	// Also exercise the decision cached before the placement change.
 	for _, check := range []func(string, int64, int64, int64) bool{canReclaim, gc.newIndexFileReclaimChecker(ctx)} {
 		for _, file := range files {
@@ -57,50 +57,9 @@ func TestManifestIndexMigrationRetainsLayoutAliases(t *testing.T) {
 		}
 	}
 	require.True(t, gc.newIndexFileReclaimChecker(ctx)(files[0]+"-unrecorded", meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID))
-	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).RemoveSegmentIndex(ctx, meta.RestartBuildID))
+	require.NoError(t, m.IndexCatalog.(*index.IndexMeta).MarkIndexAsDeleted(ctx, meta.RestartCollID, []int64{meta.RestartIndexID}))
+	gc.RecycleUnusedSegIndexes(ctx, nil)
 	for _, file := range files {
 		require.True(t, gc.newIndexFileReclaimChecker(ctx)(file, meta.RestartCollID, meta.RestartSegID, meta.RestartBuildID), file)
 	}
-}
-
-func TestManifestIndexMigrationWaitsForGCRetirement(t *testing.T) {
-	m, _, _, _ := index.RollbackFixture(t)
-	ctx := context.Background()
-	record, _ := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	gc := NewGarbageCollector(m, nil, GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)})
-	defer gc.Close()
-	entered, release := make(chan struct{}), make(chan struct{})
-	patch := mockey.Mock((*GarbageCollector).RemoveObjectFiles).To(func(*GarbageCollector, context.Context, map[string]struct{}) error {
-		close(entered)
-		<-release
-		return nil
-	}).Build()
-	defer patch.UnPatch()
-	retired := make(chan struct{})
-	go func() {
-		defer close(retired)
-		gc.recycleManifestSegmentIndexes(ctx, []segmentIndexGCItem{{summary: model.SummarizeSegmentIndex(record), files: gc.getRetainedIndexFilesOfIndex(record)}})
-	}()
-	<-entered
-	restored := make(chan int, 1)
-	restoreErr := make(chan error, 1)
-	io := NewGCManifestReadIO(t)
-	go func() {
-		n, err := m.RollbackSegmentIndexes(ctx, io, meta.RestartSegID, meta.RestartBuildID)
-		restored <- n
-		restoreErr <- err
-	}()
-	select {
-	case <-restored:
-		close(release)
-		<-retired
-		t.Fatal("rollback overtook source-file retirement")
-	case <-time.After(30 * time.Millisecond):
-	}
-	close(release)
-	<-retired
-	assert.Zero(t, <-restored)
-	require.NoError(t, <-restoreErr)
-	_, present := m.IndexCatalog.(*index.IndexMeta).GetIndexJob(meta.RestartBuildID)
-	assert.False(t, present, "rollback must not resurrect a retired build")
 }
