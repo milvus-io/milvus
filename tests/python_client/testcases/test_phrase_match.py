@@ -134,6 +134,24 @@ class TestQueryPhraseMatch(TestcaseBase):
                             log.info(f"Token {token} not in text {text}")
                             assert False
 
+    def test_query_phrase_match_icu(self):
+        dim = 2
+        collection_w = self.init_collection_wrap(
+            name=cf.gen_unique_str(prefix),
+            schema=init_collection_schema(dim, "icu", False),
+            consistency_level="Strong",
+        )
+        texts = ["a,  b", "a b", "a x b", "love it 😍🔥 so good", "love it 😍 so good"]
+        collection_w.insert([{"id": i, "text": text, "emb": [0.0, 1.0]} for i, text in enumerate(texts)])
+        collection_w.flush()
+        collection_w.create_index("emb", {"index_type": "FLAT", "metric_type": "L2"})
+        collection_w.create_index("text", {"index_type": "INVERTED"})
+        collection_w.load()
+
+        for phrase, expected_ids in [("a b", {0, 1}), ("🔥", {3})]:
+            results, _ = collection_w.query(expr=f"PHRASE_MATCH(text, '{phrase}', 0)", output_fields=["id"])
+            assert {row["id"] for row in results} == expected_ids, phrase
+
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
     @pytest.mark.parametrize("tokenizer", ["standard"])
