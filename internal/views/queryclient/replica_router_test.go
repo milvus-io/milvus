@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // Existing reducer/MVCC tests isolate discovery while keeping explicit routing.
@@ -108,7 +109,7 @@ func TestShardFailoverRechecksDeadNodesAfterVersionChange(t *testing.T) {
 	source := &fakeQueryPlanClient{}
 	service := &fakeViewQueryServiceClient{}
 	plans, calls := 0, 0
-	planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 		plans++
 		require.EqualValues(t, 1, id.ReplicaID)
 		require.EqualValues(t, 123, req.GetBarrierMvcc())
@@ -123,7 +124,7 @@ func TestShardFailoverRechecksDeadNodesAfterVersionChange(t *testing.T) {
 		}
 		plan := newTestSearchQueryPlan(id, &viewpb.QueryPlanMVCC{GrowingTimetick: 123, TransformingTimetick: 123})
 		plan.WorkNodes = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: node}}}}
-		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 	}).Build()
 	defer planPatch.UnPatch()
 	rpcPatch := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -160,11 +161,11 @@ func TestShardFailoverTriesHealthyReplica(t *testing.T) {
 			source := &fakeQueryPlanClient{}
 			service := &fakeViewQueryServiceClient{}
 			var selected []int64
-			planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 				selected = append(selected, id.ReplicaID)
 				plan := newTestSearchQueryPlan(id, &viewpb.QueryPlanMVCC{})
 				plan.WorkNodes = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: id.ReplicaID + 10}}}}
-				return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+				return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 			}).Build()
 			defer planPatch.UnPatch()
 			rpcPatch := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -194,10 +195,10 @@ func TestShardReconsidersMissingSessionOnResolverUpdate(t *testing.T) {
 	service := &fakeViewQueryServiceClient{}
 	changed := make(chan struct{})
 	calls := 0
-	planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	planPatch := mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, id qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 		plan := newTestSearchQueryPlan(id, &viewpb.QueryPlanMVCC{})
 		plan.WorkNodes = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}}}}
-		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		return &viewpb.GetQueryPlanResponse{Plan: plan}, nil, nil
 	}).Build()
 	defer planPatch.UnPatch()
 	rpcPatch := mockey.Mock((*fakeViewQueryServiceClient).SearchOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {

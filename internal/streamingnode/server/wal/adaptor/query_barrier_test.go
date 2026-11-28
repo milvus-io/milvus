@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -82,12 +83,13 @@ func TestQueryPlanFutureBarrierDoesNotBlockSharedSync(t *testing.T) {
 		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Channel).Return(channel).Build()
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(channel).Build()
 		var normalSyncs, durableSyncs atomic.Int32
-		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Sync).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, persisted bool) {
+		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Sync).To(func(_ *mock_inspector.MockTimeTickSyncOperator, _ context.Context, persisted bool) (uint64, error) {
 			if persisted {
 				durableSyncs.Add(1)
 			} else {
 				normalSyncs.Add(1)
 			}
+			return 0, nil
 		}).Build()
 		var scopedSyncs atomic.Int32
 		mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).SyncWithQueryBarriers).To(func(_ *mock_inspector.MockTimeTickSyncOperator, ctx context.Context, _ bool, targets map[string]uint64) (map[string]uint64, error) {
@@ -155,14 +157,16 @@ func TestQueryPlanFutureBarrierDoesNotBlockSharedSync(t *testing.T) {
 }
 
 func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
-	for _, ownerCanceled := range []bool{true, false} {
-		mockey.PatchConvey("owner cancellation releases the pending plan and lease", t, func() {
+	for _, cancelSource := range []string{"owner", "caller", "seal"} {
+		mockey.PatchConvey(cancelSource+" cancellation releases the pending plan and lease", t, func() {
 			resource.InitForTest(t)
 			defer resource.Resource().TimeTickInspector().Close()
 			caller, cancelCaller := context.WithCancel(t.Context())
 			defer cancelCaller()
 			owner, cancel := context.WithCancel(t.Context())
 			defer cancel()
+			writerCtx, seal := context.WithCancel(owner)
+			defer seal()
 			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
 			released := make(chan struct{})
 			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
@@ -176,7 +180,8 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			}).Build()
 			ensured := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "EnsureBarrier")).Return(nil).Build()
 			w := &walAdaptorImpl{
-				roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: owner, lifetime: typeutil.NewLifetime()},
+				roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: owner, lifetime: typeutil.NewLifetime(), replicaPublisher: replica.NewPublisher(nil)},
+				writerCtx:        writerCtx, cancelWriter: seal,
 				queryViewHandler: &snview.SNQueryViewHandler{},
 				param:            &interceptors.InterceptorBuildParam{MVCCManager: mvcc.NewMVCCManager(0)},
 			}
@@ -190,14 +195,24 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("plan did not start waiting")
 			}
-			if ownerCanceled {
+			switch cancelSource {
+			case "owner":
 				cancel()
-			} else {
+			case "caller":
 				cancelCaller()
+			case "seal":
+				drainCtx, stop := context.WithTimeout(t.Context(), time.Second)
+				defer stop()
+				require.NoError(t, w.SealHandoff(drainCtx))
+				require.NoError(t, owner.Err())
+				_, err := w.GetQueryPlan(caller, &viewpb.GetQueryPlanRequest{})
+				require.True(t, viewerror.AsViewError(err).IsNotPrimary())
+				_, err = w.GetLatestQueryPlanMVCC(caller, "v")
+				require.True(t, viewerror.AsViewError(err).IsNotPrimary())
 			}
 			select {
 			case err := <-done:
-				if ownerCanceled {
+				if cancelSource != "caller" {
 					require.True(t, viewerror.AsViewError(err).IsOnShutdown())
 					wire := viewerror.NewGRPCStatusFromViewError(viewerror.AsViewError(err)).Err()
 					require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetQueryPlan", wire)).IsRetryable())

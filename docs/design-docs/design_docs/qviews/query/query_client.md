@@ -64,19 +64,18 @@ unloaded case, but cannot prevent a subsequent concurrent release.
 unsubscribes and wakes waiters before the underlying handler clients shut down.
 TODO: reclaim idle route subscriptions together with Proxy metadata GC.
 
-Phase 1 still targets the primary WAL owner. The advertised maximum Up version
-is only a routing-change hint; SN selects the highest Up View matching the request
-schema within the requested replica. The returned plan supplies the exact version.
-Strong and Session are sent as Strong; Bounded, Eventually and Customized retain their enum
-values. Strong/Session waits for completed writes; Eventually reuses the current complete
-snapshot, and Bounded also enforces the request guarantee timestamp. Customized
-preserves its guarantee as a logical snapshot lower bound, reusing the same
-complete-prefix optimization as BarrierMVCC and establishing a scoped barrier
-only when coverage is insufficient. All use primary-WAL planning. The presence of
-`GetMVCCTimestamp` does not implement WAL-secondary routing.
+Phase 1 resolves the current writer through StreamingNode session discovery.
+Strong, Bounded, Session and Eventually sample completed writes on that writer.
+Strong also validates the advertised writer term. Customized queries with an
+effective timestamp B use the same fixed `barrier_mvcc=B` input as iterator
+snapshots. The writer selects the highest Up View matching the request schema
+and returns its exact version. RO replicas prepare QueryView resources for
+promotion. Serving queries from RO is a TODO.
 
 Phase 2 sends `SearchOnView` or `QueryOnView` concurrently to every worker in the
-plan. Requests retain the plan's View version and `QueryPlanMVCC`. The legacy
+plan. The client retains the responding WAL replica with the shard plan. All SN
+work in this attempt and retained-plan requery returns to that node and WAL
+instance. Requests retain the plan's View version and `QueryPlanMVCC`. The legacy
 request timestamp is GrowingTimetick on SN and TransformingTimetick on QN.
 The request is cloned for each worker. Empty successful retrieve responses do
 not enter reduction, but the successful shard plan is retained even for an empty
@@ -89,7 +88,7 @@ attempt. Other shards retain their results. The caller context bounds all
 attempts; non-retryable errors are returned to the caller.
 
 `handler.QueryViewClient` owns SN assignment lookup and RPC readiness handling.
-WAL shutdown/NotPrimary errors wait for routing or readiness; View errors return
+Phase 1 can wait for WAL readiness. A failure at the MVCC source during Phase 2 returns
 to query orchestration. SN services retain WAL readiness handling. The injected QN transport is required to use
 an explicit fail-fast picker mode and disable hidden same-node gRPC retries;
 ordinary WAL RPCs keep their existing picker behavior.

@@ -64,6 +64,9 @@ type StreamingNodeCataLog interface {
 // snapshot: absent sections mean "unchanged", and deletion is carried by
 // explicit Removed* sections, not by omission. See SaveRecoverySnapshot.
 type WALRecoverySnapshot struct {
+	// ExpectedCheckpoint guards a term claim against changes to the baseline,
+	// including control metadata that advanced without moving its TimeTick.
+	ExpectedCheckpoint *streamingpb.WALCheckpoint
 	// SegmentAssignments are the segment assignments to save; skipped if empty.
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	// RemovedSegmentIDs are the segment assignments to remove; skipped if empty.

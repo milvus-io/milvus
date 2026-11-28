@@ -19,6 +19,9 @@ var (
 )
 
 func (w *walAdaptorImpl) QueryViewHandler() worknodehandler.QueryViewHandler {
+	if w.replicaViews != nil {
+		return w.replicaViews
+	}
 	return w.queryViewHandler
 }
 
@@ -61,7 +64,7 @@ func (w *walAdaptorImpl) AcquireQuerySegmentTasks(
 }
 
 func (w *walAdaptorImpl) queryViewTaskHandler(shardID qviews.ShardID) (*snview.SNQueryViewHandler, error) {
-	if !w.IsAvailable() {
+	if !w.IsAvailable() || (w.writerCtx != nil && w.writerCtx.Err() != nil) {
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	if funcutil.ToPhysicalChannel(shardID.VChannel) != w.Channel().Name {

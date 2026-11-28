@@ -91,15 +91,7 @@ func SetRebalanceEnabled(enabled bool) error {
 
 // newOpMarkAsUnavailable is a operation to mark some channels as unavailable.
 func newOpMarkAsUnavailable(ctx context.Context, pChannels []types.PChannelInfo) *request {
-	future := syncutil.NewFuture[response]()
-	return &request{
-		ctx: ctx,
-		apply: func(impl *balancerImpl) {
-			err := impl.channelMetaManager.MarkAsUnavailable(ctx, pChannels)
-			future.Set(response{err: err})
-		},
-		future: future,
-	}
+	return newOpTrigger(ctx)
 }
 
 // newOpTrigger is a operation to trigger a re-balance operation.

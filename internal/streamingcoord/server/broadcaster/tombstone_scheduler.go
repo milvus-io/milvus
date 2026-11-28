@@ -184,13 +184,12 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 // loadCheckpoints reads the durable recovery boundary once per PChannel per GC
 // pass. Collect the entire map before deleting tasks; never reuse a prior pass.
 func (s *tombstoneScheduler) loadCheckpoints(ctx context.Context) (map[string]*streamingpb.WALCheckpoint, error) {
-	channels, err := resource.Resource().StreamingCatalog().ListPChannel(ctx)
+	channels, err := resource.Resource().TopologyCatalog().List(ctx)
 	if err != nil {
 		return nil, merr.Wrap(err, "list PChannels for tombstone GC")
 	}
 	checkpoints := make(map[string]*streamingpb.WALCheckpoint, len(channels))
-	for _, channel := range channels {
-		name := channel.GetChannel().GetName()
+	for name := range channels {
 		checkpoint, err := resource.Resource().StreamingNodeCatalog().GetConsumeCheckpoint(ctx, name)
 		if err != nil {
 			return nil, merr.Wrapf(err, "read WAL checkpoint for tombstone GC on %s", name)

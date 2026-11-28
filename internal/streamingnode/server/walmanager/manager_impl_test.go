@@ -196,3 +196,17 @@ func TestManagerCloseCancelsOpen(t *testing.T) {
 	}
 	assert.ErrorIs(t, <-openErr, context.Canceled)
 }
+
+func TestDemotedReplicaRejectsTermlessWriterRoute(t *testing.T) {
+	resource.InitForTest(t)
+	m := newManager(nil)
+	defer m.cancelOpening()
+	channel := types.PChannelInfo{Name: "p", WALReplicaID: 1, AccessMode: types.AccessModeRO}
+	replica := &replicaTestWAL{channel: channel}
+	m.replicas = &ReplicaControl{locals: map[string]*localReplica{"p": {instance: replica}}}
+	_, err := m.GetAvailableWAL(channel)
+	require.NoError(t, err)
+	channel.AccessMode = types.AccessModeRW
+	_, err = m.GetAvailableWAL(channel)
+	assertErrorChannelNotExist(t, err)
+}

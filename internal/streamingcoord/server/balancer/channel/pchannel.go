@@ -45,6 +45,7 @@ func newPChannelMetaFromProto(channel *streamingpb.PChannelMeta, replicateConfig
 // PChannelMeta is the read only version of PChannelInfo, to be used in balancer,
 // If you need to update PChannelMeta, please use CopyForWrite to get mutablePChannel.
 type PChannelMeta struct {
+	walReplicaID           int64
 	inner                  *streamingpb.PChannelMeta
 	availableInReplication bool
 }
@@ -67,7 +68,9 @@ func (c *PChannelMeta) ChannelID() types.ChannelID {
 
 // ChannelInfo returns the channel info.
 func (c *PChannelMeta) ChannelInfo() types.PChannelInfo {
-	return types.NewPChannelInfoFromProto(c.inner.Channel)
+	ch := types.NewPChannelInfoFromProto(c.inner.Channel)
+	ch.WALReplicaID = c.walReplicaID
+	return ch
 }
 
 // Term returns the current term of the channel.
@@ -84,7 +87,7 @@ func (c *PChannelMeta) CurrentServerID() int64 {
 // CurrentAssignment returns the current assignment of the channel.
 func (c *PChannelMeta) CurrentAssignment() types.PChannelInfoAssigned {
 	return types.PChannelInfoAssigned{
-		Channel: types.NewPChannelInfoFromProto(c.inner.Channel),
+		Channel: c.ChannelInfo(),
 		Node:    types.NewStreamingNodeInfoFromProto(c.inner.Node),
 	}
 }

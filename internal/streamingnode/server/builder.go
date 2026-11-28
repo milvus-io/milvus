@@ -4,6 +4,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -69,13 +71,16 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 func (b *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(b.etcdClient),
+		resource.OptReplicaClient(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
 		resource.OptMixCoordClient(b.mixc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
+		resource.OptQueryViewCatalog(queryview.NewQueryViewCatalog(b.kv, "coord")),
 	)
 	s := &Server{
-		session:    b.session,
-		grpcServer: b.grpcServer,
+		session:         b.session,
+		topologyCatalog: streamingcoord.NewReplicaTopologyCatalog(b.kv),
+		grpcServer:      b.grpcServer,
 	}
 	s.init()
 	return s

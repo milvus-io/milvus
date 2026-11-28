@@ -19,10 +19,12 @@ package recovery
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -30,7 +32,9 @@ import (
 // scopedTaskScheduler tracks one WAL's tasks without owning execution resources.
 // Concurrency and delayed retries are managed by the shared NodeScheduler.
 type scopedTaskScheduler struct {
-	inner nodescheduler.Scheduler
+	staging   atomic.Bool
+	admission *replica.Admission
+	inner     nodescheduler.Scheduler
 
 	mu      sync.Mutex
 	nextID  uint64
@@ -196,6 +200,16 @@ func (t *trackedTask) SchedulerTaskType() string {
 }
 
 func (t *trackedTask) Execute(ctx context.Context) error {
+	if t.owner.staging.Load() {
+		return nodescheduler.ErrDelay
+	}
+	if g := t.owner.admission; g != nil {
+		if !g.Enter() {
+			t.owner.finish(t.id)
+			return nil
+		}
+		defer g.Leave()
+	}
 	err := t.task.Execute(ctx)
 	if !errors.Is(err, nodescheduler.ErrDelay) {
 		t.owner.finish(t.id)

@@ -46,7 +46,7 @@ type VersionedStreamingNodeAssignments struct {
 
 // PChannelOfCChannel returns the pchannel of the cchannel.
 func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
-	return v.CChannel.Meta.Pchannel
+	return v.CChannel.GetMeta().GetPchannel()
 }
 
 // StreamingNodeAssignment is the relation between server and channels.

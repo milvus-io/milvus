@@ -124,6 +124,7 @@ func (r *allocationResult) materialize(p *planningContext, shardID qviews.ShardI
 	dataVersion, _ := p.DataVersionForCollection(r.collectionID)
 	return qviews.NewQueryViewAtCoordBuilderFromMetadata(shardID, qviews.QueryViewBuilderMetadata{
 		CollectionID: r.collectionID, DataVersion: dataVersion,
+		RequiredStreamingVersion:    r.shard.RequiredStreamingVersion,
 		SchemaVersion:               p.SchemaVersion(r.collectionID),
 		TransformStartAfterTimetick: r.shard.TransformStartAfterTimetick(),
 		SegmentManifestVersions:     manifests, PartitionStatsVersions: stats,
@@ -177,6 +178,7 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 	}
 	protoShard := &viewpb.DataViewOfShard{
 		Vchannel:                             shard.VChannel,
+		RequiredStreamingVersion:             shard.RequiredStreamingVersion,
 		GrowingTransformStartAfterTimetick:   shard.GrowingTransformStartAfterTimetick,
 		CompactedTransformStartAfterTimetick: shard.CompactedTransformStartAfterTimetick,
 		Partitions:                           make([]*viewpb.DataViewOfPartition, 0, len(shard.Partitions)),

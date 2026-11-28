@@ -108,17 +108,16 @@ func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) 
 	for _, version := range versions {
 		key := qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
 		entry := s.views[version]
-		v := version // capture loop variable
 		qvobserve.Observe(s.ctx, qvobserve.StreamingNodeRecoverAcquireResourceEvent{View: key})
 		s.resMgr.Acquire(AcquireResource{
 			Key:            key,
 			Meta:           entry.sm.Meta(),
 			PartitionStats: entry.sm.SNView().GetPartitionStats(),
 			OnReady: func() {
-				s.notifyRecoveringDone(v)
+				s.notifyRecoveringDone(version, entry)
 			},
 			OnUnrecoverable: func() {
-				s.notifyUnrecoverable(v)
+				s.notifyUnrecoverable(version, entry)
 			},
 		})
 	}
@@ -185,33 +184,17 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	entry, exists := s.views[key.QueryViewVersion]
 	pushedState := av.View.State()
 
+	if exists && pushedState == qviews.QueryViewStatePreparing &&
+		entry.sm.State() == qviews.QueryViewStateUnrecoverable && s.retryFailedPreparation() {
+		// The current writer still needs the version that failed on this node
+		// during its previous term.
+		s.startPreparingLocked(av, entry)
+		return
+	}
 	if !exists {
 		switch pushedState {
 		case qviews.QueryViewStatePreparing:
-			// New Preparing view: create SM and acquire resources.
-			snView := av.View.(*qviews.QueryViewAtStreamingNode)
-			pb := snView.IntoProto()
-			sm := newSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
-			entry = &snViewEntry{ApplyView: *av, sm: sm}
-			s.views[key.QueryViewVersion] = entry
-			s.publishReplicaLocked(entry)
-			qvobserve.Observe(s.ctx, qvobserve.StreamingNodeAcquireResourceEvent{View: key})
-			// SN SM constructor generates a Preparing report.
-			s.consumeReport(entry)
-
-			// Tell ResourceManager to prepare resources. Callbacks will drive SM progress.
-			version := key.QueryViewVersion
-			s.resMgr.Acquire(AcquireResource{
-				Key:            key,
-				Meta:           sm.Meta(),
-				PartitionStats: sm.SNView().GetPartitionStats(),
-				OnReady: func() {
-					s.notifyReady(version)
-				},
-				OnUnrecoverable: func() {
-					s.notifyUnrecoverable(version)
-				},
-			})
+			s.startPreparingLocked(av, nil)
 		case qviews.QueryViewStateDown, qviews.QueryViewStateDropped:
 			// A missing teardown view means the SN has already lost its local
 			// state and resources. Report Dropped so Coord can finish cleanup
@@ -261,6 +244,36 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
 }
 
+// A replica's resource manager owns the local retry policy across role changes.
+func (s *snShardView) retryFailedPreparation() bool {
+	manager, ok := s.resMgr.(interface{ RetryFailedPreparation() bool })
+	return ok && manager.RetryFailedPreparation()
+}
+
+func (s *snShardView) startPreparingLocked(av *handler.ApplyView, failed *snViewEntry) {
+	key := av.View.QueryViewKey()
+	pb := av.View.IntoProto()
+	sm := newSNQueryViewStateMachine(pb.Meta, pb.StreamingNode, pb.QueryNode)
+	entry := &snViewEntry{ApplyView: *av, sm: sm}
+	if failed != nil {
+		// Keep its DataVersion pinned even if a newer version is already ready.
+		entry.preparing = failed.preparing
+		s.notifyRecoveryChangedLocked()
+	}
+	s.views[key.QueryViewVersion] = entry
+	s.publishReplicaLocked(entry)
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeAcquireResourceEvent{View: key})
+	s.consumeReport(entry)
+	s.resMgr.Acquire(AcquireResource{
+		Retry:           failed != nil,
+		Key:             key,
+		Meta:            sm.Meta(),
+		PartitionStats:  sm.SNView().GetPartitionStats(),
+		OnReady:         func() { s.notifyReady(key.QueryViewVersion, entry) },
+		OnUnrecoverable: func() { s.notifyUnrecoverable(key.QueryViewVersion, entry) },
+	})
+}
+
 func (s *snShardView) setCollectionIDLocked(collectionID int64) {
 	if collectionID == 0 {
 		return
@@ -274,12 +287,11 @@ func (s *snShardView) setCollectionIDLocked(collectionID int64) {
 
 // notifyReady is called by ResourceManager callback when resource preparation
 // completes. Drives the SM from Preparing → Ready.
-func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyReady(version qviews.QueryViewVersion, entry *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, exists := s.views[version]
-	if !exists {
+	if s.views[version] != entry {
 		return
 	}
 
@@ -299,26 +311,30 @@ func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
 
 // notifyUnrecoverable is called by ResourceManager when the requested
 // resources can no longer be reconstructed at the QueryView DataVersion.
-func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyUnrecoverable(version qviews.QueryViewVersion, entry *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, exists := s.views[version]
-	if !exists {
+	if s.views[version] != entry {
 		return
 	}
 	entry.sm.OnUnrecoverable()
+	if entry.sm.State() == qviews.QueryViewStateUnrecoverable && entry.View.State() == qviews.QueryViewStatePreparing && s.retryFailedPreparation() {
+		// An asynchronous failure classified under the old writer can arrive
+		// after demotion. Continue preparing against the current intent.
+		s.startPreparingLocked(&entry.ApplyView, entry)
+		return
+	}
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
 // notifyRecoveringDone is called by ResourceManager callback when WAL catch-up
 // completes. Drives the SM from UpRecovering → Up.
-func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
+func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion, entry *snViewEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entry, exists := s.views[version]
-	if !exists {
+	if s.views[version] != entry {
 		return
 	}
 
@@ -410,7 +426,7 @@ func (s *snShardView) detachIfEmptyLocked() {
 // Caller must hold s.mu.
 func (s *snShardView) consumeAndPersist(entry *snViewEntry) bool {
 	persist := entry.sm.ConsumePersist()
-	if persist == nil {
+	if persist == nil || s.catalog == nil {
 		return true
 	}
 	qvobserve.Observe(s.ctx, qvobserve.StreamingNodePersistViewEvent{View: entry.View.QueryViewKey(), State: qviews.QueryViewState(persist.Meta.State)})

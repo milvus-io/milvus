@@ -70,27 +70,8 @@ func TestChannelManager(t *testing.T) {
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
 		Version: 1,
 	}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, errors.New("recover failure"))
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
-	m, err := RecoverChannelManager(ctx)
-	assert.Nil(t, m)
-	assert.Error(t, err)
-
-	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
-	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
-		return []*streamingpb.PChannelMeta{
-			{
-				Channel: &streamingpb.PChannelInfo{
-					Name: "test-channel",
-					Term: 1,
-				},
-				Node: &streamingpb.StreamingNodeInfo{
-					ServerId: 1,
-				},
-			},
-		}, nil
-	})
-	m, err = RecoverChannelManager(ctx)
+	m, err := RecoverChannelManager(ctx, "test-channel")
 	assert.NotNil(t, m)
 	assert.NoError(t, err)
 
@@ -102,64 +83,16 @@ func TestChannelManager(t *testing.T) {
 	singletonCC := GetClusterChannels()
 	assert.Equal(t, cc, singletonCC)
 
-	// Test update non exist pchannel
-	modified, err := m.AssignPChannels(ctx, map[ChannelID]types.PChannelInfoAssigned{newChannelID("non-exist-channel"): {
-		Channel: types.PChannelInfo{
-			Name:       "non-exist-channel",
-			Term:       1,
-			AccessMode: types.AccessModeRW,
-		},
-		Node: types.StreamingNodeInfo{ServerID: 2},
+	m.ObserveWriters(map[string]types.PChannelInfoAssigned{"test-channel": {
+		Channel: types.PChannelInfo{Name: "test-channel", Term: 2, WALReplicaID: 10, AccessMode: types.AccessModeRW},
+		Node:    types.StreamingNodeInfo{ServerID: 2},
 	}})
-	assert.Nil(t, modified)
-	assert.ErrorIs(t, err, ErrChannelNotExist)
-	err = m.AssignPChannelsDone(ctx, []ChannelID{newChannelID("non-exist-channel")})
-	assert.ErrorIs(t, err, ErrChannelNotExist)
-	err = m.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "non-exist-channel",
-		Term: 2,
-	}})
-	assert.ErrorIs(t, err, ErrChannelNotExist)
-
-	// Test success.
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Unset()
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pm []*streamingpb.PChannelMeta) error {
-		return nil
-	})
-	modified, err = m.AssignPChannels(ctx, map[ChannelID]types.PChannelInfoAssigned{newChannelID("test-channel"): {
-		Channel: types.PChannelInfo{
-			Name:       "test-channel",
-			Term:       1,
-			AccessMode: types.AccessModeRW,
-		},
-		Node: types.StreamingNodeInfo{ServerID: 2},
-	}})
-	assert.NotNil(t, modified)
-	assert.NoError(t, err)
-	assert.Len(t, modified, 1)
-	err = m.AssignPChannelsDone(ctx, []ChannelID{newChannelID("test-channel")})
-	assert.NoError(t, err)
-
 	nodeID, ok := m.GetLatestWALLocated(ctx, "test-channel")
-	assert.True(t, ok)
-	assert.NotZero(t, nodeID)
-
-	err = m.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel",
-		Term: 2,
-	}})
-	assert.NoError(t, err)
-
-	view := m.CurrentPChannelsView()
-	assert.NotNil(t, view)
-	assert.Equal(t, len(view.Channels), 1)
-	channel, ok := view.Channels[newChannelID("test-channel")]
-	assert.True(t, ok)
-	assert.NotNil(t, channel)
-
-	nodeID, ok = m.GetLatestWALLocated(ctx, "test-channel")
-	assert.False(t, ok)
-	assert.Zero(t, nodeID)
+	require.True(t, ok)
+	require.EqualValues(t, 2, nodeID)
+	m.ObserveWriters(nil)
+	_, ok = m.GetLatestWALLocated(ctx, "test-channel")
+	require.False(t, ok)
 
 	t.Run("UpdateReplicateConfiguration", func(t *testing.T) {
 		param, err := m.GetLatestChannelAssignment()
@@ -465,7 +398,6 @@ func TestAllocVirtualChannels(t *testing.T) {
 	}, nil).Maybe()
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
 
 	ctx := context.Background()
@@ -510,7 +442,6 @@ func TestStreamingEnableChecker(t *testing.T) {
 	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	m, err := RecoverChannelManager(ctx, "test-channel")
@@ -550,7 +481,6 @@ func TestMarkStreamingHasEnabledWaitsForListenersBeforePublishing(t *testing.T) 
 	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	m, err := RecoverChannelManager(ctx, "test-channel")
@@ -613,7 +543,6 @@ func TestMarkStreamingHasEnabledWakesParkedWaiters(t *testing.T) {
 	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	m, err := RecoverChannelManager(ctx, "test-channel")
@@ -672,25 +601,9 @@ func TestChannelManagerWatch(t *testing.T) {
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
 		Version: 1,
 	}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
-	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
-		return []*streamingpb.PChannelMeta{
-			{
-				Channel: &streamingpb.PChannelInfo{
-					Name: "test-channel",
-					Term: 1,
-				},
-				Node: &streamingpb.StreamingNodeInfo{
-					ServerId: 1,
-				},
-				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
-			},
-		}, nil
-	})
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
-	manager, err := RecoverChannelManager(context.Background())
+	manager, err := RecoverChannelManager(context.Background(), "test-channel")
 	assert.NoError(t, err)
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -708,21 +621,12 @@ func TestChannelManagerWatch(t *testing.T) {
 		assert.ErrorIs(t, err, context.Canceled)
 	}()
 
-	manager.AssignPChannels(ctx, map[ChannelID]types.PChannelInfoAssigned{newChannelID("test-channel"): {
-		Channel: types.PChannelInfo{
-			Name:       "test-channel",
-			Term:       1,
-			AccessMode: types.AccessModeRW,
-		},
-		Node: types.StreamingNodeInfo{ServerID: 2},
+	manager.ObserveWriters(map[string]types.PChannelInfoAssigned{"test-channel": {
+		Channel: types.PChannelInfo{Name: "test-channel", Term: 2, WALReplicaID: 10, AccessMode: types.AccessModeRW},
+		Node:    types.StreamingNodeInfo{ServerID: 2},
 	}})
-	manager.AssignPChannelsDone(ctx, []ChannelID{newChannelID("test-channel")})
-
 	<-called
-	manager.MarkAsUnavailable(ctx, []types.PChannelInfo{{
-		Name: "test-channel",
-		Term: 2,
-	}})
+	manager.ObserveWriters(nil)
 	<-called
 	cancel()
 	<-done
@@ -744,14 +648,7 @@ func TestChannelManager_AddPChannels(t *testing.T) {
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
 		Version: 1,
 	}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{
-			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
-			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
-		},
-	}, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
 
 	m, err := RecoverChannelManager(ctx, "test-channel")
 	assert.NoError(t, err)
@@ -782,7 +679,7 @@ func TestChannelManager_AddPChannels(t *testing.T) {
 	assert.Len(t, view.Channels, 4)
 }
 
-func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
+func TestChannelManager_AddPChannelsBeforeFirstWriter(t *testing.T) {
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -797,9 +694,7 @@ func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
 	}, nil)
 	// streamingVersion is nil => streaming never enabled
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
 
 	m, err := RecoverChannelManager(ctx, "test-channel")
 	assert.NoError(t, err)
@@ -810,50 +705,7 @@ func TestChannelManager_AddPChannels_ROWhenStreamingNotEnabled(t *testing.T) {
 	view := m.CurrentPChannelsView()
 	ch, ok := view.Channels[ChannelID{Name: "new-ro-channel"}]
 	assert.True(t, ok)
-	assert.Equal(t, types.AccessModeRO, ch.ChannelInfo().AccessMode)
-}
-
-func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
-	ResetStaticPChannelStatsManager()
-	RecoverPChannelStatsManager([]string{})
-
-	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
-	s := sessionutil.NewMockSession(t)
-	s.EXPECT().GetRegisteredRevision().Return(int64(1))
-	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
-
-	ctx := context.Background()
-	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
-		Pchannel: "test-channel",
-	}, nil)
-	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
-		Version: 1,
-	}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{
-			Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
-			Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
-		},
-	}, nil)
-	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
-
-	persistErr := errors.New("persist failure")
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(persistErr)
-
-	m, err := RecoverChannelManager(ctx, "test-channel")
-	assert.NoError(t, err)
-
-	// Attempt to add channels; persist fails
-	err = m.AddPChannels(ctx, []string{"fail-channel-1", "fail-channel-2"})
-	assert.ErrorIs(t, err, persistErr)
-
-	// Channels should be rolled back — still only the original channel
-	view := m.CurrentPChannelsView()
-	assert.Len(t, view.Channels, 1)
-	_, ok := view.Channels[ChannelID{Name: "test-channel"}]
-	assert.True(t, ok)
-	_, ok = view.Channels[ChannelID{Name: "fail-channel-1"}]
-	assert.False(t, ok)
+	assert.False(t, ch.IsAssigned())
 }
 
 func TestAddPChannels_UnavailableInReplication(t *testing.T) {
@@ -871,10 +723,6 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 		Pchannel: "ch1",
 	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
-	}, nil)
 	replicateCfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
@@ -886,7 +734,6 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 	}
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
 		&streamingpb.ReplicateConfigurationMeta{ReplicateConfiguration: replicateCfg}, nil)
-	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil)
 
 	m, err := RecoverChannelManager(ctx, "ch1", "ch2")
 	assert.NoError(t, err)
@@ -914,9 +761,6 @@ func TestRecovery_NoReplicateConfig_AllAvailable(t *testing.T) {
 	ctx := context.Background()
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}, Node: &streamingpb.StreamingNodeInfo{ServerId: 1}},
-	}, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
 
 	m, err := RecoverChannelManager(ctx, "ch1")
@@ -937,11 +781,6 @@ func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
 	ctx := context.Background()
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
-	}, nil)
 	replicateCfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
@@ -983,11 +822,6 @@ func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
 	ctx := context.Background()
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
-	}, nil)
 	replicateCfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
 			{ClusterId: "by-dev", Pchannels: []string{"ch1", "ch2"}},
@@ -1027,11 +861,6 @@ func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
 	ctx := context.Background()
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "ch1"}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
-		{Channel: &streamingpb.PChannelInfo{Name: "ch1", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch2", Term: 1}},
-		{Channel: &streamingpb.PChannelInfo{Name: "ch3", Term: 1}},
-	}, nil)
 	// Initial config: only ch1, ch2 in current cluster
 	replicateCfg := &commonpb.ReplicateConfiguration{
 		Clusters: []*commonpb.MilvusCluster{
@@ -1144,11 +973,7 @@ func TestChannelAssignmentDoesNotWaitForPChannelStats(t *testing.T) {
 	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "test-channel"}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{{
-		Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
-		Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
-	}}, nil)
-	m, err := RecoverChannelManager(context.Background())
+	m, err := RecoverChannelManager(context.Background(), "test-channel")
 	require.NoError(t, err)
 
 	balancerView := make(chan *PChannelView, 1)

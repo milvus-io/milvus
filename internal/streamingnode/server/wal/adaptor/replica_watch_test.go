@@ -20,7 +20,9 @@ func TestReplicaWatchWALAvailability(t *testing.T) {
 	mockey.PatchConvey("local watch follows WAL availability independently of directory draining", t, func() {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: ctx, lifetime: typeutil.NewLifetime()}}
+		writerCtx, seal := context.WithCancel(ctx)
+		defer seal()
+		w := &walAdaptorImpl{writerCtx: writerCtx, readSide: &roWALAdaptorImpl{}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: ctx, lifetime: typeutil.NewLifetime()}}
 		_, err := w.AcquireReplicaWatchStream(t.Context())
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
 		d := snview.NewReplicaDirectoryForTest()
@@ -29,7 +31,7 @@ func TestReplicaWatchWALAvailability(t *testing.T) {
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{Name: "p", Term: 1}).Build()
 		mockey.Mock((*snview.SNQueryViewHandler).AcquireReplicaWatchStream).To(func(_ *snview.SNQueryViewHandler, callCtx context.Context, pc string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
 			require.Equal(t, "p", pc)
-			require.Equal(t, ctx.Done(), unavailable)
+			require.Equal(t, writerCtx.Done(), unavailable)
 			return d.AcquireStream(callCtx, pc, unavailable)
 		}).Build()
 		stream, err := w.AcquireReplicaWatchStream(t.Context())
@@ -38,7 +40,10 @@ func TestReplicaWatchWALAvailability(t *testing.T) {
 		sub, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return sub.Snapshot().Valid }, time.Second, time.Millisecond)
-		cancel()
+		seal()
+		require.NoError(t, ctx.Err())
+		_, err = w.AcquireReplicaWatchStream(t.Context())
+		require.True(t, status.AsStreamingError(err).IsOnShutdown())
 		select {
 		case <-stream.Done():
 		case <-time.After(time.Second):

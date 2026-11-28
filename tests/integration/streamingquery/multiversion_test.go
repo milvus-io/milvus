@@ -27,6 +27,7 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(flushed.GetStatus()))
 	var newer *viewpb.DataVersion
+	var required int64
 	require.Eventually(t, func() bool {
 		response, err := etcd.Get(ctx, namespace+"/meta/coord/dv/", clientv3.WithPrefix())
 		require.NoError(t, err)
@@ -34,8 +35,12 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 			var candidate viewpb.DataViewOfCollection
 			require.NoError(t, proto.Unmarshal(kv.Value, &candidate))
 			if candidate.GetCollectionId() == oldView.GetMeta().GetCollectionId() && candidate.GetDataVersion().GetStreamingVersion() > oldView.GetMeta().GetVersion().GetDataVersion().GetStreamingVersion() {
-				newer = candidate.GetDataVersion()
-				return true
+				for _, shard := range candidate.Shards {
+					if shard.Vchannel == oldView.Meta.Vchannel && shard.RequiredStreamingVersion > oldView.Meta.RequiredStreamingVersion {
+						newer, required = candidate.DataVersion, shard.RequiredStreamingVersion
+						return true
+					}
+				}
 			}
 		}
 		return false
@@ -45,6 +50,7 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 	// query/lease checks while the newer view stays Up and pins this runtime.
 	next.Meta.ReplicaId++
 	next.Meta.Version = &viewpb.QueryViewVersion{DataVersion: newer, QueryVersion: 1}
+	next.Meta.RequiredStreamingVersion = required
 	stream, err := viewpb.NewViewSyncServiceClient(sn).SyncQueryView(rpcctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = stream.CloseSend() })
@@ -98,7 +104,7 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 	require.NoError(t, merr.Error(emptySearch.GetLegacyResults().GetStatus()))
 	require.Empty(t, emptySearch.GetLegacyResults().GetSlicedBlob())
 	t.Logf("concurrent Up views verified: old=%s returns 19 rows; new=%s returns 0 SN rows and empty search; Phase 1 prunes SN", oldPlan.Version, newPlan.Version)
-	finishRetention := verifyCrossReplicaRetention(t, rpcctx, sn, oldView, newPlan, oldPlan.GetLegacyRetrieveRequest())
+	finishRetention := verifyCrossReplicaRetention(t, rpcctx, sn, oldView, next, newPlan, oldPlan.GetLegacyRetrieveRequest())
 	return func() {
 		// The loaded fixture also has Coord-owned views. Wait for their old
 		// references to finish teardown, not just for a newer Up to appear.
@@ -131,15 +137,14 @@ func verifyConcurrentSNViews(t *testing.T, ctx, rpcctx context.Context, proxy mi
 
 // Existing references protect their exact base across replicas. Once the last
 // old reference is released, a new acquisition cannot rewind reclamation.
-func verifyCrossReplicaRetention(t *testing.T, ctx context.Context, sn *grpc.ClientConn, oldView *viewpb.QueryViewOfShard, newerPlan *viewpb.QueryPlan, retrieve *internalpb.RetrieveRequest) func() {
+func verifyCrossReplicaRetention(t *testing.T, ctx context.Context, sn *grpc.ClientConn, oldView, newView *viewpb.QueryViewOfShard, newerPlan *viewpb.QueryPlan, retrieve *internalpb.RetrieveRequest) func() {
 	t.Helper()
 	stream, err := viewpb.NewViewSyncServiceClient(sn).SyncQueryView(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = stream.CloseSend() })
-	newReplica := func(offset int64, version *viewpb.DataVersion) *viewpb.QueryViewOfShard {
-		view := proto.Clone(oldView).(*viewpb.QueryViewOfShard)
-		view.Meta.ReplicaId += offset
-		view.Meta.Version.DataVersion = proto.Clone(version).(*viewpb.DataVersion)
+	newReplica := func(offset int64, base *viewpb.QueryViewOfShard) *viewpb.QueryViewOfShard {
+		view := proto.CloneOf(base)
+		view.Meta.ReplicaId = oldView.Meta.ReplicaId + offset
 		return view
 	}
 	transition := func(view *viewpb.QueryViewOfShard, state, expected viewpb.QueryViewState) {
@@ -164,8 +169,7 @@ func verifyCrossReplicaRetention(t *testing.T, ctx context.Context, sn *grpc.Cli
 			}
 		}
 	}
-	oldVersion := oldView.Meta.Version.DataVersion
-	retained := newReplica(2, oldVersion)
+	retained := newReplica(2, oldView)
 	transition(retained, viewpb.QueryViewState_QueryViewStatePreparing, viewpb.QueryViewState_QueryViewStateReady)
 	transition(retained, viewpb.QueryViewState_QueryViewStateUp, viewpb.QueryViewState_QueryViewStateUp)
 	checkRetainedRows := func() {
@@ -193,10 +197,10 @@ func verifyCrossReplicaRetention(t *testing.T, ctx context.Context, sn *grpc.Cli
 		// acknowledgement is the release barrier; no fixed sleep or retry of
 		// the stale acquisition may hide an early Dropped report.
 		transition(retained, viewpb.QueryViewState_QueryViewStateDropped, viewpb.QueryViewState_QueryViewStateDropped)
-		stale := newReplica(3, oldVersion)
+		stale := newReplica(3, oldView)
 		transition(stale, viewpb.QueryViewState_QueryViewStatePreparing, viewpb.QueryViewState_QueryViewStateUnrecoverable)
 		transition(stale, viewpb.QueryViewState_QueryViewStateDropped, viewpb.QueryViewState_QueryViewStateDropped)
-		current := newReplica(4, newerPlan.Version.DataVersion)
+		current := newReplica(4, newView)
 		transition(current, viewpb.QueryViewState_QueryViewStatePreparing, viewpb.QueryViewState_QueryViewStateReady)
 		transition(current, viewpb.QueryViewState_QueryViewStateDropped, viewpb.QueryViewState_QueryViewStateDropped)
 		t.Log("last old-base reference dropped: old version rejected, current version Ready while newer view stays Up")

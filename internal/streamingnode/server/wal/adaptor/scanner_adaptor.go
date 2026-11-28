@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -51,6 +52,8 @@ var (
 // scannerConfig supplies an already available WAB and an optional startup boundary.
 // Without an injected WAB, RW scanners resolve it through the TimeTick inspector.
 type scannerConfig struct {
+	replicaObserve func([]message.ImmutableMessage, uint64)
+	replicaBuffer  *replica.Buffer
 	// RecoveryStorage observes control records; public subscriptions receive confirmations.
 	deliverWALControl bool
 	writeAheadBuffer  wab.ROWriteAheadBuffer
@@ -90,6 +93,8 @@ func newScannerAdaptor(
 		mlog.String("channel", l.Channel().Name),
 	)
 	s := &scannerAdaptorImpl{
+		replicaObserve:    config.replicaObserve,
+		replicaBuffer:     config.replicaBuffer,
 		logger:            logger,
 		deliverWALControl: config.deliverWALControl,
 		writeAheadBuffer:  config.writeAheadBuffer,
@@ -110,6 +115,9 @@ func newScannerAdaptor(
 
 // scannerAdaptorImpl is a wrapper of ScannerImpls to extend it into a Scanner interface.
 type scannerAdaptorImpl struct {
+	replicaObserve    func([]message.ImmutableMessage, uint64)
+	replicaPending    []message.ImmutableMessage // assembled messages awaiting a physical confirmation
+	replicaBuffer     *replica.Buffer
 	deliverWALControl bool
 	startupBarrier    *scannerStartupBarrier
 	startupTxnBuffer  *utility.TxnBuffer // published by delivery of the startup barrier
@@ -349,6 +357,28 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 	}
 	if s.startupBarrier != nil && s.startupBarrier.matches(msg) && s.startupTxnBuffer == nil {
 		s.startupTxnBuffer = s.txnBuffer.Snapshot()
+	}
+	if s.replicaBuffer != nil {
+		if message.IsWALSwitch(msg) {
+			start, err := message.WALSwitchStart(msg)
+			if err != nil {
+				return err
+			}
+			if start.WALName() != msg.WALName() {
+				s.replicaBuffer.ObserveSwitch(msg.TimeTick(), start)
+			}
+		}
+		if msg.MessageType() == message.MessageTypeRecoveryBarrier {
+			s.replicaBuffer.ObserveRecoveryBarrier(msg, s.txnBuffer)
+		}
+		s.replicaPending = append(s.replicaPending, msgs...)
+		if msg.IsPersisted() {
+			s.replicaBuffer.Observe(s.replicaPending, msg.TimeTick())
+			if s.replicaObserve != nil {
+				s.replicaObserve(s.replicaPending, msg.TimeTick())
+			}
+			s.replicaPending = nil
+		}
 	}
 	s.enqueue(msgs)
 	return nil

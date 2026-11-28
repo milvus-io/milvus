@@ -27,7 +27,12 @@ func acquireAndServeReplicaWatch(manager walmanager.Manager, rpc streamingpb.Str
 	if err != nil {
 		return status.NewInvalidArgument("create replica watch stream request is required")
 	}
-	raw, err := manager.GetAvailableWAL(types.NewPChannelInfoFromProto(req.GetPchannel()))
+	channel := req.GetPchannel()
+	if channel.GetName() == "" || channel.GetTerm() <= 0 || channel.GetAccessMode() != streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE || req.WalReplicaId < 0 {
+		return status.NewInvalidArgument("replica watch requires a PChannel and writer term")
+	}
+	route := types.PChannelInfo{Name: channel.Name, Term: channel.Term, WALReplicaID: req.WalReplicaId, AccessMode: types.AccessModeRW}
+	raw, err := manager.GetAvailableWAL(route)
 	if err != nil {
 		return err
 	}

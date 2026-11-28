@@ -69,6 +69,8 @@ func TestUpdateStartPosition(t *testing.T) {
 		{"L0 WAL position", datapb.SegmentLevel_L0, &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 100}, true},
 		{"L0 missing position", datapb.SegmentLevel_L0, nil, false},
 		{"L0 empty position", datapb.SegmentLevel_L0, &msgpb.MsgPosition{}, false},
+		{"Woodpecker first entry", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100, WALName: commonpb.WALName_WoodPecker}, true},
+		{"Woodpecker missing position", datapb.SegmentLevel_L1, &msgpb.MsgPosition{WALName: commonpb.WALName_WoodPecker}, false},
 		{"L1 timestamp only", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100}, false},
 		{"L1 Woodpecker zero ID", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100, WALName: commonpb.WALName_WoodPecker}, false},
 		{"L1 missing position", datapb.SegmentLevel_L1, nil, false},

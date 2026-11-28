@@ -458,18 +458,14 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ## 13. Consistency Implementation (Consistency Level)
 
-### Current primary routing
+### StreamingNode session routing
 
-The query client discovers eligible replicas through the primary SN's
-[replica directory](query/replica_discovery.md), selects an explicit ReplicaID,
-and still plans through that primary WAL owner. Strong and Session
-are sent as Strong; Bounded and Eventually preserve the requested enum.
-`wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
-prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
-writes, Eventually can reuse the current complete snapshot, and Bounded also
-requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
-also requires RW access. WAL-secondary routing remains future work; QueryView replicas on the current
-owner are selected explicitly and support shard-level failover.
+The query client watches StreamingNode sessions for the physical WAL replicas of each PChannel.
+It subscribes to the writer's [directory](query/replica_discovery.md) for locally Up logical QueryView replicas.
+Strong sampling and `GetMVCCTimestamp` use the advertised writer and its term.
+Bounded sampling also goes to the writer. Routing queries to RO replicas is deferred.
+The selected endpoint must cover the guarantee timestamp. Growing-segment execution and requery
+stay on the WAL replica that supplied the plan's MVCC. The next shard plan can select a new endpoint after handoff.
 
 Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
 [Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with

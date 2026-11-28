@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -501,11 +502,12 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 	collector := newLegacyQueryCollector()
 	group, groupCtx := errgroup.WithContext(ctx)
 	for _, plan := range req.Plans {
+		executionCtx := contextutil.WithQueryWALReplica(groupCtx, plan.walReplica)
 		for _, node := range plan.WorkNodes {
 			group.Go(func() error {
 				request := proto.Clone(req.Req).(*internalpb.RetrieveRequest)
 				request.MvccTimestamp = legacyMVCCForNode(plan.Mvcc, node)
-				response, err := c.shardClient.queryServiceClient.QueryOnView(groupCtx, node, &viewpb.QueryOnViewRequest{
+				response, err := c.shardClient.queryServiceClient.QueryOnView(executionCtx, node, &viewpb.QueryOnViewRequest{
 					SegmentSelection: qviews.WorkNodeSelection(&viewpb.QueryPlan{WorkNodes: plan.Selections}, node).GetSegmentSelection(),
 					LegacyReq:        request, ShardId: plan.ShardID.IntoProto(), Version: plan.Version, Mvcc: plan.Mvcc,
 				})

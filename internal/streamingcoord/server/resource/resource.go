@@ -7,6 +7,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/manager"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -43,6 +44,15 @@ func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceIni
 	}
 }
 
+func OptTopologyCatalog(c *streamingcoord.ReplicaTopologyCatalog) optResourceInit {
+	return func(r *resourceImpl) { r.topologyCatalog = c }
+}
+
+func (r *resourceImpl) TopologyCatalog() *streamingcoord.ReplicaTopologyCatalog {
+	return r.topologyCatalog
+}
+func (r *resourceImpl) ReplicaClient() *manager.WALReplicaClient { return r.replicaClient }
+
 // OptStreamingNodeCatalog provides read access to the durable WAL recovery checkpoints.
 func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
 	return func(r *resourceImpl) {
@@ -71,6 +81,7 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
 	assertNotNil(newR.StreamingNodeCatalog())
+	newR.replicaClient = manager.NewWALReplicaClient(newR.etcdClient)
 	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
 	assertNotNil(newR.StreamingNodeManagerClient())
 	r.Store(newR)
@@ -80,6 +91,7 @@ func Init(opts ...optResourceInit) {
 func Release() {
 	if res := r.Load(); res != nil && res.streamingNodeManagerClient != nil {
 		res.streamingNodeManagerClient.Close()
+		res.replicaClient.Close()
 	}
 }
 
@@ -91,6 +103,8 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
+	topologyCatalog            *streamingcoord.ReplicaTopologyCatalog
+	replicaClient              *manager.WALReplicaClient
 	idAllocator                idalloc.Allocator
 	mixCoordClient             *syncutil.Future[types.MixCoordClient]
 	session                    sessionutil.SessionInterface

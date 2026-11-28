@@ -43,3 +43,9 @@ func TestPChannelInfo(t *testing.T) {
 	}
 	assert.Equal(t, c.String(), "pchannel:ro@1>1@127.0.0.1")
 }
+
+func TestReadOnlyReplicaWithoutWriterTerm(t *testing.T) {
+	ro := PChannelInfo{Name: "reader", AccessMode: AccessModeRO}
+	assert.Equal(t, ro, NewPChannelInfoFromProto(NewProtoFromPChannelInfo(ro)))
+	assert.Panics(t, func() { NewProtoFromPChannelInfo(PChannelInfo{Name: "writer", AccessMode: AccessModeRW}) })
+}

@@ -69,25 +69,35 @@ func (impl *timeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
 	return impl.interceptorBuildParam.MVCCManager
 }
 
-// Sync trigger a sync operation.
-// Sync operation is not thread safe, so call it in a single goroutine.
-func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
-	_, _ = impl.SyncWithQueryBarriers(ctx, persisted, nil)
+func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) (uint64, error) {
+	return impl.sync(ctx, persisted, nil)
 }
 
 func (impl *timeTickSyncOperator) SyncWithQueryBarriers(ctx context.Context, persisted bool, barriers map[string]uint64) (map[string]uint64, error) {
+	tick, err := impl.sync(ctx, persisted, barriers)
+	if err != nil || tick == 0 {
+		return nil, err
+	}
+	published := make(map[string]uint64, len(barriers))
+	for channel := range barriers {
+		published[channel] = tick
+	}
+	return published, nil
+}
+
+func (impl *timeTickSyncOperator) sync(ctx context.Context, persisted bool, barriers map[string]uint64) (uint64, error) {
 	impl.interceptorBuildParam.TimeTickSyncMu.Lock()
 	defer impl.interceptorBuildParam.TimeTickSyncMu.Unlock()
 	if impl.walShutdownOrFenced.Load() {
 		// skip append tt msg to a shutdown or fenced wal
-		return nil, status.NewChannelFenced(impl.Channel().Name)
+		return 0, status.NewChannelFenced(impl.Channel().Name)
 	}
 
 	// Sync operation cannot trigger until isReady.
 	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
 	if err != nil {
 		impl.logger.Warn(ctx, "unreachable: get wal failed", mlog.Err(err))
-		return nil, err
+		return 0, err
 	}
 
 	var target uint64
@@ -96,7 +106,7 @@ func (impl *timeTickSyncOperator) SyncWithQueryBarriers(ctx context.Context, per
 	}
 	if target > impl.lastPublishedTick {
 		if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, target); err != nil {
-			return nil, err
+			return 0, err
 		}
 	}
 	impl.queryBarriers = barriers
@@ -115,15 +125,9 @@ func (impl *timeTickSyncOperator) SyncWithQueryBarriers(ctx context.Context, per
 		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
 			impl.walShutdownOrFenced.Store(true)
 		}
-		return nil, err
+		return 0, err
 	}
-	published := make(map[string]uint64)
-	for vchannel := range barriers {
-		if impl.lastPublishedTick > 0 {
-			published[vchannel] = impl.lastPublishedTick
-		}
-	}
-	return published, nil
+	return impl.lastPublishedTick, nil
 }
 
 // AckManager returns the ack manager.
@@ -151,7 +155,7 @@ func (impl *timeTickSyncOperator) sendTsMsg(ctx context.Context, appender func(c
 	// Construct time tick message.
 	ts := impl.ackDetails.LastAllAcknowledgedTimestamp()
 	lastConfirmedMessageID := impl.ackDetails.EarliestLastConfirmedMessageID()
-	persist := (!impl.ackDetails.IsNoPersistedMessage() || forcePersisted)
+	persist := !impl.ackDetails.IsNoPersistedMessage() || forcePersisted || (len(impl.queryBarriers) > 0 && impl.Channel().WALReplicaID != 0)
 
 	return impl.sendTsMsgToWAL(ctx, ts, lastConfirmedMessageID, persist, appender)
 }

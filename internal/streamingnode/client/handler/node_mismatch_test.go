@@ -90,7 +90,7 @@ func TestQueryPlanNodeMismatchCancellation(t *testing.T) {
 	}
 }
 
-func TestPhaseTwoNodeMismatchWaitsForAssignmentThroughGRPC(t *testing.T) {
+func TestPhaseTwoNodeMismatchReplansOnNewWALThroughGRPC(t *testing.T) {
 	paramtable.Init()
 	fixture := newNodeMismatchFixture(t, true)
 	plans := &recordingQueryPlanClient{QueryViewClient: fixture.client.QueryViewClient()}
@@ -105,8 +105,8 @@ func TestPhaseTwoNodeMismatchWaitsForAssignmentThroughGRPC(t *testing.T) {
 		done <- err
 	}()
 	fixture.waitForReport(t, ctx)
-	// The plan succeeded and its execution was rejected: the request waits for
-	// the replacement SN and replays the same plan there.
+	// The first plan lost its MVCC source. The next planning attempt waits for
+	// the replacement and obtains its own View and MVCC.
 	fixture.publish(2, 2, 1683)
 	select {
 	case err := <-done:
@@ -114,7 +114,7 @@ func TestPhaseTwoNodeMismatchWaitsForAssignmentThroughGRPC(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	require.Equal(t, []codes.Code{codes.OK}, plans.codes)
+	require.Equal(t, []codes.Code{codes.OK, codes.OK}, plans.codes)
 	require.EqualValues(t, 1, fixture.executions.Load())
 }
 
@@ -133,7 +133,7 @@ func TestQueryPlanOrdinaryErrorsBypassAssignmentRecovery(t *testing.T) {
 					return nil, rpcErr
 				},
 			}, nil, nil)
-			_, err := client.QueryViewClient().GetQueryPlan(context.Background(), qviews.ShardID{VChannel: "p0"}, &viewpb.GetQueryPlanRequest{})
+			_, _, err := client.QueryViewClient().GetQueryPlan(context.Background(), qviews.ShardID{VChannel: "p0"}, &viewpb.GetQueryPlanRequest{})
 			require.Equal(t, status.Code(rpcErr), status.Code(err))
 			require.Equal(t, 1, calls)
 		})
@@ -233,7 +233,7 @@ func (f *nodeMismatchFixture) read(ctx context.Context, method string) error {
 		_, err := f.client.QueryViewClient().GetMVCCTimestamp(ctx, shard, &viewpb.GetMVCCTimestampRequest{Vchannel: f.vchannel})
 		return err
 	}
-	_, err := f.client.QueryViewClient().GetQueryPlan(ctx, shard, &viewpb.GetQueryPlanRequest{ShardId: shard.IntoProto()})
+	_, _, err := f.client.QueryViewClient().GetQueryPlan(ctx, shard, &viewpb.GetQueryPlanRequest{ShardId: shard.IntoProto()})
 	return err
 }
 
@@ -275,8 +275,7 @@ func (s *nodeMismatchQueryServer) SearchOnView(ctx context.Context, req *viewpb.
 	pchannel, err := worknodehandler.DecodeQueryViewPChannelFromIncomingContext(ctx)
 	assert.NoError(s.t, err)
 	assert.EqualValues(s.t, 2, pchannel.Term)
-	// The plan produced on term 1 is replayed unchanged.
-	assert.EqualValues(s.t, 1, req.GetVersion().GetQueryVersion())
+	assert.EqualValues(s.t, 2, req.GetVersion().GetQueryVersion())
 	md, ok := metadata.FromIncomingContext(ctx)
 	assert.True(s.t, ok)
 	assert.Equal(s.t, []string{"1683"}, md.Get(interceptor.ServerIDKey))
@@ -302,10 +301,10 @@ func (staticReplicaSubscription) Snapshot() qviews.ReplicaSnapshot {
 
 func (staticReplicaSubscription) Close() error { return nil }
 
-func (c *recordingQueryPlanClient) GetQueryPlan(ctx context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-	resp, err := c.QueryViewClient.GetQueryPlan(ctx, shard, req)
+func (c *recordingQueryPlanClient) GetQueryPlan(ctx context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
+	resp, source, err := c.QueryViewClient.GetQueryPlan(ctx, shard, req)
 	c.codes = append(c.codes, status.Code(err))
-	return resp, err
+	return resp, source, err
 }
 
 type retryShardResolver struct{ vchannel string }

@@ -344,7 +344,10 @@ func (hc *handlerClientImpl) createHandlerAfterStreamingNodeReady(ctx context.Co
 
 			// Check if the error is permanent failure until new assignment.
 			if assign != nil && isPermanentFailureUntilNewAssignment(err) {
-				reportErr := hc.rebalanceTrigger.ReportAssignmentError(ctx, assign.Channel, err)
+				// A control-plane hint must not block discovery of the next writer.
+				reportCtx, cancel := context.WithTimeout(ctx, backoff.InitialInterval)
+				reportErr := hc.rebalanceTrigger.ReportAssignmentError(reportCtx, assign.Channel, err)
+				cancel()
 				logger.Info(ctx, "report assignment error", mlog.NamedError("assignmentError", err), mlog.Err(reportErr))
 			}
 		} else {
@@ -401,10 +404,8 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
 	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
-	// Owners close resumable clients before joining physical stream acquisition.
-	hc.lifetime.Wait()
-
 	hc.watcher.Close()
+	hc.lifetime.Wait()
 	hc.service.Close()
 	hc.rb.Close()
 }

@@ -26,6 +26,7 @@ func NewWatcher(r resolver.Resolver) Watcher {
 
 // watcherImpl is the implementation of the assignment watcher.
 type watcherImpl struct {
+	closed      bool
 	ctx         context.Context
 	cancel      context.CancelFunc
 	r           resolver.Resolver
@@ -38,7 +39,9 @@ func (w *watcherImpl) execute() {
 	mlog.Info(w.ctx, "assignment watcher start")
 	var err error
 	defer func() {
-		// error can be ignored here, so use info level log here.
+		w.cond.LockAndBroadcast()
+		w.closed = true
+		w.cond.L.Unlock()
 		mlog.Info(w.ctx, "assignment watcher close", mlog.Err(err))
 	}()
 
@@ -87,6 +90,10 @@ func (w *watcherImpl) Watch(ctx context.Context, channel string, previous *types
 	}
 
 	for {
+		if w.closed {
+			w.cond.L.Unlock()
+			return context.Canceled
+		}
 		if info, ok := w.assignments[channel]; ok {
 			if info.Channel.Term > term {
 				break

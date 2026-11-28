@@ -7,13 +7,19 @@ querying Coordinator for every request.
 The WAL-owned SNQueryViewHandler is authoritative for local View state; the RPC
 service owns only connection/subscription lifetimes. QN does not implement Watch.
 
-## Extraction boundary
+## WAL multi-replica integration
 
-This branch includes the directory, local/RPC watch, shared subscription manager,
-and injectable query-client routing. Production Proxy ownership and the QN
-session observer/transport are parent integration points. See the explicit
-[client transport contract](query_client.md#component-and-integration-boundary).
-Discovery does not activate production Proxy QueryView routing on its own.
+StreamingClient obtains the current writer for each PChannel from StreamingNode sessions. The Proxy subscribes to that writer's local directory and sends all WAL-side query plans, including Bounded, to the writer. At Seal, the directory stream ends. The resumable client invalidates its cached candidates, reconnects to the next writer, and requests a fresh snapshot. RO replicas continue to consume the WAL and prepare the same logical Views.
+
+TODO: Add RO query routing with directory subscriptions scoped to the selected WAL replica. [WAL session discovery protocol](../../wal/wal-replica-protocol.md#2-sn-session-发布-wal-路由)
+
+A Ready report for a logical View is scoped to the WAL replica on its active watch. The RW matches the shard and QueryView version; the RO keeps prepared resources for promotion and serves queries once it becomes the writer. On process restart, a persisted Up resumes as UpRecovering without an inherited serving lease. [WAL replica confirmations](../../wal/wal-replica-protocol.md#4-up-和-down-的多副本确认)
+
+## Integration with the query client
+
+The Proxy uses the streaming client for the SN directory and WAL-side query execution.
+The query client routes sealed-segment work to the QNs named in the plan.
+See the [client transport contract](query_client.md#component-and-integration-boundary).
 
 ## Directory and publication
 
@@ -61,8 +67,7 @@ locks, calls consumer code, or sends RPCs.
 ## Transport and ownership
 
 `StreamingNodeHandlerService.SubscribeReplicas` follows TransformLog's stream /
-subscription separation. Creation metadata carries the assigned PChannel and
-term. The server validates WAL ownership, acquires a domain stream, and returns
+subscription separation. Creation metadata carries the PChannel and advertised WAL replica ID. A writer route also carries its term. The server validates the local instance, acquires a domain stream, and returns
 `CreateReplicaWatchStreamResponse` before accepting subscriptions. QN does not
 implement this RPC. The former unreleased ViewQueryService Watch RPC is removed.
 
@@ -104,13 +109,9 @@ and direct local stream are private implementations inside `wal/snview`; clients
 depend on the WAL contracts and qviews values, not the directory implementation.
 There is no separate `internal/views/replicadiscovery` package.
 
-`HandlerClient.AcquireReplicaWatchStream` resolves the assignment and creates
-one physical attempt. It owns no sharing, reconnect loop or logical subscription
-manager. It first looks up a local available WAL with the exact owner term. The
-local WAL Provider returns the domain stream directly: there is no local RPC,
-Send/Recv emulation, control-message queue, or wire acknowledgement. Only the
-existing `shouldUseRemoteWAL` conditions select remote fallback; local internal
-errors are not silently redirected to RPC.
+`HandlerClient.AcquireReplicaWatchStream` selects the advertised writer and looks up the local WAL by instance ID and term. A matching local provider returns its directory stream directly. When the
+WAL is remote, the RPC is addressed to the candidate's specific SN. The
+resuming client owns sharing, reconnects, and logical subscriptions.
 
 The remote adapter owns the serialized Send path and an independent Recv loop.
 Recv directly applies snapshots and lifecycle acknowledgements to physical
@@ -132,7 +133,7 @@ bounded physical close handshake before canceling its attempt context, and does
 not consume failure backoff. Failed attempts and owner shutdown cancel first to
 unblock transport operations; they do not guarantee a graceful handshake.
 A failed attempt invalidates cached availability,
-rediscovers the owner, backs off, and recreates desired subscriptions. Local to
+selects the current writer from the sessions, backs off, and recreates desired subscriptions. Local to
 remote and remote to local migration use this same loop. A replacement physical
 attempt starts only after the old one closes. Old callbacks are checked against
 the logical registration and attempt context before changing current state.
@@ -162,9 +163,7 @@ Replica selection and execution
 failure-driven reselection are implemented by [QueryViewClient](query_client.md).
 The discovery service supplies candidates; it does not pin query versions or
 implement query retry.
-Current assignment resolves one WAL owner. Future WAL replicas require explicit
-WAL-replica assignments and separate directories; the PChannel term is an owner
-fence, not a permanent WAL-replica identity.
+Each physical WAL replica publishes its own logical directory. WALReplicaID remains stable across a local role change. The writer term fences Strong acquisition.
 
 ## Verification
 

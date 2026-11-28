@@ -48,6 +48,7 @@ func (b *ServerBuilder) WithSession(session sessionutil.SessionInterface) *Serve
 func (s *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
+		resource.OptTopologyCatalog(streamingcoord.NewReplicaTopologyCatalog(s.metaKV)),
 		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(s.metaKV)),
 		resource.OptMixCoordClient(s.mixCoordClient),

@@ -42,13 +42,11 @@ serialized sync operator applies successful ACK messages in TimeTick order and
 atomically publishes both frontiers with the complete ACK-prefix position. A pair
 is never assembled from append-time maxima sampled at different stages.
 
-Strong/Session fixes its minimum once from the completed query-relevant writes
-of this VChannel and global publication operations. Later appends do not move
-that attempt's target. Eventually may reuse the current completed snapshot;
-Bounded also requires the prefix to cover the request's GuaranteeTimestamp.
-An adequate snapshot returns without sync. Otherwise ordinary TimeTick sync is
-triggered and the query waits under caller and WAL-owner cancellation. Pure
-Growing writes do not increase TransformMVCC or QueryNode's wait target.
+For ordinary Strong, Bounded, Session and Eventually queries the writer fixes
+its minimum once from completed query-relevant writes of this VChannel and
+global publication operations. Later appends do not move the attempt's target.
+A sufficient published snapshot returns immediately on an idle channel. Pending
+writes trigger TimeTick sync. Writer seal and caller cancellation interrupt waits.
 
 ACK publication can precede the deferred append callback. Callbacks at or below
 the published prefix are ignored; newer callbacks retain only a pending bound.
@@ -56,11 +54,10 @@ Only ordered publication changes channel membership, so delayed Create/Drop
 callbacks cannot register or revive channels. Recovery initializes live channels
 at its complete opening fence before append admission opens.
 
-Customized reads preserve the request's GuaranteeTimestamp as a lower bound
-on the logical snapshot. Planning chooses B as the maximum of that guarantee and
-the currently visible frontiers, then uses the same barrier resolution as an
-explicit BarrierMVCC. This preserves already observed writes without requiring
-both execution frontiers to reach the guarantee.
+For a Customized read, the query client puts the effective nonzero guarantee B
+in `barrier_mvcc`. The writer returns a snapshot at B, including when newer
+writes are already visible. A zero effective timestamp selects the latest
+writer snapshot. Retained execution MVCC and iterator snapshots take precedence.
 
 The manager logically owns (G,T,P): per-channel Growing/Transform frontiers and
 the shared PChannel complete-prefix boundary P (`through`). All three are read

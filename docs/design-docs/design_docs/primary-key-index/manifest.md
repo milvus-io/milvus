@@ -115,12 +115,10 @@ Rules of the model:
 
 - The pointer keys come from `PointerKey` in
   `internal/datacoord/pkindex/manifest`.
-- A flush also reads `<metaRoot>/streamingcoord-meta/pchannel/<pchannel>`, the
-  `PChannelMeta` of the streaming coordinator. The manifest service does not
-  write this key. Its name comes from `BuildPChannelInfoPath` in
-  `internal/metastore/kv/streamingcoord`, which the streaming coordinator
-  catalog also uses. In MixCoord, DataCoord and the streaming coordinator use
-  the same meta kv and the same meta root path.
+- StreamingCoord stores the desired `WALReplicaTopology` at
+  `<metaRoot>/streamingcoord-meta/pchannel/<pchannel>`. Its metastore package
+  supplies the assigned writer term and a predicate on the stored value to the
+  manifest service. In MixCoord both coordinators use the same meta kv and root.
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
 - `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`. The
@@ -149,14 +147,13 @@ The snapshot side commits a flush with `CommitFlush`. A flush carries the
 vchannel, the term, the new SSTs (newest first), and the new checkpoint. The
 pchannel of the flush is the pchannel part of the vchannel name.
 
-The flush term is first checked against `channel.term` of the pchannel meta.
-The manager reads the meta from the meta kv on every flush. It keeps the
-stored bytes for the condition of the pointer write, and it compares the
-decoded term:
+On every flush, the manager compares the request term with the topology's
+`writer_term` when `writer_replica_id` identifies an assigned writer.
+The pointer write uses a predicate on the exact topology bytes read for that check.
 
 | Condition | Result |
 |---|---|
-| No pchannel meta | `ErrTermNotAssigned` |
+| Missing topology or no assigned writer, including a closed topology with a retained term | `ErrTermNotAssigned` |
 | Flush term < meta term | `ErrFenced` |
 | Flush term > meta term, also after one more read | `ErrTermNotAssigned` |
 | Flush term = meta term | Continue with the edit |
@@ -262,14 +259,11 @@ The pointer value is the deterministic encoding of `ManifestPointer`. The body
 key has a UUID, so each version has a unique pointer value. `ValueEqual` thus
 fails when any other writer committed in between.
 
-The pchannel meta condition makes the term check and the pointer write one
-atomic step. In one term, the streaming coordinator changes the value of the
-pchannel meta only when it marks the pchannel assigned or unavailable. A new
-term changes the value too. If the value changes between the check and the
-write, the condition fails and the flush gets a retryable error. The retry
-reads the pchannel meta again and checks the term again. A failed condition
-of the pointer or of the pchannel meta takes the same path: the caller
-retries. The manager has no retry loop of its own.
+The topology predicate makes the term check and the pointer write atomic.
+A topology change between the read and the write causes a retryable error.
+The caller retries the flush and the manager checks the new assignment. A
+membership change that retains the writer and its term allows the retry to
+proceed. A reassignment to a higher term fences the old writer.
 
 - **etcd.** The condition is a compare in the transaction. etcd evaluates it
   atomically with the writes.
@@ -345,9 +339,9 @@ reads the body from object storage.
 
 ## Fencing by Pchannel Term
 
-The term is `PChannelInfo.term`. The streaming coordinator increases it each
-time it assigns the pchannel to a streaming node. The term does not depend on
-the WAL backend.
+The streaming node sends its writer term in `CommitFlushRequest.pchannel_term`.
+StreamingCoord advances `WALReplicaTopology.writer_term` on writer
+reassignment and retains it across closure to prevent reuse.
 
 - The streaming coordinator records the term once for each pchannel, in the
   pchannel meta. The manifest service reads it there and keeps no term record
@@ -395,7 +389,7 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
 | Pointer write failed, for example on a failed condition | Commit step 5 | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
-| Body, pointer or pchannel meta does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
+| Invalid body, pointer or topology, including an assigned writer with a nonpositive term (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | `ErrTermNotAssigned`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit` | Edits | `ServiceInternal` | No (caller bug) |
 | Error with no category | Any | `ServiceInternal` | No |
 

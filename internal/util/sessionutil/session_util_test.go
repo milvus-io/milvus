@@ -27,6 +27,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -382,6 +383,32 @@ func TestSesssionMarshal(t *testing.T) {
 	assert.Equal(t, s.ServerName, s2.ServerName)
 	assert.Equal(t, s.Address, s2.Address)
 	assert.Equal(t, s.Version.String(), s2.Version.String())
+}
+
+func TestSessionWALAdvertisements(t *testing.T) {
+	term := int64(8)
+	s := &Session{SessionRaw: SessionRaw{WALReplicas: []*streamingpb.WALAdvertisement{
+		{Pchannel: "control", WalReplicaId: 10, WriterTerm: &term, IsCchannel: true},
+		{Pchannel: "data", WalReplicaId: 20},
+	}}}
+
+	data, err := json.Marshal(s)
+	require.NoError(t, err)
+	var raw struct {
+		WALReplicas []map[string]interface{}
+	}
+	require.NoError(t, json.Unmarshal(data, &raw))
+	require.Len(t, raw.WALReplicas, 2)
+	assert.NotContains(t, raw.WALReplicas[1], "writer_term")
+	assert.NotContains(t, raw.WALReplicas[1], "is_cchannel")
+
+	var decoded Session
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.WALReplicas, 2)
+	assert.Equal(t, term, decoded.WALReplicas[0].GetWriterTerm())
+	assert.True(t, decoded.WALReplicas[0].GetIsCchannel())
+	assert.Equal(t, int64(20), decoded.WALReplicas[1].GetWalReplicaId())
+	assert.Nil(t, decoded.WALReplicas[1].WriterTerm)
 }
 
 func TestSessionUnmarshal(t *testing.T) {
@@ -768,6 +795,60 @@ func (s *SessionSuite) TestDisconnected() {
 			s.Equal(c.expect, c.input.Disconnected())
 		})
 	}
+}
+
+func (s *SessionSuite) TestWALRegistration() {
+	t := s.T()
+	ctx := t.Context()
+	session := NewSessionWithEtcd(ctx, s.metaRoot, s.client)
+	session.Init(typeutil.StreamingNodeRole, "localhost", false)
+	session.Register()
+	defer session.Stop()
+	key := session.getCompleteKey()
+	read := func() (SessionRaw, int64) {
+		r, err := s.client.Get(ctx, key)
+		require.NoError(t, err)
+		require.Len(t, r.Kvs, 1)
+		require.EqualValues(t, *session.LeaseID, r.Kvs[0].Lease)
+		var stored SessionRaw
+		require.NoError(t, json.Unmarshal(r.Kvs[0].Value, &stored))
+		return stored, r.Kvs[0].ModRevision
+	}
+
+	results := make(chan error, 2)
+	for _, name := range []string{"a", "b"} {
+		go func() {
+			results <- session.SetWALAdvertisement(ctx, name, &streamingpb.WALAdvertisement{Pchannel: name, WalReplicaId: 42})
+		}()
+	}
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	stored, _ := read()
+	require.Len(t, stored.WALReplicas, 2)
+	term := int64(8)
+	writer := &streamingpb.WALAdvertisement{Pchannel: "a", WalReplicaId: 42, WriterTerm: &term, IsCchannel: true}
+	require.NoError(t, session.SetWALAdvertisement(ctx, "a", writer))
+	_, rev := read()
+	require.NoError(t, session.SetWALAdvertisement(ctx, "a", writer))
+	require.NoError(t, session.SetWALAdvertisement(ctx, "absent", nil))
+	_, after := read()
+	require.Equal(t, rev, after)
+	require.NoError(t, session.SetWALAdvertisement(ctx, "b", nil))
+	stored, _ = read()
+	require.Len(t, stored.WALReplicas, 1)
+	require.Equal(t, term, stored.WALReplicas[0].GetWriterTerm())
+	require.Error(t, session.SetWALAdvertisement(ctx, "wrong", writer))
+	require.NoError(t, session.GoingStop())
+	require.NoError(t, session.GoingStop())
+	require.Error(t, session.SetWALAdvertisement(ctx, "a", nil))
+	stored, _ = read()
+	require.True(t, stored.Stopping)
+	_, err := s.client.Delete(ctx, key)
+	require.NoError(t, err)
+	require.Error(t, session.SetWALAdvertisement(ctx, "a", writer))
+	r, err := s.client.Get(ctx, key)
+	require.NoError(t, err)
+	require.Empty(t, r.Kvs)
 }
 
 func (s *SessionSuite) TestGoingStop() {

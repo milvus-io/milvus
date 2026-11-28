@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
@@ -23,6 +24,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type testSessionResolver struct{ resolver.Resolver }
+
+func (testSessionResolver) GetLatestState(context.Context) (resolver.VersionedState, error) {
+	return resolver.VersionedState{Version: typeutil.VersionInt64(9)}, nil
+}
+
+func (r testSessionResolver) Watch(ctx context.Context, cb func(resolver.VersionedState) error) error {
+	state, _ := r.GetLatestState(ctx)
+	if err := cb(state); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
 
 func TestAssignmentService(t *testing.T) {
 	paramtable.Init()
@@ -97,7 +113,7 @@ func TestAssignmentService(t *testing.T) {
 		return resps[k-1], errs[k-1]
 	})
 
-	assignmentService := NewAssignmentService(s)
+	assignmentService := NewAssignmentService(s, testSessionResolver{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -107,14 +123,11 @@ func TestAssignmentService(t *testing.T) {
 		return nil
 	})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.True(t, finalAssignments.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
-
+	assert.EqualValues(t, 9, finalAssignments.Version.Global)
 	assign, err := assignmentService.GetLatestAssignments(ctx)
 	assert.NoError(t, err)
-	assert.True(t, assign.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
-	assert.Len(t, assign.Assignments[1].Channels, 2)
-	assert.Equal(t, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, assign.Assignments[1].Channels["c1"])
-	assert.NotContains(t, assign.Assignments[1].Channels, "c1-ro")
+	assert.Equal(t, finalAssignments, assign)
+	assert.Empty(t, assign.Assignments, "Coord responses must not publish WAL routes")
 
 	resp, err := assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	assert.NoError(t, err)
@@ -142,11 +155,11 @@ func TestAssignmentService(t *testing.T) {
 	se = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 
-	assignmentService.GetLatestAssignments(ctx)
+	_, err = assignmentService.GetLatestAssignments(ctx)
 	se = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 
-	assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
+	_, err = assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	se = status.AsStreamingError(err)
 	assert.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, se.Code)
 
@@ -300,7 +313,7 @@ func TestGetReplicateConfiguration_FreshRead(t *testing.T) {
 
 		c.EXPECT().AssignmentDiscover(mock.Anything).Return(bgCC, nil)
 
-		assignmentService := NewAssignmentService(s)
+		assignmentService := NewAssignmentService(s, testSessionResolver{})
 		defer func() {
 			close(bgDoneCh)
 			assignmentService.Close()

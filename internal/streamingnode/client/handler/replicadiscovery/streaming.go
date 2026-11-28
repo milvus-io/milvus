@@ -33,7 +33,8 @@ func CreateEventStream(
 ) (*EventStream, error) {
 	pchannel := opts.Assignment.Channel.Name
 	ctx = contextutil.WithCreateReplicaWatchStream(ctx, &streamingpb.CreateReplicaWatchStreamRequest{
-		Pchannel: types.NewProtoFromPChannelInfo(opts.Assignment.Channel),
+		Pchannel:     &streamingpb.PChannelInfo{Name: pchannel, Term: opts.Assignment.Channel.Term},
+		WalReplicaId: opts.Assignment.Channel.WALReplicaID,
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	streamClient, err := handlerClient.SubscribeReplicas(ctx, grpc.MaxCallRecvMsgSize(math.MaxInt32))

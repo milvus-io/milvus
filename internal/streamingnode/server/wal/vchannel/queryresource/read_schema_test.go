@@ -33,7 +33,7 @@ func TestReadSchemasShareSameBindingAcrossViewsAndReclaimUnusedSchemas(t *testin
 	runtime := NewQueryRuntime(module)
 	defer runtime.Close()
 	view := walview.VChannelWALView{CollectionID: 7331, VChannel: "v1", Schema: schema}
-	view.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+	view.CaptureQueryView = func(_ context.Context, meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		next := view
 		next.Schema = proto.Clone(schema).(*schemapb.CollectionSchema)
 		next.Schema.Version = meta.GetSchemaVersion()
@@ -78,7 +78,7 @@ func TestReadSchemasShareSameBindingAcrossViewsAndReclaimUnusedSchemas(t *testin
 }
 
 func TestReadSchemaPreparationRejectsWrongCapture(t *testing.T) {
-	module := &readSchemas{pool: &readSchemaPool{resources: make(map[collectionSchemaKey]*readSchema)}, capture: func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+	module := &readSchemas{pool: &readSchemaPool{resources: make(map[collectionSchemaKey]*readSchema)}, capture: func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
 		capture(walview.VChannelWALView{Schema: &schemapb.CollectionSchema{Version: 3}})
 		return true
 	}}
@@ -99,7 +99,7 @@ func TestReadSchemaLoadScopesIsolateIndexMetadata(t *testing.T) {
 		{FieldID: 101, Name: "a", DataType: schemapb.DataType_FloatVector, TypeParams: params},
 		{FieldID: 102, Name: "b", DataType: schemapb.DataType_FloatVector, TypeParams: params},
 	}}
-	module := &readSchemas{pool: pool, capture: func(_ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
+	module := &readSchemas{pool: pool, capture: func(_ context.Context, _ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
 		fn(walview.VChannelWALView{CollectionID: 7882, Schema: schema})
 		return true
 	}}
@@ -137,7 +137,7 @@ func TestReadSchemaFailedPreparationDoesNotRetainOwnership(t *testing.T) {
 	paramtable.Init()
 	schema := mock_segcore.GenTestCollectionSchema("failed-binding", schemapb.DataType_Int64, false)
 	pool := &readSchemaPool{resources: make(map[collectionSchemaKey]*readSchema)}
-	module := &readSchemas{pool: pool, capture: func(_ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
+	module := &readSchemas{pool: pool, capture: func(_ context.Context, _ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool {
 		fn(walview.VChannelWALView{CollectionID: 7883, Schema: schema})
 		return true
 	}}
@@ -167,7 +167,10 @@ func TestNativeHandleRetainsReadSchemaAfterLastView(t *testing.T) {
 	runtime := NewQueryRuntime(module)
 	defer runtime.Close()
 	view := walview.VChannelWALView{CollectionID: 7884, Schema: schema}
-	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	view.CaptureQueryView = func(_ context.Context, _ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		capture(view)
+		return true
+	}
 	require.NoError(t, runtime.Initialize(t.Context(), view))
 	ref := runtime.bindView(&viewpb.QueryViewMeta{})
 	require.NoError(t, ref.prepare(t.Context(), nil))

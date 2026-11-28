@@ -221,3 +221,28 @@ func TestQueryRuntimeBarrierFollowsObservedEvents(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, captured.ResourceEventBarrier(ctx), context.Canceled)
 }
+
+func TestQueryRuntimeCancelBlockedObserver(t *testing.T) {
+	runtime := NewQueryRuntime(&recordingModule{})
+	defer runtime.Close()
+	runtime.pendingLimit = 1
+	event := walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: 1}}
+	require.True(t, runtime.ObserveEvent(t.Context(), event))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	accepted := make(chan bool, 1)
+	go func() { accepted <- runtime.ObserveEvent(ctx, event) }()
+	select {
+	case <-accepted:
+		t.Fatal("full queue accepted an event")
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case ok := <-accepted:
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("canceled observer is still waiting")
+	}
+	require.Len(t, runtime.pending, 1)
+}

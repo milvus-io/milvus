@@ -100,7 +100,7 @@ func (b *viewBinding) Prepare(ctx context.Context, loadInfo queryresource.LoadIn
 	stop := context.AfterFunc(ctx, func() { r.mu.Lock(); stage.err = ctx.Err(); r.cond.Broadcast(); r.mu.Unlock() })
 	defer stop()
 	var view walview.VChannelWALView
-	if !base.CaptureQueryView(target, func(v walview.VChannelWALView) {
+	if !base.CaptureQueryView(ctx, target, func(v walview.VChannelWALView) {
 		view = v
 		r.mu.Lock()
 		stage.timeTick = v.BaseGrowingTimeTick

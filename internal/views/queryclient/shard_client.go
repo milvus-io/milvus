@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -310,11 +312,12 @@ func (s *shardViewQueryClient) SearchStreams(
 					// Preparation may replace the plan request captured by consumeResponse.
 					plannedRequests[0] = response.GetPlan().GetLegacySearchRequest()
 				}
-				// Workers of each sub-search share one context for this vchannel attempt.
+				// Streams outlive plan setup but stay on the WAL replica that supplied this plan.
+				streamCtx := contextutil.WithQueryWALReplica(ctx, contextutil.QueryWALReplica(planCtx))
 				workerContexts = make([]context.Context, len(requests))
 				workerCancels = make([]context.CancelFunc, len(requests))
 				for i := range requests {
-					workerContexts[i], workerCancels[i] = context.WithCancel(ctx) //nolint:gosec // G118: the shard stream owns the cancel after setup; failures cancel it earlier.
+					workerContexts[i], workerCancels[i] = context.WithCancel(streamCtx) //nolint:gosec // G118: the shard stream owns the cancel after setup; failures cancel it earlier.
 					if registerCancel != nil {
 						registerCancel(workerCancels[i])
 					}
@@ -521,8 +524,8 @@ func (s *shardViewQueryClient) QueryStream(
 					Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: req.Req},
 				}
 			},
-			beforeDispatch: func(context.Context, *viewpb.GetQueryPlanResponse, qviews.ShardID) error {
-				workerCtx, workerCancel = context.WithCancel(ctx)
+			beforeDispatch: func(planCtx context.Context, _ *viewpb.GetQueryPlanResponse, _ qviews.ShardID) error {
+				workerCtx, workerCancel = context.WithCancel(contextutil.WithQueryWALReplica(ctx, contextutil.QueryWALReplica(planCtx)))
 				if registerCancel != nil {
 					registerCancel(workerCancel)
 				}
@@ -722,7 +725,7 @@ func (s *shardViewQueryClient) executeShard(
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
 		planTimer := clientPlan.Begin()
-		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+		response, source, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		planTimer.End(err)
 		if err != nil {
 			if retryableQueryError(err) {
@@ -761,8 +764,9 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 2: Fan out to all work nodes concurrently.
 		fanoutTimer := clientFanout.Begin()
+		executionCtx := contextutil.WithQueryWALReplica(ctx, source)
 		if params.beforeDispatch != nil {
-			err = params.beforeDispatch(ctx, response, shardID)
+			err = params.beforeDispatch(executionCtx, response, shardID)
 		}
 		if err == nil {
 			dispatch := params.dispatchNode
@@ -781,7 +785,7 @@ func (s *shardViewQueryClient) executeShard(
 					return err
 				}
 			}
-			err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, dispatch)
+			err = s.fanOutToWorkNodes(executionCtx, workNodes, plan, shardID, dispatch)
 			if firstErr != nil {
 				err = firstErr
 			}
@@ -798,6 +802,7 @@ func (s *shardViewQueryClient) executeShard(
 
 		retry.attempt++
 		return &ShardPlan{
+			walReplica:       source,
 			ShardID:          shardID,
 			Version:          plan.Version,
 			Mvcc:             plan.GetMvcc(),
@@ -808,35 +813,27 @@ func (s *shardViewQueryClient) executeShard(
 	}
 }
 
-// executeGetQueryPlan handles consistency-level routing and dispatches Phase 1.
-//
-// All replicas are planned on the primary WAL owner, so strong consistency
-// is satisfied directly by that WAL:
-//   - Strong/Session: GetQueryPlan(consistency_level=Strong)
-//   - Bounded/Eventually: GetQueryPlan(consistency_level=...) — SN generates MVCC from WAL
+// executeGetQueryPlan preserves the requested snapshot or consistency level for Phase 1.
 func (s *shardViewQueryClient) executeGetQueryPlan(
 	ctx context.Context,
 	targetShardID qviews.ShardID,
 	planReq *viewpb.GetQueryPlanRequest,
 	params *shardExecParams,
-) (*viewpb.GetQueryPlanResponse, error) {
+) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 	if params.mvcc != nil && params.barrierMVCC != 0 {
-		return nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
+		return nil, nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
 	}
-	if params.barrierMVCC != 0 {
-		planReq.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: params.barrierMVCC}
-	} else if params.mvcc != nil {
+	if params.mvcc != nil {
 		planReq.Mvcc = &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: proto.Clone(params.mvcc).(*viewpb.QueryPlanMVCC)}
 	} else {
-		switch params.consistencyLevel {
-		case commonpb.ConsistencyLevel_Strong, commonpb.ConsistencyLevel_Session:
-			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
-				ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-			}
-		default:
-			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{
-				ConsistencyLevel: params.consistencyLevel,
-			}
+		barrier := params.barrierMVCC
+		if barrier == 0 && params.consistencyLevel == commonpb.ConsistencyLevel_Customized {
+			barrier = max(planReq.GetLegacySearchRequest().GetGuaranteeTimestamp(), planReq.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
+		}
+		if barrier != 0 {
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: barrier}
+		} else {
+			planReq.Mvcc = &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: params.consistencyLevel}
 		}
 	}
 	return s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)

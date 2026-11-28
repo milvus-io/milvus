@@ -39,17 +39,20 @@ plan can therefore delay resource reclamation indefinitely.
 ## Down protocol
 
 1. Coord marks the old view Down and sends Down to SN after a replacement is Up.
-2. SN records a pending Down intent. While the serving deadline is in the future
-   or a call-scoped QueryView reference exists, SN stays Up and retains its
-   persisted Up record. It does not acknowledge Down early.
+2. A local view in Preparing, Ready, UpRecovering or Unrecoverable can enter
+   Down immediately. An Up view records a pending Down intent. While the serving
+   deadline is in the future or a call-scoped QueryView reference exists,
+   SN stays Up and the persisted Up record remains in place.
 3. A per-view one-shot timer checks the deadline. Renewal moves the deadline;
    an early/stale timer rechecks it under the shard mutex. Duplicate Down pushes
    replace the report callback but do not reset the lease or create a report
    loop. Once the original window has elapsed, active references alone need no
    timer: their final release rechecks Down eligibility.
-4. Once the deadline expires and call references reach zero, SN transitions to
-   Down, deletes persisted Up metadata, then reports Down through the current
-   ViewSync callback. Expiry alone never changes a view without a Down intent.
+4. Once the deadline expires and call references reach zero, the Up view
+   transitions to Down. With WAL replicas, each RO reports local Down to the
+   RW. The RW deletes the persisted Up record after group confirmation, then
+   reports Down through ViewSync. A writer without WAL replicas deletes the
+   record after local drain. Expiry alone never changes a view without a Down intent.
 5. Coord's existing Down confirmation gate then permits Dropped to be sent to
    SN and QNs. QNs remain Ready while SN is waiting, protecting both halves of
    an outstanding plan. No per-request Coord/QN lease RPC is required.

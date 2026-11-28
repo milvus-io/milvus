@@ -39,9 +39,10 @@ func setupTombstoneGC(t *testing.T) (metastore.StreamingCoordCataLog, metastore.
 	kv := etcdkv.NewEtcdKV(client, "tombstone-gc-"+uuid.NewString()+"/meta")
 	t.Cleanup(func() { require.NoError(t, kv.RemoveWithPrefix(context.Background(), "")) })
 	coord, node := coordcatalog.NewCataLog(kv), nodecatalog.NewCataLog(kv)
-	resource.InitForTest(resource.OptStreamingCatalog(coord), resource.OptStreamingNodeCatalog(node))
+	topologies := coordcatalog.NewReplicaTopologyCatalog(kv)
+	resource.InitForTest(resource.OptStreamingCatalog(coord), resource.OptStreamingNodeCatalog(node), resource.OptTopologyCatalog(topologies))
 	for _, name := range []string{"p0", "p1", "p2"} {
-		require.NoError(t, coord.SavePChannels(t.Context(), []*streamingpb.PChannelMeta{{Channel: &streamingpb.PChannelInfo{Name: name, Term: 1}}}))
+		require.NoError(t, topologies.Save(t.Context(), nil, &streamingpb.WALReplicaTopology{Pchannel: name, Revision: 1}))
 	}
 	return coord, node
 }
@@ -219,12 +220,12 @@ func TestTombstoneGCEligibleMaxCount(t *testing.T) {
 }
 
 func TestTombstoneGCSkipsCatalogWithoutAgeOrCountPressure(t *testing.T) {
-	coord, node := setupTombstoneGC(t)
+	_, node := setupTombstoneGC(t)
 	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
 	listReads, checkpointReads := 0, 0
-	listPatch := mockey.Mock(mockey.GetMethod(coord, "ListPChannel")).To(func(context.Context) ([]*streamingpb.PChannelMeta, error) {
+	listPatch := mockey.Mock((*coordcatalog.ReplicaTopologyCatalog).List).To(func(context.Context) (map[string]*streamingpb.WALReplicaTopology, error) {
 		listReads++
-		return []*streamingpb.PChannelMeta{{Channel: &streamingpb.PChannelInfo{Name: "p0"}}}, nil
+		return map[string]*streamingpb.WALReplicaTopology{"p0": {Pchannel: "p0", Revision: 1}}, nil
 	}).Build()
 	defer listPatch.UnPatch()
 	checkpointPatch := mockey.Mock(mockey.GetMethod(node, "GetConsumeCheckpoint")).To(func(context.Context, string) (*streamingpb.WALCheckpoint, error) {
@@ -279,7 +280,7 @@ func TestTombstoneGCFailuresAndLegacyPositions(t *testing.T) {
 	for _, target := range []struct {
 		receiver any
 		method   string
-	}{{coord, "ListPChannel"}, {node, "GetConsumeCheckpoint"}, {coord, "RemoveBroadcastTasks"}} {
+	}{{resource.Resource().TopologyCatalog(), "List"}, {node, "GetConsumeCheckpoint"}, {coord, "RemoveBroadcastTasks"}} {
 		builder := mockey.Mock(mockey.GetMethod(target.receiver, target.method))
 		if target.method == "RemoveBroadcastTasks" {
 			builder.To(func(ctx context.Context, _ []uint64) error {

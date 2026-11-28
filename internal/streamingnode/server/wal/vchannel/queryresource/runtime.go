@@ -35,7 +35,7 @@ type QueryRuntime struct {
 	latestAdvance qviews.DataVersion
 	hasAdvance    bool
 
-	prepareView func(context.Context) error
+	prepareView func(context.Context, int64) error
 	closed      chan struct{}
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -94,7 +94,12 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
 	}
 	r.mu.Lock()
-	r.prepareView = func(ctx context.Context) error {
+	r.prepareView = func(ctx context.Context, required int64) error {
+		if view.SyncShardAssignments != nil {
+			if err := view.SyncShardAssignments(ctx, required, func(e walview.VChannelResourceEvent) bool { return r.ObserveEvent(ctx, e) }); err != nil {
+				return err
+			}
+		}
 		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, view.PrepareQueryView)
 	}
 	r.mu.Unlock()
@@ -148,12 +153,22 @@ func (r *QueryRuntime) ObserveEvent(ctx context.Context, event walview.VChannelR
 		r.mu.Unlock()
 		return false
 	}
-	for r.pendingLimit > 0 && len(r.pending) >= r.pendingLimit && r.state != queryRuntimeClosed {
-		r.cond.Wait()
-	}
-	if r.state == queryRuntimeClosed {
-		r.mu.Unlock()
-		return false
+	if r.pendingLimit > 0 && len(r.pending) >= r.pendingLimit {
+		// Cancel can race the transition into Wait. Take the same lock before
+		// waking producers so a cancellation cannot miss the waiter.
+		stop := context.AfterFunc(ctx, func() {
+			r.mu.Lock()
+			r.cond.Broadcast()
+			r.mu.Unlock()
+		})
+		for len(r.pending) >= r.pendingLimit && r.state != queryRuntimeClosed && ctx.Err() == nil {
+			r.cond.Wait()
+		}
+		stop()
+		if r.state == queryRuntimeClosed || ctx.Err() != nil {
+			r.mu.Unlock()
+			return false
+		}
 	}
 	r.pending = append(r.pending, event)
 	drain := r.markDrainScheduledLocked()
@@ -190,7 +205,7 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 }
 
 // PrepareQueryView fences sealed handoffs before View resources are prepared.
-func (r *QueryRuntime) PrepareQueryView(ctx context.Context) (retErr error) {
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context, required int64) (retErr error) {
 	timer := runtimePrepareVersion.Begin()
 	defer timer.EndError(&retErr)
 	if r == nil {
@@ -203,7 +218,7 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context) (retErr error) {
 	}
 	prepare := r.prepareView
 	r.mu.Unlock()
-	return prepare(ctx)
+	return prepare(ctx, required)
 }
 
 // PrepareIndexMeta refreshes a reused runtime before the new view can serve.

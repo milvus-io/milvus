@@ -83,7 +83,7 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 		unlock()
 		return nil, nil, nil, err
 	}
-	if err := addSegments(next, event.NewSegments); err != nil {
+	if err := addSegments(next, event.NewSegments, 0); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}

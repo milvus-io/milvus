@@ -1211,6 +1211,9 @@ message StreamingNodeValidateAnalyzerResponse {
 // Sent in creation metadata, before any subscription request.
 message CreateReplicaWatchStreamRequest {
     PChannelInfo pchannel = 1;
+    // Identifies the physical WAL instance serving this QueryView subscription.
+    // A reader route uses pchannel.name and this ID without a writer term.
+    int64 wal_replica_id = 2;
 }
 
 message ReplicaWatchRequest {
@@ -1293,3 +1296,147 @@ message HighlightRowResult {
 message HighlightResult {
     repeated HighlightRowResult results = 1;
 }
+
+// WAL replica control and state transfer, served by each StreamingNode.
+service StreamingNodeWALReplicaService {
+    // Coord sends the complete desired topology to each registered node, including
+    // nodes with no desired replicas. Each reply is the node's full local inventory.
+    rpc SyncWALReplicas(stream SyncWALReplicasRequest) returns (stream SyncWALReplicasResponse);
+
+    // A reader opens against a specific writer incarnation. The writer registers
+    // the listener and captures its first snapshot atomically, then sends changes.
+    rpc WatchWALReplicaState(stream WatchWALReplicaStateRequest) returns (stream WatchWALReplicaStateResponse);
+
+    // The old writer appends a durable TimeTick while continuing to serve.
+    // The successor waits for its own reader to observe that tick before Catchup.
+    rpc PreparingWALHandoff(WALHandoffRequest) returns (PreparingWALHandoffResponse);
+
+    // The successor waits for the old writer to freeze and drain persistence.
+    // On success it can read a stable durable snapshot while appends continue.
+    rpc WALHandoffCatchup(WALHandoffRequest) returns (WALHandoffCatchupResponse);
+    // Called after reconciling that snapshot. Success confirms write admission
+    // has closed, appends have drained and the old writer route has been withdrawn.
+    rpc SealWALHandoff(WALHandoffRequest) returns (SealWALHandoffResponse);
+}
+
+// Published only while this replica can serve. Its node and lease come from
+// the enclosing SN session. There is at most one entry per PChannel per node.
+message WALAdvertisement {
+    string pchannel = 1;
+    int64 wal_replica_id = 2;
+    // Present and positive for the writer. Absence advertises a reader.
+    optional int64 writer_term = 3;
+    // True only on the active writer for the control PChannel.
+    bool is_cchannel = 4;
+}
+
+// Replica identity stays with this node through a role change.
+message WALReplicaPlacement {
+    int64 wal_replica_id = 1;
+    int64 node_id = 2;
+}
+
+// Durable desired state for one PChannel. An empty membership closes it.
+message WALReplicaTopology {
+    string pchannel = 1;
+    int64 revision = 2;
+    repeated WALReplicaPlacement members = 3;
+    // One of members, or zero for an empty topology.
+    int64 writer_replica_id = 4;
+    // Advances on writer reassignment. Retained across close to prevent reuse.
+    int64 writer_term = 5;
+}
+
+message SyncWALReplicasRequest {
+    // Includes closed topologies. The maximum topology revision (zero when
+    // empty) is the revision the node echoes after accepting the full set.
+    repeated WALReplicaTopology topologies = 1;
+    // PChannels whose member set is confirmed for the included topology revision.
+    // Coord may confirm later by resending the same revision.
+    repeated string confirmed_query_memberships = 2;
+    // The fixed catalog mapping lets the serving writer set is_cchannel.
+    CChannelMeta cchannel = 3;
+}
+
+message LocalWALReplica {
+    string pchannel = 1;
+    int64 wal_replica_id = 2;
+    // PREPARING covers an operation in progress. Once it finishes, report
+    // the actual local role, including RO when a promotion was abandoned.
+    enum State {
+        PREPARING = 0;
+        RO = 1;
+        RW = 2;
+        CLOSED = 3;
+    }
+    State state = 3;
+    // Present only for RW and identifies the term actually serving writes.
+    optional int64 writer_term = 4;
+}
+
+message SyncWALReplicasResponse {
+    int64 observed_revision = 1;
+    repeated LocalWALReplica replicas = 2;
+}
+
+// First request on a subscription. Later reports inherit both endpoint identities.
+message OpenWALReplicaWatch {
+    string pchannel = 1;
+    int64 writer_replica_id = 2;
+    int64 writer_term = 3;
+    int64 subscriber_replica_id = 4;
+}
+
+message WatchWALReplicaStateRequest {
+    oneof request {
+        OpenWALReplicaWatch open = 1;
+        WALQueryViewReport view_report = 2;
+    }
+}
+
+message WatchWALReplicaStateResponse {
+    oneof response {
+        // First on every watch: latest published checkpoint (if any) and all
+        // current QueryView signals for this PChannel, including pending drains.
+        WALReplicaState snapshot = 1;
+        // Only changed signals. Omission leaves the corresponding state unchanged.
+        WALReplicaState changes = 2;
+    }
+}
+
+// Notification payload. RO bootstraps independently from the catalog and WAL.
+message WALReplicaState {
+    // Project only message_id (safe restart anchor) and time_tick from the
+    // durably published checkpoint. This releases the RO buffer's own references.
+    WALCheckpoint checkpoint = 1;
+    repeated WALQueryViewSignal query_views = 2;
+}
+
+// Describes the action for one logical view. Load its versioned resources from
+// the catalog. Up is sent only after the writer has durably published the view.
+message WALQueryViewSignal {
+    view.QueryViewKey view = 1;
+    view.QueryViewState state = 2;
+}
+
+// Reports the current local state of this view. The active watch identifies
+// the reporting replica and writer term; repeated reports are idempotent.
+message WALQueryViewReport {
+    view.QueryViewKey view = 1;
+    view.QueryViewState local_state = 2;
+}
+
+// These operations are idempotent for the authorized successor's term.
+// Final write catch-up is observed on the shared WAL by the successor itself.
+message WALHandoffRequest {
+    string pchannel = 1;
+    int64 target_term = 2;
+}
+
+message PreparingWALHandoffResponse {
+    uint64 persisted_time_tick = 1;
+}
+
+message WALHandoffCatchupResponse {}
+
+message SealWALHandoffResponse {}

@@ -117,8 +117,31 @@ func (_c *MockTimeTickSyncOperator_MVCCManager_Call) RunAndReturn(run func() *mv
 }
 
 // Sync provides a mock function with given fields: ctx, forcePersisted
-func (_m *MockTimeTickSyncOperator) Sync(ctx context.Context, forcePersisted bool) {
-	_m.Called(ctx, forcePersisted)
+func (_m *MockTimeTickSyncOperator) Sync(ctx context.Context, forcePersisted bool) (uint64, error) {
+	ret := _m.Called(ctx, forcePersisted)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Sync")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, bool) (uint64, error)); ok {
+		return rf(ctx, forcePersisted)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, bool) uint64); ok {
+		r0 = rf(ctx, forcePersisted)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, bool) error); ok {
+		r1 = rf(ctx, forcePersisted)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockTimeTickSyncOperator_Sync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Sync'
@@ -140,13 +163,13 @@ func (_c *MockTimeTickSyncOperator_Sync_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_Sync_Call) Return() *MockTimeTickSyncOperator_Sync_Call {
-	_c.Call.Return()
+func (_c *MockTimeTickSyncOperator_Sync_Call) Return(_a0 uint64, _a1 error) *MockTimeTickSyncOperator_Sync_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockTimeTickSyncOperator_Sync_Call) RunAndReturn(run func(context.Context, bool)) *MockTimeTickSyncOperator_Sync_Call {
-	_c.Run(run)
+func (_c *MockTimeTickSyncOperator_Sync_Call) RunAndReturn(run func(context.Context, bool) (uint64, error)) *MockTimeTickSyncOperator_Sync_Call {
+	_c.Call.Return(run)
 	return _c
 }
 

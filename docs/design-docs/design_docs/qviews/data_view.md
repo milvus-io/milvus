@@ -213,6 +213,16 @@ after SegmentMeta committed is gone.
 
 ## Segment Flush publication binding
 
+Each DataView shard records the collection StreamingVersion of the most recent
+Flush that added a newly sealed Segment to that shard. The field is
+`required_streaming_version` and starts at zero. The Flush transaction persists
+it alongside the Segment's first seal. A Flush on another shard, a manifest
+refresh and a compaction preserve the shard's value.
+
+QueryCoord copies this value from the selected DataView shard into QueryViewMeta.
+Placement changes and repair of a retained QueryView preserve its original
+requirement, even when a newer collection DataView exists.
+
 The recovery-storage integration stores `SegmentInfo.sealed_at_data_version`
 in the same transaction as the Segment's first Flush DataView. If binlog writes
 exceed the transaction limit, they are written first; the Segment record with

@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -461,9 +462,9 @@ func (c *dqlRetryPlanClient) SubscribeReplicas(vc string, h wal.ReplicaWatchHand
 	return sub, err
 }
 
-func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *dqlRetryPlanClient) GetQueryPlan(ctx context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, *types.PChannelInfoAssigned, error) {
 	resp, err := c.client.GetQueryPlan(ctx, req)
-	return resp, viewerror.ConvertViewError("GetQueryPlan", err)
+	return resp, nil, viewerror.ConvertViewError("GetQueryPlan", err)
 }
 
 type dqlRetryServiceClient struct {

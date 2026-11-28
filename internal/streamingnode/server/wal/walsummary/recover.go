@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -33,28 +34,47 @@ import (
 // Writers must receive a fresh assignment term on every reopen, including when
 // the previous attempt left no manifest. Same-term recovery supports reads only.
 func (m *Manager) Restore(ctx context.Context) error {
-	terms, err := m.cfg.Store.ListManifestTerms(ctx, math.MaxInt64)
+	snapshot, err := ReadSnapshot(ctx, m.cfg.Store, m.cfg.Term)
 	if err != nil {
 		return err
+	}
+	m.RestoreSnapshot(snapshot)
+	return nil
+}
+
+// Snapshot owns the manifest and the consecutive immutable chunks found after
+// its publication. Reading it has no storage side effects.
+type Snapshot struct {
+	manifest   *streamingpb.PChannelSummaryManifest
+	sourceTerm int64
+	published  bool
+	unchanged  bool
+}
+
+// ReadSnapshot can run on the successor after Prepare drains the source.
+func ReadSnapshot(ctx context.Context, store *Store, term int64) (*Snapshot, error) {
+	terms, err := store.ListManifestTerms(ctx, math.MaxInt64)
+	if err != nil {
+		return nil, err
 	}
 	manifest := &streamingpb.PChannelSummaryManifest{}
 	var sourceTerm int64
 	found := len(terms) > 0
 	if found {
 		sourceTerm = terms[0]
-		if sourceTerm > m.cfg.Term {
-			return merr.WrapErrServiceUnavailableMsg("summary manifest term %d supersedes writer term %d", sourceTerm, m.cfg.Term)
+		if sourceTerm > term {
+			return nil, merr.WrapErrServiceUnavailableMsg("summary manifest term %d supersedes writer term %d", sourceTerm, term)
 		}
 		var exists bool
-		manifest, exists, err = m.cfg.Store.ReadManifestOfTerm(ctx, sourceTerm)
+		manifest, exists, err = store.ReadManifestOfTerm(ctx, sourceTerm)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !exists {
-			return merr.WrapErrServiceUnavailableMsg("summary manifest disappeared during recovery")
+			return nil, merr.WrapErrServiceUnavailableMsg("summary manifest disappeared during recovery")
 		}
 		if err := validateManifest(manifest); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	original := proto.Clone(manifest).(*streamingpb.PChannelSummaryManifest)
@@ -63,30 +83,55 @@ func (m *Manager) Restore(ctx context.Context) error {
 		if manifest.Coverage != nil {
 			from = manifest.Coverage.GetGeneration() + 1
 		}
-		tail, err := m.cfg.Store.ProbeChunkForwardOfTerm(ctx, sourceTerm, from)
+		tail, err := store.ProbeChunkForwardOfTerm(ctx, sourceTerm, from)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, entry := range tail {
 			if manifest.Coverage != nil && (manifest.Coverage.GetEndTimeTick() == math.MaxUint64 || entry.GetStartTimeTick() != manifest.Coverage.GetEndTimeTick()+1) {
-				return storeCorruptedf("summary tail is not contiguous with covered WAL prefix at generation %d", entry.GetGeneration())
+				return nil, storeCorruptedf("summary tail is not contiguous with covered WAL prefix at generation %d", entry.GetGeneration())
 			}
 			recordChunk(manifest, entry)
 		}
 	}
 	if err := validateManifest(manifest); err != nil {
-		return err
+		return nil, err
 	}
+	return &Snapshot{manifest: manifest, sourceTerm: sourceTerm, published: found, unchanged: proto.Equal(original, manifest)}, nil
+}
+
+// RestoreSnapshot consumes the privately owned snapshot after writer activation.
+func (m *Manager) RestoreSnapshot(snapshot *Snapshot) {
+	m.installSnapshot(snapshot)
+	m.scheduleManifest()
+}
+
+// NewQuerySnapshot returns a bounded reader for one View build. Durable chunks
+// are read lazily, and the WAL tail supplies records newer than the manifest.
+func NewQuerySnapshot(store *Store, snapshot *Snapshot, suffix []message.ImmutableMessage, through uint64) *Stream {
+	reader := NewManager(ManagerConfig{Store: store})
+	reader.installSnapshot(snapshot)
+	for _, msg := range suffix {
+		reader.ObserveMessage(context.Background(), msg)
+	}
+	reader.mu.Lock()
+	reader.advanceReadableLocked(through)
+	reader.mu.Unlock()
+	return NewStream(reader)
+}
+
+func (m *Manager) installSnapshot(snapshot *Snapshot) {
+	manifest := snapshot.manifest
 	m.mu.Lock()
 	m.manifest = manifest
 	for _, chunk := range manifest.GetChunks() {
 		m.chunkIndex.chunks = append(m.chunkIndex.chunks, m.chunkIndex.newChunk(chunk, nil))
 	}
-	m.reopenedTerm = found && sourceTerm == m.cfg.Term
-	m.manifestPublished = found && sourceTerm == m.cfg.Term
+	m.reopenedTerm = snapshot.published && snapshot.sourceTerm == m.cfg.Term
+	m.manifestPublished = snapshot.published && snapshot.sourceTerm == m.cfg.Term
 	m.manifestVersion = 1
 	m.publishedVersion = 0
-	if m.manifestPublished && proto.Equal(original, manifest) {
+	if m.manifestPublished && snapshot.unchanged {
 		m.publishedVersion = 1
 	}
 	if last := manifest.GetCoverage(); last != nil {
@@ -106,8 +151,6 @@ func (m *Manager) Restore(ctx context.Context) error {
 		}
 	}
 	m.mu.Unlock()
-	m.scheduleManifest()
-	return nil
 }
 
 // validateManifest checks structure without reading retained chunk bodies.

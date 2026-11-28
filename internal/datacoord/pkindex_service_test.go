@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -112,6 +113,53 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), collectionID)
 	assert.Equal(t, "ch_v0", vchannel)
+}
+
+func TestPKIndexCommitFlushAcrossWriterReassignment(t *testing.T) {
+	ctx := context.Background()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: Params.EtcdCfg.Endpoints.GetAsStrings(), DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	defer client.Close()
+	kv := etcdkv.NewEtcdKV(client, "pkindex-reassignment-"+uuid.NewString()+"/meta")
+	defer func() { _ = kv.RemoveWithPrefix(ctx, "") }()
+
+	catalog := streamingcoord.NewReplicaTopologyCatalog(kv)
+	s := &Server{ctx: ctx, kv: kv, pkindexService: pkindexservice.New()}
+	s.initPKIndex(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir())))
+	flush := func(term int64, tick uint64) *pkindexpb.CommitFlushResponse {
+		resp, err := s.pkindexService.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
+			CollectionId: 1, Vchannel: "ch_1v0", PchannelTerm: term, CheckpointTimeTick: tick,
+		})
+		require.NoError(t, err)
+		return resp
+	}
+
+	members := []*streamingpb.WALReplicaPlacement{{WalReplicaId: 1, NodeId: 10}, {WalReplicaId: 2, NodeId: 20}}
+	first := &streamingpb.WALReplicaTopology{Pchannel: "ch", Revision: 1, Members: members, WriterReplicaId: 1, WriterTerm: 7}
+	require.NoError(t, catalog.Save(ctx, nil, first))
+	resp := flush(7, 100)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.EqualValues(t, 1, resp.GetManifest().GetVersion())
+
+	next := &streamingpb.WALReplicaTopology{Pchannel: "ch", Revision: 2, Members: members, WriterReplicaId: 2, WriterTerm: 8}
+	require.NoError(t, catalog.Save(ctx, first, next))
+	require.ErrorIs(t, merr.Error(flush(7, 120).GetStatus()), merr.ErrChannelNotAvailable)
+	resp = flush(8, 110)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.EqualValues(t, 2, resp.GetManifest().GetVersion())
+	require.EqualValues(t, 8, resp.GetManifest().GetLastFlushTerm())
+
+	key := manifest.PointerKey(1, "ch_1v0")
+	beforeClose, err := kv.Load(ctx, key)
+	require.NoError(t, err)
+	closed := &streamingpb.WALReplicaTopology{Pchannel: "ch", Revision: 3, WriterTerm: 8}
+	require.NoError(t, catalog.Save(ctx, next, closed))
+	require.ErrorIs(t, merr.Error(flush(8, 130).GetStatus()), merr.ErrServiceInternal)
+	afterClose, err := kv.Load(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, beforeClose, afterClose)
 }
 
 func TestPKIndexChunkManagerStore(t *testing.T) {

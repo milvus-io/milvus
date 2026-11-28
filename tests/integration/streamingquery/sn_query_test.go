@@ -3,6 +3,7 @@ package streamingquery
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -22,11 +23,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -98,29 +99,33 @@ func TestStreamingQueryRPC(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
-	var assignment *streamingpb.PChannelMeta
+	pchannel := funcutil.ToPhysicalChannel(vc)
 	var sn *grpc.ClientConn
 	var rpcctx context.Context
 	// Process health can precede WAL reassignment after an SN restart. Wait for
 	// the assigned term and its MVCC service before driving the view protocol.
 	require.Eventually(t, func() bool {
-		kvs, err := etcd.Get(ctx, namespace+"/meta/streamingcoord-meta/pchannel/", clientv3.WithPrefix())
+		kvs, err := etcd.Get(ctx, namespace+"/meta/session/streamingnode-", clientv3.WithPrefix())
 		require.NoError(t, err)
 		for _, kv := range kvs.Kvs {
-			var candidate streamingpb.PChannelMeta
-			require.NoError(t, proto.Unmarshal(kv.Value, &candidate))
-			if candidate.GetChannel().GetName() != funcutil.ToPhysicalChannel(vc) || candidate.GetState() != streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED {
+			var node sessionutil.SessionRaw
+			require.NoError(t, json.Unmarshal(kv.Value, &node))
+			if node.Stopping {
 				continue
 			}
-			if assignment == nil || assignment.GetNode().GetAddress() != candidate.GetNode().GetAddress() {
-				sn = dial(candidate.GetNode().GetAddress())
+			for _, ad := range node.WALReplicas {
+				if ad.GetPchannel() != pchannel || ad.GetWriterTerm() == 0 {
+					continue
+				}
+				if sn == nil || sn.Target() != node.Address {
+					sn = dial(node.Address)
+				}
+				rpcctx = handler.EncodeQueryViewPChannelToOutgoingContext(ctx, types.PChannelInfo{Name: pchannel, Term: ad.GetWriterTerm(), WALReplicaID: ad.GetWalReplicaId(), AccessMode: types.AccessModeRW})
+				probe, cancel := context.WithTimeout(rpcctx, time.Second)
+				defer cancel()
+				_, err = viewpb.NewQueryPlanServiceClient(sn).GetMVCCTimestamp(probe, &viewpb.GetMVCCTimestampRequest{Vchannel: vc})
+				return err == nil
 			}
-			assignment = &candidate
-			rpcctx = handler.EncodeQueryViewPChannelToOutgoingContext(ctx, types.PChannelInfo{Name: candidate.GetChannel().GetName(), Term: candidate.GetChannel().GetTerm(), AccessMode: types.AccessModeRW})
-			probe, cancel := context.WithTimeout(rpcctx, time.Second)
-			defer cancel()
-			_, err = viewpb.NewQueryPlanServiceClient(sn).GetMVCCTimestamp(probe, &viewpb.GetMVCCTimestampRequest{Vchannel: vc})
-			return err == nil
 		}
 		return false
 	}, 30*time.Second, 100*time.Millisecond, "assigned SN WAL must be query-ready")
@@ -153,7 +158,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 	view.Meta.ReplicaId = 40451
 	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
 	if recovering {
-		saved, err := etcd.Get(ctx, namespace+"/meta/streamingnode-meta/wal/"+assignment.GetChannel().GetName()+"/qv/", clientv3.WithPrefix())
+		saved, err := etcd.Get(ctx, namespace+"/meta/streamingnode-meta/wal/"+pchannel+"/qv/", clientv3.WithPrefix())
 		require.NoError(t, err)
 		found := false
 		for _, kv := range saved.Kvs {

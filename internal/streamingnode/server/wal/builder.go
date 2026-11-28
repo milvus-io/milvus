@@ -3,9 +3,14 @@ package wal
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
+
+// ErrWriterTermConsumed marks an abandoned writer attempt after term-scoped
+// side effects became possible. Opening a new writer requires a fresh term.
+var ErrWriterTermConsumed = status.NewUnrecoverableError("writer term has already been used")
 
 // OpenerBuilder is the interface for build wal opener.
 type OpenerBuilder interface {

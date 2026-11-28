@@ -38,7 +38,7 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		RecoveryBarrier: lastTimeTickMessage,
-		StopAtWALSwitch: true,
+		StopAtWALSwitch: !r.writerBarrierObserved,
 	})
 	r.recoveryStream = rs
 	defer func() {
@@ -62,15 +62,11 @@ L:
 			// Filter after scanner ordering and transaction assembly so older txn
 			// fragments can still contribute to a commit beyond the checkpoint.
 			if msg.TimeTick() > recoveryTimeTick {
-				if msg.MessageType() == message.MessageTypeCreateSegment {
-					header := message.MustAsImmutableCreateSegmentMessageV2(msg).Header()
-					if err := storagecommon.ValidateSegmentStorageVersion(header.GetSegmentId(), header.GetStorageVersion()); err != nil {
-						return nil, err
-					}
+				if err := r.observeRecoveryMessage(ctx, msg); err != nil {
+					return nil, err
 				}
-				r.observeMessage(ctx, msg)
 			}
-			if message.IsWALSwitch(msg) {
+			if !r.writerBarrierObserved && message.IsWALSwitch(msg) {
 				start, switchErr := message.WALSwitchStart(msg)
 				if switchErr != nil {
 					return nil, switchErr
@@ -124,6 +120,18 @@ L:
 	}
 	r.Logger().Info(context.TODO(), "recovery from wal stream done", logFields...)
 	return snapshot, nil
+}
+
+// observeRecoveryMessage validates replayed segment metadata before applying it.
+func (r *recoveryStorageImpl) observeRecoveryMessage(ctx context.Context, msg message.ImmutableMessage) error {
+	if msg.MessageType() == message.MessageTypeCreateSegment {
+		header := message.MustAsImmutableCreateSegmentMessageV2(msg).Header()
+		if err := storagecommon.ValidateSegmentStorageVersion(header.GetSegmentId(), header.GetStorageVersion()); err != nil {
+			return err
+		}
+	}
+	r.observeMessage(ctx, msg)
+	return nil
 }
 
 func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {

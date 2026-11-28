@@ -20,6 +20,7 @@ import (
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -456,4 +457,25 @@ func TestAppendMessagesOrderConsistency(t *testing.T) {
 	assert.NoError(t, resp3.UnwrapFirstError())
 	assert.Len(t, resp3.Responses, 1)
 	assert.NotNil(t, resp3.Responses[0].AppendResult)
+}
+
+func TestControlPChannelWaitsForWriterAdvertisement(t *testing.T) {
+	client := newResolvePChannelInfoTestClient(t, &types.VersionedStreamingNodeAssignments{}, nil)
+	mockey.PatchConvey("wait for the serving control channel across a handoff", t, func() {
+		mockey.Mock((*resolvePChannelInfoAssignment).AssignmentDiscover).To(func(_ *resolvePChannelInfoAssignment, ctx context.Context, cb func(*types.VersionedStreamingNodeAssignments) error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			assert.NoError(t, cb(&types.VersionedStreamingNodeAssignments{}))
+			assert.NoError(t, cb(&types.VersionedStreamingNodeAssignments{CChannel: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "p"}}}))
+			return ctx.Err()
+		}).Build()
+		got, err := controlPChannel(t.Context(), client.Assignment())
+		assert.NoError(t, err)
+		assert.Equal(t, "p", got)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err = controlPChannel(ctx, client.Assignment())
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }

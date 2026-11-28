@@ -18,9 +18,8 @@ type TimeTickSyncOperator interface {
 	// WriteAheadBuffer get the related WriteAhead buffer.
 	WriteAheadBuffer() wab.ROWriteAheadBuffer
 
-	// Sync trigger a sync operation, try to send the timetick message into wal.
-	// Sync operation is a blocking operation, and not thread-safe, will only call in one goroutine.
-	Sync(ctx context.Context, forcePersisted bool)
+	// Sync returns the TimeTick appended by this call, or zero if the ACK prefix cannot advance.
+	Sync(ctx context.Context, forcePersisted bool) (uint64, error)
 
 	// SyncWithQueryBarriers publishes scoped query progress with a normal
 	// sync. Returns published VChannel frontiers, not consumption watermarks.

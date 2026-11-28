@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -25,8 +27,7 @@ type TransferChannelsRequest struct {
 }
 
 // TransferChannels runs in the same queue as automatic balancing. Success means
-// the old WALs were closed, the target SNs acknowledged Assign, and ASSIGNED was
-// persisted. It is neither a QueryView readiness nor an in-flight query barrier.
+// each selected destination has advertised its new writer term in its session.
 func (b *balancerImpl) TransferChannels(ctx context.Context, req TransferChannelsRequest) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("balancer is closing")
@@ -35,48 +36,69 @@ func (b *balancerImpl) TransferChannels(ctx context.Context, req TransferChannel
 	ctx, cancel := contextutil.MergeContext(ctx, b.ctx)
 	defer cancel()
 	future := syncutil.NewFuture[response]()
-	_, err := b.sendRequestAndWaitFinish(ctx, &request{
+	result, err := b.sendRequestAndWaitFinish(ctx, &request{
 		ctx: ctx,
 		apply: func(impl *balancerImpl) {
-			future.Set(response{err: impl.transferChannels(ctx, req)})
+			routes, err := impl.requestChannelTransfer(ctx, req)
+			future.Set(response{resp: routes, err: err})
 		},
 		future: future,
 	})
+	if err != nil {
+		return err
+	}
+	want := result.(map[types.ChannelID]types.PChannelInfoAssigned)
+	if len(want) == 0 {
+		return nil
+	}
+	// Wait outside the serialized balancer so reports, retries and a successor
+	// assignment can continue to make progress.
+	done := errors.New("requested writers are serving")
+	err = b.WatchChannelAssignments(ctx, func(state WatchChannelAssignmentsCallbackParam) error {
+		ready := 0
+		for _, route := range state.Relations {
+			if target, ok := want[route.Channel.ChannelID()]; ok && route.Node.ServerID == target.Node.ServerID && route.Channel.Term > target.Channel.Term {
+				ready++
+			}
+		}
+		if ready == len(want) {
+			return done
+		}
+		return nil
+	})
+	if errors.Is(err, done) {
+		return nil
+	}
 	return err
 }
 
-func (b *balancerImpl) transferChannels(ctx context.Context, req TransferChannelsRequest) error {
+func (b *balancerImpl) requestChannelTransfer(ctx context.Context, req TransferChannelsRequest) (map[types.ChannelID]types.PChannelInfoAssigned, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	if req.SourceNodeID <= 0 || req.TargetNodeID < 0 || req.SourceNodeID == req.TargetNodeID {
-		return merr.WrapErrParameterInvalidMsg("expected a positive source SN and a different target SN (or zero for automatic selection)")
+		return nil, merr.WrapErrParameterInvalidMsg("expected a positive source SN and a different target SN (or zero for automatic selection)")
 	}
 	allNodes, err := b.GetAllStreamingNodes(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, ok := allNodes[req.SourceNodeID]; !ok {
-		return merr.WrapErrNodeNotFound(req.SourceNodeID, "source StreamingNode not found")
+		return nil, merr.WrapErrNodeNotFound(req.SourceNodeID, "source StreamingNode not found")
 	}
 	nodes, err := b.fetchStreamingNodeStatus(ctx, paramtable.Get().StreamingCfg.PrimaryResourceGroup.GetValue())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	view := b.channelMetaManager.CurrentPChannelsView()
 	assignments, err := planChannelTransfer(view, nodes, req)
 	if err != nil || len(assignments) == 0 {
-		return err
+		return nil, err
 	}
 	b.Logger().Info(ctx, "transfer WAL channels", mlog.Int64("source", req.SourceNodeID),
 		mlog.Int64("target", req.TargetNodeID), mlog.String("channel", req.ChannelName), mlog.Int("pchannelCount", len(assignments)))
-	modified, err := b.channelMetaManager.AssignPChannels(ctx, assignments)
-	if err != nil {
-		return merr.Wrap(err, "persist manual WAL assignment")
-	}
-	// On cancellation or failure the durable ASSIGNING state is left for normal
-	// balancing to recover; never acknowledge a merely persisted intent as success.
-	return b.applyBalanceResultToStreamingNode(ctx, modified)
+	_, err = b.balanceWithTargets(ctx, assignments)
+	return assignments, err
 }
 
 func planChannelTransfer(view *channel.PChannelView, nodes map[int64]*types.StreamingNodeStatus, req TransferChannelsRequest) (map[types.ChannelID]types.PChannelInfoAssigned, error) {

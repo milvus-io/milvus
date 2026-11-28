@@ -216,7 +216,7 @@ func TestQueryViewPinsSegmentUntilVersionFloorIsPersisted(t *testing.T) {
 	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, map[int64]*streamingpb.SegmentAssignmentMeta{100: segmentMeta})
 	module := manager.Module("v1")
 	key := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "v1", ReplicaID: 1}, QueryViewVersion: qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}}}
-	module.queryResources.AcquireLocked(snview.AcquireResource{Key: key, Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: key.QueryViewVersion.IntoProto()}}, func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) { return walview.VChannelWALView{}, false })
+	module.localQueries.AcquireLocked(snview.AcquireResource{Key: key, Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: key.QueryViewVersion.IntoProto()}}, func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) { return walview.VChannelWALView{}, false })
 	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11}
 	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "the old Up view retains its growing segment")
 	module.ReleaseQueryResource(snview.ReleaseResource{Key: key})
@@ -244,7 +244,7 @@ func TestQueryResourceRejectsDroppedVChannel(t *testing.T) {
 		manager := newCleanupTestManager(t, state, nil)
 		module := manager.Module("v1")
 		scheduler := nodescheduler.New(1)
-		module.queryResources = queryresource.NewManager(queryresource.Config{Scheduler: scheduler})
+		module.localQueries.Manager = queryresource.NewManager(queryresource.Config{Scheduler: scheduler})
 		rejected := make(chan struct{})
 		module.AcquireQueryResource(snview.AcquireResource{Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}}}, OnUnrecoverable: func() { close(rejected) }})
 		select {
@@ -252,7 +252,7 @@ func TestQueryResourceRejectsDroppedVChannel(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("dropped channel preparation stalled")
 		}
-		_, ok := module.queryResources.OldestDataVersion()
+		_, ok := module.localQueries.OldestDataVersion()
 		require.False(t, ok)
 		scheduler.Close()
 	}

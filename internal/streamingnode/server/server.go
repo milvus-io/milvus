@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -29,6 +30,7 @@ import (
 
 // Server is the streamingnode server.
 type Server struct {
+	topologyCatalog *streamingcoord.ReplicaTopologyCatalog
 	// session of current server.
 	session    *sessionutil.Session
 	grpcServer *grpc.Server
@@ -38,7 +40,8 @@ type Server struct {
 	managerService service.ManagerService
 
 	// basic component instances.
-	walManager walmanager.Manager
+	walManager     walmanager.Manager
+	replicaControl *walmanager.ReplicaControl
 }
 
 // Init initializes the streamingnode server.
@@ -79,11 +82,12 @@ func (s *Server) Stop() {
 
 // initBasicComponent initialize all underlying dependency for streamingnode.
 func (s *Server) initBasicComponent() {
-	var err error
-	s.walManager, err = walmanager.OpenManager()
+	manager, err := walmanager.OpenManager()
 	if err != nil {
 		panic(fmt.Sprintf("open wal manager failed, %+v", err))
 	}
+	s.walManager = manager
+	s.replicaControl = manager.EnableReplicaControl(s.session, s.topologyCatalog)
 	// Register the wal manager to the local registry.
 	registry.RegisterLocalWALManager(s.walManager)
 }
@@ -101,6 +105,7 @@ func (s *Server) initService() {
 func (s *Server) registerGRPCService(grpcServer *grpc.Server) {
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(grpcServer, s.handlerService)
 	streamingpb.RegisterStreamingNodeManagerServiceServer(grpcServer, s.managerService)
+	streamingpb.RegisterStreamingNodeWALReplicaServiceServer(grpcServer, service.NewWALReplicaService(s.walManager, s.replicaControl))
 	viewpb.RegisterViewSyncServiceServer(grpcServer, snview.NewPChannelViewSyncServer(s.walManager))
 	viewpb.RegisterViewQueryServiceServer(grpcServer, snview.NewPChannelViewQueryServer(
 		s.walManager,

@@ -37,7 +37,7 @@ func TestMaybeForcePersistedSync(t *testing.T) {
 	defer channelPatch.UnPatch()
 	i.operators.Insert("test", operator)
 
-	operator.EXPECT().Sync(mock.Anything, true).Times(2)
+	operator.EXPECT().Sync(mock.Anything, true).Return(0, nil).Times(2)
 	waitForSync := func() {
 		t.Helper()
 		// A notification from inside Sync can arrive before asyncSync releases

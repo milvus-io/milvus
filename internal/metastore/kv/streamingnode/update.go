@@ -164,6 +164,9 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			return err
 		}
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			if snapshot.ExpectedCheckpoint != nil {
+				return err
+			}
 			if len(removes)+len(schemaSaves)+len(vchannelSaves)+len(segmentSaves) != 0 || snapshot.SalvageCheckpoint != nil {
 				return merr.WrapErrServiceInternalMsg("initialize consume checkpoint before publishing components of pchannel %s", pChannelName)
 			}
@@ -171,8 +174,13 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 		} else {
 			// Fast-fail on a strictly older publisher before the commit txn.
 			currentCP := &streamingpb.WALCheckpoint{}
-			if uerr := proto.Unmarshal([]byte(current), currentCP); uerr == nil &&
-				currentCP.GetTerm() > snapshot.ConsumeCheckpoint.GetTerm() {
+			if err := proto.Unmarshal([]byte(current), currentCP); err != nil {
+				return merr.WrapErrSerializationFailed(err, "decode current consume checkpoint at pchannel %s", pChannelName)
+			}
+			if snapshot.ExpectedCheckpoint != nil && !proto.Equal(currentCP, snapshot.ExpectedCheckpoint) {
+				return merr.WrapErrServiceUnavailable("consume checkpoint advanced during writer takeover")
+			}
+			if currentCP.GetTerm() > snapshot.ConsumeCheckpoint.GetTerm() {
 				return merr.WrapErrServiceInternalMsg(
 					"consume checkpoint of pchannel %s is fenced: recorded term %d is newer than publisher term %d",
 					pChannelName, currentCP.GetTerm(), snapshot.ConsumeCheckpoint.GetTerm(),

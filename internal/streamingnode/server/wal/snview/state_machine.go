@@ -24,6 +24,7 @@ import (
 //	Normal:        Preparing → Ready → Up → Down → Dropping → Dropped
 //	Error:         Preparing → Unrecoverable → Dropping → Dropped
 //	Abort:         Preparing → Dropping → Dropped, Ready → Dropping → Dropped
+//	Retire:        Preparing/Ready/Unrecoverable → Down → Dropping → Dropped
 //	Recovery:      UpRecovering → Up (WAL caught up)
 //	Recovery err:  UpRecovering → Unrecoverable → Dropping → Dropped
 //
@@ -265,21 +266,17 @@ func (sm *snQueryViewStateMachine) handleCoordUp() {
 
 func (sm *snQueryViewStateMachine) handleCoordDown() {
 	switch sm.state {
-	case qviews.QueryViewStateUp:
+	case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
+		// This view has never served a query or persisted Up.
 		sm.state = qviews.QueryViewStateDown
-		sm.pendingReport = sm.buildReport()
-		sm.pendingPersist = sm.buildReport()
-	case qviews.QueryViewStateUpRecovering:
+	case qviews.QueryViewStateUp, qviews.QueryViewStateUpRecovering, qviews.QueryViewStateUnrecoverable:
+		// Unrecoverable may still have a persisted Up from crash recovery.
 		sm.state = qviews.QueryViewStateDown
-		sm.pendingReport = sm.buildReport()
 		sm.pendingPersist = sm.buildReport()
 	case qviews.QueryViewStateDropping:
-		// Already releasing resources, wait for OnDropped callback.
-	default:
-		// Re-push or node has advanced/diverged: re-report current state
-		// so Coord can fast-forward.
-		sm.pendingReport = sm.buildReport()
+		return // Release will report Dropped.
 	}
+	sm.pendingReport = sm.buildReport()
 }
 
 func (sm *snQueryViewStateMachine) handleCoordDropped() {

@@ -155,6 +155,7 @@ func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error 
 			logger = logger.With(mlog.String("sessionValue", string(ev.Kv.Value)))
 			session, err := sw.parseSession(ev.Kv.Value)
 			if err != nil {
+				delete(sw.peerSessions, string(ev.Kv.Key))
 				logger.Warn(context.TODO(), "failed to parse session", mlog.Err(err))
 				continue
 			}
@@ -172,7 +173,7 @@ func (sw *sessionDiscoverer) handleETCDEvent(resp clientv3.WatchResponse) error 
 
 // initDiscover initializes the discoverer if needed.
 func (sw *sessionDiscoverer) initDiscover(ctx context.Context) error {
-	opts := []clientv3.OpOption{clientv3.WithSerializable()}
+	var opts []clientv3.OpOption // Take a linearizable baseline before watching from its next revision.
 	if !sw.exclusive {
 		opts = append(opts, clientv3.WithPrefix())
 	}

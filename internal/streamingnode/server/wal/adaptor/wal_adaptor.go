@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -84,6 +85,7 @@ func adaptImplsToRWWAL(
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
+	wal.writerCtx, wal.cancelWriter = context.WithCancel(roWAL.availableCtx)
 	wal.writeMetrics.SetLogger(wal.Logger())
 	interceptorParam.WAL.Set(wal)
 	wal.RegisterMemoryObserver()
@@ -93,8 +95,13 @@ func adaptImplsToRWWAL(
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
+	readSide            *roWALAdaptorImpl
+	writerCtx           context.Context
+	cancelWriter        context.CancelFunc
+	writeAdmission      replica.Admission
 	queryViewHandler    *snview.SNQueryViewHandler
 	viewResourceManager *vchannel.PChannelRecoveryManager
+	replicaViews        *writerViewControl
 	*roWALAdaptorImpl
 
 	rwWALImpls             walimpls.WALImpls
@@ -107,6 +114,44 @@ type walAdaptorImpl struct {
 	chunkPayloadSizeValue  atomic.Int64                // cached payload budget per chunked WAL record; 0 until first computed.
 	chunkPayloadSizeAt     atomic.Int64                // unixnano of the last chunk-payload-size recompute.
 }
+
+func (w *walAdaptorImpl) PrepareHandoff(ctx context.Context) error {
+	if w.replicaViews != nil {
+		w.replicaViews.Stop()
+	}
+	return w.writerPersistence.Drain(ctx)
+}
+
+func (w *walAdaptorImpl) SealHandoff(ctx context.Context) error {
+	w.cancelWriter()
+	if err := w.writeAdmission.Drain(ctx); err != nil {
+		return err
+	}
+	w.replicaPublisher.Close()
+	return nil
+}
+
+// ReadReplica stays available while writer admission and writer resources drain.
+func (w *walAdaptorImpl) ReadReplica() wal.WAL { return w.readSide }
+
+func (w *walAdaptorImpl) Demote() wal.WAL {
+	reader := w.readSide
+	w.closeWriter()
+	reader.startFollowing()
+	return reader
+}
+
+func (w *walAdaptorImpl) SyncHandoffTimeTick(ctx context.Context) (uint64, error) {
+	operator := resource.Resource().TimeTickInspector().MustGetOperator(w.Channel())
+	tick, err := operator.Sync(ctx, true)
+	if err == nil && tick == 0 {
+		return 0, status.NewIgnoreOperation("waiting for acknowledged WAL prefix on %s", w.Channel().Name)
+	}
+	return tick, err
+}
+
+// ReplicaPublisher exposes writer signals only on the read-write adaptor.
+func (w *walAdaptorImpl) ReplicaPublisher() *replica.Publisher { return w.replicaPublisher }
 
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
@@ -163,6 +208,10 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	defer w.lifetime.Done()
 
+	if !w.writeAdmission.Enter() {
+		return nil, status.NewChannelFenced(w.Channel().Name)
+	}
+	defer w.writeAdmission.Leave()
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALAppend)
 	defer func() {
 		if err != nil {
@@ -187,8 +236,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-w.availableCtx.Done():
-		return nil, status.NewOnShutdownError("wal is on shutdown")
 	case <-w.interceptorBuildResult.Interceptor.Ready():
+	}
+	// Ready can remain closed after the writer stops.
+	if w.availableCtx.Err() != nil {
+		return nil, status.NewOnShutdownError("wal is on shutdown")
 	}
 
 	// Setup the term of wal.
@@ -395,6 +447,21 @@ func (w *walAdaptorImpl) AppendAsync(ctx context.Context, msg message.MutableMes
 
 // Close overrides Scanner Close function.
 func (w *walAdaptorImpl) Close() {
+	if w.readSide != nil {
+		// Full retirement also stops the replica scanner and its runtime.
+		w.readSide.availableCancel()
+	}
+	w.closeWriter()
+	if w.readSide != nil {
+		w.readSide.Close()
+	}
+}
+
+func (w *walAdaptorImpl) closeWriter() {
+	w.cancelWriter()
+	if w.replicaViews != nil {
+		w.replicaViews.Stop()
+	}
 	w.Logger().Info(context.TODO(), "wal begin to close, start graceful close...")
 	// graceful close the interceptors before wal closing.
 	w.interceptorBuildResult.GracefulCloseFunc()
@@ -403,13 +470,13 @@ func (w *walAdaptorImpl) Close() {
 	// begin to close the wal.
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
-	if w.queryViewHandler != nil {
+	if w.readSide == nil && w.queryViewHandler != nil {
 		// Recovery waiters hold a lifetime reference. Wake them before waiting
 		// for in-flight operations, without releasing their query resources yet.
 		w.queryViewHandler.StopQueryAcquisition()
 	}
 	w.lifetime.Wait()
-	if w.queryViewHandler != nil {
+	if w.queryViewHandler != nil && w.readSide == nil {
 		w.queryViewHandler.CloseForHandoff()
 	}
 
@@ -417,6 +484,12 @@ func (w *walAdaptorImpl) Close() {
 	w.Logger().Info(context.TODO(), "wal begin to close recovery storage...")
 	if w.param.RecoveryStorage != nil {
 		w.param.RecoveryStorage.Close()
+	}
+	if w.replicaPublisher != nil {
+		w.replicaPublisher.Close()
+	}
+	if w.replicaBuffer != nil {
+		w.replicaBuffer.Close()
 	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")

@@ -15,7 +15,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/replica"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -36,7 +39,6 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		mlog.String("state", recoveryStorageStatePersistRecovering),
 	))
 
-	catalog := resource.Resource().StreamingNodeCatalog()
 	if r.checkpoint == nil {
 		return merr.WrapErrDataIntegrityMsg("missing recovery checkpoint")
 	}
@@ -52,44 +54,23 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 		mlog.Int64("magic", r.checkpoint.Magic),
 	)
 
-	var vchannelMetas map[string]*streamingpb.VChannelMeta
-	fVChannel := conc.Go(func() (struct{}, error) {
-		vchannels, err := catalog.ListVChannel(ctx, channelInfo.Name)
+	snapshot := r.frozen
+	if snapshot == nil {
+		snapshot = &FrozenSnapshot{}
+		var err error
+		snapshot.vchannels, snapshot.segments, err = readRecoveryMeta(ctx, channelInfo.Name)
 		if err != nil {
-			return struct{}{}, merr.Wrap(err, "failed to get vchannel from catalog")
+			return err
 		}
-		vchannelMetas, err = vchannelMetaMap(vchannels)
-		if err != nil {
-			return struct{}{}, err
-		}
-		r.Logger().Info(context.TODO(), "recovery vchannel info done", mlog.Int("vchannels", len(vchannelMetas)))
-		return struct{}{}, nil
-	})
-
-	var segmentMetas map[int64]*streamingpb.SegmentAssignmentMeta
-	fSegment := conc.Go(func() (struct{}, error) {
-		segments, err := catalog.ListSegmentAssignment(ctx, channelInfo.Name)
-		if err != nil {
-			return struct{}{}, merr.Wrap(err, "failed to get segment assignment from catalog")
-		}
-		segmentMetas, err = segmentAssignmentMetaMap(segments)
-		if err != nil {
-			return struct{}{}, err
-		}
-		r.Logger().Info(context.TODO(), "recover segment assignment meta done", mlog.Int("segments", len(segmentMetas)))
-		return struct{}{}, nil
-	})
-
-	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
-		return err
 	}
-	summaryManager := r.newSummaryManager(moduleapi.Runtime{
-		Scheduler: r.taskScheduler,
-		Notifier:  r,
-	})
-	if err := summaryManager.Restore(ctx); err != nil {
+	vchannelMetas, segmentMetas := snapshot.vchannels, snapshot.segments
+	summaryManager := r.newSummaryManager(moduleapi.Runtime{Scheduler: r.taskScheduler, Notifier: r})
+	if snapshot.summary != nil {
+		summaryManager.RestoreSnapshot(snapshot.summary)
+	} else if err := summaryManager.Restore(ctx); err != nil {
 		return merr.Wrap(err, "restore pchannel summary")
 	}
+	r.frozen = nil
 	if _, err := r.migrateLegacyRecoveryInfo(ctx, vchannelMetas, segmentMetas); err != nil {
 		return err
 	}
@@ -105,6 +86,132 @@ func (r *recoveryStorageImpl) recoverRecoveryInfoFromMeta(ctx context.Context, c
 	}
 	r.Logger().Info(context.TODO(), "recover segment info done", mlog.Int("segments", len(segmentMetas)))
 	return r.initRecoveryModules(ctx, vchannelMetas, segmentMetas, summaryManager)
+}
+
+// FrozenSnapshot contains the durable writer baseline read while the old writer
+// continues serving appends. Ownership transfers to one RecoveryStorage.
+type FrozenSnapshot struct {
+	staged     *recoveryStorageImpl
+	Checkpoint *utility.WALCheckpoint
+	vchannels  map[string]*streamingpb.VChannelMeta
+	segments   map[int64]*streamingpb.SegmentAssignmentMeta
+	summary    *walsummary.Snapshot
+}
+
+func ReadFrozenSnapshot(ctx context.Context, target types.PChannelInfo) (*FrozenSnapshot, error) {
+	catalog := resource.Resource().StreamingNodeCatalog()
+	checkpoint, err := catalog.GetConsumeCheckpoint(ctx, target.Name)
+	if err != nil {
+		return nil, err
+	}
+	vchannels, segments, err := readRecoveryMeta(ctx, target.Name)
+	if err != nil {
+		return nil, err
+	}
+	store := walsummary.NewStore(resource.Resource().ChunkManager(), target.Name, target.Term)
+	summary, err := walsummary.ReadSnapshot(ctx, store, target.Term)
+	if err != nil {
+		return nil, err
+	}
+	return &FrozenSnapshot{Checkpoint: utility.NewWALCheckpointFromProto(checkpoint), vchannels: vchannels, segments: segments, summary: summary}, nil
+}
+
+// Prepare reconstructs writer modules and applies the local confirmed suffix
+// while the source still accepts appends. The scheduler cannot run any writer
+// side effects before activation. An older metadata format needs the existing
+// exclusive migration path and is restored after ownership changes.
+func (s *FrozenSnapshot) Prepare(ctx context.Context, target types.PChannelInfo, cursor *replica.RecoveryCursor, retention vchannel.QueryRetention) error {
+	if s.Checkpoint == nil || s.Checkpoint.Magic != utility.RecoveryMagicSchemaMetadataAligned {
+		return nil
+	}
+	r := newRecoveryStorage(target, s.Checkpoint, WithQueryRetention(retention))
+	s.staged = r
+	r.SetLogger(resource.Resource().Logger().With(mlog.String("channel", target.String())))
+	r.taskScheduler.staging.Store(true)
+	if err := validateRecoveredViewMeta(s.vchannels, s.segments, true); err != nil {
+		return err
+	}
+	summary := r.newSummaryManager(moduleapi.Runtime{Scheduler: r.taskScheduler, Notifier: r})
+	summary.RestoreSnapshot(s.summary)
+	if err := r.initRecoveryModules(ctx, s.vchannels, s.segments, summary); err != nil {
+		return err
+	}
+	batch, err := cursor.TakeAvailable()
+	if err != nil {
+		return err
+	}
+	for _, msg := range batch {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if msg.TimeTick() > s.Checkpoint.TimeTick {
+			if err := r.observeRecoveryMessage(ctx, msg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Close releases a partially staged writer if seal, authority verification or
+// backend open failed. Recover transfers ownership before starting the writer.
+func (s *FrozenSnapshot) Close() {
+	if s.staged != nil {
+		s.staged.closeRecoveryResources()
+		s.staged = nil
+	}
+}
+
+func (s *FrozenSnapshot) Recover(ctx context.Context, builder RecoveryStreamBuilder, cp *utility.WALCheckpoint, barrier message.ImmutableMessage, opts ...RecoveryStorageOption) (RecoveryStorage, *RecoverySnapshot, error) {
+	if s == nil || s.staged == nil {
+		return RecoverRecoveryStorage(ctx, builder, cp, barrier, append(opts, WithFrozenSnapshot(s))...)
+	}
+	r := s.staged
+	r.checkpoint.Term = cp.Term
+	for _, opt := range opts {
+		opt(r)
+	}
+	r.taskScheduler.admission = r.persistence
+	r.tailController = newRecoveryTailController(r.cfg, r.recoveryTailRateLimiter, r.metrics)
+	r.refreshRecoveryTail()
+	s.staged = nil
+	return r.activate(ctx, builder, barrier)
+}
+
+func readRecoveryMeta(ctx context.Context, channel string) (map[string]*streamingpb.VChannelMeta, map[int64]*streamingpb.SegmentAssignmentMeta, error) {
+	catalog := resource.Resource().StreamingNodeCatalog()
+	var vchannelMetas map[string]*streamingpb.VChannelMeta
+	fVChannel := conc.Go(func() (struct{}, error) {
+		vchannels, err := catalog.ListVChannel(ctx, channel)
+		if err != nil {
+			return struct{}{}, merr.Wrap(err, "failed to get vchannel from catalog")
+		}
+		vchannelMetas, err = vchannelMetaMap(vchannels)
+		if err != nil {
+			return struct{}{}, err
+		}
+
+		return struct{}{}, nil
+	})
+
+	var segmentMetas map[int64]*streamingpb.SegmentAssignmentMeta
+	fSegment := conc.Go(func() (struct{}, error) {
+		segments, err := catalog.ListSegmentAssignment(ctx, channel)
+		if err != nil {
+			return struct{}{}, merr.Wrap(err, "failed to get segment assignment from catalog")
+		}
+		segmentMetas, err = segmentAssignmentMetaMap(segments)
+		if err != nil {
+			return struct{}{}, err
+		}
+
+		return struct{}{}, nil
+	})
+
+	if err := conc.BlockOnAll(fVChannel, fSegment); err != nil {
+		return nil, nil, err
+	}
+	return vchannelMetas, segmentMetas, nil
 }
 
 func vchannelMetaMap(vchannels []*streamingpb.VChannelMeta) (map[string]*streamingpb.VChannelMeta, error) {

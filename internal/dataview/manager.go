@@ -515,7 +515,7 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 
 	view := buildEmptyDataView(event.CollectionID, event.VChannels)
 	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1}
-	if err := addSegments(view, event.Segments); err != nil {
+	if err := addSegments(view, event.Segments, 0); err != nil {
 		return nil, err
 	}
 	bounds, err := m.captureFrontiers(ctx, event.CollectionID)
@@ -787,6 +787,7 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 		}
 		nativeShard := &api.ShardDataView{
 			VChannel:                             shard.GetVchannel(),
+			RequiredStreamingVersion:             shard.GetRequiredStreamingVersion(),
 			GrowingTransformStartAfterTimetick:   shard.GetGrowingTransformStartAfterTimetick(),
 			CompactedTransformStartAfterTimetick: shard.GetCompactedTransformStartAfterTimetick(),
 			Partitions:                           make([]*api.PartitionDataView, 0, len(shard.GetPartitions())),
@@ -923,7 +924,8 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 	if next == nil {
 		next = &viewpb.DataViewOfCollection{CollectionId: event.CollectionID}
 	}
-	if err := addSegments(next, event.Segments); err != nil {
+	version := nextDataVersion(base, dataViewAdvanceStreaming)
+	if err := addSegments(next, event.Segments, version.StreamingVersion); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}
@@ -944,7 +946,7 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		abort := func() { once.Do(unlock) }
 		return view, commit, abort, nil
 	}
-	next.DataVersion = nextDataVersion(base, dataViewAdvanceStreaming)
+	next.DataVersion = version
 
 	// The flushed snapshot is incremental: next carries the base version's
 	// segments plus the flushed ones, so its stats index must merge the base
@@ -1117,7 +1119,7 @@ func nextDataVersion(base *viewpb.DataViewOfCollection, advance dataViewAdvance)
 	}
 }
 
-func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
+func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment, firstSealVersion int64) error {
 	slots := dataViewSegmentSlots(view)
 	for _, segment := range segments {
 		if segment.SegmentID == 0 || segment.VChannel == "" || segment.ManifestVersion < 0 {
@@ -1129,7 +1131,8 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			)
 		}
 		location := segmentLocation{vchannel: segment.VChannel, partitionID: segment.PartitionID}
-		partition := findOrCreatePartition(findOrCreateShard(view, segment.VChannel), segment.PartitionID)
+		shard := findOrCreateShard(view, segment.VChannel)
+		partition := findOrCreatePartition(shard, segment.PartitionID)
 		partition.PartitionStatsVersion = max(partition.PartitionStatsVersion, segment.PartitionStatsVersion)
 		if known, ok := slots[segment.SegmentID]; ok {
 			if known.location != location {
@@ -1169,6 +1172,7 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			}
 			continue
 		}
+		shard.RequiredStreamingVersion = max(shard.RequiredStreamingVersion, firstSealVersion)
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
 		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.ManifestVersion)
 		partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)
@@ -1237,7 +1241,7 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 			)
 		}
 	}
-	return addSegments(view, segments)
+	return addSegments(view, segments, 0)
 }
 
 func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection) error {
