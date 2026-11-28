@@ -205,9 +205,10 @@ func (c *CachedRootVerifier) Verify(ctx context.Context, username, password stri
 		return merr.WrapErrPrivilegeNotPermitted("only root user can access this endpoint")
 	}
 	// Reject oversized candidates before hashing or fetching the root hash.
-	// crypto.PasswordEncrypt enforces this limit under every algorithm, so no
-	// stored root hash can match a longer password.
-	if len(password) > crypto.BcryptMaxPasswordBytes {
+	// PBKDF2MaxPasswordBytes is the widest bound a stored root hash can have, so
+	// no hash can match a longer password whatever its algorithm; the bound of
+	// the hash's own algorithm is applied when it is compared.
+	if len(password) > crypto.PBKDF2MaxPasswordBytes {
 		return merr.WrapErrPrivilegeNotAuthenticated("invalid root password")
 	}
 
