@@ -86,7 +86,7 @@ impl From<&str> for SystemFilter {
             "alphanumonly" => Self::AlphaNumOnly(AlphaNumOnlyFilter),
             "cncharonly" => Self::CnCharOnly(CnCharOnlyFilter),
             "cnalphanumonly" => Self::CnAlphaNumOnly(CnAlphaNumOnlyFilter),
-            "removepunct" => Self::RemovePunct(RemovePunctFilter),
+            "removepunct" => Self::RemovePunct(RemovePunctFilter::default()),
             "pinyin" => Self::Pinyin(PinyinFilter::default()),
             "decimaldigit" => Self::DecimalDigit(DecimalDigitFilter),
             "arabic_normalization" => Self::ArabicNormalization(ArabicNormalizationFilter),
@@ -114,6 +114,9 @@ pub fn create_filter(
                     .map(|f| SystemFilter::Decompounder(f)),
                 "stemmer" => Stemmer::from_json(params, helper).map(|f| SystemFilter::Stemmer(f)),
                 "regex" => RegexFilter::from_json(params).map(|f| SystemFilter::Regex(f)),
+                "removepunct" => {
+                    RemovePunctFilter::from_json(params).map(|f| SystemFilter::RemovePunct(f))
+                }
                 "synonym" => {
                     SynonymFilter::from_json(params, helper).map(|f| SystemFilter::Synonym(f))
                 }
