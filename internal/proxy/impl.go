@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/dml"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -2638,6 +2639,54 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	mlog.Debug(context.TODO(), "Finish processing upsert request in Proxy")
 	return it.Result(), nil
+}
+
+// Update accepts one literal assignment set for a list of primary keys.
+func (node *Proxy) Update(ctx context.Context, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.UpdateLabel).
+		SetDatabaseName(request.GetDbName()).
+		SetCollectionName(request.GetCollectionName())
+
+	if !paramtable.Get().ProxyCfg.PKUpdateEnabled.GetAsBool() {
+		return failedMutationResult(merr.Wrap(merr.ErrServiceUnimplemented, "PK-update admission is disabled (proxy.pkUpdate.enabled=false)")), nil
+	}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return failedMutationResult(err), nil
+	}
+	if err := checkExternalCollectionBlockedForWrite(ctx, node.GetMetaCache(), request.GetDbName(), request.GetCollectionName(), "update"); err != nil {
+		return failedMutationResult(err), nil
+	}
+	tr := timerecord.NewTimeRecorder("Update")
+	task := dml.NewUpdateTask(ctx, node.GetMetaCache(), request)
+	if err := node.sched.DmQueue.Enqueue(task); err != nil {
+		return failedMutationResult(err), nil
+	}
+	if err := task.WaitToFinish(); err != nil {
+		return failedMutationResult(err), nil
+	}
+	result := task.Result()
+
+	requestSize := proto.Size(request)
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(requestSize))
+
+	dbName := request.GetDbName()
+	username := GetCurUserFromContextOrDefault(ctx)
+	nodeID := paramtable.GetStringNodeID()
+	v := hookutil.GetExtension().Report(map[string]any{
+		hookutil.OpTypeKey:          hookutil.OpTypeUpdate,
+		hookutil.DatabaseKey:        dbName,
+		hookutil.UsernameKey:        username,
+		hookutil.RequestDataSizeKey: requestSize,
+		hookutil.SuccessCntKey:      result.GetUpdateCnt(),
+		hookutil.FailCntKey:         len(result.GetErrIndex()),
+	})
+	SetReportValue(result.GetStatus(), v)
+	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpdate, dbName, username).Add(float64(v))
+	metrics.ProxyMutationLatency.WithLabelValues(nodeID, metrics.UpdateLabel, dbName, request.GetCollectionName()).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
 }
 
 func GetCollectionRateSubLabel(req any) string {

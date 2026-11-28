@@ -74,6 +74,7 @@ enum MessageType {
     UpdateImport                 = 49;
     AddFileResource              = 50;
     RemoveFileResource           = 51;
+    Update                       = 52;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -248,6 +249,26 @@ message SegmentAssignment {
 message DeleteMessageHeader {
     int64 collection_id = 1;
     uint64 rows = 2;
+}
+
+// Routing and schema metadata; PKs and assignments stay in the payload.
+message UpdateMessageHeader {
+    int64 collection_id = 1;
+    optional int32 schema_version = 2;
+    // AllPartitionsID (-1) or a concrete partition ID. No implicit zero scope.
+    int64 partition_id = 3;
+}
+
+message UpdateAssignment {
+    int64 field_id = 1;
+    schema.UpdateLiteral literal = 2;
+}
+
+message UpdateMessageBody {
+    reserved 1; // Former partition_id; scope is carried in UpdateMessageHeader.
+    reserved "partition_id";
+    schema.IDs primary_keys = 2;
+    repeated UpdateAssignment assignments = 3;
 }
 
 // FlushMessageHeader just nothing.

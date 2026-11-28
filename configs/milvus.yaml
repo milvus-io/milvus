@@ -1552,7 +1552,9 @@ quotaAndLimits:
     # materialization, including generated fields, row IDs, timestamps, namespace data,
     # and partial-upsert query reconstruction. It does not include later streaming-message
     # properties, encryption expansion, StreamingNode-generated function fields, or the
-    # broker envelope.
+    # broker envelope. For a PK update, the limit applies to the total bytes of all WAL
+    # messages encoded by the Proxy across all VChannels, including repeated assignments
+    # and any encryption overhead added by the Proxy.
     maxInsertSize: 67108864
     # maximum protobuf size of each Proxy-side materialized delete message, in bytes,
     # for both delete and upsert tombstones; -1 means no limit. The check runs after

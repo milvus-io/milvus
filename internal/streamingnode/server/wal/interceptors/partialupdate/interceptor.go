@@ -182,7 +182,7 @@ func (i *appendInterceptor) appendWrite(
 	}
 
 	if msg.TxnContext() != nil {
-		// Transaction bodies are Insert and Delete, whose PKs are exact.
+		// Transaction write bodies are Insert, Update and Delete, whose PKs are exact.
 		// Collection fences and drops come from exclusive DDL, which is not
 		// transactional and fails every transaction on its vchannel.
 		txnID := msg.TxnContext().TxnID

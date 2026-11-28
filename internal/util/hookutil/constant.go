@@ -35,6 +35,7 @@ var (
 	OpTypeInsert       = "insert"
 	OpTypeDelete       = "delete"
 	OpTypeUpsert       = "upsert"
+	OpTypeUpdate       = "update"
 	OpTypeQuery        = "query"
 	OpTypeSearch       = "search"
 	OpTypeHybridSearch = "hybrid_search"

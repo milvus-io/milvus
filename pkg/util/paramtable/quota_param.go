@@ -1509,7 +1509,9 @@ for both insert and upsert; -1 means no limit. The check runs after Proxy field
 materialization, including generated fields, row IDs, timestamps, namespace data,
 and partial-upsert query reconstruction. It does not include later streaming-message
 properties, encryption expansion, StreamingNode-generated function fields, or the
-broker envelope.`,
+broker envelope. For a PK update, the limit applies to the total bytes of all WAL
+messages encoded by the Proxy across all VChannels, including repeated assignments
+and any encryption overhead added by the Proxy.`,
 		Export: true,
 	}
 	p.MaxInsertSize.Init(base.mgr)

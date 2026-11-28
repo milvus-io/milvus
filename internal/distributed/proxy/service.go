@@ -399,7 +399,8 @@ func (s *Server) startExternalGrpc(errChan chan error) {
 			// inbound only
 			WithInboundRecord(milvuspb.MilvusService_Insert_FullMethodName,
 				milvuspb.MilvusService_Delete_FullMethodName,
-				milvuspb.MilvusService_Upsert_FullMethodName)),
+				milvuspb.MilvusService_Upsert_FullMethodName,
+				milvuspb.MilvusService_Update_FullMethodName)),
 	}
 
 	if Params.TLSMode.GetAsInt() == 1 {
@@ -969,6 +970,18 @@ func (s *Server) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*
 
 func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
 	return s.proxy.Upsert(ctx, request)
+}
+
+func (s *Server) Update(ctx context.Context, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.UpdateLabel).
+		SetDatabaseName(request.GetDbName()).
+		SetCollectionName(request.GetCollectionName())
+	// Enable public writes only after WAL consumers can apply and serve PK updates.
+	return &milvuspb.MutationResult{
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "PK update is unavailable until WAL consumers support it")),
+	}, nil
 }
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {

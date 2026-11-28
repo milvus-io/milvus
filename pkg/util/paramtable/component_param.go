@@ -2892,6 +2892,8 @@ type proxyConfig struct {
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
 	EnableAutoLoad                    ParamItem `refreshable:"true"`
+	PKUpdateEnabled                   ParamItem `refreshable:"true"`
+	PKUpdateMaxPKCount                ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
@@ -3221,6 +3223,31 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.EnableAutoLoad.Init(base.mgr)
+
+	p.PKUpdateEnabled = ParamItem{
+		Key:          "proxy.pkUpdate.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "Admit new literal PK-update requests. Disabling admission does not disable replay, materialization, CDC or reads of accepted updates. Requires compatible consumers.",
+		Export:       false,
+	}
+	p.PKUpdateEnabled.Init(base.mgr)
+
+	p.PKUpdateMaxPKCount = ParamItem{
+		Key:          "proxy.pkUpdate.maxPkCount",
+		Version:      "3.0.0",
+		DefaultValue: "10000",
+		Doc:          "Maximum submitted PK count per update request, including duplicates and all VChannels. Must be positive; invalid values fall back to 10000. Message byte limits apply independently.",
+		Export:       false,
+		Formatter: func(v string) string {
+			count, err := strconv.Atoi(v)
+			if err != nil || count <= 0 {
+				return "10000"
+			}
+			return v
+		},
+	}
+	p.PKUpdateMaxPKCount.Init(base.mgr)
 
 	p.DDLConcurrency = ParamItem{
 		Key:          "proxy.ddlConcurrency",

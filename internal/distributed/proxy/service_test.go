@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/netutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -74,6 +75,26 @@ func TestMain(m *testing.M) {
 	paramtable.Init()
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestPublicUpdateBlockedUntilConsumersReady(t *testing.T) {
+	params := paramtable.Get()
+	gate := &params.ProxyCfg.PKUpdateEnabled
+	original := gate.GetValue()
+	t.Cleanup(func() { params.Save(gate.Key, original) })
+	// A server without a Proxy backend also verifies that the RPC never dispatches.
+	server := &Server{}
+	for _, enabled := range []string{"false", "true"} {
+		t.Run(enabled, func(t *testing.T) {
+			params.Save(gate.Key, enabled)
+			require.Equal(t, enabled, gate.GetValue())
+			result, err := server.Update(t.Context(), &milvuspb.UpdateRequest{CollectionName: "users"})
+			require.NoError(t, err)
+			require.ErrorIs(t, merr.Error(result.GetStatus()), merr.ErrServiceUnimplemented)
+			require.False(t, result.GetAcknowledged())
+			require.Zero(t, result.GetUpdateCnt())
+		})
+	}
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
