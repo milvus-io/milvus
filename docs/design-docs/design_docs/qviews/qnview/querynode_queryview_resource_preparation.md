@@ -463,7 +463,7 @@ poll. This fallback does not add notifications for physical changes that do not
 create a new View. `GetQueryViewSegmentLoadInfo` is a unary batch request for Segment IDs
 in one Collection. It returns one result per distinct requested ID, including a
 per-Segment status and, on success, the current SegmentLoadInfo. For ordinary
-StorageV3 segments in summary mode, a capable QueryNode can receive summaries
+StorageV3 segments, a capable QueryNode can receive summaries
 and retained finished tasks and resolve index files from the same manifest it
 uses for column groups, deltas and stats. Collection index definitions are
 included once for the batch. The response-level status is
@@ -481,8 +481,11 @@ concurrent resource tasks, and the RPC has a timeout. The QN metadata adapter
 coalesces pending requests for the same Collection for up to 1 ms or 128 callers,
 deduplicates Segment IDs, then distributes individual results back to their
 resource owners. Different Collections never share a batch. A failed request retries
-only while a live unmet requirement needs it; physical load retries retain their
-accepted metadata rather than repeatedly calling the coordinator.
+only while a live unmet requirement needs it. A failed ordinary StorageV3
+preparation requires fresh metadata for that binding's retry. A newer committed
+revision can retract artifacts referenced by the failed load. Other bindings
+can still prepare from compatible accepted metadata. External preparation
+retains its exact-revision requirement.
 
 Successful preparation freezes the binding's ReadState. There is no metadata
 polling or same-View index-refresh subscription. Manifest publication requests

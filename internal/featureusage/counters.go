@@ -261,6 +261,25 @@ const (
 	FeatureUpsertMissingInsert
 	FeatureUpsertMissingSkip
 	FeatureUpsertMissingError
+
+	// Operations that leave no metadata behind to walk, or whose metadata does
+	// not outlive the object (a dropped snapshot): counted per client call at
+	// the Proxy, whether or not the call then succeeds.
+	FeatureSnapshotCreate
+	FeatureSnapshotRestore
+	FeatureSnapshotExport
+	FeatureFileResourceAdd
+	FeatureRunningRequestsList
+	FeatureRunningRequestsCancel
+	FeatureTruncateCollection
+	FeatureSchemaChangeAddField
+	FeatureSchemaChangeAlterSchema
+	FeatureSchemaChangeAlterFunction
+
+	// FeatureQueryFunctionChains: a Query carrying function_chains. Unlike a
+	// search chain it is a scan-stage transform, not a reranker, so it does
+	// not count under reranker=*.
+	FeatureQueryFunctionChains
 	numFeatures // must be last
 )
 
@@ -468,6 +487,19 @@ var featureNames = [numFeatures]string{
 	FeatureUpsertMissingInsert: "upsert_on_missing=insert",
 	FeatureUpsertMissingSkip:   "upsert_on_missing=skip",
 	FeatureUpsertMissingError:  "upsert_on_missing=error",
+
+	FeatureSnapshotCreate:            "snapshot=create",
+	FeatureSnapshotRestore:           "snapshot=restore",
+	FeatureSnapshotExport:            "snapshot=export",
+	FeatureFileResourceAdd:           "file_resource=add",
+	FeatureRunningRequestsList:       "running_requests=list",
+	FeatureRunningRequestsCancel:     "running_requests=cancel",
+	FeatureTruncateCollection:        "truncate_collection",
+	FeatureSchemaChangeAddField:      "schema_change=add_field",
+	FeatureSchemaChangeAlterSchema:   "schema_change=alter_schema",
+	FeatureSchemaChangeAlterFunction: "schema_change=alter_function",
+
+	FeatureQueryFunctionChains: "query_function_chains",
 }
 
 // Role is the node role that owns a counter. Every role's GetFeatureUsage

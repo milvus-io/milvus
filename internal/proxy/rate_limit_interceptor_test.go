@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -351,6 +352,9 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.DeleteRequest{}, internalpb.RateType_DMLDelete, merr.ErrServiceQuotaExceeded, "delete")
 		testGetFailedResponse(&milvuspb.UpsertRequest{}, internalpb.RateType_DMLInsert, merr.ErrServiceQuotaExceeded, "upsert")
 		testGetFailedResponse(&milvuspb.ImportRequest{}, internalpb.RateType_DMLBulkLoad, merr.ErrServiceMemoryLimitExceeded, "import")
+		importResponse, ok := GetFailedResponse(&internalpb.ImportRequest{}, merr.ErrServiceQuotaExceeded).(*internalpb.ImportResponse)
+		require.True(t, ok)
+		assert.ErrorIs(t, merr.Error(importResponse.GetStatus()), merr.ErrServiceQuotaExceeded)
 		testGetFailedResponse(&milvuspb.SearchRequest{}, internalpb.RateType_DQLSearch, merr.ErrServiceDiskLimitExceeded, "search")
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
@@ -439,6 +443,106 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
+}
+
+func TestRateLimitInterceptor_RegexpPartitionQuota(t *testing.T) {
+	for _, param := range []*paramtable.ParamItem{
+		&Params.QuotaConfig.QuotaAndLimitsEnabled,
+		&Params.ProxyCfg.PartitionNameRegexp,
+	} {
+		originalValue := param.GetValue()
+		require.NoError(t, Params.Save(param.Key, "true"))
+		t.Cleanup(func() { assert.NoError(t, Params.Save(param.Key, originalValue)) })
+	}
+
+	const dbID, collectionID, firstPartitionID, secondPartitionID int64 = 100, 10, 20, 21
+	ctx := context.Background()
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(ctx, "db1").Return(&databaseInfo{DBID: dbID}, nil)
+	cache.EXPECT().GetCollectionID(ctx, "db1", "foo").Return(collectionID, nil)
+	cache.EXPECT().GetPartitions(ctx, "db1", "foo").Return(map[string]int64{
+		"p1": firstPartitionID,
+		"p2": secondPartitionID,
+		"p3": 22,
+	}, nil)
+
+	req := &milvuspb.SearchRequest{
+		DbName:         "db1",
+		CollectionName: "foo",
+		PartitionNames: []string{"p[12]", "p2"},
+		Nq:             1,
+	}
+	gotDBID, collections, rateType, tokens, err := GetRequestInfo(ctx, cache, req)
+	require.NoError(t, err)
+	assert.Equal(t, dbID, gotDBID)
+	assert.ElementsMatch(t, []int64{firstPartitionID, secondPartitionID}, collections[collectionID])
+	assert.Equal(t, internalpb.RateType_DQLSearch, rateType)
+	assert.Equal(t, 1, tokens)
+
+	limiter := NewSimpleLimiter(0, 0)
+	partition := limiter.rateLimiter.GetOrCreatePartitionLimiters(
+		dbID, collectionID, secondPartitionID, newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
+	partition.GetLimiters().Insert(rateType, ratelimitutil.NewLimiter(0, 0))
+	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return cache }, limiter)
+	response, err := interceptor(ctx, req, &grpc.UnaryServerInfo{}, func(context.Context, any) (any, error) {
+		t.Fatal("search must be rejected by the matched partition's quota")
+		return nil, nil
+	})
+	require.NoError(t, err)
+	result, ok := response.(*milvuspb.SearchResults)
+	require.True(t, ok)
+	assert.ErrorIs(t, merr.Error(result.GetStatus()), merr.ErrServiceQuotaExceeded)
+}
+
+func TestGetRequestInfo_ImportQuota(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMockCache(t)
+	cache.EXPECT().GetDatabaseInfo(ctx, "db1").Return(&databaseInfo{DBID: 100}, nil)
+	cache.EXPECT().GetCollectionID(ctx, "db1", "collection").Return(int64(10), nil)
+	cache.EXPECT().GetPartitionInfo(ctx, "db1", "collection", "partition").Return(&partitionInfo{PartitionID: 20}, nil)
+
+	skip := &commonpb.KeyValuePair{Key: importutilv2.SkipDQC, Value: "true"}
+	backup := &commonpb.KeyValuePair{Key: importutilv2.BackupFlag, Value: "true"}
+	l0 := &commonpb.KeyValuePair{Key: importutilv2.L0Import, Value: "true"}
+	for _, tc := range []struct {
+		name    string
+		options []*commonpb.KeyValuePair
+		exempt  bool
+	}{
+		{name: "normal import"},
+		{name: "skip alone", options: []*commonpb.KeyValuePair{skip}},
+		{name: "backup alone", options: []*commonpb.KeyValuePair{backup}},
+		{name: "backup with skip", options: []*commonpb.KeyValuePair{backup, skip}, exempt: true},
+		{name: "L0 with skip", options: []*commonpb.KeyValuePair{l0, skip}, exempt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, req := range []proto.Message{
+				&milvuspb.ImportRequest{
+					DbName: "db1", CollectionName: "collection", PartitionName: "partition",
+					Files: []string{"one.parquet", "two.parquet"}, Options: tc.options,
+				},
+				&internalpb.ImportRequest{
+					DbName: "db1", CollectionName: "collection", PartitionName: "partition",
+					Files: []*internalpb.ImportFile{
+						{Paths: []string{"one.parquet"}},
+						{Paths: []string{"two.parquet"}},
+					},
+					Options: tc.options,
+				},
+			} {
+				dbID, collections, rateType, tokens, err := GetRequestInfo(ctx, cache, req)
+				require.NoError(t, err)
+				assert.EqualValues(t, 100, dbID)
+				assert.Equal(t, map[int64][]int64{10: {20}}, collections)
+				assert.Equal(t, internalpb.RateType_DMLBulkLoad, rateType)
+				if tc.exempt {
+					assert.Zero(t, tokens)
+				} else {
+					assert.Equal(t, proto.Size(req), tokens)
+				}
+			}
+		})
+	}
 }
 
 func TestRateLimitInterceptor_ZeroTokenRequestsBypassLimiter(t *testing.T) {

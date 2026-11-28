@@ -193,13 +193,34 @@ func fragmentIdentityWithProperties(base string, properties map[string]string) s
 	return fmt.Sprintf("%s:%x", base, digest)
 }
 
+// deltaLakeMetadata identifies the snapshot descriptor emitted by milvus-storage.
+// Keep the original properties for hashing so future descriptor fields participate
+// in identity without needing to be interpreted here.
+type deltaLakeMetadata struct {
+	Version         int    `json:"version"`
+	TableURI        string `json:"table_uri"`
+	SnapshotVersion *int64 `json:"snapshot_version"`
+}
+
+func parseDeltaLakeMetadata(properties map[string]string) (deltaLakeMetadata, bool) {
+	var metadata deltaLakeMetadata
+	if err := json.Unmarshal([]byte(properties["metadata"]), &metadata); err != nil {
+		return metadata, false
+	}
+	return metadata, metadata.Version == 1 && metadata.TableURI != "" &&
+		metadata.SnapshotVersion != nil && *metadata.SnapshotVersion >= 0
+}
+
 // FragmentIdentity uses immutable file ranges for ordinary external files.
 // Source manifests are matched by revision rather than JSON spelling.
-// Paimon also includes the descriptor because a new deletion vector can change
+// Delta and Paimon also include the descriptor because a deletion vector can change
 // the rows in an unchanged physical file. Deltalogs remain outside this identity:
 // milvus-table refreshes them in-place.
 func FragmentIdentity(f Fragment) string {
 	base := fmt.Sprintf("%s:%d:%d", ManifestPathKey(f.FilePath), f.StartRow, f.EndRow)
+	if _, ok := parseDeltaLakeMetadata(f.Properties); ok {
+		return "deltalake|" + fragmentIdentityWithProperties(base, f.Properties)
+	}
 	raw, metadata, err := parsePaimonRoutingMetadata(f.Properties)
 	if err != nil {
 		return base
@@ -306,7 +327,7 @@ func CreateManifestForSegment(
 	defer C.loon_properties_free(cProperties)
 
 	// Begin transaction at the earliest version
-	transactionHandle, err := openTransaction(ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
+	transactionHandle, err := openTransaction(context.Background(), ManifestJSON{BasePath: basePath, ManifestVersion: ManifestEarliest}, cProperties,
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "loon_transaction_open failed")

@@ -108,7 +108,7 @@ func addDeltaLogsToManifest(
 	defer C.loon_properties_free(cProperties)
 
 	// Start transaction
-	transactionHandle, err := openTransaction(manifest, cProperties, resolveID, getRetryLimit())
+	transactionHandle, err := openTransaction(context.Background(), manifest, cProperties, resolveID, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -241,7 +241,7 @@ func getDeltaLogsFromManifest(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	cManifest, err := openManifest(manifest, cProperties)
+	cManifest, err := openManifest(context.Background(), manifest, cProperties, nil)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}
@@ -351,7 +351,7 @@ func AddStatsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	transactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	transactionHandle, err := openTransaction(context.Background(), manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}

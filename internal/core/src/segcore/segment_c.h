@@ -76,6 +76,7 @@ NewSealedSegmentWithCollection(CCollection collection,
                                const int64_t* load_fields,
                                int64_t field_count);
 
+// The optional manifest is borrowed for the duration of the call.
 CStatus
 NewSealedSegmentWithManifest(CCollection collection,
                              int64_t segment_id,
@@ -180,6 +181,7 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                                        const int64_t* load_fields,
                                        int64_t load_field_count);
 
+// The optional manifest is borrowed only until this call returns.
 CFuture*
 AsyncReopenSealedSegmentWithManifest(CTraceContext trace,
                                      CSegmentInterface segment,

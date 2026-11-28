@@ -17,7 +17,6 @@
 package rootcoord
 
 import (
-	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -27,11 +26,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	streamingbroadcaster "github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestBroadcastCreateCollectionV1RollbackFileResourcesWhenTaskNotCreated(t *testing.T) {
@@ -41,12 +41,25 @@ func TestBroadcastCreateCollectionV1RollbackFileResourcesWhenTaskNotCreated(t *t
 			collectionName = "test_collection"
 		)
 		heldFileResourceIDs := []int64{1001}
-		schemaBytes, err := proto.Marshal(&schemapb.CollectionSchema{Name: collectionName})
+		schemaBytes, err := proto.Marshal(&schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{Name: "embedding", DataType: schemapb.DataType_FloatVector},
+			},
+		})
 		require.NoError(t, err)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().DecFileResourceRefCnt(heldFileResourceIDs).Once()
-		core := newTestCore(withMeta(meta))
+		db := model.NewDefaultDatabase(nil)
+		meta.EXPECT().GetDatabaseByName(mock.Anything, dbName, mock.Anything).Return(db, nil)
+		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, db.ID).Return(0, 0, true)
+		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0)
+		meta.EXPECT().DescribeAlias(mock.Anything, dbName, collectionName, mock.Anything).Return("", merr.ErrAliasNotFound)
+		meta.EXPECT().GetCollectionByName(mock.Anything, dbName, collectionName, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
+		reserved := meta.EXPECT().IncFileResourceRefCnt(heldFileResourceIDs).Return(nil).Once()
+		meta.EXPECT().DecFileResourceRefCnt(heldFileResourceIDs).NotBefore(reserved).Once()
+		core := newTestCore(withMeta(meta), withValidIDAllocator())
 
 		broadcastAPI := mock_broadcaster.NewMockBroadcastAPI(t)
 		broadcastAPI.EXPECT().Broadcast(mock.Anything, mock.Anything).
@@ -54,18 +67,10 @@ func TestBroadcastCreateCollectionV1RollbackFileResourcesWhenTaskNotCreated(t *t
 		broadcastAPI.EXPECT().Close().Return().Once()
 
 		mockey.Mock((*Core).startBroadcastWithCollectionLock).Return(broadcastAPI, nil).Build()
-		mockey.Mock((*createCollectionTask).Prepare).To(func(task *createCollectionTask, ctx context.Context) error {
-			task.Req.ShardsNum = 1
-			task.body.VirtualChannelNames = []string{"by-dev-rootcoord-dml_0_100v0"}
-			task.heldFileResourceIds = heldFileResourceIDs
-			return nil
-		}).Build()
+		mockey.Mock((*Core).validateSchemaAnalyzerFileResources).Return(heldFileResourceIDs, nil).Build()
+		mockey.Mock((*snmanager.StreamingNodeManager).AllocVirtualChannels).Return([]string{"by-dev-rootcoord-dml_0_100v0"}, nil).Build()
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		streaming.SetWALForTest(wal)
-		defer streaming.SetWALForTest(nil)
-
-		err = core.broadcastCreateCollectionV1(context.Background(), &milvuspb.CreateCollectionRequest{
+		err = core.broadcastCreateCollectionV1(t.Context(), &milvuspb.CreateCollectionRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			ShardsNum:      1,

@@ -68,9 +68,12 @@ func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	require.True(t, im.UsesSegmentSummaries())
 	require.NoError(t, im.CreateIndex(ctx, &model.Index{CollectionID: 1, IndexID: 4, FieldID: 100, IndexName: "idx"}))
 	base := path.Join(root, "insert_log/1/2/3")
+	manifest, err := packed.CreateManifestForSegment(base, []string{"100"}, "parquet",
+		[]packed.Fragment{{FilePath: path.Join(base, "_data", "old.parquet"), EndRow: 10}}, cfg)
+	require.NoError(t, err)
 	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
-		ManifestPath: packed.MarshalManifestPath(base, packed.ManifestEarliest), NumOfRows: 10,
+		ManifestPath: manifest, NumOfRows: 10,
 	})))
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
 	task := &model.SegmentIndex{
@@ -78,12 +81,12 @@ func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 		IndexState: commonpb.IndexState_InProgress, IndexStorePathVersion: version, IndexType: "FLAT",
 	}
 	require.NoError(t, im.AddSegmentIndex(ctx, task))
-	const tolerance = time.Minute
+	const tolerance = 24 * time.Hour
 	live := path.Join(base, "_index/5/1/index.bin")
 	orphan := path.Join(base, "_index/6/1/orphan.bin")
 	for _, file := range []string{live, orphan} {
 		require.NoError(t, cm.Write(ctx, file, []byte("artifact")))
-		old := time.Now().Add(-2 * tolerance)
+		old := time.Now().Add(-3 * tolerance)
 		require.NoError(t, os.Chtimes(file, old, old))
 	}
 	require.NoError(t, index.NewIndexBuildTask(task, 1, mt, im, nil, nil, nil).SetJobInfo(&workerpb.IndexTaskInfo{
@@ -111,6 +114,34 @@ func TestSummaryGCKeepsPublishedArtifactAcrossRestart(t *testing.T) {
 	data, err := cm.Read(ctx, live)
 	require.NoError(t, err)
 	require.Equal(t, "artifact", string(data))
+
+	// A load can still hold the old metadata while the structured replacement
+	// atomically retracts this build and installs a new revision.
+	require.NoError(t, recovered.CommitSegmentManifest(ctx, meta.SegmentManifestCommit{
+		SegmentID: 3, StorageConfig: cfg, InspectedManifest: pinned,
+		Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+			DropColumns: []string{"100"},
+			ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{
+				Path: path.Join(base, "_data", "replacement.parquet"), StartIndex: 0, EndIndex: 10,
+			}}}},
+		}},
+	}))
+	latest := recovered.GetSegment(ctx, 3)
+	require.NotEqual(t, pinned, latest.GetManifestPath())
+	require.Empty(t, latest.GetIndexSummaries())
+	require.False(t, latest.GetManifestHasIndex())
+	require.EqualValues(t, 100, recoveredIndex.GetFieldIDByIndexID(1, 4), "the index definition is still live")
+	indexes, err = recovered.ResolveSegmentIndexes(ctx, latest.SegmentInfo, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, indexes)
+	gc = NewGarbageCollector(recovered, meta.NewMockHandler(), GcOption{IndexMeta: recoveredIndex, Cli: cm, MissingTolerance: tolerance})
+	gc.RecycleUnusedBinlogFiles(ctx)
+	require.NoFileExists(t, live)
+	indexes, err = recovered.ResolveSegmentIndexes(ctx, segment.SegmentInfo, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, indexes[4].BuildID, "reading the old manifest still discovers the retired build")
+	_, err = cm.Read(ctx, live)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
 }
 
 func TestSummaryGCProtectsManifestWithoutResidentBuild(t *testing.T) {

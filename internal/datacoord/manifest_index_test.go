@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -262,7 +263,7 @@ func TestSummaryModeIndexInfoKeepsRetainedTasksAndEmptySlots(t *testing.T) {
 	require.False(t, resp.SegmentInfo[5].GetEnableIndex())
 	require.Empty(t, resp.SegmentInfo[5].GetIndexInfos())
 
-	results, _, err := srv.GetQueryViewSegmentLoadInfos(ctx, 1, []int64{3}, false)
+	results, _, err := srv.GetQueryViewSegmentLoadInfos(ctx, 1, []int64{3}, types.QueryViewIndexFull)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.NoError(t, merr.Error(results[0].GetStatus()))

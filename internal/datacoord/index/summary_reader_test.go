@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
@@ -47,6 +49,7 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 	require.Contains(t, summaries, int64(10))
 	require.EqualValues(t, 20, summaries[10].BuildID)
 	require.True(t, summaries[10].HasArtifact)
+	require.Equal(t, commonpb.IndexState_Finished, dm.IndexMeta.GetSegmentIndexState(1, 3, 10).GetState())
 	require.Empty(t, dm.IndexMeta.GetSegmentIndexTasks(1, 3))
 	require.False(t, dm.IndexMeta.HasBuildInfo(20))
 	require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
@@ -124,6 +127,58 @@ func TestSummaryModeIndexStatePreservesFailureReason(t *testing.T) {
 	require.Empty(t, mt.GetSegment(ctx, 3).GetIndexSummaries())
 }
 
+func TestMixedIndexStateUsesNewestBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		buildID    int64
+		deleted    bool
+		wantState  commonpb.IndexState
+		wantReason string
+	}{
+		{name: "older", buildID: 19, wantState: commonpb.IndexState_Finished},
+		{name: "older deleted", buildID: 19, deleted: true, wantState: commonpb.IndexState_Finished},
+		{name: "same", buildID: 20, wantState: commonpb.IndexState_Failed, wantReason: "worker lost"},
+		{name: "newer", buildID: 21, wantState: commonpb.IndexState_Failed, wantReason: "worker lost"},
+		{name: "newer deleted", buildID: 21, deleted: true, wantState: commonpb.IndexState_Unissued},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const collectionID, segmentID, indexID, fieldID = 1, 3, 10, 100
+			store := metacache.NewMetaStore(nil)
+			store.LoadSegments([]*datapb.SegmentInfo{{
+				ID: segmentID, CollectionID: collectionID,
+				IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: indexID, FieldId: fieldID, BuildId: 20}},
+			}})
+			im := &IndexMeta{
+				Indexes: map[int64]map[int64]*model.Index{
+					collectionID: {indexID: {IndexID: indexID, FieldID: fieldID, IndexName: "vector"}},
+				},
+				SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
+				summarySource:  store,
+			}
+			tasks := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+			tasks.Insert(indexID, &model.SegmentIndex{
+				CollectionID: collectionID, SegmentID: segmentID, IndexID: indexID,
+				BuildID: tc.buildID, IsDeleted: tc.deleted, IndexState: commonpb.IndexState_Failed, FailReason: "worker lost",
+			})
+			im.SegmentIndexes.Insert(segmentID, tasks)
+
+			single := im.GetSegmentIndexState(collectionID, segmentID, indexID)
+			require.Equal(t, tc.wantState, single.GetState())
+			require.Equal(t, tc.wantReason, single.GetFailReason())
+			batch := im.GetSegmentsIndexStates(collectionID, []int64{segmentID})[segmentID][indexID]
+			indexed := im.GetIndexedSegments(collectionID, []int64{segmentID}, []int64{fieldID})
+			if tc.wantState == commonpb.IndexState_Unissued {
+				require.Nil(t, batch)
+			} else {
+				require.Equal(t, tc.wantState, batch.GetState())
+				require.Equal(t, tc.wantReason, batch.GetFailReason())
+			}
+			require.Equal(t, tc.wantState == commonpb.IndexState_Finished, len(indexed) == 1)
+			require.Empty(t, im.GetUnIndexedSegmentIDsForIndexTask(collectionID, []int64{segmentID}))
+		})
+	}
+}
+
 type pausedSummaryView struct {
 	metacache.MetaView
 	started chan struct{}
@@ -186,4 +241,102 @@ func TestSummaryModeReaderDuringTaskRetirement(t *testing.T) {
 	require.Contains(t, <-result, int64(10))
 	require.NoError(t, <-finished)
 	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexSummaries(1, 3)[10].IndexState)
+}
+
+func TestSummaryModeReconciliationChecksAllActiveIndexes(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	im := &IndexMeta{
+		Indexes: map[int64]map[int64]*model.Index{
+			1: {10: {IndexID: 10}, 20: {IndexID: 20}, 30: {IndexID: 30, IsDeleted: true}},
+		},
+		SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
+		summarySource:  store,
+	}
+	// Retained deleted tasks suppress rescheduling and take precedence over summaries.
+	tasks := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+	tasks.Insert(10, &model.SegmentIndex{IndexID: 10, IsDeleted: true})
+	im.SegmentIndexes.Insert(1, tasks)
+	store.LoadSegments([]*datapb.SegmentInfo{
+		{ID: 1, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10}, {IndexId: 20}}},
+		{ID: 2, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10}, {IndexId: 10}, {IndexId: 30}, {IndexId: 40}}},
+		{ID: 3, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 20}}},
+		{ID: 4, IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 20}, {IndexId: 10}}},
+		{ID: 5},
+	})
+	im.SegmentIndexes.Insert(3, tasks)
+	// Empty completions still count. Duplicate, deleted and unrelated IDs cannot
+	// stand in for a missing active ID. Segment 6 does not have metadata.
+	require.ElementsMatch(t, []int64{2, 5, 6}, im.GetUnIndexedSegmentIDsForIndexTask(1, []int64{1, 2, 3, 4, 5, 6}).Collect())
+	require.Equal(t, commonpb.IndexState_Unissued, im.GetSegmentIndexState(1, 1, 10).GetState())
+	require.Equal(t, commonpb.IndexState_Finished, im.GetSegmentIndexState(1, 1, 20).GetState())
+}
+
+func BenchmarkSummaryIndexReconciliation(b *testing.B) {
+	const segmentCount = 1024
+	for _, indexCount := range []int{1, 8, 32, 128, 512} {
+		b.Run(strconv.Itoa(indexCount)+"Indexes", func(b *testing.B) {
+			store := metacache.NewMetaStore(nil)
+			im := &IndexMeta{Indexes: map[int64]map[int64]*model.Index{1: {}}, summarySource: store}
+			segmentIDs := make([]int64, segmentCount)
+			segments := make([]*datapb.SegmentInfo, segmentCount)
+			for id := int64(1); id <= int64(indexCount); id++ {
+				im.Indexes[1][id] = &model.Index{CollectionID: 1, IndexID: id}
+			}
+			for i := range segments {
+				segmentIDs[i] = int64(i + 1)
+				segment := &datapb.SegmentInfo{ID: segmentIDs[i], CollectionID: 1}
+				for id := int64(1); id <= int64(indexCount); id++ {
+					segment.IndexSummaries = append(segment.IndexSummaries, &datapb.SegmentIndexSummary{IndexId: id, HasArtifact: true})
+				}
+				segments[i] = segment
+			}
+			store.LoadSegments(segments)
+			b.ReportAllocs()
+			for b.Loop() {
+				if len(im.GetUnIndexedSegmentIDsForIndexTask(1, segmentIDs)) != 0 {
+					b.Fatal("expected every segment to have all index summaries")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkLegacyIndexLookup(b *testing.B) {
+	const segmentCount, indexCount = 1024, 8
+	im := &IndexMeta{
+		Indexes:        map[int64]map[int64]*model.Index{1: {}},
+		SegmentIndexes: typeutil.NewConcurrentMap[int64, *typeutil.ConcurrentMap[int64, *model.SegmentIndex]](),
+	}
+	for indexID := int64(1); indexID <= indexCount; indexID++ {
+		im.Indexes[1][indexID] = &model.Index{CollectionID: 1, IndexID: indexID}
+	}
+	segmentIDs := make([]int64, segmentCount)
+	for i := range segmentIDs {
+		segmentID := int64(i + 1)
+		segmentIDs[i] = segmentID
+		tasks := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+		for indexID := range im.Indexes[1] {
+			tasks.Insert(indexID, &model.SegmentIndex{
+				CollectionID: 1, SegmentID: segmentID, IndexID: indexID, IndexState: commonpb.IndexState_Finished,
+			})
+		}
+		im.SegmentIndexes.Insert(segmentID, tasks)
+	}
+
+	b.Run("Reconcile1024Segments", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if len(im.GetUnIndexedSegmentIDsForIndexTask(1, segmentIDs)) != 0 {
+				b.Fatal("expected every segment to be indexed")
+			}
+		}
+	})
+	b.Run("SingleIndexState", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if im.GetSegmentIndexState(1, segmentIDs[0], indexCount).GetState() != commonpb.IndexState_Finished {
+				b.Fatal("expected a finished index")
+			}
+		}
+	})
 }

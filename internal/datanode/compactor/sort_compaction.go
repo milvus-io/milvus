@@ -442,7 +442,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "flush").Observe(float64(flushCost.Milliseconds()))
 	metrics.DataNodeCompactionStageLatency.WithLabelValues(nodeID, compType, "compress").Observe(float64(compressCost.Milliseconds()))
 
-	isNamespaceSorted := t.plan.GetSchema().GetEnableNamespace()
+	isNamespaceSorted := common.UsesNamespacePartitionKey(t.plan.GetSchema())
 	isSorted := !isNamespaceSorted
 	res := []*datapb.CompactionSegment{
 		{
@@ -464,9 +464,13 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 			// and V3 (manifest-embedded blob bytes); the FieldBinlog
 			// arrays would silently report zero for V3 since stats
 			// live in the manifest.
-			Stats: buildCompactionOutputStats(insertLogs, nil, srw.GetStatsBlobSize()),
+			Stats: buildCompactionOutputStats(insertLogs, nil, srw, int64(numValidRows)),
 		},
 	}
+	// Sort's predicate visits every row once. Use its actual rejected rows
+	// plus the emitted rows, not the plan's estimate, to prove retention.
+	readRows := int64(numValidRows + entityFilter.GetDeletedCount() + entityFilter.GetExpiredCount())
+	inheritSingleSourceText(res[0], t.plan.GetSegmentBinlogs()[0], readRows, existingFields, writerSchema, t.lobContext)
 	planResult := &datapb.CompactionPlanResult{
 		State:    datapb.CompactionTaskState_completed,
 		PlanID:   t.GetPlanID(),

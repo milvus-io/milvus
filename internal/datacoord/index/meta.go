@@ -759,38 +759,37 @@ func (m *IndexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	m.fieldIndexLock.RLock()
-	fieldIndexesMap, ok := m.Indexes[collID]
+	indexes, ok := m.Indexes[collID]
+	index := indexes[indexID]
+	m.fieldIndexLock.RUnlock()
 	if !ok {
 		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
-		m.fieldIndexLock.RUnlock()
-		return state
-	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
-	}
-	m.fieldIndexLock.RUnlock()
-
-	summaries := m.segmentIndexSummaries(segmentID)
-	if len(summaries) == 0 {
-		state.State = commonpb.IndexState_Unissued
-		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
 		return state
 	}
 
-	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if summary := summaries[indexID]; summary != nil && !summary.IsDeleted {
-			state.IndexName = index.IndexName
-			state.State = summary.IndexState
-			state.FailReason = summary.FailReason
-			return state
+	m.readSegmentIndexRecords(segmentID, func(records segmentIndexRecords) {
+		if (records.tasks == nil || records.tasks.Len() == 0) && len(records.segment.GetIndexSummaries()) == 0 {
+			state.State = commonpb.IndexState_Unissued
+			state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
+			return
 		}
-		state.State = commonpb.IndexState_Unissued
-		return state
-	}
-
-	state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+		if index == nil || index.IsDeleted {
+			state.FailReason = fmt.Sprintf("there is no index on indexID: %d", indexID)
+			return
+		}
+		task, completed := records.lookup(indexID)
+		switch {
+		case task != nil && !task.IsDeleted:
+			state.IndexName = index.IndexName
+			state.State = task.IndexState
+			state.FailReason = task.FailReason
+		case completed != nil:
+			state.IndexName = index.IndexName
+			state.State = commonpb.IndexState_Finished
+		default:
+			state.State = commonpb.IndexState_Unissued
+		}
+	})
 	return state
 }
 
@@ -993,20 +992,17 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 		return unindexed
 	}
 
+	var missing typeutil.UniqueSet
+	if m.UsesSegmentSummaries() {
+		// Reuse storage for the active IDs missing from each segment's task map.
+		missing = make(typeutil.UniqueSet, len(activeIndexIDs))
+	}
 	for _, segID := range segIDs {
-		// the segment should be unindexed status if the fieldIndexes is not nil
-		summaries := m.segmentIndexSummaries(segID)
-		if len(summaries) == 0 {
-			unindexed.Insert(segID)
-			continue
-		}
-		for _, indexID := range activeIndexIDs {
-			if _, ok := summaries[indexID]; !ok {
-				// the segment should be unindexed status if the segment index is not found within field indexes
+		m.readSegmentIndexRecords(segID, func(records segmentIndexRecords) {
+			if !records.coversIndexes(activeIndexIDs, missing) {
 				unindexed.Insert(segID)
-				break
 			}
-		}
+		})
 	}
 
 	return unindexed
@@ -1678,23 +1674,32 @@ func (m *IndexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 }
 
 func (m *IndexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
-	indexInfos := m.GetIndexesForCollection(collectionID, "")
-
-	// dense vector fields only, struct vector sub-fields included
-	vectorFields := lo.Filter(typeutil.GetVectorFieldSchemas(schema), func(field *schemapb.FieldSchema, _ int) bool {
-		return !typeutil.IsSparseFloatVectorType(field.GetDataType())
-	})
-	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
-		return t.FieldID, meta.GetIndexType(t.IndexParams)
-	})
-	vectorFieldsWithDiskIndex := lo.Filter(vectorFields, func(field *schemapb.FieldSchema, _ int) bool {
-		if indexType, ok := fieldIndexTypes[field.FieldID]; ok {
-			return vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType)
+	m.fieldIndexLock.RLock()
+	indexes := m.Indexes[collectionID]
+	fieldIndexTypes := make(map[int64]indexparamcheck.IndexType, len(indexes))
+	for _, index := range indexes {
+		if !index.IsDeleted {
+			fieldIndexTypes[index.FieldID] = meta.GetIndexType(index.IndexParams)
 		}
-		return false
-	})
+	}
+	m.fieldIndexLock.RUnlock()
 
-	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	// A collection without a vector field has no DiskANN index and keeps the
+	// default segment size; without this guard the empty loop selected the
+	// DiskANN size. Sparse-only collections keep their pre-existing result.
+	if !typeutil.HasVectorField(schema) {
+		return false
+	}
+	for _, field := range typeutil.GetVectorFieldSchemas(schema) {
+		if typeutil.IsSparseFloatVectorType(field.GetDataType()) {
+			continue
+		}
+		indexType, ok := fieldIndexTypes[field.GetFieldID()]
+		if !ok || !vecindexmgr.GetVecIndexMgrInstance().IsDiskVecIndex(indexType) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *IndexMeta) HasIndex(collectionID int64) bool {

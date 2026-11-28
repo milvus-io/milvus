@@ -61,6 +61,7 @@ type indexBuildTask struct {
 	queueDur       time.Duration
 	prepareDur     time.Duration // Preparation and input loading, excluding waits between stages.
 	manager        *TaskManager
+	info           *IndexTaskInfo
 	resource       taskcommon.Resource
 
 	now           func() time.Time // Injectable clock; defaults to time.Now, tests override it.
@@ -72,6 +73,7 @@ func NewIndexBuildTask(ctx context.Context,
 	req *workerpb.CreateJobRequest,
 	cm storage.ChunkManager,
 	manager *TaskManager,
+	info *IndexTaskInfo,
 	pluginContext *indexcgopb.StoragePluginContext,
 	resource taskcommon.Resource,
 ) *indexBuildTask {
@@ -84,6 +86,7 @@ func NewIndexBuildTask(ctx context.Context,
 		tr:            timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.GetBuildID(), req.GetClusterID())),
 		manager:       manager,
 		now:           time.Now,
+		info:          info,
 		pluginContext: pluginContext,
 		resource:      resource,
 	}
@@ -125,7 +128,7 @@ func (it *indexBuildTask) Name() string {
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
-	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -134,7 +137,7 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 // concurrent QueryTask can never observe a final cost paired with a stale
 // in-progress state.
 func (it *indexBuildTask) SetStateWithCost(state indexpb.JobState, failReason string, endMs, costTimeMs int64) {
-	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), endMs, costTimeMs, commonpb.IndexState(state), failReason)
+	it.manager.StoreIndexTaskExecutionEndWithState(it.req.GetClusterID(), it.req.GetBuildID(), it.info, endMs, costTimeMs, commonpb.IndexState(state), failReason)
 	it.observeStateMetrics(state)
 }
 
@@ -465,6 +468,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 	it.manager.StoreIndexFilesAndStatistic(
 		it.req.GetClusterID(),
 		it.req.GetBuildID(),
+		it.info,
 		saveFileKeys,
 		serializedSize,
 		uint64(indexStats.MemSize),

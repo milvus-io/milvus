@@ -163,14 +163,15 @@ func (s *importV3SemanticBase) verifyEquivalentImport(ctx context.Context) {
 	}
 }
 
-// ImportV2SemanticSuite exercises the legacy chain (enableImportV3 stays at its
-// default false), the baseline for the semantic equivalence comparison.
+// ImportV2SemanticSuite exercises the legacy chain with enableImportV3
+// explicitly disabled, the baseline for the semantic equivalence comparison.
 type ImportV2SemanticSuite struct {
 	importV3SemanticBase
 }
 
 func (s *ImportV2SemanticSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableImportV3.Key, "false")
 	s.MiniClusterSuite.SetupSuite()
 }
 

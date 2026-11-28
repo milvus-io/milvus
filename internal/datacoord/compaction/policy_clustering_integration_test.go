@@ -203,7 +203,7 @@ func (s *ClusteringCompactionPolicySuite) TestCalculateClusteringCompactionConfi
 					segment.Size = float64(expectedSegmentSize) * float64(segment.NumOfRows) / float64(test.maxSegmentRows)
 				}
 			}
-			totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize)
+			totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize, 0)
 			s.Equal(test.totalRows, totalRows)
 			s.Equal(test.maxSegmentRows, maxSegmentRows)
 			s.Equal(test.preferSegmentRows, preferSegmentRows)
@@ -368,6 +368,23 @@ func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionNormal() {
 	s.Equal(1, len(cv))
 	s.NoError(err)
 	s.Equal(testLabel, cv[0].GetGroupLabel())
+}
+
+func (s *ClusteringCompactionPolicySuite) TestTriggerPartitionNamespaceWithPKSortedSegment() {
+	schema := newTestScalarClusteringKeySchema()
+	schema.EnableNamespace = true
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition}}
+	coll := &meta.CollectionInfo{ID: 1, Schema: schema}
+	s.handler.EXPECT().GetCollection(mock.Anything, coll.ID).Return(coll, nil)
+	label := &view.CompactionGroupLabel{CollectionID: coll.ID, PartitionID: 10, Channel: "ch-1"}
+	segment := policy.GenTestSegmentInfo(label, 100, datapb.SegmentLevel_L1, commonpb.SegmentState_Flushed)
+	segment.IsSorted = true
+	s.meta.Segments.SetSegment(segment.GetID(), segment)
+
+	views, _, err := s.clusteringCompactionPolicy.TriggerOneCollection(context.Background(), coll.ID, true)
+	s.Require().NoError(err)
+	s.Require().Len(views, 1)
+	s.Equal(label, views[0].GetGroupLabel())
 }
 
 func (s *ClusteringCompactionPolicySuite) TestTriggerOneCollectionAllowsMixedSchemaVersionGroup() {

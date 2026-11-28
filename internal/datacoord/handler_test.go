@@ -2289,6 +2289,8 @@ func TestHasCommittedManifest(t *testing.T) {
 // committed. A growing segment's earliest manifest is only a placeholder.
 func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := meta.NewTestSchema()
+	fieldID := schema.GetFields()[0].GetFieldID()
+	sizes := &datapb.FieldLogicalSizes{Version: 1, RowCount: 3, Fields: map[int64]*datapb.FieldLogicalSize{fieldID: {}}}
 	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:              2001,
@@ -2301,7 +2303,10 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion:  storage.StorageV3,
 		ManifestPath:    packed.MarshalManifestPath("/data/segments/2001", 3),
 		CommitTimestamp: 700,
+		NumOfRows:       sizes.RowCount,
+		Stats:           &datapb.Statistics{FieldLogicalSizes: sizes},
 	})
+	manifestSeg.FieldLogicalSizesManifest = manifestSeg.ManifestPath
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2002,
@@ -2395,6 +2400,20 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
+	counts := snapshotData.Segments[0].GetFieldLogicalSizes()
+	require.Equal(t, sizes.RowCount, counts.GetRowCount())
+	require.NotNil(t, counts.GetFields()[fieldID])
+
+	manifestSeg.FieldLogicalSizesManifest = packed.MarshalManifestPath("/data/segments/2001", 2)
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200, positions)
+	require.NoError(t, err)
+	require.Nil(t, snapshotData.Segments[0].GetFieldLogicalSizes())
+
+	manifestSeg.FieldLogicalSizesManifest = manifestSeg.ManifestPath
+	schema.Fields[0].ExternalField = "source_column"
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200, positions)
+	require.NoError(t, err)
+	require.Nil(t, snapshotData.Segments[0].GetFieldLogicalSizes())
 	staged.UnPatch()
 
 	candidates = []*meta.SegmentInfo{meta.NewSegmentInfo(&datapb.SegmentInfo{

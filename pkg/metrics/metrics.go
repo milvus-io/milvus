@@ -107,8 +107,9 @@ const (
 
 	BatchReduce = "batch_reduce"
 
-	FunctionChainLevelL0 = "l0"
-	FunctionChainLevelL1 = "l1"
+	FunctionChainLevelL0        = "l0"
+	FunctionChainLevelL1        = "l1"
+	FunctionChainLevelQueryScan = "query_scan"
 
 	Pending   = "pending"
 	Executing = "executing"
@@ -246,6 +247,8 @@ func Register(r prometheus.Registerer) {
 	r.MustRegister(ThreadNum)
 	r.MustRegister(ThreadCPUActiveNumByPool)
 	r.MustRegister(AdminAuthTotal)
+	registerNodeScheduler(r)
+	registerQueryStages(r)
 	r.MustRegister(ThreadPoolCPUSeconds)
 	metricRegisterer = r
 }

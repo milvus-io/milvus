@@ -753,13 +753,22 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	}
 }
 
+// ContextWithGin attaches the gin context to ctx under the key the hook
+// extension looks it up by. With it the extension reads the caller of a RESTful
+// request (user, client address, user agent) from the HTTP request; without it
+// the extension looks for gRPC metadata and a gRPC peer, which a RESTful request
+// does not have.
+func ContextWithGin(ctx context.Context, c *gin.Context) context.Context {
+	return context.WithValue(ctx, hook.GinParamsKey, c)
+}
+
 func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, req interface{}) error {
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
-		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
+		hookutil.GetExtension().ReportAction(ContextWithGin(ctx, c), req, WrapErrorToResponse(merr.ErrNeedAuthenticate), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return merr.ErrNeedAuthenticate
 	}
 	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
@@ -767,7 +776,7 @@ func (h *HandlersV2) checkAuthorizationV2(ctx context.Context, c *gin.Context, i
 		if !ignoreErr {
 			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
-		hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
+		hookutil.GetExtension().ReportAction(ContextWithGin(ctx, c), req, WrapErrorToResponse(authErr), nil, c.FullPath(), hookutil.ActionAuthorize)
 		return authErr
 	}
 
@@ -791,25 +800,28 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 		}
 		ctx = ginCtx.Request.Context()
 	}
-	if checkLimit {
-		_, err := CheckLimiter(ctx, req, pxy)
-		if err != nil {
-			mlog.Warn(context.TODO(), "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
-			hookutil.GetExtension().ReportAction(ctx, req, WrapErrorToResponse(merr.ErrHTTPRateLimit), nil, ginCtx.FullPath(), hookutil.ActionAuthorize)
-			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
-				HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
-				HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + err.Error(),
-			})
-			return nil, RestRequestInterceptorErr
-		}
-	}
 	mlog.Debug(ctx, "high level restful api, try to do a grpc call")
 	username, ok := ginCtx.Get(ContextUsername)
 	if !ok {
 		username = ""
 	}
 
+	var limitErr error
 	forwardHandler := func(reqCtx context.Context, req any) (any, error) {
+		if checkLimit {
+			rejection, err := CheckLimiter(reqCtx, req, pxy)
+			if err != nil {
+				limitErr = err
+				mlog.Warn(reqCtx, "high level restful api, fail to check limiter", mlog.Err(err), mlog.String("method", fullMethod))
+				// After needs a native failure status so it can clean up
+				// resources prepared by Before. Render the REST error outside
+				// the hook chain.
+				if rejection == nil {
+					rejection = merr.Status(err)
+				}
+				return rejection, nil
+			}
+		}
 		interceptor := streaming.ForwardLegacyProxyUnaryServerInterceptor()
 		if token, ok := ginCtx.Get(ContextToken); ok {
 			interceptor = streaming.ForwardLegacyProxyUnaryServerInterceptor(streaming.OptForwardAuth(token.(string)))
@@ -818,7 +830,14 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 			return handler(ctx, req)
 		})
 	}
-	response, err := proxy.HookInterceptor(context.WithValue(ctx, hook.GinParamsKey, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	response, err := proxy.HookInterceptor(ContextWithGin(ctx, ginCtx), req, username.(string), fullMethod, forwardHandler)
+	if limitErr != nil && err == nil {
+		HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrHTTPRateLimit),
+			HTTPReturnMessage: merr.ErrHTTPRateLimit.Error() + ", error: " + limitErr.Error(),
+		})
+		return nil, RestRequestInterceptorErr
+	}
 	if response != nil {
 		ginCtx.Set(ContextResponse, response)
 	}
@@ -831,8 +850,8 @@ func (h *HandlersV2) wrapperProxyWithLimit(ctx context.Context, ginCtx *gin.Cont
 
 	if err != nil {
 		// Expose the exact classification (incl. boundary InputError marks) to
-		// the REST access log; key must match accesslog/info.ContextErrorType.
-		ginCtx.Set("error_type", merr.GetErrorType(err).String())
+		// the REST access log.
+		ginCtx.Set(ContextErrorType, merr.GetErrorType(err).String())
 		mlog.Warn(ctx, "high level restful api, grpc call failed", mlog.Err(err))
 		if !ignoreErr {
 			HTTPAbortReturn(ginCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
@@ -1827,6 +1846,11 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionDataReq)
+	if httpReq.WriteCondition != nil {
+		err := merr.WrapErrParameterInvalidMsg("writeCondition is only supported for upsert")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	req := &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2038,6 +2062,21 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	return resp, err
 }
 
+// abortSearchWithoutVectorField returns the error the Proxy returns for a search on a
+// collection without a vector field. The search handlers resolve a vector field to decode
+// the request body, so without this check such a request failed as a malformed body.
+func abortSearchWithoutVectorField(c *gin.Context, collSchema *schemapb.CollectionSchema, collectionName string) error {
+	if typeutil.HasVectorField(collSchema) {
+		return nil
+	}
+	err := merr.WrapErrParameterInvalidMsg("collection %s has no vector field, search is not supported", collectionName)
+	HTTPAbortReturn(c, http.StatusOK, gin.H{
+		HTTPReturnCode:    merr.Code(err),
+		HTTPReturnMessage: err.Error(),
+	})
+	return err
+}
+
 func generatePlaceholderGroup(ctx context.Context, body string, collSchema *schemapb.CollectionSchema, fieldName string) ([]byte, error) {
 	var err error
 	var vectorField *schemapb.FieldSchema
@@ -2177,6 +2216,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
+		return nil, err
+	}
+	if err := abortSearchWithoutVectorField(c, collSchema, httpReq.CollectionName); err != nil {
 		return nil, err
 	}
 
@@ -2527,6 +2569,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
+		return nil, err
+	}
+	if err := abortSearchWithoutVectorField(c, collSchema, httpReq.CollectionName); err != nil {
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
@@ -3301,7 +3346,7 @@ func (h *HandlersV2) alterDatabase(ctx context.Context, c *gin.Context, anyReq a
 	req.Properties = properties
 
 	c.Set(ContextRequest, req)
-	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterDatabase", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterDatabase(reqCtx, req.(*milvuspb.AlterDatabaseRequest))
 	})
 	if err == nil {
@@ -4141,7 +4186,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}
 		ctx = c.Request.Context()
 	}
-	resp, err := h.wrapperProxy(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := h.wrapperProxyWithLimit(ctx, c, req, false, false, "/milvus.proto.milvus.MilvusService/Import", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {

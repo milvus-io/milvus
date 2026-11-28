@@ -630,6 +630,9 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 					Type:    meta.ManifestMutationCommitUpdates,
 					Updates: updates,
 				},
+				CatalogMutation: meta.SegmentCatalogMutation{Operators: []meta.UpdateOperator{
+					meta.InvalidateExternalFieldSizes(segID, updates.ColumnGroups),
+				}},
 			},
 		}
 		if omitted {
@@ -694,6 +697,7 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 	if entry.SourceVersion > 0 {
 		expectedManifest = packed.MarshalManifestPath(basePath, entry.SourceVersion)
 	}
+	manifest := packed.MarshalManifestPath(basePath, entry.Version)
 	return classifySegmentResult{unit: &backfillCommitUnit{
 		segmentID: segID,
 		kind:      "v3",
@@ -704,8 +708,11 @@ func (s *Server) classifyOneBackfillSegment(ctx context.Context, bucket string, 
 			RequireNoIndexInventory: true,
 			Mutation: meta.ManifestMutation{
 				Type:         meta.ManifestMutationNoop,
-				ManifestPath: packed.MarshalManifestPath(basePath, entry.Version),
+				ManifestPath: manifest,
 			},
+			CatalogMutation: meta.SegmentCatalogMutation{Operators: []meta.UpdateOperator{
+				meta.InvalidateReplacedManifestFieldSizes(segID, manifest),
+			}},
 		},
 	}}
 }

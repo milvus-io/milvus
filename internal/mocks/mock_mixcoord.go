@@ -6173,9 +6173,9 @@ func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
-// GetQueryViewSegmentLoadInfos provides a mock function with given fields: ctx, collectionID, segmentIDs, resolveManifestIndexesLocally
-func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, resolveManifestIndexesLocally bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
-	ret := _m.Called(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+// GetQueryViewSegmentLoadInfos provides a mock function with given fields: ctx, collectionID, segmentIDs, indexMode
+func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64, indexMode types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+	ret := _m.Called(ctx, collectionID, segmentIDs, indexMode)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetQueryViewSegmentLoadInfos")
@@ -6184,27 +6184,27 @@ func (_m *MixCoord) GetQueryViewSegmentLoadInfos(ctx context.Context, collection
 	var r0 []*querypb.QueryViewSegmentLoadInfoResult
 	var r1 []*indexpb.IndexInfo
 	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)); ok {
-		return rf(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)); ok {
+		return rf(ctx, collectionID, segmentIDs, indexMode)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, bool) []*querypb.QueryViewSegmentLoadInfoResult); ok {
-		r0 = rf(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, types.QueryViewIndexMode) []*querypb.QueryViewSegmentLoadInfoResult); ok {
+		r0 = rf(ctx, collectionID, segmentIDs, indexMode)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*querypb.QueryViewSegmentLoadInfoResult)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64, bool) []*indexpb.IndexInfo); ok {
-		r1 = rf(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64, types.QueryViewIndexMode) []*indexpb.IndexInfo); ok {
+		r1 = rf(ctx, collectionID, segmentIDs, indexMode)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]*indexpb.IndexInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, int64, []int64, bool) error); ok {
-		r2 = rf(ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)
+	if rf, ok := ret.Get(2).(func(context.Context, int64, []int64, types.QueryViewIndexMode) error); ok {
+		r2 = rf(ctx, collectionID, segmentIDs, indexMode)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -6221,14 +6221,14 @@ type MixCoord_GetQueryViewSegmentLoadInfos_Call struct {
 //   - ctx context.Context
 //   - collectionID int64
 //   - segmentIDs []int64
-//   - resolveManifestIndexesLocally bool
-func (_e *MixCoord_Expecter) GetQueryViewSegmentLoadInfos(ctx interface{}, collectionID interface{}, segmentIDs interface{}, resolveManifestIndexesLocally interface{}) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
-	return &MixCoord_GetQueryViewSegmentLoadInfos_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfos", ctx, collectionID, segmentIDs, resolveManifestIndexesLocally)}
+//   - indexMode types.QueryViewIndexMode
+func (_e *MixCoord_Expecter) GetQueryViewSegmentLoadInfos(ctx interface{}, collectionID interface{}, segmentIDs interface{}, indexMode interface{}) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+	return &MixCoord_GetQueryViewSegmentLoadInfos_Call{Call: _e.mock.On("GetQueryViewSegmentLoadInfos", ctx, collectionID, segmentIDs, indexMode)}
 }
 
-func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64, resolveManifestIndexesLocally bool)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Run(run func(ctx context.Context, collectionID int64, segmentIDs []int64, indexMode types.QueryViewIndexMode)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].([]int64), args[3].(bool))
+		run(args[0].(context.Context), args[1].(int64), args[2].([]int64), args[3].(types.QueryViewIndexMode))
 	})
 	return _c
 }
@@ -6238,7 +6238,7 @@ func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) Return(_a0 []*querypb.Quer
 	return _c
 }
 
-func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) RunAndReturn(run func(context.Context, int64, []int64, bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
+func (_c *MixCoord_GetQueryViewSegmentLoadInfos_Call) RunAndReturn(run func(context.Context, int64, []int64, types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error)) *MixCoord_GetQueryViewSegmentLoadInfos_Call {
 	_c.Call.Return(run)
 	return _c
 }

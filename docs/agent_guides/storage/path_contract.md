@@ -114,7 +114,9 @@ rows for retry.
 Referenced snapshots retain explicit catalog-backed index files and the
 selected revision and BuildID of each manifest-backed artifact. Restore and
 export resolve those BuildIDs from their pinned manifests. Exported bundles
-carry explicit paths.
+carry explicit paths. To move a referenced snapshot to an older reader
+without manifest-backed snapshot support, export it on the source version
+and restore the self-contained bundle.
 
 See the [index summary design](../../design-docs/design_docs/20261110-segment-index-summary.md).
 

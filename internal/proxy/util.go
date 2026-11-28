@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -666,7 +667,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		}
 	}
 
-	if vectorCnt == 0 {
+	if vectorCnt == 0 && typeutil.HasVectorField(schema) {
 		return merr.WrapErrParameterInvalidMsg("cannot config all vector field(s) skip loading")
 	}
 
@@ -2041,7 +2042,7 @@ func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
 }
 
 func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
-	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
+	return common.UsesNamespacePartitionKey(schema)
 }
 
 func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
@@ -2306,26 +2307,9 @@ func GetStorageCost(status *commonpb.Status) (int64, int64, float64, bool) {
 }
 
 // searchRequestNq returns the number of query rows of a search request as it
-// arrives, before any task has looked at it. The nq field is optional -- older
-// clients and the RESTful API leave it at 0 -- so a request that does not
-// declare it is counted by what it carries: the rows of its placeholder group,
-// or its primary keys when it searches by primary key. Reading the field alone
-// lets such a request through the rate limiter uncharged and lists it with
-// nq 0.
-//
-// A malformed placeholder group counts as 0 here; the search task rejects it.
+// arrives, whether or not the request declares nq.
 func searchRequestNq(req *milvuspb.SearchRequest) int64 {
-	if nq := req.GetNq(); nq != 0 {
-		return nq
-	}
-	if ids := req.GetIds(); ids != nil {
-		return int64(typeutil.GetSizeOfIDs(ids))
-	}
-	rows, err := funcutil.CountPlaceholderGroupValues(req.GetPlaceholderGroup())
-	if err != nil {
-		return 0
-	}
-	return rows
+	return requestutil.SearchRequestNq(req)
 }
 
 // hybridSearchRequestNq is searchRequestNq summed over the sub-requests.
@@ -2353,9 +2337,19 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 	case *milvuspb.DeleteRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
 		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
-	case *milvuspb.ImportRequest:
-		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
+	case *milvuspb.ImportRequest, *internalpb.ImportRequest:
+		importReq := r.(interface {
+			reqPartName
+			GetOptions() []*commonpb.KeyValuePair
+		})
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, metaCache, importReq)
+		tokens := 0
+		if !importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {
+			// Charge the protobuf request as received by each entry point.
+			// This preserves the gRPC charge and avoids flattening REST file groups.
+			tokens = proto.Size(r)
+		}
+		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, tokens, err
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, metaCache, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(searchRequestNq(r)), err
@@ -2463,6 +2457,10 @@ func GetFailedResponse(req any, err error) any {
 		return failedMutationResult(err)
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{
+			Status: merr.Status(err),
+		}
+	case *internalpb.ImportRequest:
+		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
 		}
 	case *milvuspb.SearchRequest:

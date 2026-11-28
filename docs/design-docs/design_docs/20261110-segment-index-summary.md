@@ -83,9 +83,18 @@ snapshot without opening the manifest. QueryNode opens that revision once per
 preparation and uses it for index artifacts, column groups, delta paths and stats.
 The manifest closes when preparation ends. Read states of the same revision
 share the imported column groups. The View's index definitions supply its load
-parameters. A finished catalog record for the same or a newer build supplies the artifact metadata.
-Complete snapshots remain available for older consumers, external collections,
-StorageV2 and diagnostics.
+parameters. A finished catalog record for the same or a newer build supplies
+the artifact metadata. Complete load metadata remains available for older
+consumers, external collections and StorageV2. Segment diagnostics use the
+selected segment's summaries and finished tasks directly. Full metadata batches
+use the shared manifest I/O limit and return per-segment errors.
+
+A QueryView load does not pin index files in DataCoord GC. If preparation
+fails after a newer revision retracts an index, an ordinary StorageV3 binding
+retries with current metadata and accepts a revision at or above its minimum.
+Other bindings can still use their accepted metadata. Manifest reuse also
+applies when the load response supplies explicit index files, as happens
+for catalog-backed artifacts.
 
 ## Cleanup and restore
 
@@ -107,6 +116,12 @@ remain explicit completion records. Restore and export use DataCoord's shared
 manifest read limit to resolve deferred records from those versions and verify
 that every captured build is accounted for. The self-contained export writes
 the complete file list with rewritten paths.
+
+To move a referenced snapshot to a version without manifest-backed snapshot
+support, export it on the source version and restore the self-contained bundle.
+The referenced snapshot's V6 metadata uses `index_files_from_manifest` to mark
+the deferred files. Older readers ignore that field and can accept the snapshot
+without copying its index artifacts, causing the target to rebuild them.
 
 Copy/restore validates the worker result against the placement recorded at dispatch.
 Targets publish their manifest and summaries or retain catalog records before

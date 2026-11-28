@@ -22,13 +22,13 @@ import (
 
 type segmentMetadataTestCoord struct{ types.MixCoord }
 
-func (*segmentMetadataTestCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64, bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+func (*segmentMetadataTestCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64, types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 	panic("patch with mockey")
 }
 
 func TestGetQueryViewSegmentLoadInfoRPC(t *testing.T) {
 	mockey.PatchConvey("unary errors are isolated and complete snapshots survive protobuf transport", t, func() {
-		mockey.Mock((*segmentMetadataTestCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentMetadataTestCoord, ctx context.Context, collection int64, ids []int64, local bool) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
+		mockey.Mock((*segmentMetadataTestCoord).GetQueryViewSegmentLoadInfos).To(func(_ *segmentMetadataTestCoord, ctx context.Context, collection int64, ids []int64, mode types.QueryViewIndexMode) ([]*querypb.QueryViewSegmentLoadInfoResult, []*indexpb.IndexInfo, error) {
 			if len(ids) == 1 && ids[0] == 3 {
 				<-ctx.Done()
 				return nil, nil, ctx.Err()
@@ -39,7 +39,7 @@ func TestGetQueryViewSegmentLoadInfoRPC(t *testing.T) {
 				if id == 2 {
 					result.Status = merr.Status(merr.WrapErrSegmentNotFound(id))
 				} else {
-					if local {
+					if mode == types.QueryViewIndexResolveLocally {
 						result.ManifestIndexes = &querypb.QueryViewManifestIndexes{}
 					}
 					result.LoadInfo = &querypb.SegmentLoadInfo{CollectionID: collection, SegmentID: id, ManifestPath: "base/_metadata/manifest-2.avro", TransformStartAfterTimetick: 100, Stats: &datapb.Statistics{InsertBinlogSize: 1024}}

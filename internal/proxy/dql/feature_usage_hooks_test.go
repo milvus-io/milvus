@@ -738,6 +738,36 @@ func TestFeatureUsageHooksFunctionChains(t *testing.T) {
 	}
 }
 
+// A query chain is a scan-stage transform, not a reranker: it has its own
+// counter and never moves reranker=*.
+func TestFeatureUsageHooksQueryFunctionChains(t *testing.T) {
+	featureusage.SetEnabled(true)
+	t.Cleanup(func() { featureusage.SetEnabled(true) })
+
+	scan := &schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan,
+		Ops:   []*schemapb.FunctionChainOp{{Op: chaintypes.OpTypeMap, Expr: &schemapb.FunctionChainExpr{Name: "decay"}}},
+	}
+	for _, tc := range []struct {
+		name   string
+		chains []*schemapb.FunctionChain
+		want   map[string]int64
+	}{
+		{"one chain", []*schemapb.FunctionChain{scan}, map[string]int64{"query_function_chains": 1}},
+		{"two chains, one request", []*schemapb.FunctionChain{scan, scan}, map[string]int64{"query_function_chains": 1}},
+		{"no chains", nil, map[string]int64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := counterSnapshot()
+			var set featureusage.FeatureSet
+			collectQueryFunctionChainFeature(tc.chains, &set)
+			set.HitAll()
+			assert.Equal(t, tc.want, delta(before, counterSnapshot()))
+		})
+	}
+	collectQueryFunctionChainFeature([]*schemapb.FunctionChain{scan}, nil)
+}
+
 func TestFeatureUsageHooksExecBits(t *testing.T) {
 	featureusage.SetEnabled(true)
 	t.Cleanup(func() { featureusage.SetEnabled(true) })

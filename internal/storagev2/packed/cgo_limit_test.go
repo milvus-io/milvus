@@ -18,12 +18,14 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -80,4 +82,43 @@ func TestManifestFFILimiterReadsConfiguredBudget(t *testing.T) {
 	paramtable.Init()
 	require.NoError(t, acquireManifestFFI(context.Background()))
 	releaseManifestFFI()
+}
+
+func TestOpenLoadManifestCancelsPermitWait(t *testing.T) {
+	paramtable.Init()
+	synctest.Test(t, func(t *testing.T) {
+		limiter := &manifestFFILimit{slots: semaphore.NewWeighted(1)}
+		previous := manifestFFI
+		manifestFFI = limiter
+		defer func() { manifestFFI = previous }()
+		require.NoError(t, limiter.acquire(t.Context()))
+
+		ctx, cancel := context.WithCancel(t.Context())
+		root := t.TempDir()
+		path := MarshalManifestPath(root, 1)
+		result := make(chan error, 1)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			manifest, err := OpenLoadManifest(ctx, path, &indexpb.StorageConfig{StorageType: "local", RootPath: root})
+			manifest.Close()
+			result <- err
+		}()
+		defer func() {
+			cancel()
+			limiter.release()
+			<-done
+		}()
+
+		synctest.Wait()
+		require.Empty(t, result, "the manifest open is waiting for the held permit")
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-result:
+			require.ErrorIs(t, err, context.Canceled)
+		default:
+			t.Fatal("manifest open waited for the held permit after cancellation")
+		}
+	})
 }

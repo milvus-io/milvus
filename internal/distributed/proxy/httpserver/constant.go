@@ -112,6 +112,7 @@ const (
 	ContextResponse               = "response"
 	ContextUsername               = "username"
 	ContextToken                  = "token"
+	ContextErrorType              = "error_type" // merr classification of a failed call, read by the access log; must match accesslog/info.ContextErrorType
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"

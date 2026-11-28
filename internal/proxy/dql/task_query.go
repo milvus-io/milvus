@@ -811,6 +811,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		defer t.features.HitAll()
 	}
 	collectCommonRequestFeatures(t.request, t.featureSink())
+	collectQueryFunctionChainFeature(t.request.GetFunctionChains(), t.featureSink())
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -1526,6 +1527,10 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 	}
 	return output, nil
 }
+
+// IsInternalTask identifies synthesized reads, including search-by-primary-key
+// lookups that are scheduler tasks but not requery subtasks.
+func (t *QueryTask) IsInternalTask() bool { return t.internalTask || t.reQuery }
 
 func (t *QueryTask) IsSubTask() bool {
 	return t.reQuery

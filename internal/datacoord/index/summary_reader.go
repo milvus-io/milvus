@@ -22,9 +22,55 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// segmentIndexSummaries returns the newest build per index ID. For the same
-// build, a retained task takes precedence until retirement.
-func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.SegmentIndexSummary {
+type segmentIndexRecords struct {
+	tasks   *typeutil.ConcurrentMap[int64, *model.SegmentIndex]
+	segment *datapb.SegmentInfo
+}
+
+func (r segmentIndexRecords) lookup(indexID int64) (*model.SegmentIndex, *datapb.SegmentIndexSummary) {
+	var task *model.SegmentIndex
+	if r.tasks != nil {
+		task, _ = r.tasks.Get(indexID)
+	}
+	for _, summary := range r.segment.GetIndexSummaries() {
+		if summary.GetIndexId() == indexID {
+			if task == nil || summary.GetBuildId() > task.BuildID {
+				return nil, summary
+			}
+			break
+		}
+	}
+	return task, nil
+}
+
+func (r segmentIndexRecords) coversIndexes(indexIDs []int64, missing typeutil.UniqueSet) bool {
+	completed := r.segment.GetIndexSummaries()
+	for _, id := range indexIDs {
+		if r.tasks != nil {
+			if task, _ := r.tasks.Get(id); task != nil {
+				// Any retained task satisfies the scheduling existence check.
+				continue
+			}
+		}
+		if len(completed) == 0 {
+			return false
+		}
+		missing[id] = struct{}{}
+	}
+	for _, summary := range completed {
+		if len(missing) == 0 {
+			break
+		}
+		if summary != nil {
+			delete(missing, summary.GetIndexId())
+		}
+	}
+	covered := len(missing) == 0
+	clear(missing)
+	return covered
+}
+
+func (m *IndexMeta) readSegmentIndexRecords(segmentID int64, read func(segmentIndexRecords)) {
 	usesSummaries := m.UsesSegmentSummaries()
 	if usesSummaries {
 		// Completion publishes the summary before retiring the task under this lock.
@@ -32,30 +78,38 @@ func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.Segm
 		locks.RLock(segmentID)
 		defer locks.RUnlock(segmentID)
 	}
-	var tasks *typeutil.ConcurrentMap[int64, *model.SegmentIndex]
+	var records segmentIndexRecords
 	if m.SegmentIndexes != nil {
-		tasks, _ = m.SegmentIndexes.Get(segmentID)
+		records.tasks, _ = m.SegmentIndexes.Get(segmentID)
 	}
-	var segment *datapb.SegmentInfo
 	if usesSummaries {
-		segment, _ = m.summarySource.GetSegment(segmentID)
+		records.segment, _ = m.summarySource.GetSegment(segmentID)
 	}
-	completed := segment.GetIndexSummaries()
-	if tasks == nil && len(completed) == 0 {
-		return nil
-	}
-	summaries := make(map[int64]*model.SegmentIndexSummary, len(completed))
-	for _, summary := range completed {
-		summaries[summary.GetIndexId()] = model.SegmentIndexSummaryFromProto(segment, summary)
-	}
-	if tasks != nil {
-		tasks.Range(func(id int64, task *model.SegmentIndex) bool {
-			if current := summaries[id]; current == nil || task.BuildID >= current.BuildID {
-				summaries[id] = model.SummarizeSegmentIndex(task)
-			}
-			return true
-		})
-	}
+	read(records)
+}
+
+// segmentIndexSummaries returns the newest build per index ID. A retained task
+// takes precedence for the same build until retirement.
+func (m *IndexMeta) segmentIndexSummaries(segmentID int64) map[int64]*model.SegmentIndexSummary {
+	var summaries map[int64]*model.SegmentIndexSummary
+	m.readSegmentIndexRecords(segmentID, func(records segmentIndexRecords) {
+		completed := records.segment.GetIndexSummaries()
+		if records.tasks == nil && len(completed) == 0 {
+			return
+		}
+		summaries = make(map[int64]*model.SegmentIndexSummary, len(completed))
+		for _, summary := range completed {
+			summaries[summary.GetIndexId()] = model.SegmentIndexSummaryFromProto(records.segment, summary)
+		}
+		if records.tasks != nil {
+			records.tasks.Range(func(id int64, task *model.SegmentIndex) bool {
+				if current := summaries[id]; current == nil || task.BuildID >= current.BuildID {
+					summaries[id] = model.SummarizeSegmentIndex(task)
+				}
+				return true
+			})
+		}
+	})
 	return summaries
 }
 

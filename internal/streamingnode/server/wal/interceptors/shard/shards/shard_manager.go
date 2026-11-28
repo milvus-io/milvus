@@ -93,7 +93,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
-			)
+			).withCollectionInfo(collectionInfo)
 			segmentTotal += len(segmentManagers)
 		}
 	}
@@ -273,17 +273,6 @@ func (c *CollectionInfo) AllowGrowingSourceFlush() bool {
 	return typeutil.AllowGrowingSourceFlush(c.Schema.GetSchema(),
 		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
 		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
-}
-
-func (c *CollectionInfo) RequiresStorageV3() bool {
-	return c.HasTextField()
-}
-
-func (c *CollectionInfo) HasTextField() bool {
-	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil {
-		return false
-	}
-	return typeutil.HasTextField(c.Schema.GetSchema())
 }
 
 // RuntimeFlushSize estimates the in-memory footprint used by flush pressure decisions.

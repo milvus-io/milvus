@@ -62,10 +62,10 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 	t.Cleanup(func() { applyQueryNodeLoadConfig(false, beforeBytes, beforeSlots) })
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	enabledKey := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key
-	bytesKey := pt.CommonCfg.LoadTransientBudgetBytes.Key
-	slotsKey := pt.CommonCfg.LoadAdmissionSlots.Key
-	cpuSlots := int64(2 * hardware.GetCPUNum())
+	enabledKey := pt.QueryNodeCfg.LoadAsyncReadEnabled.Key
+	bytesKey := pt.QueryNodeCfg.LoadTransientBudgetBytes.Key
+	slotsKey := pt.QueryNodeCfg.LoadAdmissionSlots.Key
+	cpuSlots := int64(10 * hardware.GetCPUNum())
 	expect := func(wantBytes, wantSlots int64) {
 		t.Helper()
 		gotBytes, gotSlots := nativeLoadAdmissionLimits(t)
@@ -73,7 +73,9 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 		assert.Equal(t, wantSlots, gotSlots)
 	}
 
-	registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig)
+	require.NoError(t, registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig))
+	expect(2*1024*1024*1024, cpuSlots)
+	require.NoError(t, pt.Save(enabledKey, "false"))
 	expect(0, 0)
 	// A value equal to ParamItem.DefaultValue is still explicit. It must take
 	// effect even though the legacy-mode effective default was unlimited.
@@ -100,8 +102,10 @@ func TestQueryNodeLoadConfigPublishesNativeLimits(t *testing.T) {
 	expect(1234, cpuSlots)
 	require.NoError(t, pt.Remove(bytesKey))
 	expect(2*1024*1024*1024, cpuSlots)
-	require.NoError(t, pt.Reset(enabledKey))
+	require.NoError(t, pt.Save(enabledKey, "false"))
 	expect(0, 0)
+	require.NoError(t, pt.Reset(enabledKey))
+	expect(2*1024*1024*1024, cpuSlots)
 }
 
 func TestCommonCoreCallbacksDoNotOwnLoadAdmission(t *testing.T) {
@@ -109,42 +113,42 @@ func TestCommonCoreCallbacksDoNotOwnLoadAdmission(t *testing.T) {
 	pt := paramtable.Get()
 	beforeBytes, beforeSlots := nativeLoadAdmissionLimits(t)
 	t.Cleanup(func() {
-		pt.Reset(pt.CommonCfg.LoadTransientBudgetBytes.Key)
-		pt.Reset(pt.CommonCfg.LoadAdmissionSlots.Key)
+		pt.Reset(pt.QueryNodeCfg.LoadTransientBudgetBytes.Key)
+		pt.Reset(pt.QueryNodeCfg.LoadAdmissionSlots.Key)
 		applyQueryNodeLoadConfig(false, beforeBytes, beforeSlots)
 	})
 	SetupCoreConfigChangelCallback()
 	applyQueryNodeLoadConfig(false, 1234, 7)
 	// This is also the setup used by DataNode. Runtime updates must not write
 	// QueryNode's process-wide capacities through these shared callbacks.
-	require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "4096"))
-	require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, "32"))
+	require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadTransientBudgetBytes.Key, "4096"))
+	require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadAdmissionSlots.Key, "32"))
 	gotBytes, gotSlots := nativeLoadAdmissionLimits(t)
 	assert.EqualValues(t, 1234, gotBytes)
 	assert.EqualValues(t, 7, gotSlots)
 }
 
 func TestQueryNodeAsyncLoadThreadPoolConfig(t *testing.T) {
-	previous := getStorageV2AsyncLoadThreadPoolSize()
-	t.Cleanup(func() { require.NoError(t, updateStorageV2AsyncLoadThreadPoolSize(previous)) })
+	previous := getLoadExecutorThreads()
+	t.Cleanup(func() { require.NoError(t, updateLoadExecutorThreads(previous)) })
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	item := &pt.QueryNodeCfg.LoadExecutorThreads
 	wantDefault := max(1, min(hardware.GetCPUNum(), 16))
 	// The first synchronization must pick up an override set before registration.
 	require.NoError(t, pt.Save(item.Key, "3"))
-	require.NoError(t, registerQueryNodeAsyncLoadThreadPoolConfig(t.Context(), pt, updateStorageV2AsyncLoadThreadPoolSize))
-	assert.Equal(t, 3, getStorageV2AsyncLoadThreadPoolSize())
+	require.NoError(t, registerQueryNodeAsyncLoadThreadPoolConfig(t.Context(), pt, updateLoadExecutorThreads))
+	assert.Equal(t, 3, getLoadExecutorThreads())
 	require.NoError(t, pt.Save(item.Key, "2"))
-	assert.Equal(t, 2, getStorageV2AsyncLoadThreadPoolSize())
+	assert.Equal(t, 2, getLoadExecutorThreads())
 	require.NoError(t, pt.Save(item.Key, "typo"))
-	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+	assert.Equal(t, wantDefault, getLoadExecutorThreads())
 	require.NoError(t, pt.Save(item.Key, "1"))
 	require.NoError(t, pt.Remove(item.Key))
-	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+	assert.Equal(t, wantDefault, getLoadExecutorThreads())
 	// Native callers also reject zero instead of stranding queued work.
-	require.Error(t, updateStorageV2AsyncLoadThreadPoolSize(0))
-	assert.Equal(t, wantDefault, getStorageV2AsyncLoadThreadPoolSize())
+	require.Error(t, updateLoadExecutorThreads(0))
+	assert.Equal(t, wantDefault, getLoadExecutorThreads())
 }
 
 func TestQueryNodeAsyncLoadThreadPoolConfigReportsInitialFailure(t *testing.T) {
@@ -157,7 +161,7 @@ func TestQueryNodeAsyncLoadThreadPoolConfigReportsInitialFailure(t *testing.T) {
 func TestQueryNodeAsyncLoadThreadPoolConfigSerializesUpdates(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
-	item := &pt.QueryNodeCfg.StorageV2AsyncLoadThreadPoolSize
+	item := &pt.QueryNodeCfg.LoadExecutorThreads
 	require.NoError(t, pt.Save(item.Key, "1"))
 	firstApply := make(chan struct{})
 	releaseFirst := make(chan struct{})
@@ -205,13 +209,13 @@ func TestQueryNodeLoadConfigInvalidLimitsStayBounded(t *testing.T) {
 	pt := &paramtable.ComponentParam{}
 	pt.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
 	registerQueryNodeLoadConfig(t.Context(), pt, applyQueryNodeLoadConfig)
-	require.NoError(t, pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "typo"))
-	require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, "9223372036854775808"))
+	require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadTransientBudgetBytes.Key, "typo"))
+	require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadAdmissionSlots.Key, "9223372036854775808"))
 	for _, enabled := range []string{"true", "false"} {
-		require.NoError(t, pt.Save(pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key, enabled))
+		require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadAsyncReadEnabled.Key, enabled))
 		bytes, slots := nativeLoadAdmissionLimits(t)
 		assert.EqualValues(t, paramtable.DefaultLoadTransientBudgetBytes, bytes)
-		assert.EqualValues(t, 2*hardware.GetCPUNum(), slots)
+		assert.EqualValues(t, 10*hardware.GetCPUNum(), slots)
 	}
 }
 
@@ -247,8 +251,8 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 	}()
 	<-firstApply
 	for key, value := range map[string]string{
-		pt.CommonCfg.LoadTransientBudgetBytes.Key: "1234",
-		pt.CommonCfg.LoadAdmissionSlots.Key:       "7",
+		pt.QueryNodeCfg.LoadTransientBudgetBytes.Key: "1234",
+		pt.QueryNodeCfg.LoadAdmissionSlots.Key:       "7",
 	} {
 		tasks.Add(1)
 		go func() {
@@ -259,8 +263,8 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 	// Both source updates land before either callback can complete. The
 	// callback must read the current configuration after acquiring its lock.
 	updated := assert.Eventually(t, func() bool {
-		return pt.CommonCfg.LoadTransientBudgetBytes.GetValue() == "1234" &&
-			pt.CommonCfg.LoadAdmissionSlots.GetValue() == "7"
+		return pt.QueryNodeCfg.LoadTransientBudgetBytes.GetValue() == "1234" &&
+			pt.QueryNodeCfg.LoadAdmissionSlots.GetValue() == "7"
 	}, 2*time.Second, time.Millisecond)
 	release()
 	tasks.Wait()
@@ -273,7 +277,7 @@ func TestQueryNodeLoadConfigSerializesUpdatesAcrossKeys(t *testing.T) {
 
 func TestApplyQueryNodeLoadConfigOrdersRolloutAndLimits(t *testing.T) {
 	var calls []string
-	enabled := mockey.Mock(updateStorageV2AsyncLoadEnabled).To(func(value bool) error {
+	enabled := mockey.Mock(updateLoadAsyncReadEnabled).To(func(value bool) error {
 		calls = append(calls, "enabled="+strconv.FormatBool(value))
 		return nil
 	}).Build()
@@ -296,7 +300,7 @@ func TestApplyQueryNodeLoadConfigOrdersRolloutAndLimits(t *testing.T) {
 
 func TestApplyQueryNodeLoadConfigStopsAfterRejectedDisable(t *testing.T) {
 	failure := errors.New("mode rejected")
-	enabled := mockey.Mock(updateStorageV2AsyncLoadEnabled).To(func(bool) error { return failure }).Build()
+	enabled := mockey.Mock(updateLoadAsyncReadEnabled).To(func(bool) error { return failure }).Build()
 	defer enabled.UnPatch()
 	changed := false
 	memory := mockey.Mock(UpdateLoadTransientBudgetBytes).To(func(int64) { changed = true }).Build()
@@ -320,6 +324,6 @@ func TestQueryNodeLoadConfigReportsStartupFailureAndAllowsRefresh(t *testing.T) 
 		return nil
 	})
 	require.ErrorIs(t, err, failure)
-	require.NoError(t, pt.Save(pt.CommonCfg.LoadAdmissionSlots.Key, "7"))
+	require.NoError(t, pt.Save(pt.QueryNodeCfg.LoadAdmissionSlots.Key, "7"))
 	assert.Equal(t, 2, calls)
 }

@@ -7,12 +7,16 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -299,11 +303,18 @@ func TestQNHandler_SegmentManagerCallback_IncrementalProgress(t *testing.T) {
 	mgr := newMockSegmentManager()
 	h := NewQNQueryViewHandler(mgr)
 
+	inflight := metrics.QueryStageInflight.WithLabelValues("queryNode", "view_load", "prepare")
+	baselineInflight := testutil.ToFloat64(inflight)
+	successHist := metrics.QueryStageDuration.WithLabelValues("queryNode", "view_load", "prepare", "success")
+	var before, mid, after dto.Metric
+	require.NoError(t, successHist.(prometheus.Metric).Write(&before))
+
 	rc := &reportCollector{}
 	view := newPreparingQNView(1, 1)
 	h.ApplyViews([]handler.ApplyView{
 		{View: view, OnReport: rc.onReport},
 	})
+	assert.Equal(t, baselineInflight+1, testutil.ToFloat64(inflight))
 
 	key := view.QueryViewKey()
 	req, _ := mgr.getAcquired(key)
@@ -312,6 +323,9 @@ func TestQNHandler_SegmentManagerCallback_IncrementalProgress(t *testing.T) {
 	req.OnReady(map[int64][]int64{10: {1000}})
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStatePreparing, rc.last().State())
+	assert.Equal(t, baselineInflight+1, testutil.ToFloat64(inflight))
+	require.NoError(t, successHist.(prometheus.Metric).Write(&mid))
+	assert.Equal(t, before.GetHistogram().GetSampleCount(), mid.GetHistogram().GetSampleCount())
 
 	// Complete: Ready.
 	req.OnReady(map[int64][]int64{
@@ -320,6 +334,9 @@ func TestQNHandler_SegmentManagerCallback_IncrementalProgress(t *testing.T) {
 	})
 	require.Equal(t, 2, rc.count())
 	assert.Equal(t, qviews.QueryViewStateReady, rc.last().State())
+	assert.Equal(t, baselineInflight, testutil.ToFloat64(inflight))
+	require.NoError(t, successHist.(prometheus.Metric).Write(&after))
+	assert.Equal(t, before.GetHistogram().GetSampleCount()+1, after.GetHistogram().GetSampleCount())
 }
 
 func TestQNHandler_SegmentManagerCallback_StaleCallbackIgnored(t *testing.T) {

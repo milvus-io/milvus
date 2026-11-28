@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -75,13 +76,18 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var status C.CStatus
+	var createTimer stage.Timer
 	if req.LoadInfo != nil {
-		segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, req.LoadManifest)
+		convertTimer := segmentConvert.Begin()
+		segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, req.LoadManifest, packed.ManifestReadCreate)
+		convertTimer.End(err)
 		if err != nil {
 			return nil, merr.Wrap(err, "failed to convert segment load info")
 		}
 		segLoadInfo.FieldHints = req.FieldHints
+		marshalTimer := segmentMarshal.Begin()
 		loadInfoBlob, err := proto.Marshal(segLoadInfo)
+		marshalTimer.End(err)
 		if err != nil {
 			return nil, err
 		}
@@ -90,6 +96,7 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 		if len(req.LoadFields) > 0 {
 			fields = (*C.int64_t)(unsafe.Pointer(&req.LoadFields[0]))
 		}
+		createTimer = segmentCgoCreate.Begin()
 		if req.ExplicitLoadScope && req.SegmentType == SegmentTypeSealed {
 			status = C.NewSealedSegmentWithManifest(req.Collection.rawPointer(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)), fields, C.int64_t(len(req.LoadFields)), req.LoadManifest.Native())
 		} else {
@@ -98,15 +105,21 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 			status = C.NewSegmentWithLoadInfo(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), (*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])), C.int64_t(len(loadInfoBlob)))
 		}
 	} else {
+		createTimer = segmentCgoCreate.Begin()
 		status = C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
 	}
-	if err := ConsumeCStatusIntoError(&status); err != nil {
+	createErr := ConsumeCStatusIntoError(&status)
+	createTimer.End(createErr)
+	if err := createErr; err != nil {
 		return nil, err
 	}
 	seg := &cSegmentImpl{id: req.SegmentID, ptr: ptr}
 	if req.LoadInfo != nil {
 		if commitTs := req.LoadInfo.GetCommitTimestamp(); commitTs != 0 {
-			if err := seg.SetCommitTimestamp(commitTs); err != nil {
+			commitTimer := segmentCommit.Begin()
+			commitErr := seg.SetCommitTimestamp(commitTs)
+			commitTimer.End(commitErr)
+			if err := commitErr; err != nil {
 				C.DeleteSegment(ptr)
 				return nil, merr.Wrap(err, "failed to set commit timestamp on segment")
 			}
@@ -387,7 +400,7 @@ func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
 	defer runtime.KeepAlive(req)
 
 	manifest := packed.LoadManifestFromContext(ctx, req.LoadInfo.GetManifestPath())
-	segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, manifest)
+	segLoadInfo, err := convertToSegcoreSegmentLoadInfo(req.LoadInfo, manifest, packed.ManifestReadReopen)
 	if err != nil {
 		return merr.Wrap(err, "failed to convert reopen load info")
 	}
@@ -452,10 +465,10 @@ func (s *cSegmentImpl) SetCommitTimestamp(ts uint64) error {
 // This function is needed because segcorepb.SegmentLoadInfo is a simplified version that doesn't
 // depend on data_coord.proto and excludes fields like start_position, delta_position, and level.
 func ConvertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
-	return convertToSegcoreSegmentLoadInfo(src, nil)
+	return convertToSegcoreSegmentLoadInfo(src, nil, packed.ManifestReadOther)
 }
 
-func convertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo, manifest *packed.LoadManifest) (*segcorepb.SegmentLoadInfo, error) {
+func convertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo, manifest *packed.LoadManifest, origin packed.ManifestReadOrigin) (*segcorepb.SegmentLoadInfo, error) {
 	if src == nil {
 		return nil, nil
 	}
@@ -463,7 +476,7 @@ func convertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo, manifest *pac
 	// Resolve text/json stats with basePaths.
 	// V2: stats come from src proto fields, basePaths computed from metadata + rootPath.
 	// V3: stats resolved from manifest (src proto fields are empty), basePaths from manifest paths.
-	textStats, jsonStats, textBasePaths, jsonBasePaths, err := resolveStatsWithBasePaths(src, manifest)
+	textStats, jsonStats, textBasePaths, jsonBasePaths, err := resolveStatsWithBasePaths(src, manifest, origin)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +514,7 @@ func convertToSegcoreSegmentLoadInfo(src *querypb.SegmentLoadInfo, manifest *pac
 // V3: stats resolved from manifest via StatsResolver, basePaths extracted from manifest paths.
 // A V3 manifest error does not fall back to V2 path construction because the
 // legacy prefixes are incompatible with manifest-backed stat files.
-func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo, manifest *packed.LoadManifest) (
+func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo, manifest *packed.LoadManifest, origin packed.ManifestReadOrigin) (
 	map[int64]*datapb.TextIndexStats,
 	map[int64]*datapb.JsonKeyStats,
 	map[int64]string, // textBasePaths
@@ -513,7 +526,9 @@ func resolveStatsWithBasePaths(src *querypb.SegmentLoadInfo, manifest *packed.Lo
 
 	// For V3 (manifest-based): resolve stats from manifest if proto fields are empty.
 	if src.GetStorageVersion() == storage.StorageV3 {
-		result := packed.NewStatsResolverFromLoadInfo(src).WithManifest(manifest).TextAndJSONIndexStatsWithBasePaths()
+		result := packed.NewStatsResolverFromLoadInfo(src).
+			WithManifest(manifest).
+			WithManifestReadOrigin(origin).TextAndJSONIndexStatsWithBasePaths()
 		if result.Err() != nil {
 			mlog.Warn(context.TODO(), "failed to resolve stats from manifest for segcore load info",
 				mlog.Int64("segmentID", src.GetSegmentID()),
@@ -728,3 +743,10 @@ func AdoptSealedReadState(base, read CSegment) error {
 	status := C.AdoptSealedSegmentReadState(C.CSegmentInterface(base.RawPointer()), C.CSegmentInterface(read.RawPointer()))
 	return ConsumeCStatusIntoError(&status)
 }
+
+var (
+	segmentConvert   = stage.New("queryNode", "segment_create", "convert_load_info")
+	segmentMarshal   = stage.New("queryNode", "segment_create", "marshal")
+	segmentCgoCreate = stage.New("queryNode", "segment_create", "cgo_create")
+	segmentCommit    = stage.New("queryNode", "segment_create", "commit_timestamp")
+)

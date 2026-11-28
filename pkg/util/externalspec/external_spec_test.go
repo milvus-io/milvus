@@ -53,6 +53,12 @@ func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
 	_, err = MarshalCollectionSchema(schema)
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 
+	// A persisted spec that sets one key twice is not sent to native code.
+	schema.ExternalSpec = `{"format":"paimon-table","Format":"parquet"}`
+	_, err = MarshalCollectionSchema(schema)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `external spec keys "format" and "Format" differ only in case`)
+
 	schema.ExternalSpec = ""
 	blob, err = MarshalCollectionSchema(schema)
 	require.NoError(t, err)
@@ -63,6 +69,26 @@ func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
 func TestValidateSourceAndSpecLegacyKeys(t *testing.T) {
 	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table",
 		`{"Format":"paimon-table","SNAPSHOT_ID":"7","Scan_Mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`))
+}
+
+// Create in Proxy and RootCoord, Proxy refresh and DataCoord refresh
+// revalidation all call ValidateSourceAndSpec.
+func TestValidateSourceAndSpecRejectsCollidingKeys(t *testing.T) {
+	const extfs = `{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}`
+	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table", `{"format":"parquet","extfs":`+extfs+`}`))
+	for _, tc := range []struct{ spec, wantErr string }{
+		{`{"extfs":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "extfs" and "Extfs" differ only in case`},
+		{`{"EXTFS":` + extfs + `,"Extfs":{"role_arn":"arn:aws:iam::123456789012:role/other"}}`, `external spec keys "EXTFS" and "Extfs" differ only in case`},
+		{`{"format":"parquet","Format":"vortex","extfs":` + extfs + `}`, `external spec keys "format" and "Format" differ only in case`},
+		{`{"cloud_extra":{},"Cloud_Extra":{},"extfs":` + extfs + `}`, `external spec keys "cloud_extra" and "Cloud_Extra" differ only in case`},
+		{`{"extfs":` + extfs + `,"extfs":` + extfs + `}`, `external spec key "extfs" appears more than once`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true","Region":"eu-west-1"}}`, `extfs keys "region" and "Region" differ only in case`},
+		{`{"extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true","region":"eu-west-1"}}`, `extfs key "region" appears more than once`},
+	} {
+		err := ValidateSourceAndSpec("s3://bucket/table", tc.spec)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid, tc.spec)
+		require.ErrorContains(t, err, tc.wantErr, tc.spec)
+	}
 }
 
 func TestParseExternalSpec_Empty(t *testing.T) {
@@ -640,6 +666,22 @@ func TestRedactExternalSpec(t *testing.T) {
 		assert.Equal(t, "<invalid spec>", RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":{}}`))
 	})
 
+	t.Run("lone_key_spelling_redacted_under_canonical_name", func(t *testing.T) {
+		out := RedactExternalSpec(`{"Format":"parquet","EXTFS":{"region":"us-east-1","access_key_value":"SEC"},"Snapshot_Id":7}`)
+		assert.NotContains(t, out, "SEC")
+		assert.JSONEq(t, `{"format":"parquet","extfs":{"region":"us-east-1","access_key_value":"***"},"snapshot_id":"7"}`, out)
+	})
+
+	t.Run("key_set_twice_returns_placeholder", func(t *testing.T) {
+		for _, spec := range []string{
+			`{"format":"parquet","extfs":{"access_key_value":"SEC"},"Extfs":{"access_key_value":"SEC2"}}`,
+			`{"format":"parquet","extfs":{"access_key_value":"SEC"},"extfs":{}}`,
+			`{"format":"parquet","extfs":{"access_key_value":"SEC","Access_Key_Value":"SEC2"}}`,
+		} {
+			assert.Equal(t, "<invalid spec>", RedactExternalSpec(spec), spec)
+		}
+	})
+
 	t.Run("preserves_unknown_top_level_fields", func(t *testing.T) {
 		out := RedactExternalSpec(`{
 			"format":"parquet",
@@ -750,6 +792,96 @@ func TestExternalSpecMarshalJSON(t *testing.T) {
 	})
 }
 
+func TestExplicitBucketMatchesExternalSource(t *testing.T) {
+	for _, tc := range []struct{ provider, source, bucket string }{
+		{"aws", "s3://events.prod/dir/file", "events.prod"},
+		{"aws", "s3://s3.us-west-2.amazonaws.com/events/dir/file", "events"},
+		{"aws", "s3://S3.US-WEST-2.AMAZONAWS.COM:443/events/dir/file", "events"},
+		{"aws", "aws://s3.cn-north-1.amazonaws.com.cn:8443/events/dir/file", "events"},
+		{"aliyun", "oss://events/dir/file", "events"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com/events/dir/file", "events"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com:443/events/dir/file", "events"},
+		{"tencent", "cos://events-1250000000/dir/file", "events-1250000000"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com/events-1250000000/dir/file", "events-1250000000"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com:8443/events-1250000000/dir/file", "events-1250000000"},
+		{"huawei", "obs://events/dir/file", "events"},
+		{"huawei", "obs://obs.cn-north-4.myhuaweicloud.com/events/dir/file", "events"},
+		{"gcp", "gs://events.prod/dir/file", "events.prod"},
+		{"gcp", "gcs://STORAGE.GOOGLEAPIS.COM:443/events%2Fdir/file", "events"},
+		{"gcp", "gs://storage.googleapis.com/%65vents/file", "events"},
+		{"azure", "azure://events/dir/file", "events"},
+		{"azure", "azure://core.chinacloudapi.cn/events/dir/file", "events"},
+		{"minio", "s3://custom.example:9000/events/dir/file", "events"},
+		{"", "minio://custom.example:9000/events/dir/file", "events"},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			extfs := map[string]string{
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+				ExtfsKeyRegion: "us-west-2", ExtfsKeyBucketName: tc.bucket,
+			}
+			if tc.provider != "" {
+				extfs[ExtfsKeyCloudProvider] = tc.provider
+			}
+			require.NoError(t, ValidateSourceAndSpec(tc.source, marshalBrokerSpec(t, FormatParquet, extfs)))
+			extfs[ExtfsKeyBucketName] = "other"
+			err := ValidateSourceAndSpec(tc.source, marshalBrokerSpec(t, FormatParquet, extfs))
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, "extfs.bucket_name must match the bucket in external_source")
+			require.NotContains(t, err.Error(), tc.source)
+		})
+	}
+}
+
+func TestS3ProviderEndpointBucketRoot(t *testing.T) {
+	for _, tc := range []struct{ provider, scheme, host string }{
+		{"aws", "s3", "s3.us-west-2.amazonaws.com"},
+		{"aliyun", "oss", "oss-cn-hangzhou-internal.aliyuncs.com"},
+		{"tencent", "cos", "cos.ap-guangzhou.myqcloud.com"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			extfs := map[string]string{
+				ExtfsKeyCloudProvider: tc.provider, ExtfsKeyRegion: "us-west-2",
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+			}
+			for _, bucket := range []string{"", "events"} {
+				if bucket != "" {
+					extfs[ExtfsKeyBucketName] = bucket
+				}
+				spec := marshalBrokerSpec(t, FormatParquet, extfs)
+				require.NoError(t, ValidateSourceAndSpec(tc.scheme+"://events", spec))
+				for _, port := range []string{"", ":443"} {
+					root := tc.scheme + "://" + tc.host + port + "/events"
+					require.ErrorContains(t, ValidateSourceAndSpec(root, spec), "trailing slash")
+					require.NoError(t, ValidateSourceAndSpec(root+"/", spec))
+					require.NoError(t, ValidateSourceAndSpec(root+"%2F", spec))
+				}
+			}
+		})
+	}
+}
+
+func TestS3ProviderEndpointPort(t *testing.T) {
+	for _, tc := range []struct{ provider, endpoint string }{
+		{"aws", "s3://s3.us-west-2.amazonaws.com"},
+		{"aliyun", "oss://oss-cn-hangzhou-internal.aliyuncs.com"},
+		{"tencent", "cos://cos.ap-guangzhou.myqcloud.com"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			spec := marshalBrokerSpec(t, FormatParquet, map[string]string{
+				ExtfsKeyCloudProvider: tc.provider, ExtfsKeyRegion: "us-west-2",
+				ExtfsKeyAccessKeyID: "account", ExtfsKeyAccessKeyValue: "secret",
+			})
+			for _, port := range []string{"443", "65535"} {
+				require.NoError(t, ValidateSourceAndSpec(tc.endpoint+":"+port+"/events/file", spec))
+			}
+			for _, port := range []string{"", "0", "65536", "abc"} {
+				err := ValidateSourceAndSpec(tc.endpoint+":"+port+"/events/file", spec)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid, "port %q", port)
+			}
+		})
+	}
+}
+
 func TestIsCloudEndpointHost(t *testing.T) {
 	for _, host := range []string{
 		"s3.us-west-2.amazonaws.com",
@@ -769,6 +901,8 @@ func TestIsCloudEndpointHost(t *testing.T) {
 
 	for _, host := range []string{
 		"localhost:9000",
+		"s3.us-west-2.amazonaws.com:443",
+		"storage.googleapis.com:443",
 		"bucket",
 		"amazonaws.com",
 	} {
@@ -954,7 +1088,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			value string
 		}{
 			{name: "account_key", key: "access_key_value", value: "base64key"},
-			{name: "workload_identity", key: "use_iam", value: "true"},
+			{name: "broker_iam_with_target_fields", key: "use_iam", value: "true"},
 			{name: "role_arn", key: "role_arn", value: "arn:aws:iam::1:role/r"},
 			{name: "gcp_impersonation", key: "gcp_target_service_account", value: "sa@proj.iam.gserviceaccount.com"},
 			{name: "anonymous", key: "anonymous", value: "true"},
@@ -965,7 +1099,8 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 				extfs[test.key] = test.value
 				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "credential modes are mutually exclusive")
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "conflicts with Azure credential broker")
 			})
 		}
 	})
@@ -1024,7 +1159,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"cloud_provider":             "azure",
 		})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "only valid for GCP")
+		assert.Contains(t, err.Error(), "requires cloud_provider=gcp")
 	})
 }
 
@@ -1248,7 +1383,7 @@ func TestCredentialBrokerModesAndPolicy(t *testing.T) {
 			require.Error(t, ValidateExtfsComplete("s3://bucket/key", extfs))
 		})
 	}
-	for _, cloud := range []string{"gcp", "huawei", "minio"} {
+	for _, cloud := range []string{"huawei", "minio"} {
 		require.Error(t, ValidateExtfsComplete("s3://bucket/key", map[string]string{"cloud_provider": cloud, "region": "r", "use_iam": "true", "credential_endpoint": endpoint}))
 	}
 	extfs := map[string]string{"cloud_provider": "azure", "access_key_id": "account", "region": "westus3", "azure_client_id": "client", "azure_tenant_id": "tenant", "azure_credential_endpoint": endpoint}

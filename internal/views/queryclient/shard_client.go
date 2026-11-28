@@ -23,10 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -689,6 +691,7 @@ func (s *shardViewQueryClient) executeShard(
 		}
 	}
 	for ; ; retry.attempt++ {
+		metrics.QueryStageItems.WithLabelValues("proxy", "shard_query", "attempt", "attempts").Inc()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -718,7 +721,9 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
+		planTimer := clientPlan.Begin()
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+		planTimer.End(err)
 		if err != nil {
 			if retryableQueryError(err) {
 				retry.lastErr = err
@@ -755,6 +760,7 @@ func (s *shardViewQueryClient) executeShard(
 		workNodes := workNodesFromPlan(plan)
 
 		// Phase 2: Fan out to all work nodes concurrently.
+		fanoutTimer := clientFanout.Begin()
 		if params.beforeDispatch != nil {
 			err = params.beforeDispatch(ctx, response, shardID)
 		}
@@ -780,6 +786,7 @@ func (s *shardViewQueryClient) executeShard(
 				err = firstErr
 			}
 		}
+		fanoutTimer.End(err)
 		if err != nil {
 			if retryableQueryError(err) {
 				retry.recordFailure(err)
@@ -853,7 +860,10 @@ func (s *shardViewQueryClient) fanOutToWorkNodes(
 	for _, node := range workNodes {
 		node := node
 		g.Go(func() error {
-			if err := dispatchNode(gCtx, node, plan, shardID); err != nil {
+			nodeTimer := clientDispatch.Begin()
+			err := dispatchNode(gCtx, node, plan, shardID)
+			nodeTimer.End(err)
+			if err != nil {
 				return &workNodeFailure{node: node, shardID: shardID, err: err}
 			}
 			return nil
@@ -923,3 +933,10 @@ func retryableQueryError(err error) bool {
 	}
 	return status.Code(err) == codes.Unavailable
 }
+
+var (
+	clientPlan   = stage.New("proxy", "shard_query", "get_plan")
+	clientFanout = stage.New("proxy", "shard_query", "fanout")
+)
+
+var clientDispatch = stage.New("proxy", "shard_query", "node_dispatch")

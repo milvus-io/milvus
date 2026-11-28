@@ -308,6 +308,12 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 				normalized.NumOfRows = corrected
 			}
 		}
+		// An older DataCoord can preserve unknown proto fields while replacing
+		// the manifest. A matching row count cannot authenticate those fields.
+		if sizes := normalized.GetStats().GetFieldLogicalSizes(); sizes.GetVersion() == storage.FieldLogicalSizeVersion && (m.GetCollection(normalized.GetCollectionID()).IsExternal() || SegmentFieldLogicalSizes(normalized) == nil) {
+			clone()
+			ClearFieldLogicalSizes(normalized)
+		}
 		if !localStorage || segment.GetStorageVersion() != storage.StorageV3 {
 			return normalized, nil
 		}
@@ -318,7 +324,7 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 		}
 		if manifestPath != segment.GetManifestPath() {
 			clone()
-			normalized.ManifestPath = manifestPath
+			moveFieldLogicalSizes(normalized, manifestPath)
 		}
 		return normalized, nil
 	}
@@ -1093,6 +1099,7 @@ func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs
 		// to a transient array-derived value for reads, but the persisted
 		// proto stays nil until a future write reaches UpdateSegmentStats.
 		segment.Stats = nil
+		segment.FieldLogicalSizesManifest = ""
 		modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 			UpdateMask: metastore.BinlogsUpdateMask{
@@ -1189,7 +1196,7 @@ func updateManifestPathIfNewer(segment *SegmentInfo, manifestPath string) error 
 		return merr.WrapErrServiceInternalMsg("manifest base path mismatch for segment %d: current %s, incoming %s", segment.GetID(), currentBase, incomingBase)
 	}
 	if incomingVersion > currentVersion {
-		segment.ManifestPath = manifestPath
+		moveFieldLogicalSizes(segment.SegmentInfo, manifestPath)
 	}
 	return nil
 }
@@ -1392,6 +1399,7 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 		// writer-reported V3 stats override, and the segment is being
 		// (re)initialized with the supplied arrays.
 		segment.Stats = storage.BuildStatsFromFieldBinlogs(binlogs, statslogs, bm25logs, deltalogs)
+		segment.FieldLogicalSizesManifest = ""
 		modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1415,9 +1423,12 @@ func UpdateSegmentStats(segmentID int64, requestStats *datapb.Statistics) Update
 			return false
 		}
 		if requestStats != nil {
-			segment.Stats = requestStats
+			if err := modPack.Meta.installReportedStats(segment.SegmentInfo, requestStats); err != nil {
+				return modPack.Fail(err)
+			}
 		} else {
 			segment.Stats = storage.BuildStatsFromFieldBinlogs(segment.GetBinlogs(), segment.GetStatslogs(), segment.GetBm25Statslogs(), segment.GetDeltalogs())
+			segment.FieldLogicalSizesManifest = ""
 		}
 		return true
 	}
@@ -1440,6 +1451,7 @@ func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslog
 		// Stats invalidated; UpdateSegmentStats is chained next under the
 		// same write lock to repopulate from the replaced arrays.
 		segment.Stats = nil
+		segment.FieldLogicalSizesManifest = ""
 		modPack.Increments[segmentID] = metastore.BinlogsIncrement{
 			Segment: segment.SegmentInfo,
 		}
@@ -1552,7 +1564,8 @@ func UpdateSegmentColumnGroupsOperator(segmentID int64, groups map[int64]*datapb
 // (commitBumpV3Materialization short-circuits once the persisted schema version
 // has reached the target), and the column-group merge is itself idempotent by
 // FieldID, so this operator is a straight apply.
-func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVersion int32, newGroups []*datapb.FieldBinlog, statsDelta *datapb.Statistics) UpdateOperator {
+func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, schema *schemapb.CollectionSchema, result *datapb.CompactionSegment) UpdateOperator {
+	newSchemaVersion := schema.GetVersion()
 	return func(modPack *UpdateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1561,7 +1574,7 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 		}
 		before := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
 
-		if len(newGroups) > 0 {
+		if newGroups := result.GetInsertLogs(); len(newGroups) > 0 {
 			merged, droppedFieldIDs := mergeSegmentColumnGroups(segment.Binlogs,
 				lo.KeyBy(newGroups, func(fb *datapb.FieldBinlog) int64 { return fb.GetFieldID() }))
 			segment.Binlogs = merged
@@ -1579,9 +1592,8 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 			segment.SchemaVersion = newSchemaVersion
 		}
 
-		if statsDelta != nil {
-			segment.Stats = addStatsDelta(modPack.Meta.Ctx, segmentID, segment.GetStats(), statsDelta)
-		}
+		segment.Stats = addStatsDelta(modPack.Meta.Ctx, segment, result, schema)
+		bindFieldLogicalSizes(segment.SegmentInfo)
 
 		// Bump DataVersion so querynodes with the segment loaded Reopen and pick
 		// up the new column group. Materialization always changes Binlogs, so this
@@ -1601,20 +1613,23 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 			if s == nil {
 				continue
 			}
+			startPosition := pos.GetStartPosition()
+			// Transform coverage is a logical timestamp, independent of the
+			// physical seek ID (Woodpecker 0/0 serializes to empty bytes).
+			// Persist it with the first data pack even if its seek ID is empty.
+			if s.GetLevel() != datapb.SegmentLevel_L0 && !s.GetIsImporting() && s.GetTransformStartAfterTimetick() == 0 {
+				s.TransformStartAfterTimetick = startPosition.GetTimestamp()
+			}
 			// L0 segments materialized from WALSummary have no physical WAL
 			// position. Their timestamp-only StartPosition is a valid delete
 			// retention boundary used by QueryCoord/delegators, not a WAL seek
 			// position. Dropping it would allow live L0 deletes to be evicted.
-			startPosition := pos.GetStartPosition()
 			if len(startPosition.GetMsgID()) == 0 &&
 				(s.GetLevel() != datapb.SegmentLevel_L0 || startPosition.GetTimestamp() == 0) {
 				continue
 			}
 
 			s.StartPosition = startPosition
-			if s.GetLevel() != datapb.SegmentLevel_L0 && !s.GetIsImporting() && s.GetTransformStartAfterTimetick() == 0 {
-				s.TransformStartAfterTimetick = startPosition.GetTimestamp()
-			}
 		}
 		return true
 	}
@@ -1654,9 +1669,9 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 
 		// Set segment dml position
 		for _, cp := range checkpoints {
-			if cp.SegmentID != segmentID {
+			if cp.GetSegmentID() != segmentID {
 				// Don't think this is gonna to happen, ignore for now.
-				mlog.Warn(modPack.Meta.Ctx, "checkpoint in segment is not same as flush segment to update, igreo", mlog.Int64("current", segmentID), mlog.Int64("checkpoint segment", cp.SegmentID))
+				mlog.Warn(modPack.Meta.Ctx, "checkpoint in segment is not same as flush segment to update, igreo", mlog.Int64("current", segmentID), mlog.Int64("checkpoint segment", cp.GetSegmentID()))
 				continue
 			}
 
@@ -1733,6 +1748,9 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 		// revision through UpdateManifestVersion below, guarded only by version
 		// monotonicity - a known bypass of the manifest lock (see the design
 		// doc's known limitations).
+		// A bare pointer does not identify the insert values. Flush, import
+		// and copy can establish coverage in their subsequent catalog operator.
+		ClearFieldLogicalSizes(segment.SegmentInfo)
 		segment.ManifestPath = manifestPath
 		return true
 	}
@@ -1801,7 +1819,10 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 			mlog.Warn(modPack.Meta.Ctx, "manifest adoption skipped after index publication", mlog.FieldSegmentID(segmentID))
 			return false
 		}
-		modPack.Get(segmentID).ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		segment = modPack.Get(segmentID)
+		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		// This external V3 pointer advance contains no changed-column list.
+		ClearFieldLogicalSizes(segment.SegmentInfo)
 		return true
 	}
 }
@@ -1813,6 +1834,9 @@ func UpdateImportedRows(segmentID int64, rows int64) UpdateOperator {
 			mlog.Warn(modPack.Meta.Ctx, "meta update: update NumOfRows failed - segment not found",
 				mlog.Int64("segmentID", segmentID))
 			return false
+		}
+		if segment.GetNumOfRows() != rows {
+			ClearFieldLogicalSizes(segment.SegmentInfo)
 		}
 		segment.NumOfRows = rows
 		segment.MaxRowNum = rows
@@ -1841,6 +1865,7 @@ func ResetImportingSegmentRows(segmentIDs ...int64) UpdateOperator {
 					mlog.String("state", segment.GetState().String()))
 				continue
 			}
+			ClearFieldLogicalSizes(segment.SegmentInfo)
 			segment.NumOfRows = 0
 			segment.MaxRowNum = 0
 			anyReset = true
@@ -2023,6 +2048,9 @@ func (m *Meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 func (m *Meta) UpdateSegmentsInfoWithoutNotify(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
 	locks, updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
 	defer locks.release()
+	if errors.Is(err, errIgnoredSegmentMetaOperation) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -2056,6 +2084,11 @@ func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, updates) }()
 	locks, updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
 	defer locks.release()
+	// A regressing V3 checkpoint/manifest must publish neither half of this
+	// transaction (the prepared DataView carries that request's revision).
+	if errors.Is(err, errIgnoredSegmentMetaOperation) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -2631,8 +2664,27 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	}
 
 	fallbackStart, fallbackDml := getCompactionFallbackPositions(compactFromSegInfos)
-
+	var newOutputs []*SegmentInfo
 	for _, seg := range result.GetSegments() {
+		// Clustering keeps its inputs live, so a retry can reach this path
+		// after its output (or a later revision of it) was persisted.
+		if existing := m.Segments.GetSegment(seg.GetSegmentID()); existing != nil && existing.GetStorageVersion() == storage.StorageV3 && existing.GetManifestPath() != "" {
+			if !segmentIDSetEqual(existing.GetCompactionFrom(), compactFromSegIDs) || existing.GetNumOfRows() != seg.GetNumOfRows() {
+				return nil, merr.WrapErrDataIntegrityMsg("conflicting clustering output for segment %d", seg.GetSegmentID())
+			}
+			cmp, err := packed.CompareManifestPath(seg.GetManifest(), existing.GetManifestPath())
+			if err != nil {
+				return nil, err
+			}
+			if cmp > 0 {
+				return nil, merr.WrapErrDataIntegrityMsg("clustering replay changed the published manifest for segment %d", seg.GetSegmentID())
+			}
+			if err := checkCompactionFieldSizeReplay(existing.SegmentInfo, seg); err != nil {
+				return nil, err
+			}
+			compactToSegInfos = append(compactToSegInfos, existing)
+			continue
+		}
 		startPos, dmlPos := RecalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		segmentInfo := &datapb.SegmentInfo{
 			ID:                          seg.GetSegmentID(),
@@ -2664,14 +2716,20 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		// CompactionSegment. V3 outputs whose stats live in the manifest
 		// are populated correctly there (the compactor sees the stats
 		// blob size); the receiver does not recompute.
-		segmentInfo.Stats = seg.GetStats()
+		if err := m.installReportedStats(segmentInfo, seg.GetStats()); err != nil {
+			return nil, err
+		}
 		segment := NewSegmentInfo(segmentInfo)
+		newOutputs = append(newOutputs, segment)
 		compactToSegInfos = append(compactToSegInfos, segment)
+	}
+	if len(newOutputs) == 0 {
+		return compactToSegInfos, nil
 	}
 
 	mlog.Debug(m.Ctx, "meta update: prepare for meta mutation - complete")
 
-	compactToInfos := lo.Map(compactToSegInfos, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
+	compactToInfos := lo.Map(newOutputs, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
 
@@ -2684,7 +2742,7 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		mlog.Warn(m.Ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, err
 	}
-	m.Segments.PublishSegments(compactToSegInfos)
+	m.Segments.PublishSegments(newOutputs)
 	mlog.Info(m.Ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegInfos, nil
 }
@@ -2769,7 +2827,9 @@ func (m *Meta) completeMixCompactionMutation(
 		// Statistics is computed at the compactor and shipped on the
 		// CompactionSegment. V3 outputs whose stats live in the manifest
 		// are populated correctly there; the receiver does not recompute.
-		compactToProto.Stats = compactToSegment.GetStats()
+		if err := m.installReportedStats(compactToProto, compactToSegment.GetStats()); err != nil {
+			return nil, err
+		}
 		compactToSegmentInfo := NewSegmentInfo(compactToProto)
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -2951,6 +3011,9 @@ func (m *Meta) appliedCompactionResultLocked(
 				"compaction inputs were already committed to different outputs than worker result Segment %d",
 				resultSegment.GetSegmentID(),
 			)
+		}
+		if err := checkCompactionFieldSizeReplay(segment.SegmentInfo, resultSegment); err != nil {
+			return nil, true, err
 		}
 		compactTo = append(compactTo, segment)
 	}
@@ -3235,6 +3298,9 @@ func (m *Meta) CompleteSortCompactionMutation(
 		compactTo, _ := m.Segments.GetCompactionTo(compactFromSegID)
 		for _, segment := range compactTo {
 			if segment.GetID() == resultSegmentID {
+				if err := checkCompactionFieldSizeReplay(segment.SegmentInfo, result.GetSegments()[0]); err != nil {
+					return nil, err
+				}
 				return []*SegmentInfo{segment}, nil
 			}
 		}
@@ -3307,7 +3373,9 @@ func (m *Meta) CompleteSortCompactionMutation(
 	// Statistics is computed at the compactor and shipped on the
 	// CompactionSegment. V3 outputs whose stats live in the manifest are
 	// populated correctly there; the receiver does not recompute.
-	segmentInfo.Stats = resultSegment.GetStats()
+	if err := m.installReportedStats(segmentInfo, resultSegment.GetStats()); err != nil {
+		return nil, err
+	}
 
 	segment := NewSegmentInfo(segmentInfo)
 	if segment.GetNumOfRows() == 0 {
@@ -3424,7 +3492,11 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
 	}
 	replay := packed.SameManifestPath(resultManifest, currentManifest)
-	if !replay {
+	if replay {
+		if err := CheckMaterializationFieldSizeReplay(oldSegment.SegmentInfo, resultSegment); err != nil {
+			return nil, err
+		}
+	} else {
 		if !packed.SameManifestPath(baseManifest, currentManifest) {
 			return nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
 		}
@@ -3472,11 +3544,6 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 	}
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
-	// A replay keeps the stored pointer text, so a differently spelled copy of
-	// the same revision neither rewrites it nor bumps DataVersion below.
-	if !replay {
-		cloned.ManifestPath = resultManifest
-	}
 	// Statistics semantics depend on the adoption path: this branch updates an
 	// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
 	// onto the segment's current value. See CompactionSegment.stats.
@@ -3487,8 +3554,12 @@ func (m *Meta) CompleteBumpSchemaVersionCompactionMutation(
 	//
 	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
 	if !replay {
+		// Validate retained columns against the original revision before
+		// binding the new projection to the adopted revision.
+		cloned.Stats = addStatsDelta(m.Ctx, cloned, resultSegment, t.GetSchema())
+		cloned.ManifestPath = resultManifest
+		bindFieldLogicalSizes(cloned.SegmentInfo)
 		if delta := resultSegment.GetStats(); delta != nil {
-			cloned.Stats = addStatsDelta(m.Ctx, segmentID, cloned.GetStats(), delta)
 			mlog.Info(m.Ctx, "meta update: applied schema bump stats increment",
 				mlog.Int64("segmentID", segmentID),
 				mlog.String("baseManifest", baseManifest),
@@ -3545,7 +3616,7 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 	UpdateSegState(dropped, commonpb.SegmentState_Dropped)
 
 	startPos, dmlPos := RecalculateSegmentPosition(resultSegment.GetInsertLogs(), oldSegment.GetInsertChannel(), oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
-	newSegment := NewSegmentInfo(&datapb.SegmentInfo{
+	segmentInfo := &datapb.SegmentInfo{
 		ID:                          resultSegment.GetSegmentID(),
 		CollectionID:                oldSegment.GetCollectionID(),
 		PartitionID:                 oldSegment.GetPartitionID(),
@@ -3577,10 +3648,11 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 		ExpirQuantiles:              resultSegment.GetExpirQuantiles(),
 		IsSortedByNamespace:         oldSegment.GetIsSortedByNamespace(),
 		SchemaVersion:               schemaVersion,
-		// Statistics is computed at the compactor and shipped on the
-		// CompactionSegment; the receiver copies it verbatim.
-		Stats: resultSegment.GetStats(),
-	})
+	}
+	if err := m.installReportedStats(segmentInfo, resultSegment.GetStats()); err != nil {
+		return nil, err
+	}
+	newSegment := NewSegmentInfo(segmentInfo)
 	if newSegment.GetNumOfRows() <= 0 {
 		newSegment.State = commonpb.SegmentState_Dropped
 		newSegment.DroppedAt = uint64(time.Now().UnixNano())

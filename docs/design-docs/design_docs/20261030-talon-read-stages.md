@@ -3,35 +3,39 @@
 ## Configuration and scope
 
 `common.storage.talon.mode` remains 0 (disabled), 1 (eligible reads), or 2
-(eligible small reads). `common.storage.talon.enabledStages` selects eligible
-operations: `all` is the backward-compatible default; `load_open` enables only
-QueryNode load-reader open metadata, including footers and schema metadata.
-Data reads after open, index loads, ordinary manifests/stats, and background
-reads use origin storage under `load_open`.
+(eligible small reads). `common.storage.talon.enabledStages` selects operations:
 
-YAML lists and comma-separated values are accepted. Empty values, unknown names,
-and combining `all` with another stage are rejected. Restart is required.
+- `all` is the backward-compatible default.
+- `load_open` selects QueryNode format-reader open metadata, including footers
+  and schema metadata. Subsequent data reads use the origin filesystem.
+- `manifest` selects QueryNode segment-manifest reads during load. It does not
+  select the data, index, or stats files referenced by a manifest.
+
+`load_open` and `manifest` can be combined. YAML lists and comma-separated
+values are accepted. Empty values, unknown names, and combining `all` with
+another stage are rejected. Restart is required.
 
 ```yaml
 common:
   storage:
     talon:
       mode: 1
-      enabledStages: [load_open]
+      enabledStages: [load_open, manifest]
       coordinator: talon-coordinator:7000
 ```
 
-Only LoadOpen (`1U << 0`) is a defined operation bit. Future operations receive
-new independent bits; there is no OtherRead catchall. All is UINT32_MAX. Raw
-mask zero from older senders/initializers retains legacy All behavior. The mask
-stays within Milvus and never enters milvus-storage properties.
+LoadOpen is `1U << 0`; Manifest is `1U << 1`. Future operations receive new
+independent bits; there is no OtherRead catchall. All is UINT32_MAX. Raw mask
+zero from older senders/initializers retains legacy All behavior. The mask stays
+within Milvus and never enters milvus-storage properties.
 
 `enableForExternalTable` remains an additional gate, default false. Remote
 external sources require it as well as a matching stage and enabled mode. Local
-filesystems never route through Talon. Explicit DataCoord prewarming remains
-separately controlled by `talonPrewarm.enabled`.
+filesystems never route through Talon. Broker-backed external sources retain
+origin routing. Explicit DataCoord prewarming remains separately controlled by
+`talonPrewarm.enabled`.
 
-## Transport and default filesystems
+## Transport and shared properties
 
 Raw mode and mask travel together through paramtable, indexpb.StorageConfig,
 indexcgopb/clusteringpb.StorageConfig, CStorageConfig, and native
@@ -40,79 +44,83 @@ StorageConfig/StorageV2FSCache::Key. All three protobuf schemas use uint32 field
 not consult a receiving worker's local policy.
 
 Default filesystems are shared by arbitrary operations, so only All (or legacy
-zero) permits their configured Talon mode. Any restricted mask, including an
-unrecognized future bit, leaves the default FS disabled. A future operation's
-entry point must explicitly select its own bit rather than enabling unrelated
-users of the default FS.
+zero) permits their configured Talon mode. A restricted mask leaves unscoped
+operations on origin storage. Each eligible entry point must explicitly select
+its own stage instead of enabling unrelated users of the default filesystem.
 
-`MakeInternalPropertiesFromStorageConfig` accepts only CStorageConfig and emits
-ordinary FS properties. It does not accept a current-stage argument or emit any
-open override. `LoonFFIPropertiesSingleton::Init` caches this ordinary base and a
-small raw `TalonReadConfig` snapshot separately; it does not classify callers as
-LoadOpen. The snapshot contains only mode, mask, and external-table enablement,
-not duplicated provider clients or credentials.
+`MakeInternalPropertiesFromStorageConfig` builds the ordinary base properties.
+`LoonFFIPropertiesSingleton::Init` stores that immutable base and a raw
+`TalonReadConfig` snapshot. `GetProperties(PropertiesOptions)` resolves the
+requested stage into effective Talon mode, external mode, and open-only policy.
+Equivalent effective settings share an immutable snapshot from a bounded
+128-entry cache; unchanged settings reuse the base. Base-property updates
+invalidate this cache while existing readers retain their snapshots. Callers
+copy a snapshot before injecting collection-specific external aliases.
 
-## Load-local properties
+Go's `MakePropertiesFromStorageConfig` accepts optional stage bits and applies
+the same stage selection before building FFI properties. The stage and manifest
+metric origin are independent: the former selects routing; the latter selects
+a fixed instrumentation population. Neither is inferred from a manifest path.
 
-Only the actual load-reader construction sites call `MakeLoadProperties`:
+## Load reader and manifest entry points
 
-- Sealed external `LoadColumnGroups`, before external-spec alias injection.
-- Sealed internal `PrepareLoadDiffForReopen`, for normal and lazy readers.
-- Growing `LoadColumnsGroups`, after the ordinary manifest read.
+LoadOpen is selected by sealed `LoadColumnGroups`, sealed
+`PrepareLoadDiffForReopen`, and growing `LoadColumnsGroups`. Under a restricted
+matching policy, the resulting properties set `fs.talon.open_only=true`.
+External alias injection carries the effective mode and open-only policy into
+that alias's filesystem properties, subject to the external and local gates.
+Mode zero does not enable Talon.
 
-The function copies the base, checks the LoadOpen bit, and adds
-`reader.open.fs.talon.mode` only to that private copy when it differs from the
-ordinary mode. The private external open-mode value is consumed during alias
-injection to form `reader.open.extfs.<alias>.talon.mode`. External and local-FS
-gates still apply. Mode zero adds no overrides. Base properties remain unchanged.
+Manifest is selected separately by:
 
-Reader clones, async chunk readers, lazy materialization, and reload retain the
-load reader's private properties. Ordinary singleton users (manifest access,
-JSON stats, TEXT LOB reads, writers, and default FS access) receive only the base.
+- Native `SegmentLoadInfo::GetColumnGroups` and the growing segment's manifest
+  read before creating its format reader.
+- Go `NewStatsResolverFromLoadInfo`, for QueryNode manifest-backed stats lookup.
+- QueryNode manifest-backed delta and compact-to overlay lookup, through
+  `GetManifestHandleWithExtfs` and `GetDeltaLogPathsFromManifest`.
 
-## Storage open lifecycle
+The manifest snapshot enables its configured Talon mode for the whole manifest
+read and does not set the LoadOpen-only policy. Unscoped and DataNode
+`StatsResolver` constructors do not acquire the QueryNode manifest stage.
+Resolvers cache their result or error; repeated lookups do not issue another
+FFI read. Metric origins such as create/preload/postsync/reopen survive the
+same call chain without replacing the stage argument or duplicating observations.
 
-Storage understands generic `reader.open.fs.*` / `reader.open.extfs.*` overrides,
-not Talon stages. Underlying clients remain in the existing shared FS cache;
-reader-local wrappers select open/data sources independently. Successful open
-switches retained handles to data routing before metadata or readers are
-published. Providers are not destroyed by the routing transition.
+Manifest properties are not reused for the returned stats, data, or index
+files. Ordinary singleton users retain the base policy. Reader clones and lazy
+materialization retain the properties selected for their load reader.
 
-Parquet and Vortex sync/async readers finish this phase. Metadata reuse retains a
-finished scope; encrypted Parquet reconstruction creates a fresh open scope for
-its decryptors. Iceberg/Paimon delegated Parquet/Vortex files share these paths.
-Iceberg delete rows remain ordinary reads.
+## Storage lifecycle and dependency
 
-Vortex local-format loading bypasses the normal format-reader factory. Its
-`VortexColumnGroup` explicitly uses the generic open wrapper for
-`VortexFooterReader::Open` (footer, schema, and zonemap metadata), finishes it
-afterward, and keeps the original source
-FS for Cell fills. The pinned footer implementation only uses its source input
-handle during Open.
+The pinned milvus-storage revision is
+`95215819ea9094f7b96be0f9503346dfee0b62e5`. It supports the generic
+`fs.talon.open_only` filesystem policy and `ControlTalonForFile` routing control;
+it does not receive a Milvus stage bit or name. This supersedes the earlier
+proposal to pass `reader.open.fs.*` overrides.
 
-Lance, Paimon's native Rust FileIO paths, and legacy packed-reader paths remain
-on origin under a restricted mask. No new acceleration is claimed for them;
-All preserves their existing behavior.
+For an open-only Talon file, disabling Talon routes subsequent content reads
+through its retained origin handle. Each read captures the routing flag when it
+starts. For an unrestricted Talon file, the control operation leaves its
+configured mode active. The filesystem cache key includes the open-only policy.
+The current Parquet, Vortex, and delegated format-reader implementations control
+routing at their metadata-to-data boundary. This does not prove acceleration
+for every external format or every native FileIO path; those paths require their
+own runtime validation.
 
-## Dependency and compatibility
-
-This change requires milvus-storage support for generic reader-open filesystem
-overrides and switching retained file handles after Open. The currently pinned
-storage revision `3bc763b7` does not include that support; the dependency update
-must be coordinated separately before this feature can be merged and released.
-No compiler, toolchain, build-script, or dependency-pin changes are included here.
-
-Milvus's internal CStorageConfig and native config layouts change, so matching
-native libraries must be rebuilt. The storage Reader/Writer API does not receive
-a Talon mask or stage name. Older Milvus senders omit the mask and retain legacy
-All behavior; older receivers cannot enforce restricted stages. Upgrade the
-participating components and restart before enabling load_open.
+Milvus's internal CStorageConfig and native configuration layouts change with
+stage transport, so matching native libraries must be rebuilt. Older senders
+omit the mask and retain legacy All behavior; older receivers cannot enforce
+restricted stages. Upgrade participating components and restart before enabling
+restricted stages. The observability wrappers preserve master's dependency pin,
+routing rules, and error identity.
 
 ## Validation
 
-The property tests cover modes 0/1/2, legacy/load/unknown/combined/All masks,
-private-copy isolation, local storage, and the external-table gate. Protocol
-round-trip tests verify that the mask survives all three StorageConfig schemas.
-The Vortex source-counter regression checks open metadata versus later Cell
-reads using independent filesystems. Native runtime verification with the
-matching storage dependency remains required before merge.
+Property tests cover disabled/full/small-read modes, legacy/load/manifest/
+combined/unknown/All masks, immutable snapshot reuse and invalidation, local
+storage, and external gates. Protocol round-trip tests verify the mask in all
+three StorageConfig schemas. Resolver and entry-point tests verify stage
+forwarding independently of metric origins, cached lookups, and property failures.
+Manifest timing tests require one observation per phase with the final outcome.
+These checks do not measure production latency improvement or replace native
+runtime validation with the pinned storage dependency.

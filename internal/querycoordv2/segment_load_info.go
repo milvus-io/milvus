@@ -3,8 +3,10 @@ package querycoordv2
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
 // GetQueryViewSegmentLoadInfo returns current snapshots in a batch. A failed
@@ -19,7 +21,13 @@ func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("segment metadata provider is not initialized"))
 		return resp, nil
 	}
-	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs(), req.GetResolveManifestIndexesLocally())
+	indexMode := types.QueryViewIndexFull
+	if req.GetResolveManifestIndexesLocally() {
+		indexMode = types.QueryViewIndexResolveLocally
+	}
+	buildTimer := loadInfoBuild.Begin()
+	infos, indexes, err := s.mixCoord.GetQueryViewSegmentLoadInfos(ctx, req.GetCollectionID(), req.GetSegmentIDs(), indexMode)
+	buildTimer.End(err)
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -27,3 +35,5 @@ func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.G
 	resp.Results, resp.IndexInfoList = infos, indexes
 	return resp, nil
 }
+
+var loadInfoBuild = stage.New("coord", "load_info", "build_snapshot")

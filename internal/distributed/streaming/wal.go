@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -108,6 +109,9 @@ func (w *walAccesserImpl) RawAppend(ctx context.Context, msg message.MutableMess
 
 // Read returns a scanner for reading records from the wal.
 func (w *walAccesserImpl) Read(ctx context.Context, opts ReadOption) Scanner {
+	if _, latest := opts.DeliverPolicy.GetPolicy().(*streamingpb.DeliverPolicy_Latest); latest {
+		return newErrScanner(status.NewInvalidArgument("latest delivery policy is deprecated; use All, StartFrom or StartAfter"))
+	}
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return newErrScanner(ErrWALAccesserClosed)
 	}

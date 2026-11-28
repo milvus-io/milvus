@@ -95,10 +95,9 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 	meta, err := NewMemoryMeta(t)
 	require.NoError(t, err)
 	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             200,
-		State:          commonpb.SegmentState_Flushed,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   oldManifest,
+		ID: 200, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, NumOfRows: 12,
+		ManifestPath: oldManifest, FieldLogicalSizesManifest: oldManifest,
+		Stats: &datapb.Statistics{FieldLogicalSizes: &datapb.FieldLogicalSizes{Version: 1, RowCount: 12, Fields: map[int64]*datapb.FieldLogicalSize{101: {}}}},
 	})))
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
@@ -128,6 +127,8 @@ func TestCommitSegmentManifestPublishesOnlyAfterCatalogSuccess(t *testing.T) {
 
 	updated := meta.GetSegment(context.Background(), 200)
 	require.Equal(t, newManifest, updated.GetManifestPath())
+	require.Equal(t, newManifest, updated.GetFieldLogicalSizesManifest())
+	require.NotNil(t, SegmentFieldLogicalSizes(updated.SegmentInfo).GetFields()[101])
 	require.EqualValues(t, 3, updated.GetStats().GetDeleteNumRows())
 	require.Empty(t, updated.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	manifest9 := packed.MarshalManifestPath(basePath, 9)

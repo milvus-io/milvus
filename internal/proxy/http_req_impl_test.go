@@ -7,11 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -19,7 +22,9 @@ import (
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -425,4 +430,86 @@ func TestDescribeDatabase(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "db_name is required")
 	})
+}
+
+type (
+	consoleMetadataTestMixCoord struct{ types.MixCoordClient }
+	consoleMetadataTestProxy    struct{ types.ProxyComponent }
+)
+
+func TestConsoleMetadataAuthorization(t *testing.T) {
+	require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	t.Cleanup(func() { Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key) })
+
+	mix := &consoleMetadataTestMixCoord{}
+	proxy := &consoleMetadataTestProxy{}
+	var collectionUser, databaseUser string
+	var describedDB string
+	show := mockey.Mock((*consoleMetadataTestMixCoord).ShowCollections).To(
+		func(_ *consoleMetadataTestMixCoord, ctx context.Context, _ *milvuspb.ShowCollectionsRequest, _ ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
+			md, _ := metadata.FromOutgoingContext(ctx)
+			collectionUser, _ = contextutil.GetCurUserFromContext(metadata.NewIncomingContext(context.Background(), md))
+			return &milvuspb.ShowCollectionsResponse{Status: &commonpb.Status{}}, nil
+		}).Build()
+	defer show.UnPatch()
+	load := mockey.Mock((*consoleMetadataTestMixCoord).ShowLoadCollections).
+		Return(&querypb.ShowCollectionsResponse{Status: &commonpb.Status{}}, nil).Build()
+	defer load.UnPatch()
+	list := mockey.Mock((*consoleMetadataTestProxy).ListDatabases).To(
+		func(_ *consoleMetadataTestProxy, ctx context.Context, _ *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
+			databaseUser, _ = contextutil.GetCurUserFromContext(ctx)
+			return &milvuspb.ListDatabasesResponse{Status: &commonpb.Status{}}, nil
+		}).Build()
+	defer list.UnPatch()
+	describe := mockey.Mock((*consoleMetadataTestProxy).DescribeDatabase).To(
+		func(_ *consoleMetadataTestProxy, _ context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
+			describedDB = req.GetDbName()
+			return &milvuspb.DescribeDatabaseResponse{Status: &commonpb.Status{}}, nil
+		}).Build()
+	defer describe.UnPatch()
+	roles := mockey.Mock(GetRole).Return([]string{"reader"}, nil).Build()
+	defer roles.UnPatch()
+	policy := mockey.Mock(isRolePermitted).To(func(role, db, _, _, privilege string) (bool, error) {
+		return role == "reader" && db == "allowed" && privilege == commonpb.ObjectPrivilege_PrivilegeDescribeDatabase.String(), nil
+	}).Build()
+	defer policy.UnPatch()
+
+	for _, tc := range []struct {
+		name                                                  string
+		handler                                               gin.HandlerFunc
+		admin                                                 bool
+		user, db                                              string
+		wantStatus                                            int
+		wantCollectionUser, wantDatabaseUser, wantDescribedDB string
+	}{
+		{name: "collection identity", handler: listCollection(&Proxy{mixCoord: mix}), user: "alice", wantStatus: http.StatusOK, wantCollectionUser: "alice"},
+		{name: "database identity", handler: listDatabase(proxy), user: "alice", wantStatus: http.StatusOK, wantDatabaseUser: "alice"},
+		{name: "collection identity required", handler: listCollection(&Proxy{mixCoord: mix}), wantStatus: http.StatusForbidden},
+		{name: "database identity required", handler: listDatabase(proxy), wantStatus: http.StatusForbidden},
+		{name: "describe identity required", handler: describeDatabase(proxy), db: "allowed", wantStatus: http.StatusForbidden},
+		{name: "describe privilege required on target", handler: describeDatabase(proxy), user: "alice", db: "other", wantStatus: http.StatusForbidden},
+		{name: "describe permitted target", handler: describeDatabase(proxy), user: "alice", db: "allowed", wantStatus: http.StatusOK, wantDescribedDB: "allowed"},
+		{name: "collection admin view", handler: listCollection(&Proxy{mixCoord: mix}), admin: true, wantStatus: http.StatusOK},
+		{name: "database admin view", handler: listDatabase(proxy), admin: true, wantStatus: http.StatusOK},
+		{name: "describe admin view", handler: describeDatabase(proxy), admin: true, db: "other", wantStatus: http.StatusOK, wantDescribedDB: "other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionUser, databaseUser, describedDB = "", "", ""
+			if tc.admin {
+				adminMock := mockey.Mock(mhttp.AuthenticatedAdminFromContext).Return("root", true).Build()
+				defer adminMock.UnPatch()
+			}
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/?db_name="+tc.db, nil)
+			if tc.user != "" {
+				c.Set("username", tc.user)
+			}
+			tc.handler(c)
+			assert.Equal(t, tc.wantStatus, w.Code)
+			assert.Equal(t, tc.wantCollectionUser, collectionUser)
+			assert.Equal(t, tc.wantDatabaseUser, databaseUser)
+			assert.Equal(t, tc.wantDescribedDB, describedDB)
+		})
+	}
 }

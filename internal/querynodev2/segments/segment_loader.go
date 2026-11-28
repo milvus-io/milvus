@@ -947,7 +947,9 @@ func separateLoadInfoV2(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, 
 		}
 	}
 
-	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).WithLoadManifest(ctx).TextAndJSONIndexStatsWithBasePaths()
+	statsResult := packed.NewStatsResolverFromLoadInfo(loadInfo).
+		WithLoadManifest(ctx).
+		WithManifestReadOrigin(packed.ManifestReadPreload).TextAndJSONIndexStatsWithBasePaths()
 	textIndexedInfo := statsResult.TextIndexStats
 	jsonKeyIndexInfo := statsResult.JSONKeyStats
 	textBasePaths := statsResult.TextBasePaths
@@ -990,9 +992,8 @@ func separateLoadInfoV2(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, 
 	unindexedTextFields := make(map[int64]struct{})
 	// todo(SpadeA): consider struct fields when index is ready
 	for _, field := range schema.GetFields() {
-		h := typeutil.CreateFieldSchemaHelper(field)
 		_, textIndexExist := textIndexedInfo[field.GetFieldID()]
-		if h.EnableMatch() && !textIndexExist {
+		if typeutil.IsTextMatchEnabled(field) && !textIndexExist {
 			unindexedTextFields[field.GetFieldID()] = struct{}{}
 		}
 	}
@@ -1001,6 +1002,17 @@ func separateLoadInfoV2(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, 
 }
 
 func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) (err error) {
+	physicalLoadTiming := PhysicalLoadTimingFromContext(ctx)
+	startedAt := time.Now()
+	prepareFinished := false
+	defer func() {
+		if physicalLoadTiming != nil {
+			physicalLoadTiming.SealedLoad = time.Since(startedAt)
+			if !prepareFinished {
+				physicalLoadTiming.SealedPrepare = physicalLoadTiming.SealedLoad
+			}
+		}
+	}()
 	// TODO: we should create a transaction-like api to load segment for segment interface,
 	// but not do many things in segment loader.
 	stateLockGuard, err := segment.StartLoadData()
@@ -1031,7 +1043,21 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			mlog.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
 		)
 	}
+	loadSubmittedAt := time.Now()
+	prepareFinished = true
+	if physicalLoadTiming != nil {
+		physicalLoadTiming.SealedPrepare = loadSubmittedAt.Sub(startedAt)
+	}
 	_, err = GetLoadPool().Submit(func() (any, error) {
+		workerStartedAt := time.Now()
+		if physicalLoadTiming != nil {
+			physicalLoadTiming.SealedLoadPoolWait = workerStartedAt.Sub(loadSubmittedAt)
+		}
+		defer func() {
+			if physicalLoadTiming != nil {
+				physicalLoadTiming.LocalSegmentLoad = time.Since(workerStartedAt)
+			}
+		}()
 		if err = segment.Load(ctx); err != nil {
 			return struct{}{}, merr.Wrap(err, "At Load")
 		}
@@ -1042,6 +1068,12 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		return err
 	}
 
+	postLoadStartedAt := time.Now()
+	defer func() {
+		if physicalLoadTiming != nil {
+			physicalLoadTiming.SealedPostLoad = time.Since(postLoadStartedAt)
+		}
+	}()
 	for _, indexInfo := range loadInfo.IndexInfos {
 		segment.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{

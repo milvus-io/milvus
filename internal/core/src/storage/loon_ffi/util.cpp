@@ -15,8 +15,10 @@
 #include <mutex>
 #include <regex>
 #include <cctype>
+#include <charconv>
 #include <arpa/inet.h>
 #include "arrow/util/uri.h"
+#include "arrow/util/string.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
@@ -52,6 +54,7 @@
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/Util.h"
 #include "storage/loon_ffi/loon_error_code.h"
 
 using json = nlohmann::json;
@@ -385,180 +388,143 @@ IsCredentialBrokerEndpoint(const std::string& endpoint) {
 }
 
 std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
-    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
-
-    // Add non-null string fields
-    if (c_storage_config.address != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ADDRESS, c_storage_config.address);
+MakeStorageProperties(CStorageConfig config) {
+    auto properties = std::make_shared<milvus_storage::api::Properties>();
+    // C/protobuf inputs are already typed. Preserve their values, including
+    // the configured ChunkManager root, until the filesystem boundary.
+    const std::pair<const char*, const char*> strings[] = {
+        {PROPERTY_FS_ADDRESS, config.address},
+        {PROPERTY_FS_BUCKET_NAME, config.bucket_name},
+        {PROPERTY_FS_ACCESS_KEY_ID, config.access_key_id},
+        {PROPERTY_FS_ACCESS_KEY_VALUE, config.access_key_value},
+        {PROPERTY_FS_ROOT_PATH, config.root_path},
+        {PROPERTY_FS_STORAGE_TYPE, config.storage_type},
+        {PROPERTY_FS_CLOUD_PROVIDER, config.cloud_provider},
+        {PROPERTY_FS_IAM_ENDPOINT, config.iam_endpoint},
+        {PROPERTY_FS_LOG_LEVEL, config.log_level},
+        {PROPERTY_FS_REGION, config.region},
+        {PROPERTY_FS_SSL_CA_CERT, config.sslCACert},
+        {PROPERTY_FS_GCP_CREDENTIAL_JSON, config.gcp_credential_json},
+        {PROPERTY_FS_TLS_MIN_VERSION, config.tls_min_version},
+        {PROPERTY_FS_TALON_COORDINATOR, config.talon_coordinator},
+    };
+    for (const auto& [key, value] : strings) {
+        if (value != nullptr) {
+            (*properties)[key] = std::string(value);
+        }
     }
-    if (c_storage_config.bucket_name != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_BUCKET_NAME,
-                                      c_storage_config.bucket_name);
+    if (config.talon_namespace != nullptr &&
+        config.talon_namespace[0] != '\0') {
+        (*properties)[PROPERTY_FS_TALON_NAMESPACE] =
+            std::string(config.talon_namespace);
     }
-    if (c_storage_config.access_key_id != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_ACCESS_KEY_ID,
-                                      c_storage_config.access_key_id);
+    (*properties)[PROPERTY_FS_USE_SSL] = config.useSSL;
+    (*properties)[PROPERTY_FS_USE_IAM] = config.useIAM;
+    (*properties)[PROPERTY_FS_USE_VIRTUAL_HOST] = config.useVirtualHost;
+    (*properties)[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] =
+        config.use_custom_part_upload;
+    (*properties)[PROPERTY_FS_REQUEST_TIMEOUT_MS] = config.requestTimeoutMs;
+    (*properties)[PROPERTY_FS_USE_CRC32C_CHECKSUM] = config.use_crc32c_checksum;
+    if (config.max_connections > 0) {
+        (*properties)[PROPERTY_FS_MAX_CONNECTIONS] = config.max_connections;
     }
-    if (c_storage_config.access_key_value != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_ACCESS_KEY_VALUE,
-                                      c_storage_config.access_key_value);
-    }
-    const std::string storage_type = c_storage_config.storage_type != nullptr
-                                         ? c_storage_config.storage_type
-                                         : "";
-    if (c_storage_config.root_path != nullptr || storage_type == "local") {
-        const std::string root_path = c_storage_config.root_path != nullptr
-                                          ? c_storage_config.root_path
-                                          : "";
-        milvus_storage::api::SetValue(
-            *properties_map,
-            PROPERTY_FS_ROOT_PATH,
-            LoonFSRootPath(storage_type, root_path).c_str());
-    }
-    if (c_storage_config.storage_type != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_STORAGE_TYPE,
-                                      c_storage_config.storage_type);
-    }
-    if (c_storage_config.cloud_provider != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_CLOUD_PROVIDER,
-                                      c_storage_config.cloud_provider);
-    }
-    if (c_storage_config.iam_endpoint != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_IAM_ENDPOINT,
-                                      c_storage_config.iam_endpoint);
-    }
-    if (c_storage_config.log_level != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_LOG_LEVEL, "Warn");
-    }
-    if (c_storage_config.region != nullptr) {
-        milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_REGION, c_storage_config.region);
-    }
-    if (c_storage_config.sslCACert != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_SSL_CA_CERT,
-                                      c_storage_config.sslCACert);
-    }
-    if (c_storage_config.gcp_credential_json != nullptr) {
-        milvus_storage::api::SetValue(*properties_map,
-                                      PROPERTY_FS_GCP_CREDENTIAL_JSON,
-                                      c_storage_config.gcp_credential_json);
-    }
-
-    // Add boolean fields
-    milvus_storage::api::SetValue(*properties_map,
-                                  PROPERTY_FS_USE_SSL,
-                                  c_storage_config.useSSL ? "true" : "false");
-    milvus_storage::api::SetValue(*properties_map,
-                                  PROPERTY_FS_USE_IAM,
-                                  c_storage_config.useIAM ? "true" : "false");
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_VIRTUAL_HOST,
-        c_storage_config.useVirtualHost ? "true" : "false");
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_CUSTOM_PART_UPLOAD,
-        c_storage_config.use_custom_part_upload ? "true" : "false");
-
-    // Preserve SDK I/O until CRT honors the configured TLS minimum.
-    (*properties_map)[PROPERTY_FS_S3_USE_CRT] = false;
-
-    // Add integer fields
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_REQUEST_TIMEOUT_MS,
-        std::to_string(c_storage_config.requestTimeoutMs).c_str());
-    // Absent when unset: leave the key absent so milvus-storage applies its
-    // registered default instead of taking an explicit 0.
-    if (c_storage_config.max_connections > 0) {
-        milvus_storage::api::SetValue(
-            *properties_map,
-            PROPERTY_FS_MAX_CONNECTIONS,
-            std::to_string(c_storage_config.max_connections).c_str());
-    }
-
-    (*properties_map)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
-        c_storage_config.crt_queue_sizes > 0
-            ? c_storage_config.crt_queue_sizes
+    (*properties)[PROPERTY_FS_S3_USE_CRT] = false;
+    (*properties)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+        config.crt_queue_sizes > 0
+            ? config.crt_queue_sizes
             : milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
                   .GetS3CrtQueueSizes();
-
-    if (c_storage_config.tls_min_version != nullptr) {
-        std::string tls_ver(c_storage_config.tls_min_version);
-        if (!tls_ver.empty() && tls_ver != "default") {
-            milvus_storage::api::SetValue(*properties_map,
-                                          PROPERTY_FS_TLS_MIN_VERSION,
-                                          c_storage_config.tls_min_version);
-        }
-    }
-
-    milvus_storage::api::SetValue(
-        *properties_map,
-        PROPERTY_FS_USE_CRC32C_CHECKSUM,
-        c_storage_config.use_crc32c_checksum ? "true" : "false");
-
-    const bool is_local =
-        c_storage_config.storage_type != nullptr &&
-        std::string_view(c_storage_config.storage_type) == "local";
-    // Default properties serve arbitrary operations. Only unrestricted policy
-    // enables their FS; load readers select their own mode and file policy later.
-    const uint32_t data_mode = (c_storage_config.talon_enabled_stages == 0 ||
-                                c_storage_config.talon_enabled_stages ==
-                                    milvus::storage::kTalonStagesAll)
-                                   ? c_storage_config.talon_mode
-                                   : 0;
+    // Shared filesystems serve arbitrary operations. Restricted stage masks
+    // enable Talon only in the stage-specific properties selected by readers.
+    const uint32_t data_mode =
+        config.talon_enabled_stages == 0 ||
+                config.talon_enabled_stages == milvus::storage::kTalonStagesAll
+            ? config.talon_mode
+            : 0;
+    (*properties)[PROPERTY_FS_TALON_MODE] = data_mode;
+    (*properties)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
     const std::pair<const char*, uint32_t> talon_values[] = {
-        {PROPERTY_FS_TALON_MODE, data_mode},
         {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
-         c_storage_config.talon_small_read_threshold},
-        {PROPERTY_FS_TALON_BLOCK_SIZE, c_storage_config.talon_block_size},
-        {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR,
-         c_storage_config.talon_max_idle_per_addr}};
-    // Ordinary callers retain unrestricted file behavior; a QN load copy may
-    // select the immutable open-only filesystem policy below.
-    (*properties_map)[PROPERTY_FS_TALON_OPEN_ONLY] = false;
-    // Keep the External Table policy alongside ordinary filesystem properties.
-    // This Milvus-only key is consumed below, including for local primary storage.
-    (*properties_map)["milvus.talon.external_mode"] = std::to_string(
-        c_storage_config.talon_enable_for_external_table ? data_mode : 0);
+         config.talon_small_read_threshold},
+        {PROPERTY_FS_TALON_BLOCK_SIZE, config.talon_block_size},
+        {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR, config.talon_max_idle_per_addr},
+    };
     for (const auto& [key, value] : talon_values) {
-        const bool is_mode = std::string_view(key) == PROPERTY_FS_TALON_MODE;
-        if (!is_mode && value == 0) {
-            continue;  // Unset in older StorageConfig messages: use storage defaults.
+        if (value > 0) {
+            (*properties)[key] = value;
         }
-        (*properties_map)[key] = is_mode && is_local ? uint32_t{0} : value;
     }
-    if (c_storage_config.talon_coordinator != nullptr) {
-        (*properties_map)[PROPERTY_FS_TALON_COORDINATOR] =
-            std::string(c_storage_config.talon_coordinator);
-    }
-    if (c_storage_config.talon_namespace != nullptr &&
-        c_storage_config.talon_namespace[0] != '\0') {
-        (*properties_map)[PROPERTY_FS_TALON_NAMESPACE] =
-            std::string(c_storage_config.talon_namespace);
-    }
-
-    // Carry the configured arrow reader prebuffer limits into every
-    // freshly-built properties map. Index build (index_c.cpp) and the FFI
-    // readers construct properties per task through this helper instead of
-    // going through LoonFFIPropertiesSingleton's cached map, so without this
-    // the common.arrow.reader.* configuration never reaches those reads and
-    // external-table index builds are stuck with arrow's default range
-    // coalescing (effectively one in-flight S3 range per file).
+    // Preserve the external-table policy even when the primary is local.
+    (*properties)["milvus.talon.external_mode"] =
+        std::to_string(config.talon_enable_for_external_table ? data_mode : 0);
     milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-        .ApplyArrowReaderConfig(*properties_map);
+        .ApplyArrowReaderConfig(*properties);
+    return properties;
+}
 
-    return properties_map;
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalProperties(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    const auto storage_type = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_STORAGE_TYPE);
+    auto result =
+        std::make_shared<milvus_storage::api::Properties>(*properties);
+    if (storage_type == "local") {
+        // Keys already include localStorage.path; do not prepend it twice.
+        (*result)[PROPERTY_FS_ROOT_PATH] = std::string(kLoonLocalFSRootPath);
+        (*result)[PROPERTY_FS_TALON_MODE] = uint32_t{0};
+    }
+    if (storage_type == "minio") {
+        (*result)[PROPERTY_FS_STORAGE_TYPE] = std::string("remote");
+    }
+    const auto provider = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_CLOUD_PROVIDER);
+    if ((storage_type == "remote" || storage_type == "minio") &&
+        provider == "gcpnative") {
+        // Reject before filesystem creation so every C++ entry point reports
+        // a configuration error, rather than a generic Arrow Invalid status.
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "Unsupported cloud provider: gcpnative; the legacy GCP "
+                  "native backend has been removed");
+    }
+    if (provider.empty()) {
+        (*result)[PROPERTY_FS_CLOUD_PROVIDER] = std::string("aws");
+    }
+    const auto address = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_ADDRESS);
+    if (provider != "azure" &&
+        !milvus::storage::GetStorageProperty<bool>(properties,
+                                                   PROPERTY_FS_USE_SSL) &&
+        !address.empty() && address.find("://") == std::string::npos) {
+        (*result)[PROPERTY_FS_ADDRESS] = "http://" + address;
+    }
+    const auto tls = milvus::storage::GetStorageProperty<std::string>(
+        properties, PROPERTY_FS_TLS_MIN_VERSION);
+    if (tls.empty() || tls == "default") {
+        result->erase(PROPERTY_FS_TLS_MIN_VERSION);
+    }
+    // Older protobuf producers send zero for unset optional tuning fields.
+    for (const auto* key : {PROPERTY_FS_MAX_CONNECTIONS,
+                            PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
+                            PROPERTY_FS_TALON_BLOCK_SIZE,
+                            PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR}) {
+        if (milvus::storage::GetStorageProperty<uint32_t>(properties, key) ==
+            0) {
+            result->erase(key);
+        }
+    }
+    (*result)[PROPERTY_FS_S3_USE_CRT] = false;
+    if (!result->contains(PROPERTY_FS_S3_CRT_QUEUE_SIZES)) {
+        (*result)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+            milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                .GetS3CrtQueueSizes();
+    }
+    return result;
+}
+
+std::shared_ptr<milvus_storage::api::Properties>
+MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
+    return MakeInternalProperties(MakeStorageProperties(c_storage_config));
 }
 
 // kAllowedExtfsSpecKeys is the C++-side defense-in-depth allowlist for extfs
@@ -755,13 +721,6 @@ StripURIScheme(const std::string& addr) {
     return (pos != std::string::npos) ? addr.substr(pos + 3) : addr;
 }
 
-// IsCloudEndpointHost returns true when `host` matches a known cloud provider
-// domain family. Used to identify Milvus-form URIs whose host is an endpoint
-// variant (global / accelerate / dual-stack / VPC / FIPS / sovereign) that
-// DeriveEndpoint does not produce verbatim. When the host belongs to a cloud
-// family, the URI is Milvus-form regardless of whether DeriveEndpoint(cp,
-// region) equals the host string. Keep list in sync with Go
-// externalspec.IsCloudEndpointHost.
 // IsAzureStorageAuthority returns true for the bare Azure Storage
 // authorities that azure://<authority>/<container>/<blob> names. An Azure
 // container name cannot contain a dot, so such a host is never a container.
@@ -775,43 +734,32 @@ IsAzureStorageAuthority(const std::string& host) {
            h == "core.usgovcloudapi.net" || h == "core.cloudapi.de";
 }
 
-static bool
-IsCloudEndpointHost(const std::string& host) {
-    std::string h = host;
-    std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) {
-        return std::tolower(c);
-    });
-    auto ends_with = [&](const std::string& suffix) {
-        return h.size() >= suffix.size() &&
-               h.compare(h.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
-    // AWS (global, regional, accelerate, dualstack, FIPS, VPC, China).
-    if (ends_with(".amazonaws.com") || ends_with(".amazonaws.com.cn")) {
-        return true;
+// Keep the endpoint domain families in sync with Go externalspec.IsCloudEndpointHost.
+static std::string_view
+CloudEndpointProvider(const std::string& host) {
+    const auto h = arrow::internal::AsciiToLower(host);
+    if (h.ends_with(".amazonaws.com") || h.ends_with(".amazonaws.com.cn")) {
+        return "aws";
     }
-    // GCP Cloud Storage.
-    if (ends_with(".googleapis.com")) {
-        return true;
+    if (h.ends_with(".googleapis.com")) {
+        return "gcp";
     }
-    // Aliyun OSS (public, internal, accelerate, VPC).
-    if (ends_with(".aliyuncs.com")) {
-        return true;
+    if (h.ends_with(".aliyuncs.com")) {
+        return "aliyun";
     }
-    // Tencent Cloud COS.
-    if (ends_with(".myqcloud.com")) {
-        return true;
+    if (h.ends_with(".myqcloud.com")) {
+        return "tencent";
     }
-    // Huawei Cloud OBS.
-    if (ends_with(".myhuaweicloud.com")) {
-        return true;
+    if (h.ends_with(".myhuaweicloud.com")) {
+        return "huawei";
     }
-    // Azure Blob Storage (public, China, US Gov, Germany).
-    if (ends_with(".core.windows.net") || ends_with(".core.chinacloudapi.cn") ||
-        ends_with(".core.usgovcloudapi.net") ||
-        ends_with(".core.cloudapi.de")) {
-        return true;
+    if (h.ends_with(".core.windows.net") ||
+        h.ends_with(".core.chinacloudapi.cn") ||
+        h.ends_with(".core.usgovcloudapi.net") ||
+        h.ends_with(".core.cloudapi.de")) {
+        return "azure";
     }
-    return false;
+    return {};
 }
 
 static arrow::Status
@@ -827,24 +775,16 @@ InjectExternalSpecProperties(
     // External origin filesystems retain the same SDK backend as internal I/O.
     properties[extfs_prefix + "s3.use_crt"] = std::string("false");
 
-    // Layer 0: zero-init bool fields only (milvus-storage rejects empty
-    // strings on enum-constrained keys like cloud_provider).
-    //
-    // "anonymous" is intentionally skipped: milvus-storage's fs.* property
-    // registry does not yet declare PROPERTY_FS_ANONYMOUS, so any SetValue
-    // on "extfs.<cid>.anonymous" hits strict "undefined key" in
-    // ExtractExternalFsProperties (iceberg explore path). Skipping the
-    // default zero-init keeps the slot absent — equivalent to anonymous=false
-    // — so the default credential path stays unaffected. Once the upstream
-    // registry adds the key, this skip can be removed without further
-    // changes (and user-supplied anonymous=true via Layer 2 will start
-    // working automatically — we deliberately do NOT drop it on Layer 2 so
-    // the future fix is a one-line revert here).
+    // Only set registered boolean defaults. Storage has no fs.anonymous key.
     for (const auto& [name, is_bool] : kExtfsFields) {
         if (is_bool && name != "anonymous") {
             properties[extfs_prefix + name] = std::string("false");
         }
     }
+
+    // Absent keys default to minioadmin in storage and conflict with GCP tokens.
+    properties[extfs_prefix + "access_key_id"] = std::string();
+    properties[extfs_prefix + "access_key_value"] = std::string();
 
     // IOPS limiting is an External Table read policy, not an attribute of the
     // internal filesystem. Keep it out of fs.* and stamp it only into the
@@ -899,6 +839,7 @@ InjectExternalSpecProperties(
 
     std::string scheme = external_source.substr(0, scheme_end);
     auto rest = external_source.substr(scheme_end + 3);
+    rest = rest.substr(0, rest.find_first_of("?#"));
     auto slash_pos = rest.find('/');
     // No slash after authority (e.g. "s3://mybucket"): entire rest is host,
     // path is empty. Only assert against the pathological "scheme://" case
@@ -948,6 +889,7 @@ InjectExternalSpecProperties(
     std::string spec_cloud_provider;
     std::string spec_region;
     std::string spec_endpoint_url;
+    std::optional<std::string> spec_bucket_name;
     bool has_spec_endpoint_url = false;
     std::string broker_endpoint;
     bool legacy_broker = false;
@@ -971,11 +913,23 @@ InjectExternalSpecProperties(
                                 collection_id);
                             continue;
                         }
-                        auto val =
-                            std::string(field.value().get_string().value());
+                        // Match Go's map[string]string: null is an empty string.
+                        auto json_value = field.value();
+                        std::string_view text;
+                        if (!json_value.is_null().value() &&
+                            json_value.get_string().get(text) !=
+                                simdjson::SUCCESS) {
+                            return arrow::Status::Invalid(
+                                "extfs.", key, " must be a JSON string");
+                        }
+                        auto val = std::string(text);
                         if (key == "endpoint_url") {
                             has_spec_endpoint_url = true;
                             spec_endpoint_url = val;
+                            continue;
+                        }
+                        if (key == "bucket_name") {
+                            spec_bucket_name = std::move(val);
                             continue;
                         }
                         if (val.empty()) {
@@ -993,6 +947,12 @@ InjectExternalSpecProperties(
                             broker_endpoint = std::move(endpoint);
                             legacy_broker = legacy_broker ||
                                             key == "azure_credential_endpoint";
+                            continue;
+                        }
+                        if (key == "anonymous" && val == "false") {
+                            // Explicit false clears the override. The storage
+                            // property registry has no fs.anonymous entry.
+                            properties.erase(extfs_prefix + key);
                             continue;
                         }
                         if (key == "cloud_provider") {
@@ -1014,12 +974,10 @@ InjectExternalSpecProperties(
                             (extfs_prefix + key).c_str(),
                             val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
-                        LOG_WARN(
-                            "extfs field parse failed, skipping "
-                            "(collection_id={}): {}",
-                            collection_id,
-                            per_field.what());
-                        continue;
+                        // A field that cannot be read would leave the spec
+                        // partially applied.
+                        return arrow::Status::Invalid(
+                            "extfs field parse failed: ", per_field.what());
                     }
                 }
             }
@@ -1036,6 +994,32 @@ InjectExternalSpecProperties(
         }
     }
 
+    const auto value = [&](const char* key) {
+        return PropertyValueAsString(properties, (extfs_prefix + key).c_str())
+            .value_or("");
+    };
+    const bool use_iam =
+        arrow::internal::AsciiEqualsCaseInsensitive(value("use_iam"), "true");
+    const bool has_target = !value("gcp_target_service_account").empty();
+    const auto validate_token_lifetime = [&](const char* mode) {
+        const auto lifetime = value("load_frequency");
+        if (lifetime.empty()) {
+            return arrow::Status::OK();
+        }
+        uint64_t seconds = 0;
+        const auto* end = lifetime.data() + lifetime.size();
+        const auto [ptr, error] =
+            std::from_chars(lifetime.data(), end, seconds);
+        if (error != std::errc{} || ptr != end) {
+            return arrow::Status::Invalid(mode,
+                                          " has an invalid token lifetime");
+        }
+        if (seconds < 900 || seconds > 3600) {
+            return arrow::Status::Invalid(
+                mode, " requires load_frequency in [900, 3600]");
+        }
+        return arrow::Status::OK();
+    };
     if (!broker_endpoint.empty()) {
         if (legacy_broker && spec_cloud_provider != "azure") {
             return arrow::Status::Invalid(
@@ -1043,33 +1027,70 @@ InjectExternalSpecProperties(
         }
         if (spec_cloud_provider != "aws" && spec_cloud_provider != "aliyun" &&
             spec_cloud_provider != "tencent" &&
-            spec_cloud_provider != "azure") {
+            spec_cloud_provider != "azure" && spec_cloud_provider != "gcp") {
             return arrow::Status::Invalid(
                 "Unsupported credential broker cloud provider");
         }
-        const auto value = [&](const char* key) {
-            return PropertyValueAsString(properties,
-                                         (extfs_prefix + key).c_str())
-                .value_or("");
-        };
-        if (spec_cloud_provider == "azure" && value("use_iam") == "true") {
-            return arrow::Status::Invalid(
-                "Azure SAS broker cannot use native IAM");
-        }
-        if (spec_cloud_provider != "azure" && value("use_iam") == "true") {
-            for (const auto* key : {"role_arn",
-                                    "external_id",
-                                    "session_name",
-                                    "access_key_id",
-                                    "access_key_value",
-                                    "gcp_target_service_account",
-                                    "azure_client_id",
-                                    "azure_tenant_id"}) {
-                if (!value(key).empty()) {
-                    return arrow::Status::Invalid(
-                        "Inactive credential field in broker IAM: ", key);
+        const auto reject_fields =
+            [&](const char* mode, std::initializer_list<const char*> keys) {
+                for (const auto* key : keys) {
+                    if (!value(key).empty()) {
+                        return arrow::Status::Invalid(
+                            "Inactive credential field in ", mode, ": ", key);
+                    }
                 }
+                return arrow::Status::OK();
+            };
+        if (spec_cloud_provider == "azure") {
+            if (value("access_key_id").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires access_key_id");
             }
+            if (use_iam) {
+                // Existing Azure target specs may carry unused S3 session fields.
+                ARROW_RETURN_NOT_OK(reject_fields("Azure broker IAM",
+                                                  {"azure_client_id",
+                                                   "azure_tenant_id",
+                                                   "external_id",
+                                                   "session_name"}));
+                ARROW_RETURN_NOT_OK(
+                    validate_token_lifetime("Azure broker IAM"));
+            } else if (value("azure_client_id").empty() ||
+                       value("azure_tenant_id").empty() ||
+                       value("region").empty()) {
+                return arrow::Status::Invalid(
+                    "Azure broker requires azure_client_id, azure_tenant_id "
+                    "and region without use_iam=true");
+            }
+            ARROW_RETURN_NOT_OK(reject_fields("Azure broker",
+                                              {"access_key_value",
+                                               "role_arn",
+                                               "gcp_target_service_account"}));
+            if (value("anonymous") == "true") {
+                return arrow::Status::Invalid(
+                    "anonymous conflicts with Azure broker");
+            }
+        } else if (spec_cloud_provider == "gcp" || use_iam) {
+            const bool is_gcp = spec_cloud_provider == "gcp";
+            if (is_gcp && use_iam == has_target) {
+                return arrow::Status::Invalid(
+                    "GCP broker requires exactly one of use_iam=true and "
+                    "gcp_target_service_account");
+            }
+            if (!is_gcp && has_target) {
+                return arrow::Status::Invalid(
+                    "Inactive credential field in broker IAM: "
+                    "gcp_target_service_account");
+            }
+            ARROW_RETURN_NOT_OK(
+                reject_fields(is_gcp ? "GCP broker" : "broker IAM",
+                              {"role_arn",
+                               "external_id",
+                               "session_name",
+                               "access_key_id",
+                               "access_key_value",
+                               "azure_client_id",
+                               "azure_tenant_id"}));
         }
         ARROW_RETURN_NOT_OK(CheckCredentialBrokerEndpoint(broker_endpoint));
         properties.erase(extfs_prefix + "azure_credential_endpoint");
@@ -1087,6 +1108,11 @@ InjectExternalSpecProperties(
     // The Go API boundary validates the full URL contract. The checks here are
     // defense in depth for corrupted metadata or callers that bypass Go.
     if (has_spec_endpoint_url) {
+        if (spec_bucket_name.has_value()) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name cannot be set with extfs.endpoint_url; "
+                "the bucket comes from external_source");
+        }
         std::string effective_endpoint = spec_endpoint_url;
         if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
             effective_endpoint.pop_back();
@@ -1166,11 +1192,54 @@ InjectExternalSpecProperties(
                        spec_cp.end(),
                        spec_cp.begin(),
                        [](unsigned char c) { return std::tolower(c); });
+        const auto colon = host.find(':');
+        const auto provider = CloudEndpointProvider(host.substr(0, colon));
         bool uri_host_is_cloud_endpoint =
-            IsCloudEndpointHost(host) ||
+            (colon == std::string::npos && !provider.empty()) ||
             (spec_cp == "azure" && IsAzureStorageAuthority(host));
-        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-            StripURIScheme(derived) != host) {
+        if (colon != std::string::npos && provider == spec_cp &&
+            (provider == "aws" || provider == "aliyun" ||
+             provider == "tencent" ||
+             (provider == "gcp" &&
+              (arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gs") ||
+               arrow::internal::AsciiEqualsCaseInsensitive(scheme, "gcs"))))) {
+            // Classify the DNS hostname, but keep the complete address for
+            // matching the storage URI and connecting to its explicit port.
+            arrow::util::Uri endpoint;
+            if (!endpoint.Parse("https://" + host).ok() ||
+                endpoint.port() <= 0 || endpoint.port() > 65535 ||
+                !endpoint.username().empty() || !endpoint.password().empty()) {
+                return arrow::Status::Invalid(
+                    "Cloud endpoint requires a port between 1 and 65535");
+            }
+            uri_host_is_cloud_endpoint = true;
+        }
+        const bool bucket_in_host = !uri_host_is_cloud_endpoint &&
+                                    !derived.empty() &&
+                                    StripURIScheme(derived) != host;
+        // StorageUri::Parse decodes the path before splitting out the bucket.
+        auto source_bucket =
+            bucket_in_host ? host : arrow::util::UriUnescape(path_bucket);
+        source_bucket = source_bucket.substr(0, source_bucket.find('/'));
+        if (spec_bucket_name && !spec_bucket_name->empty() &&
+            *spec_bucket_name != source_bucket) {
+            return arrow::Status::Invalid(
+                "extfs.bucket_name must match the bucket in "
+                "external_source");
+        }
+        if (!bucket_in_host && !path_bucket.empty()) {
+            if (spec_cp == "azure" && !broker_endpoint.empty() && use_iam &&
+                path_bucket != source_bucket) {
+                return arrow::Status::Invalid(
+                    "Azure broker IAM requires an unescaped source "
+                    "container");
+            }
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                source_bucket.c_str());
+        }
+        if (bucket_in_host) {
             milvus_storage::api::SetValue(
                 properties,
                 (extfs_prefix + "bucket_name").c_str(),
@@ -1186,29 +1255,36 @@ InjectExternalSpecProperties(
     // `options.blob_storage_authority = ".blob." + config_.address`, so the
     // address must be a bare authority (e.g. "core.windows.net"); prepending
     // a scheme would break the concatenation.
-    auto final_properties =
-        std::make_shared<const milvus_storage::api::Properties>(properties);
-    auto final_cp = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "cloud_provider").c_str());
-    bool is_azure = final_cp.ok() && *final_cp == "azure";
-    auto final_use_ssl = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "use_ssl").c_str());
-    auto final_address = milvus_storage::api::GetValue<std::string>(
-        final_properties, (extfs_prefix + "address").c_str());
-    if (!is_azure && final_use_ssl.ok() && final_address.ok() &&
-        final_address->find("://") == std::string::npos) {
-        const char* scheme =
-            (*final_use_ssl == "true") ? "https://" : "http://";
+    auto final_address = value("address");
+    const bool use_ssl = value("use_ssl") == "true";
+    if (value("cloud_provider") != "azure" && !final_address.empty() &&
+        final_address.find("://") == std::string::npos) {
+        final_address = (use_ssl ? "https://" : "http://") + final_address;
         milvus_storage::api::SetValue(properties,
                                       (extfs_prefix + "address").c_str(),
-                                      (scheme + *final_address).c_str());
+                                      final_address.c_str());
     }
 
-    // External Tables share the filesystem tuning, with an independently
-    // configured mode. Local external filesystems never use Talon.
-    const bool external_is_local =
-        PropertyValueAsString(
-            properties, (extfs_prefix + "storage_type").c_str()) == "local";
+    // Target impersonation and Broker tokens have the same endpoint contract
+    // in Go admission and native readers, including persisted specs. Plain IAM
+    // keeps milvus-storage's Bearer delivery policy: HTTPS *.googleapis.com,
+    // or an endpoint the operator's primary GCP filesystem trusts.
+    if (spec_cloud_provider == "gcp" &&
+        (has_target || !broker_endpoint.empty())) {
+        arrow::util::Uri endpoint;
+        ARROW_RETURN_NOT_OK(endpoint.Parse(final_address));
+        const auto hostname = arrow::internal::AsciiToLower(endpoint.host());
+        constexpr std::string_view suffix = ".googleapis.com";
+        if (!use_ssl || endpoint.scheme() != "https" ||
+            hostname.size() <= suffix.size() || !hostname.ends_with(suffix)) {
+            return arrow::Status::Invalid(
+                "GCP Bearer credentials require HTTPS and a *.googleapis.com "
+                "endpoint");
+        }
+        ARROW_RETURN_NOT_OK(validate_token_lifetime("GCP Bearer credentials"));
+    }
+
+    const bool origin_only = value("storage_type") == "local";
     for (const auto* key : {PROPERTY_FS_TALON_MODE,
                             PROPERTY_FS_TALON_OPEN_ONLY,
                             PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
@@ -1221,20 +1297,14 @@ InjectExternalSpecProperties(
                                      : key;
         const auto value = PropertyValueAsString(properties, source_key);
         const auto extfs_key = ExternalFsPropertyKey(extfs_prefix, key);
-        // Keep Broker credential acquisition and refresh on the origin filesystem.
-        if (!broker_endpoint.empty()) {
-            properties.erase(extfs_key);
-            if (std::string_view(key) == PROPERTY_FS_TALON_MODE) {
-                properties[extfs_key] = std::string("0");
-            }
-        } else if (external_is_local) {
+        if (origin_only) {
             properties.erase(extfs_key);
         } else if (value.has_value()) {
             properties[extfs_key] = *value;
         }
     }
     // Format-layer: emit per-format properties derived from spec.format.
-    // Lance, Iceberg, and Paimon use reader.exttable.snapshot_id.
+    // Lance, Iceberg, Paimon, and Delta Lake use reader.exttable.snapshot_id.
     if (external_spec.empty()) {
         return arrow::Status::OK();
     }
@@ -1247,7 +1317,7 @@ InjectExternalSpecProperties(
             simdjson::SUCCESS) {
             std::string format{format_view};
             if (format == "lance-table" || format == "iceberg-table" ||
-                format == "paimon-table") {
+                format == "paimon-table" || format == "deltalake-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
@@ -1339,39 +1409,6 @@ LoonFSRootPath(const std::string& storage_type, const std::string& root_path) {
         return kLoonLocalFSRootPath;
     }
     return root_path;
-}
-
-CStorageConfig
-ToCStorageConfig(const milvus::storage::StorageConfig& config) {
-    return CStorageConfig{config.address.c_str(),
-                          config.bucket_name.c_str(),
-                          config.access_key_id.c_str(),
-                          config.access_key_value.c_str(),
-                          config.root_path.c_str(),
-                          config.storage_type.c_str(),
-                          config.cloud_provider.c_str(),
-                          config.iam_endpoint.c_str(),
-                          config.log_level.c_str(),
-                          config.region.c_str(),
-                          config.useSSL,
-                          config.sslCACert.c_str(),
-                          config.useIAM,
-                          config.useVirtualHost,
-                          config.requestTimeoutMs,
-                          config.gcp_credential_json.c_str(),
-                          false,  // this field does not exist in StorageConfig
-                          config.max_connections,
-                          config.tls_min_version.c_str(),
-                          config.use_crc32c_checksum,
-                          config.talon_mode,
-                          config.talon_small_read_threshold,
-                          config.talon_coordinator.c_str(),
-                          config.talon_block_size,
-                          config.talon_max_idle_per_addr,
-                          config.talon_enable_for_external_table,
-                          0,  // CRT queue tuning is node-local.
-                          config.talon_enabled_stages,
-                          config.talon_namespace.c_str()};
 }
 
 std::optional<LoonManifestPath>
