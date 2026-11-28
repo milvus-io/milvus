@@ -30,6 +30,7 @@ const (
 	OpTypeLimit   = "limit"
 	OpTypeGroupBy = "group_by"
 	OpTypeMerge   = "merge"
+	OpTypeMMR     = "mmr"
 )
 
 // =============================================================================
@@ -48,6 +49,28 @@ const (
 	DecayParamScale    = "scale"
 	DecayParamOffset   = "offset"
 	DecayParamDecay    = "decay"
+)
+
+// =============================================================================
+// MMR Constants
+// =============================================================================
+
+const (
+	// MMR parameter keys, shared by the FunctionScore reranker and the
+	// FunctionChains operator.
+	MMRParamLambda          = "lambda"
+	MMRParamCandidateSize   = "candidate_size"
+	MMRParamSimilarity      = "similarity"
+	MMRParamLimit           = "limit"
+	MMRParamScoreDescending = "score_descending"
+	MMRParamRelevanceMetric = "relevance_metric"
+
+	// MMRDefaultLambda balances relevance and diversity equally.
+	MMRDefaultLambda = 0.5
+	// MMRMinDefaultCandidateSize is the lower bound of the default window.
+	MMRMinDefaultCandidateSize = 100
+	// MMRDefaultCandidateSizeFactor multiplies limit for the default window.
+	MMRDefaultCandidateSizeFactor = 3
 )
 
 // =============================================================================

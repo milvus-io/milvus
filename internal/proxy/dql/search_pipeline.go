@@ -999,6 +999,8 @@ type rerankOperator struct {
 	groupSize        int64
 	groupScorerStr   string
 	useRequestLimit  bool
+	// annsFields are the vector fields of the ANN searches, in input order.
+	annsFields []string
 
 	collSchema *schemapb.CollectionSchema
 	rerankMeta rerankMeta
@@ -1062,9 +1064,12 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 			rerankMeta:       t.rerankMeta,
 			dbName:           t.request.GetDbName(),
 			useRequestLimit:  useRequestLimit,
+			annsFields: lo.Map(t.queryInfos, func(info *planpb.QueryInfo, _ int) string {
+				return annsFieldName(t.schema.CollectionSchema, info.GetQueryFieldId())
+			}),
 		}, nil
 	}
-	return &rerankOperator{
+	op := &rerankOperator{
 		nq:               t.GetNq(),
 		topK:             t.GetTopk(),
 		offset:           0, // Search performs Offset in the reduce phase
@@ -1075,7 +1080,19 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 		collSchema:       t.schema.CollectionSchema,
 		rerankMeta:       t.rerankMeta,
 		dbName:           t.request.GetDbName(),
-	}, nil
+		annsFields:       []string{annsFieldName(t.schema.CollectionSchema, t.GetFieldId())},
+	}
+	if t.mmrPage != nil {
+		// Reduce kept the whole MMR window; the chain slices the user page.
+		op.topK = t.mmrPage.limit
+		op.offset = t.mmrPage.offset
+		if meta, ok := t.rerankMeta.(*functionChainRerankMeta); ok {
+			op.useRequestLimit = !lo.ContainsBy(meta.repr.Operators, func(o chain.OperatorRepr) bool {
+				return o.Type == chaintypes.OpTypeLimit
+			})
+		}
+	}
+	return op, nil
 }
 
 func buildChainFromMeta(
@@ -1182,6 +1199,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		DBName:    op.dbName,
 	}
 	searchParams.ScoresRewritten = scoresRewritten
+	searchParams.AnnsFields = op.annsFields
 	fc, err := buildChainFromMeta(op.rerankMeta, op.collSchema, inputMetrics, searchParams, alloc)
 	if err != nil {
 		for _, df := range dataframes {
@@ -1292,7 +1310,7 @@ type requeryOperator struct {
 // These internal dependencies do not change the final user output projection.
 func (t *SearchTask) requeryOutputFields() []string {
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
-	if t.GetIsAdvanced() && t.rerankMeta != nil {
+	if (t.GetIsAdvanced() || t.mmrPage != nil) && t.rerankMeta != nil {
 		outputFieldNames.Insert(t.rerankMeta.GetInputFieldNames()...)
 	}
 	// Union order_by field names with output fields for requery
@@ -1303,12 +1321,15 @@ func (t *SearchTask) requeryOutputFields() []string {
 	for _, orderByField := range t.orderByFields {
 		outputFieldNames.Insert(orderByField.OutputFieldName)
 	}
-	// Add highlight dynamic fields to requery output
+	// Add the fields highlighting reads (text, analyzer-name columns, dynamic
+	// fields); the requery result replaces the search output fields.
 	if t.highlighter != nil {
-		highlightDynFields := t.highlighter.DynamicFieldNames()
-		if len(highlightDynFields) > 0 {
-			outputFieldNames.Insert(highlightDynFields...)
+		for _, id := range t.highlighter.RequiredFieldIDs() {
+			if field := typeutil.GetFieldByID(t.schema.CollectionSchema, id); field != nil {
+				outputFieldNames.Insert(field.GetName())
+			}
 		}
+		outputFieldNames.Insert(t.highlighter.DynamicFieldNames()...)
 	}
 	return outputFieldNames.Collect()
 }
@@ -3434,6 +3455,106 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 	},
 }
 
+// searchWithRequeryAndRerankByFieldDataPipe serves ordinary search whose
+// rerank reads stored field data that QueryNode does not return (MMR vectors).
+// Reduce keeps the whole candidate window, requery fetches the rerank inputs
+// and output fields once for those candidates, rerank slices the page, and the
+// final fields are organized from the same requery result.
+var searchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
+	name: "searchWithRequeryAndRerankByFieldData",
+	nodes: []*nodeDef{
+		{
+			name:    "reduce",
+			inputs:  []string{pipelineInput, pipelineStorageCost},
+			outputs: []string{"reduced", "score_infos"},
+			opName:  searchReduceOp,
+		},
+		{
+			name:    "merge_ids",
+			inputs:  []string{"reduced"},
+			outputs: []string{"ids"},
+			opName:  lambdaOp,
+			params: map[string]any{
+				lambdaParamKey: mergeIDsFunc,
+			},
+		},
+		{
+			name:    "requery",
+			inputs:  []string{"ids", pipelineStorageCost},
+			outputs: []string{"fields", pipelineStorageCost},
+			opName:  requeryOp,
+		},
+		{
+			name:    "parse_ids",
+			inputs:  []string{"reduced"},
+			outputs: []string{"id_list"},
+			opName:  lambdaOp,
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					return []any{[]*schemapb.IDs{inputs[0].([]*milvuspb.SearchResults)[0].Results.Ids}}, nil
+				},
+			},
+		},
+		{
+			name:    "organize_rank_data",
+			inputs:  []string{"fields", "id_list"},
+			outputs: []string{"organized_fields"},
+			opName:  organizeOp,
+		},
+		{
+			name:    "gen_rank_data",
+			inputs:  []string{"reduced", "organized_fields"},
+			outputs: []string{"rank_data"},
+			opName:  lambdaOp,
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					results := inputs[0].([]*milvuspb.SearchResults)
+					fields := inputs[1].([][]*schemapb.FieldData)
+					results[0].Results.FieldsData = fields[0]
+					return []any{results}, nil
+				},
+			},
+		},
+		{
+			name:    "rerank",
+			inputs:  []string{"rank_data", "score_infos"},
+			outputs: []string{"rank_result"},
+			opName:  rerankOp,
+		},
+		{
+			name:    "pick_ids",
+			inputs:  []string{"rank_result"},
+			outputs: []string{"ids"},
+			opName:  lambdaOp,
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					return []any{[]*schemapb.IDs{inputs[0].(*milvuspb.SearchResults).Results.Ids}}, nil
+				},
+			},
+		},
+		{
+			name:    "organize_result",
+			inputs:  []string{"fields", "ids"},
+			outputs: []string{"organized_fields"},
+			opName:  organizeOp,
+		},
+		{
+			name:    "result",
+			inputs:  []string{"rank_result", "organized_fields"},
+			outputs: []string{"result"},
+			params: map[string]any{
+				lambdaParamKey: func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
+					result := inputs[0].(*milvuspb.SearchResults)
+					fields := inputs[1].([][]*schemapb.FieldData)
+					result.Results.FieldsData = fields[0]
+					return []any{result}, nil
+				},
+			},
+			opName: lambdaOp,
+		},
+	},
+}
+
 var hybridSearchPipe = &pipelineDef{
 	name: "hybridSearchPipe",
 	nodes: []*nodeDef{
@@ -3717,6 +3838,9 @@ func newBuiltInPipeline(t *SearchTask) (*pipeline, error) {
 	}
 
 	hasRerank := t.rerankMeta != nil
+	if !t.GetIsAdvanced() && t.needRequery && t.mmrPage != nil {
+		return newPipeline(searchWithRequeryAndRerankByFieldDataPipe, t)
+	}
 	if !t.GetIsAdvanced() && !t.needRequery && !hasRerank {
 		return newPipeline(searchPipe, t)
 	}

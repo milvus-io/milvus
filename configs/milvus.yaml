@@ -2048,6 +2048,9 @@ function:
           credential:  # The name in the crendential configuration item
           enable: true # Whether to enable voyageai model service
           url:  # Your voyageai rerank url, Default is the official rerank url
+    mmr:
+      maxCandidateSize: 1024 # Maximum candidate_size accepted by the MMR reranker, that is, the maximum number of top search results MMR diversifies per query. Invalid or non-positive values fall back to 1024.
+      maxSimilarityOps: 1000000000 # Upper bound on the estimated vector element operations the MMR reranker may spend per request, counted as one similarity per candidate pair of every query's window. Requests above it are rejected. Protects embedding-list fields, whose pairwise similarity is quadratic in their token counts. Invalid or non-positive values fall back to 1000000000.
   analyzer:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included

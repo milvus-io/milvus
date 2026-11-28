@@ -45,6 +45,7 @@ const (
 	ModelRerankerName    = "model"
 	RRFRerankerName      = "rrf"
 	WeightedRerankerName = "weighted"
+	MMRRerankerName      = "mmr"
 
 	// Parameter keys
 	rerankerKey  = "reranker"
@@ -83,6 +84,10 @@ type SearchParams struct {
 	RoundDecimal int64
 
 	ScoresRewritten []bool
+
+	// AnnsFields are the vector fields of the ANN searches, in the same order
+	// as the search metrics. MMR uses them to resolve the default similarity.
+	AnnsFields []string
 
 	// Grouping parameters
 	GroupByField string      // Field to group by (empty means no grouping)
@@ -155,11 +160,31 @@ func BuildRerankChain(
 		return nil, nil
 	}
 
-	// Currently only support single proxy rerank function
+	// MMR may follow one other reranker; it must be the last function.
+	var mmrFunc *schemapb.FunctionSchema
+	if last := proxyFunctions[len(proxyFunctions)-1]; rerank.GetRerankName(last) == MMRRerankerName {
+		mmrFunc = last
+		proxyFunctions = proxyFunctions[:len(proxyFunctions)-1]
+	}
+	for _, f := range proxyFunctions {
+		if rerank.GetRerankName(f) == MMRRerankerName {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"rerank_builder: mmr must be the last rerank function and may appear only once")
+		}
+	}
+
+	// Currently only support single proxy rerank function (plus optional MMR)
 	if len(proxyFunctions) > 1 {
 		return nil, merr.WrapErrParameterInvalidMsg("rerank_builder: currently only supports one rerank function")
 	}
 
+	if mmrFunc != nil {
+		var upstream *schemapb.FunctionSchema
+		if len(proxyFunctions) == 1 {
+			upstream = proxyFunctions[0]
+		}
+		return buildMMRRerankChain(collSchema, upstream, mmrFunc, searchMetrics, searchParams, alloc)
+	}
 	return buildRerankChainInternal(collSchema, proxyFunctions[0], searchMetrics, searchParams, alloc)
 }
 
@@ -279,9 +304,25 @@ func buildRerankChainInternal(
 	searchParams *SearchParams,
 	alloc memory.Allocator,
 ) (*FuncChain, error) {
+	fc, sortDescending, err := buildRerankBody(collSchema, funcSchema, searchMetrics, searchParams, alloc)
+	if err != nil {
+		return nil, err
+	}
+	return appendRerankTail(fc, sortDescending, searchParams)
+}
+
+// buildRerankBody builds the reranker-specific part of the chain (merge and
+// scoring) and returns the direction of the resulting $score.
+func buildRerankBody(
+	collSchema *schemapb.CollectionSchema,
+	funcSchema *schemapb.FunctionSchema,
+	searchMetrics []string,
+	searchParams *SearchParams,
+	alloc memory.Allocator,
+) (*FuncChain, bool, error) {
 	rerankerName := rerank.GetRerankName(funcSchema)
 	if rerankerName == "" {
-		return nil, merr.WrapErrParameterMissingMsg("rerank_builder: reranker name not specified")
+		return nil, false, merr.WrapErrParameterMissingMsg("rerank_builder: reranker name not specified")
 	}
 
 	if alloc == nil {
@@ -297,30 +338,34 @@ func buildRerankChainInternal(
 	switch rerankerName {
 	case RRFRerankerName:
 		if err := buildRRFChain(fc, funcSchema, searchMetrics); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 	case WeightedRerankerName:
 		var err error
 		sortDescending, err = buildWeightedChain(fc, funcSchema, searchMetrics, searchParams.ScoresRewritten)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 	case DecayRerankerName:
 		if err := buildDecayChain(fc, collSchema, funcSchema, searchMetrics); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 	case ModelRerankerName:
 		if err := buildModelChain(fc, collSchema, funcSchema, searchMetrics, searchParams); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 	default:
-		return nil, merr.WrapErrParameterInvalidMsg("rerank_builder: unsupported reranker %s", rerankerName)
+		return nil, false, merr.WrapErrParameterInvalidMsg("rerank_builder: unsupported reranker %s", rerankerName)
 	}
+	return fc, sortDescending, nil
+}
 
+// appendRerankTail adds the shared grouping or sort+limit tail and rounding.
+func appendRerankTail(fc *FuncChain, sortDescending bool, searchParams *SearchParams) (*FuncChain, error) {
 	// Add grouping or sort+limit
 	if searchParams.HasGrouping() {
 		// Use GroupBy for grouping search
@@ -348,7 +393,11 @@ func buildRerankChainInternal(
 		}
 	}
 
-	// Apply score rounding after sort/limit (rounding should not affect ordering)
+	return appendRounding(fc, searchParams)
+}
+
+// appendRounding rounds $score after ordering (rounding must not affect order).
+func appendRounding(fc *FuncChain, searchParams *SearchParams) (*FuncChain, error) {
 	if searchParams.RoundDecimal >= 0 {
 		roundExpr, err := expr.NewRoundDecimalExpr(searchParams.RoundDecimal)
 		if err != nil {
@@ -358,7 +407,6 @@ func buildRerankChainInternal(
 			[]string{types.ScoreFieldName},
 			[]string{types.ScoreFieldName})
 	}
-
 	return fc, nil
 }
 

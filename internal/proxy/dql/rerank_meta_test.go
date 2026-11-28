@@ -198,7 +198,7 @@ func TestFunctionScoreInputPlanValidation(t *testing.T) {
 		{FieldID: 101, Name: "a", DataType: schemapb.DataType_Int64},
 		{FieldID: 102, Name: "b", DataType: schemapb.DataType_VarChar, Nullable: true},
 	}}
-	plan, err := newDataFrameInputPlanFromFieldNames(schema, []string{"b", "a", "b", "a"})
+	plan, err := newDataFrameInputPlanFromFieldNames(schema, []string{"b", "a", "b", "a"}, nil)
 	require.NoError(t, err)
 	require.Len(t, plan.Inputs, 2)
 	assert.Equal(t, []int64{102, 101}, plan.PhysicalFieldIDs())
