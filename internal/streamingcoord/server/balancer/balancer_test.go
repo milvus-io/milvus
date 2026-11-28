@@ -1118,3 +1118,208 @@ func TestBalancer_NoGracePeriodWhenDisabled(t *testing.T) {
 	// Grace 0 disables the wait, the helper fails at its 10s assign timeout if the balancer keeps waiting.
 	reassignFromLostNode(t, types.ErrNotAlive, "0")
 }
+
+func TestBalancer_FailoverToBackupRGWithStalePrimarySession(t *testing.T) {
+	paramtable.Init()
+	oldPrimaryRG := paramtable.Get().StreamingCfg.PrimaryResourceGroup.SwapTempValue("rg1")
+	oldExpectedNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	oldGrace := paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("0")
+	defer paramtable.Get().StreamingCfg.PrimaryResourceGroup.SwapTempValue(oldPrimaryRG)
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue(oldExpectedNum)
+	defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue(oldGrace)
+
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	assignedToRG2 := make(chan struct{})
+	var assignOnce sync.Once
+	var removedIDs []int64
+	var mu sync.Mutex
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(make(chan struct{}), nil)
+	// Stale primary node 7 is still in etcd sessions alongside healthy backup node 6.
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfoWithResourceGroup{
+		7: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 7, Address: "localhost:7"}, ResourceGroup: "rg1"},
+		6: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 6, Address: "localhost:6"}, ResourceGroup: "rg2"},
+	}, nil).Maybe()
+	// CollectAllStatus falls back to RG2 (node 6) when RG1 (node 7) is unreachable/unhealthy.
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, "rg1").Return(map[int64]*types.StreamingNodeStatus{
+		6: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 6, Address: "localhost:6"}},
+	}, nil)
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, assignment types.PChannelInfoAssigned) error {
+			mu.Lock()
+			removedIDs = append(removedIDs, assignment.Node.ServerID)
+			mu.Unlock()
+			return nil
+		})
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, assignment types.PChannelInfoAssigned) error {
+			assert.Equal(t, int64(6), assignment.Node.ServerID)
+			assignOnce.Do(func() { close(assignedToRG2) })
+			return nil
+		})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: channel.StreamingVersion260}, nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "test-channel-1",
+				Term:       4,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 7},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
+	require.NoError(t, err)
+	defer b.Close()
+
+	require.NoError(t, b.Trigger(ctx))
+	select {
+	case <-assignedToRG2:
+	case <-time.After(10 * time.Second):
+		t.Fatal("channel did not fail over to backup RG node 6")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, removedIDs, int64(7))
+}
+
+func TestBalancer_FailoverWaitsForRemoveDeadlineExceededBeforeAssign(t *testing.T) {
+	paramtable.Init()
+	oldPrimaryRG := paramtable.Get().StreamingCfg.PrimaryResourceGroup.SwapTempValue("rg1")
+	oldExpectedNum := paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue("0")
+	oldGrace := paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue("0")
+	defer paramtable.Get().StreamingCfg.PrimaryResourceGroup.SwapTempValue(oldPrimaryRG)
+	defer paramtable.Get().StreamingCfg.WALBalancerExpectedInitialStreamingNodeNum.SwapTempValue(oldExpectedNum)
+	defer paramtable.Get().StreamingCfg.WALBalancerNodeLostGracePeriod.SwapTempValue(oldGrace)
+
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{})
+
+	nodeChanged := make(chan struct{}, 1)
+	firstRemoveFailed := make(chan struct{})
+	assignedToRG2 := make(chan struct{})
+	var firstRemoveOnce sync.Once
+	var assignOnce sync.Once
+	var removeAttempts atomic.Int32
+	var assignCalls atomic.Int32
+	var sessionExpired atomic.Bool
+
+	streamingNodeManager := mock_manager.NewMockManagerClient(t)
+	streamingNodeManager.EXPECT().WatchNodeChanged(mock.Anything).Return(nodeChanged, nil)
+	streamingNodeManager.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(
+		func(context.Context) (map[int64]*types.StreamingNodeInfoWithResourceGroup, error) {
+			nodes := map[int64]*types.StreamingNodeInfoWithResourceGroup{
+				6: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 6, Address: "localhost:6"}, ResourceGroup: "rg2"},
+			}
+			if !sessionExpired.Load() {
+				nodes[7] = &types.StreamingNodeInfoWithResourceGroup{
+					StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 7, Address: "localhost:7"},
+					ResourceGroup:     "rg1",
+				}
+			}
+			return nodes, nil
+		}).Maybe()
+	streamingNodeManager.EXPECT().CollectAllStatus(mock.Anything, "rg1").Return(map[int64]*types.StreamingNodeStatus{
+		6: {StreamingNodeInfo: types.StreamingNodeInfo{ServerID: 6, Address: "localhost:6"}},
+	}, nil)
+	// Remove hits context.DeadlineExceeded while stale node 7 is unreachable with an active session;
+	// Assign must not run until Remove later returns ErrNotAlive after node 7's session expires.
+	// On retry, AssignPChannels may also include the aborted term on node 6 in AssignHistories,
+	// which returns nil via SkippedOperation.
+	streamingNodeManager.EXPECT().Remove(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, assignment types.PChannelInfoAssigned) error {
+			if assignment.Node.ServerID != 7 {
+				return nil
+			}
+			removeAttempts.Add(1)
+			if !sessionExpired.Load() {
+				firstRemoveOnce.Do(func() { close(firstRemoveFailed) })
+				return context.DeadlineExceeded
+			}
+			return types.ErrNotAlive
+		})
+	streamingNodeManager.EXPECT().Assign(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, assignment types.PChannelInfoAssigned) error {
+			assert.Equal(t, int64(6), assignment.Node.ServerID)
+			assert.GreaterOrEqual(t, removeAttempts.Load(), int32(2))
+			assignCalls.Add(1)
+			assignOnce.Do(func() { close(assignedToRG2) })
+			return nil
+		})
+
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1)).Maybe()
+	resource.InitForTest(
+		resource.OptETCD(etcdClient),
+		resource.OptStreamingCatalog(catalog),
+		resource.OptStreamingManagerClient(streamingNodeManager),
+		resource.OptSession(s),
+	)
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: channel.StreamingVersion260}, nil).Maybe()
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{
+		{
+			Channel: &streamingpb.PChannelInfo{
+				Name:       "test-channel-1",
+				Term:       4,
+				AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READWRITE,
+			},
+			State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+			Node:  &streamingpb.StreamingNodeInfo{ServerId: 7},
+		},
+	}, nil)
+	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil).Maybe()
+
+	ctx := context.Background()
+	b, err := balancer.RecoverBalancer(ctx, newStaticChannelProvider("test-channel-1"))
+	require.NoError(t, err)
+	defer b.Close()
+
+	// Wait for the initial round triggered by RecoverBalancer (or Trigger) to hit Remove timeout without assigning.
+	select {
+	case <-firstRemoveFailed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("initial Remove attempt was not invoked")
+	}
+	assert.Zero(t, assignCalls.Load())
+
+	// Simulate node 7's etcd session expiring so Remove returns ErrNotAlive on the next balance round.
+	sessionExpired.Store(true)
+	select {
+	case nodeChanged <- struct{}{}:
+	default:
+	}
+
+	select {
+	case <-assignedToRG2:
+	case <-time.After(10 * time.Second):
+		t.Fatal("channel did not assign to backup RG node 6 after session expiry")
+	}
+	assert.Equal(t, int32(1), assignCalls.Load())
+}
