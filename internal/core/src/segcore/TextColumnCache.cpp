@@ -38,40 +38,46 @@ DefaultTextLobReaderFactory(
                                                              config);
 }
 
-// Drive unbound continuations on the synchronous caller without imposing a
-// background executor. The reader retains native scans until fan-in.
-std::vector<std::string>
-ReadLobBatch(const std::shared_ptr<CachedTextLobReader>& cached_reader,
-             const std::vector<milvus_storage::lob_column::EncodedRef>& refs,
-             const std::string& lob_base_path) {
-    try {
-        auto result = cachinglayer::SemiInlineGet(
-            cached_reader->reader->ReadBatchAsync(refs));
-        if (!result.ok()) {
-            auto error = milvus_storage::ToSegcoreError(result.status());
-            ThrowInfo(error.get_error_code(),
-                      "Failed to read text batch from {}: {}",
-                      lob_base_path,
-                      error.what());
-        }
-        return std::move(result).ValueOrDie();
-    } catch (const std::bad_alloc& error) {
-        throw SegcoreError(ErrorCode::MemAllocateFailed, error.what());
-    } catch (const folly::OperationCancelled& error) {
-        throw SegcoreError(ErrorCode::FollyCancel, error.what());
-    } catch (const folly::FutureCancellation& error) {
-        throw SegcoreError(ErrorCode::FollyCancel, error.what());
-    } catch (const folly::FutureException& error) {
-        throw SegcoreError(ErrorCode::FollyOtherException, error.what());
-    } catch (const std::exception&) {
-        // Preserve typed errors and let the caller's boundary classify other
-        // standard exceptions. Keep allocation/cancellation codes above.
-        throw;
-    } catch (...) {
-        // Async callers do not all have a non-standard exception catch tail.
-        throw SegcoreError(ErrorCode::UnexpectedError,
-                           "Unknown async load exception");
-    }
+// The caller chooses how to drive deferred work. Retain the reader until
+// fan-in and preserve the synchronous API's exception classification.
+folly::SemiFuture<std::vector<std::string>>
+ReadLobBatchAsync(
+    const std::shared_ptr<CachedTextLobReader>& cached_reader,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& refs,
+    const std::string& lob_base_path) {
+    return folly::makeSemiFutureWith(
+               [&] { return cached_reader->reader->ReadBatchAsync(refs); })
+        .defer([cached_reader, lob_base_path](auto&& completed) {
+            try {
+                auto result = std::move(completed).value();
+                if (!result.ok()) {
+                    auto error =
+                        milvus_storage::ToSegcoreError(result.status());
+                    ThrowInfo(error.get_error_code(),
+                              "Failed to read text batch from {}: {}",
+                              lob_base_path,
+                              error.what());
+                }
+                return std::move(result).ValueOrDie();
+            } catch (const std::bad_alloc& error) {
+                throw SegcoreError(ErrorCode::MemAllocateFailed, error.what());
+            } catch (const folly::OperationCancelled& error) {
+                throw SegcoreError(ErrorCode::FollyCancel, error.what());
+            } catch (const folly::FutureCancellation& error) {
+                throw SegcoreError(ErrorCode::FollyCancel, error.what());
+            } catch (const folly::FutureException& error) {
+                throw SegcoreError(ErrorCode::FollyOtherException,
+                                   error.what());
+            } catch (const std::exception&) {
+                // Preserve typed errors and let the caller's boundary classify other
+                // standard exceptions. Keep allocation/cancellation codes above.
+                throw;
+            } catch (...) {
+                // Async callers do not all have a non-standard exception catch tail.
+                throw SegcoreError(ErrorCode::UnexpectedError,
+                                   "Unknown async load exception");
+            }
+        });
 }
 
 }  // namespace
@@ -137,14 +143,14 @@ TextColumnCache::GetOrCreateReader(
     return cached_reader;
 }
 
-std::vector<std::string>
-TextColumnCache::ReadBatch(
+folly::SemiFuture<std::vector<std::string>>
+TextColumnCache::ReadBatchAsync(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
     const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
-        return {};
+        return folly::makeSemiFuture(std::vector<std::string>{});
     }
 
     std::vector<std::string> results(encoded_refs.size());
@@ -173,16 +179,29 @@ TextColumnCache::ReadBatch(
     if (!pending_refs.empty()) {
         auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        auto texts = ReadLobBatch(cached_reader, pending_refs, lob_base_path);
-
-        for (size_t i = 0; i < pending_indices.size() && i < texts.size();
-             i++) {
-            size_t original_idx = pending_indices[i];
-            results[original_idx] = std::move(texts[i]);
-        }
+        return ReadLobBatchAsync(cached_reader, pending_refs, lob_base_path)
+            .deferValue([results = std::move(results),
+                         pending_indices = std::move(pending_indices)](
+                            std::vector<std::string>&& texts) mutable {
+                AssertInfo(texts.size() == pending_indices.size(),
+                           "LOB batch returned an unexpected row count");
+                for (size_t i = 0; i < pending_indices.size(); ++i) {
+                    results[pending_indices[i]] = std::move(texts[i]);
+                }
+                return std::move(results);
+            });
     }
+    return folly::makeSemiFuture(std::move(results));
+}
 
-    return results;
+std::vector<std::string>
+TextColumnCache::ReadBatch(
+    const std::string& lob_base_path,
+    std::shared_ptr<arrow::fs::FileSystem> fs,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
+    return cachinglayer::SemiInlineGet(
+        ReadBatchAsync(lob_base_path, std::move(fs), properties, encoded_refs));
 }
 
 void
@@ -220,7 +239,8 @@ TextColumnCache::ReadBatchInto(
     if (!pending_refs.empty()) {
         auto cached_reader = GetOrCreateReader(lob_base_path, fs, properties);
 
-        auto texts = ReadLobBatch(cached_reader, pending_refs, lob_base_path);
+        auto texts = cachinglayer::SemiInlineGet(
+            ReadLobBatchAsync(cached_reader, pending_refs, lob_base_path));
 
         for (size_t i = 0; i < pending_indices.size() && i < texts.size();
              i++) {

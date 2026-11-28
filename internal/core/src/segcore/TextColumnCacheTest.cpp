@@ -17,6 +17,8 @@
 #include "segcore/TextColumnCache.h"
 
 #include <arrow/array.h>
+#include "cachinglayer/Utils.h"
+#include <folly/OperationCancelled.h>
 #include <arrow/status.h>
 #include <gtest/gtest.h>
 #include <atomic>
@@ -271,7 +273,13 @@ class FailingAsyncReader : public InstrumentedLobColumnReader {
                     throw SegcoreError(ErrorCode::StorageTransientError,
                                        "async backend exception");
                 }
-                throw std::bad_alloc();
+                if (mode == 2)
+                    throw std::bad_alloc();
+                if (mode == 3)
+                    return arrow::Status::Invalid("corrupt LOB");
+                if (mode == 4)
+                    return arrow::Status::OutOfMemory("decoder OOM");
+                throw folly::OperationCancelled();
             });
     }
 
@@ -280,7 +288,7 @@ class FailingAsyncReader : public InstrumentedLobColumnReader {
 };
 
 TEST(TextColumnCache, PreservesAsyncErrorsForBothReadAPIs) {
-    for (int mode = 0; mode < 3; ++mode) {
+    for (int mode = 0; mode < 6; ++mode) {
         TextColumnCache cache(
             TextColumnCacheConfig{},
             [mode](std::shared_ptr<arrow::fs::FileSystem>,
@@ -291,20 +299,28 @@ TEST(TextColumnCache, PreservesAsyncErrorsForBothReadAPIs) {
             });
         auto raw = MakeLobReference();
         std::vector<EncodedRef> refs{{raw.data(), raw.size()}};
-        for (bool into : {false, true}) {
+        for (int api : {0, 1, 2}) {
             try {
-                if (into) {
+                if (api == 1) {
                     google::protobuf::RepeatedPtrField<std::string> dst;
                     dst.Add();
                     cache.ReadBatchInto("lob", nullptr, nullptr, refs, &dst);
-                } else {
+                } else if (api == 0) {
                     cache.ReadBatch("lob", nullptr, nullptr, refs);
+                } else {
+                    auto future =
+                        cache.ReadBatchAsync("lob", nullptr, nullptr, refs);
+                    cache.Clear();
+                    cachinglayer::SemiInlineGet(std::move(future));
                 }
                 FAIL() << "expected async failure";
             } catch (const SegcoreError& error) {
                 EXPECT_EQ(error.get_error_code(),
-                          mode == 2 ? ErrorCode::MemAllocateFailed
-                                    : ErrorCode::StorageTransientError);
+                          (mode == 2 || mode == 4)
+                              ? ErrorCode::MemAllocateFailed
+                          : mode == 3 ? ErrorCode::DataFormatBroken
+                          : mode == 5 ? ErrorCode::FollyCancel
+                                      : ErrorCode::StorageTransientError);
             }
         }
     }

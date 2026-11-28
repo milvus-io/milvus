@@ -8,6 +8,9 @@
 
 #include <gtest/gtest.h>
 #include <thread>
+#include <future>
+#include <array>
+#include "grep/GrepBatchReader.h"
 #include <numeric>
 #include <limits>
 #include <nlohmann/json.hpp>
@@ -1434,6 +1437,19 @@ TEST_P(GrepScanTest, StopsMatchingInsidePrefetchedBatch) {
     Scan({0, 1}, "timeout", DataFormatBroken);
 }
 
+TEST_P(GrepScanTest, PrefetchPreservesEarlyStop) {
+    options.batch_size = 1;
+    options.limit = 1;
+    // Invalid next batch must not fail an already satisfied match limit.
+    auto result = Scan({2, -1});
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->num_rows(), 1);
+    options.limit = 2;
+    Scan({2, -1}, "timeout", UnexpectedError);
+    options.max_scan_rows = 1;
+    EXPECT_NE(Scan({2, -1}), nullptr);
+}
+
 TEST_P(GrepScanTest, EmptyNullAndMultipleBatches) {
     auto empty = Scan({}, "");
     ASSERT_NE(empty, nullptr);
@@ -1556,6 +1572,17 @@ TEST_P(GrepScanTest, MixedInlineAndFileTextPreservesOrder) {
         ->SetTextLobPathForTesting(FieldId(101), lob.lob_base_path);
     options.limit = 100;
     auto raw = Scan({4, 1, 0, 3, 2, 4});
+    for (auto batch_size : {1, 2, 128}) {
+        options.batch_size = batch_size;
+        auto pipelined = Scan({4, 1, 0, 3, 2, 4});
+        ASSERT_NE(pipelined, nullptr);
+        EXPECT_TRUE(pipelined->Equals(*raw));
+        options.limit = 1;
+        auto limited = Scan({1, 1, 0, 4});
+        ASSERT_NE(limited, nullptr);
+        EXPECT_EQ(limited->num_rows(), 1);
+        options.limit = 100;
+    }
     auto probe = AttachNgram(texts, {true, true, true, false, true});
     for (auto batch_size : {1, 2, 128}) {
         options.batch_size = batch_size;
@@ -1797,3 +1824,79 @@ TEST_P(GrepScanTest, PersistedInvalidUtf8IsSystemError) {
 }
 }  // namespace
 }  // namespace milvus::segcore
+
+namespace milvus::grep {
+TEST(GrepBatchReader, StartsCurrentAndFiveReadAheadBatchesInOrder) {
+    std::array<folly::Promise<int>, 6> promises;
+    std::promise<void> started;
+    size_t submissions = 0;
+    GrepBatchReader<int> reader([&]() -> std::optional<folly::SemiFuture<int>> {
+        if (submissions == promises.size())
+            return std::nullopt;
+        const auto index = submissions++;
+        return folly::makeSemiFuture().deferValue([&, index](folly::Unit) {
+            auto future = promises[index].getSemiFuture();
+            if (index == 5)
+                started.set_value();
+            return future;
+        });
+    });
+    auto next = std::async(std::launch::async, [&] { return reader.Next(); });
+    const auto status = started.get_future().wait_for(std::chrono::seconds(5));
+    for (int i = 5; i >= 0; --i) promises[i].setValue(i);
+    EXPECT_EQ(status, std::future_status::ready);
+    EXPECT_EQ(next.get(), 0);
+    for (int i = 1; i < 6; ++i) EXPECT_EQ(reader.Next(), i);
+    EXPECT_FALSE(reader.Next());
+}
+
+TEST(GrepBatchReader, DefersSpeculativeFailureAndPreservesTypedErrors) {
+    for (bool consume : {false, true}) {
+        int submissions = 0;
+        GrepBatchReader<int> reader(
+            [&]() -> std::optional<folly::SemiFuture<int>> {
+                if (++submissions == 1)
+                    return folly::makeSemiFuture(1);
+                throw SegcoreError(ErrorCode::StorageTransientError,
+                                   "injected timeout");
+            });
+        EXPECT_EQ(reader.Next(), 1);
+        if (consume) {
+            try {
+                reader.Next();
+                FAIL() << "expected storage failure";
+            } catch (const SegcoreError& e) {
+                EXPECT_EQ(e.get_error_code(), ErrorCode::StorageTransientError);
+            }
+        }
+        EXPECT_NO_THROW(reader.Close());
+        EXPECT_FALSE(reader.Next());
+    }
+}
+
+TEST(GrepBatchReader, CloseDrainsOutstandingRead) {
+    folly::Promise<int> pending;
+    int submissions = 0;
+    GrepBatchReader<int> reader([&]() -> std::optional<folly::SemiFuture<int>> {
+        if (submissions == 2)
+            return std::nullopt;
+        if (++submissions == 1)
+            return folly::makeSemiFuture(1);
+        return pending.getSemiFuture();
+    });
+    EXPECT_EQ(reader.Next(), 1);
+    std::promise<void> entering;
+    auto close = std::async(std::launch::async, [&] {
+        entering.set_value();
+        reader.Close();
+    });
+    entering.get_future().wait();
+    EXPECT_EQ(close.wait_for(std::chrono::milliseconds(20)),
+              std::future_status::timeout);
+    pending.setException(
+        SegcoreError(ErrorCode::FollyCancel, "injected cancel"));
+    close.get();
+    EXPECT_FALSE(reader.Next());
+    EXPECT_EQ(submissions, 2);
+}
+}  // namespace milvus::grep

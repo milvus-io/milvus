@@ -33,6 +33,7 @@
 #include "milvus-storage/lob_column/lob_column_writer.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "segcore/TextColumnCache.h"
+#include "cachinglayer/Utils.h"
 #include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::segcore {
@@ -207,7 +208,7 @@ BytesOutsideMetadata(const TextReadSnapshot& reads,
     return bytes;
 }
 
-class TextColumnCacheReadTest : public ::testing::TestWithParam<bool> {
+class TextColumnCacheReadTest : public ::testing::TestWithParam<int> {
  protected:
     std::vector<std::string>
     Read(TextColumnCache& cache,
@@ -217,6 +218,24 @@ class TextColumnCacheReadTest : public ::testing::TestWithParam<bool> {
         if (!GetParam()) {
             return cache.ReadBatch(
                 config.lob_base_path, fs, config.properties, refs);
+        }
+        if (GetParam() == 2) {
+            // Destroy the input reference storage before executing deferred work.
+            auto future = [&] {
+                std::vector<std::string> owned;
+                owned.reserve(refs.size());
+                std::vector<milvus_storage::lob_column::EncodedRef> temporary;
+                for (const auto& ref : refs) {
+                    owned.emplace_back(reinterpret_cast<const char*>(ref.data),
+                                       ref.size);
+                    temporary.push_back(
+                        {reinterpret_cast<const uint8_t*>(owned.back().data()),
+                         owned.back().size()});
+                }
+                return cache.ReadBatchAsync(
+                    config.lob_base_path, fs, config.properties, temporary);
+            }();
+            return cachinglayer::SemiInlineGet(std::move(future));
         }
         google::protobuf::RepeatedPtrField<std::string> dst;
         for (size_t i = 0; i < refs.size(); ++i) {
@@ -243,9 +262,11 @@ class TextColumnCacheReadTest : public ::testing::TestWithParam<bool> {
 
 INSTANTIATE_TEST_SUITE_P(ReadAPIs,
                          TextColumnCacheReadTest,
-                         ::testing::Bool(),
-                         [](const ::testing::TestParamInfo<bool>& info) {
-                             return info.param ? "ReadBatchInto" : "ReadBatch";
+                         ::testing::Values(0, 1, 2),
+                         [](const ::testing::TestParamInfo<int>& info) {
+                             return info.param == 0   ? "ReadBatch"
+                                    : info.param == 1 ? "ReadBatchInto"
+                                                      : "ReadBatchAsync";
                          });
 
 TEST_P(TextColumnCacheReadTest, RepeatedLobReadsReuseReadersButReadDataAgain) {

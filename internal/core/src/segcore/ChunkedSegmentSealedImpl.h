@@ -594,6 +594,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // Public for cross-class access via dynamic_cast from SegmentInterface
     // (same pattern as TryTakeForRetrieve); the virtual bulk_subscript keeps
     // its frozen signature and delegates to these with a fresh capture.
+    // Reference gathering is synchronous; payload reads are deferred. The
+    // returned future owns its output and no longer borrows op_ctx or offsets.
+    folly::SemiFuture<std::unique_ptr<DataArray>>
+    bulk_subscript_text_async_from_state(
+        const std::shared_ptr<const PublishedSegmentState>& snapshot,
+        milvus::OpContext* op_ctx,
+        FieldId field_id,
+        const int64_t* seg_offsets,
+        int64_t count) const;
+
     std::unique_ptr<DataArray>
     bulk_subscript_from_state(
         const std::shared_ptr<const PublishedSegmentState>& snapshot,
@@ -1390,6 +1400,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TEXT column handling for StorageV2 (LOB reference resolution). Reads the
     // text_lob_paths map from the passed runtime so callers that already hold a
     // pinned snapshot avoid re-capturing the published state.
+    folly::SemiFuture<folly::Unit>
+    bulk_subscript_text_impl_async(
+        FieldId field_id,
+        const std::shared_ptr<const RuntimeResourceState>& runtime,
+        const ChunkedColumnInterface::TakeResult& take,
+        google::protobuf::RepeatedPtrField<std::string>* dst,
+        bool* validity) const;
+
     void
     bulk_subscript_text_impl(
         FieldId field_id,

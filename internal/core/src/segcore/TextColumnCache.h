@@ -100,6 +100,17 @@ class TextColumnCache {
         const std::shared_ptr<const milvus_storage::api::Properties>&
             properties);
 
+    // Consumes/copies encoded references before returning. The future retains
+    // its reader and output, not this cache or caller buffers. Deferred work
+    // must be driven by the caller (via an executor or SemiInlineGet).
+    folly::SemiFuture<std::vector<std::string>>
+    ReadBatchAsync(const std::string& lob_base_path,
+                   std::shared_ptr<arrow::fs::FileSystem> fs,
+                   const std::shared_ptr<const milvus_storage::api::Properties>&
+                       properties,
+                   const std::vector<milvus_storage::lob_column::EncodedRef>&
+                       encoded_refs);
+
     std::vector<std::string>
     ReadBatch(const std::string& lob_base_path,
               std::shared_ptr<arrow::fs::FileSystem> fs,
@@ -132,7 +143,7 @@ class TextColumnCache {
     TextLobReaderFactory reader_factory_;
 
     // Key: lob_base_path
-    // Value: LobColumnReader and its per-reader lock.
+    // Value: shared LobColumnReader; no cache lock is held across I/O.
     mutable std::mutex reader_cache_mutex_;
     milvus_storage::LRUCache<std::string, std::shared_ptr<CachedTextLobReader>>
         reader_cache_;
