@@ -19,10 +19,12 @@ package grpcdatanode
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -362,4 +364,32 @@ func TestIndexService(t *testing.T) {
 	server.datanode.(*mocks.MockDataNode).EXPECT().Stop().Return(nil)
 	err = server.Stop()
 	assert.NoError(t, err)
+}
+
+func TestDataNodeStartGrpcCancelledContextStopsCleanly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	server, err := NewServer(ctx, nil)
+	require.NoError(t, err)
+
+	dn := mocks.NewMockDataNode(t)
+	dn.EXPECT().Stop().Return(nil)
+	server.datanode = dn
+
+	require.NoError(t, server.Prepare())
+	cancel()
+
+	err = server.startGrpc()
+	require.ErrorIs(t, err, context.Canceled)
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- server.Stop()
+	}()
+
+	select {
+	case stopErr := <-stopDone:
+		require.NoError(t, stopErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not finish after startGrpc cancellation")
+	}
 }

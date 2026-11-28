@@ -266,7 +266,9 @@ func (s *Server) initSession() error {
 	// Init QueryCoord session
 	if s.session == nil {
 		s.session = sessionutil.NewSession(s.ctx)
-		s.session.Init(typeutil.QueryCoordRole, s.address, true)
+		if err := s.session.Init(typeutil.QueryCoordRole, s.address, true); err != nil {
+			return err
+		}
 		s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 		s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	}

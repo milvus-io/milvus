@@ -25,6 +25,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -180,6 +181,9 @@ func runComponent[T component](ctx context.Context,
 
 		// Run() executes after sign is closed, allowing components to start concurrently
 		if err := role.Run(); err != nil {
+			if stopErr := role.Stop(); stopErr != nil {
+				mlog.Warn(ctx, "failed to stop component after Run failure", mlog.String("role", role.GetName()), mlog.Err(stopErr))
+			}
 			return nil, errors.Wrap(err, "run component failed")
 		}
 		return role, nil
@@ -206,8 +210,9 @@ type MilvusRoles struct {
 
 	ServerType string
 
-	closed chan struct{}
-	once   sync.Once
+	closed                  chan struct{}
+	once                    sync.Once
+	startupCanceledBySignal atomic.Bool
 }
 
 // NewMilvusRoles creates a new MilvusRoles with private fields initialized.
@@ -273,8 +278,9 @@ func (mr *MilvusRoles) resolveFileResourceMode() fileresource.Mode {
 }
 
 // waitForAllComponentsReady waits for all components to be ready.
-// It will return an error if any component is not ready before closing with a fast fail strategy.
-// It will return a map of components that are ready.
+// On any component failure or shutdown signal, it cancels the shared startup
+// context, waits for all component futures to finish, stops any components that
+// already became ready, and returns the original failure or context.Canceled.
 func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, componentFutureMap map[string]*conc.Future[component]) (map[string]component, error) {
 	roles := make([]string, 0, len(componentFutureMap))
 	futures := make([]*conc.Future[component], 0, len(componentFutureMap))
@@ -294,23 +300,30 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 		}
 	}
 	componentMap := make(map[string]component, len(componentFutureMap))
+	mr.startupCanceledBySignal.Store(false)
 	readyCount := 0
-	for {
+	var firstErr error
+	for readyCount < len(componentFutureMap) {
 		index, _, _ := reflect.Select(selectCases)
 		if index == 0 {
 			cancel()
-			mlog.Warn(context.TODO(), "components are not ready before closing, wait for the start of components to be canceled...")
-			return nil, context.Canceled
+			if firstErr == nil {
+				firstErr = context.Canceled
+				mr.startupCanceledBySignal.Store(true)
+				mlog.Warn(context.TODO(), "components are not ready before closing, wait for the start of components to be canceled...")
+			}
 		} else {
 			role := roles[index-1]
-			component, err := futures[index-1].Await()
+			comp, err := futures[index-1].Await()
 			readyCount++
 			if err != nil {
 				cancel()
-				mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
-				return nil, err
+				if firstErr == nil {
+					firstErr = err
+					mlog.Warn(context.TODO(), "component is not ready before closing", mlog.String("role", role), mlog.Err(err))
+				}
 			} else {
-				componentMap[role] = &stopOnceComponent{component: component}
+				componentMap[role] = &stopOnceComponent{component: comp}
 				mlog.Info(context.TODO(), "component is ready", mlog.String("role", role))
 			}
 		}
@@ -318,11 +331,56 @@ func (mr *MilvusRoles) waitForAllComponentsReady(cancel context.CancelFunc, comp
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(nil),
 		}
-		if readyCount == len(componentFutureMap) {
-			break
-		}
+	}
+	if firstErr != nil {
+		mr.stopComponents(componentMap)
+		return nil, firstErr
 	}
 	return componentMap, nil
+}
+
+func (mr *MilvusRoles) stopComponents(componentMap map[string]component) {
+	mixCoord := componentMap[typeutil.MixCoordRole]
+	streamingNode := componentMap[typeutil.StreamingNodeRole]
+	queryNode := componentMap[typeutil.QueryNodeRole]
+	dataNode := componentMap[typeutil.DataNodeRole]
+	cdc := componentMap[typeutil.CDCRole]
+	proxy := componentMap[typeutil.ProxyRole]
+
+	// stop coordinators first
+	coordinators := []component{mixCoord}
+	for idx, coord := range coordinators {
+		if coord != nil {
+			mlog.Warn(context.TODO(), "stop processing")
+			mlog.Info(context.TODO(), "stop coord", mlog.Int("idx", idx), mlog.Any("coord", coord))
+			coord.Stop()
+		}
+	}
+	mlog.Info(context.TODO(), "All coordinators have stopped")
+
+	// stop nodes
+	nodes := []component{streamingNode, queryNode, dataNode, cdc}
+	stopNodeWG := &sync.WaitGroup{}
+	for _, node := range nodes {
+		if node != nil {
+			stopNodeWG.Add(1)
+			go func() {
+				defer func() {
+					stopNodeWG.Done()
+					mlog.Info(context.TODO(), "stop node done", mlog.Any("node", node))
+				}()
+				mlog.Info(context.TODO(), "stop node...", mlog.Any("node", node))
+				node.Stop()
+			}()
+		}
+	}
+	stopNodeWG.Wait()
+	mlog.Info(context.TODO(), "All nodes have stopped")
+
+	if proxy != nil {
+		proxy.Stop()
+		mlog.Info(context.TODO(), "proxy stopped!")
+	}
 }
 
 func (mr *MilvusRoles) setupLogger() {
@@ -436,7 +494,7 @@ func (mr *MilvusRoles) componentNum() int {
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run() {
+func (mr *MilvusRoles) Run() error {
 	// start signal handler, defer close func
 	closeFn := mr.handleSignals()
 	defer closeFn()
@@ -468,7 +526,7 @@ func (mr *MilvusRoles) Run() {
 		params := paramtable.Get()
 		// Recover visible legacy local files before etcd and components start.
 		if !mr.migrateLocalStorageLayoutOrDie(ctx, params) {
-			return
+			return nil
 		}
 		if params.EtcdCfg.UseEmbedEtcd.GetAsBool() {
 			// Start etcd server.
@@ -495,6 +553,7 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+	defer kvfactory.CloseEtcdClient()
 	metrics.SetCollectionLevelMetricsMode(paramtable.Get().CommonCfg.CollectionLevelMetricsMode.GetValue())
 	mlog.Info(context.TODO(), "configured collection and VChannel metrics",
 		mlog.String("mode", metrics.CollectionLevelMetricsMode()))
@@ -510,7 +569,7 @@ func (mr *MilvusRoles) Run() {
 			paramtable.Get().MQCfg.Type.Key: func(string) string { return walName.String() },
 		}); err != nil {
 			mlog.Error(context.TODO(), "failed to process immutable configs", mlog.Err(err))
-			return
+			return err
 		}
 	}
 
@@ -623,8 +682,12 @@ func (mr *MilvusRoles) Run() {
 
 	componentMap, err := mr.waitForAllComponentsReady(cancel, componentFutureMap)
 	if err != nil {
-		mlog.Warn(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
-		return
+		if mr.startupCanceledBySignal.Load() {
+			mlog.Info(context.TODO(), "Milvus startup canceled due to shutdown signal", mlog.Err(err))
+			return nil
+		}
+		mlog.Error(context.TODO(), "Failed to wait for all components ready", mlog.Err(err))
+		return err
 	}
 	mlog.Info(context.TODO(), "All components are ready", mlog.Strings("roles", lo.Keys(componentMap)))
 
@@ -684,52 +747,10 @@ func (mr *MilvusRoles) Run() {
 
 	<-mr.closed
 
-	mixCoord := componentMap[typeutil.MixCoordRole]
-	streamingNode := componentMap[typeutil.StreamingNodeRole]
-	queryNode := componentMap[typeutil.QueryNodeRole]
-	dataNode := componentMap[typeutil.DataNodeRole]
-	cdc := componentMap[typeutil.CDCRole]
-	proxy := componentMap[typeutil.ProxyRole]
-
-	// stop coordinators first
-	coordinators := []component{mixCoord}
-	for idx, coord := range coordinators {
-		mlog.Warn(context.TODO(), "stop processing")
-		if coord != nil {
-			mlog.Info(context.TODO(), "stop coord", mlog.Int("idx", idx), mlog.Any("coord", coord))
-			coord.Stop()
-		}
-	}
-	mlog.Info(context.TODO(), "All coordinators have stopped")
-
-	// stop nodes
-	nodes := []component{streamingNode, queryNode, dataNode, cdc}
-	stopNodeWG := &sync.WaitGroup{}
-	for _, node := range nodes {
-		if node != nil {
-			stopNodeWG.Add(1)
-			go func() {
-				defer func() {
-					stopNodeWG.Done()
-					mlog.Info(context.TODO(), "stop node done", mlog.Any("node", node))
-				}()
-				mlog.Info(context.TODO(), "stop node...", mlog.Any("node", node))
-				node.Stop()
-			}()
-		}
-	}
-	stopNodeWG.Wait()
-	mlog.Info(context.TODO(), "All nodes have stopped")
-
-	if proxy != nil {
-		proxy.Stop()
-		mlog.Info(context.TODO(), "proxy stopped!")
-	}
-
-	// close reused etcd client
-	kvfactory.CloseEtcdClient()
+	mr.stopComponents(componentMap)
 
 	mlog.Info(context.TODO(), "Milvus components graceful stop done")
+	return nil
 }
 
 func (mr *MilvusRoles) GetRoles() []string {

@@ -25,9 +25,9 @@ type SessionInterface interface {
 	UnmarshalJSON(data []byte) error
 	MarshalJSON() ([]byte, error)
 
-	Init(serverName, address string, exclusive bool)
+	Init(serverName, address string, exclusive bool) error
 	String() string
-	Register()
+	Register() error
 
 	GetSessions(ctx context.Context, prefix string) (map[string]*Session, int64, error)
 	GetSessionsWithVersionRange(prefix string, r semver.Range) (map[string]*Session, int64, error)

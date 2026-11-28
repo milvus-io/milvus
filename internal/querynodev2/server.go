@@ -183,7 +183,9 @@ func (node *QueryNode) initSession() error {
 	if node.session == nil {
 		return merr.WrapErrServiceNotReadyMsg("session is nil, the etcd client connection may have failed")
 	}
-	node.session.Init(typeutil.QueryNodeRole, node.address, false)
+	if err := node.session.Init(typeutil.QueryNodeRole, node.address, false); err != nil {
+		return err
+	}
 	sessionutil.SaveServerInfo(typeutil.QueryNodeRole, node.session.ServerID)
 	paramtable.SetNodeID(node.session.ServerID)
 	node.serverID = node.session.ServerID
@@ -193,7 +195,9 @@ func (node *QueryNode) initSession() error {
 
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
-	node.session.Register()
+	if err := node.session.Register(); err != nil {
+		return err
+	}
 	// start liveness check
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(node.GetNodeID()), typeutil.QueryNodeRole).Inc()
 	return nil

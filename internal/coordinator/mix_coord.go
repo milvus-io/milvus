@@ -144,7 +144,9 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 
 // Register register mixcoord at etcd
 func (s *mixCoordImpl) Register() error {
-	s.session.Register()
+	if err := s.session.Register(); err != nil {
+		return err
+	}
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.MixCoordRole).Inc()
 		mlog.Info(s.ctx, "MixCoord Register Finished")
@@ -533,8 +535,10 @@ func (s *mixCoordImpl) Stop() error {
 	s.cancel()
 
 	// All coordinators have stopped. Now stop the session.
-	s.session.SetMixCoordMode(false)
-	s.session.Stop()
+	if s.session != nil {
+		s.session.SetMixCoordMode(false)
+		s.session.Stop()
+	}
 	return nil
 }
 
@@ -552,7 +556,9 @@ func (s *mixCoordImpl) initStreamingCoord() {
 
 func (s *mixCoordImpl) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx)
-	s.session.Init(typeutil.MixCoordRole, s.address, true)
+	if err := s.session.Init(typeutil.MixCoordRole, s.address, true); err != nil {
+		return err
+	}
 	s.session.SetEnableActiveStandBy(true)
 	// Mark session as MixCoord mode so individual coordinator Stop() calls won't cancel it.
 	// MixCoord owns the session lifecycle and stops it after all coordinators have stopped.

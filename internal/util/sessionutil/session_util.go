@@ -317,13 +317,13 @@ func NewSessionWithEtcd(ctx context.Context, metaRoot string, client *clientv3.C
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool) {
+func (s *Session) Init(serverName, address string, exclusive bool) error {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
 	serverID, err := s.getServerID()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	s.ServerID = serverID
 	s.ServerLabels = getServerLabelsFromEnv(serverName)
@@ -335,6 +335,7 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 		mlog.Int64("serverID", s.ServerID),
 		mlog.String("address", address),
 	))
+	return nil
 }
 
 // String makes Session struct able to be logged by zap
@@ -342,15 +343,43 @@ func (s *Session) String() string {
 	return fmt.Sprintf("Session:<ServerID: %d, ServerName: %s, Version: %s>", s.ServerID, s.ServerName, s.Version.String())
 }
 
-// Register will process keepAliveResponse to keep alive with etcd.
-func (s *Session) Register() {
+// Register registers the session with etcd and starts the keepalive loop.
+func (s *Session) Register() error {
 	err := s.registerService()
 	if err != nil {
-		s.Logger().Error(s.ctx, "register failed", mlog.Err(err))
-		panic(err)
+		if ctxErr := s.ctx.Err(); ctxErr != nil {
+			if !errors.Is(err, ctxErr) {
+				err = fmt.Errorf("%w: %w", ctxErr, err)
+			}
+			s.Logger().Info(s.ctx, "register canceled", mlog.Err(err))
+		} else {
+			s.Logger().Error(s.ctx, "register failed", mlog.Err(err))
+		}
+		return err
+	}
+	if err := s.ctx.Err(); err != nil {
+		s.revokeLease()
+		s.Logger().Info(s.ctx, "register canceled", mlog.Err(err))
+		return err
 	}
 	s.UpdateRegistered(true)
 	s.startKeepAliveLoop()
+	return nil
+}
+
+// revokeLease revokes the currently held lease using a short-lived background
+// context so cleanup succeeds even when s.ctx is already canceled.
+func (s *Session) revokeLease() {
+	if s.LeaseID == nil || s.etcdCli == nil {
+		return
+	}
+	leaseID := *s.LeaseID
+	s.LeaseID = nil
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := s.etcdCli.Revoke(ctx, leaseID); err != nil {
+		s.Logger().Warn(ctx, "failed to revoke lease after aborted registration", mlog.Int64("leaseID", int64(leaseID)), mlog.Err(err))
+	}
 }
 
 func (s *Session) GetRegisteredRevision() int64 {
@@ -516,7 +545,14 @@ func (s *Session) registerService() error {
 			s.Logger().Error(s.ctx, "register service: failed to grant lease from etcd", mlog.Err(err))
 			return err
 		}
-		s.LeaseID = &resp.ID
+		leaseID := resp.ID
+		s.LeaseID = &leaseID
+		registered := false
+		defer func() {
+			if !registered {
+				s.revokeLease()
+			}
+		}()
 
 		sessionJSON, err := json.Marshal(s)
 		if err != nil {
@@ -528,7 +564,7 @@ func (s *Session) registerService() error {
 			clientv3.Compare(clientv3.Version(completeKey), "=", 0),
 		}
 		ops := []clientv3.Op{
-			clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID)),
+			clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(leaseID)),
 		}
 
 		// if enable active-standby, we don't need to check the version now,
@@ -547,6 +583,10 @@ func (s *Session) registerService() error {
 		if txnResp != nil && !txnResp.Succeeded {
 			return merr.WrapErrServiceUnavailableMsg("CompareAndSwap failed for session key %s: compare is false", s.ServerName)
 		}
+		if err := s.ctx.Err(); err != nil {
+			return err
+		}
+		registered = true
 		if !s.enableActiveStandBy {
 			s.registeredRevision.Store(txnResp.Header.GetRevision())
 		}
