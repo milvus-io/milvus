@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"time"
 
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -53,6 +54,8 @@ type LoadConfigWatcher struct {
 	s         *Server
 
 	handlers map[string]config.EventHandler
+	// Owned by the background loop. A failed placement write blocks its destinations until retry.
+	unappliedGroups map[string]bool
 }
 
 // Trigger triggers a load config change.
@@ -81,20 +84,27 @@ func (w *LoadConfigWatcher) background() {
 		},
 	})
 
+	promotion := time.NewTicker(5 * time.Second)
+	defer promotion.Stop()
+	nextTimer, _ := balanceTimer.NextTimer()
 	for {
-		nextTimer, _ := balanceTimer.NextTimer()
 		select {
 		case <-w.notifier.Context().Done():
 			return
 		case <-w.triggerCh:
 			w.Logger().Info(w.notifier.Context(), "load config watcher triggered")
+		case <-promotion.C:
+			w.promoteReadyGroups()
+			continue
 		case <-nextTimer:
 		}
 		if err := w.applyLoadConfigChanges(); err != nil {
 			balanceTimer.EnableBackoff()
-			continue
+		} else {
+			balanceTimer.DisableBackoff()
+			w.promoteReadyGroups()
 		}
-		balanceTimer.DisableBackoff()
+		nextTimer, _ = balanceTimer.NextTimer()
 	}
 }
 
@@ -103,11 +113,13 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 	// Reconcile each current configuration, including after recovery and retries.
 	// A previously applied cluster setting does not prove every collection matches.
 	var result error
+	w.unappliedGroups = make(map[string]bool)
 	for id := range w.s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap() {
 		if err := w.notifier.Context().Err(); err != nil {
 			return err
 		}
 		if err := w.s.updateCollectionLoadConfig(w.notifier.Context(), id, 0, nil, true); err != nil {
+			w.blockUnappliedGroups(w.s.qviewsRuntime.loadConfigStore.GetConfig(id))
 			result = merr.Combine(result, err)
 		}
 	}
@@ -115,6 +127,22 @@ func (w *LoadConfigWatcher) applyLoadConfigChanges() error {
 		w.Logger().Warn(w.notifier.Context(), "failed to apply cluster load configuration", mlog.Err(result))
 	}
 	return result
+}
+
+func (w *LoadConfigWatcher) blockUnappliedGroups(cfg *loadmgr.LoadConfig) {
+	replicas, groups, changed := clusterDefaultPlacementChange(cfg)
+	if !changed {
+		return
+	}
+	deficit, _ := loadmgr.ReplicaNumberByResourceGroup(groups, replicas)
+	for _, r := range cfg.Replicas {
+		deficit[r.ResourceGroup]--
+	}
+	for group, count := range deficit {
+		if count > 0 {
+			w.unappliedGroups[group] = true
+		}
+	}
 }
 
 // Close closes the load config watcher.

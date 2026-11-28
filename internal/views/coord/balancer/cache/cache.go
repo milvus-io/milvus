@@ -511,7 +511,8 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	}
 	c.mu.Unlock()
 	if old != nil && stats != nil {
-		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
+		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) &&
+			old.stats.HeldReadyLoadInfoVersion == stats.HeldReadyLoadInfoVersion {
 			return
 		}
 		// An undesired shard's teardown is already driven by its manager and

@@ -76,7 +76,17 @@ a replacement when DataVersion advances, even if membership is unchanged.
 - All SN and QNs have reported Ready (automatic transition from Preparing).
 
 **Automatic Behavior:**
-1. Push Up to SN.
+For a replica added or moved by the cluster load-config watcher, Coord waits
+before sending Up. Every expected VChannel of every pending replica in the
+destination resource group must reach Ready at its collection's current load
+version. This includes pending replicas in other collections. Existing Up
+views keep serving while the group waits.
+
+Coord clears the group's pending placements together in memory, then sends
+Up through normal per-shard synchronization. Each SN publishes its updated
+replica snapshot when it applies Up. Delivery to individual subscribers is
+asynchronous. After a Coord restart, recovered placements follow the ordinary
+per-shard Ready-to-Up transition.
 
 **Transitions:**
 

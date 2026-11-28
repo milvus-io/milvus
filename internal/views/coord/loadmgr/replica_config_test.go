@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -87,4 +88,58 @@ func TestReplicaNumberByResourceGroup(t *testing.T) {
 	counts, err := ReplicaNumberByResourceGroup(nil, 2)
 	require.NoError(t, err)
 	require.Equal(t, map[string]int{common.DefaultResourceGroupName: 2}, counts)
+}
+
+func TestMovedReplicaVisibilityIsInMemory(t *testing.T) {
+	ctx := t.Context()
+	hooks := new(versionedTestHooks)
+	deps := versionedTestDependencies(t, hooks)
+	store, err := RecoverLoadConfigStore(ctx, deps)
+	require.NoError(t, err)
+	initial := versionedTestConfig()
+	initial.Replicas = append(initial.Replicas, &ReplicaAssignment{ReplicaID: 201, ResourceGroup: "rg"})
+	require.NoError(t, store.Put(ctx, initial))
+	oldVersion := store.GetConfigVersion(1)
+	patch := mockey.Mock((*testReplicaConfigResources).ContainResourceGroup).Return(true).Build()
+	defer patch.UnPatch()
+	manager := NewCollectionLoadManager(store, nil, &testReplicaConfigResources{})
+	hooks.beforeSave = func(*viewpb.CollectionLoadConfig) error { return context.Canceled }
+	require.ErrorIs(t, manager.UpdateClusterReplicaConfig(ctx, 1, 2, []string{"new"}), context.Canceled)
+	require.Equal(t, oldVersion, store.GetConfigVersion(1))
+	require.Empty(t, store.PendingVisibility())
+	hooks.beforeSave = nil
+	require.NoError(t, manager.UpdateClusterReplicaConfig(ctx, 1, 2, []string{"new"}))
+
+	pending := store.PendingVisibility()
+	moved := store.GetConfig(1)
+	require.ElementsMatch(t, moved.Replicas, pending[moved])
+	require.False(t, store.HoldReplicaUp(1, 200, oldVersion))
+	require.True(t, store.HoldReplicaUp(1, 200, moved.Version))
+	ddl := moved.Clone()
+	ddl.PartitionIDs = append(ddl.PartitionIDs, 12)
+	require.NoError(t, store.Put(ctx, ddl))
+
+	require.False(t, store.AdmitResourceGroup(pending))
+	current := store.GetConfig(1)
+	require.True(t, store.HoldReplicaUp(1, 200, current.Version))
+	// Recovery while the source store is still holding the new placement.
+	recovered, err := RecoverLoadConfigStore(ctx, deps)
+	require.NoError(t, err)
+	require.Equal(t, current, recovered.GetConfig(1))
+	require.Empty(t, recovered.PendingVisibility())
+	require.False(t, recovered.HoldReplicaUp(1, 200, current.Version))
+
+	require.True(t, store.AdmitResourceGroup(store.PendingVisibility()))
+	require.False(t, store.HoldReplicaUp(1, 200, current.Version))
+	require.False(t, store.HoldReplicaUp(1, 201, current.Version))
+	// Reusing the ID in a later move starts a fresh hold. Explicitly moving it back
+	// cancels that hold, and releasing a collection discards any remaining holds.
+	require.NoError(t, manager.UpdateClusterReplicaConfig(ctx, 1, 1, []string{"another"}))
+	require.False(t, store.HoldReplicaUp(1, 200, current.Version))
+	require.True(t, store.HoldReplicaUp(1, 200, store.GetConfigVersion(1)))
+	require.NoError(t, manager.UpdateReplicaConfig(ctx, 1, 1, []string{"new"}))
+	require.Empty(t, store.PendingVisibility())
+	require.NoError(t, manager.UpdateClusterReplicaConfig(ctx, 1, 1, []string{"another"}))
+	store.StopPlanning(1)
+	require.Empty(t, store.PendingVisibility())
 }

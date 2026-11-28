@@ -22,23 +22,24 @@ type ReplicaConfigResources interface {
 // or database resource guard. It never reacquires that guard or broadcasts.
 // A watcher must reread its cluster settings under the guard before calling.
 func (m *CollectionLoadManager) UpdateReplicaConfig(ctx context.Context, collectionID int64, replicas int32, groups []string) error {
+	return m.updateReplicaConfig(ctx, collectionID, replicas, groups, false)
+}
+
+// UpdateClusterReplicaConfig enrolls only new or moved assignments in the destination group's next admission.
+func (m *CollectionLoadManager) UpdateClusterReplicaConfig(ctx context.Context, collectionID int64, replicas int32, groups []string) error {
+	return m.updateReplicaConfig(ctx, collectionID, replicas, groups, true)
+}
+
+func (m *CollectionLoadManager) updateReplicaConfig(ctx context.Context, collectionID int64, replicas int32, groups []string, cluster bool) error {
 	current := m.store.GetConfig(collectionID)
 	if current == nil {
 		return nil
 	}
-	next, err := m.prepareReplicaConfig(ctx, current, replicas, groups)
-	if err != nil || next == nil {
-		return err
-	}
-	return m.apply(ctx, next)
-}
-
-func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, current *LoadConfig, replicas int32, groups []string) (*LoadConfig, error) {
 	if replicas == 0 {
 		replicas = int32(len(current.Replicas))
 	}
 	if replicas < 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("replica number must be positive")
+		return merr.WrapErrParameterInvalidMsg("replica number must be positive")
 	}
 	actual := make(map[string]int)
 	for _, replica := range current.Replicas {
@@ -46,20 +47,20 @@ func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, curren
 	}
 	if len(groups) == 0 {
 		if int(replicas) == len(current.Replicas) {
-			return nil, nil
+			return nil
 		}
 		groups = slices.Sorted(maps.Keys(actual))
 	}
 	expected, err := ReplicaNumberByResourceGroup(groups, replicas)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if maps.Equal(actual, expected) {
-		return nil, nil
+		return nil
 	}
 	for group := range expected {
 		if !m.replicas.ContainResourceGroup(ctx, group) {
-			return nil, merr.WrapErrResourceGroupNotFound(group)
+			return merr.WrapErrResourceGroupNotFound(group)
 		}
 	}
 	next := current.Clone()
@@ -76,6 +77,7 @@ func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, curren
 			spare = append(spare, replica)
 		}
 	}
+	retained := len(kept)
 	for _, group := range slices.Sorted(maps.Keys(expected)) {
 		for i := assigned[group]; i < expected[group]; i++ {
 			var replica *ReplicaAssignment
@@ -84,7 +86,7 @@ func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, curren
 			} else {
 				id, err := m.replicas.AllocateReplicaID(ctx)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				replica = &ReplicaAssignment{ReplicaID: id}
 			}
@@ -92,9 +94,16 @@ func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, curren
 			kept = append(kept, replica)
 		}
 	}
-	slices.SortFunc(kept, func(a, b *ReplicaAssignment) int { return cmp.Compare(a.ReplicaID, b.ReplicaID) })
 	next.Replicas = kept
-	return next, nil
+	var newPlacements []*ReplicaAssignment
+	if cluster {
+		newPlacements = kept[retained:]
+	}
+	if err := m.store.put(ctx, next, newPlacements); err != nil {
+		return err
+	}
+	m.notifyCollection(collectionID)
+	return nil
 }
 
 // ReplicaNumberByResourceGroup resolves the count associated with each group.

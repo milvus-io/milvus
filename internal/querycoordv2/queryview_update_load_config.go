@@ -50,7 +50,11 @@ func (s *Server) updateCollectionLoadConfig(ctx context.Context, id int64, repli
 	}
 	// Only borrow the resource guard: configuration reconciliation does not
 	// create another WAL operation or wait for QueryView resource preparation.
-	if err := s.qviewsRuntime.loadManager.UpdateReplicaConfig(ctx, id, replicas, groups); err != nil {
+	update := s.qviewsRuntime.loadManager.UpdateReplicaConfig
+	if clusterDefault {
+		update = s.qviewsRuntime.loadManager.UpdateClusterReplicaConfig
+	}
+	if err := update(ctx, id, replicas, groups); err != nil {
 		return err
 	}
 	meta.GlobalFailedLoadCache.Remove(id)

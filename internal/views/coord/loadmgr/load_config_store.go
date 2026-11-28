@@ -56,6 +56,9 @@ type LoadConfigStore struct {
 	// The balancer receives per-collection publication events directly.
 	snapshot *LoadConfigSnapshot
 
+	// collection → replica → pending cluster placement.
+	pendingVisibility map[int64]map[int64]pendingPlacement
+
 	observers []func(collectionID int64, released bool)
 }
 
@@ -83,6 +86,7 @@ func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencie
 		allocateVersion: deps.AllocateVersion, indexes: deps.Indexes,
 		version: 1, configs: make(map[int64]*LoadConfig), versions: make(map[int64]uint64),
 		history: make(map[int64]map[uint64]*LoadConfig), references: make(map[loadInfoKey]int),
+		pendingVisibility: make(map[int64]map[int64]pendingPlacement),
 	}
 	records, err := deps.Catalog.List(ctx)
 	if err != nil {
@@ -115,15 +119,19 @@ func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencie
 // The caller holds the collection DDL guard; the local guard also serializes GC
 // and release.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
+	return s.put(ctx, cfg, nil)
+}
+
+func (s *LoadConfigStore) put(ctx context.Context, cfg *LoadConfig, newPlacements []*ReplicaAssignment) error {
 	if cfg == nil {
 		return nil
 	}
 	s.collectionLocks.Lock(cfg.CollectionID)
 	defer s.collectionLocks.Unlock(cfg.CollectionID)
-	return s.putLocked(ctx, cfg)
+	return s.putLocked(ctx, cfg, newPlacements...)
 }
 
-func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error {
+func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig, newPlacements ...*ReplicaAssignment) error {
 	cfg, err := s.normalize(ctx, cfg)
 	if err != nil {
 		return err
@@ -162,6 +170,7 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	// Notify even at the same requirements version: future planning must see
 	// the new AutoLoad source. Existing readers keep their immutable snapshot.
 	s.version++
+	s.updatePendingVisibility(cfg, newPlacements)
 	s.publishConfigLocked(cfg.CollectionID)
 	s.mu.Unlock()
 	s.notifyObservers(cfg.CollectionID, false)
@@ -175,6 +184,7 @@ func (s *LoadConfigStore) StopPlanning(collectionID int64) {
 	s.collectionLocks.Lock(collectionID)
 	defer s.collectionLocks.Unlock(collectionID)
 	s.mu.Lock()
+	delete(s.pendingVisibility, collectionID)
 	delete(s.configs, collectionID)
 	delete(s.versions, collectionID)
 	s.version++

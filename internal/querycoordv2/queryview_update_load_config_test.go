@@ -59,7 +59,13 @@ func TestQueryViewUpdateLoadConfig(t *testing.T) {
 	require.NoError(t, watcher.applyLoadConfigChanges())
 	require.Equal(t, "b", store.GetConfig(1).Replicas[1].ResourceGroup, "user placement is protected")
 	require.NoError(t, params.Save(params.QueryCoordCfg.ClusterLevelLoadForceOverrideUserReplicaMode.Key, "true"))
+	fail := mockey.Mock((*loadmgr.CollectionLoadManager).UpdateClusterReplicaConfig).Return(context.DeadlineExceeded).Build()
+	err := watcher.applyLoadConfigChanges()
+	fail.UnPatch()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, map[string]bool{"a": true}, watcher.unappliedGroups)
 	require.NoError(t, watcher.applyLoadConfigChanges())
+	require.Empty(t, watcher.unappliedGroups)
 	require.True(t, store.GetConfig(1).UserSpecifiedReplicaMode, "force does not erase user intent")
 	var groups []string
 	for _, replica := range store.GetConfig(1).Replicas {

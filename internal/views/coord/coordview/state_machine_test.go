@@ -462,6 +462,18 @@ func TestUnrecoverableClearsPendingPreparingSync(t *testing.T) {
 	assert.Empty(t, flush.Sync)
 }
 
+func TestHeldReadyLosesQueryNodeBeforeAdmission(t *testing.T) {
+	view := buildTestView(1)
+	sm := NewCoordQueryViewStateMachine(view)
+	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
+	require.Equal(t, qviews.QueryViewStateReady, sm.State())
+	sm.upHeld = true
+	sm.OnQueryNodeLost(qviews.NewQueryNode(1))
+	require.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
+	require.Empty(t, sm.ConsumeFlush().Sync)
+}
+
 func TestUnrecoverableClearsPendingUpSync(t *testing.T) {
 	view := buildTestView(1)
 	sm := NewCoordQueryViewStateMachine(view)
