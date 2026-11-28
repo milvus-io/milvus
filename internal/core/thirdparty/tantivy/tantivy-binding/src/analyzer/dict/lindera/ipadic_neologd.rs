@@ -1,14 +1,24 @@
 use super::fetch;
 use crate::error::Result;
-#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ipadic-neologd"))]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl",
+    feature = "lindera-ipadic-neologd"
+))]
 use crate::error::TantivyBindingError;
 #[cfg(feature = "lindera-ipadic-neologd")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
-#[cfg(feature = "analyzer-remote-tls")]
+#[cfg(any(
+    feature = "analyzer-remote-tls",
+    feature = "analyzer-remote-tls-openssl"
+))]
 use lindera_dictionary::dictionary_builder::ipadic_neologd::IpadicNeologdBuilder;
 
 #[cfg(all(
-    feature = "analyzer-remote-tls",
+    any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    ),
     not(feature = "lindera-ipadic-neologd")
 ))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
@@ -23,7 +33,10 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
 // Online download is compiled out; only a dictionary already built under
 // `build_dir` can be used.
 #[cfg(all(
-    not(feature = "analyzer-remote-tls"),
+    not(any(
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )),
     not(feature = "lindera-ipadic-neologd")
 ))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
@@ -46,6 +59,7 @@ pub fn load_ipadic_neologd(
             "https://lindera.dev/mecab-ipadic-neologd-0.0.7-20200820.tar.gz".to_string(),
         ],
         md5_hash: "3561f0e76980a842dc828b460a8cae96".to_string(),
+        sha256_hash: "d55c02c204932858b179050554276a33364a9deffe15380ce7ac53edeb6a8ea2".to_string(),
     };
     if download_url.len() > 0 {
         params.download_urls = download_url
@@ -69,7 +83,11 @@ pub fn load_ipadic_neologd(
 
 #[cfg(all(
     test,
-    any(feature = "lindera-ipadic-neologd", feature = "analyzer-remote-tls")
+    any(
+        feature = "lindera-ipadic-neologd",
+        feature = "analyzer-remote-tls",
+        feature = "analyzer-remote-tls-openssl"
+    )
 ))]
 mod tests {
     use super::load_ipadic_neologd;

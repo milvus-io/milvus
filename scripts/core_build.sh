@@ -104,6 +104,7 @@ USE_SVS="AUTO"
 WITH_CRT="OFF"
 TANTIVY_FEATURES=""
 : "${TANTIVY_ANALYZER_REMOTE_TLS:=ON}"
+: "${TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL:=OFF}"
 INDEX_ENGINE="KNOWHERE"
 ENABLE_AZURE_FS="ON"
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -195,6 +196,7 @@ parameter:
 environment:
 TANTIVY_ANALYZER_REMOTE_TLS: ON/OFF (default: ON). Set OFF for FIPS builds that must not link rustls/ring
   (disables Lindera online dictionary download and gRPC tokenizer TLS).
+TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL: ON/OFF (default: OFF). Set ON with TANTIVY_ANALYZER_REMOTE_TLS=OFF for Lindera download and gRPC tokenizer TLS through OpenSSL
 
 usage:
 ./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-x \${INDEX_ENGINE}] [-G \${WITH_GPU}] [-u] [-l] [-c] [-z] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
@@ -317,6 +319,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 -DTANTIVY_FEATURES_LIST=${TANTIVY_FEATURES} \
 -DTANTIVY_ANALYZER_REMOTE_TLS=${TANTIVY_ANALYZER_REMOTE_TLS} \
+-DTANTIVY_ANALYZER_REMOTE_TLS_OPENSSL=${TANTIVY_ANALYZER_REMOTE_TLS_OPENSSL} \
 -DENABLE_AZURE_FS=${ENABLE_AZURE_FS} \
 -DWITH_CRT=${WITH_CRT} \
 -DMILVUS_USE_PCH=${USE_PCH} \
