@@ -456,8 +456,10 @@ type QueryReqV2 struct {
 	PartitionNames []string `json:"partitionNames"`
 	OutputFields   []string `json:"outputFields"`
 	Filter         string   `json:"filter"`
-	Limit          int32    `json:"limit"`
-	Offset         int32    `json:"offset"`
+	// Limit is the server default. RequestedLimit tracks the client value, including zero.
+	Limit          int32  `json:"-"`
+	RequestedLimit *int32 `json:"limit,omitempty"`
+	Offset         int32  `json:"offset"`
 	// OrderByFields sorts query results by scalar fields; each item is
 	// "fieldName" or "fieldName:asc" / "fieldName:desc" (default asc).
 	OrderByFields []string `json:"orderByFields"`

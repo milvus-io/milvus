@@ -5378,7 +5378,7 @@ func TestDML(t *testing.T) {
 	}, nil).Times(6)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Times(4)
 	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-		if matchCountRule(req.OutputFields) {
+		if hasCountStar(req.OutputFields) {
 			for _, pair := range req.QueryParams {
 				if pair.GetKey() == proxy.LimitKey {
 					return nil, errors.New("mock error")
@@ -5403,7 +5403,7 @@ func TestDML(t *testing.T) {
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
-		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [2, 4, 6, 8]", "outputFields": ["book_id",  "word_count", "book_intro"], "offset": 1}`),
+		requestBody: []byte(`{"collectionName": "book", "filter": "book_id in [2, 4, 6, 8]", "outputFields": ["book_id",  "word_count", "book_intro"], "limit": 10, "offset": 1}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        GetAction,
@@ -5417,7 +5417,7 @@ func TestDML(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
-		requestBody: []byte(`{"collectionName": "book", "filter": "", "outputFields": ["count(*)"], "limit": 10}`),
+		requestBody: []byte(`{"collectionName": "book", "filter": "", "outputFields": ["count(*)"]}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        QueryAction,
@@ -5735,9 +5735,9 @@ func TestQueryGroupByFields(t *testing.T) {
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "groupByFields": ["word_count"], "limit": 10, "offset": 2}`),
 		},
 		{
-			// Preserve the master REST behavior for a global lone count(*).
+			// A lone global count(*) ignores the server default limit.
 			path:        QueryAction,
-			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"], "limit": 10}`),
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "outputFields": ["count(*)"]}`),
 		},
 		{
 			path:        QueryAction,

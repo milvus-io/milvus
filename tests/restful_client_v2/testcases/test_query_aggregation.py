@@ -295,22 +295,24 @@ class TestQueryAggregation(TestBase):
         ]
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_global_count_star_keeps_legacy_limit_behavior(self):
+    def test_query_global_count_star_rejects_pagination(self):
         """
-        target: verify global count(*) behavior remains unchanged after adding groupByFields
-        method: query count(*) without groupByFields while sending limit and offset
-        expected: one global row returns the full collection count
+        target: verify a lone global count(*) rejects pagination
+        method: query without pagination, with zero values, and with positive limit and offset separately and together
+        expected: requests with no pagination return the full count and requests with positive pagination fail
         """
-        rows = self._query(
-            {
-                "collectionName": self.collection_name,
-                "filter": "id >= 0",
-                "limit": 1,
-                "offset": 10,
-                "outputFields": ["count(*)"],
-            }
-        )
-        assert rows == [{"count(*)": NB}]
+        payload = {
+            "collectionName": self.collection_name,
+            "filter": "id >= 0",
+            "outputFields": ["count(*)"],
+        }
+        assert self._query(payload) == [{"count(*)": NB}]
+        assert self._query({**payload, "limit": 0, "offset": 0}) == [{"count(*)": NB}]
+
+        for pagination in ({"limit": 1}, {"offset": 10}, {"limit": 1, "offset": 10}):
+            rsp = self.vector_client.vector_query({**payload, **pagination})
+            assert rsp["code"] == 1100, rsp
+            assert "count entities with pagination is not allowed" in rsp["message"], rsp
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_global_mixed_count_aggregates_without_limit(self):

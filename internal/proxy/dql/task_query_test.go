@@ -873,6 +873,30 @@ func TestQueryTask_all(t *testing.T) {
 			assert.Contains(t, err.Error(), "count entities with pagination is not allowed")
 		}
 
+		for _, tc := range []struct {
+			name    string
+			offset  string
+			wantErr bool
+		}{
+			{name: "zero offset", offset: "0"},
+			{name: "positive offset", offset: "10", wantErr: true},
+			{name: "negative offset", offset: "-1", wantErr: true},
+			{name: "malformed offset", offset: "abc", wantErr: true},
+			{name: "empty offset", wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				task := makeTask(expr, []string{"count(*)"}, 0, "")
+				task.request.QueryParams = append(task.request.QueryParams, &commonpb.KeyValuePair{Key: OffsetKey, Value: tc.offset})
+				err := task.PreExecute(ctx)
+				if tc.wantErr {
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					assert.ErrorContains(t, err, "count entities with pagination is not allowed")
+					return
+				}
+				require.NoError(t, err)
+			})
+		}
+
 		// Case 4: aggregation + empty expr + no limit → should PASS
 		{
 			task := makeTask(

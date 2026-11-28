@@ -991,8 +991,17 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 
 	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
 	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
-	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
-		return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
+	if t.hasCountStar() && len(t.GetGroupByFieldIds()) == 0 {
+		hasPagination := t.queryParams.limit != typeutil.Unlimited
+		// The regular parser ignores offset without a limit. Check it here so a
+		// raw offset cannot bypass the global count pagination rule.
+		if rawOffset, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(OffsetKey, t.request.GetQueryParams()); !hasPagination && ok {
+			offset, err := strconv.ParseInt(rawOffset, 0, 64)
+			hasPagination = err != nil || offset != 0
+		}
+		if hasPagination {
+			return merr.WrapErrParameterInvalidMsg("count entities with pagination is not allowed")
+		}
 	}
 	t.plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 
