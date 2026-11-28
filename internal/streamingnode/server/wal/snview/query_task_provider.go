@@ -3,6 +3,7 @@ package snview
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -36,13 +37,14 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
 
+	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 	queryOptimizeTimer := queryOptimize.Begin()
-	queryOptimizeErr := h.localOptimizer.OptimizeSearch(ctx, req)
-	queryOptimizeTimer.End(queryOptimizeErr)
-	if err := queryOptimizeErr; err != nil {
+	_, err = h.localOptimizer.OptimizeSearch(ctx, req, optimizer.LocalSegmentScope{Key: key})
+	queryOptimizeTimer.End(err)
+	if err != nil {
 		return nil, err
 	}
-	runtime, err := h.queryRuntime(qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version})
+	runtime, err := h.queryRuntime(key)
 	if err != nil {
 		return nil, err
 	}
@@ -105,13 +107,14 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		return nil, viewerror.NewViewInvalidated("request schema %d does not match QueryView schema %d", req.GetSchemaVersion(), lease.Meta.GetSchemaVersion())
 	}
 
+	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 	queryOptimizeTimer := queryOptimize.Begin()
-	queryOptimizeErr := h.localOptimizer.OptimizeRetrieve(ctx, req)
-	queryOptimizeTimer.End(queryOptimizeErr)
-	if err := queryOptimizeErr; err != nil {
+	_, err = h.localOptimizer.OptimizeRetrieve(ctx, req, optimizer.LocalSegmentScope{Key: key})
+	queryOptimizeTimer.End(err)
+	if err != nil {
 		return nil, err
 	}
-	runtime, err := h.queryRuntime(qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version})
+	runtime, err := h.queryRuntime(key)
 	if err != nil {
 		return nil, err
 	}

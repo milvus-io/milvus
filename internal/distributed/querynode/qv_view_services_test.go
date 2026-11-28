@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -66,6 +68,23 @@ func TestLazyQNSegmentManagerNilCallbacksUseNodeScheduler(t *testing.T) {
 	}
 }
 
+func TestLazyQNSegmentManagerSealedPKCandidates(t *testing.T) {
+	key := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "channel"}}
+	partitions := []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}
+	mgr := &lazyQNSegmentManager{}
+	require.Empty(t, mgr.SealedPKCandidates(key, partitions))
+
+	want := []pkoracle.PKFilterTarget{pkoracle.NewBloomFilterSet(100, 10, commonpb.SegmentState_Sealed)}
+	patch := mockey.Mock((*qnview.SegmentResourceManager).SealedPKCandidates).To(func(_ *qnview.SegmentResourceManager, gotKey qviews.QueryViewKey, gotPartitions []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget {
+		require.Equal(t, key, gotKey)
+		require.Equal(t, partitions, gotPartitions)
+		return want
+	}).Build()
+	defer patch.UnPatch()
+	mgr.build = func() qnview.SegmentManager { return &qnview.SegmentResourceManager{} }
+	require.Equal(t, want, mgr.SealedPKCandidates(key, partitions))
+}
+
 func TestRegisterQueryViewServers(t *testing.T) {
 	server := grpc.NewServer()
 	registerQueryViewServers(server, noopQNSegmentManager{}, 100)
@@ -84,6 +103,10 @@ func (noopQNSegmentManager) Close() {}
 func (noopQNSegmentManager) Acquire(qnview.AcquireSegments) {}
 
 func (noopQNSegmentManager) Release(qnview.ReleaseSegments) {}
+
+func (noopQNSegmentManager) SealedPKCandidates(qviews.QueryViewKey, []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget {
+	return nil
+}
 
 func (noopQNSegmentManager) AcquireSealedSegmentHandles(context.Context, qviews.QueryViewKey, *viewpb.QueryViewOfQueryNode, uint64) ([]qnview.SealedSegmentHandle, error) {
 	return nil, nil

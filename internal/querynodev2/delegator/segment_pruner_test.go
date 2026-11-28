@@ -6,15 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1689,4 +1692,25 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsTimestamptzField() {
 
 func TestSegmentPrunerSuite(t *testing.T) {
 	suite.Run(t, new(SegmentPrunerSuite))
+}
+
+// Keep the legacy delegator on the same predicate evaluator as QueryView.
+func TestSealedPKFilterLegacy(t *testing.T) {
+	paramtable.Init()
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}})
+	require.NoError(t, err)
+	plan, err := planparserv2.CreateRetrievePlan(helper, "id == -1", nil)
+	require.NoError(t, err)
+	data, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	bf := pkoracle.NewBloomFilterSet(1, 0, commonpb.SegmentState_Sealed)
+	bf.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(7)})
+	item := []SnapshotItem{{Segments: []SegmentEntry{{SegmentID: 1, Candidate: bf}, {SegmentID: 2}}}, {Segments: []SegmentEntry{{SegmentID: 3}}}}
+	PruneSealedSegmentsByPKFilter(t.Context(), data, common.PkFilterNoPkFilter, item, 1, "query")
+	require.Len(t, item[0].Segments, 2)
+	PruneSealedSegmentsByPKFilter(t.Context(), data, common.PkFilterNotChecked, item, 1, "query")
+	require.Equal(t, []SegmentEntry{{SegmentID: 2}}, item[0].Segments)
+	require.Equal(t, []SegmentEntry{{SegmentID: 3}}, item[1].Segments)
 }

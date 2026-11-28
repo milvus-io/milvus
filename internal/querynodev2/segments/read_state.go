@@ -6,6 +6,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
@@ -18,6 +19,7 @@ import (
 // reference; each query retains another reference until result reduction ends.
 type ReadState interface {
 	Segment
+	PKCandidate() pkoracle.Candidate
 	RetainReadState() func()
 	ReleaseReadState()
 }
@@ -27,6 +29,10 @@ type sealedReadState struct {
 	parent *LocalSegment
 	native segcore.CSegment
 	refs   atomic.Int64
+}
+
+func (s *sealedReadState) PKCandidate() pkoracle.Candidate {
+	return s.parent.pkCandidate
 }
 
 func (s *sealedReadState) RetainReadState() func() {

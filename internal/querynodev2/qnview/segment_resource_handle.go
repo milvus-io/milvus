@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -20,6 +21,26 @@ func (h *resourceSegmentHandle) ID() int64                 { return h.segment.ID
 func (h *resourceSegmentHandle) PartitionID() int64        { return h.segment.PartitionID() }
 func (h *resourceSegmentHandle) Segment() TransformSegment { return h.segment }
 func (h *resourceSegmentHandle) Release()                  { h.once.Do(h.release) }
+
+func (m *SegmentResourceManager) SealedPKCandidates(key qviews.QueryViewKey, partitions []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v := m.views[key]
+	if v == nil {
+		return nil
+	}
+	var candidates []pkoracle.PKFilterTarget
+	for _, part := range partitions {
+		for _, id := range part.GetSegmentIds() {
+			if b := v.bindings[id]; b != nil && b.prepared != nil {
+				if c := b.prepared.read.PKCandidate(); c != nil && c.PkCandidateExist() {
+					candidates = append(candidates, c)
+				}
+			}
+		}
+	}
+	return candidates
+}
 
 func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context, key qviews.QueryViewKey, view *viewpb.QueryViewOfQueryNode, timetick uint64) ([]SealedSegmentHandle, error) {
 	if err := ctx.Err(); err != nil {

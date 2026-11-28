@@ -14,10 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package delegator
+package pkoracle
 
 import (
 	"context"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -104,6 +106,20 @@ func extractPKFilterPredicates(plan *planpb.PlanNode) *planpb.Expr {
 		return vectorAnns.GetPredicates()
 	}
 	return nil
+}
+
+// ParsePKFilterExpr skips plans known to have no PK predicate. A decoding failure
+// disables pruning and leaves plan validation to the ordinary execution path.
+func ParsePKFilterExpr(ctx context.Context, data []byte, hint int32) PKFilterExpr {
+	if hint == common.PkFilterNoPkFilter {
+		return nil
+	}
+	var plan planpb.PlanNode
+	if err := proto.Unmarshal(data, &plan); err != nil {
+		mlog.Warn(ctx, "failed to decode plan for PK pruning", mlog.Err(err))
+		return nil
+	}
+	return BuildPKFilterExpr(&plan, hint)
 }
 
 // BuildPKFilterExpr compiles the PK predicate from plan into a PKFilterExpr.

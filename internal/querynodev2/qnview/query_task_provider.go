@@ -3,6 +3,7 @@ package qnview
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -33,12 +34,6 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	}
 
 	view := qviews.FilterSelectedSegments(filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs()), selection)
-	queryOptimizeTimer := queryOptimize.Begin()
-	queryOptimizeErr := h.localOptimizer.OptimizeSearch(ctx, req)
-	queryOptimizeTimer.End(queryOptimizeErr)
-	if err := queryOptimizeErr; err != nil {
-		return nil, err
-	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 	queryVisibleTimer := queryVisible.Begin()
 	queryVisibleErr := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick())
@@ -46,6 +41,13 @@ func (h *QNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
+	queryOptimizeTimer := queryOptimize.Begin()
+	optimization, err := h.localOptimizer.OptimizeSearch(ctx, req, optimizer.LocalSegmentScope{Key: key, Partitions: view.GetPartitions()})
+	queryOptimizeTimer.End(err)
+	if err != nil {
+		return nil, err
+	}
+	view = qviews.FilterSelectedSegments(view, optimization.SegmentSelection)
 	handlesTimer := queryHandles.Begin()
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	handlesTimer.End(err)
@@ -83,12 +85,6 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	}
 
 	view := qviews.FilterSelectedSegments(filterQueryNodeViewByPartitions(lease.View, req.GetPartitionIDs()), selection)
-	queryOptimizeTimer := queryOptimize.Begin()
-	queryOptimizeErr := h.localOptimizer.OptimizeRetrieve(ctx, req)
-	queryOptimizeTimer.End(queryOptimizeErr)
-	if err := queryOptimizeErr; err != nil {
-		return nil, err
-	}
 	key := qviews.QueryViewKey{ShardID: shardID, QueryViewVersion: version}
 	queryVisibleTimer := queryVisible.Begin()
 	queryVisibleErr := h.segMgr.WaitTransformVisible(ctx, key, mvcc.GetTransformingTimetick())
@@ -96,6 +92,13 @@ func (h *QNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := queryVisibleErr; err != nil {
 		return nil, err
 	}
+	queryOptimizeTimer := queryOptimize.Begin()
+	optimization, err := h.localOptimizer.OptimizeRetrieve(ctx, req, optimizer.LocalSegmentScope{Key: key, Partitions: view.GetPartitions()})
+	queryOptimizeTimer.End(err)
+	if err != nil {
+		return nil, err
+	}
+	view = qviews.FilterSelectedSegments(view, optimization.SegmentSelection)
 	handlesTimer := queryHandles.Begin()
 	handles, err := h.segMgr.AcquireSealedSegmentHandles(ctx, key, view, mvcc.GetTransformingTimetick())
 	handlesTimer.End(err)

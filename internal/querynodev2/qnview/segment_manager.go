@@ -3,6 +3,7 @@ package qnview
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -80,6 +81,10 @@ type SegmentManager interface {
 	// Release decrements reference counts for all segments held by this view.
 	// Segments whose count reaches zero will be unloaded.
 	Release(req ReleaseSegments)
+
+	// SealedPKCandidates borrows the available PK statistics from the selected
+	// bindings while the caller holds the corresponding Ready view lease.
+	SealedPKCandidates(key qviews.QueryViewKey, partitions []*viewpb.QueryViewOfPartition) []pkoracle.PKFilterTarget
 
 	// AcquireSealedSegmentHandles acquires query lifecycle refs for selected
 	// sealed segments that already reached QueryView transform readiness, then

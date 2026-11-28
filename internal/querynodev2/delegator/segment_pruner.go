@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
@@ -354,18 +355,7 @@ func PruneSealedSegmentsByPKFilter(
 	collectionID int64,
 	queryType string,
 ) {
-	if pkFilter == common.PkFilterNoPkFilter {
-		return
-	}
-
-	plan := &planpb.PlanNode{}
-	if err := proto.Unmarshal(serializedExprPlan, plan); err != nil {
-		mlog.Warn(ctx, "PruneSealedSegmentsByPKFilter: failed to unmarshal plan, skipping",
-			mlog.Err(err))
-		return
-	}
-
-	expr := BuildPKFilterExpr(plan, pkFilter)
+	expr := pkoracle.ParsePKFilterExpr(ctx, serializedExprPlan, pkFilter)
 	if expr == nil {
 		return
 	}
@@ -377,14 +367,14 @@ func PruneSealedSegmentsByPKFilter(
 		totalCount += len(item.Segments)
 
 		// Collect candidates with valid BF data as PKFilterTargets.
-		targets := make([]PKFilterTarget, 0, len(item.Segments))
+		targets := make([]pkoracle.PKFilterTarget, 0, len(item.Segments))
 		for _, entry := range item.Segments {
 			if entry.Candidate != nil {
 				targets = append(targets, entry.Candidate)
 			}
 		}
 
-		ids, all := CheckPKFilter(expr, targets)
+		ids, all := pkoracle.CheckPKFilter(expr, targets)
 		if all {
 			continue
 		}

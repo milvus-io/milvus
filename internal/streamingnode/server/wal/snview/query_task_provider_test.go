@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
@@ -206,14 +207,14 @@ type fakeSNLocalOptimizer struct {
 	queryErr     error
 }
 
-func (o *fakeSNLocalOptimizer) OptimizeSearch(context.Context, *internalpb.SearchRequest) error {
+func (o *fakeSNLocalOptimizer) OptimizeSearch(context.Context, *internalpb.SearchRequest, optimizer.LocalSegmentScope) (optimizer.LocalOptimization, error) {
 	o.searchCalled = true
-	return o.searchErr
+	return optimizer.LocalOptimization{}, o.searchErr
 }
 
-func (o *fakeSNLocalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest) error {
+func (o *fakeSNLocalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest, optimizer.LocalSegmentScope) (optimizer.LocalOptimization, error) {
 	o.queryCalled = true
-	return o.queryErr
+	return optimizer.LocalOptimization{}, o.queryErr
 }
 
 func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
