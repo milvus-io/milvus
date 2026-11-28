@@ -11,11 +11,13 @@
 
 #include <arrow/builder.h>
 #include <fmt/core.h>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <future>
 #include <memory>
@@ -28,6 +30,7 @@
 #include "bitset/detail/element_vectorized.h"
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Translator.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/ChunkWriter.h"
 #include "common/FieldData.h"
@@ -45,6 +48,8 @@
 #include "index/Meta.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "exec/operator/FilterBitsNode.h"
+#include "exec/Task.h"
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
@@ -75,6 +80,7 @@
 #include "test_utils/Constants.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/skip_metrics_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
@@ -90,6 +96,12 @@ class JsonStatsProjectionTestAccessor {
     static std::shared_ptr<ChunkedColumnInterface>&
     SharedColumn(JsonKeyStats& stats) {
         return stats.shared_column_;
+    }
+
+    static bool
+    FirstCellLoaded(const JsonKeyStats& stats, const std::string& field) {
+        const int64_t row = 0;
+        return stats.shredding_columns_.at(field)->CellsLoaded(&row, 1);
     }
 
     static bool
@@ -209,7 +221,15 @@ class CountingJsonStatsTranslator
     get_cells(milvus::OpContext* ctx,
               const std::vector<cachinglayer::cid_t>& cids) override {
         load_count_.fetch_add(1, std::memory_order_relaxed);
+        if (fail_loads_.load()) {
+            throw std::runtime_error("injected JSON stats load failure");
+        }
         return JsonStatsTranslator::get_cells(ctx, cids);
+    }
+
+    void
+    FailLoads(bool enabled) {
+        fail_loads_.store(enabled);
     }
 
     int64_t
@@ -219,6 +239,7 @@ class CountingJsonStatsTranslator
 
  private:
     std::atomic<int64_t> load_count_{0};
+    std::atomic_bool fail_loads_{false};
 };
 
 class TestJsonStatsTranslator
@@ -394,7 +415,7 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
 
 struct CountedJsonStatsSlot {
     std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>> slot;
-    const CountingJsonStatsTranslator* translator;  // Owned by slot.
+    CountingJsonStatsTranslator* translator;  // Owned by slot.
 };
 
 CountedJsonStatsSlot
@@ -816,6 +837,353 @@ TEST(JsonStatsLazyInitializationTest, ConcurrentFirstUseSharesInitialization) {
 
     auto field = results.front()->GetShreddingField("/a", JSONType::INT64);
     ASSERT_FALSE(field.empty());
+}
+
+namespace {
+enum class StatsLoadFailure { None, Transient, Persistent };
+
+class GatedPrefetchColumn : public TestMetricsColumn {
+ public:
+    GatedPrefetchColumn(std::shared_ptr<ChunkedColumnInterface> column,
+                        std::shared_future<void> release)
+        : TestMetricsColumn(std::move(column), {}),
+          release_(std::move(release)) {
+    }
+
+    void
+    PrefetchChunks(OpContext* ctx,
+                   const std::vector<int64_t>& cells) const override {
+        started.set_value();
+        release_.wait();
+        TestMetricsColumn::PrefetchChunks(ctx, cells);
+    }
+
+    mutable std::promise<void> started;
+
+ private:
+    std::shared_future<void> release_;
+};
+
+CountedJsonStatsSlot
+MakeColdEventStats(FieldId field, int64_t segment_id) {
+    auto built = BuildJsonStatsIndex(
+        {R"({"kind":"commit","commit":{"operation":"create"}})",
+         R"({"kind":"issue","commit":{"operation":"update"}})",
+         R"({"kind":"commit","commit":{"operation":"update"}})"},
+        field,
+        TestLocalPath,
+        1404,
+        2404,
+        segment_id,
+        field.get(),
+        5404,
+        1);
+    return MakeCountedJsonStatsSlot(built, field);
+}
+
+std::shared_ptr<expr::UnaryRangeFilterExpr>
+EventStringEquals(FieldId field,
+                  std::vector<std::string> path,
+                  const std::string& literal) {
+    proto::plan::GenericValue value;
+    value.set_string_val(literal);
+    return std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field, DataType::JSON, std::move(path)),
+        proto::plan::Equal,
+        value,
+        std::vector<proto::plan::GenericValue>{});
+}
+
+void
+CheckStringPredicatePrefetch(StatsLoadFailure failure) {
+    const auto segment_id = 3404 + static_cast<int>(failure);
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    auto counted = MakeColdEventStats(field, segment_id);
+    auto segment =
+        segcore::CreateSealedSegment(schema, empty_index_meta, segment_id);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(field, counted.slot);
+
+    auto logical = EventStringEquals(field, {"kind"}, "commit");
+    auto predicate = std::make_shared<exec::PhyUnaryRangeFilterExpr>(
+        std::vector<exec::ExprPtr>{},
+        logical,
+        "kind",
+        nullptr,
+        sealed,
+        3,
+        3,
+        0);
+    auto workers = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    ASSERT_EQ(counted.translator->LoadCount(), 0);
+    counted.translator->FailLoads(failure != StatsLoadFailure::None);
+    predicate->PrefetchAsync(workers);
+    ASSERT_NO_THROW(predicate->WaitPrefetch());
+    EXPECT_EQ(counted.translator->LoadCount(), 1);
+    if (failure == StatsLoadFailure::None) {
+        auto stats = sealed->GetJsonStats(nullptr, field);
+        auto kind = stats->GetShreddingField("/kind", JSONType::STRING);
+        auto op =
+            stats->GetShreddingField("/commit/operation", JSONType::STRING);
+        ASSERT_FALSE(kind.empty());
+        ASSERT_FALSE(op.empty());
+        EXPECT_TRUE(
+            JsonStatsProjectionTestAccessor::FirstCellLoaded(*stats, kind));
+        EXPECT_FALSE(
+            JsonStatsProjectionTestAccessor::FirstCellLoaded(*stats, op));
+    }
+    counted.translator->FailLoads(failure == StatsLoadFailure::Persistent);
+
+    exec::QueryContext query("kind", sealed, 3, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query);
+    exec::EvalCtx context(&exec_context);
+    VectorPtr rows;
+    if (failure == StatsLoadFailure::Persistent) {
+        EXPECT_ANY_THROW(predicate->Eval(context, rows));
+        EXPECT_EQ(counted.translator->LoadCount(), 2);
+        return;
+    }
+    predicate->Eval(context, rows);
+    EXPECT_EQ(counted.translator->LoadCount(),
+              failure == StatsLoadFailure::None ? 1 : 2);
+    auto bitmap = std::dynamic_pointer_cast<ColumnVector>(rows);
+    ASSERT_NE(bitmap, nullptr);
+    ASSERT_EQ(bitmap->size(), 3);
+    TargetBitmapView matches(bitmap->GetRawData(), bitmap->size());
+    EXPECT_TRUE(matches[0]);
+    EXPECT_FALSE(matches[1]);
+    EXPECT_TRUE(matches[2]);
+}
+}  // namespace
+
+TEST(JsonStatsLazyInitializationTest,
+     StringPredicateWarmsOnlyItsOwnProjection) {
+    CheckStringPredicatePrefetch(StatsLoadFailure::None);
+}
+
+TEST(JsonStatsLazyInitializationTest,
+     CachedRangeBitmapsSkipColdProjectionPrefetch) {
+    using exec::ExprResCacheManager;
+    auto& cache = ExprResCacheManager::Instance();
+    const auto was_enabled = ExprResCacheManager::IsEnabled();
+    auto restore = folly::makeGuard([&] {
+        cache.Clear();
+        ExprResCacheManager::SetEnabled(was_enabled);
+    });
+    exec::CacheConfig config;
+    config.mode = exec::CacheMode::Memory;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(cache.SetConfig(config));
+    ExprResCacheManager::SetEnabled(true);
+
+    constexpr int64_t segment_id = 3416;
+    constexpr int64_t row_count = 3;
+    auto schema = std::make_shared<Schema>();
+    const auto field = schema->AddDebugField("json", DataType::JSON);
+    auto built = BuildJsonStatsIndex({R"({"a":1})", R"({"a":9})", R"({})"},
+                                     field,
+                                     TestLocalPath,
+                                     1416,
+                                     2416,
+                                     segment_id,
+                                     field.get(),
+                                     5416,
+                                     1);
+    auto segment =
+        segcore::CreateSealedSegment(schema, empty_index_meta, segment_id);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(field,
+                                   MakeCountedJsonStatsSlot(built, field).slot);
+    auto snapshot = sealed->CaptureReadSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_NE(snapshot->GetExprCacheGeneration(), nullptr);
+    auto stats = sealed->GetJsonStats(nullptr, field);
+    ASSERT_NE(stats, nullptr);
+    auto projection = stats->GetShreddingField("/a", JSONType::INT64);
+    ASSERT_FALSE(projection.empty());
+
+    const expr::ColumnInfo column(field, DataType::JSON, {"a"});
+    proto::plan::GenericValue lower;
+    lower.set_int64_val(0);
+    proto::plan::GenericValue upper;
+    upper.set_int64_val(5);
+    auto unary = std::make_shared<expr::UnaryRangeFilterExpr>(
+        column,
+        proto::plan::LessThan,
+        upper,
+        std::vector<proto::plan::GenericValue>{});
+    auto binary = std::make_shared<expr::BinaryRangeFilterExpr>(
+        column, lower, upper, true, false);
+    auto make_predicate =
+        [&](bool use_binary) -> std::shared_ptr<exec::SegmentExpr> {
+        if (use_binary) {
+            return std::make_shared<exec::PhyBinaryRangeFilterExpr>(
+                std::vector<exec::ExprPtr>{},
+                binary,
+                "range",
+                nullptr,
+                sealed,
+                row_count,
+                row_count,
+                0);
+        }
+        return std::make_shared<exec::PhyUnaryRangeFilterExpr>(
+            std::vector<exec::ExprPtr>{},
+            unary,
+            "range",
+            nullptr,
+            sealed,
+            row_count,
+            row_count,
+            0);
+    };
+
+    auto workers = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    exec::QueryContext query("range", sealed, row_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query);
+    exec::EvalCtx context(&exec_context);
+    for (bool use_binary : {false, true}) {
+        SCOPED_TRACE(use_binary ? "binary range" : "unary range");
+        auto initial = make_predicate(use_binary);
+        initial->SetSnapshot(snapshot.get());
+        initial->PrefetchAsync(workers);
+        initial->WaitPrefetch();
+        ASSERT_TRUE(JsonStatsProjectionTestAccessor::FirstCellLoaded(
+            *stats, projection));
+        VectorPtr initial_rows;
+        initial->Eval(context, initial_rows);
+        ASSERT_NE(initial_rows, nullptr);
+
+        JsonStatsProjectionTestAccessor::ShreddingColumn(*stats, projection)
+            ->ManualEvictCache();
+        ASSERT_FALSE(JsonStatsProjectionTestAccessor::FirstCellLoaded(
+            *stats, projection));
+
+        auto cached = make_predicate(use_binary);
+        cached->SetSnapshot(snapshot.get());
+        cached->PrefetchAsync(workers);
+        cached->WaitPrefetch();
+        EXPECT_FALSE(JsonStatsProjectionTestAccessor::FirstCellLoaded(
+            *stats, projection));
+        VectorPtr rows;
+        cached->Eval(context, rows);
+        EXPECT_FALSE(JsonStatsProjectionTestAccessor::FirstCellLoaded(
+            *stats, projection));
+
+        auto bitmap = std::dynamic_pointer_cast<ColumnVector>(rows);
+        ASSERT_NE(bitmap, nullptr);
+        ASSERT_EQ(bitmap->size(), row_count);
+        TargetBitmapView matches(bitmap->GetRawData(), row_count);
+        TargetBitmapView valid(bitmap->GetValidRawData(), row_count);
+        EXPECT_TRUE(matches[0]);
+        EXPECT_FALSE(matches[1]);
+        EXPECT_FALSE(matches[2]);
+        EXPECT_TRUE(valid[0]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_FALSE(valid[2]);
+    }
+}
+
+TEST(JsonStatsLazyInitializationTest, DemandRetriesFailedSpeculativeStatsRead) {
+    CheckStringPredicatePrefetch(StatsLoadFailure::Transient);
+}
+
+TEST(JsonStatsLazyInitializationTest, DemandReportsPersistentStatsReadFailure) {
+    CheckStringPredicatePrefetch(StatsLoadFailure::Persistent);
+}
+
+TEST(JsonStatsLazyInitializationTest, ColdCompoundFilterUsesBothProjections) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    auto filter = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And,
+        EventStringEquals(field, {"kind"}, "commit"),
+        EventStringEquals(field, {"commit", "operation"}, "update"));
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+    const bool saved_prefetch = ENABLE_DRIVER_PREFETCH.load();
+    auto restore = folly::makeGuard(
+        [saved_prefetch] { ENABLE_DRIVER_PREFETCH = saved_prefetch; });
+    for (const bool prefetch : {false, true}) {
+        SCOPED_TRACE(prefetch);
+        ENABLE_DRIVER_PREFETCH = prefetch;
+        const int64_t segment_id = prefetch ? 3409 : 3407;
+        auto counted = MakeColdEventStats(field, segment_id);
+        auto segment =
+            segcore::CreateSealedSegment(schema, empty_index_meta, segment_id);
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(field, counted.slot);
+        ASSERT_EQ(counted.translator->LoadCount(), 0);
+        auto matches = query::ExecuteQueryExpr(plan, sealed, 3, MAX_TIMESTAMP);
+        EXPECT_EQ(counted.translator->LoadCount(), 1);
+        ASSERT_EQ(matches.size(), 3);
+        EXPECT_FALSE(matches[0]);
+        EXPECT_FALSE(matches[1]);
+        EXPECT_TRUE(matches[2]);
+    }
+}
+
+TEST(JsonStatsLazyInitializationTest, FilterEvaluatesWhileProjectionIsLoading) {
+    constexpr int64_t segment_id = 3408;
+    auto schema = std::make_shared<Schema>();
+    const auto field = schema->AddDebugField("json", DataType::JSON);
+    auto segment =
+        segcore::CreateSealedSegment(schema, empty_index_meta, segment_id);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(field,
+                                   MakeColdEventStats(field, segment_id).slot);
+    auto stats = sealed->GetJsonStats(nullptr, field);
+    const auto kind = stats->GetShreddingField("/kind", JSONType::STRING);
+    auto& column =
+        JsonStatsProjectionTestAccessor::ShreddingColumn(*stats, kind);
+    std::promise<void> release;
+    auto gated = std::make_shared<GatedPrefetchColumn>(
+        column, release.get_future().share());
+    column = gated;
+
+    // No row has operation "delete", so this AND can finish while /kind is cold.
+    auto filter = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And,
+        EventStringEquals(field, {"commit", "operation"}, "delete"),
+        EventStringEquals(field, {"kind"}, "commit"));
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, filter);
+    auto query = std::make_shared<exec::QueryContext>(
+        "cold-sibling", sealed, 3, MAX_TIMESTAMP);
+    query->set_read_snapshot(sealed->CaptureReadSnapshot());
+    auto task =
+        exec::Task::Create("cold-sibling", plan::PlanFragment(plan), 0, query);
+    exec::DriverContext driver(task, 0, 0, 0, 0);
+    exec::PhyFilterBitsNode node(0, &driver, plan);
+    auto workers = std::make_shared<folly::CPUThreadPoolExecutor>(2);
+    node.PrefetchAsync(workers);
+    EXPECT_EQ(gated->started.get_future().wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    auto output =
+        std::async(std::launch::async, [&] { return node.GetOutput(); });
+    const auto before_release = output.wait_for(std::chrono::seconds(5));
+    release.set_value();
+    auto rows = output.get();
+    node.WaitPrefetch();
+
+    ASSERT_EQ(before_release, std::future_status::ready);
+    ASSERT_NE(rows, nullptr);
+    auto excluded = std::dynamic_pointer_cast<ColumnVector>(rows->child(0));
+    ASSERT_NE(excluded, nullptr);
+    ASSERT_EQ(excluded->size(), 3);
+    EXPECT_TRUE(TargetBitmapView(excluded->GetRawData(), 3).all());
+    EXPECT_TRUE(TargetBitmapView(excluded->GetValidRawData(), 3).all());
+    EXPECT_TRUE(JsonStatsProjectionTestAccessor::FirstCellLoaded(*stats, kind));
 }
 
 TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {

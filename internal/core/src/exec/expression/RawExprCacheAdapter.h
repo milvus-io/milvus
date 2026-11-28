@@ -76,6 +76,9 @@ class RawExprCacheAdapter final : public Expr {
     void
     WaitPrefetch() override;
 
+    double
+    PrefetchWaitMicros() const override;
+
     const std::shared_ptr<SegmentExpr>&
     wrapped_expr() const {
         return input_;
@@ -106,7 +109,7 @@ class RawExprCacheAdapter final : public Expr {
     };
 
     void
-    EnsureLookup();
+    EnsureLookup(bool on_prefetch_thread = false);
 
     bool
     TryServeCacheHit(EvalCtx& context, VectorPtr& result);

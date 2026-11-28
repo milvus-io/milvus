@@ -412,7 +412,7 @@ class JsonKeyStats {
     // return all shredding fields whose pointers start with the given prefix
     // for example, prefix "/a/b" will include fields for "/a/b" and "/a/b/..."
     std::set<std::string>
-    GetShreddingFieldsWithPrefix(const std::string& prefix) {
+    GetShreddingFieldsWithPrefix(const std::string& prefix) const {
         std::set<std::string> fields;
         for (const auto& [path, field_names] : key_field_map_) {
             if (path.size() >= prefix.size() &&
@@ -430,19 +430,28 @@ class JsonKeyStats {
     }
 
     std::string
-    GetShreddingField(const std::string& pointer, JSONType type) {
-        if (key_field_map_.find(pointer) == key_field_map_.end()) {
+    GetShreddingField(const std::string& pointer, JSONType type) const {
+        auto fields = key_field_map_.find(pointer);
+        if (fields == key_field_map_.end()) {
             return "";
         }
-        for (const auto& field : key_field_map_[pointer]) {
-            if (shred_field_data_type_map_.find(field) !=
-                    shred_field_data_type_map_.end() &&
-                shred_field_data_type_map_[field] == type) {
+        for (const auto& field : fields->second) {
+            auto field_type = shred_field_data_type_map_.find(field);
+            if (field_type != shred_field_data_type_map_.end() &&
+                field_type->second == type) {
                 return field;
             }
         }
         return "";
     }
+
+    void
+    PrefetchTypedColumns(OpContext* ctx,
+                         const std::string& pointer,
+                         std::initializer_list<JSONType> types) const;
+
+    void
+    PrefetchExistsColumns(OpContext* ctx, const std::string& pointer) const;
 
     bool
     HasAllShreddingFields(const std::string& pointer,
@@ -487,6 +496,9 @@ class JsonKeyStats {
     }
 
  private:
+    void
+    PrefetchBsonIndex(OpContext* ctx) const;
+
     void
     CollectSingleJsonStatsInfo(std::string_view json_str,
                                std::map<JsonKey, KeyStatsInfo>& infos);

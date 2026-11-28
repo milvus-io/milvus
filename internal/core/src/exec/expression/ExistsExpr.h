@@ -71,6 +71,10 @@ class PhyExistsFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    void
+    PrefetchJsonStatsPath(index::JsonKeyStats& stats,
+                          const std::string& pointer) const override;
+
     bool
     SupportsRawExprCache() const override {
         return !expr_->column_.element_level_;

@@ -72,6 +72,12 @@ EvaluateShreddedArrayExists(const std::string_view* values,
 }  // namespace
 
 void
+PhyExistsFilterExpr::PrefetchJsonStatsPath(index::JsonKeyStats& stats,
+                                           const std::string& pointer) const {
+    stats.PrefetchExistsColumns(op_ctx_, pointer);
+}
+
+void
 PhyExistsFilterExpr::DetermineExecPath() {
     // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
     // index serves this path; see SegmentExpr::FallbackToJsonStatsIfEligible().

@@ -24,6 +24,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -158,6 +160,9 @@ class CountingRawExpr final : public SegmentExpr {
 
     void
     DetermineExecPath() override {
+        if (before_path_selection) {
+            before_path_selection();
+        }
         exec_path_ = ExprExecPath::RawData;
     }
 
@@ -204,6 +209,7 @@ class CountingRawExpr final : public SegmentExpr {
     int prefetch_count{0};
     int throw_on_eval_count{0};
     std::chrono::milliseconds prefetch_delay{0};
+    std::function<void()> before_path_selection;
 
  private:
     std::string signature_;
@@ -816,6 +822,57 @@ TEST_F(RawExprCacheAdapterTest, CacheMissPrefetchUsesSinglePoolTask) {
 
     EXPECT_EQ(input->prefetch_count, 1);
     EXPECT_EQ(pool->submitted_tasks(), 1);
+}
+
+TEST_F(RawExprCacheAdapterTest, RecordsPathSelectionWaitBeforePrefetchJoin) {
+    using namespace std::chrono_literals;
+
+    std::promise<void> path_selection_started;
+    auto started = path_selection_started.get_future();
+    std::promise<void> allow_selection;
+    auto allowed = allow_selection.get_future();
+    auto [input, adapter] = MakeAdapter("raw:path-selection-wait");
+    const Expr& expr = *adapter;
+    input->before_path_selection = [&] {
+        path_selection_started.set_value();
+        allowed.wait();
+    };
+
+    auto pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+    adapter->PrefetchAsync(pool);
+    auto release_selection =
+        folly::makeGuard([&] { allow_selection.set_value(); });
+    ASSERT_EQ(started.wait_for(5s), std::future_status::ready);
+
+    std::promise<void> checking_batch_size;
+    auto checking = checking_batch_size.get_future();
+    auto can_execute = std::async(std::launch::async, [&] {
+        checking_batch_size.set_value();
+        return expr.CanExecuteAllAtOnce();
+    });
+    checking.wait();
+    EXPECT_EQ(can_execute.wait_for(20ms), std::future_status::timeout);
+    allow_selection.set_value();
+    release_selection.dismiss();
+    EXPECT_FALSE(can_execute.get());
+
+    // The adapter's prefetch future has not been joined yet.
+    const auto wait_us = expr.PrefetchWaitMicros();
+    EXPECT_GT(wait_us, 0.0);
+    EXPECT_FALSE(expr.CanExecuteAllAtOnce());
+    EXPECT_DOUBLE_EQ(expr.PrefetchWaitMicros(), wait_us);
+    adapter->WaitPrefetch();
+}
+
+TEST_F(RawExprCacheAdapterTest, ForegroundPathSelectionIsNotPrefetchWait) {
+    auto [input, adapter] = MakeAdapter("raw:foreground-path-selection");
+    input->before_path_selection = [] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    };
+
+    const Expr& expr = *adapter;
+    EXPECT_FALSE(expr.CanExecuteAllAtOnce());
+    EXPECT_DOUBLE_EQ(expr.PrefetchWaitMicros(), 0.0);
 }
 
 TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {

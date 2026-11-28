@@ -69,12 +69,11 @@ RawExprCacheAdapter::RawExprCacheAdapter(std::shared_ptr<SegmentExpr> input,
 }
 
 void
-RawExprCacheAdapter::EnsureLookup() {
-    std::call_once(lookup_once_, [this]() {
+RawExprCacheAdapter::EnsureLookup(bool on_prefetch_thread) {
+    std::call_once(lookup_once_, [this, on_prefetch_thread]() {
         state_.lookup_state = LookupState::Ineligible;
         try {
-            if (!ExprResCacheManager::IsEnabled() ||
-                !input_->SupportsRawExprCache() || !input_->IsCacheable() ||
+            if (!ExprResCacheManager::IsEnabled() || !input_->IsCacheable() ||
                 !input_->HasExprCacheIdentity() ||
                 input_->GetActiveCount() <= 0) {
                 return;
@@ -82,9 +81,12 @@ RawExprCacheAdapter::EnsureLookup() {
 
             const auto* segment = input_->GetSegment();
             auto& manager = ExprResCacheManager::Instance();
+            // Path selection publishes the reader inspected by SupportsRawExprCache().
             if (segment == nullptr ||
                 !manager.CanCacheSegment(segment->type()) ||
-                input_->GetExecPath() != ExprExecPath::RawData) {
+                input_->GetExecPath(on_prefetch_thread) !=
+                    ExprExecPath::RawData ||
+                !input_->SupportsRawExprCache()) {
                 return;
             }
 
@@ -340,11 +342,14 @@ void
 RawExprCacheAdapter::Eval(EvalCtx& context, VectorPtr& result) {
     const bool has_offset_input = context.get_offset_input() != nullptr;
     SetHasOffsetInput(has_offset_input);
+    if (has_offset_input && !prefetch_future_) {
+        input_->SetHasOffsetInput(true);
+    }
+    WaitPrefetch();
     // A cache hit bypasses input_->Eval(), so mirror the offset mode that the
     // wrapped evaluator would otherwise record for its MoveCursor() guard.
     input_->SetHasOffsetInput(has_offset_input);
 
-    WaitPrefetch();
     EnsureLookup();
     if (TryServeCacheHit(context, result)) {
         return;
@@ -464,7 +469,7 @@ RawExprCacheAdapter::PrefetchAsync(
             self->op_ctx_->cancellation_token.isCancellationRequested()) {
             return;
         }
-        self->EnsureLookup();
+        self->EnsureLookup(/*on_prefetch_thread=*/true);
         if (self->state_.lookup_state != LookupState::Hit) {
             const bool measure_prefetch =
                 self->state_.lookup_state == LookupState::Miss;
@@ -486,9 +491,7 @@ RawExprCacheAdapter::PrefetchAsync(
 void
 RawExprCacheAdapter::WaitPrefetch() {
     if (prefetch_future_.has_value()) {
-        auto future = std::move(*prefetch_future_);
-        prefetch_future_.reset();
-        std::move(future).get();
+        JoinPrefetch(prefetch_future_);
     } else {
         EnsureLookup();
     }
@@ -496,6 +499,11 @@ RawExprCacheAdapter::WaitPrefetch() {
     if (state_.lookup_state != LookupState::Hit) {
         input_->WaitPrefetch();
     }
+}
+
+double
+RawExprCacheAdapter::PrefetchWaitMicros() const {
+    return Expr::PrefetchWaitMicros() + input_->PrefetchWaitMicros();
 }
 
 void

@@ -52,10 +52,104 @@
 #include "pb/plan.pb.h"
 #include "prometheus/histogram.h"
 #include "segcore/SegcoreConfig.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "segcore/Utils.h"
 
 namespace milvus {
 namespace exec {
+
+void
+Expr::WaitForPrefetches(const std::vector<ExprPtr>& exprs) {
+    std::exception_ptr first_error;
+    for (const auto& expr : exprs) {
+        try {
+            expr->WaitPrefetch();
+        } catch (...) {
+            // Other workers still borrow the request's OpContext.
+            if (!first_error) {
+                first_error = std::current_exception();
+            }
+        }
+    }
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
+}
+
+void
+Expr::JoinPrefetch(std::optional<folly::Future<folly::Unit>>& pending) {
+    auto future = std::move(*pending);
+    pending.reset();
+    const auto start = std::chrono::steady_clock::now();
+    std::move(future).get();
+    prefetch_wait_us_ += std::chrono::duration<double, std::micro>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+}
+
+double
+Expr::PrefetchWaitMicros() const {
+    double total = prefetch_wait_us_;
+    for (const auto& input : inputs_) {
+        total += input->PrefetchWaitMicros();
+    }
+    return total;
+}
+
+void
+SegmentExpr::PrefetchJsonStats() {
+    if (active_count_ == 0 || has_offset_input_ ||
+        segment_->type() != SegmentType::Sealed) {
+        return;
+    }
+    // Empty IN/CONTAINS has no typed value. EXISTS accepts any cast type.
+    if (value_type_ == DataType::NONE && !allow_any_json_cast_type_) {
+        return;
+    }
+    if (SupportsJsonStatsPrefetchCacheLookup()) {
+        prefetched_json_stats_cache_ = LookupCachedIndexBitmaps();
+        if (prefetched_json_stats_cache_.result) {
+            return;
+        }
+    }
+    try {
+        auto stats = segment_->GetJsonStats(op_ctx_, field_id_);
+        if (stats) {
+            PrefetchJsonStatsPath(*stats, index::JsonPointer(nested_path_));
+        }
+    } catch (const std::exception& e) {
+        // This is speculative: a preceding predicate may short-circuit.
+        // The demand reader retries and reports its own error if used.
+        LOG_DEBUG("JSON stats prefetch for field {} failed: {}",
+                  field_id_.get(),
+                  e.what());
+    }
+}
+
+void
+SegmentExpr::PrefetchJsonStatsPath(index::JsonKeyStats& stats,
+                                   const std::string& pointer) const {
+    using index::JSONType;
+    switch (is_json_contains_ ? DataType::ARRAY : value_type_) {
+        case DataType::BOOL:
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::BOOL});
+            break;
+        case DataType::INT64:
+        case DataType::DOUBLE:
+            stats.PrefetchTypedColumns(
+                op_ctx_, pointer, {JSONType::INT64, JSONType::DOUBLE});
+            break;
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::STRING});
+            break;
+        case DataType::ARRAY:
+            stats.PrefetchTypedColumns(op_ctx_, pointer, {JSONType::ARRAY});
+            break;
+        default:
+            break;
+    }
+}
 
 SegmentExpr::~SegmentExpr() {
     // record accumulated json filter latencies as segment-level metrics.

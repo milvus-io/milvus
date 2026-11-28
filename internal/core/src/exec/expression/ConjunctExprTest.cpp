@@ -626,6 +626,30 @@ TEST(ConjunctExprTest, NestedOrSkipKeepsNonnullableNullTailAligned) {
     ExpectTruth(output, 0, Truth::False);
 }
 
+TEST(ConjunctExprTest, CleanupJoinsSiblingsAfterPrefetchFailure) {
+    class JoinProbe : public FixedBitmapExpr {
+     public:
+        JoinProbe() : FixedBitmapExpr(TargetBitmap(1), TargetBitmap(1)) {
+        }
+        void
+        WaitPrefetch() override {
+            ++joins;
+            if (fail) {
+                throw std::runtime_error("injected prefetch failure");
+            }
+        }
+        bool fail = false;
+        size_t joins = 0;
+    };
+    auto failed = std::make_shared<JoinProbe>();
+    auto sibling = std::make_shared<JoinProbe>();
+    failed->fail = true;
+    PhyConjunctFilterExpr tree({failed, sibling}, true, nullptr);
+    EXPECT_THROW(tree.WaitPrefetch(), std::runtime_error);
+    EXPECT_EQ(failed->joins, 1);
+    EXPECT_EQ(sibling->joins, 1);
+}
+
 TEST(ConjunctExprTest, AndKeepsUnknownRowsActiveForFollowingFalse) {
     auto unknown = FixedBool(false, false);
     auto true_expr = FixedBool(true, true);
