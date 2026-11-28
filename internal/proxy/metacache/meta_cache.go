@@ -22,9 +22,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -211,11 +214,9 @@ type MetaCache struct {
 	// broadcasting) -- no timestamp comparison needed, and it also covers
 	// write-backs the floor could not (alias resolution entries, RequestTime==0
 	// responses from older rootcoords).
-	// Costs, accepted by design: an invalidation waits for the slowest in-flight
-	// fill. Fill RPCs preserve the caller's context and do not impose a shorter
-	// MetaCache-specific deadline, so callers must provide an appropriate
-	// deadline (or rely on the coordinator client's transport policy). Fills
-	// issued while an invalidation is pending briefly block behind it.
+	// A queued invalidation waits for all active fills and blocks new fills.
+	// Bound the coordinator and schema RPCs inside each flight so even callers
+	// without a deadline eventually release the read lock.
 	// Cache HITS never touch this lock; fills don't block each other.
 	// Lock order: fillMu before m.mu. Deadlock-free against rootcoord: ack
 	// callbacks release the meta lock before the expiration fan-out, so a fill's
@@ -487,6 +488,23 @@ func BuildPartitionCacheKey(collectionID typeutil.UniqueID) string {
 	return buildPartitionCacheKey(collectionID)
 }
 
+var errFillTimeout = errors.New("meta cache fill exceeded proxy.metaCacheFillTimeout")
+
+func newFillContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := paramtable.Get().ProxyCfg.MetaCacheFillTimeout.GetAsDuration(time.Second)
+	return context.WithTimeoutCause(ctx, timeout, errFillTimeout)
+}
+
+func fillError(ctx context.Context, err error) error {
+	// Only relabel a deadline error caused by our own timer. A coordinator
+	// can return a more specific failure at the same time as the timer fires.
+	if context.Cause(ctx) == errFillTimeout &&
+		(errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded) {
+		return merr.WrapErrServiceUnavailableErr(err, "%s", errFillTimeout)
+	}
+	return err
+}
+
 func (m *MetaCache) updateWithSingleflight(
 	ctx context.Context,
 	key string,
@@ -503,7 +521,10 @@ func (m *MetaCache) updateWithSingleflight(
 	defer m.fillMu.RUnlock()
 
 	collection, err, _ := m.sfGlobal.Do(key, func() (*CollectionInfo, error) {
-		info, err := m.update(ctx, database, collectionName, collectionID)
+		fillCtx, cancel := newFillContext(ctx)
+		defer cancel()
+		info, err := m.update(fillCtx, database, collectionName, collectionID)
+		err = fillError(fillCtx, err)
 		if h := m.testHookBeforeSingleflightReturn; h != nil {
 			h()
 		}
@@ -858,9 +879,11 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 		// Partition-key status is fixed at creation, so the resolved schema answers
 		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
 		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
-		resp, err := m.showPartitions(ctx, rpcDB, "", collectionID)
+		fillCtx, cancel := newFillContext(ctx)
+		defer cancel()
+		resp, err := m.showPartitions(fillCtx, rpcDB, "", collectionID)
 		if err != nil {
-			return nil, err
+			return nil, fillError(fillCtx, err)
 		}
 		partitions := make([]*PartitionInfo, 0)
 		for i, name := range resp.PartitionNames {
@@ -1329,9 +1352,11 @@ func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*Data
 	m.fillMu.RLock()
 	defer m.fillMu.RUnlock()
 	dbInfo, err, _ := m.sfDB.Do(database, func() (*DatabaseInfo, error) {
-		resp, err := m.describeDatabase(ctx, database)
+		fillCtx, cancel := newFillContext(ctx)
+		defer cancel()
+		resp, err := m.describeDatabase(fillCtx, database)
 		if err != nil {
-			return nil, err
+			return nil, fillError(fillCtx, err)
 		}
 
 		m.mu.Lock()

@@ -2917,6 +2917,7 @@ type proxyConfig struct {
 	MaxResultEntries                  ParamItem `refreshable:"true"`
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	EnableLocalCollectionVisibility   ParamItem `refreshable:"true"`
+	MetaCacheFillTimeout              ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 	MaterializeEnabled                ParamItem `refreshable:"true"`
 
@@ -3638,6 +3639,20 @@ Disabled if the value is less or equal to 0.`,
 		Export:       false,
 	}
 	p.EnableLocalCollectionVisibility.Init(base.mgr)
+	p.MetaCacheFillTimeout = ParamItem{
+		Key:          "proxy.metaCacheFillTimeout",
+		Version:      "3.0.7",
+		DefaultValue: "60",
+		Doc:          "Maximum time in seconds for the RPCs of one Proxy metadata cache fill. A shorter caller deadline takes precedence.",
+		Formatter: func(v string) string {
+			if getAsDuration(v, time.Second) <= 0 {
+				return p.MetaCacheFillTimeout.DefaultValue
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.MetaCacheFillTimeout.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
