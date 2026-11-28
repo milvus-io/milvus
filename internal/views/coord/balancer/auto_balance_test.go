@@ -58,7 +58,7 @@ func TestAutoBalanceDisabledStillMaintainsViews(t *testing.T) {
 			}
 			plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{id})
 			if scenario == "release" {
-				require.Contains(t, plan.Releases, id)
+				require.Empty(t, plan.Releases)
 			} else {
 				require.Contains(t, plan.Prepares, id)
 			}

@@ -17,8 +17,7 @@ const (
 	// actionNone: nothing to do for this shard in this batch.
 	actionNone actionKind = iota
 
-	// actionRelease: desired state is absent but current views exist.
-	// The Policy emits a Release in the plan; no allocation needed.
+	// actionRelease drains a removed replica of a loaded collection.
 	actionRelease
 
 	// actionMust: a new view must be generated (e.g., initial load,
@@ -36,55 +35,31 @@ const (
 //
 // The decision rules, in order:
 //
-//  1. Desired absent + current exists     → Release
-//  2. Desired present + no Up view        → Must unless Preparing exists
+//  1. Replica removed + remaining desired placement serving → Release
+//  2. Desired replica has targets + no Up view        → Must unless Preparing exists
 //  3. Already has a Preparing view        → None (avoid stacking)
 //  4. Current DataVersion < DataView DV   → Must (data changed)
 //  5. Current view references an unavailable node → Must (node lost)
 //  6. LoadInfoVersion differs            → Must
 //  7. Otherwise                           → MayOptimize
-func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
+func classifyShard(snap *planningContext, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
 	stats := snap.GetShardStats(shardID)
-	hasUpView := stats != nil && stats.UpVersion != nil
-	hasPreparing := stats != nil && stats.PreparingVersion != nil
-	hasAnyView := hasUpView || hasPreparing || (stats != nil && len(stats.Segments) > 0)
-	if entry := snap.ShardEntry(shardID); entry != nil && len(entry.ResidentNodes()) > 0 {
-		hasAnyView = true
-	}
-
-	// 1. Desired absent → release any residual views.
+	// Full collection release is handled by DDL. Here we only drain a removed replica.
 	if desired == nil {
 		// Registry presence also covers SN-only Down/Unrecoverable views,
 		// whose stats contain neither an Up version nor QN placements.
-		if stats != nil {
+		if collection := snap.collectionForShard(shardID); stats != nil && collection != nil && collection.CanRetireReplicas(snap) {
 			return actionRelease
 		}
 		return actionNone
 	}
 	if target, managed := snap.TargetNodes(shardID); managed && len(target) == 0 {
-		// No capacity in this replica's RG: preserve lifecycle state until
-		// topology changes. Node-failure reports still advance the state machine;
-		// capacity loss alone must not turn recovery into an explicit release.
-		replica := findReplica(desired, shardID.ReplicaID)
-		if len(snap.CandidateNodes(replica.ResourceGroup)) == 0 {
-			return actionNone
-		}
-		if !hasAnyView {
-			return actionNone
-		}
-		if !healthyUp(snap, shardID) {
-			return actionRelease
-		}
-		// Never retire the last healthy serving cover merely to reduce replicas.
-		for _, replica := range desired.Replicas {
-			sibling := qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shardID.VChannel}
-			if nodes, ok := snap.TargetNodes(sibling); ok && len(nodes) > 0 && healthyUp(snap, sibling) {
-				return actionRelease
-			}
-		}
+		// Topology changes will revisit this desired replica when it has a target.
 		return actionNone
 	}
+	hasUpView := stats != nil && stats.UpVersion != nil
+	hasPreparing := stats != nil && stats.PreparingVersion != nil
 	// Supersede an in-flight view after DataView certifies a newer schema. This
 	// check must precede the normal "wait for Preparing" rule.
 	latestSchema := snap.SchemaVersion(desired.CollectionID)
@@ -161,10 +136,10 @@ func healthyUp(snap balanceInput, id qviews.ShardID) bool {
 	entry := snap.ShardEntry(id)
 	if entry != nil {
 		for _, node := range entry.UpNodes() {
-			n := snap.NodesMap()[node]
+			n := snap.GetNode(node)
 			// Stopping forbids new placement, but an existing Up view can
 			// still serve until its replacement is ready or a node fails.
-			if n == nil || !n.Alive {
+			if n == nil || !n.Info().Alive {
 				return false
 			}
 		}

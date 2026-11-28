@@ -47,19 +47,19 @@ func TestReplicaLayoutMinimumTransfers(t *testing.T) {
 					}
 					return
 				}
-				previous := &replicaLayout{replicas: replicas, nodes: nodes, owners: map[int64]int64{}, targets: map[int64][]int64{}}
+				previous := &balancercache.ReplicaLayout{Replicas: replicas, Nodes: nodes, Owners: map[int64]int64{}, Targets: map[int64][]int64{}}
 				node := int64(1)
 				for i, count := range counts {
 					for j := 0; j < count; j++ {
-						previous.owners[node] = replicas[i]
-						previous.targets[replicas[i]] = append(previous.targets[replicas[i]], node)
+						previous.Owners[node] = replicas[i]
+						previous.Targets[replicas[i]] = append(previous.Targets[replicas[i]], node)
 						node++
 					}
 				}
 				got := buildReplicaLayout(c, previous, replicas, nodes)
-				require.Len(t, got.owners, n)
+				require.Len(t, got.Owners, n)
 				active := 0
-				for _, target := range got.targets {
+				for _, target := range got.Targets {
 					require.True(t, len(target) == n/r || len(target) == (n+r-1)/r)
 					if len(target) > 0 {
 						active++
@@ -67,8 +67,8 @@ func TestReplicaLayoutMinimumTransfers(t *testing.T) {
 				}
 				require.Equal(t, min(n, r), active)
 				moved := 0
-				for node, owner := range previous.owners {
-					if got.owners[node] != owner {
+				for node, owner := range previous.Owners {
+					if got.Owners[node] != owner {
 						moved++
 					}
 				}
@@ -84,7 +84,7 @@ func TestReplicaLayoutMinimumTransfers(t *testing.T) {
 					best = min(best, moves)
 				}
 				require.Equal(t, best, moved, "N=%d R=%d counts=%v", n, r, counts)
-				require.Equal(t, got.owners, buildReplicaLayout(c, got, replicas, nodes).owners)
+				require.Equal(t, got.Owners, buildReplicaLayout(c, got, replicas, nodes).Owners)
 			}
 			visit(nil, n)
 		}
@@ -109,11 +109,9 @@ func TestReplicaLayoutIsolationSuspensionAndRestore(t *testing.T) {
 	c.PublishNode(1, nil)
 	lost := qviews.ShardID{ReplicaID: owners[1], VChannel: shard.VChannel}
 	plan = policy.Plan(c, []qviews.ShardID{lost})
-	require.Contains(t, plan.Releases, lost)
-	require.False(t, plan.ReleaseControls[lost].GetPreemptServingLease(), "suspension preserves ordinary lease protection")
+	require.Empty(t, plan.Releases)
 	require.Empty(t, plan.Retries)
 	require.NotContains(t, plan.Prepares, lost)
-	c.PublishShard(lost, nil)
 	require.Empty(t, policy.Plan(c, []qviews.ShardID{lost}).Prepares)
 	c.PublishNode(4, &NodeInfo{NodeID: 4, Alive: true, ResourceGroup: "rg1"})
 	plan = policy.Plan(c, []qviews.ShardID{lost})
@@ -122,7 +120,7 @@ func TestReplicaLayoutIsolationSuspensionAndRestore(t *testing.T) {
 	require.Len(t, c.GetCollection(1).LoadConfig().Replicas, 3)
 }
 
-func TestReplicaSuspensionPreservesLastServingCover(t *testing.T) {
+func TestReplicaSuspensionPreservesUpWithHealthySibling(t *testing.T) {
 	c := replicaCache(2, 1)
 	a, b := cacheShard(1, 10), cacheShard(1, 11)
 	// Freeze A as active before B's old view is reported.
@@ -141,8 +139,8 @@ func TestReplicaSuspensionPreservesLastServingCover(t *testing.T) {
 	require.Empty(t, plan.Releases)
 	require.Empty(t, plan.Retries)
 	c.PublishShard(a, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
-	plan = p.Plan(c, []qviews.ShardID{a})
-	require.Contains(t, plan.Releases, b)
+	plan = p.Plan(c, []qviews.ShardID{a, b})
+	require.Empty(t, plan.Releases)
 	require.NotContains(t, plan.Prepares, b)
 	require.Empty(t, plan.Retries)
 }
@@ -179,15 +177,13 @@ func TestReplicaZeroCapacityPreservesLifecycle(t *testing.T) {
 				// Explicit unload still tears down every resident lifecycle state.
 				c.PublishLoadConfig(1, nil, 2)
 				plan := p.Plan(c, []qviews.ShardID{id})
-				if state != "absent" {
-					require.Contains(t, plan.Releases, id)
-				}
+				require.Empty(t, plan.Releases, "explicit unload owns teardown")
 			})
 		}
 	}
 }
 
-func TestReplicaSuspensionRetainsStoppingCoverUntilSiblingUp(t *testing.T) {
+func TestReplicaSuspensionRetainsUpOnStoppingNode(t *testing.T) {
 	c := replicaCache(2, 1)
 	a, b := cacheShard(1, 10), cacheShard(1, 11)
 	p := NewDefaultBalancePolicy()
@@ -207,8 +203,8 @@ func TestReplicaSuspensionRetainsStoppingCoverUntilSiblingUp(t *testing.T) {
 	require.Empty(t, plan.Releases, "a Preparing sibling cannot replace the last serving cover")
 	require.Empty(t, plan.Prepares)
 	c.PublishShard(a, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
-	plan = p.Plan(c, []qviews.ShardID{a})
-	require.Contains(t, plan.Releases, b)
+	plan = p.Plan(c, []qviews.ShardID{a, b})
+	require.Empty(t, plan.Releases)
 	require.NotContains(t, plan.Prepares, b)
 }
 
@@ -220,10 +216,10 @@ func TestReplicaLayoutLoadingCostAndCompatibility(t *testing.T) {
 	// making node 1 or 2 strictly preferable to empty node 3.
 	c.PublishShard(cacheShard(1, 10), upStats(version,
 		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1000, 1, 2, coordview.SegmentStateUp)))
-	previous := &replicaLayout{replicas: []int64{10, 11}, nodes: []int64{1, 2, 3, 4}, owners: map[int64]int64{1: 10, 2: 10, 3: 10, 4: 11}, targets: map[int64][]int64{10: {1, 2, 3}, 11: {4}}}
-	layout := buildReplicaLayout(c.GetCollection(1), previous, previous.replicas, previous.nodes)
-	require.Equal(t, int64(10), layout.owners[3])
-	require.True(t, layout.owners[1] == 11 || layout.owners[2] == 11)
+	previous := &balancercache.ReplicaLayout{Replicas: []int64{10, 11}, Nodes: []int64{1, 2, 3, 4}, Owners: map[int64]int64{1: 10, 2: 10, 3: 10, 4: 11}, Targets: map[int64][]int64{10: {1, 2, 3}, 11: {4}}}
+	layout := buildReplicaLayout(c.GetCollection(1), previous, previous.Replicas, previous.Nodes)
+	require.Equal(t, int64(10), layout.Owners[3])
+	require.True(t, layout.Owners[1] == 11 || layout.Owners[2] == 11)
 	key := coordview.ResourceKey{SegmentID: 1000, PartitionID: 1, DataVersion: version, LoadInfoVersion: 1}
 	collection := c.GetCollection(1)
 	placements := []*balancercache.PlacementNode{collection.PlacementNode(1), collection.PlacementNode(2), collection.PlacementNode(3)}
@@ -250,8 +246,8 @@ func TestReplicaLayoutBudgetFallback(t *testing.T) {
 		replicas[i] = int64(i + 10)
 	}
 	got := buildReplicaLayout(c.GetCollection(1), nil, replicas, nodes)
-	require.Len(t, got.owners, 260)
-	for _, target := range got.targets {
+	require.Len(t, got.Owners, 260)
+	for _, target := range got.Targets {
 		require.Len(t, target, 1)
 	}
 }
@@ -278,18 +274,21 @@ func TestReplicaLayoutSharedAcrossChannelsAndRGChange(t *testing.T) {
 	policy := NewDefaultBalancePolicy()
 	plan := policy.Plan(c, []qviews.ShardID{a})
 	require.Len(t, plan.Prepares, 4)
-	layout := policy.layouts.domains[1]["rg1"]
+	layout := c.GetCollection(1).Planning().Layout("rg1")
 	for id, builder := range plan.Prepares {
 		for _, node := range assignmentsFromBuilder(builder) {
-			require.Equal(t, id.ReplicaID, layout.owners[node])
+			require.Equal(t, id.ReplicaID, layout.Owners[node])
 		}
 	}
 	scoped := policy.Plan(c, []qviews.ShardID{other})
 	require.Len(t, scoped.Prepares, 1)
-	require.Same(t, layout, policy.layouts.domains[1]["rg1"], "progress reuses a stable target")
+	require.Same(t, layout, c.GetCollection(1).Planning().Layout("rg1"), "progress reuses a stable target")
 	cfg := c.GetCollection(1).LoadConfig().Clone()
+	// Replaying a pre-upgrade config can still move an ID. Detach the old RG's fanout.
+	previous := c.GetCollection(1).Planning().Replica(11)
 	cfg.Replicas[1].ResourceGroup = "rg2"
 	c.PublishLoadConfig(1, cfg, 2)
+	require.NotSame(t, previous, c.GetCollection(1).Planning().Replica(11))
 	c.PublishNode(5, &NodeInfo{NodeID: 5, Alive: true, ResourceGroup: "rg2"})
 	plan = policy.Plan(c, []qviews.ShardID{a})
 	require.Len(t, plan.Prepares, 4)
@@ -304,7 +303,7 @@ func TestReplicaLayoutSharedAcrossChannelsAndRGChange(t *testing.T) {
 	}
 	c.PublishLoadConfig(1, nil, 3)
 	policy.Plan(c, []qviews.ShardID{a})
-	require.Empty(t, policy.layouts.domains)
+	require.Nil(t, c.GetCollection(1).Planning().Layout("rg1"))
 }
 
 func BenchmarkReplicaLayoutStable(b *testing.B) {

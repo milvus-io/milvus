@@ -92,9 +92,9 @@ func TestReleasePartitionsWaitsForHandoff(t *testing.T) {
 	}
 }
 
-func TestReleasePartitionsRepeatedFullReleaseWaits(t *testing.T) {
+func TestReleasePartitionsRepeatedFullReleaseCleansResidentShard(t *testing.T) {
 	s := newReleaseTestServer(t)
-	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
+	s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
 	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100})
 	patches := []*mockey.Mocker{
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build(),
@@ -105,14 +105,9 @@ func TestReleasePartitionsRepeatedFullReleaseWaits(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{CollectionID: 100, PartitionIDs: []int64{20}})
-		done <- err
-	}()
-	assertReadinessBlocked(t, done)
-	require.NoError(t, manager.RequestRelease(ctx))
-	require.NoError(t, <-done)
+	_, err := s.broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{CollectionID: 100, PartitionIDs: []int64{20}})
+	require.NoError(t, err)
+	require.False(t, s.qviewsRuntime.shardViewRegistry.HasCollectionShards(100))
 }
 
 type releasePartitionsBroadcaster struct{}

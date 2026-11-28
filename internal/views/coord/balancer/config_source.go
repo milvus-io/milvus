@@ -43,8 +43,8 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		dest *int64
 	}{
 		{&p.BalancerResourceGroupAbsoluteTolerance, &value.ResourceGroupAbsoluteTolerance},
+		{&p.BalancerShardBatchSize, &value.ShardBatchSize},
 		{&p.BalancerTargetLogicalSizePerNode, &value.TargetLogicalSizePerNode},
-		{&p.BalancerMaxCandidateEvaluationsPerShard, &value.MaxCandidateEvaluationsPerShard},
 	} {
 		parsed, err := strconv.ParseInt(field.item.GetValue(), 10, 64)
 		if err != nil {
@@ -81,6 +81,7 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 	keys := []string{
 		p.BalancerOptimizationEnabled.Key,
 		p.BalancerReconcileInterval.Key,
+		p.BalancerShardBatchSize.Key,
 		p.BalancerResourceGroupWeight.Key,
 		p.BalancerShardConcentrationWeight.Key,
 		p.BalancerCollectionConcentrationWeight.Key,
@@ -93,7 +94,6 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 		p.BalancerResourceGroupAbsoluteTolerance.Key,
 		p.BalancerTargetLogicalSizePerNode.Key,
 		p.BalancerMinScoreGain.Key,
-		p.BalancerMaxCandidateEvaluationsPerShard.Key,
 	}
 
 	var mu sync.Mutex
@@ -106,10 +106,7 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 			return
 		}
 		if b.cache.UpdateBalanceConfig(value) {
-			select {
-			case b.configChanged <- struct{}{}:
-			default:
-			}
+			wakeBalancer(b.configChanged)
 		}
 	}
 	handler := config.NewHandler(fmt.Sprintf("query-view-balance-%p", b), func(*config.Event) { refresh() })

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -9,11 +10,11 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // Reader returns immutable objects. Separate calls need not observe one instant.
-// Returned objects and all their descendants are read-only.
+// Published facts are read-only. Replica planning handles have their own lifetime and synchronization.
 type Reader interface {
 	GetCollection(int64) *CollectionEntry
 	GetNode(int64) *NodeEntry
@@ -26,13 +27,17 @@ type Reader interface {
 
 // CollectionEntry shares independently published desired and actual children.
 type CollectionEntry struct {
-	id                 int64
-	config             *loadmgr.LoadConfig
-	configVersion      uint64
-	data               *api.CollectionDataView
-	shards             immutableIndex[*ShardEntry]
-	placements         immutableIndex[*PlacementNode]
-	suspended          immutableIndex[bool]
+	id            int64
+	config        *loadmgr.LoadConfig
+	configVersion uint64
+	currentUps    int // Desired shards Up at the current load, schema and data versions.
+	planning      *CollectionPlanning
+	data          *api.CollectionDataView
+	shards        immutableIndex[*ShardEntry]
+	placements    immutableIndex[*PlacementNode]
+	suspended     immutableIndex[bool]
+	// Preserve Up history while a desired replica temporarily has no shard manager.
+	releasedUpShards   immutableIndex[bool]
 	targetLoads        immutableIndex[targetLoad]
 	loadedPartitions   map[int64]struct{}
 	loadsAllPartitions bool
@@ -47,6 +52,66 @@ func (c *CollectionEntry) DataView() *api.CollectionDataView { return c.data }
 func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 	shard, _ := c.shards.getShard(id)
 	return shard
+}
+
+func (c *CollectionEntry) currentUp(id qviews.ShardID, stats *coordview.ShardStats) bool {
+	return stats != nil && stats.UpVersion != nil && stats.UpLoadInfoVersion == c.configVersion &&
+		c.planning.Replica(id.ReplicaID) != nil && c.data != nil && c.data.Shard(id.VChannel) != nil &&
+		stats.UpSchemaVersion == c.data.SchemaVersion && stats.UpVersion.DataVersion.GTE(c.data.DataVersion)
+}
+
+func (c *CollectionEntry) allCurrentUp() bool {
+	return c.currentUps > 0 && c.currentUps == len(c.config.Replicas)*len(c.data.Shards)
+}
+
+// CanRetireReplicas checks the complete desired placement against live topology.
+// Placement footprints aggregate all shard Up references by node and replica.
+func (c *CollectionEntry) CanRetireReplicas(reader Reader) bool {
+	if !c.allCurrentUp() {
+		return false
+	}
+	for node := range c.RangePlacementNodes {
+		n := reader.GetNode(node.ID())
+		for ref := range node.RangeReplicas {
+			if r := c.planning.Replica(ref.ReplicaID); r != nil && ref.Up > 0 &&
+				!n.eligibleFor(r.group) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// A placement-only handoff can unblock retirement while all versions stay current.
+func (c *CollectionEntry) clearedRetirementBlocker(reader Reader, old, next *ShardEntry) bool {
+	if old == nil || (next != nil && slices.Equal(old.upNodes, next.upNodes)) {
+		return false
+	}
+	replica := c.planning.Replica(old.id.ReplicaID)
+	if replica == nil {
+		return false
+	}
+	key := idKey(old.id.ReplicaID)
+	for _, node := range old.upNodes {
+		if placement := c.PlacementNode(node); placement != nil {
+			ref, _ := placement.replicas.get(key[:])
+			if ref.Up > 0 {
+				continue
+			}
+		}
+		if !reader.GetNode(node).eligibleFor(replica.group) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CollectionEntry) MaybeUped(id qviews.ShardID) bool {
+	if shard := c.GetShard(id); shard != nil && shard.stats.MaybeUped {
+		return true
+	}
+	_, ok := c.releasedUpShards.getShard(id)
+	return ok
 }
 func (c *CollectionEntry) RangeShards(fn func(*ShardEntry) bool) { c.shards.each(fn) }
 
@@ -72,6 +137,10 @@ type NodeEntry struct {
 	info          api.BalanceNode
 	contributions immutableIndex[nodeContribution]
 	targets       immutableIndex[targetContribution]
+}
+
+func (n *NodeEntry) eligibleFor(group string) bool {
+	return n != nil && n.info.Alive && !n.info.Stopping && n.info.ResourceGroup == group
 }
 
 func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
@@ -112,17 +181,18 @@ type nodeSlot struct {
 // segment work is serialized per collection, and contribution writes per node.
 // Sources invoke publication synchronously and never call back from cache to source.
 type Cache struct {
-	mu            sync.RWMutex
-	collections   map[int64]*collectionSlot
-	scanIndex     collectionScanIndex
-	nodes         map[int64]*nodeSlot
-	replicas      map[int64]int64
-	groups        map[string]*ResourceGroupEntry
-	notify        func(api.TriggerScope)
-	config        atomic.Pointer[api.BalanceConfig]
-	readyCh       chan struct{}
-	readyOnce     sync.Once
-	subscriptions []func()
+	mu               sync.RWMutex
+	collections      map[int64]*collectionSlot
+	scanIndex        collectionScanIndex
+	nodes            map[int64]*nodeSlot
+	replicas         map[int64]int64
+	groups           map[string]*ResourceGroupEntry
+	notify           func(api.TriggerScope)
+	asyncNodeTargets bool
+	config           atomic.Pointer[api.BalanceConfig]
+	readyCh          chan struct{}
+	readyOnce        sync.Once
+	subscriptions    []func()
 }
 
 func New(config *api.BalanceConfig) *Cache {
@@ -190,7 +260,18 @@ func (c *Cache) WaitForReady(ctx context.Context) error {
 	}
 }
 
-func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.mu.Lock(); c.notify = fn; c.mu.Unlock() }
+// SetNotifier registers an observer. Target accounting completes on publication.
+func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.setNotifier(fn, false) }
+
+// SetScheduler installs the controller, which refreshes node targets during discovery.
+func (c *Cache) SetScheduler(fn func(api.TriggerScope)) { c.setNotifier(fn, true) }
+
+func (c *Cache) setNotifier(fn func(api.TriggerScope), asyncNodeTargets bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.notify, c.asyncNodeTargets = fn, asyncNodeTargets && fn != nil
+}
+
 func (c *Cache) changed(scope api.TriggerScope) {
 	c.mu.RLock()
 	fn := c.notify
@@ -220,6 +301,7 @@ func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) bool {
 		if c.config.CompareAndSwap(previous, &copy) {
 			policy := copy
 			policy.ReconcileInterval = previous.ReconcileInterval
+			policy.ShardBatchSize = previous.ShardBatchSize
 			if policy != *previous {
 				c.changed(api.TriggerScope{NodeChanged: true})
 			}
@@ -373,6 +455,27 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 		}
 	}
 	c.mu.Unlock()
+	membershipChanged := previous.config != nil && (cfg == nil || !slices.EqualFunc(previous.config.Replicas, cfg.Replicas, func(a, b *loadmgr.ReplicaAssignment) bool {
+		return a.ReplicaID == b.ReplicaID && a.ResourceGroup == b.ResourceGroup
+	}))
+	if cfg == nil {
+		next.planning = nil
+		next.releasedUpShards = immutableIndex[bool]{}
+		next.suspended = immutableIndex[bool]{}
+	} else if previous.config == nil || membershipChanged {
+		next.planning = previous.planning.withMembership(cfg)
+	}
+	if cfg != nil && membershipChanged && (next.suspended.len() > 0 || next.releasedUpShards.len() > 0) {
+		for _, replica := range previous.config.Replicas {
+			if !hasReplica(cfg, replica.ReplicaID) {
+				prefix := idKey(replica.ReplicaID)
+				next.suspended = next.suspended.remove(prefix[:])
+				if next.releasedUpShards.tree != nil {
+					next.releasedUpShards.tree, _ = next.releasedUpShards.tree.DeletePrefix(prefix[:])
+				}
+			}
+		}
+	}
 	next.config, next.configVersion = cfg, version
 	next.refreshLoadRows()
 	c.replaceDemand(&previous, &next)
@@ -441,13 +544,10 @@ func (s *collectionSlot) pruneRow(next *CollectionEntry, id int64) {
 
 // PublishShard is called in source order, including seed and final removal.
 func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
-	collectionID, ok := parseShardCollection(id)
-	if !ok {
-		collectionID, ok = c.CollectionForReplica(id.ReplicaID)
-	}
+	collectionID, ok := c.collectionIDForShard(id)
 	if !ok {
 		return
-	} // Invalid legacy identity cannot be associated with a collection.
+	}
 	slot := c.lockCollection(collectionID)
 	defer c.finishCollection(collectionID, slot)
 	next := *slot.value.Load()
@@ -455,8 +555,15 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	if old != nil && old.stats == stats {
 		return
 	}
+	wasReady := next.allCurrentUp()
+	if next.currentUp(id, stats) {
+		next.currentUps++
+	}
 	var previous ShardSizeStats
 	if old != nil {
+		if next.currentUp(id, old.stats) {
+			next.currentUps--
+		}
 		previous = old.rows
 		for segmentID := range old.stats.Segments {
 			slot.uses[segmentID]--
@@ -481,6 +588,9 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	c.replaceTarget(&next, id, old, replacement, slot.rows)
 	if stats == nil {
 		if old != nil {
+			if old.stats.MaybeUped && next.config != nil && hasReplica(next.config, id.ReplicaID) {
+				next.releasedUpShards = next.releasedUpShards.set(shardKey(id), true)
+			}
 			slot.replicaUses[id.ReplicaID]--
 			if slot.replicaUses[id.ReplicaID] == 0 {
 				delete(slot.replicaUses, id.ReplicaID)
@@ -510,7 +620,23 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		delete(c.replicas, id.ReplicaID)
 	}
 	c.mu.Unlock()
+	// Once all desired shards are current, each desired replica has a resident
+	// shard. Extra replica IDs therefore identify collections awaiting retirement.
+	if next.allCurrentUp() && len(slot.replicaUses) > len(next.config.Replicas) &&
+		(!wasReady || next.clearedRetirementBlocker(c, old, replacement)) && next.CanRetireReplicas(c) {
+		for resident := range slot.replicaUses {
+			if next.planning.Replica(resident) == nil {
+				c.changed(api.TriggerScope{RetiringReplicas: []int64{resident}})
+			}
+		}
+	}
 	if old != nil && stats != nil {
+		// A schema publication can unblock retirement even for an empty manager.
+		if next.config != nil && next.planning.Replica(id.ReplicaID) == nil &&
+			!sameVersion(old.stats.PublishedSchema, stats.PublishedSchema) {
+			c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
+			return
+		}
 		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
 			return
 		}
@@ -524,7 +650,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
 }
 
-func sameVersion(a, b *qviews.QueryViewVersion) bool {
+func sameVersion[T comparable](a, b *T) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -535,6 +661,13 @@ func shardRows(stats *coordview.ShardStats, fallback map[int64]int64) ShardSizeS
 	rows := make(ShardSizeStats)
 	if stats == nil {
 		return rows
+	}
+	// A Preparing on an empty node can still select or invalidate a non-empty Up fallback.
+	for _, node := range stats.UpNodes {
+		rows[node] = NodeSizeStats{}
+	}
+	for _, node := range stats.PreparingNodes {
+		rows[node] = NodeSizeStats{}
 	}
 	for _, segment := range stats.Segments {
 		count := segment.LogicalSize
@@ -610,27 +743,40 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	c.mu.Unlock()
 	slot.value.Store(&next)
 	c.finishNode(id, slot)
-	scope := api.TriggerScope{DirtyNodes: []int64{id}}
-	{
-		seen := make(map[int64]struct{})
-		for _, name := range []string{old.ResourceGroup, next.info.ResourceGroup} {
-			if rg := c.GetResourceGroup(name); rg != nil {
-				rg.RangeCollections(func(id int64) bool { seen[id] = struct{}{}; return true })
-			}
-		}
-		for id := range seen {
-			scope.DirtyCollections = append(scope.DirtyCollections, id)
+	scope := api.TriggerScope{DirtyNodes: []int64{id}, DirtyResourceGroups: []string{old.ResourceGroup}}
+	if next.info.ResourceGroup != old.ResourceGroup {
+		scope.DirtyResourceGroups = append(scope.DirtyResourceGroups, next.info.ResourceGroup)
+	}
+	c.mu.RLock()
+	notify, async := c.notify, c.asyncNodeTargets
+	c.mu.RUnlock()
+	if !async {
+		// Standalone readers and initial replay have no discovery producer.
+		for shard := range next.RangeShards {
+			c.RefreshShardTarget(shard)
 		}
 	}
-	// Release the node writer lock before taking any collection writer lock.
-	for _, collectionID := range scope.DirtyCollections {
-		s := c.lockCollection(collectionID)
-		entry := *s.value.Load()
-		c.refreshTargets(&entry, s.rows)
+	if notify != nil {
+		notify(scope)
+	}
+}
+
+// RefreshShardTarget recomputes from current inputs under the collection writer lock.
+func (c *Cache) RefreshShardTarget(shard qviews.ShardID) {
+	collectionID, ok := c.collectionIDForShard(shard)
+	if !ok {
+		return
+	}
+	// Cold and already removed shards have no published target to repair.
+	if entry := c.GetCollection(collectionID); entry == nil || entry.GetShard(shard) == nil {
+		return
+	}
+	s := c.lockCollection(collectionID)
+	defer c.finishCollection(collectionID, s)
+	entry := *s.value.Load()
+	if current := entry.GetShard(shard); current != nil && c.refreshShardTarget(&entry, current, s.rows, make(map[int64]int64)) {
 		s.value.Store(&entry)
-		c.finishCollection(collectionID, s)
 	}
-	c.changed(scope)
 }
 
 // A publication that waited for a retired slot retries on the replacement;
@@ -693,10 +839,10 @@ func hasReplica(config *loadmgr.LoadConfig, id int64) bool {
 	return false
 }
 
-func parseShardCollection(shardID qviews.ShardID) (int64, bool) {
-	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
+func (c *Cache) collectionIDForShard(shardID qviews.ShardID) (int64, bool) {
+	_, id, _, err := funcutil.ParseVChannel(shardID.VChannel)
 	if err != nil {
-		return 0, false
+		return c.CollectionForReplica(shardID.ReplicaID)
 	}
-	return channel.CollectionID(), true
+	return id, true
 }

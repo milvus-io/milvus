@@ -88,9 +88,7 @@ func (m *CollectionLoadManager) RefreshIndexes(ctx context.Context, collectionID
 	return nil
 }
 
-// ReleaseCollection removes desired state. Existing views are intentionally
-// left in the registry; the Balancer sees "desired absent + current exists"
-// and releases them through its plan and ShardViewManager.
+// ReleaseCollection withdraws intent before the DDL callback starts shard teardown.
 func (m *CollectionLoadManager) ReleaseCollection(
 	ctx context.Context,
 	msg *messagespb.DropLoadConfigMessageHeader,
@@ -98,9 +96,7 @@ func (m *CollectionLoadManager) ReleaseCollection(
 	if msg == nil {
 		return nil
 	}
-	collectionID := msg.GetCollectionId()
-	m.store.StopPlanning(collectionID)
-	m.notifyCollection(collectionID)
+	m.store.StopPlanning(msg.GetCollectionId())
 	return nil
 }
 

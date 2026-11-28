@@ -46,14 +46,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type qviewsBalancer interface {
 	Start(ctx context.Context)
 	Stop()
 	Trigger(scopes ...balancer.TriggerScope)
-	TriggerWithCompletion(scopes ...balancer.TriggerScope) *syncutil.Future[error]
 }
 
 type qviewsRuntime struct {
@@ -100,13 +98,17 @@ type qviewsRuntimeDependencies struct {
 }
 
 func reconcileSchemaVersionProvider(
+	balances *cache.Cache,
 	getCollectionInfo func(int64) (*metacache.CollectionInfo, error),
-	publishSchema func(int64, int32),
+	publishSchema func(int64, int32, func() bool),
 ) balancer.SchemaVersionProvider {
 	return func(ctx context.Context, id int64) (int32, error) {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
+		// Capture the load before either metadata read so a release and reload
+		// cannot inherit a published schema from the previous load.
+		load := balances.GetCollection(id)
 		// An ALTER publishes its schema before retiring its pending target.
 		// Read the target first so a retired target is covered by the published read.
 		target, targetErr := broadcast.GetPendingSchemaTarget(id)
@@ -115,7 +117,10 @@ func reconcileSchemaVersionProvider(
 			return 0, err
 		}
 		published := collection.Schema.GetVersion()
-		publishSchema(id, published)
+		publishSchema(id, published, func() bool {
+			live := balances.GetCollection(id)
+			return load != nil && load.LoadConfig() != nil && live != nil && live.ConfigVersion() == load.ConfigVersion()
+		})
 		if targetErr != nil {
 			return 0, targetErr
 		}
@@ -182,7 +187,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	balanceCache := cache.NewFromSources(balancer.DefaultBalanceConfig(), loadConfigStore, deps.dataViewProvider, shardViewRegistry, nodePublisher)
 	var schemaVersion balancer.SchemaVersionProvider
 	if deps.getCollectionInfo != nil {
-		schemaVersion = reconcileSchemaVersionProvider(deps.getCollectionInfo, shardViewRegistry.PublishCollectionSchema)
+		schemaVersion = reconcileSchemaVersionProvider(balanceCache, deps.getCollectionInfo, shardViewRegistry.PublishCollectionSchemaIf)
 	}
 	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback)), schemaVersion))
 	if deps.balancerFactory != nil {

@@ -77,8 +77,8 @@ func TestUnloadedPartitionsDoNotAffectBalance(t *testing.T) {
 		require.Equal(t, int64(2_000_000), shardTotalLoad(p, other))
 		require.Equal(t, int64(2_080_000), c.GetResourceGroup("rg1").Demand(3))
 		p.targets[id.ReplicaID] = []int64{1, 2, 3}
-		p.fanouts = make(map[qviews.ShardID]int)
-		ctx := newAllocationContext(p, id, map[int64]int64{}, c.GetCollection(1).DataView().Shard(id.VChannel).Partitions[0].Segments)
+
+		ctx := newAllocationContext(p, id, map[int64]int64{}, c.GetCollection(1).DataView().Shard(id.VChannel).Partitions[0].Segments, 0)
 		require.InDelta(t, 2_080_000.0/3, ctx.mean, 1e-6)
 		require.InDelta(t, 88_000, ctx.shardLimit, 1e-6)
 		require.InDelta(t, 1.1*2_080_000/3, ctx.collectionLimit, 1e-6)
@@ -89,14 +89,15 @@ func TestUnloadedPartitionsDoNotAffectBalance(t *testing.T) {
 		b := extraPolicy.Plan(extra, []qviews.ShardID{id, other})
 		require.Equal(t, a.Releases, b.Releases)
 		require.Equal(t, a.Retries, b.Retries)
-		require.Equal(t, a.Continues, b.Continues)
 		require.Len(t, b.Prepares, len(a.Prepares))
 		for id, builder := range a.Prepares {
 			require.Contains(t, b.Prepares, id)
 			require.Equal(t, builder.Build(), b.Prepares[id].Build(), "unloaded data must not change candidate order, scores or assignments")
 		}
-		require.Equal(t, policy.fanouts, extraPolicy.fanouts)
-		require.Equal(t, 1, policy.fanouts[id], "the loaded small shard retains a compact fanout")
+		for _, shard := range []qviews.ShardID{id, other} {
+			require.Equal(t, baseline.GetCollection(1).Planning().Replica(shard.ReplicaID).Fanout(shard.VChannel), extra.GetCollection(1).Planning().Replica(shard.ReplicaID).Fanout(shard.VChannel))
+		}
+		require.Equal(t, 1, baseline.GetCollection(1).Planning().Replica(id.ReplicaID).Fanout(id.VChannel), "the loaded small shard retains a compact fanout")
 	}
 	compare()
 	// Repeat with a skewed serving placement to exercise optional optimization.
@@ -120,7 +121,7 @@ func TestPublishedRecoveryRetainsHistoricalPartitions(t *testing.T) {
 	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
 	publishTestNodes(c, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
 	p := newPlanningContext(c)
-	p.fanouts = make(map[qviews.ShardID]int)
+
 	p.targets[id.ReplicaID] = []int64{2}
 	p.recovery = newPublishedRecoveryBase(id, &coordview.PublishedRecovery{View: &viewpb.QueryViewOfShard{
 		Meta: &viewpb.QueryViewMeta{

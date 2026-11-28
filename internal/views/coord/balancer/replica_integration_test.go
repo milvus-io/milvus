@@ -2,7 +2,7 @@ package balancer
 
 import (
 	"context"
-	"sync"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,20 +98,11 @@ func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 		Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10, ResourceGroup: "rg1"}, {ReplicaID: 11, ResourceGroup: "rg1"}},
 	}))
 	var lost atomic.Int64
-	var holdDrops atomic.Bool
-	var dropMu sync.Mutex
-	var drops []syncer.SyncView
 	// Only catalog/transport boundaries are mocked. Registry, lifecycle, cache,
 	// policy, controller and load config store run their real implementations.
 	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
 		for _, views := range group.ViewsByNode {
 			for _, view := range views {
-				if holdDrops.Load() && view.View.State() == qviews.QueryViewStateDropped {
-					dropMu.Lock()
-					drops = append(drops, view)
-					dropMu.Unlock()
-					continue
-				}
 				if node, ok := view.View.WorkNode().(qviews.QueryNode); ok && node.ID == lost.Load() {
 					if view.OnQueryNodeLost != nil {
 						view.OnQueryNodeLost(node)
@@ -139,22 +130,14 @@ func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 	controller := NewDefaultBalancer(cache, registry, nil, nil)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
-	awaitServing := func(count int) {
-		t.Helper()
-		require.Eventually(t, func() bool {
-			if controller.Reconcile(t.Context()) != nil {
+	require.Eventually(t, func() bool {
+		for _, id := range []qviews.ShardID{cacheShard(1, 10), cacheShard(1, 11)} {
+			if mgr := registry.Get(id); mgr == nil || mgr.Stats().UpVersion == nil {
 				return false
 			}
-			serving := 0
-			for _, id := range []qviews.ShardID{cacheShard(1, 10), cacheShard(1, 11)} {
-				if mgr := registry.Get(id); mgr != nil && mgr.Stats().UpVersion != nil {
-					serving++
-				}
-			}
-			return serving == count
-		}, 5*time.Second, time.Millisecond)
-	}
-	awaitServing(2)
+		}
+		return true
+	}, 5*time.Second, time.Millisecond)
 	nodeOneReplica := int64(0)
 	for _, id := range []qviews.ShardID{cacheShard(1, 10), cacheShard(1, 11)} {
 		if registry.Get(id).Stats().UpNodes[0] == 1 {
@@ -162,46 +145,188 @@ func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 		}
 	}
 	require.NotZero(t, nodeOneReplica)
-	retired := cacheShard(1, nodeOneReplica)
-	up := registry.Get(retired).Stats()
+	id := cacheShard(1, nodeOneReplica)
+	manager := registry.Get(id)
+	up := manager.Stats()
 	key := coordview.ResourceKey{PartitionID: 1, SegmentID: 1000, DataVersion: up.UpVersion.DataVersion, LoadInfoVersion: up.UpLoadInfoVersion}
-	require.Contains(t, up.Resources[int64(1)], key)
-	holdDrops.Store(true)
 	lost.Store(1)
 	cache.PublishNode(1, nil)
-	require.NoError(t, controller.Reconcile(t.Context()))
-	awaitServing(1)
-	require.Eventually(t, func() bool {
-		dropMu.Lock()
-		defer dropMu.Unlock()
-		return len(drops) == 2
-	}, 5*time.Second, time.Millisecond)
-	dropping := registry.Get(retired).Stats()
-	require.Empty(t, dropping.Segments)
-	require.Empty(t, dropping.Resources)
-	require.Equal(t, []int64{1}, dropping.ResidentNodes)
-	require.Equal(t, []int64{1}, cache.GetCollection(1).GetShard(retired).ResidentNodes())
-	holdDrops.Store(false)
-	dropMu.Lock()
-	responses := append([]syncer.SyncView(nil), drops...)
-	dropMu.Unlock()
-	for _, view := range responses {
-		view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(view.View.IntoProto()))
-	}
-	require.Eventually(t, func() bool { return registry.Get(retired) == nil }, 5*time.Second, time.Millisecond)
-	require.Equal(t, []int64{1}, dropping.ResidentNodes, "published facts remain immutable after durable cleanup")
-	require.Contains(t, up.Resources[int64(1)], key)
-	// A full reconcile must not recreate the suspended replica even though it
-	// remains desired. Suspension is entirely local to the Balancer layout.
 	for range 3 {
 		controller.Trigger()
 		require.NoError(t, controller.Reconcile(t.Context()))
-		require.Nil(t, registry.Get(retired))
+		require.Same(t, manager, registry.Get(id))
+		stats := manager.Stats()
+		require.Equal(t, up.UpVersion, stats.UpVersion)
+		require.Nil(t, stats.PreparingVersion)
+		require.Contains(t, stats.Resources[int64(1)], key)
 	}
 	require.Len(t, store.Snapshot().ConfigsMap()[1].Replicas, 2)
+
 	cache.PublishNode(3, &NodeInfo{NodeID: 3, ResourceGroup: "rg1", Alive: true})
-	require.NoError(t, controller.Reconcile(t.Context()))
-	awaitServing(2)
-	require.Equal(t, []int64{3}, registry.Get(retired).Stats().UpNodes)
-	require.Len(t, store.Snapshot().ConfigsMap()[1].Replicas, 2)
+	require.Eventually(t, func() bool {
+		if controller.Reconcile(t.Context()) != nil {
+			return false
+		}
+		stats := manager.Stats()
+		return stats.UpVersion != nil && stats.UpVersion.GT(*up.UpVersion) && slices.Equal(stats.UpNodes, []int64{3})
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, up.UpVersion.DataVersion, manager.Stats().UpVersion.DataVersion)
+
+	registry.PublishCollectionSchema(1, 0)
+	// Removing this replica from the desired config still retires its manager.
+	cfg := store.Snapshot().ConfigsMap()[1].Clone()
+	cfg.Replicas = slices.DeleteFunc(cfg.Replicas, func(r *loadmgr.ReplicaAssignment) bool { return r.ReplicaID == id.ReplicaID })
+	require.NoError(t, store.Put(t.Context(), cfg))
+	require.Eventually(t, func() bool {
+		return controller.Reconcile(t.Context()) == nil && registry.Get(id) == nil
+	}, 5*time.Second, time.Millisecond)
+	require.NotNil(t, registry.Get(cacheShard(1, cfg.Replicas[0].ReplicaID)))
+}
+
+// Recovery may replay desired state, DataViews, and resident old/new managers
+// in different orders. Only the desired replica x vchannel product counts.
+func TestRetirementWaitsForWholeTarget(t *testing.T) {
+	c := replicaCache(2, 2)
+	defer c.Close()
+	a, b, removed := cacheShard(1, 10), cacheShard(1, 11), cacheShard(1, 12)
+	channel2 := "by-dev-rootcoord-dml_1_1v1"
+	c.PublishShard(removed, testShardStats(ver(1, 0, 1), 1))
+	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 2}, nil, shardDataView(a.VChannel, 1), shardDataView(channel2, 1))
+	replacement := func(node int64) *coordview.ShardStats {
+		return testShardStats(ver(2, 0, 1), 1, placement(1000, 1, node, coordview.SegmentStateUp))
+	}
+	check := func(ready bool) {
+		t.Helper()
+		plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{removed})
+		require.Equal(t, ready, slices.Contains(plan.Releases, removed))
+	}
+	for _, id := range []qviews.ShardID{a, b, {ReplicaID: a.ReplicaID, VChannel: channel2}} {
+		c.PublishShard(id, replacement(1))
+	}
+	last := qviews.ShardID{ReplicaID: b.ReplicaID, VChannel: channel2}
+	c.PublishShard(qviews.ShardID{ReplicaID: b.ReplicaID, VChannel: "extra_1v2"}, replacement(2))
+	check(false)
+	c.PublishShard(last, testShardStats(ver(1, 0, 1), 1))
+	check(false)
+	c.PublishShard(last, testShardStats(ver(2, 0, 1), 9))
+	check(false)
+	stale := replacement(2)
+	stale.UpSchemaVersion = 3
+	c.PublishShard(last, stale)
+	check(false)
+
+	var retiring []int64
+	c.SetScheduler(func(scope TriggerScope) { retiring = append(retiring, scope.RetiringReplicas...) })
+	c.PublishShard(last, replacement(2))
+	require.Equal(t, []int64{removed.ReplicaID}, retiring)
+	check(true)
+	for _, info := range []*NodeInfo{nil, {NodeID: 1, ResourceGroup: "rg1", Alive: true, Stopping: true}, {NodeID: 1, ResourceGroup: "other", Alive: true}} {
+		c.PublishNode(1, info)
+		check(false)
+	}
+	c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg1", Alive: true})
+	check(true)
+	c.PublishShard(last, nil)
+	check(false)
+}
+
+func TestRetirementWakesOnPlacementHandoff(t *testing.T) {
+	c := replicaCache(1, 2)
+	t.Cleanup(c.Close)
+	target, old := cacheShard(1, 10), cacheShard(1, 11)
+	second := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_1_1v1"}
+	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1}, nil, shardDataView(target.VChannel, 1), shardDataView(second.VChannel, 1))
+	placed := func(node int64) *coordview.ShardStats {
+		return testShardStats(ver(1, 0, node), 1, placement(1000, 1, node, coordview.SegmentStateUp))
+	}
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, Stopping: true, ResourceGroup: "rg1"})
+	c.PublishShard(target, placed(1))
+	c.PublishShard(second, placed(1))
+	registry := emptyRegistry(t)
+	registry.PublishCollectionSchema(1, 0)
+	registry.Ensure(old)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	c.MarkReady()
+	b := NewDefaultBalancer(c, registry, nil, nil)
+	// Neither Start nor Trigger is called. Consume only publications after this point.
+	c.PublishShard(target, placed(2))
+	for b.dispatch(anySource) >= 0 {
+	}
+	require.NotContains(t, b.ready.items, old, "another desired shard still references the stopping node")
+	c.PublishShard(second, placed(2))
+	for b.dispatch(anySource) >= 0 {
+	}
+	require.Contains(t, b.ready.items, old)
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.Nil(t, registry.Get(old))
+}
+
+func TestRetirementWakesOnSchemaPublication(t *testing.T) {
+	c := replicaCache(1, 1)
+	t.Cleanup(c.Close)
+	target, old := cacheShard(1, 10), cacheShard(1, 11)
+	data := cacheData(1, target.VChannel, 100)
+	data.SchemaVersion = 1
+	c.PublishDataView(1, data)
+	stats := testShardStats(ver(1, 0, 1), 1, placement(1000, 1, 1, coordview.SegmentStateUp))
+	stats.UpSchemaVersion = 1
+	c.PublishShard(target, stats)
+	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
+		for _, views := range group.ViewsByNode {
+			for _, view := range views {
+				response := view.View.IntoProto()
+				if response.Meta.State == viewpb.QueryViewState_QueryViewStatePreparing {
+					response.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+				}
+				view.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(response))
+			}
+		}
+		return nil
+	})
+	registry.PublishCollectionSchema(1, 0)
+	addShardWithPreparingView(t, registry, old, nil)
+	mgr := registry.Get(old)
+	require.Eventually(t, func() bool { return mgr.Stats().UpVersion != nil }, 5*time.Second, time.Millisecond)
+	c.MarkReady()
+	b := NewDefaultBalancer(c, registry, nil, nil)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.NotNil(t, mgr.Stats().UpVersion, "the old public schema must remain serviceable")
+	registry.PublishCollectionSchema(1, 1)
+	require.Nil(t, mgr.Stats().UpVersion)
+	registry.PublishCollectionSchema(1, 1)
+	require.Eventually(t, func() bool {
+		return b.Reconcile(t.Context()) == nil && registry.Get(old) == nil
+	}, 5*time.Second, time.Millisecond)
+	require.Nil(t, registry.Get(target), "retirement must not prepare a desired shard")
+}
+
+func TestRetirementRechecksApplyInputs(t *testing.T) {
+	c := replicaCache(1, 1)
+	defer c.Close()
+	target, old := cacheShard(1, 10), cacheShard(1, 11)
+	registry := emptyRegistry(t)
+	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
+	addShardWithPreparingView(t, registry, old, nil)
+	c.PublishShard(target, testShardStats(ver(1, 0, 1), 1, placement(1000, 1, 1, coordview.SegmentStateUp)))
+	b := NewDefaultBalancer(c, registry, nil, nil)
+	pinned := newPlanningContext(c)
+	plan := b.policy.Plan(pinned, []qviews.ShardID{old})
+	require.Contains(t, plan.Releases, old)
+	manager := registry.Get(old)
+	require.NoError(t, manager.RequestReplicaRetirement(t.Context(), 0, func() bool { return true }))
+	require.NotNil(t, manager.Stats().PreparingVersion, "schema zero also needs a recovered public fence")
+	manager.PublishSchema(0)
+	require.NoError(t, manager.RequestReplicaRetirement(t.Context(), 1, func() bool { return true }))
+	require.NotNil(t, manager.Stats().PreparingVersion, "a replacement on an unpublished schema cannot take over reads")
+	// Keep the same desired config, but lose the destination after planning.
+	c.PublishNode(1, nil)
+	require.NoError(t, b.apply(t.Context(), pinned, plan, nil))
+	require.NotNil(t, registry.Get(old).Stats().PreparingVersion)
+	c.PublishNode(1, &NodeInfo{NodeID: 1, ResourceGroup: "rg1", Alive: true})
+	cfg := c.GetCollection(1).LoadConfig().Clone()
+	cfg.Replicas[0].ReplicaID = 13
+	c.PublishLoadConfig(1, cfg, 2)
+	require.NoError(t, b.apply(t.Context(), pinned, plan, nil))
+	require.NotNil(t, registry.Get(old).Stats().PreparingVersion)
 }

@@ -1,6 +1,11 @@
 package api
 
-import "github.com/milvus-io/milvus/internal/views/qviews"
+import (
+	"cmp"
+	"slices"
+
+	"github.com/milvus-io/milvus/internal/views/qviews"
+)
 
 // CollectionDataView is the native (non-proto) DataView of one collection.
 type CollectionDataView struct {
@@ -23,6 +28,9 @@ type ShardDataView struct {
 	TotalRows                            int64
 	LogicalSize                          int64
 	SegmentCount                         int
+	// SegmentsBySize is immutable and shares segment pointers with Partitions.
+	// Ties in descending logical size are ordered by ascending segment ID.
+	SegmentsBySize []*SegmentDataView
 }
 
 // PartitionDataView is one partition's segment list within a shard. The
@@ -62,7 +70,14 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 			continue
 		}
 		coll.shardIndex[shard.VChannel] = shard
-		shard.TotalRows, shard.LogicalSize, shard.SegmentCount = 0, 0, 0
+		shard.TotalRows, shard.LogicalSize = 0, 0
+		count := 0
+		for _, partition := range shard.Partitions {
+			if partition != nil {
+				count += len(partition.Segments)
+			}
+		}
+		shard.SegmentsBySize = make([]*SegmentDataView, 0, count)
 		for _, partition := range shard.Partitions {
 			if partition == nil {
 				continue
@@ -80,9 +95,16 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 				partition.LogicalSize += segment.LogicalSize
 				shard.LogicalSize += segment.LogicalSize
 				coll.LogicalSize += segment.LogicalSize
-				shard.SegmentCount++
+				shard.SegmentsBySize = append(shard.SegmentsBySize, segment)
 			}
 		}
+		shard.SegmentCount = len(shard.SegmentsBySize)
+		slices.SortFunc(shard.SegmentsBySize, func(a, b *SegmentDataView) int {
+			if a.LogicalSize != b.LogicalSize {
+				return cmp.Compare(b.LogicalSize, a.LogicalSize)
+			}
+			return cmp.Compare(a.SegmentID, b.SegmentID)
+		})
 	}
 	return coll
 }

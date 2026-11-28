@@ -541,8 +541,8 @@ zero query waiting after later writes; per-query MVCC checks remain required.
 ## Collection teardown control
 
 State identifies the lifecycle stage; QueryViewMeta.control supplies monotonic
-transition policy. After explicit release/drop withdraws collection load intent, Balancer marks
-residual-shard release actions with preempt_serving_lease. Replica removal or
+transition policy. After explicit release/drop withdraws collection load intent, the DDL callback requests
+teardown directly on resident shard managers with preempt_serving_lease. Replica removal or
 suspension with collection intent still present retains default control.
 Up still enters Down. An existing Down persists and resends the new control.
 SN withdraws admission immediately and skips only the time-based lease gate;

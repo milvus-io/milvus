@@ -2,9 +2,7 @@ package balancer
 
 import (
 	"context"
-	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
@@ -79,12 +76,13 @@ func TestBalancerReleaseDoesNotRequeueItsOwnProgress(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	cache.PublishLoadConfig(1, nil, 2)
+	require.NoError(t, registry.RequestCollectionRelease(t.Context(), 1))
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.Nil(t, manager.Stats().UpVersion)
 	require.NotNil(t, registry.Get(shard), "SN has not acknowledged Down yet")
-	require.Equal(t, 1, calls)
+	require.Equal(t, 0, calls)
 	require.NoError(t, controller.Reconcile(t.Context()))
-	require.Equal(t, 1, calls, "release progress must not enqueue another balance decision")
+	require.Equal(t, 0, calls, "release progress must not enqueue another balance decision")
 }
 
 func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
@@ -112,27 +110,35 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	const collectionID, replicaID int64 = 1, 10
 	shard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	registry := emptyRegistry(t)
+	registry.PublishCollectionSchema(collectionID, 0)
 	addShardWithPreparingView(t, registry, shard, map[int64]map[int64][]int64{1: {100: {101}}})
 	cache := balancercache.New(policyTestConfig())
 	cache.PublishLoadConfig(collectionID, cfgFor(collectionID, replicaID, nil, nil), 1)
 	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
+	cache.PublishDataView(collectionID, cacheData(collectionID, shard.VChannel, 100))
 	cache.MarkReady()
 	controller := NewDefaultBalancer(cache, registry, nil, nil)
+	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	var original func(*balancercache.Cache, int64) *balancercache.CollectionEntry
 	once := true
 	patch := mockey.Mock((*balancercache.Cache).GetCollection).Origin(&original).To(func(c *balancercache.Cache, id int64) *balancercache.CollectionEntry {
 		entry := original(c, id)
 		if once {
 			once = false
-			cache.PublishLoadConfig(collectionID, nil, 2)
+			// Scale-down discovered during a pass must still retire the old replica.
+			cache.PublishLoadConfig(collectionID, cfgFor(collectionID, replicaID+1, nil, nil), 2)
 		}
 		return entry
 	}).Build()
 	defer patch.UnPatch()
-	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.NotNil(t, registry.Get(shard).Stats().PreparingVersion)
+	require.NoError(t, controller.Reconcile(t.Context()))
+	target := cacheShard(collectionID, replicaID+1)
+	require.NotNil(t, registry.Get(target).Stats().PreparingVersion, "the config publication triggered replacement placement")
+	require.NotNil(t, registry.Get(shard).Stats().PreparingVersion)
+	cache.PublishShard(target, testShardStats(ver(1, 0, 1), 2, placement(1000, 1, 1, coordview.SegmentStateUp)))
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.Nil(t, registry.Get(shard).Stats().PreparingVersion)
 }
@@ -226,7 +232,8 @@ func TestBalancerLoopInitialAndPeriodicFullReconcile(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 }
 
-func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
+func TestBalancerPeriodicScanRecoversUnavailableAllocation(t *testing.T) {
+	setBalanceParam(t, paramtable.Get(), paramtable.Get().QueryViewCfg.BalancerReconcileInterval.Key, "50ms")
 	reg := emptyRegistry(t)
 	c := newTestCache(cfgFor(1, 10, nil, nil))
 	shard := cacheShard(1, 10)
@@ -255,7 +262,7 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("initial allocation did not retry missing DataView")
 	}
-	// Disable publication notifications so recovery must consume the queued retry.
+	// Disable publication notifications so recovery must use the periodic scan.
 	c.SetNotifier(nil)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
 	require.Eventually(t, func() bool {
@@ -278,11 +285,11 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 
 	// Retire the first manager between Ensure and AddPreparing, reproducing
 	// the stale-pointer interleaving without replacing either implementation.
-	var ensure func(*coordview.ShardViewRegistry, qviews.ShardID) *coordview.ShardViewManager
+	var ensure func(*coordview.ShardViewRegistry, qviews.ShardID, func() bool) *coordview.ShardViewManager
 	var retired *coordview.ShardViewManager
 	var releaseErr error
-	ensurePatch := mockey.Mock((*coordview.ShardViewRegistry).Ensure).Origin(&ensure).To(func(r *coordview.ShardViewRegistry, id qviews.ShardID) *coordview.ShardViewManager {
-		manager := ensure(r, id)
+	ensurePatch := mockey.Mock((*coordview.ShardViewRegistry).EnsureIf).Origin(&ensure).To(func(r *coordview.ShardViewRegistry, id qviews.ShardID, current func() bool) *coordview.ShardViewManager {
+		manager := ensure(r, id, current)
 		if retired == nil {
 			retired = manager
 			releaseErr = manager.RequestRelease(t.Context())
@@ -308,8 +315,8 @@ func TestBalancerLoopRetriesDetachedManager(t *testing.T) {
 	t.Cleanup(func() { preparePatch.UnPatch() })
 
 	balancer := NewDefaultBalancer(cache, registry, nil, nil)
-	// Only the initial scan and apply's own retry can drive this test:
-	// neither cache notifications nor the periodic timer may rescue it.
+	// A stale manager is retried from fresh inputs on the next discovery round.
+	setBalanceParam(t, paramtable.Get(), paramtable.Get().QueryViewCfg.BalancerReconcileInterval.Key, "50ms")
 	cache.SetNotifier(nil)
 	balancer.Start(t.Context())
 	t.Cleanup(balancer.Stop)
@@ -362,7 +369,7 @@ func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.
 		return prepare(manager, ctx, builder)
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	controller := NewDefaultBalancer(nil, registry, nil, nil)
+	controller := NewDefaultBalancer(newTestCache(cfgFor(1, 10, nil, nil)), registry, nil, nil)
 	// Use a DataVersion retained by the real registry fixture.
 	builder := qviews.NewQueryViewAtCoordBuilder(blockedShard.ReplicaID, &viewpb.DataViewOfCollection{
 		CollectionId: 1,
@@ -372,7 +379,7 @@ func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.
 	done := make(chan error, 1)
 	var workers sync.WaitGroup
 	workers.Go(func() {
-		done <- controller.apply(t.Context(), &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{blockedShard: builder}})
+		done <- controller.apply(t.Context(), nil, &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{blockedShard: builder.SetLoadInfoVersion(1)}}, []qviews.ShardID{blockedShard})
 	})
 	defer func() {
 		release()
@@ -398,212 +405,67 @@ func TestBalancerApplyDoesNotHoldOtherShardEventsDuringReferenceWait(t *testing.
 	}
 }
 
-type completionTestPolicy func(balancercache.Reader, []qviews.ShardID) *BalancePlan
+type balancePolicyFunc func(balancercache.Reader, []qviews.ShardID) *BalancePlan
 
-func (p completionTestPolicy) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+func (p balancePolicyFunc) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
 	return p(reader, dirty)
 }
 
-func pendingCompletion(t *testing.T, b *DefaultBalancer, count int) *syncutil.Future[error] {
-	t.Helper()
-	var result *syncutil.Future[error]
-	require.Eventually(t, func() bool {
-		b.queue.mu.Lock()
-		defer b.queue.mu.Unlock()
-		result = b.queue.completion
-		return result != nil && len(b.queue.dirtyColls) == count
-	}, 5*time.Second, time.Millisecond)
-	return result
-}
-
-func TestTriggerWithCompletionCoalescesConcurrentReleases(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		name := "success"
-		if fail {
-			name = "planning failure"
-		}
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			c := balancercache.New(nil)
+// Hold a real plan between placement and application. Collection release must
+// complete with the worker still occupied, even if that batch will fail.
+func TestReleaseDuringPlacement(t *testing.T) {
+	for _, reload := range []bool{false, true} {
+		t.Run(map[bool]string{false: "withdraw", true: "reload"}[reload], func(t *testing.T) {
+			id, unrelated := cacheShard(1, 10), cacheShard(2, 20)
+			c := newTestCache(cfgFor(1, 10, nil, nil))
 			t.Cleanup(c.Close)
-			c.PublishShard(cacheShard(1000, 10000), &coordview.ShardStats{})
+			c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+			c.PublishDataView(1, cacheData(1, id.VChannel, 100))
 			c.MarkReady()
-			entered := make(chan struct{})
-			gate := make(chan struct{})
-			unblock := sync.OnceFunc(func() { close(gate) })
-			planned := make(chan []qviews.ShardID, 1)
-			var calls atomic.Int32
-			policy := completionTestPolicy(func(_ balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
-				if calls.Add(1) == 1 {
-					close(entered)
-					<-gate
-					return nil
-				}
-				select {
-				case planned <- slices.Clone(dirty):
-				default:
-				}
-				if fail {
-					return &BalancePlan{Retries: dirty}
-				}
-				return nil
-			})
-			b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
-			b.Start(ctx)
-			t.Cleanup(b.Stop)
-			t.Cleanup(unblock)
-			<-entered
-
-			const waiters = 64
-			results := make(chan *syncutil.Future[error], waiters)
-			var expected []qviews.ShardID
-			for i := range waiters {
-				id := cacheShard(int64(i+1), int64(i+1)*10)
-				c.PublishShard(id, &coordview.ShardStats{})
-				expected = append(expected, id)
-				go func() {
-					results <- b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{int64(i + 1)}})
-				}()
+			reg := emptyRegistry(t)
+			old := reg.Ensure(id)
+			t.Cleanup(reg.RegisterPublicationListener(c.PublishShard))
+			planned, resume := make(chan bool, 1), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(resume) })
+			defer unblock()
+			policy := NewDefaultBalancePolicy()
+			b := NewDefaultBalancer(c, reg, balancePolicyFunc(func(r balancercache.Reader, ids []qviews.ShardID) *BalancePlan {
+				plan := policy.Plan(r, ids)
+				planned <- plan.Prepares[id] != nil
+				<-resume
+				plan.Retries = append(plan.Retries, unrelated)
+				return plan
+			}), nil)
+			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{id}})
+			pass := make(chan error, 1)
+			go func() { pass <- b.Reconcile(t.Context()) }()
+			select {
+			case prepared := <-planned:
+				require.True(t, prepared)
+			case <-time.After(5 * time.Second):
+				t.Fatal("worker did not produce the initial prepare")
 			}
-			completion := pendingCompletion(t, b, waiters)
-			for range waiters {
-				require.Same(t, completion, <-results, "concurrent releases share the pending batch")
+			c.PublishLoadConfig(1, nil, 0)
+			require.NoError(t, reg.RequestCollectionRelease(t.Context(), 1))
+			require.Nil(t, reg.Get(id))
+			var replacement *coordview.ShardViewManager
+			if reload {
+				c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 2)
+				replacement = reg.Ensure(id)
 			}
-			require.False(t, completion.Ready())
 			unblock()
-			result, err := completion.GetWithContext(ctx)
-			require.NoError(t, err)
-			if fail {
-				require.ErrorIs(t, result, merr.ErrServiceUnavailable)
-				require.Equal(t, merr.Code(merr.ErrServiceUnavailable), merr.Code(result))
+			require.ErrorIs(t, <-pass, merr.ErrServiceUnavailable)
+			require.Nil(t, old.Stats().PreparingVersion)
+			if reload {
+				require.Same(t, replacement, reg.Get(id))
+				require.Nil(t, replacement.Stats().PreparingVersion, "an old plan must not attach to the reloaded manager")
+				b.policy = policy
+				b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{id}})
+				require.NoError(t, b.Reconcile(t.Context()))
+				require.NotNil(t, replacement.Stats().PreparingVersion)
 			} else {
-				require.NoError(t, result)
-			}
-			require.ElementsMatch(t, expected, <-planned)
-			if !fail {
-				require.Equal(t, int32(2), calls.Load(), "one initial pass and one shared pass for all 64 releases")
+				require.Nil(t, reg.Get(id), "an old prepare must not recreate the released shard")
 			}
 		})
 	}
-}
-
-func TestTriggerWithCompletionUsesSuccessorBatch(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	c := balancercache.New(nil)
-	t.Cleanup(c.Close)
-	a, late := cacheShard(1, 10), cacheShard(2, 20)
-	c.PublishShard(a, &coordview.ShardStats{})
-	firstStarted, secondStarted := make(chan struct{}), make(chan struct{})
-	firstGate, secondGate := make(chan struct{}), make(chan struct{})
-	unblockFirst := sync.OnceFunc(func() { close(firstGate) })
-	unblockSecond := sync.OnceFunc(func() { close(secondGate) })
-	var calls atomic.Int32
-	policy := completionTestPolicy(func(_ balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
-		switch calls.Add(1) {
-		case 1:
-			close(firstStarted)
-			<-firstGate
-		case 2:
-			close(secondStarted)
-			<-secondGate
-		}
-		return nil
-	})
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
-	b.Start(ctx)
-	t.Cleanup(b.Stop)
-	t.Cleanup(unblockFirst)
-	t.Cleanup(unblockSecond)
-	first := b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{1}})
-	c.MarkReady()
-	<-firstStarted
-
-	c.PublishShard(late, &coordview.ShardStats{})
-	second := b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{2}})
-	require.NotSame(t, first, second)
-	unblockFirst()
-	result, err := first.GetWithContext(ctx)
-	require.NoError(t, err)
-	require.NoError(t, result)
-	<-secondStarted
-	require.False(t, second.Ready(), "a release arriving during a pass cannot use that pass's completion")
-	unblockSecond()
-	result, err = second.GetWithContext(ctx)
-	require.NoError(t, err)
-	require.NoError(t, result)
-}
-
-func TestTriggerWithCompletionRetainsPendingBatch(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	c := balancercache.New(nil)
-	t.Cleanup(c.Close)
-	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, nil, nil)
-	scope := TriggerScope{DirtyCollections: []int64{1}}
-	completion := b.TriggerWithCompletion(scope)
-	b.Start(ctx)
-	t.Cleanup(b.Stop)
-	b.Stop()
-	require.False(t, completion.Ready(), "the runtime owns shutdown notification to callers")
-	require.Same(t, completion, b.TriggerWithCompletion(scope))
-	c.MarkReady()
-	b.Start(ctx)
-	result, err := completion.GetWithContext(ctx)
-	require.NoError(t, err)
-	require.NoError(t, result)
-}
-
-func TestTriggerWithCompletionDrainsOldPreparation(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	registry := emptyRegistry(t)
-	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
-	t.Cleanup(c.Close)
-	id := cacheShard(1, 10)
-	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
-	t.Cleanup(registry.RegisterPublicationListener(c.PublishShard))
-	c.MarkReady()
-	oldStarted, releaseStarted := make(chan struct{}), make(chan struct{})
-	oldGate, releaseGate := make(chan struct{}), make(chan struct{})
-	unblockOld := sync.OnceFunc(func() { close(oldGate) })
-	unblockRelease := sync.OnceFunc(func() { close(releaseGate) })
-	var calls atomic.Int32
-	policy := completionTestPolicy(func(_ balancercache.Reader, _ []qviews.ShardID) *BalancePlan {
-		if calls.Add(1) == 1 {
-			builder := qviews.NewQueryViewAtCoordBuilder(id.ReplicaID, &viewpb.DataViewOfCollection{
-				CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
-				Shards: []*viewpb.DataViewOfShard{{Vchannel: id.VChannel}},
-			}, id.VChannel)
-			builder.SetAssignments(map[int64]map[int64][]int64{1: {1: {1000}}})
-			close(oldStarted)
-			<-oldGate
-			return &BalancePlan{Prepares: map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder{id: builder}}
-		}
-		if calls.Load() == 2 {
-			close(releaseStarted)
-			<-releaseGate
-			return &BalancePlan{Releases: []qviews.ShardID{id}}
-		}
-		return nil
-	})
-	b := NewDefaultBalancer(c, registry, policy, nil)
-	b.Start(ctx)
-	t.Cleanup(b.Stop)
-	t.Cleanup(unblockOld)
-	t.Cleanup(unblockRelease)
-	<-oldStarted
-	require.Empty(t, registry.CollectionShards(1))
-	c.PublishLoadConfig(1, nil, 2)
-	completion := b.TriggerWithCompletion(TriggerScope{DirtyCollections: []int64{1}})
-	unblockOld()
-	<-releaseStarted
-	require.NotNil(t, registry.Get(id), "the old pass can publish a prepare after desired state was removed")
-	require.False(t, completion.Ready(), "release must wait for its successor pass, not an empty-registry check")
-	unblockRelease()
-	result, err := completion.GetWithContext(ctx)
-	require.NoError(t, err)
-	require.NoError(t, result)
 }

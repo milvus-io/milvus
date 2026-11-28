@@ -8,8 +8,10 @@ import "github.com/milvus-io/milvus/internal/views/qviews"
 // a full scan, because the caller did not provide enough information to narrow
 // the affected shards.
 type TriggerScope struct {
-	NodeChanged      bool
-	DirtyNodes       []int64
-	DirtyShards      []qviews.ShardID
-	DirtyCollections []int64
+	NodeChanged         bool
+	DirtyNodes          []int64
+	DirtyResourceGroups []string
+	DirtyShards         []qviews.ShardID
+	DirtyCollections    []int64
+	RetiringReplicas    []int64 // Revisit only resident shards of these removed replica IDs.
 }

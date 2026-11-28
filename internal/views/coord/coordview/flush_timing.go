@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
 )
 
@@ -75,11 +74,11 @@ func (p *pendingTiming) finish(err error) {
 	p.total.End(err)
 }
 
-func (s *DirtyViewFlushScheduler) waitReason(shard qviews.ShardID) int {
-	if _, ok := s.inflight[shard]; ok {
+func (s *DirtyViewFlushScheduler) waitReason(event *pendingDirtyViewEvent) int {
+	if _, ok := s.inflight[event.shardID]; ok {
 		return waitShard
 	}
-	if _, ok := s.held[shard]; ok {
+	if event.held {
 		return waitBatch
 	}
 	return waitEligible

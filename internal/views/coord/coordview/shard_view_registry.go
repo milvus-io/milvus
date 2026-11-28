@@ -40,9 +40,10 @@ type ShardViewRegistry struct {
 
 	// Reverse indexes cover resident shards. The collection index changes with
 	// shard lifecycle, while the node index tracks current Stats placements.
-	collectionShards map[int64]map[qviews.ShardID]struct{}
-	publishedSchemas map[int64]int32
-	nodeShards       map[int64]map[qviews.ShardID]struct{}
+	collectionShards  map[int64]map[qviews.ShardID]struct{}
+	publishedSchemas  map[int64]int32
+	publishingSchemas map[int64]chan struct{}
+	nodeShards        map[int64]map[qviews.ShardID]struct{}
 
 	statsObservers        []func(qviews.ShardID, *ShardStats)
 	publicationListeners  map[uint64]ShardPublicationListener
@@ -146,11 +147,21 @@ var registryEnsure = stage.New("coord", "apply", "ensure")
 // Ensure returns the ShardViewManager for shardID, creating a fresh one if
 // none exists. Safe to call repeatedly.
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
+	return r.EnsureIf(shardID, nil)
+}
+
+// EnsureIf checks the immutable desired load snapshot under the same lock that
+// orders registration against the release caller's resident snapshot. The
+// predicate must not take a publisher lock or call back into the registry.
+func (r *ShardViewRegistry) EnsureIf(shardID qviews.ShardID, current func() bool) *ShardViewManager {
 	timer := registryEnsure.Begin()
 	defer timer.End(nil)
 	// Fast path: already present.
 	r.mu.RLock()
 	if mgr, ok := r.shards[shardID]; ok {
+		if current != nil && !current() {
+			mgr = nil
+		}
 		r.mu.RUnlock()
 		return mgr
 	}
@@ -162,6 +173,10 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	stats := emptyShardStats()
 
 	r.mu.Lock()
+	if current != nil && !current() {
+		r.mu.Unlock()
+		return nil
+	}
 	// Re-check under the write lock.
 	if mgr, ok := r.shards[shardID]; ok {
 		r.mu.Unlock()
@@ -170,6 +185,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	_, collectionID, _, _ := funcutil.ParseVChannel(shardID.VChannel)
 	if version, ok := r.publishedSchemas[collectionID]; ok {
 		mgr.publishedSchema = &version
+		stats.PublishedSchema = mgr.publishedSchema
 	}
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
@@ -318,6 +334,35 @@ func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardI
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return maps.Keys(r.collectionShards[collectionID])
+}
+
+// HasCollectionShards checks final removal without copying the remaining shard IDs.
+func (r *ShardViewRegistry) HasCollectionShards(collectionID int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.collectionShards[collectionID]) != 0
+}
+
+// RequestCollectionRelease captures the withdrawn collection's managers under
+// the lock shared with EnsureIf. Manager transitions run outside that lock.
+func (r *ShardViewRegistry) RequestCollectionRelease(ctx context.Context, collectionID int64) error {
+	r.mu.Lock()
+	// The next load recovers its fence from RootCoord before planning. A
+	// publication already in flight owns its manager snapshot and completion.
+	delete(r.publishedSchemas, collectionID)
+	delete(r.publishingSchemas, collectionID)
+	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
+	for id := range r.collectionShards[collectionID] {
+		managers = append(managers, r.shards[id])
+	}
+	r.mu.Unlock()
+	control := &viewpb.QueryViewControl{PreemptServingLease: true}
+	for _, manager := range managers {
+		if err := manager.RequestReleaseWithControl(ctx, control); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NodeShards returns the resident shards with placements on nodeID.
@@ -532,14 +577,33 @@ func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *Sh
 // PublishCollectionSchema records the public read generation recovered from or
 // durably committed to RootCoord. Manager calls run without the registry lock.
 func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version int32) {
+	r.PublishCollectionSchemaIf(collectionID, version, nil)
+}
+
+// PublishCollectionSchemaIf checks load intent under the lock shared with
+// RequestCollectionRelease. The predicate may only read published snapshots.
+func (r *ShardViewRegistry) PublishCollectionSchemaIf(collectionID int64, version int32, current func() bool) {
 	r.mu.Lock()
-	if old, ok := r.publishedSchemas[collectionID]; ok && old > version {
+	if current != nil && !current() {
 		r.mu.Unlock()
+		return
+	}
+	if old, ok := r.publishedSchemas[collectionID]; ok && old >= version {
+		pending := r.publishingSchemas[collectionID]
+		r.mu.Unlock()
+		if old == version && pending != nil {
+			<-pending
+		}
 		return
 	}
 	if r.publishedSchemas == nil {
 		r.publishedSchemas = make(map[int64]int32)
 	}
+	if r.publishingSchemas == nil {
+		r.publishingSchemas = make(map[int64]chan struct{})
+	}
+	done := make(chan struct{})
+	r.publishingSchemas[collectionID] = done
 	r.publishedSchemas[collectionID] = version
 	managers := make([]*ShardViewManager, 0, len(r.collectionShards[collectionID]))
 	for id := range r.collectionShards[collectionID] {
@@ -549,4 +613,10 @@ func (r *ShardViewRegistry) PublishCollectionSchema(collectionID int64, version 
 	for _, manager := range managers {
 		manager.PublishSchema(version)
 	}
+	r.mu.Lock()
+	if r.publishingSchemas[collectionID] == done {
+		delete(r.publishingSchemas, collectionID)
+	}
+	close(done)
+	r.mu.Unlock()
 }

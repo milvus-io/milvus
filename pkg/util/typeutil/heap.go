@@ -71,38 +71,50 @@ func (h *heapArray[E]) Peek() interface{} {
 	return (*h)[0]
 }
 
-type objectHeapArray[O any, E constraints.Ordered] struct {
-	objects      []O
-	getOrderFunc func(O) E
+type objectHeapArray[O any] struct {
+	objects  []O
+	less     func(O, O) bool
+	setIndex func(O, int)
 }
 
-func (h *objectHeapArray[O, E]) Len() int {
+func (h *objectHeapArray[O]) Len() int {
 	return len(h.objects)
 }
 
-func (h *objectHeapArray[O, E]) Less(i, j int) bool {
-	return h.getOrderFunc(h.objects[i]) < h.getOrderFunc(h.objects[j])
+func (h *objectHeapArray[O]) Less(i, j int) bool {
+	return h.less(h.objects[i], h.objects[j])
 }
 
-func (h *objectHeapArray[O, E]) Swap(i, j int) {
+func (h *objectHeapArray[O]) Swap(i, j int) {
 	h.objects[i], h.objects[j] = h.objects[j], h.objects[i]
+	if h.setIndex != nil {
+		h.setIndex(h.objects[i], i)
+		h.setIndex(h.objects[j], j)
+	}
 }
 
-func (h *objectHeapArray[O, E]) Push(x interface{}) {
-	h.objects = append(h.objects, x.(O))
+func (h *objectHeapArray[O]) Push(x interface{}) {
+	object := x.(O)
+	if h.setIndex != nil {
+		h.setIndex(object, len(h.objects))
+	}
+	h.objects = append(h.objects, object)
 }
 
-func (h *objectHeapArray[O, E]) Pop() interface{} {
+func (h *objectHeapArray[O]) Pop() interface{} {
 	old := h.objects
 	n := len(old)
 	x := old[n-1]
+	if h.setIndex != nil {
+		h.setIndex(x, -1)
+	}
 	var zero O
 	old[n-1] = zero // release the memory of underlying array.
 	h.objects = old[0 : n-1]
 	return x
 }
 
-func (h *objectHeapArray[O, E]) Peek() interface{} {
+func (h *objectHeapArray[O]) Peek() interface{} {
 	return h.objects[0]
 }
 
@@ -145,34 +157,30 @@ func NewArrayBasedMinimumHeap[E constraints.Ordered](initial []E) Heap[E] {
 }
 
 func NewObjectArrayBasedMaximumHeap[O any, E constraints.Ordered](initial []O, getOrderFunc func(O) E) Heap[O] {
-	if initial == nil {
-		initial = make([]O, 0)
-	}
-	ha := &objectHeapArray[O, E]{
-		objects:      initial,
-		getOrderFunc: getOrderFunc,
-	}
-	reverse := reverseOrderedInterface[E]{
-		HeapInterface: ha,
-	}
-	heap.Init(reverse)
-	return &heapImpl[O, reverseOrderedInterface[E]]{
-		inner: reverse,
-	}
+	return newObjectHeap(initial, func(a, b O) bool { return getOrderFunc(b) < getOrderFunc(a) }, nil)
 }
 
 func NewObjectArrayBasedMinimumHeap[O any, E constraints.Ordered](initial []O, getOrderFunc func(O) E) Heap[O] {
-	if initial == nil {
-		initial = make([]O, 0)
-	}
-	ha := &objectHeapArray[O, E]{
-		objects:      initial,
-		getOrderFunc: getOrderFunc,
-	}
-	heap.Init(ha)
-	return &heapImpl[O, *objectHeapArray[O, E]]{
-		inner: ha,
-	}
+	return newObjectHeap(initial, func(a, b O) bool { return getOrderFunc(a) < getOrderFunc(b) }, nil)
+}
+
+// IndexedHeap supports updating or removing a resident item by its current index.
+type IndexedHeap[E any] interface {
+	Heap[E]
+	Fix(index int)
+	Remove(index int) E
+}
+
+// NewIndexedHeap orders distinct items by less. setIndex records the current
+// position on each item and receives -1 when the item leaves the heap.
+func NewIndexedHeap[E any](less func(E, E) bool, setIndex func(E, int)) IndexedHeap[E] {
+	return newObjectHeap(nil, less, setIndex)
+}
+
+func newObjectHeap[E any](initial []E, less func(E, E) bool, setIndex func(E, int)) *heapImpl[E, *objectHeapArray[E]] {
+	array := &objectHeapArray[E]{objects: initial, less: less, setIndex: setIndex}
+	heap.Init(array)
+	return &heapImpl[E, *objectHeapArray[E]]{inner: array}
 }
 
 // heapImpl is a min-heap of E.
@@ -198,4 +206,12 @@ func (h *heapImpl[E, H]) Pop() E {
 // Peek returns the element at the top of the heap.
 func (h *heapImpl[E, H]) Peek() E {
 	return h.inner.Peek().(E)
+}
+
+func (h *heapImpl[E, H]) Fix(index int) {
+	heap.Fix(h.inner, index)
+}
+
+func (h *heapImpl[E, H]) Remove(index int) E {
+	return heap.Remove(h.inner, index).(E)
 }

@@ -1,6 +1,7 @@
 package coordview
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"sort"
@@ -41,6 +42,12 @@ func (e dirtyViewEvent) empty() bool {
 }
 
 type pendingDirtyViewEvent struct {
+	shardID      qviews.ShardID
+	priority     int32
+	sequence     uint64
+	index        int
+	age          *list.Element
+	held         bool
 	notBefore    time.Time
 	timing       pendingTiming
 	persists     map[qviews.QueryViewKey]*viewpb.QueryViewOfShard
@@ -53,8 +60,9 @@ type dirtyViewSyncKey struct {
 	node qviews.WorkNodeKey
 }
 
-func newPendingDirtyViewEvent() *pendingDirtyViewEvent {
+func newPendingDirtyViewEvent(id qviews.ShardID) *pendingDirtyViewEvent {
 	return &pendingDirtyViewEvent{
+		shardID:  id,
 		timing:   newPendingTiming(),
 		persists: make(map[qviews.QueryViewKey]*viewpb.QueryViewOfShard),
 		syncs:    make(map[dirtyViewSyncKey]syncer.SyncView),
@@ -74,6 +82,32 @@ func (e *pendingDirtyViewEvent) merge(event dirtyViewEvent) {
 		e.syncs[key] = view
 	}
 	e.afterPersist = append(e.afterPersist, event.afterPersist...)
+}
+
+// Score only effects advancing a view toward serving. A durable transition
+// to Down or Unrecoverable supersedes older per-node Preparing syncs of the
+// same identity. Recovery and the Ready -> Up command may have only syncs.
+func (e *pendingDirtyViewEvent) preparationPriority() int32 {
+	var priority int32
+	found := false
+	include := func(state qviews.QueryViewState, score int32) {
+		switch state {
+		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady, qviews.QueryViewStateUp:
+			if !found || score > priority {
+				priority, found = score, true
+			}
+		}
+	}
+	for _, view := range e.persists {
+		meta := view.GetMeta()
+		include(qviews.QueryViewState(meta.GetState()), meta.GetControl().GetPreparationPriority())
+	}
+	for key, sync := range e.syncs {
+		if e.persists[key.view] == nil {
+			include(sync.View.State(), sync.View.PreparationPriority())
+		}
+	}
+	return priority
 }
 
 func (e *pendingDirtyViewEvent) operationCount() int {
@@ -100,10 +134,10 @@ type DirtyViewFlushScheduler struct {
 	mu          sync.Mutex
 	pending     map[qviews.ShardID]*pendingDirtyViewEvent
 	delayed     map[qviews.ShardID]*dirtyViewDelayTask
-	ready       map[qviews.ShardID]struct{}
+	ready       dirtyViewReadyQueue
 	readyOps    int
 	inflight    map[qviews.ShardID]struct{}
-	held        map[qviews.ShardID]struct{}
+	held        []qviews.ShardID
 	batchDepth  int
 	queuedTasks int
 	tasks       map[*dirtyViewFlushTask]nodescheduler.TaskHandle
@@ -146,10 +180,9 @@ func newDirtyViewFlushScheduler(
 		maxTxnOps:     maxTxnOps,
 		nodeScheduler: nodeScheduler,
 		pending:       make(map[qviews.ShardID]*pendingDirtyViewEvent),
+		ready:         newDirtyViewReadyQueue(),
 		delayed:       make(map[qviews.ShardID]*dirtyViewDelayTask),
-		ready:         make(map[qviews.ShardID]struct{}),
 		inflight:      make(map[qviews.ShardID]struct{}),
-		held:          make(map[qviews.ShardID]struct{}),
 		tasks:         make(map[*dirtyViewFlushTask]nodescheduler.TaskHandle),
 		notify:        make(chan struct{}, 1),
 	}
@@ -178,11 +211,11 @@ func (s *DirtyViewFlushScheduler) commit() {
 	if s.batchDepth > 0 {
 		s.batchDepth--
 		if s.batchDepth == 0 {
-			held := s.held
-			s.held = make(map[qviews.ShardID]struct{})
-			for shardID := range held {
+			for _, shardID := range s.held {
+				s.pending[shardID].held = false
 				s.markReadyLocked(shardID)
 			}
+			s.held = nil
 			s.scheduleReadyTasksLocked()
 		}
 	}
@@ -203,23 +236,22 @@ func (s *DirtyViewFlushScheduler) Submit(event dirtyViewEvent) {
 	}
 	pending := s.pending[event.shardID]
 	if pending == nil {
-		pending = newPendingDirtyViewEvent()
+		pending = newPendingDirtyViewEvent(event.shardID)
 		s.pending[event.shardID] = pending
 	}
-	_, wasReady := s.ready[event.shardID]
-	if wasReady {
-		s.readyOps -= pending.operationCount()
-	}
+	previousOps := pending.operationCount()
 	pending.merge(event)
-	pending.timing.change(s.waitReason(event.shardID))
-	if wasReady {
-		s.readyOps += pending.operationCount()
+	if pending.age != nil {
+		s.readyOps += pending.operationCount() - previousOps
 	}
 	if s.batchDepth > 0 {
-		s.removeReadyLocked(event.shardID)
+		s.removeReadyLocked(pending)
 		s.cancelDelayLocked(event.shardID)
-		s.held[event.shardID] = struct{}{}
-		pending.timing.change(s.waitReason(event.shardID))
+		if !pending.held {
+			pending.held = true
+			s.held = append(s.held, event.shardID)
+		}
+		pending.timing.change(s.waitReason(pending))
 	} else {
 		s.markReadyLocked(event.shardID)
 		s.scheduleReadyTasksLocked()
@@ -231,10 +263,10 @@ func (s *DirtyViewFlushScheduler) scheduleReadyTasksLocked() {
 	if s.closed || s.batchDepth > 0 {
 		return
 	}
-	if len(s.ready) == 0 {
+	if s.ready.heap.Len() == 0 {
 		return
 	}
-	desiredTasks := min(len(s.ready), (s.readyOps+s.maxTxnOps-1)/s.maxTxnOps)
+	desiredTasks := min(s.ready.heap.Len(), (s.readyOps+s.maxTxnOps-1)/s.maxTxnOps)
 	for s.queuedTasks < desiredTasks {
 		task := &dirtyViewFlushTask{scheduler: s}
 		s.queuedTasks++
@@ -254,21 +286,18 @@ func (s *DirtyViewFlushScheduler) claim() map[qviews.ShardID]*pendingDirtyViewEv
 		return claimed
 	}
 	usedOps := 0
-	for shardID := range s.ready {
-		event := s.pending[shardID]
-		ops := event.operationCount()
-		if len(claimed) > 0 && usedOps+ops > s.maxTxnOps {
-			continue
-		}
-		event.timing.finish(nil)
-		claimed[shardID] = event
-		s.removeReadyLocked(shardID)
-		delete(s.pending, shardID)
-		s.inflight[shardID] = struct{}{}
-		usedOps += ops
-		if usedOps >= s.maxTxnOps {
+	for usedOps < s.maxTxnOps {
+		event := s.ready.take(s.maxTxnOps-usedOps, usedOps == 0)
+		if event == nil {
 			break
 		}
+		ops := event.operationCount()
+		s.readyOps -= ops
+		usedOps += ops
+		event.timing.finish(nil)
+		claimed[event.shardID] = event
+		delete(s.pending, event.shardID)
+		s.inflight[event.shardID] = struct{}{}
 	}
 	s.scheduleReadyTasksLocked()
 	s.signalLocked()
@@ -284,12 +313,7 @@ func (s *DirtyViewFlushScheduler) complete(
 	delete(s.tasks, task)
 	for shardID := range claimed {
 		delete(s.inflight, shardID)
-		if pending := s.pending[shardID]; pending != nil {
-			pending.timing.change(s.waitReason(shardID))
-		}
-		if _, held := s.held[shardID]; !held {
-			s.markReadyLocked(shardID)
-		}
+		s.markReadyLocked(shardID)
 	}
 	// A failed batch must not reschedule more work: on shutdown the scheduler is
 	// closing anyway, and on a real failure Execute panics (unrecoverable path)
@@ -489,9 +513,9 @@ func (s *DirtyViewFlushScheduler) Close() {
 	s.closed = true
 	s.finishPending()
 	clear(s.pending)
-	clear(s.ready)
+	s.ready = dirtyViewReadyQueue{}
 	s.readyOps = 0
-	clear(s.held)
+	s.held = nil
 	handles := make([]nodescheduler.TaskHandle, 0, len(s.tasks)+len(s.delayed))
 	for _, task := range s.delayed {
 		handles = append(handles, task.handle)
@@ -519,18 +543,17 @@ func (s *DirtyViewFlushScheduler) signalLocked() {
 }
 
 func (s *DirtyViewFlushScheduler) markReadyLocked(shardID qviews.ShardID) {
-	if _, ok := s.inflight[shardID]; ok {
-		return
-	}
-	if _, ok := s.held[shardID]; ok {
-		return
-	}
 	event := s.pending[shardID]
 	if event == nil {
 		return
 	}
+	reason := s.waitReason(event)
+	event.timing.change(reason)
+	if reason != waitEligible {
+		return
+	}
 	if event.notBefore.After(time.Now()) {
-		s.removeReadyLocked(shardID)
+		s.removeReadyLocked(event)
 		if task := s.delayed[shardID]; task != nil && task.notBefore.Equal(event.notBefore) {
 			return
 		}
@@ -541,12 +564,10 @@ func (s *DirtyViewFlushScheduler) markReadyLocked(shardID qviews.ShardID) {
 		return
 	}
 	s.cancelDelayLocked(shardID)
-	if _, ok := s.ready[shardID]; ok {
-		return
+	if event.age == nil {
+		s.readyOps += event.operationCount()
 	}
-	event.timing.change(waitEligible)
-	s.ready[shardID] = struct{}{}
-	s.readyOps += event.operationCount()
+	s.ready.upsert(event)
 }
 
 // Delaying a lane never claims its effects: newer transitions can still merge
@@ -583,12 +604,9 @@ func (s *DirtyViewFlushScheduler) cancelDelayLocked(shardID qviews.ShardID) {
 	}
 }
 
-func (s *DirtyViewFlushScheduler) removeReadyLocked(shardID qviews.ShardID) {
-	if _, ok := s.ready[shardID]; !ok {
-		return
-	}
-	delete(s.ready, shardID)
-	if event := s.pending[shardID]; event != nil {
+func (s *DirtyViewFlushScheduler) removeReadyLocked(event *pendingDirtyViewEvent) {
+	if event.age != nil {
+		s.ready.remove(event)
 		s.readyOps -= event.operationCount()
 	}
 }

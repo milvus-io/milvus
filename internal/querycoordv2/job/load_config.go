@@ -18,6 +18,8 @@ package job
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sort"
 
 	"github.com/samber/lo"
@@ -26,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -152,24 +155,13 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 
 	loadFields := generateLoadFields(c.GetLoadFields(), c.GetFieldIndexID())
 
-	replicas := make([]*messagespb.LoadReplicaConfig, 0, len(c.Replicas))
-	for _, replica := range c.Replicas {
-		replicas = append(replicas, &messagespb.LoadReplicaConfig{
-			ReplicaId:         replica.GetID(),
-			ResourceGroupName: replica.GetResourceGroup(),
-			Priority:          replica.LoadPriority(),
-		})
-	}
-	sort.Slice(replicas, func(i, j int) bool {
-		return replicas[i].GetReplicaId() < replicas[j].GetReplicaId()
-	})
 	return &messagespb.AlterLoadConfigMessageHeader{
 		DbId:                     c.Collection.DbID,
 		CollectionId:             c.Collection.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
 		RequiredFields:           c.Collection.GetRequiredFields(),
-		Replicas:                 replicas,
+		Replicas:                 loadmgr.ReplicasToMessage(c.sortedReplicas()),
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
 		AutoLoad:                 c.AutoLoad,
 	}
@@ -233,54 +225,20 @@ func generateLoadFields(loadedFields []int64, fieldIndexID map[int64]int64) []*m
 
 // generateReplicas generates the replicas for the collection.
 func (req *AlterLoadConfigRequest) generateReplicas(ctx context.Context) ([]*messagespb.LoadReplicaConfig, error) {
-	// fill up the existsReplicaNum found the redundant replicas and the replicas that should be kept
-	existsReplicaNum := make(map[string]int)
-	keptReplicas := make(map[int64]struct{}) // replica that should be kept
-	redundantReplicas := make([]int64, 0)    // replica that should be removed
-	loadReplicaConfigs := make([]*messagespb.LoadReplicaConfig, 0)
-	for _, replica := range req.Current.Replicas {
-		if existsReplicaNum[replica.GetResourceGroup()] >= req.Expected.ExpectedReplicaNumber[replica.GetResourceGroup()] {
-			redundantReplicas = append(redundantReplicas, replica.GetID())
-			continue
-		}
-		keptReplicas[replica.GetID()] = struct{}{}
-		loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-			ReplicaId:         replica.GetID(),
-			ResourceGroupName: replica.GetResourceGroup(),
-			Priority:          replica.LoadPriority(),
-		})
-		existsReplicaNum[replica.GetResourceGroup()]++
-	}
-
-	// check if there should generate new incoming replicas.
-	for rg, num := range req.Expected.ExpectedReplicaNumber {
-		for i := existsReplicaNum[rg]; i < num; i++ {
-			if len(redundantReplicas) > 0 {
-				// reuse the replica from redundant replicas.
-				// make a transfer operation from a resource group to another resource group.
-				replicaID := redundantReplicas[0]
-				redundantReplicas = redundantReplicas[1:]
-				loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-					ReplicaId:         replicaID,
-					ResourceGroupName: rg,
-					Priority:          req.Expected.ExpectedPriority,
-				})
-			} else {
-				// allocate a new replica.
-				newID, err := req.Meta.AllocateReplicaID(ctx)
-				if err != nil {
-					return nil, err
-				}
-				loadReplicaConfigs = append(loadReplicaConfigs, &messagespb.LoadReplicaConfig{
-					ReplicaId:         newID,
-					ResourceGroupName: rg,
-					Priority:          req.Expected.ExpectedPriority,
-				})
-			}
-		}
-	}
-	sort.Slice(loadReplicaConfigs, func(i, j int) bool {
-		return loadReplicaConfigs[i].GetReplicaId() < loadReplicaConfigs[j].GetReplicaId()
+	replicas, err := loadmgr.ReconcileReplicas(req.Current.sortedReplicas(), req.Expected.ExpectedReplicaNumber, req.Expected.ExpectedPriority, func() (int64, error) {
+		return req.Meta.AllocateReplicaID(ctx)
 	})
-	return loadReplicaConfigs, nil
+	if err != nil {
+		return nil, err
+	}
+	return loadmgr.ReplicasToMessage(replicas), nil
+}
+
+func (c *CurrentLoadConfig) sortedReplicas() []*loadmgr.ReplicaAssignment {
+	replicas := make([]*loadmgr.ReplicaAssignment, 0, len(c.Replicas))
+	for _, id := range slices.Sorted(maps.Keys(c.Replicas)) {
+		r := c.Replicas[id]
+		replicas = append(replicas, &loadmgr.ReplicaAssignment{ReplicaID: r.GetID(), ResourceGroup: r.GetResourceGroup(), Priority: r.LoadPriority()})
+	}
+	return replicas
 }

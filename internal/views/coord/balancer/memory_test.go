@@ -38,7 +38,7 @@ func TestMemoryPlanRollbackAndLazyMaterialization(t *testing.T) {
 				if mandatory || id == ids[0] {
 					return nil
 				}
-				return &allocationResult{assignments: maps.Clone(currentSegmentNodes(p, id)), rowsByNode: map[int64]int64{1: 100}, more: true}
+				return &allocationResult{assignments: maps.Clone(currentSegmentNodes(p, id)), rowsByNode: map[int64]int64{1: 100}}
 			}).Build()
 			defer patch.UnPatch()
 			materialize := mockey.Mock((*allocationResult).materialize).To(func(*allocationResult, *planningContext, qviews.ShardID) *qviews.QueryViewAtCoordBuilder {
@@ -53,7 +53,6 @@ func TestMemoryPlanRollbackAndLazyMaterialization(t *testing.T) {
 				require.Len(t, plan.Retries, 3)
 			} else {
 				require.Equal(t, ids[:1], plan.Retries)
-				require.Equal(t, ids[1:], plan.Continues)
 			}
 			require.Equal(t, int64(300), c.GetNode(1).TargetSize())
 		})
@@ -78,9 +77,10 @@ func TestMemoryNativeBuilderMatchesProto(t *testing.T) {
 	c.PublishDataView(1, data)
 	p := newPlanningContext(c)
 	p.targets[10] = []int64{1}
-	p.fanouts = make(map[qviews.ShardID]int)
+
 	result := allocate(p, id, map[int64]int64{1: 0}, false)
 	require.NotNil(t, result)
+	require.Same(t, &shard.SegmentsBySize[0], &result.entries[0], "a full load shares the published ordering")
 	// Cache publications between allocation and admission cannot replace the
 	// metadata pinned by this planning context.
 	c.PublishDataView(1, cacheData(1, id.VChannel, 999))
@@ -102,8 +102,8 @@ func TestMemoryReusableResourcesWithoutData(t *testing.T) {
 	segment := &SegmentDataView{SegmentID: 1000, PartitionID: 1}
 	c.PublishLoadConfig(1, cfgFor(1, 10, []int64{1}, nil), 1)
 	p := newPlanningContext(c)
-	p.fanouts = make(map[qviews.ShardID]int)
-	ctx := newAllocationContext(p, id, nil, []*SegmentDataView{segment})
+
+	ctx := newAllocationContext(p, id, nil, []*SegmentDataView{segment}, 0)
 	require.Same(t, segment, ctx.segments[segment.SegmentID])
 	require.Empty(t, ctx.reusable[segment.SegmentID])
 }
@@ -119,7 +119,7 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1001, 1, 1, coordview.SegmentStateUp)))
 	p := newPlanningContext(c)
 	p.targets[10] = []int64{1, 2}
-	p.fanouts = make(map[qviews.ShardID]int)
+
 	pinned := p.GetCollection(1)
 	entries := pinned.DataView().Shard(id.VChannel).Partitions[0].Segments
 
@@ -145,7 +145,7 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 		return original(id)
 	}).Build()
 	defer patch.UnPatch()
-	ctx := newAllocationContext(p, id, map[int64]int64{}, entries)
+	ctx := newAllocationContext(p, id, map[int64]int64{}, entries, 0)
 	lookupPatch.UnPatch()
 	require.Equal(t, 1, calls, "resolve the collection once, regardless of segment count")
 	require.Equal(t, map[int64]int{1: 1, 2: 1}, lookups, "resolve each eligible placement once, including absent placements")
@@ -153,8 +153,8 @@ func TestMemoryReusePinsCollectionWithoutPerSegmentLookup(t *testing.T) {
 
 	fresh := newPlanningContext(c)
 	fresh.targets[10] = []int64{1, 2}
-	fresh.fanouts = make(map[qviews.ShardID]int)
-	for _, reusable := range newAllocationContext(fresh, id, map[int64]int64{}, entries).reusable {
+
+	for _, reusable := range newAllocationContext(fresh, id, map[int64]int64{}, entries, 0).reusable {
 		require.Empty(t, reusable, "a new context must reject the old materialization")
 	}
 }

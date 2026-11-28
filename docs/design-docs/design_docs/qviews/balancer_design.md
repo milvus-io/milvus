@@ -26,7 +26,8 @@ shards. State ownership is separate from planning:
    actual QueryView state.
 2. `BalancerCache` receives synchronous publication hooks and maintains
    immutable read objects, actual-load aggregates, and reverse indexes.
-3. Balancer resolves dirty scopes from the cache and requests one batch plan.
+3. Scope and scan producers score shard IDs and update a deduplicated priority queue.
+   The serial worker requests a placement plan for the next bounded batch.
 4. BalancePolicy reads immutable objects and maintains private predicted loads.
 5. The executor applies the completed plan through ShardViewManager.
 
@@ -74,9 +75,9 @@ LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
 - **Copy-on-write with structural sharing**: Node and Collection are the main
   access units; large Collection children and node contribution indexes share
   unchanged structure. Neither reads nor small writes copy global segment data.
-- **Preserved batch planning**: Must before MayOptimize, then larger shards
-  first with deterministic tie-breaking. All candidates share one private
-  projected-load tracker. Apply starts only after planning the batch.
+- **Priority batches**: The worker selects shard IDs in signed priority order.
+  Each batch shares one projected-load tracker. Apply starts after planning
+  the selected shards.
 - **Separated state ownership**: The cache is a derived view, not a new owner
   of load lifecycle or QueryView state. No predicted plan is written into it.
 
@@ -84,8 +85,8 @@ LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
 
 ### 2.1 Balancer
 
-The controller owns a work queue and one reconcile goroutine. It resolves
-scope, delegates batch decisions, and applies the completed plan.
+After cache readiness, three producers independently expand local collection/shard changes, node/RG changes and periodic scans. All submit scored shard IDs to one heap. A single
+worker consumes priority batches, delegates placement decisions, and applies each plan.
 
 ```go
 type Balancer interface {
@@ -140,32 +141,31 @@ not an atomic configuration transaction.
 
 Config publication copies the input and skips unchanged values. Policy changes
 request a full pass. Interval-only changes wake the controller and reset its
-timer without requesting extra optimization, including during retry backoff.
+timer without requesting extra optimization.
 An active reconcile is allowed to finish; configuration changes do not preempt
 planning or cancel previously submitted Preparing views. Recovery readiness
 still gates planning, while config updates can be published during that wait.
 
 Synchronous Reconcile callers may supply a valid cache configuration directly.
 Once Start runs, ParamTable owns the runtime configuration. Layout estimation
-budgets and retry backoff remain internal constants in this change.
+budgets remain internal constants.
 
 #### Main Loop
 
 The target control flow is schematic:
 
 ```text
-wait for queued work, periodic tick, retry, or cancellation
-cache.WaitForReady(ctx)  // cancellation preserves pending work
-pending := queue.TakePending()
-dirty := resolveScope(cache, pending)
-plan := policy.Plan(cache, dirty)
-failedOrInvalidated := apply(plan)
-requeue affected failures with bounded backoff
+producers: local changes | topology changes | full scans
+           discover and score slices independently, upsert into the same heap
+
+worker:   take the highest-priority shard batch
+          read current inputs, classify shards and calculate placements
+          apply releases and prepares, then take the next batch
 ```
 
-The queue detaches work before scope resolution. A concurrent publication must
-remain scheduled for a later pass. The loop may start during recovery, but waits
-for all sources to finish initial cache seeding before consuming pending work.
+A new publication can requeue a shard that is already being planned. Failed
+metadata reads and apply operations are reconsidered on input changes and
+periodic scans. Explicit collection release runs in the DDL callback.
 A periodic cache scan cannot repair an update that the upstream never published.
 
 #### Scope Resolution
@@ -173,19 +173,18 @@ A periodic cache scan cannot repair an update that the upstream never published.
 Scope resolution uses cache keys and indexes:
 
 - A collection scope combines configured replicas × DataView vchannels with
-  resident shards, including residual views after desired configuration removal.
+  resident shards of a loaded collection, including replicas removed by scale-down.
 - A direct shard scope targets that ShardID.
 - A node-loss/Stopping scope expands through its placed-shard index and the
   affected RG collection index, since replica quotas also change.
 - Node addition or recovery expands to desired collections in its RG; a new
   node has no placements to discover through the placed-shard index.
 - RG reassignment covers both the old and new groups.
-- Full scope combines all desired collections and all residual resident shards.
+- Full scope combines all desired collections and their resident shards.
   An unkeyed node notification or an unresolvable legacy scope may fall back
   to this full scope without rebuilding the cache.
 
-Shard details are obtained from retained CollectionEntry references. Missing
-LoadConfig means release only after source readiness is known. Desired config
+Shard details are obtained from retained CollectionEntry references. Collection discovery skips shards whose load intent has been withdrawn. Desired config
 with a missing/unready DataView waits or retries, rather than releasing views.
 
 #### External System Integration
@@ -321,8 +320,7 @@ loadmgr.CollectionLoadManager
 #### Replica suspension boundary
 
 Suspension is an internal Balancer layout decision: a zero-quota replica stops
-receiving Preparing views and releases existing views once the last-serving-cover
-barrier permits it. Desired load config remains unchanged. Balancer does not
+receiving new placements and keeps its existing views until it has targets again. Desired load config remains unchanged. Balancer does not
 publish discovery state or notify CollectionLoadManager about suspension.
 Service discovery follows QueryView lifecycle state through the existing
 Registry notifications and view synchronization transports.
@@ -476,10 +474,10 @@ WAL ack of CChannel AlterLoadConfig broadcast
 
 WAL ack of CChannel DropLoadConfig broadcast
         → CollectionLoadManager.ReleaseCollection(msg.Header())
-         ├── LoadConfigStore.Remove(collID)
-         └── store hook: publish cache, then enqueue collID
-         // ShardViewRegistry cleanup via reconcile: Phase 1
-         // sees "desired absent + current exists" → actionRelease
+         ├── LoadConfigStore.StopPlanning(collID) publishes intent withdrawal
+         ├── RequestCollectionRelease(collID) starts resident manager teardown
+         ├── wait for final collection shard removal
+         └── LoadConfigStore.Remove(collID) deletes historical requirements
 ```
 
 `AlterLoadConfig` and `DropLoadConfig` are CChannel-only broadcasts. Coord uses the
@@ -507,22 +505,12 @@ The periodically retried cluster configuration is its reconciliation source.
 External `UpdateLoadConfig` requests also acquire the collection guard and apply
 through the manager directly; they do not create another WAL operation.
 
-**Release semantics (Option A)**: `ReleaseCollection` removes LoadConfig; its
-source hook clears the cache desired field and enqueues the collection. Orphan
-views are detected by Phase 1 and released via `RequestRelease`. No separate
-"releasing" desired state is needed; crash recovery uses the same reconciliation.
-Registry presence, rather than an Up version or QN placement, identifies residual
-shards: SN-only Down/Unrecoverable views also require RequestRelease.
-
-The DropLoadConfig acknowledgement waits for a serialized Balancer pass and
-then for all collection shard managers to leave the Registry. The pass drains
-any preparation planned against the old desired state; final Registry removal
-requires node cleanup and durable QueryView deletion. The collection broadcast
-lock remains held until acknowledgement completes, so ReleaseCollection returns
-success only after cleanup and a subsequent load cannot overlap the old replica.
-An already-absent LoadConfig still takes the same cleanup barrier under the
-collection lock. Cancellation does not report successful release or undo the
-durable release intent. SN serving leases and active references remain respected.
+**Release semantics.** The DropLoadConfig acknowledgement holds the collection
+broadcast lock while it withdraws desired state, requests release on every
+resident manager, and waits for node cleanup and durable QueryView deletion.
+The registry also includes SN-only Down and Unrecoverable views. An idempotent
+release or replay repeats the same request. A subsequent load may proceed once
+the callback removes the historical LoadConfigs and releases the broadcast lock.
 
 **Load status derivation**: `LoadStatus` and `LoadPercentage` are derived from view states:
 
@@ -542,7 +530,7 @@ This section records the historical normalized-score algorithm. The replacement 
 quantitative example are in [Incremental Score-Based Balancing](balancer_scoring.md#3-placement-objective).
 
 The default policy first repairs/reuses collection/RG layouts as described in
-[Replica Placement](replica_placement.md), retaining targets across calls. It
+[Replica Placement](replica_placement.md), using the planning state pinned with each collection. It
 then organizes shard work into three phases and processes all dirty shards
 in one batch so decisions across shards remain coordinated.
 
@@ -575,10 +563,10 @@ Phase 1: Classify each dirty shard
     │    actionNone        → skip
     │
     ▼
-Phase 2: Order candidates + build complete placements with a shared
+Phase 2: Process queued candidates and build complete placements with a shared
          steady-state row tracker
     │
-    │  Mandatory first, then optional.
+    │  Follow the selected batch order.
     │  Rebuild each shard from an empty partial candidate.
     │  After each accepted candidate, update projectedRows so later shards see it.
     │
@@ -593,19 +581,17 @@ Return BalancePlan { Prepares, Releases }
 ### 3.1 Phase 1: Classify
 
 Compare desired state, actual state and the retained target layout. Before
-ordinary classification, a zero-quota replica drains after protecting the last
-serving cover; it never retries allocation. If its resource group has no
-eligible QNs at all, preserve lifecycle state and wait for topology changes
-instead of releasing views. Stopping prevents new allocation but does not by
-itself invalidate an existing Up view's serving coverage. Explicit unload or
-replica removal still takes precedence. An
+ordinary classification, a desired replica with zero target nodes keeps its
+existing views and waits for a topology change. This also applies when other
+replicas in the same resource group have healthy Up views. Stopping prevents new allocation but does not by
+itself invalidate an existing Up view's serving coverage. Explicit collection unload takes precedence. An
 in-flight view on a lost/ineligible node is replaceable. An Up view outside
 its active target requires Must convergence. For other dirty shards:
 
 | Condition (checked in order) | Action |
 |---|---|
-| Desired absent, current exists | **Release** |
-| Both absent | **None** |
+| Replica removed from a loaded collection, current exists | **Release** once the entire desired placement is serving the current requirements |
+| Collection load intent withdrawn | **None** (DDL owns cleanup) |
 | Desired present, no Up view, Preparing exists | **None** (avoid stacking) |
 | Desired present, no Up view or only Unrecoverable state | **Must** (initial load or post-Unrecoverable) |
 | Current Up view and a Preparing view exists | **None** (avoid stacking; retry latest state after the in-flight view finishes) |
@@ -616,9 +602,10 @@ its active target requires Must convergence. For other dirty shards:
 
 ### 3.2 Phase 2: Normalized Ordered Allocation
 
-Candidates are processed in priority order — mandatory (Must) first, optional
-(MayOptimize) last. Within each group, larger shards by total `RowNum` are
-processed first, then by ShardID. Within a shard, segments are processed by
+Controller batches retain the shard queue order. Mandatory and optional
+classification controls whether a replacement is required. Direct unbounded
+policy calls order mandatory work first and use shard load to break ties.
+Within a shard, segments are processed by
 `RowNum` descending and SegmentID ascending. The explicit secondary ordering
 makes planning deterministic.
 
@@ -805,9 +792,8 @@ do not decide whether a placement is economically worthwhile.
 
 ### 3.4 Computation and Cost Boundaries
 
-The cache moves actual-state aggregation to publication. It does not change
-candidate allocation: collecting/sorting desired segments costs `O(S log S)`
-and evaluating eligible nodes normally costs `O(S*N)` per allocated shard.
+DataView publication builds the size-ordered shard index in `O(S log S)`. Planning
+scans the index in order and evaluates eligible nodes in `O(S*N)` per allocated shard.
 Overlapping placement copies can add stickiness-scan work. FanoutBudget remains
 a score, not a hard cap on candidate enumeration. A stable optional shard may
 still require a full allocation before assignment equality suppresses emission.
@@ -821,7 +807,7 @@ The target reconcile work is:
 | Establish node baselines | `O(M)` retained references/scalars; no global consistency requirement |
 | Replace candidate contributions | Read the pinned node's contribution index; lookup cost depends on its shared representation |
 | Calculate ReferenceRows | Sum predicted eligible-node loads once per candidate |
-| Allocate segments | Existing segment sort and node scoring |
+| Allocate segments | Published segment order and node scoring |
 | Return accepted plans | Memory proportional to accepted segment assignments |
 
 RG candidate indexes are maintained when topology changes. No reconcile scans
@@ -863,7 +849,7 @@ base[n] = pinnedNode[n].TotalRows
 old[n,s] = pinnedNode[n].Contribution(s).TotalRows
 projected[n] = base[n] + acceptedDelta[n]
 
-for each candidate s in the existing policy order:
+for each eligible shard s in dequeue order:
     candidateBase[n] = projected[n] - old[n,s]
     candidate = allocate(s, candidateBase)
     if accepted:
@@ -901,7 +887,7 @@ reference provider.
 
 1. The node owner publishes QN3 as ineligible, then enqueues its placed shards.
 2. QueryView failure transitions independently publish actual contributions.
-3. Balancer detaches work, obtains cache references, and classifies candidates.
+3. Balancer takes up to `queryView.balancer.shardBatchSize` shards in descending preparation priority, reads current cache state, and classifies candidates.
 4. Lost placements are redistributed with surviving-copy stickiness preserved.
    Accepted candidates update only the private projected-load delta.
 5. Apply creates Preparing views; their source hooks publish actual state.
@@ -913,8 +899,7 @@ reference provider.
 2. The store hook publishes the Collection desired field and indexes before
    enqueueing C1 and returning.
 3. Scope resolution combines configured replicas and published DataView shards.
-4. Policy uses cached shard totals for ordering and allocates complete placements
-   with one shared projected-load tracker.
+4. Policy computes eligible placements in dequeue order with one shared projected-load tracker.
 5. Apply calls AddPreparing; the exact DataViewRef is acquired before existing
    views can be preempted. Missing versions cause replanning.
 
@@ -949,9 +934,9 @@ merged under its cache lock; published descendants remain immutable.
 | Component | Responsibility | State |
 |---|---|---|
 | Balancer | Resolve queued scopes, call Policy, apply/requeue | Work queue |
-| BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable objects, aggregate contribution indexes |
+| BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable facts, aggregate contributions, load-scoped planning handles |
 | PlanningContext | Reuse per-object reads and coordinate batch predictions | References, candidate-local data, accepted deltas |
-| BalancePolicy | Classify, order, allocate, compare | Retained replica target layouts |
+| BalancePolicy | Classify, order, allocate, compare | Batch inputs and predictions |
 | CollectionLoadManager | Desired load lifecycle through LoadConfigStore | Existing store |
 | ShardViewRegistry | Actual manager lifecycle and source publication | Resident managers |
 | ShardViewManager | QueryView state and placement/statistics publication | Per-shard state machines and DataViewRefs |
@@ -978,7 +963,7 @@ and waits for initial node discovery before the cache readiness barrier opens.
 
 The first [incremental scoring implementation](balancer_scoring.md) includes
 target accounting, partial-resource reuse evidence, gain acceptance, and
-per-shard search continuations. Fair bounded batch discovery and migration/loading
+size-ordered single-segment search. Fair bounded batch discovery and migration/loading
 budgets remain follow-up work. Defaults require further production calibration.
 
 Further work beyond that first policy implementation includes bounded
@@ -1041,7 +1026,7 @@ accounting, failure-reuse, and scale checks are listed in
 
 ### 10.4 Cache Publication and Batch Accounting
 
-1. Cache scopes cover dirty collection/shard/node events and residual releases;
+1. Cache scopes cover dirty collection/shard/node events and removed replicas;
    a new node with no placements still triggers its RG's desired collections.
 2. Each retained object stays immutable across concurrent source publications.
    Concurrent updates to different fields do not overwrite one another.
@@ -1093,7 +1078,7 @@ The work for one allocated shard in the current implementation is:
 | Classify the shard and calculate its row size | `O(P_i + S_i)` |
 | Remove the current shard contribution from projected rows | `O(M + P_i)` |
 | Resolve the shard's replica assignment | `O(R_i)` |
-| Collect and sort desired segments | `O(S_i log S_i)` |
+| Read published segment order, filtering partitions when needed | linear in shard segments visited |
 | Build and sort the eligible-node set and fixed `ReferenceRows` | `O(M + G_i log G_i)` |
 | Evaluate every eligible node for every segment | normally `O(S_i * N_i)`, strict worst case `O(N_i * (S_i + P_i))` |
 | Compare an optional candidate with the current assignment | `O(P_i + S_i)` |
@@ -1127,7 +1112,7 @@ O(
   + sum over all dirty shards of (S_i + P_i)
   + sum over allocated shards of (
         R_i
-      + S_i log S_i
+      + S_i
       + G_i log G_i
       + N_i * (S_i + P_i)
     )
@@ -1152,7 +1137,7 @@ O(
   + sum over all dirty shards of (S_i + P_i)
   + sum over allocated shards of (
         R_i
-      + S_i log S_i
+      + S_i
       + G_i log G_i
       + S_i * N_i
     )
@@ -1164,12 +1149,11 @@ With uniform upper bounds of `S` desired segments, `R` replica assignments,
 this is:
 
 ```text
-O(K + D log D + D * (M + R + S + S log S + G log G + S * N))
+O(K + D log D + D * (M + R + S + G log G + S * N))
 ```
 
 The shard-allocation core is therefore
-`O(S log S + S * N) = O(S * (log S + N))` in steady state. Segment sorting
-dominates when `log S > N`; candidate scoring dominates when `N > log S`.
+`O(S * N)` in steady state. Segment sorting is paid once per native DataView publication.
 Normalized scoring and fanout tracking add only constant work to each
 segment-node comparison. The design deliberately avoids enumerating complete
 placements, whose search space would be `N^S`.
@@ -1245,7 +1229,7 @@ collections or user-specified placement unless force override is enabled.
 Replica counts are compared per resource group, including repeated group names.
 The explicit UpdateLoadConfig RPC uses the same AlterLoadConfig broadcast and
 ordered callback. Updates preserve partitions, field requirements and user
-intent, retain/reuse replica IDs where possible, and return after durable config
+intent, retain replica IDs within their original RG, allocate fresh IDs in a destination RG, and return after durable config
 application. They do not wait for QueryView Up while holding up updates to other
 collections; shared load readiness reports asynchronous convergence. No legacy
 replica promotion or Target/Distribution observer participates.
@@ -1350,12 +1334,10 @@ permanent pin and does not assert that retained old-view resources are gone.
 
 ## Explicit collection teardown control
 
-A release plan carries optional QueryViewControl per shard, selected from the
-same planning snapshot as the release action. An absent collection LoadConfig
-after source readiness marks all residual shards for preempt_serving_lease,
-including already-Down Views. A missing replica inside a still-loaded collection
-or a suspended replica retains ordinary serving-lease protection. ConfigForShard
-alone cannot distinguish these reasons: policy inspects the collection-level
-LoadConfig. Balancer applies this control through RequestReleaseWithControl.
-DropLoadConfig only withdraws load intent and triggers reconciliation; its ACK
-callback retains the existing synchronous cleanup wait and final config removal.
+Explicit collection release sends `preempt_serving_lease` through
+`ShardViewRegistry.RequestCollectionRelease`, including for already-Down views.
+Replica scale-down retains the ordinary serving lease.
+A prepare validates its planned LoadInfoVersion and replica membership against
+current intent while the registry lock orders manager registration with the
+release snapshot. A previously admitted manager rejects preparation once marked
+for release, including after an unlocked reference acquisition.

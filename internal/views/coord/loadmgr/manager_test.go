@@ -51,7 +51,7 @@ func TestCollectionLoadManager_UpdateLoadConfig(t *testing.T) {
 	assert.Equal(t, []int64{100}, notified)
 }
 
-func TestCollectionLoadManager_ReleaseCollectionKeepsRegistryForReconcile(t *testing.T) {
+func TestCollectionLoadManager_ReleaseCollectionRetainsLoadInfoForCleanup(t *testing.T) {
 	store, _ := newTestStore(t)
 	manager := NewCollectionLoadManager(store, nil, nil)
 	require.NoError(t, manager.UpdateLoadConfig(context.Background(), sampleAlterLoadConfigResult()))

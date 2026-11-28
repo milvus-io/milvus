@@ -3,7 +3,6 @@ package balancer
 import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // BalancePolicy consumes a cache Reader and the set of dirty shards
@@ -22,24 +21,20 @@ type BalancePolicy interface {
 
 // BalancePlan is the complete set of actions to execute for one reconcile
 // batch. The Balancer applies Prepares (via AddPreparing) and Releases (via
-// RequestReleaseWithControl) in an unspecified order; both are idempotent operations on
+// RequestReplicaRetirement) in an unspecified order; both are idempotent operations on
 // the per-shard ShardViewManager.
 //
 // A shard listed in neither Prepares nor Releases is implicitly a no-op for
 // this batch.
 type BalancePlan struct {
-	// Continues contains unfinished bounded searches, not allocation failures.
-	Continues []qviews.ShardID
+	// RescanCollections identifies changed layouts for incremental discovery.
+	RescanCollections []int64
 	// Retries could not be allocated because desired inputs or eligible nodes were unavailable.
 	Retries []qviews.ShardID
 	// Prepares lists shards that should receive a new Preparing view.
 	// The value is the builder the Balancer passes to AddPreparing.
 	Prepares map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder
 
-	// Releases lists shards whose existing views should be released
-	// (desired state absent or a suspended replica can safely drain).
+	// Releases lists shards of replicas removed from a loaded collection.
 	Releases []qviews.ShardID
-	// ReleaseControls records policy selected from the same desired-state
-	// snapshot as Releases. Missing controls preserve ordinary retirement.
-	ReleaseControls map[qviews.ShardID]*viewpb.QueryViewControl
 }

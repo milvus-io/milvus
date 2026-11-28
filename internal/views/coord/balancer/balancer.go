@@ -2,9 +2,9 @@ package balancer
 
 import (
 	"context"
-	"io"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -16,7 +16,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/stage"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+)
+
+var (
+	triggerWait       = stage.New("coord", "reconcile", "trigger_wait")
+	reconcileTotal    = stage.New("coord", "reconcile", "total")
+	reconcileSnapshot = stage.New("coord", "reconcile", "snapshot")
+	reconcilePlan     = stage.New("coord", "reconcile", "plan")
+	reconcileApply    = stage.New("coord", "reconcile", "apply")
 )
 
 // Balancer is the scheduling controller that reconciles dirty shards into
@@ -27,19 +34,21 @@ type Balancer interface {
 	Trigger(scopes ...TriggerScope)
 }
 
-// DefaultBalancer owns the trigger queue and reconcile loop. Business
-// decisions are delegated to BalancePolicy; this type reads the cache,
-// drains dirty work, and applies the resulting BalancePlan.
+// DefaultBalancer discovers dirty shards, takes priority batches, and applies
+// the plans produced by BalancePolicy.
 type DefaultBalancer struct {
 	cache         *balancercache.Cache
 	schemaVersion SchemaVersionProvider
 	reconcileMu   sync.Mutex
 	viewRegistry  *coordview.ShardViewRegistry
 	policy        BalancePolicy
-	queue         *triggerQueue
-	scanner       balancercache.Scanner
-	scanning      bool
-	scanRequested bool
+	discovery     *discovery
+	running       atomic.Bool
+	work          chan struct{}
+	submitMu      sync.Mutex
+	ready         shardQueue
+	readyWait     stage.Timer // guarded by submitMu, one timer per coalesced wakeup
+	scoreRevision atomic.Uint64
 	configChanged chan struct{}
 
 	mu     sync.Mutex
@@ -66,12 +75,14 @@ func NewDefaultBalancer(
 		schemaVersion: schemaVersion,
 		viewRegistry:  registry,
 		policy:        policy,
-		queue:         newTriggerQueue(),
+
+		work:          make(chan struct{}, 1),
+		ready:         shardQueue{items: make(map[qviews.ShardID]*queuedShard)},
 		configChanged: make(chan struct{}, 1),
 	}
+	balancer.discovery = newDiscovery()
 	if cache != nil {
-		balancer.scanner = cache.NewScanner()
-		cache.SetNotifier(func(scope TriggerScope) { balancer.Trigger(scope) })
+		cache.SetScheduler(balancer.publishScope)
 	}
 	return balancer
 }
@@ -85,104 +96,161 @@ func (b *DefaultBalancer) Start(ctx context.Context) {
 	}
 	loopCtx, cancel := context.WithCancel(ctx)
 	b.cancel = cancel
-	b.wg.Add(1)
-	go b.loop(loopCtx)
-	b.queue.add()
+	b.running.Store(true)
+	b.wg.Go(func() { b.run(loopCtx) })
+	wakeBalancer(b.work) // Resume queued work even if the startup scan is empty.
+	b.Trigger()
 }
 
 // Stop cancels the reconcile loop and waits for it to exit.
 func (b *DefaultBalancer) Stop() {
 	b.mu.Lock()
-	cancel := b.cancel
-	b.cancel = nil
-	b.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
+	defer b.mu.Unlock()
+	if b.cancel != nil {
+		b.cancel()
 		b.wg.Wait()
+		b.discovery.suspend()
+		b.cancel = nil
+		b.running.Store(false)
 	}
 }
 
 // Trigger enqueues affected shards. Calling Trigger with no scopes enqueues a
 // full scan.
 func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
-	b.queue.add(scopes...)
+	if len(scopes) == 0 {
+		b.discovery.add(periodicScan, TriggerScope{NodeChanged: true})
+		return
+	}
+	for _, s := range scopes {
+		if len(s.DirtyShards) > 0 && len(s.DirtyShards) <= discoveryShardLimit && b.cache != nil && b.cache.Ready() {
+			b.submitShards(s.DirtyShards)
+			s.DirtyShards = nil
+		}
+		b.publishScope(s)
+	}
 }
 
-// TriggerWithCompletion enqueues scoped work and returns the pending batch's
-// result. The caller owns cancellation and runtime shutdown while waiting.
-func (b *DefaultBalancer) TriggerWithCompletion(scopes ...TriggerScope) *syncutil.Future[error] {
-	return b.queue.addWithCompletion(scopes...)
+// Cache callbacks can run under the registry writer lock. Only record the
+// affected scope here; the producer reads inputs after publication.
+func (b *DefaultBalancer) publishScope(s TriggerScope) {
+	if len(s.DirtyShards) > 0 {
+		b.discovery.add(localShards, TriggerScope{DirtyShards: slices.Clone(s.DirtyShards)})
+	}
+	if len(s.DirtyCollections) > 0 {
+		b.discovery.add(localChanges, TriggerScope{DirtyCollections: slices.Clone(s.DirtyCollections)})
+	}
+	for _, replica := range s.RetiringReplicas {
+		b.discovery.add(localChanges, TriggerScope{RetiringReplicas: []int64{replica}})
+	}
+	if len(s.DirtyNodes) > 0 {
+		b.discovery.add(topologyChanges, TriggerScope{DirtyNodes: slices.Clone(s.DirtyNodes)})
+	} else if s.NodeChanged {
+		b.discovery.add(periodicScan, TriggerScope{NodeChanged: true})
+	}
+	for _, group := range s.DirtyResourceGroups {
+		b.discovery.add(topologyChanges, TriggerScope{DirtyResourceGroups: []string{group}})
+	}
+}
+
+func wakeBalancer(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// All producers score before taking the queue lock. An overlapping, slower
+// notification cannot overwrite a newer priority already in the queue.
+func (b *DefaultBalancer) submitShards(ids []qviews.ShardID) {
+	if len(ids) == 0 {
+		return
+	}
+	revision := b.scoreRevision.Add(1)
+	reader := b.scoringContext()
+	scored := make([]scoredShard, 0, len(ids))
+	seen := make(map[qviews.ShardID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if collection := reader.collectionForShard(id); collection == nil || collection.LoadConfig() == nil {
+			continue
+		}
+		scored = append(scored, scoredShard{id: id, priority: reader.preparationPriority(id)})
+	}
+	if len(scored) == 0 {
+		return
+	}
+	b.submitMu.Lock()
+	if len(b.ready.heap) == 0 {
+		b.readyWait = triggerWait.Begin()
+	}
+	b.ready.submit(scored, revision)
+	b.submitMu.Unlock()
+	wakeBalancer(b.work)
+}
+
+func (b *DefaultBalancer) run(ctx context.Context) {
+	if b.cache == nil {
+		return
+	}
+	unwatch := b.watchBalanceConfig(ctx, paramtable.Get())
+	defer unwatch()
+	if b.cache.WaitForReady(ctx) != nil {
+		return
+	}
+	var workers sync.WaitGroup
+	for source := range producerCount {
+		workers.Go(func() { b.produce(ctx, source) })
+	}
+	workers.Go(func() { b.loop(ctx) })
+	defer workers.Wait()
+	interval := b.cache.GetBalanceConfig().ReconcileInterval
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.configChanged:
+			if next := b.cache.GetBalanceConfig().ReconcileInterval; next != interval {
+				interval = next
+				ticker.Reset(interval)
+			}
+		case <-ticker.C:
+			b.Trigger()
+		}
+	}
+}
+
+func (b *DefaultBalancer) produce(ctx context.Context, source discoverySource) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.discovery.queues[source].signal:
+			b.dispatch(source)
+		}
+	}
 }
 
 func (b *DefaultBalancer) loop(ctx context.Context) {
-	defer b.wg.Done()
-
-	unwatch := b.watchBalanceConfig(ctx, paramtable.Get())
-	defer unwatch()
-	interval := DefaultBalanceConfig().ReconcileInterval
-	if b.cache != nil {
-		interval = b.cache.GetBalanceConfig().ReconcileInterval
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	resetTicker := func() {
-		next := b.cache.GetBalanceConfig().ReconcileInterval
-		if next != interval {
-			interval = next
-			ticker.Reset(interval)
-		}
-	}
-
 	for {
-		var retry <-chan time.Time
-		var timer *time.Timer
-		if delay, pending := b.queue.retryWait(); pending {
-			timer = time.NewTimer(delay)
-			retry = timer.C
-		}
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
 			return
-		case <-b.configChanged:
-			if timer != nil {
-				timer.Stop()
+		case <-b.work:
+			if err := b.Reconcile(ctx); err != nil && ctx.Err() == nil {
+				mlog.Warn(ctx, "query view balance pass failed", mlog.Err(err))
 			}
-			resetTicker()
-			continue
-		case <-b.queue.signalCh():
-		case <-retry:
-		case <-ticker.C:
-			b.queue.add()
-		}
-		if timer != nil {
-			timer.Stop()
-		}
-		if err := b.Reconcile(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			mlog.Warn(ctx, "query view balance will retry", mlog.Err(err))
-		} else {
-			b.queue.resetRetryDelay()
 		}
 	}
 }
 
-var (
-	reconcileTotal    = stage.New("coord", "reconcile", "total")
-	reconcileSnapshot = stage.New("coord", "reconcile", "snapshot")
-	reconcilePlan     = stage.New("coord", "reconcile", "plan")
-	reconcileApply    = stage.New("coord", "reconcile", "apply")
-)
-
-// Reconcile handles queued local work or one collection scan batch. A single
-// call does not drain a full scan. It is exported primarily for tests and for
-// callers that want a synchronous controller pass during startup.
-// It waits for cache readiness before consuming queued work; ctx cancels that wait.
+// Reconcile waits for cache readiness and runs one priority batch. Before
+// Start, synchronous callers also drive discovery.
 func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
@@ -190,150 +258,104 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) (retErr error) {
 	if err := b.cache.WaitForReady(ctx); err != nil {
 		return err
 	}
-	// Exclude the startup cache-readiness wait from reconcile latency.
 	timer := reconcileTotal.Begin()
 	defer timer.EndError(&retErr)
 	b.reconcileMu.Lock()
-	var pending triggerBatch
-	defer func() {
-		b.reconcileMu.Unlock()
-		if pending.completion != nil {
-			pending.completion.Set(retErr)
-		}
-	}()
+	defer b.reconcileMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	pending = b.queue.takePending()
-	b.scanRequested = b.scanRequested || pending.scan
-	if !pending.hasScopes() && !b.scanning && !b.scanRequested {
-		return nil
-	}
-	// A pass releases reconcileMu before another scan batch can start. Local
-	// publications and management calls can therefore run between batches.
-	defer func() {
-		if b.scanning || b.scanRequested {
-			b.queue.wake()
-		}
-	}()
 	snapshotStartedAt := time.Now()
-	reader := newPlanningContext(b.cache)
-	b.pruneLayouts(reader, pending.dirtyColls)
-	var dirty []qviews.ShardID
-	if pending.hasScopes() {
-		dirty = resolveCacheScope(reader, pending)
-	} else if b.scanning || b.scanRequested {
-		if !b.scanning {
-			b.scanning, b.scanRequested = true, false
+	// Synchronous callers drive the same producer without starting background loops.
+	if !b.running.Load() {
+		for remaining := discoveryShardLimit; remaining > 0; {
+			n := b.dispatch(anySource)
+			if n < 0 {
+				break
+			}
+			remaining -= max(1, n) // Empty scopes also consume the discovery budget.
 		}
-		dirty = b.scanBatch(reader)
 	}
-	snapshotDuration := time.Since(snapshotStartedAt)
-	reconcileSnapshot.Observe(snapshotDuration, stage.Success)
+	b.submitMu.Lock()
+	b.readyWait.End(nil)
+	dirty := b.ready.take(int(b.cache.GetBalanceConfig().ShardBatchSize))
+	more := len(b.ready.heap) > 0
+	if more {
+		b.readyWait = triggerWait.Begin()
+	}
+	b.submitMu.Unlock()
+	if more {
+		wakeBalancer(b.work)
+	}
 	if len(dirty) == 0 {
+		reconcileSnapshot.Observe(time.Since(snapshotStartedAt), stage.Success)
 		return nil
 	}
+	// A different producer may admit a shard before its node walk reaches it.
+	// Repair this batch against live eligibility before pinning planning inputs.
+	updating := b.discovery.refreshingNodes.Load() > 0
+	if updating {
+		for _, id := range dirty {
+			b.cache.RefreshShardTarget(id)
+		}
+	}
+	reader := newPlanningContext(b.cache)
+	reader.deferOptimization = updating
+	reader.boundedBatch = true
+	reconcileSnapshot.Observe(time.Since(snapshotStartedAt), stage.Success)
 	dirty, err := b.readSchemaVersions(ctx, reader, dirty)
 	planStartedAt := time.Now()
 	plan := b.policy.Plan(reader, dirty)
-	if plan != nil {
-		// A suspended replica may shed serving capacity, but must retain the
-		// published schema's recovery base while a newer schema is pending.
-		// Otherwise resuming it can only plan the unmaterialized target. An
-		// explicit release/removal still tears down its complete obligation.
-		plan.Releases = slices.DeleteFunc(plan.Releases, func(id qviews.ShardID) bool {
-			cfg, manager := reader.ConfigForShard(id), b.viewRegistry.Get(id)
-			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.targetSchemaVersion(cfg.CollectionID)) != nil
-		})
-	}
-	planDuration := time.Since(planStartedAt)
-	reconcilePlan.Observe(planDuration, stage.Outcome(err))
+	reconcilePlan.Observe(time.Since(planStartedAt), stage.Outcome(err))
 	applyStartedAt := time.Now()
-	applyErr := b.apply(ctx, plan)
+	applyErr := b.apply(ctx, reader, plan, dirty)
 	recoveryErr := b.recoverPublishedSchemas(ctx, reader, dirty)
-	applyDuration := time.Since(applyStartedAt)
 	applyErr = errors.CombineErrors(applyErr, recoveryErr)
-	reconcileApply.Observe(applyDuration, stage.Outcome(applyErr))
-	err = errors.CombineErrors(err, applyErr)
-	return err
+	reconcileApply.Observe(time.Since(applyStartedAt), stage.Outcome(applyErr))
+	return errors.CombineErrors(err, applyErr)
 }
 
-const (
-	scanShardThreshold = 100
-	scanSlotBudget     = 256
-)
-
-func (b *DefaultBalancer) scanBatch(reader *planningContext) []qviews.ShardID {
-	targets := make(map[qviews.ShardID]struct{})
-	collections := make(map[int64]struct{})
-	err := b.scanner.Scan(scanSlotBudget, func(collection *balancercache.CollectionEntry) bool {
-		collections[collection.ID()] = struct{}{}
-		// The scanner pins directory membership only. Re-read current contents
-		// through this batch's planning context, just as for a local event.
-		addCollectionShards(targets, reader.GetCollection(collection.ID()))
-		return len(targets) <= scanShardThreshold
-	})
-	if err == io.EOF {
-		b.scanning = false
-	}
-	b.pruneLayouts(reader, collections)
-	return shardKeys(targets)
-}
-
-// Configuration removal also works after the collection has left the cache;
-// do not scan every retained layout at the start of each background batch.
-func (b *DefaultBalancer) pruneLayouts(reader balancercache.Reader, collections map[int64]struct{}) {
-	if policy, ok := b.policy.(*DefaultBalancePolicy); ok && len(collections) > 0 {
-		policy.mu.Lock()
-		defer policy.mu.Unlock()
-		for id := range collections {
-			if c := reader.GetCollection(id); c == nil || c.LoadConfig() == nil {
-				delete(policy.layouts.domains, id)
-			}
-		}
-	}
-}
-
-func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
+func (b *DefaultBalancer) apply(ctx context.Context, reader *planningContext, plan *BalancePlan, dirty []qviews.ShardID) error {
 	if plan == nil {
 		return nil
 	}
-	var errs []error
+	var result error
 	// Planning is batched, but applying a view may wait for its DataView ref.
 	// Do not hold a registry-wide flush window across that wait. Each manager
 	// submits one ordered shard event; the scheduler still coalesces pending work.
 	for _, shardID := range plan.Releases {
 		mgr := b.viewRegistry.Get(shardID)
-		if mgr == nil {
+		planned := reader.collectionForShard(shardID)
+		if mgr == nil || planned == nil || planned.DataView() == nil {
 			continue
 		}
-		if err := mgr.RequestReleaseWithControl(ctx, plan.ReleaseControls[shardID]); err != nil {
-			errs = append(errs, err)
-			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
-		}
+		result = errors.CombineErrors(result, mgr.RequestReplicaRetirement(ctx, planned.DataView().SchemaVersion, func() bool {
+			live := b.cache.GetCollection(planned.ID())
+			return planned.SameLoad(live) && planned.DataView() == live.DataView() && live.Planning().Replica(shardID.ReplicaID) == nil && live.CanRetireReplicas(b.cache)
+		}))
 	}
-	for shardID, builder := range plan.Prepares {
+	for _, shardID := range dirty {
+		builder := plan.Prepares[shardID]
 		if builder == nil {
 			continue
 		}
-		mgr := b.viewRegistry.Ensure(shardID)
-		if err := mgr.AddPreparing(ctx, builder); err != nil {
-			errs = append(errs, err)
-			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
+		collection, version := builder.LoadIdentity()
+		mgr := b.viewRegistry.EnsureIf(shardID, func() bool {
+			current := b.cache.GetCollection(collection)
+			return current != nil && current.LoadConfig() != nil && current.ConfigVersion() == version && findReplica(current.LoadConfig(), shardID.ReplicaID) != nil
+		})
+		if mgr == nil {
+			continue // The load was withdrawn or replaced after planning.
 		}
+		result = errors.CombineErrors(result, mgr.AddPreparing(ctx, builder))
 	}
-	if len(plan.Continues) > 0 {
-		b.Trigger(TriggerScope{DirtyShards: plan.Continues})
+	if len(plan.RescanCollections) > 0 {
+		b.discovery.layout(plan.RescanCollections, dirty)
 	}
 	if len(plan.Retries) > 0 {
-		b.queue.addRetry(TriggerScope{DirtyShards: plan.Retries})
-		errs = append(errs, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))
+		result = errors.CombineErrors(result, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))
 	}
-	var err error
-	for _, e := range errs {
-		err = errors.CombineErrors(err, e)
-	}
-	return err
+	return result
 }
 
 // Read once per affected collection per pass, including startup recovery and
@@ -347,18 +369,17 @@ func (b *DefaultBalancer) readSchemaVersions(ctx context.Context, reader *planni
 	var result error
 	ready := make([]qviews.ShardID, 0, len(dirty))
 	for _, shard := range dirty {
-		cfg := reader.ConfigForShard(shard)
-		if cfg == nil {
-			ready = append(ready, shard) // Releases need no schema.
+		collection := reader.collectionForShard(shard)
+		if collection == nil || collection.LoadConfig() == nil {
+			ready = append(ready, shard)
 			continue
 		}
-		id := cfg.CollectionID
+		id := collection.ID()
 		if _, read := reader.schemaVersions[id]; !read && failed[id] == nil {
 			version, err := b.schemaVersion(ctx, id)
 			if err != nil {
 				failed[id] = err
 				result = errors.CombineErrors(result, err)
-				b.queue.addRetry(TriggerScope{DirtyCollections: []int64{id}})
 			} else {
 				reader.schemaVersions[id] = version
 			}

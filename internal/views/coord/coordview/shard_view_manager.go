@@ -44,6 +44,7 @@ type ShardViewManager struct {
 	eventSubmitter   dirtyViewEventSubmitter
 	observe          func(qviews.ShardID, *ShardViewManager, *ShardStats)
 	onReleasedEmpty  func(qviews.ShardID, *ShardViewManager)
+	maybeUped        bool // Sticky after observing Up or recovering evidence of a past Up.
 	prepareBackoff   preparationBackoff
 	releaseRequested bool
 	closed           bool // Failed recovery: ignore late sync callbacks.
@@ -112,6 +113,7 @@ func newShardViewManager(
 		eventSubmitter: eventSubmitter,
 		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
 		dataViewRefs:   dataViewRefs,
+		maybeUped:      recoveredMaybeUped(recoveredViews),
 	}
 
 	// Recover state machines from persisted views. Unlike
@@ -143,6 +145,18 @@ func newShardViewManager(
 	return m
 }
 
+// A persisted Unrecoverable can follow either Preparing or Up. Without the
+// transition history, treat it as possibly Up for AutoLoad scheduling.
+func recoveredMaybeUped(views []*viewpb.QueryViewOfShard) bool {
+	for _, view := range views {
+		switch qviews.QueryViewState(view.GetMeta().GetState()) {
+		case qviews.QueryViewStateUp, qviews.QueryViewStateDown, qviews.QueryViewStateUnrecoverable:
+			return true
+		}
+	}
+	return false
+}
+
 // RecoverShardViewManager restores a shard manager and rebuilds every durable
 // QueryView's DataView reference before the view can become active again.
 func RecoverShardViewManager(
@@ -159,6 +173,7 @@ func RecoverShardViewManager(
 		eventSubmitter: eventSubmitter,
 		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
 		dataViewRefs:   dataViewRefs,
+		maybeUped:      recoveredMaybeUped(recoveredViews),
 	}
 
 	if len(loadInfoRefs) > 0 {
@@ -244,9 +259,11 @@ func (m *ShardViewManager) Stats() *ShardStats {
 
 func (m *ShardViewManager) statsLocked() *ShardStats {
 	stats := &ShardStats{
-		Segments:   make(map[int64]*SegmentStats),
-		Resources:  make(map[int64]map[ResourceKey]struct{}),
-		UpBySchema: make(map[int32]SchemaUpView),
+		MaybeUped:       m.maybeUped,
+		PublishedSchema: m.publishedSchema,
+		Segments:        make(map[int64]*SegmentStats),
+		Resources:       make(map[int64]map[ResourceKey]struct{}),
+		UpBySchema:      make(map[int32]SchemaUpView),
 	}
 	resident := make(map[int64]struct{})
 
@@ -592,10 +609,26 @@ func (m *ShardViewManager) RequestRelease(ctx context.Context) error {
 
 // RequestReleaseWithControl adds explicit collection teardown policy without
 // changing the ordinary balancer retirement contract.
-func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, control *viewpb.QueryViewControl) (retErr error) {
+func (m *ShardViewManager) RequestReleaseWithControl(ctx context.Context, control *viewpb.QueryViewControl) error {
+	return m.requestRelease(ctx, control, nil)
+}
+
+// RequestReplicaRetirement keeps the old view until its replacement can serve
+// the public read schema. The readiness predicate only reads published snapshots.
+func (m *ShardViewManager) RequestReplicaRetirement(ctx context.Context, schema int32, ready func() bool) error {
+	return m.requestRelease(ctx, nil, func() bool {
+		return m.publishedSchema != nil && *m.publishedSchema == schema && ready()
+	})
+}
+
+func (m *ShardViewManager) requestRelease(ctx context.Context, control *viewpb.QueryViewControl, allowed func() bool) (retErr error) {
 	timer := releaseDuration.Begin()
 	defer timer.EndError(&retErr)
 	m.mu.Lock()
+	if allowed != nil && !allowed() {
+		m.mu.Unlock()
+		return nil
+	}
 	m.releaseRequested = true
 
 	for _, sm := range m.views {
@@ -659,6 +692,7 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 		m.refreshNewestPreparingLocked()
 
 	case qviews.QueryViewStateUp:
+		m.maybeUped = true
 		if m.preparingView == sm {
 			m.refreshNewestPreparingLocked()
 		}

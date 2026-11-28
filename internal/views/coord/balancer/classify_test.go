@@ -57,6 +57,7 @@ func testShardStats(
 	placements ...testSegmentPlacement,
 ) *coordview.ShardStats {
 	stats := &coordview.ShardStats{
+		MaybeUped:         upVersion != nil,
 		UpVersion:         upVersion,
 		UpLoadInfoVersion: loadInfoVersion,
 		Segments:          make(map[int64]*coordview.SegmentStats),
@@ -133,9 +134,9 @@ func TestClassify_DesiredAbsent(t *testing.T) {
 		stats *coordview.ShardStats
 		want  actionKind
 	}{
-		{"residual placements", testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)), actionRelease},
-		{"empty Up", testShardStats(ver(1, 1, 1), 0), actionRelease},
-		{"SN-only failed or retiring view", testShardStats(nil, 0), actionRelease},
+		{"residual placements", testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)), actionNone},
+		{"empty Up", testShardStats(ver(1, 1, 1), 0), actionNone},
+		{"SN-only failed or retiring view", testShardStats(nil, 0), actionNone},
 		{"absent", nil, actionNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

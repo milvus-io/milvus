@@ -118,7 +118,7 @@ func TestPreparationPriorityCapturesRGReplicaRateShares(t *testing.T) {
 }
 
 func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
-	mockey.PatchConvey("health is per shard; stopping still serves; persisted AutoLoad boosts only shards without healthy Up views", t, func() {
+	mockey.PatchConvey("health is per shard; stopping still serves; AutoLoad boosts initial preparation per shard", t, func() {
 		cfg := cfgFor(10, 1, nil, nil)
 		cache := newTestCache(cfg)
 		id := qviews.ShardID{ReplicaID: 1, VChannel: "p_10v0"}
@@ -145,14 +145,14 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		cfg.AutoLoad = true
 		cache.PublishLoadConfig(10, cfg, 2)
 		auto := b.preparationPriorities()
-		require.EqualValues(t, 12, auto.preparationPriority(id), "AutoLoad with no healthy Up overrides cold history")
+		require.EqualValues(t, -3, auto.preparationPriority(id), "losing a serving QN does not restore the initial AutoLoad priority")
 		cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 		require.EqualValues(t, -8, b.preparationPriorities().preparationPriority(id), "AutoLoad does not boost a cold handoff")
 		cache.PublishNode(1, nil)
 		cfg = cfg.Clone() // The cache retains published configs as immutable snapshots.
 		cfg.AutoLoad = false
 		cache.PublishLoadConfig(10, cfg, 3)
-		require.EqualValues(t, 12, auto.preparationPriority(id), "captured load config remains immutable")
+		require.EqualValues(t, 12, auto.preparationPriority(other), "captured AutoLoad config still applies to a sibling that never served")
 		require.EqualValues(t, -3, b.preparationPriorities().preparationPriority(id))
 		reader.snapshot = &viewfeedback.PlanningSnapshot{}
 		require.EqualValues(t, 2, b.preparationPriorities().preparationPriority(id))
@@ -160,8 +160,37 @@ func TestPreparationPriorityUpViewHealthAndAutoLoad(t *testing.T) {
 		cfg.AutoLoad = true
 		cache.PublishLoadConfig(10, cfg, 4)
 		b = NewDefaultBalancer(cache, nil, NewDefaultBalancePolicy(), nil)
-		require.EqualValues(t, 12, b.preparationPriorities().preparationPriority(id), "AutoLoad does not require feedback")
+		require.EqualValues(t, 2, b.preparationPriorities().preparationPriority(id), "no feedback after serving")
+		require.EqualValues(t, 12, b.preparationPriorities().preparationPriority(other), "initial AutoLoad does not require feedback")
 	})
+}
+
+func TestAutoLoadPriorityAfterShardManagerRemoval(t *testing.T) {
+	cfg := cfgFor(10, 1, nil, nil)
+	cfg.AutoLoad = true
+	c := newTestCache(cfg)
+	id := qviews.ShardID{ReplicaID: 1, VChannel: "p_10v0"}
+	b := NewDefaultBalancer(c, nil, NewDefaultBalancePolicy(), nil)
+	priority := func() int32 { return b.preparationPriorities().preparationPriority(id) }
+	require.EqualValues(t, 12, priority())
+	c.PublishShard(id, &coordview.ShardStats{MaybeUped: true})
+	require.EqualValues(t, 2, priority())
+	c.PublishShard(id, nil) // Remember earlier Up across manager retirement while still desired.
+	require.EqualValues(t, 2, priority())
+	c.PublishShard(id, &coordview.ShardStats{})
+	require.EqualValues(t, 2, priority())
+	c.PublishShard(id, nil)
+	c.PublishLoadConfig(10, cfg.Clone(), 2)
+	require.EqualValues(t, 2, priority())
+
+	c.PublishLoadConfig(10, cfgFor(10, 2, nil, nil), 3)
+	c.PublishLoadConfig(10, cfg.Clone(), 4)
+	require.EqualValues(t, 12, priority(), "removing the replica ends its load cycle")
+	c.PublishShard(id, &coordview.ShardStats{MaybeUped: true})
+	c.PublishShard(id, nil)
+	c.PublishLoadConfig(10, nil, 5)
+	c.PublishLoadConfig(10, cfg.Clone(), 6)
+	require.EqualValues(t, 12, priority(), "full release resets AutoLoad for a new load")
 }
 
 func TestPreparationPriorityPlanPublishesImmutableControl(t *testing.T) {

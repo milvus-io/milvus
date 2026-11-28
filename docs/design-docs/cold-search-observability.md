@@ -47,7 +47,7 @@ cancellation cannot be distinguished from other cancellations at that boundary.
 | Request cohort histogram | total, readiness, execution, retry_wait | Same completed requests; total = readiness + execution + retry_wait, including zero execution on readiness failure |
 | Coord / auto_load | shared_lifecycle, load_submit, ready_wait, caller_wait | QueryCoord owns automatic loading. Lifecycle stages count once per singleflight worker; caller_wait counts each EnsureCollectionReady RPC that joined it |
 | Coord / readiness | check | One EnsureCollectionReady fast-path check; `not_ready` when the caller must join a load |
-| Coord / reconcile | trigger_wait, snapshot, plan, apply, total | Coalesced trigger batch's oldest enqueue; one reconciliation for the others |
+| Coord / reconcile | trigger_wait, snapshot, plan, apply, total | First scored shard entering an empty priority queue (or the previous claim leaving a backlog) until the next batch claim; one reconciliation for the others |
 | Coord / apply | ensure, prepare, release, shard_lock_wait, shard_lock_hold, pin_dataview, publish_stats | One prepare/release; pin_dataview runs outside the manager lock, and the lock stages cover the critical section that follows it |
 | Coord / flush | pending_total, batch_hold, same_shard_wait, eligible_wait | One merged pending shard cohort; original enqueue survives merges; reasons are exclusive |
 | Coord / flush | pack, catalog_save, after_persist, sync_enqueue, execute | One claimed batch; catalog_save/views counts attempted persisted entries |

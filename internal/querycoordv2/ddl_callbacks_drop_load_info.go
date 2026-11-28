@@ -22,7 +22,6 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -86,22 +85,16 @@ func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message
 }
 
 func (s *Server) waitQueryViewsReleased(ctx context.Context, collectionID int64) error {
-	// Join a batch queued after desired-state withdrawal. Its completion drains
-	// older planning before checking the registry, so an in-flight prepare cannot
-	// create a shard after an empty-registry check. Concurrent releases share the
-	// batch instead of each synchronously running Reconcile.
 	runtime := s.qviewsRuntime
-	completion := runtime.balancer.TriggerWithCompletion(balancer.TriggerScope{DirtyCollections: []int64{collectionID}})
-	select {
-	case <-completion.Done():
-		if err := completion.Get(); err != nil {
-			return err
-		}
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-runtime.readyChanges.Done():
-		return merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for QueryView release, collection=%d", collectionID)
+	registry := runtime.shardViewRegistry
+	if err := registry.RequestCollectionRelease(ctx, collectionID); err != nil {
+		return err
 	}
+	return s.waitForFinalShardRemoval(ctx, collectionID)
+}
+
+func (s *Server) waitForFinalShardRemoval(ctx context.Context, collectionID int64) error {
+	runtime := s.qviewsRuntime
 	registry := runtime.shardViewRegistry
 	changed := make(chan struct{}, 1)
 	// Subscribe before checking to avoid losing a final-removal notification.
@@ -118,11 +111,13 @@ func (s *Server) waitQueryViewsReleased(ctx context.Context, collectionID int64)
 		}
 		// Dropping views can have neither Up nor segment stats. Only final
 		// registry removal proves node cleanup and durable deletion completed.
-		if len(registry.CollectionShards(collectionID)) == 0 {
+		if !registry.HasCollectionShards(collectionID) {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
+		case <-runtime.readyChanges.Done():
+			return merr.WrapErrServiceUnavailableMsg("querycoord stopped while waiting for QueryView release, collection=%d", collectionID)
 		case <-changed:
 		}
 	}

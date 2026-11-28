@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -33,7 +32,7 @@ func TestSchemaPublicationRetry(t *testing.T) {
 		mockey.PatchConvey(scenario, t, func() {
 			previous := qvresource.Resource()
 			defer qvresource.Init(previous)
-			qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
+			qvresource.Init(&qvresource.Resources{})
 			published := &model.Collection{CollectionID: 1, SchemaVersion: 1, UpdateTimestamp: 50}
 			switch scenario {
 			case "published replay":
@@ -60,7 +59,7 @@ func TestSchemaPublicationRetry(t *testing.T) {
 				}
 				return nil
 			}).Build()
-			mockey.Mock((*coordview.ShardViewRegistry).PublishCollectionSchema).To(func(_ *coordview.ShardViewRegistry, id int64, version int32) {
+			mockey.Mock((*qvresource.Resources).PublishCollectionSchema).To(func(_ *qvresource.Resources, id int64, version int32) {
 				require.EqualValues(t, 1, id)
 				if scenario == "superseded replay" {
 					require.EqualValues(t, 3, version)

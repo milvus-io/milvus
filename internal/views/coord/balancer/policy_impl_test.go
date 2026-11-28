@@ -45,7 +45,7 @@ func upStats(version qviews.DataVersion, placements ...testSegmentPlacement) *co
 	)
 }
 
-func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
+func TestDefaultBalancePolicy_SkipsWithdrawnCollection(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 10, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	c := balancercache.New(policyTestConfig())
 	c.PublishShard(shardID, testShardStats(nil, 0, placement(101, 1, 1, coordview.SegmentStateUp)))
@@ -53,8 +53,7 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID, shardID})
 
 	require.Empty(t, plan.Prepares)
-	assert.Equal(t, []qviews.ShardID{shardID}, plan.Releases)
-	require.True(t, plan.ReleaseControls[shardID].GetPreemptServingLease())
+	require.Empty(t, plan.Releases)
 }
 
 func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(t *testing.T) {
@@ -213,7 +212,7 @@ func TestDefaultBalancePolicy_ReusedShardRowsAreNotDoubleCounted(t *testing.T) {
 		"shard A must contribute 100k rows once, not 200k rows after reuse")
 }
 
-func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *testing.T) {
+func TestDefaultBalancePolicy_RetainedOldReplicaDoesNotReserveTargetRows(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	releaseShard := qviews.ShardID{ReplicaID: 99, VChannel: "by-dev-rootcoord-dml_0_1v9"}
 	loadShard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
@@ -235,10 +234,10 @@ func TestDefaultBalancePolicy_ReleasedShardRowsAreRemovedBeforeAllocation(t *tes
 
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{loadShard, releaseShard})
 
-	assert.Equal(t, []qviews.ShardID{releaseShard}, plan.Releases)
+	assert.Empty(t, plan.Releases)
 	require.Contains(t, plan.Prepares, loadShard)
 	assert.Equal(t, int64(1), assignmentsFromBuilder(plan.Prepares[loadShard])[201],
-		"the released shard removes 100k rows from node 1 before new allocation")
+		"the old replica keeps its Up but no longer reserves target rows")
 }
 
 func TestDefaultBalancePolicy_OptionalOptimizationRequiresMovement(t *testing.T) {
@@ -283,7 +282,12 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 
 	publishBackgroundRows(c, map[int64]int64{1: 890})
 
-	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID})
+	refreshing := newPlanningContext(c)
+	refreshing.deferOptimization = true
+	policy := NewDefaultBalancePolicy()
+	require.Empty(t, policy.Plan(refreshing, []qviews.ShardID{shardID}).Prepares, "partial target totals must not trigger an optional migration")
+
+	plan := policy.Plan(c, []qviews.ShardID{shardID})
 
 	require.Contains(t, plan.Prepares, shardID)
 	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
@@ -609,12 +613,18 @@ func TestReleaseControlDistinguishesCollectionAndReplicaRemoval(t *testing.T) {
 			shard := cacheShard(1, 10)
 			c := newTestCache(cfgFor(1, 11, nil, nil))    // Replica 10 is no longer desired.
 			c.PublishShard(shard, testShardStats(nil, 0)) // SN-only Down still needs cleanup.
+			target := cacheShard(1, 11)
+			c.PublishDataView(1, cacheData(1, target.VChannel))
+			c.PublishShard(target, testShardStats(ver(1, 0, 1), 1))
 			if collectionReleased {
 				c.PublishLoadConfig(1, nil, 2)
 			}
 			plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shard})
-			require.Contains(t, plan.Releases, shard)
-			require.Equal(t, collectionReleased, plan.ReleaseControls[shard].GetPreemptServingLease())
+			if collectionReleased {
+				require.Empty(t, plan.Releases)
+			} else {
+				require.Contains(t, plan.Releases, shard)
+			}
 		})
 	}
 }

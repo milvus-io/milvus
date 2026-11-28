@@ -1,6 +1,9 @@
 package balancer
 
 import (
+	"fmt"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,45 +29,48 @@ func TestResolveCacheScope(t *testing.T) {
 	c.PublishShard(unrelated, cacheStats(201, 200, 100, coordview.SegmentStateUp, true))
 	for _, tc := range []struct {
 		name    string
-		pending triggerBatch
+		pending TriggerScope
 		want    []qviews.ShardID
 	}{
-		{"collection expands replicas and channels including residuals", triggerBatch{dirtyColls: setOf[int64](1)}, []qviews.ShardID{a, a1, b, b1, residual}},
-		{"direct shard does not expand siblings", triggerBatch{dirtyShards: setOf(a)}, []qviews.ShardID{a}},
-		{"node includes zero row placements", triggerBatch{dirtyNodes: setOf[int64](100)}, []qviews.ShardID{a, residual}},
-		{"missing node", triggerBatch{dirtyNodes: setOf[int64](999)}, nil},
-		{"missing collection", triggerBatch{dirtyColls: setOf[int64](999)}, nil},
-		{"merged scopes deduplicate", triggerBatch{dirtyColls: setOf[int64](1), dirtyShards: setOf(a, unrelated), dirtyNodes: setOf[int64](100)}, []qviews.ShardID{a, a1, b, b1, residual, unrelated}},
+		{"collection expands replicas and channels including residuals", TriggerScope{DirtyCollections: []int64{1}}, []qviews.ShardID{a, a1, b, b1, residual}},
+		{"direct shard does not expand siblings", TriggerScope{DirtyShards: []qviews.ShardID{a}}, []qviews.ShardID{a}},
+		{"node includes zero row placements", TriggerScope{DirtyNodes: []int64{100}}, []qviews.ShardID{a, residual}},
+		{"missing node", TriggerScope{DirtyNodes: []int64{999}}, nil},
+		{"missing collection", TriggerScope{DirtyCollections: []int64{999}}, nil},
+		{"merged scopes deduplicate", TriggerScope{DirtyCollections: []int64{1}, DirtyShards: []qviews.ShardID{a, unrelated}, DirtyNodes: []int64{100}}, []qviews.ShardID{a, a1, b, b1, residual, unrelated}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.ElementsMatch(t, tc.want, resolveCacheScope(c, tc.pending))
+			require.ElementsMatch(t, tc.want, discoveredIDs(c, tc.pending))
 		})
 	}
 	c.PublishLoadConfig(1, nil, 2)
-	require.ElementsMatch(t, []qviews.ShardID{a, residual}, resolveCacheScope(c, triggerBatch{dirtyColls: setOf[int64](1)}), "release retains actual shards without expanding removed replicas")
+	require.Empty(t, discoveredIDs(c, TriggerScope{DirtyCollections: []int64{1}}), "explicit release bypasses shard discovery")
 }
 
-func TestTriggerQueueCoalescesAndPreservesSuccessorWork(t *testing.T) {
-	q := newTriggerQueue()
-	a, b := cacheShard(1, 10), cacheShard(2, 20)
-	q.add(TriggerScope{DirtyShards: []qviews.ShardID{a, a}, DirtyCollections: []int64{1}})
-	q.add(TriggerScope{NodeChanged: true, DirtyNodes: []int64{100}})
-	<-q.signalCh()
-	first := q.takePending()
-	require.False(t, first.scan)
-	require.Equal(t, setOf(a), first.dirtyShards)
-	require.Equal(t, setOf[int64](1), first.dirtyColls)
-	require.Equal(t, setOf[int64](100), first.dirtyNodes)
-	q.add(TriggerScope{DirtyShards: []qviews.ShardID{b}})
-	<-q.signalCh()
-	require.Equal(t, setOf(a), first.dirtyShards, "detached batch cannot absorb new events")
-	require.Equal(t, setOf(b), q.takePending().dirtyShards)
-	require.True(t, q.takePending().empty())
-	for _, scopes := range [][]TriggerScope{nil, {{NodeChanged: true}}} {
-		q.add(scopes...)
-		<-q.signalCh()
-		require.True(t, q.takePending().scan)
+func TestRetiringReplicaScopeUsesResidentChannels(t *testing.T) {
+	c := replicaCache(1, 1)
+	t.Cleanup(c.Close)
+	desired, old := cacheShard(1, 10), cacheShard(1, 11)
+	c.PublishShard(desired, &coordview.ShardStats{})
+	for i := range discoveryShardLimit + 1 {
+		c.PublishShard(qviews.ShardID{ReplicaID: old.ReplicaID, VChannel: fmt.Sprintf("ch_1v%d", i)}, &coordview.ShardStats{})
 	}
+	b := NewDefaultBalancer(c, nil, nil, nil)
+	scope := TriggerScope{RetiringReplicas: []int64{old.ReplicaID}}
+	b.publishScope(scope)
+	b.publishScope(scope)
+	require.Len(t, b.discovery.pending, 1)
+	var sizes []int
+	for batch := range b.discover(scope) {
+		sizes = append(sizes, len(batch.ids))
+		for _, id := range batch.ids {
+			require.Equal(t, old.ReplicaID, id.ReplicaID)
+		}
+	}
+	require.Equal(t, []int{discoveryShardLimit, 1}, sizes)
+	require.Empty(t, discoveredIDs(c, TriggerScope{RetiringReplicas: []int64{desired.ReplicaID, 999}}))
+	c.PublishLoadConfig(1, nil, 2)
+	require.Empty(t, discoveredIDs(c, scope), "collection release owns teardown")
 }
 
 func setOf[T comparable](values ...T) map[T]struct{} {
@@ -73,4 +79,15 @@ func setOf[T comparable](values ...T) map[T]struct{} {
 		set[value] = struct{}{}
 	}
 	return set
+}
+
+func discoveredIDs(c *balancercache.Cache, scope TriggerScope) []qviews.ShardID {
+	b := &DefaultBalancer{cache: c}
+	found := make(map[qviews.ShardID]struct{})
+	for part := range b.discover(scope) {
+		for _, id := range part.ids {
+			found[id] = struct{}{}
+		}
+	}
+	return slices.Collect(maps.Keys(found))
 }

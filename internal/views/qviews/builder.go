@@ -125,6 +125,11 @@ func (b *QueryViewAtCoordBuilder) DataVersion() DataVersion {
 	return b.dataVersion
 }
 
+// LoadIdentity identifies the desired load used to plan this ordinary preparation.
+func (b *QueryViewAtCoordBuilder) LoadIdentity() (int64, uint64) {
+	return b.collectionID, b.loadInfoVersion
+}
+
 func (b *QueryViewAtCoordBuilder) SetQueryVersion(queryVersion int64) *QueryViewAtCoordBuilder {
 	b.queryVersion = queryVersion
 	return b

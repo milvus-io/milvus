@@ -23,7 +23,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -128,6 +131,9 @@ func TestDefaultQViewsRuntimeSources(t *testing.T) {
 
 func TestReconcileSchemaVersionProvider(t *testing.T) {
 	const collectionID int64 = 1
+	balances := cache.New(nil)
+	t.Cleanup(balances.Close)
+	balances.PublishLoadConfig(collectionID, &loadmgr.LoadConfig{CollectionID: collectionID}, 1)
 	for _, tc := range []struct {
 		name             string
 		published        int32
@@ -167,10 +173,11 @@ func TestReconcileSchemaVersionProvider(t *testing.T) {
 				return &broadcaster.SchemaTarget{CollectionID: id, Schema: tc.pending}, nil
 			}).Build()
 			t.Cleanup(func() { patch.UnPatch() })
-			readVersion := reconcileSchemaVersionProvider(func(id int64) (*metacache.CollectionInfo, error) {
+			readVersion := reconcileSchemaVersionProvider(balances, func(id int64) (*metacache.CollectionInfo, error) {
 				steps = append(steps, "read")
 				return collections.GetCollectionInfo(id)
-			}, func(id int64, version int32) {
+			}, func(id int64, version int32, current func() bool) {
+				require.True(t, current())
 				require.Equal(t, collectionID, id)
 				require.Equal(t, tc.published, version)
 				steps = append(steps, "publish")
@@ -186,4 +193,39 @@ func TestReconcileSchemaVersionProvider(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSchemaReadAcrossCollectionReload(t *testing.T) {
+	ctx := t.Context()
+	registry, err := coordview.RecoverShardViewRegistry(ctx, &fakeQueryViewCatalog{}, nil)
+	require.NoError(t, err)
+	t.Cleanup(registry.Close)
+	balances := cache.New(nil)
+	t.Cleanup(balances.Close)
+	cfg := &loadmgr.LoadConfig{CollectionID: 1, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}
+	balances.PublishLoadConfig(1, cfg, 1)
+	pending := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(&broadcaster.SchemaTarget{Schema: &schemapb.CollectionSchema{Version: 4}}, nil).Build()
+	t.Cleanup(func() { pending.UnPatch() })
+	readVersion := reconcileSchemaVersionProvider(balances, func(id int64) (*metacache.CollectionInfo, error) {
+		balances.PublishLoadConfig(id, nil, 0)
+		require.NoError(t, registry.RequestCollectionRelease(ctx, id))
+		balances.PublishLoadConfig(id, cfg, 2)
+		return &metacache.CollectionInfo{Schema: &schemapb.CollectionSchema{Version: 2}}, nil
+	}, registry.PublishCollectionSchemaIf)
+	target, err := readVersion(ctx, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, target)
+	manager := registry.Ensure(qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"})
+	require.NoError(t, manager.RequestReplicaRetirement(ctx, 2, func() bool {
+		t.Fatal("the previous load's metadata read seeded the new manager")
+		return false
+	}))
+	readVersion = reconcileSchemaVersionProvider(balances, func(int64) (*metacache.CollectionInfo, error) {
+		return &metacache.CollectionInfo{Schema: &schemapb.CollectionSchema{Version: 3}}, nil
+	}, registry.PublishCollectionSchemaIf)
+	_, err = readVersion(ctx, 1)
+	require.NoError(t, err)
+	current := false
+	require.NoError(t, manager.RequestReplicaRetirement(ctx, 3, func() bool { current = true; return false }))
+	require.True(t, current)
 }

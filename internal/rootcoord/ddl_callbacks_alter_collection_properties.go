@@ -513,7 +513,7 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 	// Publication may have succeeded before a cache invalidation failed. Replaying
 	// that callback must not wait for a retired schema or overwrite newer metadata.
 	if published.UpdateTimestamp >= result.GetMaxTimeTick() {
-		resources.ShardViews.PublishCollectionSchema(id, published.SchemaVersion)
+		resources.PublishCollectionSchema(id, published.SchemaVersion)
 		return nil
 	}
 	if err := c.applyBoundFieldIndexesInline(ctx, result); err != nil {
@@ -526,7 +526,7 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		return merr.Wrap(err, "publish collection schema")
 	}
-	resources.ShardViews.PublishCollectionSchema(id, updates.GetSchema().GetVersion())
+	resources.PublishCollectionSchema(id, updates.GetSchema().GetVersion())
 	return nil
 }
 

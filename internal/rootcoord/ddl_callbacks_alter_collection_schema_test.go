@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1478,7 +1479,10 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 	}).Build()
 	defer publish.UnPatch()
 	previous := qvresource.Resource()
-	qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
+	qvresource.Init(&qvresource.Resources{
+		BalanceCache: balancercache.New(nil),
+		ShardViews:   &coordview.ShardViewRegistry{},
+	})
 	defer qvresource.Init(previous)
 	mixc := imocks.NewMixCoord(t)
 	handoff := mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, id int64, old, target *schemapb.CollectionSchema) error {

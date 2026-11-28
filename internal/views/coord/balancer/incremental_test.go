@@ -94,7 +94,7 @@ func TestIncrementalVersionAdvancePreservesLegalPlacements(t *testing.T) {
 	require.Equal(t, map[int64]int64{1000: 2, 1001: 1}, assignmentsFromBuilder(plan.Prepares[id]), "metadata advancement alone does not reshuffle healthy placements")
 }
 
-func TestIncrementalBoundedSearchContinuesPastUnhelpfulPrefix(t *testing.T) {
+func TestIncrementalSearchBalancesPastUnhelpfulPrefix(t *testing.T) {
 	c := newTestCache(cfgFor(1, 10, []int64{1}, nil))
 	id := cacheShard(1, 10)
 	c.PublishDataView(1, cacheData(1, id.VChannel, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6))
@@ -104,19 +104,16 @@ func TestIncrementalBoundedSearchContinuesPastUnhelpfulPrefix(t *testing.T) {
 	c.PublishShard(id, upStats(qviews.DataVersion{StreamingVersion: 1},
 		placement(1000, 1, 1, coordview.SegmentStateUp), placement(1001, 1, 1, coordview.SegmentStateUp), placement(1002, 1, 1, coordview.SegmentStateUp),
 		placement(1003, 1, 2, coordview.SegmentStateUp), placement(1004, 1, 2, coordview.SegmentStateUp), placement(1005, 1, 2, coordview.SegmentStateUp)))
-	profile := DefaultBalanceConfig()
-	profile.MaxCandidateEvaluationsPerShard = 1
-	c.UpdateBalanceConfig(profile)
 	policy := NewDefaultBalancePolicy()
 	var moves int
 	for i := 0; i < 100; i++ {
 		plan := policy.Plan(c, []qviews.ShardID{id})
-		require.Empty(t, plan.Retries, "a search budget is not an availability failure")
+		require.Empty(t, plan.Retries)
 		if builder := plan.Prepares[id]; builder != nil {
 			publishSuccessfulPlan(c, id, builder)
 			moves++
 		}
-		if len(plan.Prepares) == 0 && len(plan.Continues) == 0 {
+		if len(plan.Prepares) == 0 {
 			break
 		}
 	}

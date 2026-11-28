@@ -281,7 +281,19 @@ No Catalog or ReliableSyncer call is performed while `m.mu` is held.
 The scheduler merges pending events per `ShardID`. Persist effects are latest-win
 per versioned QueryView key; sync effects are latest-win per QueryView key and
 WorkNode key. It packs ready, non-inflight shard lanes according to the configured
-maximum ETCD transaction operation count. For each claimed batch it performs:
+maximum ETCD transaction operation count.
+
+Each ready shard has one indexed heap entry. The highest signed preparation
+priority among its pending Preparing, Ready or Up effects determines its rank.
+Sync-only recovery and promotion count. Terminal persists supersede older syncs
+of the same View for scoring. Cleanup alone uses priority zero. Merging effects
+may raise or lower a shard's rank while each QueryView keeps its original score.
+Equal scores use FIFO by readiness; every eight priority selections, the oldest
+ready shard gets a turn. Delayed, held and inflight shards are ineligible.
+Flush tasks select shards when they start executing. If the next shard will
+not fit in a nonempty batch, it stays ready for the next selection.
+
+For each claimed batch the scheduler performs:
 
 1. Flatten all `persists` and persist them. An oversized single-shard batch is
    sorted by ascending view version and split into transactions bounded by
@@ -519,6 +531,11 @@ Incremental statistics publication remains a separate optimization.
     and its collection/node reverse-index entries. The manager owns the release
     and emptiness preconditions; the registry only rechecks manager identity
     before deletion.
+
+An explicit collection Release also discards the registry's cached public schema
+version. Managers created during the next Load inherit the public version read
+from RootCoord for that load. Schema publication and Release order their cache
+updates under the registry lock, including when Release finds no resident shards.
 
 ## 8. Package Location
 

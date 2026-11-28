@@ -80,8 +80,11 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		if cfg == nil {
 			continue
 		}
+		if nodes, known := p.TargetNodes(id); known && len(nodes) == 0 {
+			continue
+		}
 		manager := b.viewRegistry.Get(id)
-		if manager == nil {
+		if manager == nil || configForShard(b.cache, id) != cfg {
 			continue
 		}
 		recovery := manager.PublishedRecovery(p.targetSchemaVersion(cfg.CollectionID))
@@ -105,7 +108,6 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		}
 		if err != nil {
 			result = errors.CombineErrors(result, err)
-			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{id}})
 		}
 	}
 	return result

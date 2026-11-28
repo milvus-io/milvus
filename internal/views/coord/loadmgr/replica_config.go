@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -62,39 +64,60 @@ func (m *CollectionLoadManager) prepareReplicaConfig(ctx context.Context, curren
 			return nil, merr.WrapErrResourceGroupNotFound(group)
 		}
 	}
-	next := current.Clone()
-	slices.SortFunc(next.Replicas, func(a, b *ReplicaAssignment) int { return cmp.Compare(a.ReplicaID, b.ReplicaID) })
-	priority := next.Replicas[0].Priority
-	kept := make([]*ReplicaAssignment, 0, replicas)
-	spare := make([]*ReplicaAssignment, 0)
-	assigned := make(map[string]int)
-	for _, replica := range next.Replicas {
-		if assigned[replica.ResourceGroup] < expected[replica.ResourceGroup] {
-			kept = append(kept, replica)
-			assigned[replica.ResourceGroup]++
-		} else {
-			spare = append(spare, replica)
+	sorted := current.SortedReplicas()
+	updated, err := ReconcileReplicas(sorted, expected, sorted[0].Priority, func() (int64, error) {
+		return m.replicas.AllocateReplicaID(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	next := *current
+	next.Replicas = updated
+	return &next, nil
+}
+
+// SortedReplicas returns the immutable assignments in stable ID order.
+func (c *LoadConfig) SortedReplicas() []*ReplicaAssignment {
+	if c == nil {
+		return nil
+	}
+	replicas := slices.Clone(c.Replicas)
+	slices.SortFunc(replicas, compareReplicaID)
+	return replicas
+}
+
+func compareReplicaID(a, b *ReplicaAssignment) int { return cmp.Compare(a.ReplicaID, b.ReplicaID) }
+
+// ReconcileReplicas retains the lowest IDs in each resource group and assigns
+// fresh IDs to deficits. The caller supplies current assignments in ID order.
+func ReconcileReplicas(current []*ReplicaAssignment, expected map[string]int, priority commonpb.LoadPriority, allocate func() (int64, error)) ([]*ReplicaAssignment, error) {
+	assigned := make(map[string]int, len(expected))
+	var replicas []*ReplicaAssignment
+	for _, r := range current {
+		if assigned[r.ResourceGroup] < expected[r.ResourceGroup] {
+			replicas = append(replicas, r)
+			assigned[r.ResourceGroup]++
 		}
 	}
 	for _, group := range slices.Sorted(maps.Keys(expected)) {
 		for i := assigned[group]; i < expected[group]; i++ {
-			var replica *ReplicaAssignment
-			if len(spare) > 0 {
-				replica, spare = spare[0], spare[1:]
-			} else {
-				id, err := m.replicas.AllocateReplicaID(ctx)
-				if err != nil {
-					return nil, err
-				}
-				replica = &ReplicaAssignment{ReplicaID: id}
+			id, err := allocate()
+			if err != nil {
+				return nil, err
 			}
-			replica.ResourceGroup, replica.Priority = group, priority
-			kept = append(kept, replica)
+			replicas = append(replicas, &ReplicaAssignment{ReplicaID: id, ResourceGroup: group, Priority: priority})
 		}
 	}
-	slices.SortFunc(kept, func(a, b *ReplicaAssignment) int { return cmp.Compare(a.ReplicaID, b.ReplicaID) })
-	next.Replicas = kept
-	return next, nil
+	slices.SortFunc(replicas, compareReplicaID)
+	return replicas, nil
+}
+
+func ReplicasToMessage(replicas []*ReplicaAssignment) []*messagespb.LoadReplicaConfig {
+	out := make([]*messagespb.LoadReplicaConfig, 0, len(replicas))
+	for _, r := range replicas {
+		out = append(out, &messagespb.LoadReplicaConfig{ReplicaId: r.ReplicaID, ResourceGroupName: r.ResourceGroup, Priority: r.Priority})
+	}
+	return out
 }
 
 // ReplicaNumberByResourceGroup resolves the count associated with each group.

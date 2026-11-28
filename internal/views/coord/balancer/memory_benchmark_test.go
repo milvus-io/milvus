@@ -13,13 +13,9 @@ import (
 // intentionally not applied, keeping the before/after workload identical.
 func BenchmarkMemoryPlan(b *testing.B) {
 	for _, tc := range []struct{ nodes, shards, segments int }{{8, 100, 10}, {1000, 100, 10}, {8, 1000, 10}, {8, 1, 10000}} {
-		for _, mode := range []string{"unchanged", "move", "loss", "release", "continuation"} {
+		for _, mode := range []string{"unchanged", "move", "loss", "release"} {
 			b.Run(fmt.Sprintf("%s/n%d/s%d/seg%d", mode, tc.nodes, tc.shards, tc.segments), func(b *testing.B) {
-				cfg := DefaultBalanceConfig()
-				if mode == "continuation" {
-					cfg.MaxCandidateEvaluationsPerShard = 1
-				}
-				c := balancercache.New(cfg)
+				c := balancercache.New(DefaultBalanceConfig())
 				for n := 1; n <= tc.nodes; n++ {
 					c.PublishNode(int64(n), &NodeInfo{NodeID: int64(n), Alive: true, ResourceGroup: "rg1"})
 				}
@@ -68,8 +64,8 @@ func BenchmarkMemoryPlan(b *testing.B) {
 					if (mode == "move" || mode == "loss") && len(plan.Prepares) == 0 {
 						b.Fatal("expected preparation")
 					}
-					if mode == "release" && len(plan.Releases) != len(dirty) {
-						b.Fatal("missing release")
+					if mode == "release" && len(plan.Releases) != 0 {
+						b.Fatal("placement scheduled an explicit release")
 					}
 				}
 			})

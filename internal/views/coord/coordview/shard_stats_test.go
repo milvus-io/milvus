@@ -22,6 +22,35 @@ func TestStats_Empty(t *testing.T) {
 	assert.Nil(t, stats.PreparingVersion)
 }
 
+func TestMaybeUpedRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		states []qviews.QueryViewState
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"preparing", []qviews.QueryViewState{qviews.QueryViewStatePreparing}, false},
+		{"up", []qviews.QueryViewState{qviews.QueryViewStateUp}, true},
+		{"down", []qviews.QueryViewState{qviews.QueryViewStateDown}, true},
+		{"failed", []qviews.QueryViewState{qviews.QueryViewStateUnrecoverable}, true},
+		{"retry_after_failure", []qviews.QueryViewState{qviews.QueryViewStatePreparing, qviews.QueryViewStateUnrecoverable}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var records []*viewpb.QueryViewOfShard
+			for i, state := range tc.states {
+				view := buildTestViewWithVersion(1, 1, int64(len(tc.states)-i), 1)
+				view.Meta.State = viewpb.QueryViewState(state)
+				records = append(records, view)
+			}
+			mgr := newTestManager(t, newMockCatalog(), newMockSyncer(), records...)
+			require.Equal(t, tc.want, mgr.Stats().MaybeUped)
+			recovered, err := RecoverShardViewManager(t.Context(), testShardID, &capturedDirtyViewEventSubmitter{}, stubDataViewRefProvider{}, records)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, recovered.Stats().MaybeUped)
+		})
+	}
+}
+
 func TestStats_PreparingOnly(t *testing.T) {
 	mgr := newTestManager(t, newMockCatalog(), newMockSyncer())
 
@@ -77,6 +106,7 @@ func TestStats_UpOnly(t *testing.T) {
 	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateUp)
 
 	stats := mgr.Stats()
+	require.True(t, stats.MaybeUped)
 	require.Equal(t, int32(3), stats.UpSchemaVersion)
 	require.Zero(t, stats.PreparingSchemaVersion)
 	require.NotNil(t, stats.UpVersion)
@@ -95,6 +125,10 @@ func TestStats_UpOnly(t *testing.T) {
 			assert.Equal(t, SegmentStateUp, state)
 		}
 	}
+
+	require.NoError(t, mgr.RequestRelease(t.Context()))
+	require.Nil(t, mgr.Stats().UpVersion)
+	require.True(t, mgr.Stats().MaybeUped)
 }
 
 func TestStats_UpAndPreparing(t *testing.T) {
@@ -210,6 +244,7 @@ func TestStats_UnrecoverableIncludedByNode(t *testing.T) {
 	onQueryNodeLost(testQN1)
 
 	stats := mgr.Stats()
+	require.False(t, stats.MaybeUped, "a first preparation that fails live can still receive the AutoLoad boost")
 	assert.Nil(t, stats.UpVersion)
 	assert.Nil(t, stats.PreparingVersion)
 	require.Len(t, stats.Segments, 1)

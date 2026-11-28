@@ -89,3 +89,26 @@ func TestMaximumObjectHeap(t *testing.T) {
 		assert.Equal(t, i, heap.Pop().value)
 	}
 }
+
+func TestIndexedHeap(t *testing.T) {
+	type item struct{ value, index int }
+	h := NewIndexedHeap(func(a, b *item) bool { return a.value > b.value },
+		func(entry *item, i int) { entry.index = i })
+	a, b, c := &item{value: -3}, &item{value: 0}, &item{value: 10}
+	h.Push(a)
+	h.Push(b)
+	h.Push(c)
+	assert.Same(t, c, h.Peek())
+	a.value = 12
+	h.Fix(a.index)
+	assert.Same(t, a, h.Peek())
+	a.value = -5
+	h.Fix(a.index)
+	assert.Same(t, b, h.Remove(b.index))
+	assert.Equal(t, -1, b.index)
+	assert.Same(t, c, h.Pop())
+	assert.Equal(t, -1, c.index)
+	assert.Equal(t, 0, a.index)
+	assert.Same(t, a, h.Pop())
+	assert.Zero(t, h.Len())
+}
