@@ -53,6 +53,13 @@ const (
 	// TimeStampField is the ID of the Timestamp field reserved by the system
 	TimeStampField = 1
 
+	// CalcDistanceFieldID is the reserved FieldId of the synthetic per-row
+	// distance column that query() returns via the calc_distance query param.
+	// It is chosen to never collide with schema field ids (user ids start at
+	// StartOfUserFieldID). Both the proxy (ORDER BY remap target) and the
+	// QueryNode (column producer) reference this single constant.
+	CalcDistanceFieldID = int64(-10000)
+
 	// RowIDFieldName defines the name of the RowID field
 	RowIDFieldName = "RowID"
 

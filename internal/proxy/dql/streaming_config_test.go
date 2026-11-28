@@ -289,7 +289,7 @@ func TestStreamingReductionSchemaCoverage(t *testing.T) {
 		{
 			message:   &planpb.QueryPlanNode{},
 			reduction: `is_count limit group_by_field_ids aggregates order_by_fields query_iterator_cursor`,
-			other:     `predicates`,
+			other:     `predicates calc_distance`,
 		},
 		{
 			message: &planpb.QueryInfo{},

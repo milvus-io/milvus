@@ -83,6 +83,7 @@ func TestMaterializeInScope(t *testing.T) {
 		{"order by", func(q *QueryTask) { q.queryParams.orderByFields = []string{"text:desc"} }, false},
 		{"aggregate", func(q *QueryTask) { q.Aggregates = []*planpb.Aggregate{{}} }, false},
 		{"group by", func(q *QueryTask) { q.GroupByFieldIds = []int64{101} }, false},
+		{"calc distance", func(q *QueryTask) { q.queryParams.calcDistance = &calcDistanceSpec{} }, false},
 		{"nil params", func(q *QueryTask) { q.queryParams = nil }, false},
 		{"array output", func(q *QueryTask) {
 			q.schema = mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{

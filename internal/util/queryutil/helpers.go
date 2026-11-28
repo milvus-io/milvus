@@ -254,6 +254,10 @@ func buildMergedIDs(results []*internalpb.RetrieveResults, selectedRows []rowRef
 // the function falls back to template-based inference for backward compatibility.
 func buildMergedFieldDataRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx]
+	// A field keeps nullness across the merge either when the schema marks it
+	// nullable, or — for synthetic columns outside the schema such as the
+	// calc_distance distance column (common.CalcDistanceFieldID) — when the
+	// template itself carries a ValidData bitmap.
 	isNullable := (fieldSchema != nil && fieldSchema.GetNullable()) ||
 		(fieldSchema == nil && len(typeutil.GetFieldDataValidData(template)) > 0)
 
