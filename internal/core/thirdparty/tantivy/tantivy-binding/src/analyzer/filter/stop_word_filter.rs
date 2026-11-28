@@ -62,7 +62,10 @@ mod tests {
     fn test_stop_words_filter_with_file() {
         init_log();
         let file_dir = Path::new(file!()).parent().unwrap();
-        let stop_words_path = file_dir.join("../data/test/stop_words_dict.txt");
+        let stop_words_path = file_dir
+            .join("../data/test/stop_words_dict.txt")
+            .canonicalize()
+            .unwrap();
         let stop_words_path_str = stop_words_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -76,6 +79,7 @@ mod tests {
 
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(stop_words_path.parent().unwrap().to_path_buf());
         let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
 
@@ -118,6 +122,7 @@ mod tests {
 
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(stop_words_path.parent().unwrap().to_path_buf());
         let filter = StopWordFilter::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
 

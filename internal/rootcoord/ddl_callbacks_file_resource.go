@@ -19,9 +19,14 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"io"
+	"math"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -33,11 +38,6 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 	}
 	if req.GetPath() == "" {
 		return merr.WrapErrParameterMissing("file resource path")
-	}
-	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
-		return err
-	} else if !exist {
-		return merr.WrapErrParameterInvalidMsg("file resource path not exist")
 	}
 
 	// Resource changes conflict with schema DDL, which reserves resource refs.
@@ -51,30 +51,64 @@ func (c *Core) broadcastAddFileResource(ctx context.Context, req *milvuspb.AddFi
 		}
 	}()
 
+	// Keep the read bound and its final check consistent across the unlocked I/O.
+	maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize()
 	var size int64
 	sizeChecked := false
 	for {
 		resource := c.meta.FindFileResource(ctx, req.GetName())
+		// An unchanged registration was already admitted under its original policy.
+		if resource == nil || resource.GetPath() != req.GetPath() {
+			resolvedPath, resolveErr := fileresource.RestrictSource(c.storage).ResolvePath(req.GetPath())
+			if resolveErr != nil {
+				return resolveErr
+			}
+			req.Path = resolvedPath
+		}
 		if resource != nil && resource.GetPath() != req.GetPath() {
 			return merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())
 		}
 		if resource == nil {
-			if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-				if !sizeChecked {
-					// Storage admission must not block unrelated DDL.
-					broadcaster.Close()
-					broadcaster = nil
-					size, err = c.storage.Size(ctx, req.GetPath())
-					if err != nil {
-						return err
-					}
-					broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
-					if err != nil {
-						return err
-					}
-					sizeChecked = true
-					continue
+			if !sizeChecked {
+				// Storage admission must not block unrelated DDL.
+				broadcaster.Close()
+				broadcaster = nil
+				source := fileresource.RestrictSource(c.storage)
+				size, err = source.Size(ctx, req.GetPath())
+				if errors.Is(err, merr.ErrIoKeyNotFound) {
+					return merr.WrapErrParameterInvalidMsg("file resource path not exist")
 				}
+				if err != nil {
+					return err
+				}
+				if maxFileSize > 0 {
+					if size >= 0 && size <= maxFileSize {
+						if maxFileSize == math.MaxInt64 {
+							return merr.WrapErrServiceInternalMsg("file resource read limit is too large")
+						}
+						reader, readErr := source.Reader(ctx, req.GetPath())
+						if readErr != nil {
+							return readErr
+						}
+						readSize, readErr := io.Copy(io.Discard, io.LimitReader(reader, maxFileSize+1))
+						closeErr := reader.Close()
+						if readErr != nil {
+							return merr.Wrap(readErr, "validate file resource")
+						}
+						if closeErr != nil {
+							return merr.Wrap(closeErr, "close file resource")
+						}
+						size = readSize
+					}
+				}
+				broadcaster, err = broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+				if err != nil {
+					return err
+				}
+				sizeChecked = true
+				continue
+			}
+			if maxFileSize > 0 {
 				if size < 0 {
 					return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)
 				}

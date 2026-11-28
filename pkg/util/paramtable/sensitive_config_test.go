@@ -66,7 +66,7 @@ func TestBaseTablePublicGroupEnvironmentOverride(t *testing.T) {
 			base := NewBaseTable(SkipRemote(true), Interval(0))
 			t.Cleanup(base.Manager().Close)
 			params := functionConfig{}
-			params.init(base)
+			params.init(base, defaultLocalStoragePath)
 			mgr := base.Manager()
 			require.Equal(t, "false", params.GetTextEmbeddingProviderConfig("openai")["enable"])
 			require.Equal(t, "credential-env-canary", params.GetTextEmbeddingProviderConfig("openai")["credential"])
@@ -113,7 +113,7 @@ func TestBaseTableFileRefreshCannotEndorseOpaqueEnvironment(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true), Interval(0))
 	t.Cleanup(base.Manager().Close)
 	params := functionConfig{}
-	params.init(base)
+	params.init(base, defaultLocalStoragePath)
 	mgr := base.Manager()
 	_, _, err := mgr.GetRegisteredConfig(key)
 	require.ErrorIs(t, err, config.ErrKeyUnregistered)

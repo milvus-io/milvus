@@ -1,4 +1,3 @@
-use crate::analyzer::create_analyzer as create_new_analyzer;
 use crate::error::Result;
 use tantivy::tokenizer::{BoxTokenStream as NewBoxTokenStream, TextAnalyzer as NewAnalyzer};
 use tantivy_5::tokenizer::{TextAnalyzer, Token, TokenStream, Tokenizer};
@@ -61,13 +60,29 @@ impl Tokenizer for AdapterAnalyzer {
 }
 
 pub fn create_analyzer(params: &str) -> Result<TextAnalyzer> {
-    let tokenizer = create_new_analyzer(params, "")?;
+    let tokenizer = crate::analyzer::create_analyzer(params, "")?;
     Ok(TextAnalyzer::builder(AdapterAnalyzer::new(tokenizer)).build())
 }
 
 #[cfg(test)]
 mod tests {
     use super::create_analyzer;
+
+    #[test]
+    fn restores_persisted_dictionary_outside_admission_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("stop.txt");
+        std::fs::write(&file, "the\n").unwrap();
+        let params = serde_json::json!({
+            "tokenizer": "standard",
+            "filter": [{"type": "stop", "stop_words_file": {"type": "local", "path": file}}]
+        });
+        let mut analyzer = create_analyzer(&params.to_string()).unwrap();
+        let mut stream = analyzer.token_stream("the cat");
+        assert!(stream.advance());
+        assert_eq!(stream.token().text, "cat");
+        assert!(!stream.advance());
+    }
 
     #[test]
     fn test_standard_analyzer() {

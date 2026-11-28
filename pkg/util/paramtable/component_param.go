@@ -178,7 +178,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.RbacConfig.init(bt)
 	p.GpuConfig.init(bt)
 	p.KnowhereConfig.init(bt)
-	p.FunctionCfg.init(bt)
+	p.FunctionCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.CredentialCfg.init(bt)
 
 	p.InternalTLSCfg.Init(bt)
@@ -489,6 +489,7 @@ type commonConfig struct {
 	QNFileResourceMode          ParamItem `refreshable:"false"`
 	DNFileResourceMode          ParamItem `refreshable:"false"`
 	ProxyFileResourceMode       ParamItem `refreshable:"false"`
+	FileResourceAllowedPath     ParamItem `refreshable:"false"`
 	FileResourceMaxFileSize     ParamItem `refreshable:"true"`
 	FileResourceDownloadTimeout ParamItem `refreshable:"true"`
 
@@ -2040,11 +2041,21 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 	}
 	p.ProxyFileResourceMode.Init(base.mgr)
 
+	p.FileResourceAllowedPath = ParamItem{
+		Key:          "common.fileResource.allowedPath",
+		Version:      "3.0",
+		DefaultValue: "",
+		Doc:          "New file resources must use this complete object-key prefix (remote storage) or absolute directory (local storage). Existing registrations are not rechecked. Empty uses the object-storage root plus /file_resource for remote storage, or localStorage.path/file_resource for local storage. Local request paths may be relative to this directory. Restart required.",
+		Export:       true,
+		Forbidden:    true,
+	}
+	p.FileResourceAllowedPath.Init(base.mgr)
+
 	p.FileResourceMaxFileSize = ParamItem{
 		Key:          "common.fileResource.maxFileSize",
 		Version:      "3.0",
-		DefaultValue: "0",
-		Doc:          "Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.",
+		DefaultValue: "64m",
+		Doc:          "Maximum bytes accepted by a new AddFileResource registration, including actual reads. Existing registrations are not rechecked; must be positive.",
 		Export:       true,
 		Formatter: func(v string) string {
 			value := strings.ToLower(v)
@@ -2070,8 +2081,8 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 				multiplier = 1024
 			}
 			size, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || size < 0 || size > math.MaxInt64/multiplier {
-				return "0"
+			if err != nil || size <= 0 || size > math.MaxInt64/multiplier {
+				return "64m"
 			}
 			return v
 		},

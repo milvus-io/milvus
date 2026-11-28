@@ -48,6 +48,7 @@ fs2 = "0.4"
 lindera-dictionary = { version = "0.42.4", default-features = false }
 futures = "0.3.21"
 libc = "0.2"
+tempfile = "3.0"
 scopeguard = "1.2"
 zstd-sys = "=2.0.9"
 env_logger = "0.11.3"
@@ -91,7 +92,6 @@ tar = { version = "0.4.44", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
-tempfile = "3.0"
 
 [build-dependencies]
 cbindgen = "0.27.0"

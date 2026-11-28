@@ -1,4 +1,4 @@
-use crate::analyzer::options::get_resource_path;
+use crate::analyzer::options::with_resource_file;
 use crate::analyzer::options::FileResourcePathHelper;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -32,26 +32,28 @@ pub(crate) fn read_line_file(
     params: &json::Value,
     key: &str,
 ) -> Result<()> {
-    let path = get_resource_path(helper, params, key)?;
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    for (line_index, line) in reader.lines().enumerate() {
-        let mut row_data = line.map_err(|err| {
-            TantivyBindingError::InternalError(format!(
-                "read {} file failed, error: {}",
-                key,
-                err.to_string()
-            ))
-        })?;
-        if line_index == 0 {
-            row_data = row_data
-                .strip_prefix('\u{feff}')
-                .unwrap_or(&row_data)
-                .to_string();
+    with_resource_file(helper, params, key, |reader| {
+        for (line_index, line) in reader.lines().enumerate() {
+            let mut row_data = line.map_err(|err| {
+                if err.kind() == std::io::ErrorKind::InvalidData {
+                    TantivyBindingError::InternalError(format!(
+                        "read {} file failed, error: {}",
+                        key, err
+                    ))
+                } else {
+                    err.into()
+                }
+            })?;
+            if line_index == 0 {
+                row_data = row_data
+                    .strip_prefix('\u{feff}')
+                    .unwrap_or(&row_data)
+                    .to_string();
+            }
+            dict.push(row_data);
         }
-        dict.push(row_data);
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -72,6 +74,7 @@ mod tests {
             "path": file_path.to_string_lossy()
         });
         let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(dir.path().to_path_buf());
         let mut dict = Vec::new();
 
         read_line_file(&mut helper, &mut dict, &params, "test dict file").unwrap();

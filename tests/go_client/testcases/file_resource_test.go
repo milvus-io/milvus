@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -29,7 +30,8 @@ func setupFileResourceObject(t *testing.T, ctx context.Context, fileName, conten
 	require.NoError(t, err)
 	require.True(t, exists, "MinIO bucket %q must exist", cfg.bucket)
 
-	prefix := fmt.Sprintf("file-resource-e2e/%s", common.GenRandomString("go", 8))
+	sourcePrefix := envOrDefault("MILVUS_FILE_RESOURCE_PREFIX", path.Join(cfg.rootPath, "file_resource"))
+	prefix := path.Join(sourcePrefix, "file-resource-e2e", common.GenRandomString("go", 8))
 	path := fmt.Sprintf("%s/%s", prefix, fileName)
 	data := []byte(content)
 	_, err = minioClient.PutObject(ctx, cfg.bucket, path, bytes.NewReader(data), int64(len(data)), miniogo.PutObjectOptions{

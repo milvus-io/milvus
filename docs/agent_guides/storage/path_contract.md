@@ -145,3 +145,32 @@ fingerprint.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+## Analyzer and file resource sources
+
+New file-resource registrations use `common.fileResource.allowedPath` as their
+source boundary. Remote keys remain complete keys, defaulting to
+`<storage-root>/file_resource`; local sources default to
+`<localStorage.path>/file_resource`. Local relative paths resolve to absolute
+paths before registration is persisted. Admission rejects out-of-range paths
+before backend probes and bounds actual reads as well as size metadata.
+Registered resource downloads retain their recorded path across operator policy
+changes and remain bounded by the object's reported size, with atomic cache
+publication only after a complete download.
+
+New analyzer local dictionaries use `function.analyzer.local_resource_path`
+(default `<localStorage.path>/analyzer`) and `function.analyzer.max_dict_size`.
+Request-selected TLS files use the separate generic `tls.allowedPath`
+(default `<localStorage.path>/tls`) and a fixed 1 MiB admission limit per file.
+New relative dictionary/TLS paths are resolved in the schema before validation
+and WAL publication. Existing schema restoration uses the recorded definition
+without applying the current directory/size policy. Legacy relative paths retain
+their process-working-directory meaning. Inline requests and changed definitions
+always pass current admission. Error redaction applies to both paths.
+
+These are admission rules, not immutable content snapshots. Operators must retain
+admitted files and protect them from replacement; changing policy does not revoke
+existing definitions. Source directories and TLS credentials must remain separate
+from disposable caches and from each other. CDC replays recorded schema and
+resource paths through existing WAL messages, so corresponding files must be
+provisioned on every cluster.

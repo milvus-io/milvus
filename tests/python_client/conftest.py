@@ -26,6 +26,7 @@ import pytest
 from check.param_check import ip_check, number_check
 from common.common_func import param_info
 from common.milvus_sys import MilvusSys
+from common.minio_comm import file_resource_path
 from config.log_config import log_config
 from pymilvus import connections
 from pymilvus.orm.types import CONSISTENCY_STRONG
@@ -688,6 +689,7 @@ def _generate_file_resource_testdata(tmpdir):
     ``copy_files_to_minio``.  Returns a list of relative paths."""
     rel_paths = []
     for remote_path, content in _FILE_RESOURCE_DATA.items():
+        remote_path = file_resource_path(remote_path)
         local_path = os.path.join(tmpdir, remote_path)
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "w", encoding="utf-8") as f:
@@ -700,9 +702,8 @@ def _generate_file_resource_testdata(tmpdir):
 def file_resource_env(request, tmp_path_factory):
     """Generate testdata, upload to MinIO for file resource tests.
 
-    Files are uploaded to the bucket root (no rootPath prefix) because
-    AddFileResource's Exist check uses RemoteChunkManager which does NOT
-    prepend minio.rootPath.
+    Files use complete object keys under the configured file-resource prefix.
+    Set MILVUS_FILE_RESOURCE_PREFIX when the deployment overrides that prefix.
 
     Returns a dict with keys: bucket, minio_endpoint.
     """

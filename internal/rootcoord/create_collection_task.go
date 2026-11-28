@@ -271,6 +271,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 }
 
 func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *schemapb.CollectionSchema) ([]int64, error) {
+	if err := resolveSchemaAnalyzerPaths(schema, nil); err != nil {
+		return nil, err
+	}
 	analyzerInfos, err := collectAnalyzerInfos(schema)
 	if err != nil {
 		return nil, err
@@ -999,19 +1002,19 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 	return analyzerInfos, nil
 }
 
-// validateAnalyzer validates active match/BM25 fields and fields with
-// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
+// validateAnalyzer covers every consumed analyzer, including MinHash inputs
+// whose runner consumes analyzer_params without enable_analyzer.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
 	active := h.EnableMatch() || typeutil.IsBm25FunctionInputField(collSchema, fieldSchema)
 	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
-	if !h.EnableAnalyzer() {
+	if !h.EnableAnalyzer() && !isMinHashAnalyzerInput(collSchema, fieldSchema) {
 		return nil
 	}
 
-	if params, ok := h.GetMultiAnalyzerParams(); ok {
+	if params, ok := h.GetMultiAnalyzerParams(); ok && h.EnableAnalyzer() {
 		if h.EnableMatch() {
 			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}
