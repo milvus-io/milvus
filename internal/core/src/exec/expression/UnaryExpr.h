@@ -951,6 +951,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     bool
+    SupportsLegacyJsonStatsRecheck() const override {
+        return expr_->op_type_ == proto::plan::OpType::Equal &&
+               expr_->val_.val_case() ==
+                   proto::plan::GenericValue::kStringVal &&
+               !expr_->val_.string_val().empty();
+    }
+
+    bool
     CanUseOffsetsForSequentialBatch() override {
         EnsureExecPathDetermined();
         return expr_->column_.element_level_ &&

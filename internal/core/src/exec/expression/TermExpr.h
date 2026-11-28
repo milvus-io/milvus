@@ -17,6 +17,7 @@
 #pragma once
 
 #include <functional>
+#include <algorithm>
 #include <mutex>
 #include <typeinfo>
 #include <fmt/core.h>
@@ -83,6 +84,19 @@ class PhyTermFilterExpr : public SegmentExpr {
     bool
     SupportsJsonStatsExecPath() const override {
         return !expr_->is_in_field_;
+    }
+
+    bool
+    SupportsLegacyJsonStatsRecheck() const override {
+        return !expr_->is_in_field_ && !expr_->vals_.empty() &&
+               std::all_of(
+                   expr_->vals_.begin(),
+                   expr_->vals_.end(),
+                   [](const auto& value) {
+                       return value.val_case() ==
+                                  proto::plan::GenericValue::kStringVal &&
+                              !value.string_val().empty();
+                   });
     }
 
     bool

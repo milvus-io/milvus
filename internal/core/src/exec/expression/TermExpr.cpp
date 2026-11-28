@@ -747,6 +747,12 @@ PhyTermFilterExpr::ExecJsonInVariableByStats() {
             index->ExecuteForSharedData(
                 op_ctx_, bson_index_, pointer, shared_executor);
         }
+        if constexpr (std::is_same_v<ValueType, std::string>) {
+            RecheckLegacyJsonStatsNulls(
+                res_view, valid_res_view, [this](std::string_view value) {
+                    return arg_set_->In(value);
+                });
+        }
         cached_index_chunk_id_ = 0;
         CachePut(CacheElapsedUs(cache_compute_start));
     }

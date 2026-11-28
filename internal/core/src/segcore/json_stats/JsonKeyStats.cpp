@@ -1098,9 +1098,9 @@ JsonKeyStats::ParseJsonForBuildStats(
 
 void
 JsonKeyStats::BuildKeyStatsForNullRow() {
-    // add empty value for column keys that not hit
+    // Missing values are null; an empty string is a valid string value.
     for (const auto& key : column_keys_) {
-        parquet_writer_->AppendValue(key.ToColumnName(), "");
+        parquet_writer_->AppendValue(key.ToColumnName(), "", true);
     }
 
     // add an empty BSON document to the shared column
@@ -1145,10 +1145,10 @@ JsonKeyStats::BuildKeyStatsForRow(std::string_view json_str, uint32_t row_id) {
         }
         hit_keys.insert(key);
     }
-    // add empty value for column keys that not hit
+    // Append null for column keys that were not present in this row.
     for (const auto& key : column_keys_) {
         if (hit_keys.find(key) == hit_keys.end()) {
-            parquet_writer_->AppendValue(key.ToColumnName(), "");
+            parquet_writer_->AppendValue(key.ToColumnName(), "", true);
         }
     }
 
@@ -1628,6 +1628,7 @@ JsonKeyStats::GetMetaFilePath() {
 
 void
 JsonKeyStats::WriteMetaFile() {
+    json_stats_meta_.SetInt64(META_KEY_PRESERVES_EMPTY_STRINGS, 1);
     json_stats_meta_.SetLayoutTypeMap(key_types_);
     json_stats_meta_.SetInt64(META_KEY_NUM_ROWS, num_rows_);
     json_stats_meta_.SetInt64(META_KEY_NUM_SHREDDING_COLUMNS,
@@ -1686,6 +1687,9 @@ JsonKeyStats::LoadMetaFile(const std::string& remote_path, OpContext* ctx) {
     storage::ThrowIfCancelled(ctx->cancellation_token,
                               "load JSON stats metadata");
     key_field_map_ = JsonStatsMeta::DeserializeToKeyFieldMap(content);
+    preserves_empty_strings_ = JsonStatsMeta::Deserialize(content)
+                                   .GetInt64(META_KEY_PRESERVES_EMPTY_STRINGS)
+                                   .value_or(0) == 1;
 }
 
 BinarySet

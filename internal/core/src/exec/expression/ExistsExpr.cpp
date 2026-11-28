@@ -236,6 +236,57 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     return res_vec;
 }
 
+// Legacy string NULLs may hide empty strings. Stats hits remain conclusive,
+// including hits from other descendants and shared BSON. Only unresolved rows
+// need raw JSON, and EXISTS stays two-valued even for a null JSON field.
+void
+PhyExistsFilterExpr::RecheckLegacyJsonStatsExists(TargetBitmapView result) {
+    if (!recheck_legacy_json_stats_nulls_ || result.all()) {
+        return;
+    }
+    constexpr size_t kRecheckBatchSize = 1024;
+    OffsetVector offsets;
+    offsets.reserve(kRecheckBatchSize);
+    const auto pointer = milvus::Json::pointer(nested_path_);
+    auto evaluate = [&]<FilterType filter_type = FilterType::sequential>(
+        const milvus::Json* data,
+        ValidityView valid,
+        const int32_t* local_offsets,
+        int size,
+        TargetBitmapView res,
+        TargetBitmapView /*valid_res*/) {
+        for (int i = 0; i < size; ++i) {
+            const auto offset = local_offsets ? local_offsets[i] : i;
+            res[i] = data != nullptr && (!valid || valid[offset]) &&
+                     data[offset].exist(pointer);
+        }
+    };
+    auto recheck = [&] {
+        TargetBitmap res(offsets.size(), false);
+        TargetBitmap valid(offsets.size(), true);
+        ProcessDataByOffsets<milvus::Json>(evaluate,
+                                           nullptr,
+                                           &offsets,
+                                           TargetBitmapView(res),
+                                           TargetBitmapView(valid));
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            result[offsets[i]] = res[i];
+        }
+        offsets.clear();
+    };
+    for (int64_t row = 0; row < active_count_; ++row) {
+        if (!result[row]) {
+            offsets.push_back(static_cast<int32_t>(row));
+            if (offsets.size() == kRecheckBatchSize) {
+                recheck();
+            }
+        }
+    }
+    if (!offsets.empty()) {
+        recheck();
+    }
+}
+
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
     auto real_batch_size = GetNextBatchSize();
@@ -331,6 +382,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         });
                 }
 
+                RecheckLegacyJsonStatsExists(res_view);
                 TargetBitmap valid(active_count_, true);
                 return {std::move(res), std::move(valid)};
             },

@@ -60,6 +60,7 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 namespace milvus {
 namespace exec {
 
@@ -4189,6 +4190,80 @@ class SegmentExpr : public Expr {
         return false;
     }
 
+    // Scalar predicates depend only on their exact path. EXISTS overrides
+    // this because a nonempty descendant also establishes parent existence.
+    virtual bool
+    JsonStatsRequiresDescendants() const {
+        return false;
+    }
+
+    // Opt-in requires the stats evaluator to recheck unknown rows against raw
+    // JSON before publishing/caching its result, including the validity bitmap.
+    virtual bool
+    SupportsLegacyJsonStatsRecheck() const {
+        return false;
+    }
+
+    template <typename StringPredicate>
+    void
+    RecheckLegacyJsonStatsNulls(TargetBitmapView res,
+                                TargetBitmapView valid_res,
+                                StringPredicate matches) {
+        if (!recheck_legacy_json_stats_nulls_) {
+            return;
+        }
+        // Bound scratch space and raw reads. A legacy string column's NULLs
+        // include empty strings, missing paths, type mismatches and null rows.
+        // Only raw JSON can recover their three-valued predicate semantics.
+        constexpr size_t kRecheckBatchSize = 1024;
+        OffsetVector offsets;
+        offsets.reserve(kRecheckBatchSize);
+        auto pointer = milvus::Json::pointer(nested_path_);
+        auto evaluate = [&]<FilterType filter_type = FilterType::sequential>(
+            const milvus::Json* data,
+            ValidityView valid,
+            const int32_t* local_offsets,
+            int size,
+            TargetBitmapView result,
+            TargetBitmapView result_valid) {
+            for (int i = 0; i < size; ++i) {
+                const auto offset = local_offsets ? local_offsets[i] : i;
+                if (data == nullptr || (valid && !valid[offset])) {
+                    result[i] = result_valid[i] = false;
+                    continue;
+                }
+                auto value = data[offset].at<std::string_view>(pointer);
+                result_valid[i] = !value.error();
+                result[i] = !value.error() && matches(value.value());
+            }
+        };
+        auto recheck = [&] {
+            TargetBitmap result(offsets.size(), false);
+            TargetBitmap validity(offsets.size(), false);
+            ProcessDataByOffsets<milvus::Json>(evaluate,
+                                               nullptr,
+                                               &offsets,
+                                               TargetBitmapView(result),
+                                               TargetBitmapView(validity));
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                res[offsets[i]] = result[i];
+                valid_res[offsets[i]] = validity[i];
+            }
+            offsets.clear();
+        };
+        for (int64_t i = 0; i < active_count_; ++i) {
+            if (!valid_res[i]) {
+                offsets.push_back(static_cast<int32_t>(i));
+                if (offsets.size() == kRecheckBatchSize) {
+                    recheck();
+                }
+            }
+        }
+        if (!offsets.empty()) {
+            recheck();
+        }
+    }
+
     // JSON shredding is a typed column scan, not an index lookup: it still
     // visits every row of the segment on every query. A JSON path index that
     // serves this expression is preferred; the shredded columns are the
@@ -4200,6 +4275,24 @@ class SegmentExpr : public Expr {
     FallbackToJsonStatsIfEligible() {
         if (exec_path_ == ExprExecPath::RawData &&
             SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            // Numeric/bool predicates never read shredded string columns.
+            // Preserve their pin-free path selection. String predicates and
+            // EXISTS (which has no comparison value) need the capability check.
+            if (IsStringDataType(value_type_) ||
+                value_type_ == DataType::NONE) {
+                auto stats = segment_->GetJsonStats(op_ctx_, field_id_);
+                if (stats == nullptr) {
+                    return;
+                }
+                if (!stats->CanUseForPath(milvus::Json::pointer(nested_path_),
+                                          /*include_descendants=*/
+                                          JsonStatsRequiresDescendants())) {
+                    if (!SupportsLegacyJsonStatsRecheck()) {
+                        return;
+                    }
+                    recheck_legacy_json_stats_nulls_ = true;
+                }
+            }
             exec_path_ = ExprExecPath::JsonStats;
         }
     }
@@ -4648,6 +4741,7 @@ class SegmentExpr : public Expr {
     // Execution path determined once, preferably by PrefetchAsync() on the
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};
+    bool recheck_legacy_json_stats_nulls_{false};
     mutable std::once_flag determine_exec_path_once_;
     // Flag set by SetExecuteAllAtOnce() to enable move-based fast paths,
     // avoiding bitmap copies in ProcessIndexChunks/SliceCachedResult.

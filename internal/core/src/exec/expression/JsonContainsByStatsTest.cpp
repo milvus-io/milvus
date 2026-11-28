@@ -1684,7 +1684,7 @@ TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
               -17);
 }
 
-TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
+TEST(JsonContainsByStatsTest, GroupByReaderPreservesEmptyStrings) {
     auto schema = std::make_shared<Schema>();
     auto field = schema->AddDebugField("json", DataType::JSON);
     const std::vector<std::string> documents{
@@ -1700,7 +1700,8 @@ TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
                                           1);
     auto reader = stats->CreateShreddingReader("/s", JSONType::STRING, 4);
     ASSERT_NE(reader, nullptr);
-    EXPECT_FALSE(reader->Get(nullptr, 0).has_value());
+    ASSERT_TRUE(reader->Get(nullptr, 0).has_value());
+    EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 0)), "");
     ASSERT_TRUE(reader->Get(nullptr, 1).has_value());
     EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 1)), "value");
     EXPECT_FALSE(reader->Get(nullptr, 2).has_value());
@@ -2475,4 +2476,571 @@ TEST(JsonStatsExistsTest, EmptyContainersMatchRawAfterReload) {
             }
         }
     }
+}
+
+TEST(JsonStatsEmptyStringTest, NewAndLegacyStatsAgreeWithRawFilters) {
+    const std::vector<std::string> pattern = {R"({"k":"","n":1})",
+                                              R"({"k":"x","n":2})",
+                                              R"({"k":"","n":3})",
+                                              R"({"k":null,"n":4})",
+                                              R"({"n":5})",
+                                              R"({"k":7,"n":6})",
+                                              R"({"k":"y","n":7})",
+                                              R"({"k":"","n":8})",
+                                              R"({"k":"z","n":9})",
+                                              R"({"k":"w","n":10})"};
+    // More than one legacy raw-recheck batch, with a partial final batch.
+    std::vector<std::string> raw;
+    std::vector<uint8_t> valid((2050 + 7) / 8, 0);
+    for (size_t i = 0; i < 2050; ++i) {
+        raw.push_back(pattern[i % pattern.size()]);
+        if (i % pattern.size() != 7) {
+            valid[i / 8] |= 1 << (i % 8);
+        }
+    }
+    auto schema = std::make_shared<Schema>();
+    auto fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto make_segment = [&] {
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        field->FillFieldData(MakeNullableJsonArray(raw, valid));
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(
+            PrepareSingleFieldInsertBinlog(0, 0, 0, fid.get(), {field}, cm));
+        return segment;
+    };
+    auto raw_segment = make_segment();
+    for (bool legacy : {false, true}) {
+        SCOPED_TRACE(legacy ? "legacy stats" : "new stats");
+        auto input = raw;
+        if (legacy) {
+            // Reproduce the old physical representation: empty strings became
+            // null in /k_STRING, while the original JSON remains unchanged.
+            for (size_t i = 0; i < input.size(); ++i) {
+                if (i % pattern.size() == 0) {
+                    input[i] = R"({"k":null,"n":1})";
+                } else if (i % pattern.size() == 2) {
+                    input[i] = R"({"k":null,"n":3})";
+                }
+            }
+        }
+        auto built = BuildJsonStatsIndex(input,
+                                         fid,
+                                         TestLocalPath,
+                                         1600 + legacy,
+                                         2600 + legacy,
+                                         3600 + legacy,
+                                         fid.get(),
+                                         5600 + legacy,
+                                         1,
+                                         &valid);
+        if (legacy) {
+            const auto path =
+                built.stats_base_path + "/" + JSON_STATS_META_FILE_NAME;
+            auto cm = built.ctx.chunkManagerPtr;
+            std::string content(cm->Size(path), '\0');
+            cm->Read(path, content.data(), content.size());
+            auto meta = nlohmann::json::parse(content);
+            meta.erase(META_KEY_PRESERVES_EMPTY_STRINGS);
+            content = meta.dump();
+            cm->Write(path, content.data(), content.size());
+        }
+        auto stats = LoadBuiltJsonStatsIndex(built);
+        ASSERT_FALSE(stats->GetShreddingField("/k", JSONType::STRING).empty());
+        EXPECT_EQ(stats->CanUseForPath("/k", false), !legacy);
+        EXPECT_TRUE(stats->CanUseForPath("/n", false));
+        EXPECT_TRUE(stats->CanUseForPath("/key", false));
+        EXPECT_TRUE(stats->CanUseForPath("", false));
+        EXPECT_EQ(stats->CanUseForPath("", true), !legacy);
+        auto segment = make_segment();
+        auto* sealed =
+            dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetJsonStatsForTesting(fid,
+                                       MakeTestJsonStatsSlot(std::move(stats)));
+
+        auto check = [&](const expr::TypedExprPtr& filter) {
+            milvus::test::ExprBatchSizeGuard batch_size_guard(37);
+            auto expected_batches = milvus::test::EvalExprInBatches(
+                filter, raw_segment.get(), raw.size());
+            auto actual_batches = milvus::test::EvalExprInBatches(
+                filter, segment.get(), raw.size());
+            EXPECT_EQ(actual_batches.batch_sizes, expected_batches.batch_sizes);
+            auto expected = expected_batches.result;
+            auto actual = actual_batches.result;
+            ASSERT_EQ(actual->size(), expected->size());
+            ASSERT_EQ(actual->size(), raw.size());
+            TargetBitmapView ev(expected->GetValidRawData(), expected->size());
+            TargetBitmapView av(actual->GetValidRawData(), actual->size());
+            TargetBitmapView er(expected->GetRawData(), expected->size());
+            TargetBitmapView ar(actual->GetRawData(), actual->size());
+            for (size_t i = 0; i < raw.size(); ++i) {
+                EXPECT_EQ(av[i], ev[i]) << "validity, row " << i;
+                if (ev[i]) {
+                    EXPECT_EQ(ar[i], er[i]) << "result, row " << i;
+                }
+            }
+        };
+        auto column = expr::ColumnInfo(fid, DataType::JSON, {"k"});
+        check(std::make_shared<expr::ExistsExpr>(column));
+        proto::plan::GenericValue empty;
+        empty.set_string_val("");
+        auto probe = std::make_shared<expr::UnaryRangeFilterExpr>(
+            column,
+            proto::plan::OpType::Equal,
+            empty,
+            std::vector<proto::plan::GenericValue>());
+        exec::PhyUnaryRangeFilterExpr physical({},
+                                               probe,
+                                               "empty-string-path",
+                                               nullptr,
+                                               segment.get(),
+                                               raw.size(),
+                                               raw.size(),
+                                               0);
+        EXPECT_EQ(physical.GetExecPath(),
+                  legacy ? exec::ExprExecPath::RawData
+                         : exec::ExprExecPath::JsonStats);
+        proto::plan::GenericValue other;
+        other.set_string_val("y");
+        for (const auto* text : {"", "x"}) {
+            proto::plan::GenericValue value;
+            value.set_string_val(text);
+            for (auto op : {proto::plan::OpType::Equal,
+                            proto::plan::OpType::NotEqual,
+                            proto::plan::OpType::LessThan,
+                            proto::plan::OpType::GreaterEqual}) {
+                SCOPED_TRACE(::testing::Message()
+                             << "value=" << text << " op=" << op);
+                auto unary = std::make_shared<expr::UnaryRangeFilterExpr>(
+                    column,
+                    op,
+                    value,
+                    std::vector<proto::plan::GenericValue>());
+                exec::PhyUnaryRangeFilterExpr physical({},
+                                                       unary,
+                                                       "legacy-string-path",
+                                                       nullptr,
+                                                       segment.get(),
+                                                       raw.size(),
+                                                       raw.size(),
+                                                       0);
+                const bool recheck = op == proto::plan::OpType::Equal &&
+                                     !value.string_val().empty();
+                EXPECT_EQ(physical.GetExecPath(),
+                          !legacy || recheck ? exec::ExprExecPath::JsonStats
+                                             : exec::ExprExecPath::RawData);
+                check(unary);
+                check(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, unary));
+            }
+            auto term = std::make_shared<expr::TermFilterExpr>(
+                column,
+                std::vector<proto::plan::GenericValue>{value, other},
+                false);
+            exec::PhyTermFilterExpr term_physical({},
+                                                  term,
+                                                  "legacy-term-path",
+                                                  nullptr,
+                                                  segment.get(),
+                                                  raw.size(),
+                                                  MAX_TIMESTAMP,
+                                                  raw.size(),
+                                                  0);
+            EXPECT_EQ(term_physical.GetExecPath(),
+                      !legacy || !value.string_val().empty()
+                          ? exec::ExprExecPath::JsonStats
+                          : exec::ExprExecPath::RawData);
+            check(term);
+            check(std::make_shared<expr::LogicalUnaryExpr>(
+                expr::LogicalUnaryExpr::OpType::LogicalNot, term));
+            // A surrounding NOT must see the repaired validity even through
+            // another logical operator, not only when directly wrapping IN.
+            for (auto op : {expr::LogicalBinaryExpr::OpType::And,
+                            expr::LogicalBinaryExpr::OpType::Or}) {
+                auto combined = std::make_shared<expr::LogicalBinaryExpr>(
+                    op, term, std::make_shared<expr::ExistsExpr>(column));
+                check(std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, combined));
+            }
+            auto mixed_term = std::make_shared<expr::TermFilterExpr>(
+                column,
+                std::vector<proto::plan::GenericValue>{value, empty},
+                false);
+            exec::PhyTermFilterExpr mixed_physical({},
+                                                   mixed_term,
+                                                   "legacy-mixed-term-path",
+                                                   nullptr,
+                                                   segment.get(),
+                                                   raw.size(),
+                                                   MAX_TIMESTAMP,
+                                                   raw.size(),
+                                                   0);
+            EXPECT_EQ(mixed_physical.GetExecPath(),
+                      legacy ? exec::ExprExecPath::RawData
+                             : exec::ExprExecPath::JsonStats);
+            check(mixed_term);
+            check(std::make_shared<expr::BinaryRangeFilterExpr>(
+                column, value, value, true, true));
+        }
+    }
+}
+
+namespace {
+
+// Count the offsets handed to the production raw-column Take implementation.
+// A full raw scan is recorded separately so a routing regression cannot pass
+// merely because it avoided Take.
+class JsonStatsRawReadColumn : public ChunkedVariableColumn<Json> {
+ public:
+    JsonStatsRawReadColumn(std::shared_ptr<cachinglayer::CacheSlot<Chunk>> slot,
+                           const FieldMeta& meta,
+                           std::shared_ptr<ChunkedColumnInterface> source)
+        : ChunkedVariableColumn<Json>(std::move(slot), meta),
+          source_(std::move(source)) {
+    }
+
+    TakeResultPtr
+    Take(OpContext* ctx, TakeOptions options) const override {
+        batch_sizes.push_back(options.offsets.size);
+        for (int64_t i = 0; i < options.offsets.size; ++i) {
+            rows.push_back(options.offsets[i]);
+        }
+        return source_->Take(ctx, options);
+    }
+
+    ScanResult
+    Scan(OpContext* ctx, const ScanOptions& options) const override {
+        ++scans;
+        return source_->Scan(ctx, options);
+    }
+
+    mutable std::vector<int64_t> rows;
+    mutable std::vector<int64_t> batch_sizes;
+    mutable int64_t scans = 0;
+
+ private:
+    std::shared_ptr<ChunkedColumnInterface> source_;
+};
+
+// Preserve the real sealed read snapshot, substituting only its raw column's
+// read counter. In particular, query compilation and cache generation remain
+// the same as an ordinary sealed query.
+class JsonStatsReadSnapshot : public segcore::SegmentReadSnapshot {
+ public:
+    JsonStatsReadSnapshot(
+        std::shared_ptr<const segcore::SegmentReadSnapshot> source,
+        FieldId field,
+        std::shared_ptr<JsonStatsRawReadColumn> column)
+        : source_(std::move(source)),
+          field_(field),
+          column_(std::move(column)) {
+    }
+    exec::ExprCacheGenerationPtr
+    GetExprCacheGeneration() const override {
+        return source_->GetExprCacheGeneration();
+    }
+    int64_t
+    chunk_size(FieldId f, int64_t c, OpContext* ctx = nullptr) const override {
+        return source_->chunk_size(f, c, ctx);
+    }
+    int64_t
+    num_rows_until_chunk(FieldId f,
+                         int64_t c,
+                         OpContext* ctx = nullptr) const override {
+        return source_->num_rows_until_chunk(f, c, ctx);
+    }
+    std::pair<int64_t, int64_t>
+    get_chunk_by_offset(FieldId f,
+                        int64_t row,
+                        OpContext* ctx = nullptr) const override {
+        return source_->get_chunk_by_offset(f, row, ctx);
+    }
+    int64_t
+    num_chunk_data(FieldId f, OpContext* ctx = nullptr) const override {
+        return source_->num_chunk_data(f, ctx);
+    }
+    int64_t
+    get_row_count() const override {
+        return source_->get_row_count();
+    }
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
+    GetDataScanResources(FieldId f) const override {
+        auto resources = source_->GetDataScanResources(f);
+        if (f == field_) {
+            resources.first = column_;
+        }
+        return resources;
+    }
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId f) const override {
+        return source_->GetStructElementOffsets(f);
+    }
+
+ private:
+    std::shared_ptr<const segcore::SegmentReadSnapshot> source_;
+    FieldId field_;
+    std::shared_ptr<JsonStatsRawReadColumn> column_;
+};
+
+struct JsonStatsReadFixture {
+    FieldId fid;
+    segcore::SegmentSealedUPtr segment;
+    segcore::SegmentSealedUPtr raw_segment;
+    std::shared_ptr<JsonStatsRawReadColumn> column;
+    std::shared_ptr<const segcore::SegmentReadSnapshot> snapshot;
+};
+
+JsonStatsReadFixture
+MakeJsonStatsReadFixture(const std::vector<std::string>& raw,
+                         const std::vector<std::string>& stats_input,
+                         const std::vector<uint8_t>& valid,
+                         bool legacy) {
+    static std::atomic<int64_t> next_id{5597800};
+    const auto id = next_id++;
+    auto schema = std::make_shared<Schema>();
+    auto fid = schema->AddDebugField("json", DataType::JSON, true);
+    auto values = MakeNullableJsonArray(raw, valid);
+    auto make_segment = [&] {
+        auto segment = segcore::CreateSealedSegment(schema);
+        auto field = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        field->FillFieldData(values);
+        auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                      .GetRemoteChunkManager();
+        segment->LoadFieldData(
+            PrepareSingleFieldInsertBinlog(id, id, id, fid.get(), {field}, cm));
+        return segment;
+    };
+    auto raw_segment = make_segment();
+    auto segment = make_segment();
+    auto built = BuildJsonStatsIndex(
+        stats_input, fid, TestLocalPath, id, id, id, fid.get(), id, 1, &valid);
+    if (legacy) {
+        const auto path =
+            built.stats_base_path + "/" + JSON_STATS_META_FILE_NAME;
+        auto cm = built.ctx.chunkManagerPtr;
+        std::string content(cm->Size(path), '\0');
+        cm->Read(path, content.data(), content.size());
+        auto meta = nlohmann::json::parse(content);
+        meta.erase(META_KEY_PRESERVES_EMPTY_STRINGS);
+        content = meta.dump();
+        cm->Write(path, content.data(), content.size());
+    }
+    auto* sealed =
+        static_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    sealed->SetJsonStatsForTesting(
+        fid, MakeTestJsonStatsSlot(LoadBuiltJsonStatsIndex(built)));
+    auto snapshot = segment->CaptureReadSnapshot();
+    // The base class only needs row metadata; Take/Scan delegate to the loaded
+    // column retained by the real snapshot.
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(create_chunk((*schema)[fid], {values}, false));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{static_cast<int64_t>(raw.size())},
+            fmt::format("legacy_exists_raw_{}", id),
+            std::move(chunks)),
+        nullptr);
+    auto column = std::make_shared<JsonStatsRawReadColumn>(
+        std::move(slot),
+        (*schema)[fid],
+        snapshot->GetDataScanResources(fid).first);
+    auto counted =
+        std::make_shared<JsonStatsReadSnapshot>(snapshot, fid, column);
+    return {fid,
+            std::move(segment),
+            std::move(raw_segment),
+            std::move(column),
+            std::move(counted)};
+}
+
+void
+CheckJsonStatsReads(JsonStatsReadFixture& fixture,
+                    const expr::TypedExprPtr& filter,
+                    const std::vector<int64_t>& expected_reads) {
+    const auto rows = fixture.snapshot->get_row_count();
+    milvus::test::ExprBatchSizeGuard batch_size(37);
+    auto expected =
+        milvus::test::EvalExprInBatches(filter, fixture.raw_segment.get(), rows)
+            .result;
+    fixture.column->rows.clear();
+    fixture.column->batch_sizes.clear();
+    fixture.column->scans = 0;
+    exec::QueryContext query(
+        DEAFULT_QUERY_ID, fixture.segment.get(), rows, MAX_TIMESTAMP);
+    query.set_read_snapshot(fixture.snapshot);
+    exec::ExecContext exec_context(&query);
+    auto compiled =
+        exec::CompileExpressions({filter}, &exec_context, {}, false);
+    exec::EvalCtx eval_context(&exec_context);
+    TargetBitmapView expected_res(expected->GetRawData(), rows);
+    TargetBitmapView expected_valid(expected->GetValidRawData(), rows);
+    int64_t seen = 0;
+    while (seen < rows) {
+        VectorPtr result;
+        compiled[0]->Eval(eval_context, result);
+        ASSERT_NE(result, nullptr);
+        auto column = milvus::test::GetColumnVectorForTest(result);
+        ASSERT_NE(column, nullptr);
+        ASSERT_GT(column->size(), 0);
+        ASSERT_LE(seen + column->size(), rows);
+        TargetBitmapView actual(column->GetRawData(), column->size());
+        TargetBitmapView valid(column->GetValidRawData(), column->size());
+        for (int64_t i = 0; i < column->size(); ++i) {
+            EXPECT_EQ(valid[i], expected_valid[seen + i]) << seen + i;
+            if (expected_valid[seen + i]) {
+                EXPECT_EQ(actual[i], expected_res[seen + i]) << seen + i;
+            }
+        }
+        seen += column->size();
+    }
+    EXPECT_EQ(fixture.column->scans, 0);
+    EXPECT_EQ(fixture.column->rows, expected_reads);
+    for (auto size : fixture.column->batch_sizes) {
+        EXPECT_LE(size, 1024);
+    }
+}
+
+}  // namespace
+
+TEST(JsonStatsEmptyStringTest, ScalarParentIgnoresLegacyStringDescendants) {
+    DisableExprCache disable_cache;
+    std::vector<std::string> raw(17, R"({"a":{"b":"child"}})");
+    // The uncommon /a strings stay in lossless shared BSON; only /a/b is
+    // shredded. Include an empty descendant and an empty shared parent string.
+    raw[12] = R"({"a":{"b":""}})";
+    raw[13] = R"({"a":"foo"})";
+    raw[14] = R"({"a":"zoo"})";
+    raw[15] = R"({"a":""})";
+    raw[16] = R"({"a":null})";
+    auto legacy = raw;
+    legacy[12] = R"({"a":{"b":null}})";
+    auto fixture =
+        MakeJsonStatsReadFixture(raw, legacy, {0xff, 0xff, 0x01}, true);
+    auto stats = fixture.segment->GetJsonStats(nullptr, fixture.fid);
+    ASSERT_TRUE(stats->GetShreddingField("/a", JSONType::STRING).empty());
+    ASSERT_FALSE(stats->GetShreddingField("/a/b", JSONType::STRING).empty());
+    EXPECT_TRUE(stats->CanUseForPath("/a", false));
+    EXPECT_FALSE(stats->CanUseForPath("/a", true));
+    auto column = expr::ColumnInfo(fixture.fid, DataType::JSON, {"a"});
+    for (const auto* text : {"foo", ""}) {
+        proto::plan::GenericValue value;
+        value.set_string_val(text);
+        for (auto op :
+             {proto::plan::OpType::Equal, proto::plan::OpType::GreaterThan}) {
+            auto filter = std::make_shared<expr::UnaryRangeFilterExpr>(
+                column, op, value, std::vector<proto::plan::GenericValue>());
+            exec::PhyUnaryRangeFilterExpr probe({},
+                                                filter,
+                                                "legacy-parent",
+                                                nullptr,
+                                                fixture.segment.get(),
+                                                raw.size(),
+                                                raw.size(),
+                                                0);
+            EXPECT_EQ(probe.GetExecPath(), exec::ExprExecPath::JsonStats);
+            CheckJsonStatsReads(fixture, filter, {});
+            CheckJsonStatsReads(
+                fixture,
+                std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, filter),
+                {});
+        }
+    }
+}
+
+TEST(JsonStatsEmptyStringTest, ExistsRechecksOnlyUnresolvedRows) {
+    DisableExprCache disable_cache;
+    constexpr int64_t n =
+        3131;  // More than 1024 unresolved rows and an odd tail.
+    std::vector<std::string> raw, legacy;
+    std::vector<uint8_t> valid((n + 7) / 8, 0);
+    std::vector<int64_t> parent_unresolved, leaf_unresolved;
+    for (int64_t row = 0; row < n; ++row) {
+        const auto kind = row % 12;
+        nlohmann::json parent = {{"arr", nlohmann::json::array({nullptr})}};
+        if (kind < 4) {
+            parent["b"] = "hit";
+            parent["n"] = 1;
+        } else if (kind == 4 || kind == 6 || kind == 7 || kind == 8 ||
+                   kind == 9) {
+            parent["b"] = "";
+        } else if (kind == 5) {
+            parent["b"] = nullptr;
+        } else if (kind == 11) {
+            parent["b"] = nlohmann::json::object();
+        }
+        if (kind == 6)
+            parent["n"] = 1;
+        if (kind == 7)
+            parent["arr"] = nlohmann::json::array({1});
+        if (kind == 8)
+            parent["shared"] = 1;
+        raw.push_back(nlohmann::json({{"a", parent}}).dump());
+        if (parent.contains("b") && parent["b"] == "")
+            parent["b"] = nullptr;
+        legacy.push_back(nlohmann::json({{"a", parent}}).dump());
+        if (kind != 9)
+            valid[row / 8] |= 1 << (row % 8);
+        if (kind >= 4)
+            leaf_unresolved.push_back(row);
+        if (kind == 4 || kind == 5 || kind >= 9)
+            parent_unresolved.push_back(row);
+    }
+    ASSERT_GT(parent_unresolved.size(), 1024);
+    for (bool old : {false, true}) {
+        auto fixture =
+            MakeJsonStatsReadFixture(raw, old ? legacy : raw, valid, old);
+        auto stats = fixture.segment->GetJsonStats(nullptr, fixture.fid);
+        ASSERT_FALSE(
+            stats->GetShreddingField("/a/b", JSONType::STRING).empty());
+        ASSERT_FALSE(stats->GetShreddingField("/a/n", JSONType::INT64).empty());
+        ASSERT_FALSE(
+            stats->GetShreddingField("/a/arr", JSONType::ARRAY).empty());
+        ASSERT_TRUE(stats->GetShreddingFields("/a/shared").empty());
+        for (bool leaf : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "legacy=" << old << " leaf=" << leaf);
+            auto exists = std::make_shared<expr::ExistsExpr>(
+                expr::ColumnInfo(fixture.fid,
+                                 DataType::JSON,
+                                 leaf ? std::vector<std::string>{"a", "b"}
+                                      : std::vector<std::string>{"a"}));
+            exec::PhyExistsFilterExpr probe({},
+                                            exists,
+                                            "legacy-exists",
+                                            nullptr,
+                                            fixture.segment.get(),
+                                            n,
+                                            37,
+                                            0);
+            EXPECT_EQ(probe.GetExecPath(), exec::ExprExecPath::JsonStats);
+            const auto expected =
+                old ? (leaf ? leaf_unresolved : parent_unresolved)
+                    : std::vector<int64_t>{};
+            CheckJsonStatsReads(fixture, exists, expected);
+            CheckJsonStatsReads(
+                fixture,
+                std::make_shared<expr::LogicalUnaryExpr>(
+                    expr::LogicalUnaryExpr::OpType::LogicalNot, exists),
+                expected);
+        }
+    }
+    // Legacy strings trigger the capability check, but complementary scalar
+    // descendants resolve every row: no raw-column access is needed at all.
+    std::vector<std::string> all_resolved;
+    for (int i = 0; i < 17; ++i) {
+        all_resolved.push_back(i % 2 ? R"({"a":{"b":"hit"}})"
+                                     : R"({"a":{"n":1}})");
+    }
+    auto fixture = MakeJsonStatsReadFixture(
+        all_resolved, all_resolved, {0xff, 0xff, 0x01}, true);
+    auto exists = std::make_shared<expr::ExistsExpr>(
+        expr::ColumnInfo(fixture.fid, DataType::JSON, {"a"}));
+    CheckJsonStatsReads(fixture, exists, {});
+    CheckJsonStatsReads(fixture,
+                        std::make_shared<expr::LogicalUnaryExpr>(
+                            expr::LogicalUnaryExpr::OpType::LogicalNot, exists),
+                        {});
 }

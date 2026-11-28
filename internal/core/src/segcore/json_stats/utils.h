@@ -484,6 +484,9 @@ inline constexpr const char* META_KEY_NUM_ROWS = "num_rows";
 inline constexpr const char* META_KEY_NUM_SHREDDING_COLUMNS =
     "num_shredding_columns";
 inline constexpr const char* META_CURRENT_VERSION = "1";
+// Optional capability marker. Legacy writers encoded empty strings as null.
+inline constexpr const char* META_KEY_PRESERVES_EMPTY_STRINGS =
+    "preserves_empty_strings";
 
 // Generic metadata container for JSON stats
 // Supports storing various key-value pairs and can be serialized to/from JSON file
