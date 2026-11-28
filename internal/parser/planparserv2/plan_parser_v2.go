@@ -122,20 +122,20 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	exprNormal := convertHanToASCII(exprStr)
 	listener := &errorListenerImpl{}
 
-	inputStream := antlr.NewInputStream(exprNormal)
-	lexer := getLexer(inputStream, listener)
-	defer putLexer(lexer)
+	// galop's lexer and parser (see generate.sh) build ANTLR's contexts and report
+	// to the listener the errors ANTLR's LL parse with default recovery reports,
+	// what parseExpr's two stages give, in a fraction of the time.
+	lexer := planparserv2.NewPlanGalopLexer(antlr.NewInputStream(exprNormal))
+	lexer.RemoveErrorListeners()
+	lexer.AddErrorListener(listener)
+	parser := planparserv2.NewPlanGalopParser(antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel))
 	if err = listener.Error(); err != nil {
 		return
 	}
+	parser.RemoveErrorListeners()
+	parser.AddErrorListener(listener)
 
-	parser := getParser(lexer, listener)
-	defer putParser(parser)
-	if err = listener.Error(); err != nil {
-		return
-	}
-
-	ast = parseExpr(parser, listener)
+	ast = parser.Expr()
 	if err = listener.Error(); err != nil {
 		return
 	}
