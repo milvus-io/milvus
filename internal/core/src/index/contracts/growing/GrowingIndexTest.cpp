@@ -515,7 +515,11 @@ TEST(GrowingIndexContractTest, RTreeConcurrentAppendAndPinnedQueryProgress) {
 
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(60);
-    while (progress.load(std::memory_order_relaxed) < kRows &&
+    // Wait for the writer to finish AND for the reader to observe at least one
+    // query. Under CPU contention the reader thread can be starved and never
+    // scheduled before `stop` is set, leaving observed_queries at 0.
+    while ((progress.load(std::memory_order_relaxed) < kRows ||
+            observed_queries.load(std::memory_order_relaxed) == 0) &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
