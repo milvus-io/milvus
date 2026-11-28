@@ -3100,6 +3100,14 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("invalid row 10", func(t *testing.T) {
+		for _, idx := range []interface{}{-2, float64(-2), json.Number("-2")} {
+			row := map[string]interface{}{"indices": []interface{}{idx}, "values": []interface{}{0.2}}
+			_, err := CreateSparseFloatRowFromMap(row)
+			assert.Error(t, err, "index %v (%T)", idx, idx)
+		}
+	})
+
 	t.Run("valid dict row 1", func(t *testing.T) {
 		row := map[string]interface{}{"1": 1.0, "3": 2.0, "5": 3.0}
 		res, err := CreateSparseFloatRowFromMap(row)
@@ -3324,6 +3332,12 @@ func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 
 	t.Run("invalid row 7", func(t *testing.T) {
 		row := []byte(`{"indices": []interface{}{3.1}, "values": []interface{}{0.2}}`)
+		_, err := CreateSparseFloatRowFromJSON(row)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid row 8", func(t *testing.T) {
+		row := []byte(`{"indices":[-2],"values":[0.2]}`)
 		_, err := CreateSparseFloatRowFromJSON(row)
 		assert.Error(t, err)
 	})
