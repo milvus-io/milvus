@@ -19,7 +19,10 @@ package vertexai
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
 	"github.com/milvus-io/milvus/internal/util/function/models"
@@ -122,20 +125,85 @@ func (c *VertexAIEmbedding) Check() error {
 	return nil
 }
 
-func (c *VertexAIEmbedding) getAccessToken() (string, error) {
-	ctx := context.Background()
-	creds, err := google.CredentialsFromJSON(ctx, c.jsonKey, c.scopes)
+func (c *VertexAIEmbedding) getAccessToken(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	// The service-account token source uses PostForm without attaching ctx.
+	// Wrap a copy of its HTTP client so token exchange also honors the caller.
+	client := *oauth2.NewClient(ctx, nil)
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.Transport = &oauthContextTransport{ctx: ctx, base: transport}
+	authCtx := context.WithValue(ctx, oauth2.HTTPClient, &client)
+	creds, err := google.CredentialsFromJSON(authCtx, c.jsonKey, c.scopes)
 	if err != nil {
 		return "", merr.Wrap(err, "failed to find credentials")
 	}
 	token, err := creds.TokenSource.Token()
+	// OAuth token exchange formats transport errors without preserving their cause.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
 	if err != nil {
 		return "", merr.Wrap(err, "failed to get token")
 	}
 	return token.AccessToken, nil
 }
 
-func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
+type oauthContextTransport struct {
+	ctx  context.Context
+	base http.RoundTripper
+}
+
+func (t *oauthContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	// Keep a deadline installed by http.Client.Timeout as well as the caller's.
+	var ctx context.Context
+	var cancel context.CancelFunc
+	deadline, hasDeadline := req.Context().Deadline()
+	if hasDeadline {
+		ctx, cancel = context.WithDeadline(t.ctx, deadline)
+	} else {
+		ctx, cancel = context.WithCancel(t.ctx)
+	}
+	stop := context.AfterFunc(req.Context(), func() {
+		// The copied deadline expires on its own; canceling it here could
+		// replace DeadlineExceeded with Canceled when the two timers race.
+		if !hasDeadline || req.Context().Err() != context.DeadlineExceeded {
+			cancel()
+		}
+	})
+	release := func() {
+		stop()
+		cancel()
+	}
+	resp, err := t.base.RoundTrip(req.Clone(ctx))
+	if err != nil || resp == nil || resp.Body == nil {
+		release()
+		return resp, err
+	}
+	// RoundTrip ends at the response headers; cancellation must cover body reads too.
+	resp.Body = &oauthContextResponseBody{ReadCloser: resp.Body, release: release}
+	return resp, nil
+}
+
+type oauthContextResponseBody struct {
+	io.ReadCloser
+	release func()
+}
+
+func (b *oauthContextResponseBody) Close() error {
+	b.release()
+	return b.ReadCloser.Close()
+}
+
+func (c *VertexAIEmbedding) GeminiEmbedding(ctx context.Context, url string, text string, dim int64, taskType string, timeoutMs int64) (*GeminiEmbedContentResponse, error) {
 	req := GeminiEmbedContentRequest{
 		Content: GeminiContent{
 			Parts: []GeminiPart{{Text: text}},
@@ -153,7 +221,7 @@ func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, 
 	if c.token != "" {
 		token = c.token
 	} else {
-		token, err = c.getAccessToken()
+		token, err = c.getAccessToken(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -163,14 +231,14 @@ func (c *VertexAIEmbedding) GeminiEmbedding(url string, text string, dim int64, 
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[GeminiEmbedContentResponse](req, url, headers, timeoutMs)
+	res, err := models.PostRequest[GeminiEmbedContentResponse](ctx, req, url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
+func (c *VertexAIEmbedding) Embedding(ctx context.Context, modelName string, texts []string, dim int64, taskType string, timeoutMs int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	for _, text := range texts {
 		r.Instances = append(r.Instances, Instance{TaskType: taskType, Content: text})
@@ -184,7 +252,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 	if c.token != "" {
 		token = c.token
 	} else {
-		token, err = c.getAccessToken()
+		token, err = c.getAccessToken(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +262,7 @@ func (c *VertexAIEmbedding) Embedding(modelName string, texts []string, dim int6
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutMs)
+	res, err := models.PostRequest[EmbeddingResponse](ctx, r, c.url, headers, timeoutMs)
 	if err != nil {
 		return nil, err
 	}
