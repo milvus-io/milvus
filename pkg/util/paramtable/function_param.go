@@ -27,6 +27,7 @@ type functionConfig struct {
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
 	RerankModelProviders          ParamGroup `refreshable:"true"`
 	LocalResourcePath             ParamItem  `refreshable:"true"`
+	AllowedLocalResourceDirs      ParamItem  `refreshable:"true"`
 	LinderaDownloadUrls           ParamGroup `refreshable:"true"`
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
@@ -217,6 +218,17 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "/var/lib/milvus/analyzer",
 	}
 	p.LocalResourcePath.Init(base.mgr)
+
+	p.AllowedLocalResourceDirs = ParamItem{
+		Key:          "function.analyzer.allowed_local_resource_dirs",
+		Version:      "3.0.7",
+		Export:       true,
+		DefaultValue: "/var/lib/milvus/dicts",
+		Doc: "Comma-separated absolute directories that analyzer files of type local may be read from,\n" +
+			"for example stop_words_file, synonyms_file, extra_dict_file, user_dict and the grpc tokenizer tls files. local_resource_path is always allowed.\n" +
+			"An analyzer that refers to a local file outside these directories is rejected.",
+	}
+	p.AllowedLocalResourceDirs.Init(base.mgr)
 
 	p.LinderaDownloadUrls = ParamGroup{
 		KeyPrefix: "function.analyzer.lindera.download_urls.",

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -411,6 +412,71 @@ func TestPrivilegeInterceptorDatabaseLevel(t *testing.T) {
 			DbName: "db_secret",
 		})
 		assert.Error(t, err)
+	})
+}
+
+func TestAuthorizeRunAnalyzerCollection(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_search", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeSearch.String(), "default"),
+				funcutil.PolicyForPrivilege("role_load", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String(), "default"),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("searcher", "role_search"),
+				funcutil.EncodeUserRoleCache("loader", "role_load"),
+			},
+		}, nil
+	}
+	_, err := initMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	noCache := func() Cache { return nil }
+	collectionRequest := func(collection string) *milvuspb.RunAnalyzerRequest {
+		return &milvuspb.RunAnalyzerRequest{DbName: "default", CollectionName: collection, FieldName: "text"}
+	}
+
+	t.Run("collection field analyzer requires Search", func(t *testing.T) {
+		_, err := authorizeRunAnalyzerCollection(GetContext(context.Background(), "searcher:pwd"), collectionRequest("col1"), noCache)
+		assert.NoError(t, err)
+
+		_, err = authorizeRunAnalyzerCollection(GetContext(context.Background(), "searcher:pwd"), collectionRequest("col2"), noCache)
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+		_, err = authorizeRunAnalyzerCollection(GetContext(context.Background(), "loader:pwd"), collectionRequest("col1"), noCache)
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+		_, err = authorizeRunAnalyzerCollection(GetContext(context.Background(), "nobody:pwd"), collectionRequest("col1"), noCache)
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+	})
+
+	t.Run("inline analyzer needs no collection privilege", func(t *testing.T) {
+		_, err := authorizeRunAnalyzerCollection(GetContext(context.Background(), "nobody:pwd"), &milvuspb.RunAnalyzerRequest{
+			AnalyzerParams: `{"tokenizer": "standard"}`,
+		}, noCache)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alias is checked against its collection", func(t *testing.T) {
+		Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "true")
+		defer Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+		cache := NewMockCache(t)
+		cache.EXPECT().ResolveCollectionAlias(mock.Anything, "default", "alias1").Return("col1", nil)
+		_, err := authorizeRunAnalyzerCollection(GetContext(context.Background(), "searcher:pwd"), collectionRequest("alias1"), func() Cache { return cache })
+		assert.NoError(t, err)
+	})
+
+	t.Run("authorization disabled", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		_, err := authorizeRunAnalyzerCollection(context.Background(), collectionRequest("col2"), noCache)
+		assert.NoError(t, err)
 	})
 }
 

@@ -59,22 +59,19 @@ impl FilterBuilder for SplitCompoundWords {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::Path;
-    use std::sync::Arc;
 
     use serde_json as json;
 
     use super::SplitCompoundWords;
     use crate::analyzer::filter::FilterBuilder;
-    use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
+    use crate::analyzer::options::test_util::{helper_allowing, test_data_dir};
     use crate::analyzer::tokenizers::standard_builder;
     use crate::log::init_log;
 
     #[test]
     fn test_decompounder_filter_with_file() {
         init_log();
-        let file_dir = Path::new(file!()).parent().unwrap();
-        let decompounder_path = file_dir.join("../data/test/decompounder_dict.txt");
+        let decompounder_path = test_data_dir().join("decompounder_dict.txt");
         let decompounder_path_str = decompounder_path.to_string_lossy().to_string();
         let params = format!(
             r#"{{
@@ -87,7 +84,7 @@ mod tests {
         );
         let json_params = json::from_str::<json::Value>(&params).unwrap();
         // let filter = SplitCompoundWords::from_dictionary(vec!["bank", "note"]);
-        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        let mut helper = helper_allowing(&[test_data_dir()]);
         let filter = SplitCompoundWords::from_json(json_params.as_object().unwrap(), &mut helper);
         assert!(filter.is_ok(), "error: {}", filter.err().unwrap());
         let builder = standard_builder().filter(filter.unwrap());

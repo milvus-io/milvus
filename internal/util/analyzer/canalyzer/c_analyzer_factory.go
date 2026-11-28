@@ -11,6 +11,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"unsafe"
@@ -32,6 +33,8 @@ const (
 	ResourceMapKey       = "resource_map"
 	ResourcePathKey      = "resource_path"
 	StorageNameKey       = "storage_name"
+	// AllowedLocalDirsKey lists the directories that local analyzer files may be read from.
+	AllowedLocalDirsKey = "allowed_local_resource_dirs"
 )
 
 var (
@@ -63,10 +66,31 @@ func InitOptions() error {
 func BuildRuntimeOptions() map[string]any {
 	cfg := paramtable.Get()
 	return map[string]any{
-		LinderaDictURLKey:  buildLinderaDownloadURLs(cfg.FunctionCfg.LinderaDownloadUrls.GetValue()),
-		DefaultDictPathKey: cfg.FunctionCfg.LocalResourcePath.GetValue(),
-		ResourcePathKey:    pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()),
+		LinderaDictURLKey:   buildLinderaDownloadURLs(cfg.FunctionCfg.LinderaDownloadUrls.GetValue()),
+		DefaultDictPathKey:  cfg.FunctionCfg.LocalResourcePath.GetValue(),
+		ResourcePathKey:     pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID()),
+		AllowedLocalDirsKey: buildAllowedLocalDirs(),
 	}
+}
+
+// buildAllowedLocalDirs returns function.analyzer.local_resource_path plus
+// function.analyzer.allowed_local_resource_dirs. Relative entries are ignored.
+func buildAllowedLocalDirs() []string {
+	cfg := &paramtable.Get().FunctionCfg
+	candidates := append([]string{cfg.LocalResourcePath.GetValue()}, cfg.AllowedLocalResourceDirs.GetAsStrings()...)
+	dirs := make([]string, 0, len(candidates))
+	for _, dir := range candidates {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		if !filepath.IsAbs(dir) {
+			mlog.Warn(context.TODO(), "ignore relative analyzer local resource directory", mlog.String("dir", dir))
+			continue
+		}
+		dirs = append(dirs, filepath.Clean(dir))
+	}
+	return dirs
 }
 
 func buildLinderaDownloadURLs(values map[string]string) map[string][]string {

@@ -256,4 +256,102 @@ func TestBuildRuntimeOptions(t *testing.T) {
 		map[string][]string{"ipadic": {"http://a.test/ipadic.tar.gz"}},
 		buildLinderaDownloadURLs(map[string]string{".ipadic": "http://a.test/ipadic.tar.gz"}),
 	)
+	assert.Equal(t, []string{localResourcePath, "/var/lib/milvus/dicts"}, options[AllowedLocalDirsKey])
+
+	dirsKey := params.FunctionCfg.AllowedLocalResourceDirs.Key
+	require.NoError(t, params.Save(dirsKey, " /data/dicts/ , relative/dicts, ,/opt/stop"))
+	defer params.Reset(dirsKey)
+	assert.Equal(t, []string{localResourcePath, "/data/dicts", "/opt/stop"}, buildAllowedLocalDirs())
+}
+
+func TestAnalyzerLocalResourceDirs(t *testing.T) {
+	params := paramtable.Get()
+	allowed := t.TempDir()
+	dirsKey := params.FunctionCfg.AllowedLocalResourceDirs.Key
+	require.NoError(t, params.Save(dirsKey, allowed))
+	defer func() {
+		params.Reset(dirsKey)
+		require.NoError(t, updateParams())
+	}()
+	require.NoError(t, updateParams())
+
+	stopWords := filepath.Join(allowed, "stop.txt")
+	require.NoError(t, os.WriteFile(stopWords, []byte("the\nand\n"), 0o600))
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("root:x:0:0:root:/root:/bin/bash secret-value\n"), 0o600))
+
+	stopParams := func(path string) string {
+		return fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "stop", "stop_words_file": {"type": "local", "path": %q}}]}`, path)
+	}
+
+	// A file under an allowed directory still works.
+	analyzer, err := NewAnalyzer(stopParams(stopWords), "")
+	require.NoError(t, err)
+	defer analyzer.Destroy()
+	tokenStream := analyzer.NewTokenStream("the cat and the dog")
+	defer tokenStream.Destroy()
+	tokens := []string{}
+	for tokenStream.Advance() {
+		tokens = append(tokens, tokenStream.Token())
+	}
+	assert.Equal(t, []string{"cat", "dog"}, tokens)
+
+	// Paths outside the allowed directories are rejected for every file-backed option.
+	for _, path := range []string{outside, "/etc/passwd", "/dev/zero", "/proc/self/environ"} {
+		for _, params := range []string{
+			stopParams(path),
+			fmt.Sprintf(`{"tokenizer": {"type": "jieba", "extra_dict_file": {"type": "local", "path": %q}}}`, path),
+			fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "synonym", "synonyms_file": {"type": "local", "path": %q}}]}`, path),
+			fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "decompounder", "word_list_file": {"type": "local", "path": %q}}]}`, path),
+		} {
+			_, err := NewAnalyzer(params, "")
+			require.Error(t, err, params)
+			assert.Contains(t, err.Error(), "allowed_local_resource_dirs", params)
+			assert.NotContains(t, err.Error(), "secret-value", params)
+			assert.NotContains(t, err.Error(), "root:x", params)
+
+			_, err = ValidateAnalyzer(params, "")
+			require.Error(t, err, params)
+			assert.NotContains(t, err.Error(), "root:x", params)
+		}
+	}
+
+	// Parse errors of an allowed file report the line, not its content.
+	// Line 1 is valid for both formats; line 2 is not.
+	badDict := filepath.Join(allowed, "bad_dict.txt")
+	require.NoError(t, os.WriteFile(badDict, []byte("word\nroot:x:0:0:root:/root:/bin/bash secret-value\n"), 0o600))
+	for _, params := range []string{
+		fmt.Sprintf(`{"tokenizer": {"type": "jieba", "extra_dict_file": {"type": "local", "path": %q}}}`, badDict),
+		fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "synonym", "synonyms_file": {"type": "local", "path": %q}}]}`, badDict),
+	} {
+		_, err := NewAnalyzer(params, "")
+		require.Error(t, err, params)
+		assert.Contains(t, err.Error(), "line 2", params)
+		assert.NotContains(t, err.Error(), "secret-value", params)
+		assert.NotContains(t, err.Error(), "root:x", params)
+	}
+}
+
+func TestRemoteResourceFileNameStaysInResourceDir(t *testing.T) {
+	resourcePath := pathutil.GetPath(pathutil.FileResourcePath, paramtable.GetNodeID())
+	defer os.RemoveAll(resourcePath)
+	require.NoError(t, updateParams())
+	resourceID := int64(101)
+	dir := filepath.Join(resourcePath, fmt.Sprintf("%d", resourceID))
+	require.NoError(t, os.MkdirAll(dir, os.ModePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "stop.txt"), []byte("stop"), 0o600))
+	require.NoError(t, UpdateGlobalResourceInfo(map[string]int64{"stop_dict": resourceID}))
+
+	remote := func(fileName string) string {
+		return fmt.Sprintf(`{"tokenizer": "standard", "filter": [{"type": "stop", "stop_words_file": {"type": "remote", "resource_name": "stop_dict", "file_name": %q}}]}`, fileName)
+	}
+	ids, err := ValidateAnalyzer(remote("stop.txt"), "")
+	require.NoError(t, err)
+	assert.Equal(t, []int64{resourceID}, ids)
+
+	for _, fileName := range []string{"../../../../../../../../etc/passwd", "../101/stop.txt", "sub/stop.txt", "/etc/passwd"} {
+		_, err := NewAnalyzer(remote(fileName), "")
+		require.Error(t, err, fileName)
+		assert.Contains(t, err.Error(), "plain file name", fileName)
+	}
 }
