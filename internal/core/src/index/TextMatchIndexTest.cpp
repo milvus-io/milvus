@@ -44,6 +44,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
 #include "index/TextMatchIndex.h"
@@ -2064,6 +2065,75 @@ TEST(TextMatch, ConcurrentReadWriteWithNull) {
     reader.join();
 }
 
+TEST(TextMatch, ExprResCacheGrowingTextBypassesReadAndWrite) {
+    using milvus::exec::ExprResCacheManager;
+    auto& mgr = ExprResCacheManager::Instance();
+    auto reset_cache = folly::makeGuard([&]() {
+        mgr.Clear();
+        EXPECT_TRUE(mgr.SetConfig(milvus::exec::CacheConfig{}));
+        ExprResCacheManager::SetEnabled(false);
+    });
+    milvus::exec::CacheConfig config;
+    config.mode = milvus::exec::CacheMode::Memory;
+    config.mem_enable_growing = true;
+    config.admission_threshold = 1;
+    config.mem_min_eval_duration_us = 0;
+    ASSERT_TRUE(mgr.SetConfig(config));
+    mgr.Clear();
+    ExprResCacheManager::SetEnabled(true);
+
+    auto schema = GenTestSchema();
+    constexpr int64_t N = 2;
+    auto raw_data = DataGen(schema, N);
+    auto* strings = raw_data.raw_->mutable_fields_data()
+                        ->at(1)
+                        .mutable_scalars()
+                        ->mutable_string_data();
+    strings->set_data(0, "football basketball");
+    strings->set_data(1, "swimming football");
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    auto offset = seg->PreInsert(N);
+    seg->Insert(offset,
+                N,
+                raw_data.row_ids_.data(),
+                raw_data.timestamps_.data(),
+                raw_data.raw_);
+    auto index = seg->GetTextIndex(nullptr, FieldId(101));
+    index.get()->Commit();
+    index.get()->Reload();
+    ASSERT_EQ(seg->get_row_count(), N);
+    ASSERT_EQ(index.get()->MatchQuery("football", 1).count(), N);
+
+    for (auto op :
+         {OpType::TextMatch, OpType::PhraseMatch, OpType::TextMatchFuzzy}) {
+        SCOPED_TRACE(proto::plan::OpType_Name(op));
+        auto expr = GetMatchExpr(schema, "football", op);
+        auto result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(result.count(), N);
+        EXPECT_EQ(mgr.GetEntryCount(), 0);
+        mgr.Clear();
+
+        // Simulate a result cached before the index became visible, with the
+        // same active_count. Explicit commit/reload above avoids a timed race.
+        ExprResCacheManager::Key key{seg->get_segment_id(),
+                                     expr->filter()->ToString()};
+        ExprResCacheManager::Value stale;
+        stale.result = std::make_shared<TargetBitmap>(N);
+        stale.valid_result = std::make_shared<TargetBitmap>(N, true);
+        stale.active_count = N;
+        mgr.Put(key, stale);
+        ASSERT_EQ(mgr.GetEntryCount(), 1);
+
+        result = ExecuteQueryExpr(expr, seg.get(), N, MAX_TIMESTAMP);
+        EXPECT_EQ(result.count(), N);
+        ExprResCacheManager::Value still_cached;
+        still_cached.active_count = N;
+        ASSERT_TRUE(mgr.Get(key, still_cached));
+        EXPECT_EQ(still_cached.result->count(), 0);
+        mgr.Clear();
+    }
+}
+
 TEST(TextMatch, ExprResCacheSealed) {
     using milvus::exec::ExprResCacheManager;
     auto& mgr = ExprResCacheManager::Instance();
@@ -2144,6 +2214,8 @@ TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
     auto plan_fragment = plan::PlanFragment(expr);
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
         DEAFULT_QUERY_ID, seg.get(), N, MAX_TIMESTAMP);
+    query_context->set_read_snapshot(
+        query_context->get_segment()->CaptureReadSnapshot());
     query_context->set_enable_expr_cache(true);
     query_context->set_enable_sub_expr_cache_write(false);
 
@@ -2151,14 +2223,18 @@ TEST(TextMatch, ExprResCacheFilterBitsDoesNotDuplicateTextMatchEntry) {
     ASSERT_NE(row, nullptr);
     ASSERT_EQ(mgr.GetEntryCount(), 1);
 
-    ExprResCacheManager::Key filter_key{seg->get_segment_id(),
-                                        expr->ToString()};
+    ExprResCacheManager::Key filter_key{
+        seg->get_segment_id(),
+        expr->ToString(),
+        seg->CaptureReadSnapshot()->GetExprCacheGeneration()};
     ExprResCacheManager::Value filter_value;
     filter_value.active_count = N;
     ASSERT_TRUE(mgr.Get(filter_key, filter_value));
 
     ExprResCacheManager::Key text_match_key{seg->get_segment_id(),
                                             expr->filter()->ToString()};
+    text_match_key.generation =
+        seg->CaptureReadSnapshot()->GetExprCacheGeneration();
     ExprResCacheManager::Value text_match_value;
     text_match_value.active_count = N;
     ASSERT_FALSE(mgr.Get(text_match_key, text_match_value));
@@ -2190,6 +2266,8 @@ ExecuteFilterBitsWithFullCache(
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us);
+    query_context->set_read_snapshot(
+        query_context->get_segment()->CaptureReadSnapshot());
     query_context->set_enable_expr_cache(true);
     query_context->set_enable_sub_expr_cache_write(false);
 

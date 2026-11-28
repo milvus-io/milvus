@@ -307,6 +307,13 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency,
                             internal_core_search_latency,
                             strictGroupSearchLatencyLabels)
 
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_expr_cache_hit_total,
+    "[cpp]successful expression result cache lookups");
+DEFINE_PROMETHEUS_COUNTER(internal_expr_cache_hit_total,
+                          internal_expr_cache_hit_total,
+                          {});
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};

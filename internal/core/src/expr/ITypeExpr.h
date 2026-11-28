@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
 #include "common/Exception.h"
+#include "common/Json.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -214,7 +215,7 @@ struct ColumnInfo {
             std::to_string(field_id_.get()),
             data_type_,
             element_type_,
-            milvus::Join<std::string>(nested_path_, ","),
+            milvus::Json::pointer(nested_path_),
             element_level_);
     }
 };
@@ -933,10 +934,16 @@ class MatchExpr : public ITypeFilterExpr {
 
     std::string
     ToString() const override {
-        return fmt::format("MatchExpr(struct_name={}, match_type={}, count={})",
-                           struct_name_,
-                           proto::plan::MatchType_Name(match_type_),
-                           count_);
+        const auto predicate = inputs_[0]->ToString();
+        return fmt::format(
+            "MatchExpr(struct_name_length={}, struct_name={}, match_type={}, "
+            "count={}, predicate_length={}, predicate={})",
+            struct_name_.size(),
+            struct_name_,
+            proto::plan::MatchType_Name(match_type_),
+            count_,
+            predicate.size(),
+            predicate);
     }
 
     const std::string&
