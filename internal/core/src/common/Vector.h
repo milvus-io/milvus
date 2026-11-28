@@ -158,10 +158,7 @@ class ColumnVector final : public SimpleVector {
             null_count > 0 ? std::optional<size_t>(null_count) : std::nullopt;
     }
 
-    virtual ~ColumnVector() override {
-        values_.reset();
-        valid_values_.reset();
-    }
+    ~ColumnVector() override = default;
 
     void*
     RawValueAt(size_t index, size_t size_of_element) override {
