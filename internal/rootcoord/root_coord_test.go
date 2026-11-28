@@ -2049,6 +2049,8 @@ func TestRootCoord_ServerExist(t *testing.T) {
 }
 
 func TestRootCoord_AddFileResource(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("/path")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot) })
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -2068,9 +2070,20 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterMissing)
 	})
 
+	t.Run("outside allowed directory does not probe storage", func(t *testing.T) {
+		storageMock := mock_storage.NewMockChunkManager(t)
+		c := newTestCore(withHealthyCode(), withStorage(storageMock))
+		mockFileResourceBroadcast(t, c)
+		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+			Name: "test_resource", Path: "/outside/secret",
+		})
+		require.NoError(t, err)
+		require.ErrorContains(t, merr.Error(resp), "outside the configured directory")
+	})
+
 	t.Run("storage check error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, errors.New("storage error"))
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), errors.New("storage error"))
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
@@ -2085,7 +2098,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("file not exist", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(false, nil)
+		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), merr.WrapErrIoKeyNotFound("file resource"))
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
@@ -2098,12 +2111,11 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("file size limit disabled", func(t *testing.T) {
+	t.Run("zero size limit uses safe default", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "0")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2128,7 +2140,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(100), nil)
 
 		tsoAllocator := newMockTsoAllocator()
@@ -2155,7 +2166,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2173,7 +2183,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.False(t, resp.GetRetriable())
 	})
 
-	t.Run("identical add skips size check", func(t *testing.T) {
+	t.Run("identical add skips storage checks", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
@@ -2182,7 +2192,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 			Path: "/path/to/file",
 		}
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
@@ -2200,7 +2209,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("same name with different path skips size check and fails", func(t *testing.T) {
+	t.Run("same name with different path skips storage checks and fails", func(t *testing.T) {
 		Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
@@ -2209,7 +2218,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 			Path: "/path/to/new-file",
 		}
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
@@ -2231,7 +2239,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		sizeErr := merr.WrapErrIoFailedReason("size error")
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2252,7 +2259,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		defer Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key)
 
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
@@ -2270,7 +2276,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("tso allocator error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2290,7 +2295,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("meta add file resource error", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -2313,7 +2317,6 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		storageMock := mock_storage.NewMockChunkManager(t)
-		storageMock.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {

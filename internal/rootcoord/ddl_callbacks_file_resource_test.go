@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/mock_storage"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -39,8 +41,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+type admissionFileReader struct{ *strings.Reader }
+
+func (r *admissionFileReader) Close() error         { return nil }
+func (r *admissionFileReader) Size() (int64, error) { return r.Reader.Size(), nil }
+
 func mockFileResourceBroadcast(t *testing.T, core *Core) *mock_broadcaster.MockBroadcastAPI {
 	t.Helper()
+	if Params.CommonCfg.FileResourceAllowedPath.GetValue() == "" {
+		previous := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("dict")
+		t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(previous) })
+	}
+	if cm, ok := core.storage.(interface {
+		On(string, ...interface{}) *mock.Call
+	}); ok {
+		cm.On("Size", mock.Anything, mock.Anything).Return(int64(1), nil).Maybe()
+	}
+	if cm, ok := core.storage.(*mock_storage.MockChunkManager); ok {
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) (storage.FileReader, error) {
+			return &admissionFileReader{strings.NewReader("x")}, nil
+		}).Maybe()
+	}
 	if core.meta == nil {
 		core.meta = mockrootcoord.NewIMetaTable(t)
 	}
@@ -170,7 +191,6 @@ func TestFileResourceSyncFailureAfterBroadcast(t *testing.T) {
 	catalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything, uint64(1)).Return(nil).Once()
 	catalog.EXPECT().RemoveFileResource(mock.Anything, int64(123), uint64(2)).Return(nil).Once()
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, "dict/custom.txt").Return(true, nil)
 	tso := newMockTsoAllocator()
 	tso.GenerateTSOF = func(uint32) (uint64, error) { return 123, nil }
 	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage), withTsoAllocator(tso))
@@ -207,13 +227,12 @@ func TestFileResourceRemoveChecksReferencesBeforeBroadcast(t *testing.T) {
 func TestFileResourceAddKeepsMetadataUnchangedBeforeBroadcast(t *testing.T) {
 	meta, _ := fileResourceTestMeta(t)
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, "dict/custom.txt").Return(true, nil)
 	tso := newMockTsoAllocator()
 	tso.GenerateTSOF = func(uint32) (uint64, error) { return 123, nil }
 	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage), withTsoAllocator(tso))
 	api := mockFileResourceBroadcast(t, core)
 	api.ExpectedCalls = nil
-	api.EXPECT().Close().Return().Once()
+	api.EXPECT().Close().Return().Twice()
 	api.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		require.Empty(t, meta.fileResourceID2Meta)
 		body := message.MustAsBroadcastAddFileResourceMessageV2(msg).MustBody()
@@ -235,6 +254,8 @@ func TestFileResourceRejectsMalformedMetadata(t *testing.T) {
 }
 
 func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("dict")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot) })
 	Params.Save(Params.CommonCfg.FileResourceMaxFileSize.Key, "100")
 	t.Cleanup(func() { Params.Reset(Params.CommonCfg.FileResourceMaxFileSize.Key) })
 	meta, catalog := fileResourceTestMeta(t)
@@ -242,7 +263,6 @@ func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T)
 	catalog.EXPECT().SaveFileResource(mock.Anything, resource, uint64(1)).Return(nil).Once()
 	guardHeld := false
 	storage := mock_storage.NewMockChunkManager(t)
-	storage.EXPECT().Exist(mock.Anything, resource.Path).Return(true, nil).Once()
 	storage.EXPECT().Size(mock.Anything, resource.Path).
 		RunAndReturn(func(ctx context.Context, _ string) (int64, error) {
 			require.False(t, guardHeld, "storage I/O must not hold the cluster DDL guard")
@@ -281,4 +301,53 @@ func TestFileResourceSizeAdmissionReleasesGuardAndRechecksIdentity(t *testing.T)
 		Path: resource.Path,
 	}))
 	require.False(t, guardHeld)
+}
+
+func TestFileResourceAdmissionChecksActualBytes(t *testing.T) {
+	old := Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("4")
+	t.Cleanup(func() { Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(old) })
+	cm := mock_storage.NewMockChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, "dict/large.txt").Return(int64(1), nil)
+	cm.EXPECT().Reader(mock.Anything, "dict/large.txt").Run(func(context.Context, string) {
+		Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("8")
+	}).Return(&admissionFileReader{strings.NewReader("SECRET_MARKER")}, nil).Once()
+	core := newTestCore(withStorage(cm))
+	api := mockFileResourceBroadcast(t, core)
+	err := core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{Name: "large", Path: "dict/large.txt"})
+	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	require.NotContains(t, err.Error(), "SECRET_MARKER")
+	api.AssertNotCalled(t, "Broadcast", mock.Anything, mock.Anything)
+}
+
+func TestFileResourceExistingRegistrationSurvivesPolicyChange(t *testing.T) {
+	oldRoot := Params.CommonCfg.FileResourceAllowedPath.SwapTempValue("new-root")
+	oldLimit := Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue("1")
+	t.Cleanup(func() {
+		Params.CommonCfg.FileResourceAllowedPath.SwapTempValue(oldRoot)
+		Params.CommonCfg.FileResourceMaxFileSize.SwapTempValue(oldLimit)
+	})
+	meta, _ := fileResourceTestMeta(t)
+	resource := &internalpb.FileResourceInfo{Id: 123, Name: "dictionary", Path: "old-root/custom.txt"}
+	meta.fileResourceName2Meta[resource.Name] = resource
+	meta.fileResourceID2Meta[resource.Id] = resource
+	storage := mock_storage.NewMockChunkManager(t)
+	core := newTestCore(withHealthyCode(), withMeta(meta), withStorage(storage))
+	api := mockFileResourceBroadcast(t, core)
+	api.ExpectedCalls = nil
+	api.EXPECT().Close().Return().Times(3)
+	api.EXPECT().Broadcast(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			require.True(t, proto.Equal(resource, message.MustAsBroadcastAddFileResourceMessageV2(msg).MustBody().GetResource()))
+			return &types.BroadcastAppendResult{}, nil
+		}).Once()
+	require.NoError(t, core.broadcastAddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
+		Name: resource.Name, Path: resource.Path,
+	}))
+	for _, req := range []*milvuspb.AddFileResourceRequest{
+		{Name: "new-dictionary", Path: resource.Path},
+		{Name: resource.Name, Path: "old-root/other.txt"},
+	} {
+		require.ErrorContains(t, core.broadcastAddFileResource(context.Background(), req), "outside the configured directory")
+	}
+	require.Empty(t, storage.Calls, "existing registrations and rejected paths must not probe storage")
 }

@@ -204,15 +204,25 @@ pub fn create_analyzer_by_json(
     builder.build()
 }
 
-pub fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
-    if extra_info.is_empty() {
-        Ok(get_global_file_resource_helper())
+// Extra info carries server-owned runtime options, independently of resource bindings.
+fn create_helper(extra_info: &str) -> Result<FileResourcePathHelper> {
+    let extra: json::Map<String, json::Value> = if extra_info.is_empty() {
+        json::Map::new()
     } else {
-        Ok(FileResourcePathHelper::from_json(
-            &json::from_str::<json::Value>(&extra_info)
-                .map_err(|e| TantivyBindingError::JsonError(e))?,
-        )?)
-    }
+        json::from_str(extra_info).map_err(TantivyBindingError::JsonError)?
+    };
+    let check_file_access = extra
+        .get("check_file_access")
+        .and_then(json::Value::as_bool)
+        == Some(true);
+    let mut helper = if extra.contains_key("resource_map") {
+        FileResourcePathHelper::from_json(&json::Value::Object(extra))?
+    } else {
+        get_global_file_resource_helper()
+    };
+    // Persisted definitions remain usable after operator policy changes.
+    helper.enforce_file_access = check_file_access;
+    Ok(helper)
 }
 
 pub fn create_analyzer(params: &str, extra_info: &str) -> Result<TextAnalyzer> {
@@ -237,6 +247,7 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
     })?;
 
     let mut helper = create_helper(extra_info)?;
+    helper.enforce_file_access = true;
     create_analyzer_by_json(json_params, &mut helper)?;
     Ok(helper.get_resource_ids())
 }

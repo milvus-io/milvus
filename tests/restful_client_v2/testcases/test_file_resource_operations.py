@@ -1,4 +1,6 @@
 import io
+import os
+import posixpath
 import time
 
 import pytest
@@ -6,6 +8,10 @@ from api.milvus import FileResourceClient
 from base.testbase import TestBase
 from utils.constant import CaseLabel
 from utils.utils import gen_collection_name, gen_unique_str
+
+FILE_RESOURCE_PREFIX = os.getenv(
+    "MILVUS_FILE_RESOURCE_PREFIX", posixpath.join(os.getenv("MILVUS_MINIO_ROOT_PATH", "file"), "file_resource")
+)
 
 
 class TestFileResourceOperations(TestBase):
@@ -25,7 +31,7 @@ class TestFileResourceOperations(TestBase):
 
     def _upload_file(self, content, file_name="synonyms.txt"):
         resource_name = gen_unique_str("rest_file_resource")
-        path = f"file-resource-rest/{resource_name}/{file_name}"
+        path = f"{FILE_RESOURCE_PREFIX}/file-resource-rest/{resource_name}/{file_name}"
         self.storage_client.client.put_object(
             self.storage_client.bucket_name,
             path,
@@ -191,7 +197,10 @@ class TestFileResourceOperations(TestBase):
         assert rsp["code"] == 1802, rsp
 
         rsp = self.file_resource_client.file_resource_add(
-            {"name": gen_unique_str("resource"), "path": f"missing/{gen_unique_str('object')}.txt"}
+            {
+                "name": gen_unique_str("resource"),
+                "path": f"{FILE_RESOURCE_PREFIX}/missing/{gen_unique_str('object')}.txt",
+            }
         )
         assert rsp["code"] == 1100, rsp
         assert "path not exist" in rsp["message"], rsp

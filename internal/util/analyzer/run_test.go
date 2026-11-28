@@ -34,7 +34,8 @@ func TestRunAnalyzerResources(t *testing.T) {
 		mockey.PatchConvey("resources released on failure", t, func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			mockey.Mock(NewAnalyzer).To(func(string, string) (Analyzer, error) {
+			mockey.Mock(NewAnalyzer).To(func(_ string, extra string) (Analyzer, error) {
+				require.JSONEq(t, `{"resource_map":{"dict":9007199254740993},"check_file_access":true}`, extra)
 				if cancelAfterCreate {
 					cancel()
 				}
@@ -42,7 +43,7 @@ func TestRunAnalyzerResources(t *testing.T) {
 			}).Build()
 			destroy := mockey.Mock((*runTestAnalyzer).Destroy).Return().Build()
 			stream := mockey.Mock((*runTestAnalyzer).NewTokenStream).Return(nil, merr.ErrServiceUnavailable).Build()
-			_, err := Run(ctx, "{}", [][]byte{[]byte("hello")}, false, false)
+			_, err := Run(ctx, "{}", [][]byte{[]byte("hello")}, false, false, `{"resource_map":{"dict":9007199254740993}}`)
 			require.Error(t, err)
 			require.Equal(t, 1, destroy.Times())
 			if cancelAfterCreate {

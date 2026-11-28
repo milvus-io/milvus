@@ -5,6 +5,7 @@ import io
 import pytest
 from common.common_type import CaseLabel
 from common.external_table_common import build_external_source, build_external_spec, get_minio_config, new_minio_client
+from common.minio_comm import file_resource_path
 from pymilvus import DataType, MilvusException
 from pymilvus.client.types import LoadState
 from pymilvus.grpc_gen import milvus_pb2
@@ -27,7 +28,7 @@ def storage(
         get_minio_config(import_2pc_minio_endpoint, import_2pc_minio_bucket),
         get_minio_config(import_2pc_downstream_minio_endpoint, import_2pc_downstream_minio_bucket),
     ]
-    prefix = c.name("cdc_objects")
+    prefix = file_resource_path(c.name("cdc_objects"))
     clients = [new_minio_client(config) for config in configs]
 
     def cleanup():

@@ -32,7 +32,11 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 				return err
 			}
 			defer resources.Close()
-			tokenizer, err := analyzer.NewAnalyzer(source.InlineAnalyzer.GetAnalyzerParams(), resources.ExtraInfo())
+			extra, err := analyzer.WithFileAccessCheck(resources.ExtraInfo())
+			if err != nil {
+				return err
+			}
+			tokenizer, err := analyzer.NewAnalyzer(source.InlineAnalyzer.GetAnalyzerParams(), extra)
 			if err != nil {
 				return err
 			}

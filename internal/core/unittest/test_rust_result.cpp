@@ -10,7 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <stddef.h>
+#include <folly/ScopeGuard.h>
+#include <nlohmann/json.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -20,6 +23,7 @@
 #include "rust-array.h"
 #include "tantivy-error.h"
 #include "tantivy/tokenizer.h"
+#include "storage/artifact/LocalDirectory.h"
 
 TEST(RustResultTest, TestResult) {
     auto arr = test_enum_with_array();
@@ -39,9 +43,18 @@ using milvus::tantivy::RustArrayWrapper;
 using milvus::tantivy::RustResultWrapper;
 
 TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
-    // An empty local path cannot be opened; no shared filesystem fixture needed.
+    const auto directory = milvus::storage::LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "analyzer-missing-file-XXXXXX",
+        "analyzer missing-file test");
+    // Reach the I/O failure after policy validation in an empty allowed directory.
+    milvus::tantivy::set_tokenizer_options(
+        nlohmann::json{{"default_dict_path", directory->Path()}}.dump());
+    const auto reset_options = folly::makeGuard([] {
+        milvus::tantivy::set_tokenizer_options(R"({"default_dict_path":null})");
+    });
     const char* params =
-        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})";
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":"missing.txt"}}]})";
     RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
     ASSERT_FALSE(validation.result_->success);
     EXPECT_EQ(validation.result_->error_code,

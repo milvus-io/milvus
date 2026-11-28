@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFunctionConfig(t *testing.T) {
@@ -155,6 +156,31 @@ func TestGrepConfigValidationAndRefresh(t *testing.T) {
 				assert.Equal(t, value, tc.item.GetAsInt64())
 				assert.Equal(t, value, tc.item.GetAsInt64())
 			}
+		})
+	}
+}
+
+func TestAnalyzerLocalResourcePath(t *testing.T) {
+	for _, tc := range []struct {
+		name, root, configured, want string
+	}{
+		{name: "default", root: defaultLocalStoragePath, want: "/var/lib/milvus/data/analyzer"},
+		{name: "custom_storage_root", root: "/srv/milvus/data", want: "/srv/milvus/data/analyzer"},
+		{name: "explicit_legacy_path", root: "/srv/milvus/data", configured: "/var/lib/milvus/analyzer", want: "/var/lib/milvus/analyzer"},
+		{name: "relative_override", root: defaultLocalStoragePath, configured: "dicts"},
+		{name: "filesystem_root_override", root: defaultLocalStoragePath, configured: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(base.Manager().Close)
+			require.NoError(t, base.Save("function.analyzer.local_resource_path", tc.configured))
+			var cfg functionConfig
+			if tc.want == "" {
+				require.Panics(t, func() { cfg.init(base, tc.root) })
+				return
+			}
+			cfg.init(base, tc.root)
+			require.Equal(t, tc.want, cfg.LocalResourcePath.GetValue())
 		})
 	}
 }

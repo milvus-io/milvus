@@ -57,6 +57,8 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// Set only for a snapshot stored by this cluster, never from request properties.
+	restoreAnalyzerDefinitions bool
 	// allowStructSubFieldOriginMarker accepts the internal origin marker on
 	// struct sub-fields. Only restore from a snapshot sets it: that restore
 	// copies segments as they are, so the sub-fields added after their struct
@@ -260,7 +262,17 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	fileResourceIds, err := t.validateSchemaAnalyzerFileResources(ctx, schema)
+	var fileResourceIds []int64
+	var err error
+	if t.restoreAnalyzerDefinitions {
+		previous := &model.Collection{
+			Fields: schema.GetFields(), Functions: model.UnmarshalFunctionModels(schema.GetFunctions()),
+			FileResourceIds: schema.GetFileResourceIds(),
+		}
+		fileResourceIds, err = t.validateChangedAnalyzers(ctx, previous, schema)
+	} else {
+		fileResourceIds, err = t.validateSchemaAnalyzerFileResources(ctx, schema)
+	}
 	if err != nil {
 		return err
 	}
@@ -279,6 +291,9 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 }
 
 func (c *Core) validateSchemaAnalyzerFileResources(ctx context.Context, schema *schemapb.CollectionSchema) ([]int64, error) {
+	if err := resolveSchemaAnalyzerPaths(schema, nil); err != nil {
+		return nil, err
+	}
 	analyzerInfos, err := collectAnalyzerInfos(schema)
 	if err != nil {
 		return nil, err
@@ -1008,8 +1023,8 @@ func collectAnalyzerInfos(collSchema *schemapb.CollectionSchema) ([]*querypb.Ana
 	return analyzerInfos, nil
 }
 
-// validateAnalyzer validates active match/BM25 fields and fields with
-// enable_analyzer=true. Analyzer params are ignored while analyzer is disabled.
+// validateAnalyzer covers every consumed analyzer, including MinHash inputs
+// whose runner consumes analyzer_params without enable_analyzer.
 func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schemapb.FieldSchema, analyzerInfos *[]*querypb.AnalyzerInfo) error {
 	h := typeutil.CreateFieldSchemaHelper(fieldSchema)
 	matchEnabled := typeutil.IsTextMatchEnabled(fieldSchema)
@@ -1017,11 +1032,11 @@ func validateAnalyzer(collSchema *schemapb.CollectionSchema, fieldSchema *schema
 	if active && !h.EnableAnalyzer() {
 		return merr.WrapErrParameterInvalidMsg("field %s which has enable_match or is input of BM25 function must also enable_analyzer", fieldSchema.Name)
 	}
-	if !h.EnableAnalyzer() {
+	if !h.EnableAnalyzer() && !isMinHashAnalyzerInput(collSchema, fieldSchema) {
 		return nil
 	}
 
-	if params, ok := h.GetMultiAnalyzerParams(); ok {
+	if params, ok := h.GetMultiAnalyzerParams(); ok && h.EnableAnalyzer() {
 		if matchEnabled {
 			return merr.WrapErrParameterInvalidMsg("multi analyzer now only support for bm25, but now field %s enable match", fieldSchema.Name)
 		}

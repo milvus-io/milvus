@@ -4575,6 +4575,8 @@ func TestProxy_SyncFileResource(t *testing.T) {
 		})
 
 		sourcePath := t.TempDir()
+		previousSource := params.CommonCfg.FileResourceAllowedPath.SwapTempValue(sourcePath)
+		t.Cleanup(func() { params.CommonCfg.FileResourceAllowedPath.SwapTempValue(previousSource) })
 		remotePath := filepath.Join(sourcePath, "remote", "test.whl")
 		wheelContent := []byte("trusted wheel content")
 		downloader := storage.NewLocalChunkManager(objectstorage.RootPath(sourcePath))

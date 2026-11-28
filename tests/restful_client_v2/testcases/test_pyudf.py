@@ -1,6 +1,8 @@
 import copy
 import io
 import json
+import os
+import posixpath
 import time
 import zipfile
 from contextlib import contextmanager
@@ -11,6 +13,10 @@ from base.testbase import TestBase
 from pymilvus import Collection
 from utils.constant import CaseLabel
 from utils.utils import gen_collection_name, gen_unique_str
+
+FILE_RESOURCE_PREFIX = os.getenv(
+    "MILVUS_FILE_RESOURCE_PREFIX", posixpath.join(os.getenv("MILVUS_MINIO_ROOT_PATH", "file"), "file_resource")
+)
 
 
 class PyUDFRestBase(TestBase):
@@ -117,7 +123,7 @@ def create_udf(context):
         self._create_collection(json_values=json_values, dynamic=dynamic)
         resource = gen_unique_str("rest_pyudf_resource")
         package = gen_unique_str("rest_pyudf_package").lower()
-        path = f"pyudf/{resource}.whl"
+        path = f"{FILE_RESOURCE_PREFIX}/pyudf/{resource}.whl"
         content = self._wheel_bytes(package)
         uploaded = False
         registration_attempted = False
@@ -548,7 +554,9 @@ class TestPyUDF(PyUDFRestBase):
             if operation == "search":
                 response = self._search_once(payload, client=VectorClient(self.endpoint, self.invalid_api_key))
             elif operation == "add":
-                response = invalid.file_resource_add({"name": resource, "path": f"pyudf/{resource}.whl"})
+                response = invalid.file_resource_add(
+                    {"name": resource, "path": f"{FILE_RESOURCE_PREFIX}/pyudf/{resource}.whl"}
+                )
             elif operation == "remove":
                 response = invalid.file_resource_remove({"name": resource})
             else:

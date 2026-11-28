@@ -64,6 +64,7 @@ impl TokenStream for GrpcTokenStream {
 impl GrpcTokenizer {
     pub fn from_json(
         params: &json::Map<String, json::Value>,
+        enforce_file_access: bool,
     ) -> crate::error::Result<GrpcTokenizer> {
         let endpoint = params
             .get(ENDPOINTKEY)
@@ -172,81 +173,35 @@ impl GrpcTokenizer {
             }
         }
 
-        let channel = match TOKIO_RT.block_on(async {
-            #[cfg(feature = "analyzer-remote-tls")]
-            {
-                let endpoint_domain = url::Url::parse(endpoint)
-                    .ok()
-                    .and_then(|u| u.host_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| endpoint.to_string());
-                // if the endpoint starts with "https://", we need to configure TLS
-                if endpoint.starts_with("https://") {
-                    let tls_config = match params.get(TLSKEY) {
-                        Some(tls_val) => {
-                            let domain = tls_val.get("domain")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| endpoint_domain);
-
-                            let mut tls = ClientTlsConfig::new()
-                                .domain_name(domain);
-
-                            // Read the CA certificate from the file system
-                            if let Some(ca_cert_path) = tls_val.get("ca_cert") {
-                                if ca_cert_path.is_string() {
-                                    let ca_cert_path = ca_cert_path.as_str().unwrap();
-                                    let ca_cert = std::fs::read(ca_cert_path)
-                                        .map(|cert| Certificate::from_pem(cert));
-                                    if let Ok(ca_cert) = ca_cert {
-                                        tls = tls.ca_certificate(ca_cert);
-                                    } else {
-                                        warn!("grpc tokenizer tls ca_cert read error: {}", ca_cert_path);
-                                    }
-                                } else {
-                                    warn!("grpc tokenizer tls ca_cert must be a string. skip loading CA certificate.");
-                                }
-                            }
-
-                            if let (Some(client_cert_path), Some(client_key_path)) = (
-                                tls_val.get("client_cert").and_then(|v| v.as_str()),
-                                tls_val.get("client_key").and_then(|v| v.as_str())
-                            ) {
-                                let cert = std::fs::read(client_cert_path)
-                                    .unwrap_or_else(|e| {
-                                        warn!("grpc tokenizer tls client_cert read error: {}", e);
-                                        vec![]
-                                    });
-                                let key = std::fs::read(client_key_path)
-                                    .unwrap_or_else(|e| {
-                                        warn!("grpc tokenizer tls client_key read error: {}", e);
-                                        vec![]
-                                    });
-                                if !cert.is_empty() && !key.is_empty() {
-                                    tls = tls.identity(Identity::from_pem(cert, key));
-                                } else {
-                                    warn!("grpc tokenizer tls client_cert or client_key is empty. skip loading client identity.");
-                                }
-                            }
-                            tls
-                        }
-                        None => ClientTlsConfig::new()
-                            .domain_name(endpoint_domain),
-                    };
-
-                    return tonic::transport::Endpoint::new(endpoint.to_string())?
-                        .tls_config(tls_config)?
-                        .connect()
-                        .await;
-                }
-            }
-
-            tonic::transport::Endpoint::new(endpoint.to_string())?
-                .connect()
-                .await
-        }) {
+        let channel_endpoint =
+            tonic::transport::Endpoint::new(endpoint.to_string()).map_err(|_| {
+                TantivyBindingError::InvalidArgument("grpc tokenizer endpoint is invalid".into())
+            })?;
+        #[cfg(feature = "analyzer-remote-tls")]
+        let channel_endpoint = if endpoint.starts_with("https://") {
+            let domain = url::Url::parse(endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| endpoint.to_string());
+            let root = crate::analyzer::options::get_options("tls_allowed_path")
+                .and_then(|v| v.as_str().map(std::path::PathBuf::from))
+                .unwrap_or_default();
+            let config = build_tls_config(params.get(TLSKEY), domain, &root, enforce_file_access)?;
+            channel_endpoint.tls_config(config).map_err(|_| {
+                TantivyBindingError::InvalidArgument(
+                    "grpc tokenizer TLS configuration is invalid".into(),
+                )
+            })?
+        } else {
+            channel_endpoint
+        };
+        let channel = match TOKIO_RT.block_on(channel_endpoint.connect()) {
             Ok(client) => client,
             Err(e) => {
-                warn!("failed to connect to gRPC server: {}, error: {}", endpoint, e);
+                warn!(
+                    "failed to connect to gRPC server: {}, error: {}",
+                    endpoint, e
+                );
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "failed to connect to gRPC server: {}, error: {}",
                     endpoint, e
@@ -312,10 +267,86 @@ impl Tokenizer for GrpcTokenizer {
     }
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
+fn build_tls_config(
+    tls: Option<&json::Value>,
+    endpoint_domain: String,
+    root: &std::path::Path,
+    enforce_file_access: bool,
+) -> crate::error::Result<ClientTlsConfig> {
+    let Some(tls) = tls else {
+        return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
+    };
+    let Some(tls) = tls.as_object() else {
+        if !enforce_file_access {
+            return Ok(ClientTlsConfig::new().domain_name(endpoint_domain));
+        }
+        return Err(TantivyBindingError::InvalidArgument(
+            "grpc tokenizer tls must be an object".into(),
+        ));
+    };
+    if enforce_file_access && tls.contains_key("client_cert") != tls.contains_key("client_key") {
+        return Err(TantivyBindingError::InvalidArgument(
+            "grpc tokenizer TLS client_cert and client_key must be supplied together".into(),
+        ));
+    }
+    let read = |key: &str| -> crate::error::Result<Option<Vec<u8>>> {
+        let Some(value) = tls.get(key) else {
+            return Ok(None);
+        };
+        // Persisted definitions retain the old optional TLS file selection.
+        if !enforce_file_access {
+            return Ok(value.as_str().and_then(|path| std::fs::read(path).ok()));
+        }
+        let path = value.as_str().filter(|p| !p.is_empty()).ok_or_else(|| {
+            TantivyBindingError::InvalidArgument(
+                "grpc tokenizer TLS file path must be a non-empty string".into(),
+            )
+        })?;
+        crate::file_reader::read_file_in_root(root, std::path::Path::new(path), 1024 * 1024)
+            .map(Some)
+    };
+    let domain = tls
+        .get("domain")
+        .and_then(json::Value::as_str)
+        .unwrap_or(&endpoint_domain);
+    let mut config = ClientTlsConfig::new().domain_name(domain);
+    if let Some(ca) = read("ca_cert")? {
+        config = config.ca_certificate(Certificate::from_pem(ca));
+    }
+    if enforce_file_access
+        || (tls
+            .get("client_cert")
+            .and_then(json::Value::as_str)
+            .is_some()
+            && tls
+                .get("client_key")
+                .and_then(json::Value::as_str)
+                .is_some())
+    {
+        if let (Some(cert), Some(key)) = (read("client_cert")?, read("client_key")?) {
+            if enforce_file_access || (!cert.is_empty() && !key.is_empty()) {
+                config = config.identity(Identity::from_pem(cert, key));
+            }
+        }
+    }
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(feature = "analyzer-remote-tls")]
+    #[test]
+    fn restore_ignores_legacy_optional_tls_settings() {
+        let root = tempfile::tempdir().unwrap();
+        for tls in [json!(null), json!(42), json!({"ca_cert": false})] {
+            assert!(build_tls_config(Some(&tls), "localhost".into(), root.path(), false).is_ok());
+            assert!(build_tls_config(Some(&tls), "localhost".into(), root.path(), true).is_err());
+        }
+    }
 
     #[test]
     fn test_grpc_tokenizer_from_json_success() {
@@ -330,7 +361,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
 
         assert!(tokenizer.is_err()); // This test is expected to fail because the endpoint is not valid for testing
     }
@@ -342,7 +373,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
 
         assert!(tokenizer.is_err());
     }
@@ -355,7 +386,7 @@ mod tests {
         });
 
         let map = params.as_object().unwrap();
-        let tokenizer = GrpcTokenizer::from_json(map);
+        let tokenizer = GrpcTokenizer::from_json(map, true);
         assert!(tokenizer.is_err());
         let err = tokenizer.err().unwrap().to_string();
         assert!(

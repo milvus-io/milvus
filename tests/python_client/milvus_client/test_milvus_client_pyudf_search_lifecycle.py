@@ -24,7 +24,7 @@ import requests
 from base.client_v2_pyudf_base import PyUDFClientBase
 from common import common_func as cf
 from common.common_type import CaseLabel
-from common.minio_comm import copy_files_to_minio
+from common.minio_comm import copy_files_to_minio, file_resource_path
 from common.pyudf_helpers import assert_pyudf_deadline
 from pymilvus import (
     AnnSearchRequest,
@@ -1839,7 +1839,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 # using a distinct package rather than unsupported hot replacement.
                 package = cf.gen_unique_str("pyudf_snapshot_recovery").lower()
                 recovery_wheel = self._build_wheel(tmp_path, package, module=module).read_bytes()
-                recovery_path = f"pyudf/{resource}-recovery.whl"
+                recovery_path = file_resource_path(f"pyudf/{resource}-recovery.whl")
                 store.put_object(minio_bucket, recovery_path, io.BytesIO(recovery_wheel), len(recovery_wheel))
                 cleanup.callback(store.remove_object, minio_bucket, recovery_path)
                 cleanup.callback(self._remove_file_resource, client, resource)

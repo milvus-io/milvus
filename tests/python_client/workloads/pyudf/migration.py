@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from pymilvus import DataType, FunctionChain, FunctionChainStage
 from pymilvus.client.prepare import Prepare
@@ -120,7 +121,7 @@ def retained_ledger(directory, name, metric="L2"):
     metadata = {
         "collection": name,
         "resource": resource,
-        "wheel_path": f"pyudf_r2/{resource}.whl",
+        "wheel_path": file_resource_path(f"pyudf_r2/{resource}.whl"),
         "wheel_sha256": digest(wheel),
         "seed": SEED,
         "rows": ROWS,

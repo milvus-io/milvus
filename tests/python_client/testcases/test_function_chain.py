@@ -8,6 +8,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import file_resource_path
 from pymilvus import (
     AnnSearchRequest,
     DataType,
@@ -517,7 +518,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
 
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         collection_name = cf.gen_unique_str(prefix)
         model_path, feature_values, expected_scores = self._generate_xgboost_model(tmp_path)
 
@@ -639,7 +640,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         model_path, feature_values, _ = self._generate_xgboost_model(tmp_path)
         bucket = file_resource_env["bucket"]
         model_bytes = model_path.read_bytes()
@@ -688,7 +689,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str("xgboost_model")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         model_path, feature_values, _ = self._generate_xgboost_model(tmp_path)
         bucket = file_resource_env["bucket"]
         model_bytes = model_path.read_bytes()
@@ -740,7 +741,7 @@ class TestFunctionChain(TestMilvusClientV2Base):
         """
         client = self._client()
         resource_name = cf.gen_unique_str(f"xgboost_{case_name}")
-        remote_path = f"xgboost/{resource_name}.ubj"
+        remote_path = file_resource_path(f"xgboost/{resource_name}.ubj")
         if model_data is None:
             if case_name == "unsupported_objective":
                 model_path = self._generate_unsupported_xgboost_model(

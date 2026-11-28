@@ -8,6 +8,7 @@ import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from minio import Minio
 from pymilvus import DataType, FunctionChain, FunctionChainStage
@@ -82,7 +83,7 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
             package = cf.gen_unique_str("pyudf_embedding").lower()
             resource = cf.gen_unique_str("pyudf_embedding_resource")
             name = cf.gen_unique_str("pyudf_embedding")
-            remote = f"pyudf/embedding/{resource}.whl"
+            remote = file_resource_path(f"pyudf/embedding/{resource}.whl")
             cleanup_state = {"resource_attempted": False, "resource_removed": False}
 
             def cleanup_wheel():

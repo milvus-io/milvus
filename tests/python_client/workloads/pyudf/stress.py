@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 import requests
+from common.minio_comm import file_resource_path
 from common.pyudf_helpers import build_wheel
 from pymilvus import FunctionChain, FunctionChainStage, MilvusClient
 from pymilvus.function_chain import col
@@ -94,7 +95,7 @@ def register(workload, root, prefix, sources):
         name = f"{prefix}_{number:02d}"
         assert name not in registered, f"Refuse to overwrite {name}"
         wheel = build_wheel(name + "_pkg", source)
-        path = f"pyudf_r2/{name}.whl"
+        path = file_resource_path(f"pyudf_r2/{name}.whl")
         wheels.append({"resource": name, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
         save(root / "wheels.json", wheels)
         store.put_object(config.bucket, path, io.BytesIO(wheel), len(wheel))

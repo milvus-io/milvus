@@ -2,12 +2,11 @@ use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
 use lazy_static::lazy_static;
 use serde_json as json;
-use std::fs;
 use std::io::BufReader;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
-use crate::analyzer::options::{get_resource_path, FileResourcePathHelper};
+use crate::analyzer::options::{with_resource_file, FileResourcePathHelper};
 use crate::error::{Result, TantivyBindingError};
 
 lazy_static! {
@@ -56,10 +55,8 @@ impl TokenStream for JiebaTokenStream {
 
 fn get_jieba_dict(
     params: &json::Map<String, json::Value>,
-    helper: &mut FileResourcePathHelper,
-) -> Result<(Vec<String>, Option<String>, Option<PathBuf>)> {
+) -> Result<(Vec<String>, Option<String>)> {
     let mut words = Vec::<String>::new();
-    let mut user_dict = None;
     // use default dict as default system dict
     let mut system_dict = Some("_default_".to_string());
     match params.get("dict") {
@@ -100,15 +97,7 @@ fn get_jieba_dict(
         _ => {}
     };
 
-    match params.get("extra_dict_file") {
-        Some(v) => {
-            let path = get_resource_path(helper, v, "jieba extra dict file")?;
-            user_dict = Some(path)
-        }
-        _ => {}
-    };
-
-    Ok((words, system_dict, user_dict))
+    Ok((words, system_dict))
 }
 
 fn get_jieba_mode(params: &json::Map<String, json::Value>) -> Result<JiebaMode> {
@@ -161,7 +150,7 @@ impl JiebaTokenizer {
         params: &json::Map<String, json::Value>,
         helper: &mut FileResourcePathHelper,
     ) -> Result<JiebaTokenizer> {
-        let (words, system_dict, user_dict) = get_jieba_dict(params, helper)?;
+        let (words, system_dict) = get_jieba_dict(params)?;
 
         let mut tokenizer =
             system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| match name.as_str() {
@@ -185,15 +174,22 @@ impl JiebaTokenizer {
             tokenizer.add_word(word.as_str(), None, None);
         }
 
-        if user_dict.is_some() {
-            let file = fs::File::open(user_dict.unwrap())?;
-            let mut reader = BufReader::new(file);
-            tokenizer.load_dict(&mut reader).map_err(|e| {
-                TantivyBindingError::InvalidArgument(format!(
-                    "jieba tokenizer load dict file failed with error: {:?}",
-                    e
-                ))
-            })?;
+        if let Some(file_params) = params.get("extra_dict_file") {
+            with_resource_file(
+                helper,
+                file_params,
+                "jieba extra dict file",
+                |mut reader| {
+                    tokenizer.load_dict(&mut reader).map_err(|err| match err {
+                        jieba_rs::Error::Io(err) => TantivyBindingError::IOError(err),
+                        jieba_rs::Error::InvalidDictEntry(_) => {
+                            TantivyBindingError::InvalidArgument(
+                                "jieba dictionary contains an invalid entry".into(),
+                            )
+                        }
+                    })
+                },
+            )?;
         }
 
         let mode = get_jieba_mode(params)?;

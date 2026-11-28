@@ -14,15 +14,13 @@ use lindera::token_filter::korean_keep_tags::KoreanKeepTagsTokenFilter;
 use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
-use lindera::dictionary::{
-    load_user_dictionary_from_bin, load_user_dictionary_from_csv, Dictionary, UserDictionary,
-};
+use lindera::dictionary::{load_user_dictionary_from_csv, Dictionary, UserDictionary};
 use lindera_dictionary::viterbi::Lattice;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::analyzer::options::{
-    get_lindera_download_url, get_options, get_resource_path, FileResourcePathHelper,
-    DEFAULT_DICT_PATH_KEY,
+    get_lindera_download_url, get_options, get_resource_path, read_resource_file,
+    with_resource_file, FileResourcePathHelper, DEFAULT_DICT_PATH_KEY,
 };
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
@@ -369,28 +367,32 @@ fn fetch_lindera_user_dict(
 
     let path = get_resource_path(helper, v, "lindera user dict file")?;
     let ext = path.extension().and_then(|e| e.to_str());
+    if !matches!(ext, Some("csv") | Some("bin")) {
+        return Err(TantivyBindingError::InvalidArgument(
+            "lindera user dict file extension must be csv or bin".into(),
+        ));
+    }
     let user_dict = match ext {
+        Some("csv") if !helper.enforce_file_access => {
+            load_user_dictionary_from_csv(kind.clone(), path.as_path())
+        }
         Some("csv") => {
-            load_user_dictionary_from_csv(kind.clone(), path.as_path()).map_err(|e| {
-                TantivyBindingError::InvalidArgument(format!(
-                    "lindera load user dict csv failed: {:?}",
-                    e
-                ))
-            })?
+            // The CSV parser needs a path; never reopen the caller's file.
+            let mut snapshot = tempfile::NamedTempFile::new()?;
+            with_resource_file(helper, v, "lindera user dict file", |mut reader| {
+                std::io::copy(&mut reader, &mut snapshot)?;
+                Ok(())
+            })?;
+            load_user_dictionary_from_csv(kind.clone(), snapshot.path())
         }
-        Some("bin") => load_user_dictionary_from_bin(path.as_path()).map_err(|e| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera load user dict bin failed: {:?}",
-                e
-            ))
-        })?,
         _ => {
-            return Err(TantivyBindingError::InvalidArgument(format!(
-                "lindera user dict file extension must be csv or bin, got {:?}",
-                ext
-            )))
+            let bytes = read_resource_file(helper, v, "lindera user dict file")?;
+            UserDictionary::load(&bytes)
         }
-    };
+    }
+    .map_err(|_| {
+        TantivyBindingError::InvalidArgument("lindera user dictionary is invalid".into())
+    })?;
     Ok(Some(user_dict))
 }
 
@@ -571,7 +573,9 @@ mod tests {
     use tantivy::tokenizer::Tokenizer;
 
     fn default_helper() -> FileResourcePathHelper {
-        FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+        let mut helper = FileResourcePathHelper::new(Arc::new(ResourceInfo::new()));
+        helper.test_root = Some(std::env::temp_dir());
+        helper
     }
 
     #[test]
@@ -932,6 +936,83 @@ mod tests {
             let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
             assert!(get_sentence_split_chars(&params).is_err());
         }
+    }
+
+    #[test]
+    fn dictionary_snapshot_lindera_parses_and_redacts_errors() {
+        use super::{fetch_lindera_user_dict, DictionaryKind};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("user.csv");
+        let params = json::json!({"user_dict":{"type":"local","path":path}});
+        let mut helper = default_helper();
+        helper.test_root = Some(dir.path().to_path_buf());
+        std::fs::write(&path, "Milvus,custom,Milvus").unwrap();
+        let dictionary = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        )
+        .unwrap()
+        .unwrap();
+        helper.enforce_file_access = false;
+        let restored = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(restored.word_details(0), dictionary.word_details(0));
+        helper.enforce_file_access = true;
+        let binary_path = dir.path().join("user.bin");
+        let details: Vec<String> = dictionary
+            .word_details(0)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        lindera_dictionary::dictionary_builder::build_user_dictionary(dictionary, &binary_path)
+            .unwrap();
+        let binary_params = json::json!({"user_dict":{"type":"local","path":binary_path}});
+        let binary = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            binary_params.as_object().unwrap(),
+            &mut helper,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(binary.word_details(0), details);
+        std::fs::write(&binary_path, b"\0").unwrap();
+        let error = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            binary_params.as_object().unwrap(),
+            &mut helper,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("lindera user dictionary is invalid"));
+        std::fs::write(&path, "FILE_SECRET_MARKER,0,0,invalid_cost").unwrap();
+        let error = match fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        ) {
+            Ok(_) => panic!("invalid dictionary was accepted"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("lindera user dictionary is invalid"));
+        assert!(!error.contains("FILE_SECRET_MARKER"));
+        helper.enforce_file_access = false;
+        let error = fetch_lindera_user_dict(
+            &DictionaryKind::IPADIC,
+            params.as_object().unwrap(),
+            &mut helper,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(error.contains("lindera user dictionary is invalid"));
+        assert!(!error.contains("FILE_SECRET_MARKER"));
     }
 
     #[test]

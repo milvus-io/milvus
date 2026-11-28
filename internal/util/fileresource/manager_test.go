@@ -116,6 +116,7 @@ type SyncManagerSuite struct {
 }
 
 func (suite *SyncManagerSuite) SetupTest() {
+	setSourceRoot(suite.T(), "/storage")
 	// Create temporary directory for tests
 	var err error
 	suite.tempDir, err = os.MkdirTemp(os.TempDir(), "fileresource_test_sync_*")
@@ -397,6 +398,7 @@ type RefManagerSuite struct {
 }
 
 func (suite *RefManagerSuite) SetupTest() {
+	setSourceRoot(suite.T(), "/storage")
 	// Create temporary directory for tests
 	var err error
 	suite.tempDir, err = os.MkdirTemp(os.TempDir(), "fileresource_test_ref_*")

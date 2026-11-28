@@ -44,7 +44,7 @@ import (
 // These operations prepare/apply the one RestoreSnapshot broadcast; none issues
 // another creation broadcast or invokes a public DDL RPC.
 type RestoreCollectionManager interface {
-	PrepareRestoreCollection(context.Context, *milvuspb.CreateCollectionRequest, []string) (*messagespb.RestoreSnapshotMessageBody, func(), error)
+	PrepareRestoreCollection(context.Context, *milvuspb.CreateCollectionRequest, []string, bool) (*messagespb.RestoreSnapshotMessageBody, func(), error)
 	ApplyRestoreCollection(context.Context, message.BroadcastResultRestoreSnapshotMessageV2) error
 	CompleteRestoreCollection(context.Context, int64) error
 	IsCollectionDropped(context.Context, int64) (bool, error)
@@ -80,7 +80,7 @@ func (sm *Manager) broadcastRestoreCollection(ctx context.Context, snapshot *sna
 		DbName: db, CollectionName: target, Schema: encoded,
 		ShardsNum: int32(snapshot.Collection.GetNumShards()), NumPartitions: snapshot.Collection.GetNumPartitions(),
 		ConsistencyLevel: snapshot.Collection.GetConsistencyLevel(), Properties: common.CloneKeyValuePairs(properties),
-	}, slices.Collect(maps.Keys(snapshot.Collection.GetPartitions())))
+	}, slices.Collect(maps.Keys(snapshot.Collection.GetPartitions())), external)
 	if err != nil {
 		return 0, err
 	}

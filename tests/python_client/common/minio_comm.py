@@ -1,8 +1,17 @@
 import os
+import posixpath
 
 from minio import Minio
 from minio.error import S3Error
 from utils.util_log import test_log as log
+
+
+def file_resource_path(name):
+    """Build a complete source key; override the prefix for non-Helm deployments."""
+    base = os.getenv("MILVUS_FILE_RESOURCE_PREFIX")
+    if base is None:
+        base = posixpath.join(os.getenv("MILVUS_MINIO_ROOT_PATH", "file"), "file_resource")
+    return posixpath.join(base, name)
 
 
 def copy_files_to_bucket(client, r_source, target_files, bucket_name, force=False):

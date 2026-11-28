@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path"
 	"sync"
@@ -170,6 +171,12 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 	if size < 0 {
 		return merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", resource.GetPath(), size)
 	}
+	// Registered metadata has already passed admission. Do not apply a new
+	// operator policy during recovery; still bound this download to its stat size.
+	limit := size
+	if limit == math.MaxInt64 {
+		return merr.WrapErrIoFailedMsg("file resource size cannot be represented safely")
+	}
 	reader, err := downloader.Reader(downloadCtx, resource.GetPath())
 	if err != nil {
 		return merr.Wrapf(err, "open file resource %s", resource.GetPath())
@@ -202,9 +209,12 @@ func (m *BaseManager) downloadFile(ctx context.Context, downloader storage.Chunk
 		}
 	}()
 
-	written, err := io.Copy(temporary, reader)
+	written, err := io.Copy(temporary, io.LimitReader(reader, limit+1))
 	if err != nil {
 		return merr.Wrapf(err, "download file resource %s", resource.GetPath())
+	}
+	if written > limit {
+		return merr.WrapErrIoFailedMsg("file resource grew during download")
 	}
 	if written != size {
 		return merr.WrapErrIoUnexpectEOF(resource.GetPath(), errors.Newf("expected %d bytes, downloaded %d", size, written))
