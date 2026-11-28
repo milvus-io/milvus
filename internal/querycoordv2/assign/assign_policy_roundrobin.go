@@ -113,6 +113,29 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	nodes []int64,
 	forceAssign bool,
 ) []ChannelAssignPlan {
+	return p.AssignChannelWithProjectedLoad(ctx, collectionID, channels, nodes, forceAssign, nil)
+}
+
+// AssignChannelWithProjectedLoad is AssignChannel plus a round-scoped projected
+// channel count. projectedLoad holds the number of channels already planned for
+// each node earlier in the same Check() round; it is added to the load before
+// sorting and updated after every plan, so later collections see the channels
+// planned by earlier ones. This prevents the initial-allocation skew where each
+// per-collection call observes an identical scheduler delta (tasks are only
+// submitted after the whole round) and repeatedly hits the smallest node ID.
+// A nil projectedLoad keeps the legacy behavior.
+func (p *RoundRobinAssignPolicy) AssignChannelWithProjectedLoad(
+	ctx context.Context,
+	collectionID int64,
+	channels []*meta.DmChannel,
+	nodes []int64,
+	forceAssign bool,
+	projectedLoad map[int64]int,
+) []ChannelAssignPlan {
+	if projectedLoad == nil {
+		projectedLoad = make(map[int64]int)
+	}
+
 	// Filter nodes
 	nodeFilter := newCommonChannelNodeFilter(p.nodeManager)
 	nodes = nodeFilter.FilterNodes(ctx, nodes, forceAssign)
@@ -125,6 +148,10 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	scoreDelta := make(map[int64]int)
 	if streamingutil.IsStreamingServiceEnabled() {
 		channels, plans, scoreDelta = assignChannelToWALLocatedFirstForNodeInfo(channels, nodes)
+		// WAL-owner placements are also planned for this round.
+		for node, count := range scoreDelta {
+			projectedLoad[node] += count
+		}
 	}
 
 	// Create a copy of nodes to avoid race condition when sorting
@@ -133,16 +160,19 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 	nodes = nodesCopy
 
 	// Sort nodes by current channel load (ascending)
-	// Consider: current channel count + WAL assignment delta + scheduler task delta
+	// Consider: current channel count + WAL assignment delta + scheduler task delta + round projected load
 	sort.Slice(nodes, func(i, j int) bool {
 		// Base load: current channels + scheduler task delta
 		load1 := p.calculateChannelLoad(nodes[i])
 		load2 := p.calculateChannelLoad(nodes[j])
 
 		// Add WAL-based assignment delta
-		delta1, delta2 := scoreDelta[nodes[i]], scoreDelta[nodes[j]]
-		load1 += delta1
-		load2 += delta2
+		load1 += scoreDelta[nodes[i]]
+		load2 += scoreDelta[nodes[j]]
+
+		// Add the round-scoped projected load planned earlier in this round
+		load1 += projectedLoad[nodes[i]]
+		load2 += projectedLoad[nodes[j]]
 
 		if load1 != load2 {
 			return load1 < load2
@@ -153,12 +183,13 @@ func (p *RoundRobinAssignPolicy) AssignChannel(
 
 	// Assign remaining channels in round-robin fashion
 	for i, c := range channels {
-		plan := ChannelAssignPlan{
+		to := nodes[i%len(nodes)]
+		projectedLoad[to]++
+		plans = append(plans, ChannelAssignPlan{
 			Channel: c,
 			From:    -1,
-			To:      nodes[i%len(nodes)],
-		}
-		plans = append(plans, plan)
+			To:      to,
+		})
 	}
 
 	return plans

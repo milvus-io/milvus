@@ -52,7 +52,7 @@ func TestCheckReplicaReportsADelegatorItCouldNotPlace(t *testing.T) {
 	trace := mockey.Mock((*ChannelChecker).getTraceCtx).Return(context.Background()).Build()
 	defer trace.UnPatch()
 
-	tasks, unplaced := c.checkReplica(context.Background(), testReplica())
+	tasks, unplaced := c.checkReplica(context.Background(), testReplica(), nil)
 	assert.Empty(t, tasks)
 	assert.True(t, unplaced, "a channel that was lacking and produced no task is a delegator with nowhere to go")
 }
@@ -82,7 +82,7 @@ func TestCheckReplicaReportsNothingUnplacedWhenATaskWasMade(t *testing.T) {
 	priority := mockey.Mock(task.SetPriority).Return().Build()
 	defer priority.UnPatch()
 
-	_, unplaced := c.checkReplica(context.Background(), testReplica())
+	_, unplaced := c.checkReplica(context.Background(), testReplica(), nil)
 	assert.False(t, unplaced)
 }
 
@@ -102,7 +102,7 @@ func TestCheckReplicaReportsNothingUnplacedWhenNothingWasLacking(t *testing.T) {
 	trace := mockey.Mock((*ChannelChecker).getTraceCtx).Return(context.Background()).Build()
 	defer trace.UnPatch()
 
-	tasks, unplaced := c.checkReplica(context.Background(), testReplica())
+	tasks, unplaced := c.checkReplica(context.Background(), testReplica(), nil)
 	assert.Empty(t, tasks)
 	assert.False(t, unplaced)
 }
