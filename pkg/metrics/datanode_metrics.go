@@ -313,7 +313,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "encode_index_latency",
-			Help:      "latency of encoding the index file",
+			Help:      "Index serialization and upload duration in seconds",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
@@ -322,7 +322,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "save_index_latency",
-			Help:      "latency of saving the index file",
+			Help:      "Post-upload index cleanup and file and task bookkeeping duration in seconds",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
@@ -331,7 +331,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "index_task_latency_in_queue",
-			Help:      "latency of index task in queue",
+			Help:      "Index build task queue wait in milliseconds",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 
@@ -340,7 +340,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "build_index_latency",
-			Help:      "latency of build index for segment",
+			Help:      "Elapsed seconds from index task construction to the end of the reported attempt, including queue time",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
@@ -349,7 +349,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "task_build_json_stats_latency",
-			Help:      "latency of building the index by knowhere",
+			Help:      "JSON statistics build duration in seconds",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 
