@@ -36,14 +36,14 @@ func TestDataNodeCompactionStageLatency(t *testing.T) {
 
 func TestCleanupDataNodeCompactionMetrics(t *testing.T) {
 	// Set up metrics for node 1
-	DataNodeCompactionLatency.WithLabelValues("1", "SortCompaction").Observe(100)
-	DataNodeCompactionLatencyInQueue.WithLabelValues("1").Observe(50)
+	DataNodeCompactionLatency.WithLabelValues("1", "SortCompaction", SuccessLabel).Observe(100)
+	DataNodeCompactionLatencyInQueue.WithLabelValues("1", "SortCompaction", "started").Observe(50)
 	DataNodeCompactionStageLatency.WithLabelValues("1", "SortCompaction", "init_writer").Observe(10)
 	DataNodeCompactionStageLatency.WithLabelValues("1", "SortCompaction", "flush").Observe(20)
 
 	// Set up metrics for node 2 (should not be cleaned up)
-	DataNodeCompactionLatency.WithLabelValues("2", "SortCompaction").Observe(200)
-	DataNodeCompactionLatencyInQueue.WithLabelValues("2").Observe(100)
+	DataNodeCompactionLatency.WithLabelValues("2", "SortCompaction", SuccessLabel).Observe(200)
+	DataNodeCompactionLatencyInQueue.WithLabelValues("2", "SortCompaction", "started").Observe(100)
 	DataNodeCompactionStageLatency.WithLabelValues("2", "SortCompaction", "init_writer").Observe(30)
 
 	// Cleanup metrics for node 1 - should not panic
