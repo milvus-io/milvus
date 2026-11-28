@@ -739,6 +739,105 @@ func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
 	}
 }
 
+// TestUnOrderedReduceStreamMergesVarianceState streams the (mean, count, m2)
+// state of var_pop in 1-row chunks through 2 shards, global and grouped, and
+// checks the merged variance, including a group whose only state is empty.
+func TestUnOrderedReduceStreamMergesVarianceState(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Double, Nullable: true},
+	}}
+	double := func(fieldID int64, data []float64, valid []bool) *schemapb.FieldData {
+		field := &schemapb.FieldData{
+			Type: schemapb.DataType_Double, FieldId: fieldID,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}},
+			}},
+		}
+		typeutil.SetFieldDataValidData(field, valid)
+		return field
+	}
+	// payload encodes 1 (mean, count, m2) state per group. A group with count 0
+	// has NULL mean and m2.
+	payload := func(groupBy bool, groups []int64, means []float64, counts []int64, m2s []float64) *internalpb.RetrieveResults {
+		valid := make([]bool, len(counts))
+		for i, n := range counts {
+			valid[i] = n > 0
+		}
+		result := newGroupQueryTestChunk(groups, counts)
+		fields := []*schemapb.FieldData{double(101, means, valid), result.FieldsData[1], double(101, m2s, valid)}
+		if groupBy {
+			fields = append([]*schemapb.FieldData{result.FieldsData[0]}, fields...)
+		}
+		result.FieldsData = fields
+		return result
+	}
+	for _, groupBy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "global", true: "grouped"}[groupBy], func(t *testing.T) {
+			request := &internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_mean, FieldId: 101},
+				{Op: planpb.AggregateOp_count, FieldId: 101},
+				{Op: planpb.AggregateOp_m2, FieldId: 101},
+			}}
+			// Values: group 7 holds 1, 2 on shard 0 and 3, 4 on shard 1, group 8
+			// holds 10, and group 9 has no values. The global query sees 1 to 4.
+			inputs := [][]*internalpb.RetrieveResults{
+				{payload(groupBy, []int64{7}, []float64{1.5}, []int64{2}, []float64{0.5})},
+				{
+					payload(groupBy, []int64{9}, []float64{0}, []int64{0}, []float64{0}),
+					payload(groupBy, []int64{7}, []float64{3.5}, []int64{2}, []float64{0.5}),
+				},
+			}
+			want := map[int64]float64{0: 1.25}
+			if groupBy {
+				request.GroupByFieldIds = []int64{100}
+				inputs[0] = append(inputs[0], payload(groupBy, []int64{8}, []float64{10}, []int64{1}, []float64{0}))
+				want = map[int64]float64{7: 1.25, 8: 0}
+			}
+			shards := make([]ReduceStream, 0, len(inputs))
+			for _, chunks := range inputs {
+				worker := &queryTestStream{}
+				for _, chunk := range chunks {
+					split, err := SplitRetrieveResult(chunk, 1)
+					require.NoError(t, err)
+					for _, part := range split {
+						worker.recv = append(worker.recv, queryTestRecv{chunk: part})
+					}
+				}
+				shard, err := NewReduceStream(request, schema, []ReduceStream{worker}, 1)
+				require.NoError(t, err)
+				shards = append(shards, shard)
+			}
+			root, err := NewReduceStream(request, schema, shards, 1)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, root.Close()) })
+			got := map[int64]float64{}
+			nulls := 0
+			for {
+				chunk, err := root.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				cols := chunk.GetFieldsData()
+				varPop, err := agg.ComputeVarianceFromCountAndM2("var_pop", cols[len(cols)-2], cols[len(cols)-1])
+				require.NoError(t, err)
+				group := int64(0)
+				if groupBy {
+					group = cols[0].GetScalars().GetLongData().GetData()[0]
+				}
+				if !typeutil.GetFieldDataValidData(varPop)[0] {
+					nulls++
+					continue
+				}
+				got[group] = varPop.GetScalars().GetDoubleData().GetData()[0]
+			}
+			require.Equal(t, want, got)
+			require.Equal(t, map[bool]int{false: 0, true: 1}[groupBy], nulls)
+		})
+	}
+}
+
 func TestUnOrderedReduceStreamRejectsMalformedPartials(t *testing.T) {
 	for _, test := range []string{"column_count", "row_count", "validity_count"} {
 		t.Run(test, func(t *testing.T) {

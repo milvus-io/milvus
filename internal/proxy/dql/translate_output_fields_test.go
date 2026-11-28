@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -240,6 +241,25 @@ func TestTranslateOutputFields(t *testing.T) {
 		_, _, _, _, _, err = translateOutputFields([]string{idFieldName, floatVectorFieldName, ""}, schema, true)
 		assert.Error(t, err)
 	})
+}
+
+// TestTranslateOutputFieldsDedupesAggregates plans a repeated aggregate
+// expression once, and both output fields read the same state columns.
+func TestTranslateOutputFieldsDedupesAggregates(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{Name: "val", FieldID: 101, DataType: schemapb.DataType_Double},
+	}})
+	fields := []string{"var_pop(val)", "avg(val)", "var_pop(val)", "avg(val)"}
+	_, _, _, aggregates, _, err := translateOutputFields(fields, schema, false)
+	assert.NoError(t, err)
+	assert.Len(t, aggregates, 5)
+	fieldMap, err := agg.NewAggregationFieldMap(fields, nil, aggregates)
+	assert.NoError(t, err)
+	assert.Equal(t, []int{0, 1, 2}, fieldMap.IndexesAt(0))
+	assert.Equal(t, []int{3, 4}, fieldMap.IndexesAt(1))
+	assert.Equal(t, fieldMap.IndexesAt(0), fieldMap.IndexesAt(2))
+	assert.Equal(t, fieldMap.IndexesAt(1), fieldMap.IndexesAt(3))
 }
 
 func TestTranslateOutputFields_StructArrayField(t *testing.T) {

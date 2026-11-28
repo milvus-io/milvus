@@ -625,6 +625,8 @@ inline const char* const KMin = "min";
 inline const char* const KMax = "max";
 inline const char* const KCount = "count";
 inline const char* const KAvg = "avg";
+inline const char* const KM2 = "m2";
+inline const char* const KMean = "mean";
 
 inline DataType
 GetAggResultType(std::string func_name, DataType input_type) {
@@ -652,7 +654,7 @@ GetAggResultType(std::string func_name, DataType input_type) {
             }
         }
     }
-    if (func_name == KAvg) {
+    if (func_name == KAvg || func_name == KM2 || func_name == KMean) {
         switch (input_type) {
             case DataType::INT8:
             case DataType::INT16:

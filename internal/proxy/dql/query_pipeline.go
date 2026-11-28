@@ -290,27 +290,9 @@ func newReduceByGroupsOperator(
 			return nil, err
 		}
 
-		reducedFieldDatas := reducedRes.GetFieldDatas()
-		fieldCount := outputMap.Count()
-		reOrganizedFieldDatas := make([]*schemapb.FieldData, fieldCount)
-
-		for i := 0; i < fieldCount; i++ {
-			indices := outputMap.IndexesAt(i)
-			if len(indices) == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("no indices found for output field '%s'", outputMap.NameAt(i))
-			} else if len(indices) == 1 {
-				reOrganizedFieldDatas[i] = reducedFieldDatas[indices[0]]
-				reOrganizedFieldDatas[i].FieldName = outputMap.NameAt(i)
-			} else if len(indices) == 2 {
-				sumFieldData := reducedFieldDatas[indices[0]]
-				countFieldData := reducedFieldDatas[indices[1]]
-				avgFieldData, err := agg.ComputeAvgFromSumAndCount(sumFieldData, countFieldData)
-				if err != nil {
-					return nil, err
-				}
-				avgFieldData.FieldName = outputMap.NameAt(i)
-				reOrganizedFieldDatas[i] = avgFieldData
-			}
+		reOrganizedFieldDatas, err := outputMap.Finalize(reducedRes.GetFieldDatas())
+		if err != nil {
+			return nil, err
 		}
 
 		return []any{&internalpb.RetrieveResults{
@@ -352,7 +334,7 @@ func newRawReduceByGroupsOperator(
 }
 
 // newAggRemapOperator reorganizes fields from the GroupAggReducer's raw layout
-// to the user's output_fields order, computing avg from sum+count where needed.
+// to the user's output_fields order, computing avg and variance results where needed.
 // Used after ORDER BY + slice in the GROUP BY + ORDER BY pipeline.
 func newAggRemapOperator(outputMap *agg.AggregationFieldMap) queryutil.Operator {
 	return queryutil.NewLambdaOperator(queryutil.OpRemap, func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
@@ -361,25 +343,9 @@ func newAggRemapOperator(outputMap *agg.AggregationFieldMap) queryutil.Operator 
 			return []any{result}, nil
 		}
 
-		rawFields := result.GetFieldsData()
-		fieldCount := outputMap.Count()
-		remapped := make([]*schemapb.FieldData, fieldCount)
-
-		for i := 0; i < fieldCount; i++ {
-			indices := outputMap.IndexesAt(i)
-			if len(indices) == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("no indices found for output field '%s'", outputMap.NameAt(i))
-			} else if len(indices) == 1 {
-				remapped[i] = rawFields[indices[0]]
-				remapped[i].FieldName = outputMap.NameAt(i)
-			} else if len(indices) == 2 {
-				avgFieldData, err := agg.ComputeAvgFromSumAndCount(rawFields[indices[0]], rawFields[indices[1]])
-				if err != nil {
-					return nil, err
-				}
-				avgFieldData.FieldName = outputMap.NameAt(i)
-				remapped[i] = avgFieldData
-			}
+		remapped, err := outputMap.Finalize(result.GetFieldsData())
+		if err != nil {
+			return nil, err
 		}
 
 		return []any{&internalpb.RetrieveResults{
