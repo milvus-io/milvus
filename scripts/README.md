@@ -2,9 +2,11 @@
 
 ## Environment
 
+The minimum Go version is specified by the `go` directive in [go.mod](../go.mod).
+
 ```
 OS: Ubuntu 20.04
-go：1.21
+go: see ../go.mod
 cmake: >=3.18
 gcc: >= 11
 ```
