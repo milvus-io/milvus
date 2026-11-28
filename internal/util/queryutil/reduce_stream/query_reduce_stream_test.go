@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -502,7 +503,45 @@ func TestUnOrderedReduceStreamGlobalPartials(t *testing.T) {
 	}
 }
 
-func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
+func TestGroupedQueryWorkerOrdersBeforeLimit(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "region", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "city", DataType: schemapb.DataType_Int64},
+	}}
+	for _, tc := range []struct {
+		name  string
+		order []*planpb.OrderByField
+		limit int64
+		want  [][]int64
+	}{
+		{"plain", nil, 1, [][]int64{{4}, {2}}},
+		{"unlimited", nil, typeutil.Unlimited, [][]int64{{4, 8, 9, 9}, {2, 7, 1, 8}}},
+		{"city_desc_then_region", []*planpb.OrderByField{{FieldId: 101, NullsFirst: true}}, 1, [][]int64{{9}, {1}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{101, 100}, Limit: tc.limit, OrderByFields: tc.order}
+			order, err := orderby.ConvertFromPlanOrderByFields(req.OrderByFields, schema)
+			require.NoError(t, err)
+			pipeline, err := queryutil.BuildQueryReducePipeline(queryutil.PipelineNameQN, schema, req.Limit, 0, order, req.GroupByFieldIds, nil, 1<<20, nil, nil)
+			require.NoError(t, err)
+			segments := []*internalpb.RetrieveResults{
+				newGroupQueryTestChunk([]int64{8, 7}, []int64{9, 8}),
+				newGroupQueryTestChunk([]int64{1, 2}, []int64{9, 4}),
+			}
+			for _, segment := range segments {
+				segment.FieldsData[0], segment.FieldsData[1] = segment.FieldsData[1], segment.FieldsData[0]
+			}
+			msg, err := pipeline.Run(t.Context(), nil, queryutil.OpMsg{queryutil.PipelineInput: segments})
+			require.NoError(t, err)
+			fields := msg[queryutil.PipelineOutput].(*internalpb.RetrieveResults).GetFieldsData()
+			for col, want := range tc.want {
+				require.Equal(t, want, fields[col].GetScalars().GetLongData().GetData())
+			}
+		})
+	}
+}
+
+func TestOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	childA := &queryTestStream{recv: []queryTestRecv{
 		{chunk: newGroupQueryTestChunk([]int64{1, 2}, []int64{2, 3})},
 		{chunk: newGroupQueryTestChunk([]int64{3}, []int64{4})},
@@ -516,20 +555,17 @@ func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
 		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 	}}
-	stream, err := NewReduceStream(
-		&internalpb.RetrieveRequest{
-			Limit:           1, // All group contributions must be merged before Proxy applies LIMIT.
-			GroupByFieldIds: []int64{100},
-			Aggregates: []*planpb.Aggregate{
-				{Op: planpb.AggregateOp_count, FieldId: 101},
-			},
-		},
-		schema,
-		[]ReduceStream{childA, childB},
-		1<<20,
-	)
+	req := &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, GroupByFieldIds: []int64{100},
+		Aggregates:    []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}}}
+	batch := agg.NewGroupAggReducer(req.GroupByFieldIds, req.Aggregates, req.Limit, schema)
+	partials, err := batch.DecodeInternalResults([]*internalpb.RetrieveResults{childA.recv[0].chunk, childA.recv[1].chunk, childB.recv[0].chunk})
 	require.NoError(t, err)
-	require.IsType(t, &UnOrderedReduceStream{}, stream)
+	want, err := batch.Merge(t.Context(), partials)
+	require.NoError(t, err)
+	stream, err := NewReduceStream(req, schema, []ReduceStream{childA, childB}, 1<<20)
+	require.NoError(t, err)
+	require.IsType(t, &OrderedReduceStream{}, stream)
 
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
@@ -537,11 +573,13 @@ func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	require.Equal(t, int64(11), chunk.GetAllRetrieveCount())
 	groups := chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()
 	counts := chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData()
-	actual := make(map[int64]int64, len(groups))
-	for i, group := range groups {
-		actual[group] = counts[i]
+	require.Equal(t, []int64{1, 2, 3}, groups)
+	require.Equal(t, []int64{7, 3, 10}, counts)
+	batchKeys := want.GetFieldDatas()[0].GetScalars().GetLongData().GetData()
+	require.ElementsMatch(t, batchKeys, groups)
+	for i, key := range batchKeys {
+		require.Equal(t, counts[key-1], want.GetFieldDatas()[1].GetScalars().GetLongData().GetData()[i])
 	}
-	require.Equal(t, map[int64]int64{1: 7, 2: 3, 3: 10}, actual)
 
 	chunk, err = stream.Recv()
 	require.Nil(t, chunk)
@@ -550,7 +588,112 @@ func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	require.Equal(t, 1, childB.closeCount())
 }
 
-func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
+func TestOrderedGroupsStopWithoutReadingTail(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+	}}
+	req := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Limit: 2,
+		Aggregates:    []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 100}},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}}}
+	for _, budget := range []int{1, 1 << 20} {
+		var workers []*queryTestStream
+		var shards []ReduceStream
+		for range 2 {
+			var children []ReduceStream
+			for range 2 {
+				worker := &queryTestStream{recv: []queryTestRecv{
+					{chunk: newGroupQueryTestChunk([]int64{1}, []int64{3})},
+					{chunk: newGroupQueryTestChunk([]int64{2}, []int64{5})},
+					{err: io.ErrUnexpectedEOF},
+				}}
+				children = append(children, worker)
+				workers = append(workers, worker)
+			}
+			shard, err := NewShardReduceStream(req, schema, children, budget)
+			require.NoError(t, err)
+			shards = append(shards, shard)
+		}
+		root, err := NewReduceStream(req, schema, shards, budget)
+		require.NoError(t, err)
+		var keys, counts []int64
+		for len(keys) < 2 {
+			out, err := root.Recv()
+			require.NoError(t, err)
+			keys = append(keys, out.FieldsData[0].GetScalars().GetLongData().GetData()...)
+			counts = append(counts, out.FieldsData[1].GetScalars().GetLongData().GetData()...)
+			if budget == 1 && len(keys) == 1 {
+				for _, worker := range workers {
+					require.Len(t, worker.recv, 2, "first group should not need the next Chunk")
+				}
+			}
+		}
+		require.Equal(t, []int64{1, 2}, keys)
+		require.Equal(t, []int64{12, 20}, counts)
+		for _, worker := range workers {
+			require.Equal(t, 1, worker.closeCount())
+			require.Len(t, worker.recv, 1)
+		}
+		_, err = root.Recv()
+		require.ErrorIs(t, err, io.EOF)
+	}
+}
+
+func TestOrderedGroupsOversizedLastUnit(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "key", DataType: schemapb.DataType_VarChar}}}
+	req := &internalpb.RetrieveRequest{Limit: 2, GroupByFieldIds: []int64{100},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}}}
+	keys := []string{"a", "b much larger than the chunk"}
+	field := &schemapb.FieldData{Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: keys}},
+	}}}
+	worker := &queryTestStream{recv: []queryTestRecv{
+		{chunk: &internalpb.RetrieveResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{field}, AllRetrieveCount: 10}},
+		{err: io.ErrUnexpectedEOF},
+	}}
+	stream, err := NewReduceStream(req, schema, []ReduceStream{worker}, 8)
+	require.NoError(t, err)
+	for i, key := range keys {
+		out, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, []string{key}, out.FieldsData[0].GetScalars().GetStringData().GetData())
+		if i == 0 {
+			require.EqualValues(t, 10, out.GetAllRetrieveCount())
+		} else {
+			require.Zero(t, out.GetAllRetrieveCount())
+		}
+	}
+	require.Equal(t, 1, worker.closeCount())
+}
+
+func TestOrderedGroupsMaxGroupsAppliesToVisitedKeys(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64}}}
+	for _, limit := range []int64{2, typeutil.Unlimited} {
+		req := &internalpb.RetrieveRequest{
+			GroupByFieldIds: []int64{100},
+			Limit:           limit,
+			OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+		}
+		var children []ReduceStream
+		for _, keys := range [][]int64{{1, 3}, {2, 4}} {
+			partial := newGroupQueryTestChunk(keys, nil)
+			partial.FieldsData = partial.FieldsData[:1]
+			children = append(children, &queryTestStream{recv: []queryTestRecv{{chunk: partial}}})
+		}
+		root, err := NewReduceStream(req, schema, children, 1<<20)
+		require.NoError(t, err)
+		root.(*OrderedReduceStream).groups.maxGroups = 2
+		out, err := root.Recv()
+		if limit == typeutil.Unlimited {
+			require.ErrorContains(t, err, "too many groups (3)")
+		} else {
+			require.NoError(t, err)
+			require.Equal(t, []int64{1, 2}, out.FieldsData[0].GetScalars().GetLongData().GetData())
+		}
+		require.NoError(t, root.Close())
+	}
+}
+
+func TestOrderedGroupReduceStreamEmptyChildren(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		emptyShard  bool
@@ -568,8 +711,10 @@ func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 			}}
 			request := &internalpb.RetrieveRequest{
+				Limit:           typeutil.Unlimited,
 				GroupByFieldIds: []int64{100},
 				Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}},
+				OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
 			}
 			children := make([]ReduceStream, 0, 3)
 			if test.emptyShard {
@@ -640,7 +785,7 @@ func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
 	}
 }
 
-func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
+func TestOrderedGroupReduceStreamPartialContracts(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		op      planpb.AggregateOp
@@ -657,7 +802,12 @@ func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
 				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
 			}}
-			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: test.op, FieldId: 101}}}
+			request := &internalpb.RetrieveRequest{
+				Limit:           typeutil.Unlimited,
+				GroupByFieldIds: []int64{100},
+				Aggregates:      []*planpb.Aggregate{{Op: test.op, FieldId: 101}},
+				OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+			}
 			if test.average {
 				request.Aggregates = append(request.Aggregates, &planpb.Aggregate{Op: planpb.AggregateOp_count, FieldId: 101})
 			}
@@ -675,7 +825,8 @@ func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
 				first = 30
 			}
 			inputs := [][]*internalpb.RetrieveResults{
-				{{Status: merr.Success(), AllRetrieveCount: 3}, payload([]int64{7, 9}, []int64{0, 0}, []int64{0, 0}, []bool{false, false}), payload([]int64{7, 8}, []int64{first, 0}, []int64{2, 1}, []bool{true, true})},
+				{{Status: merr.Success(), AllRetrieveCount: 3}, payload([]int64{7, 9}, []int64{0, 0}, []int64{0, 0}, []bool{false, false})},
+				{payload([]int64{7, 8}, []int64{first, 0}, []int64{2, 1}, []bool{true, true})},
 				{payload([]int64{7}, []int64{60}, []int64{3}, []bool{true})},
 			}
 			inputs[1][0].AllRetrieveCount = 4
@@ -739,14 +890,19 @@ func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
 	}
 }
 
-func TestUnOrderedReduceStreamRejectsMalformedPartials(t *testing.T) {
+func TestOrderedGroupReduceStreamRejectsMalformedPartials(t *testing.T) {
 	for _, test := range []string{"column_count", "row_count", "validity_count"} {
 		t.Run(test, func(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
 				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
 			}}
-			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}}
+			request := &internalpb.RetrieveRequest{
+				Limit:           typeutil.Unlimited,
+				GroupByFieldIds: []int64{100},
+				Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+				OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+			}
 			payload := newGroupQueryTestChunk([]int64{1}, []int64{2})
 			switch test {
 			case "column_count":
@@ -763,9 +919,303 @@ func TestUnOrderedReduceStreamRejectsMalformedPartials(t *testing.T) {
 			require.Nil(t, chunk)
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.Equal(t, 1, child.closeCount())
-			require.Nil(t, stream.(*UnOrderedReduceStream).outputBuffer)
+			require.Nil(t, stream.(*OrderedReduceStream).groups)
 		})
 	}
+}
+
+func TestOrderedGroupReduceStreamRejectsUnorderedKeys(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+	}
+	for _, test := range []struct {
+		name      string
+		chunks    []*internalpb.RetrieveResults
+		chunkSize int
+		wantFirst []int64
+	}{
+		{
+			name:      "out_of_order_in_chunk",
+			chunks:    []*internalpb.RetrieveResults{newGroupQueryTestChunk([]int64{2, 1}, []int64{20, 10})},
+			chunkSize: 64,
+		},
+		{
+			name:      "duplicate_in_chunk",
+			chunks:    []*internalpb.RetrieveResults{newGroupQueryTestChunk([]int64{1, 1, 2}, []int64{10, 20, 30})},
+			chunkSize: 64,
+		},
+		{
+			name: "duplicate_across_chunks",
+			chunks: []*internalpb.RetrieveResults{
+				newGroupQueryTestChunk([]int64{1}, []int64{10}),
+				newGroupQueryTestChunk([]int64{1}, []int64{20}),
+			},
+			chunkSize: 1,
+			wantFirst: []int64{1},
+		},
+		{
+			name: "out_of_order_across_chunks",
+			chunks: []*internalpb.RetrieveResults{
+				newGroupQueryTestChunk([]int64{2}, []int64{20}),
+				newGroupQueryTestChunk([]int64{1}, []int64{10}),
+			},
+			chunkSize: 1,
+			wantFirst: []int64{2},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recvs := make([]queryTestRecv, 0, len(test.chunks))
+			for _, c := range test.chunks {
+				recvs = append(recvs, queryTestRecv{chunk: c})
+			}
+			child := &queryTestStream{recv: recvs}
+			stream, err := NewReduceStream(request, schema, []ReduceStream{child}, test.chunkSize)
+			require.NoError(t, err)
+			if len(test.wantFirst) > 0 {
+				first, err := stream.Recv()
+				require.NoError(t, err)
+				require.Equal(t, test.wantFirst, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			}
+			chunk, err := stream.Recv()
+			require.Nil(t, chunk)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, 1, child.closeCount())
+			require.Nil(t, stream.(*OrderedReduceStream).groups)
+		})
+	}
+}
+
+func TestOrderedGroupReduceStreamTerminalEOFAndLateMetadata(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+	}
+
+	t.Run("terminal_eof", func(t *testing.T) {
+		first := newGroupQueryTestChunk([]int64{1}, []int64{10})
+		first.AllRetrieveCount = 3
+		child := &queryTestStream{recv: []queryTestRecv{{chunk: first}}}
+		stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 1)
+		require.NoError(t, err)
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, int64(3), chunk.GetAllRetrieveCount())
+		chunk, err = stream.Recv()
+		require.Nil(t, chunk)
+		require.ErrorIs(t, err, io.EOF)
+		require.Equal(t, 1, child.closeCount())
+	})
+
+	t.Run("late_metadata_not_discarded", func(t *testing.T) {
+		first := newGroupQueryTestChunk([]int64{1}, []int64{10})
+		child := &queryTestStream{recv: []queryTestRecv{{chunk: first}}}
+		stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 1)
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.NoError(t, err)
+
+		rs := stream.(*OrderedReduceStream)
+		rs.metadataEmitted = false
+		rs.metadata = &internalpb.RetrieveResults{
+			Status:           merr.Success(),
+			AllRetrieveCount: 5,
+			MvccTimestamp:    42,
+		}
+
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, int64(5), chunk.GetAllRetrieveCount())
+		require.Equal(t, uint64(42), chunk.GetMvccTimestamp())
+		require.True(t, rs.metadataEmitted)
+		require.Nil(t, rs.metadata)
+		require.Equal(t, 1, child.closeCount())
+
+		chunk, err = stream.Recv()
+		require.Nil(t, chunk)
+		require.ErrorIs(t, err, io.EOF)
+	})
+}
+
+func TestOrderedGroupReduceStreamLimitValidation(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+
+	for _, limit := range []int64{0, -2} {
+		request := &internalpb.RetrieveRequest{
+			Limit:           limit,
+			GroupByFieldIds: []int64{100},
+			Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		}
+		_, err := NewReduceStream(request, schema, nil, 64)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+
+	request := &internalpb.RetrieveRequest{
+		Limit:           typeutil.Unlimited,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: false}},
+	}
+	child := &queryTestStream{recv: []queryTestRecv{{chunk: newGroupQueryTestChunk([]int64{2, 1}, []int64{20, 10})}}}
+	stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 64)
+	require.NoError(t, err)
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 1}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestOrderedGroupReduceStreamDrainsOutputChunksQueue(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	request := &internalpb.RetrieveRequest{
+		Limit:           2,
+		GroupByFieldIds: []int64{100},
+		Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+	}
+	child := &queryTestStream{}
+	stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 64)
+	require.NoError(t, err)
+
+	rs := stream.(*OrderedReduceStream)
+	rs.groups.produced = 2
+	rs.outputChunks = []*internalpb.RetrieveResults{
+		newGroupQueryTestChunk([]int64{1}, []int64{10}),
+		newGroupQueryTestChunk([]int64{2}, []int64{20}),
+	}
+
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.False(t, rs.finished)
+	require.Equal(t, 0, child.closeCount())
+	require.Len(t, rs.outputChunks, 1)
+
+	second, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, second.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.True(t, rs.finished)
+	require.Nil(t, rs.outputChunks)
+	require.Equal(t, 1, child.closeCount())
+
+	eofChunk, err := stream.Recv()
+	require.Nil(t, eofChunk)
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestGroupReduceStreamFallsBackWithoutCompleteOrder(t *testing.T) {
+	makeStringSumChunk := func(keys []string, vals []int64) *internalpb.RetrieveResults {
+		return &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: keys}},
+				}}},
+				{Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: vals}},
+				}}},
+			},
+			AllRetrieveCount: int64(len(keys)),
+		}
+	}
+
+	t.Run("unordered_empty_order_by_fields_drains_all_children", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "group", DataType: schemapb.DataType_VarChar},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		}}
+		request := &internalpb.RetrieveRequest{
+			Limit:           1,
+			GroupByFieldIds: []int64{100},
+			Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		}
+		childA := &queryTestStream{recv: []queryTestRecv{{chunk: makeStringSumChunk([]string{"B", "A"}, []int64{1, 3})}}}
+		childB := &queryTestStream{recv: []queryTestRecv{{chunk: makeStringSumChunk([]string{"A"}, []int64{2})}}}
+
+		stream, err := NewReduceStream(request, schema, []ReduceStream{childA, childB}, 1<<20)
+		require.NoError(t, err)
+		require.IsType(t, &UnOrderedReduceStream{}, stream)
+
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, []string{"A"}, chunk.GetFieldsData()[0].GetScalars().GetStringData().GetData())
+		require.Equal(t, []int64{5}, chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+
+		eofChunk, err := stream.Recv()
+		require.Nil(t, eofChunk)
+		require.ErrorIs(t, err, io.EOF)
+		require.Equal(t, 1, childA.closeCount())
+		require.Equal(t, 1, childB.closeCount())
+	})
+
+	t.Run("partial_multi_key_order_falls_back", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "g1", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "g2", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "v", DataType: schemapb.DataType_Int64},
+		}}
+		makeMultiChunk := func(g1, g2, v []int64) *internalpb.RetrieveResults {
+			c := newGroupQueryTestChunk(g1, g2)
+			c.FieldsData = append(c.FieldsData, newGroupQueryTestChunk(g1, v).FieldsData[1])
+			return c
+		}
+		request := &internalpb.RetrieveRequest{
+			Limit:           1,
+			GroupByFieldIds: []int64{100, 101},
+			Aggregates:      []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 102}},
+			OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+		}
+		childA := &queryTestStream{recv: []queryTestRecv{{chunk: makeMultiChunk([]int64{1, 1}, []int64{20, 10}, []int64{2, 3})}}}
+		childB := &queryTestStream{recv: []queryTestRecv{{chunk: makeMultiChunk([]int64{1}, []int64{10}, []int64{4})}}}
+
+		stream, err := NewReduceStream(request, schema, []ReduceStream{childA, childB}, 1<<20)
+		require.NoError(t, err)
+		require.IsType(t, &UnOrderedReduceStream{}, stream)
+
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, []int64{1}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		require.Equal(t, []int64{10}, chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+		require.Equal(t, []int64{7}, chunk.GetFieldsData()[2].GetScalars().GetLongData().GetData())
+	})
+
+	t.Run("complete_reordered_group_keys_use_ordered_stream", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "g1", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "g2", DataType: schemapb.DataType_Int64},
+		}}
+		request := &internalpb.RetrieveRequest{
+			Limit:           1,
+			GroupByFieldIds: []int64{100, 101},
+			OrderByFields: []*planpb.OrderByField{
+				{FieldId: 101, Ascending: true},
+				{FieldId: 100, Ascending: true},
+			},
+		}
+		stream, err := NewReduceStream(request, schema, nil, 64)
+		require.NoError(t, err)
+		require.IsType(t, &OrderedReduceStream{}, stream)
+		require.NoError(t, stream.Close())
+	})
 }
 
 func makeTimestampField(timestamps []int64) *schemapb.FieldData {

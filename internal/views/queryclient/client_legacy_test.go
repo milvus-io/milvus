@@ -700,6 +700,7 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 		Schema: schema,
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:    100,
+			Limit:           typeutil.Unlimited,
 			GroupByFieldIds: []int64{100},
 			Aggregates: []*planpb.Aggregate{
 				{Op: planpb.AggregateOp_count, FieldId: 101},

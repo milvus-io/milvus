@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -836,7 +837,7 @@ func TestQueryTask_all(t *testing.T) {
 			return task
 		}
 
-		// Case 1: count(*) + GROUP BY + limit → should PASS
+		// Case 1: count(*) + GROUP BY + limit → should PASS and populate default group-key OrderByFields
 		{
 			task := makeTask(
 				expr,
@@ -846,9 +847,16 @@ func TestQueryTask_all(t *testing.T) {
 			)
 			err := task.PreExecute(ctx)
 			assert.NoError(t, err, "count(*) with GROUP BY and limit should be allowed")
+			require.Len(t, task.GroupByFieldIds, 1)
+			for _, fields := range [][]*planpb.OrderByField{task.OrderByFields, task.plan.GetQuery().GetOrderByFields()} {
+				require.Len(t, fields, 1)
+				assert.Equal(t, task.GroupByFieldIds[0], fields[0].GetFieldId())
+				assert.True(t, fields[0].GetAscending())
+				assert.False(t, fields[0].GetNullsFirst())
+			}
 		}
 
-		// Case 2: count(*) + GROUP BY + no limit → should PASS
+		// Case 2: count(*) + GROUP BY + no limit → should PASS without populating OrderByFields
 		{
 			task := makeTask(
 				expr,
@@ -858,6 +866,8 @@ func TestQueryTask_all(t *testing.T) {
 			)
 			err := task.PreExecute(ctx)
 			assert.NoError(t, err, "count(*) with GROUP BY and no limit should be allowed")
+			assert.Empty(t, task.OrderByFields)
+			assert.Empty(t, task.plan.GetQuery().GetOrderByFields())
 		}
 
 		// Case 3: count(*) + no GROUP BY + limit → should FAIL

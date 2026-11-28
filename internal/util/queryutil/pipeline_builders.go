@@ -35,8 +35,8 @@ import (
 //
 //	Plain:           [ReduceByPKTS(topK)] → output
 //	ORDER BY:        [DeduplicatePK] → [OrderByLimit(topK)] → output
-//	GROUP BY:        [DeduplicateByGroups(topK without aggregates, otherwise unlimited)] → output
-//	GROUP BY+ORDER:  [DeduplicateByGroups(unlimited)] → [OrderByLimit(topK or unlimited)] → output
+//	GROUP BY:        [DeduplicateByGroups(topK if key-ordered, else unlimited)] → [OrderByLimit(topK or unlimited)] → output
+//	Global aggregate: [DeduplicateByGroups(unlimited)] → output
 //
 // topK should be offset+limit (already set by proxy in req.Limit).
 func BuildQueryReducePipeline(
@@ -57,6 +57,10 @@ func BuildQueryReducePipeline(
 	arrowOut *ArrowSelection,
 ) (*Pipeline, error) {
 	hasGroupBy := len(groupByFieldIDs) > 0 || len(aggregates) > 0
+	orderByFields, err := orderby.GroupKeyOrder(orderByFields, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
+	}
 	hasOrderBy := len(orderByFields) > 0
 
 	if hasGroupBy && hasOrderBy {
@@ -69,19 +73,9 @@ func BuildQueryReducePipeline(
 				break
 			}
 		}
-		var err error
-		orderByFields, err = orderby.AppendGroupByTieBreakers(orderByFields, groupByFieldIDs, schema)
-		if err != nil {
-			return nil, err
-		}
 		return buildGroupByOrderByReducePipeline(name, schema, groupTopK, orderByFields, groupByFieldIDs, aggregates)
 	} else if hasGroupBy {
-		// Without aggregates, any topK distinct groups are valid for an unordered query.
-		groupLimit := topK
-		if len(aggregates) > 0 {
-			groupLimit = -1
-		}
-		return buildGroupByReducePipeline(name, schema, groupLimit, groupByFieldIDs, aggregates), nil
+		return buildGroupByReducePipeline(name, schema, -1, groupByFieldIDs, aggregates), nil
 	} else if hasOrderBy {
 		return buildOrderByReducePipeline(name, schema, topK, orderByFields, maxOutputSize), nil
 	}
@@ -112,7 +106,7 @@ func buildGroupByReducePipeline(name string, schema *schemapb.CollectionSchema, 
 	return b.Build()
 }
 
-// buildGroupByOrderByReducePipeline: [DeduplicateByGroups(unlimited)] → [OrderByLimit(topK)] → output
+// buildGroupByOrderByReducePipeline: [DeduplicateByGroups(topK if key-ordered, else unlimited)] → [OrderByLimit(topK)] → output
 func buildGroupByOrderByReducePipeline(name string, schema *schemapb.CollectionSchema, topK int64, orderByFields []*orderby.OrderByField, groupByFieldIDs []int64, aggregates []*planpb.Aggregate) (*Pipeline, error) {
 	positions, err := ComputeGroupByOrderPositions(orderByFields, groupByFieldIDs, aggregates)
 	if err != nil {
@@ -120,7 +114,7 @@ func buildGroupByOrderByReducePipeline(name string, schema *schemapb.CollectionS
 	}
 
 	b := NewPipelineBuilder(name)
-	b.Add(OpReduceByGroups, pin(), pch(ChannelReduced), NewDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, -1))
+	b.Add(OpReduceByGroups, pin(), pch(ChannelReduced), NewOrderedDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, topK, orderByFields))
 	b.Add(OpOrderByLimit, pch(ChannelReduced), pout(), NewOrderByLimitOperatorWithPositions(orderByFields, positions, topK))
 	return b.Build(), nil
 }

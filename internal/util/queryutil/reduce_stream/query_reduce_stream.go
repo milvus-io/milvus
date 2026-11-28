@@ -19,6 +19,7 @@ package reducestream
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -105,8 +107,10 @@ func compareRetrieveUnits(left, right queryReduceUnit, orderByFields []*planpb.O
 type orderedChildBuffer struct {
 	chunk         *internalpb.RetrieveResults
 	cursor        int64
-	hasMoreResult bool              // Retained from the first Chunk after its rows are consumed.
-	sizeRow       func(int64) int64 // Sizes fields in the current source Chunk.
+	rows          int                 // Group partials have rows but no primary keys.
+	groupColumns  []agg.FieldAccessor // GROUP BY: accessors bound once per input Chunk.
+	hasMoreResult bool                // Retained from the first Chunk after its rows are consumed.
+	sizeRow       func(int64) int64   // Sizes fields in the current source Chunk.
 }
 
 // reducibleByteSize counts a Unit's payload while its source Chunk is still buffered.
@@ -129,7 +133,7 @@ func (b *orderedChildBuffer) reducibleByteSize(u queryReduceUnit) (int, error) {
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
-	return b.chunk != nil && int(b.cursor) < typeutil.GetSizeOfIDs(b.chunk.GetIds())
+	return b.chunk != nil && int(b.cursor) < b.rows
 }
 
 func (b *orderedChildBuffer) front() queryReduceUnit {
@@ -143,6 +147,7 @@ func (b *orderedChildBuffer) pop() queryReduceUnit {
 		b.chunk = nil
 		b.cursor = 0
 		b.sizeRow = nil
+		b.groupColumns = nil
 	}
 	return unit
 }
@@ -163,6 +168,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 		return nil
 	}
 	b.chunk = chunk
+	b.rows = rowCount
 	b.cursor = 0
 	b.sizeRow = queryutil.NewOrderedRowSizeCalculator(chunk.GetFieldsData(), chunk.GetComputedResults(), nil).RowSize
 	return nil
@@ -177,6 +183,7 @@ type OrderedReduceStream struct {
 	chunkBytes     int                           // Reducible-payload byte threshold for output Chunks.
 	reduceType     reduce.IReduceType            // Controls when drained child streams end reduction.
 	orderByFields  []*planpb.OrderByField        // Query ORDER BY: columns and directions used for comparison.
+	groups         *orderedGroups                // GROUP BY merges equal full keys instead of selecting PKs.
 	hasLastPK      bool                          // Whether lastPK has been initialized.
 	lastPK         any                           // Last selected PK, used for ordering and duplicate checks.
 	deduplicatePKs bool                          // Per-vchannel Query: resolve duplicate PK versions by timestamp.
@@ -212,13 +219,19 @@ func NewReduceStream(
 		if schema == nil {
 			return nil, merr.WrapErrServiceInternalMsg("Query aggregation ReduceStream requires a collection schema")
 		}
-		return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
+		if len(request.GetGroupByFieldIds()) == 0 {
+			return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
+		}
 	}
-	if request.GetIsCount() {
+	if request.GetIsCount() && len(request.GetGroupByFieldIds()) == 0 {
 		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream requires an aggregate plan for count"))
 	}
-	unlimited := request.GetLimit() == typeutil.Unlimited && len(request.GetOrderByFields()) == 0
-	if request.GetLimit() <= 0 && !unlimited {
+	// Plain ORDER BY streams require a positive top-K (orderByLimit > 0).
+	// Grouped streams merge child heads in key order and allow Unlimited even with ORDER BY.
+	hasGroupBy := len(request.GetGroupByFieldIds()) > 0
+	allowsUnlimited := hasGroupBy || len(request.GetOrderByFields()) == 0
+	isUnlimited := request.GetLimit() == typeutil.Unlimited && allowsUnlimited
+	if request.GetLimit() <= 0 && !isUnlimited {
 		return nil, merr.WrapErrServiceInternalMsg("invalid Query ReduceStream limit %d", request.GetLimit())
 	}
 	if chunkBytes <= 0 {
@@ -229,6 +242,11 @@ func NewReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
+	if hasGroupBy && !hasCompleteGroupKeyOrder(request.GetOrderByFields(), request.GetGroupByFieldIds()) {
+		// Early LIMIT exit is unsafe unless the request guarantees a complete
+		// group-key order across workers; otherwise drain all contributions.
+		return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
+	}
 
 	stream := &OrderedReduceStream{
 		childStreams:  reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
@@ -237,10 +255,31 @@ func NewReduceStream(
 		reduceType:    reduce.ToReduceType(request.GetReduceType()),
 		orderByFields: request.GetOrderByFields(),
 	}
-	if len(stream.orderByFields) > 0 {
+	if hasGroupBy {
+		groups, err := newOrderedGroups(request, schema)
+		if err != nil {
+			return nil, err
+		}
+		stream.groups = groups
+	} else if len(stream.orderByFields) > 0 {
 		stream.seenPKs = make(map[any]struct{})
 	}
 	return stream, nil
+}
+
+func hasCompleteGroupKeyOrder(orderByFields []*planpb.OrderByField, groupByFieldIDs []int64) bool {
+	if len(groupByFieldIDs) == 0 || len(orderByFields) == 0 {
+		return false
+	}
+	seen := make(map[int64]struct{}, len(groupByFieldIDs))
+	for _, field := range orderByFields {
+		fieldID := field.GetFieldId()
+		if !slices.Contains(groupByFieldIDs, fieldID) {
+			return false
+		}
+		seen[fieldID] = struct{}{}
+	}
+	return len(seen) == len(groupByFieldIDs)
 }
 
 // NewShardReduceStream resolves worker duplicate PKs by timestamp.
@@ -250,7 +289,7 @@ func NewShardReduceStream(request *internalpb.RetrieveRequest, schema *schemapb.
 	if err != nil {
 		return nil, err
 	}
-	if ordered, ok := stream.(*OrderedReduceStream); ok {
+	if ordered, ok := stream.(*OrderedReduceStream); ok && ordered.groups == nil {
 		if len(ordered.orderByFields) == 0 {
 			ordered.deduplicatePKs = true
 		} else {
@@ -270,6 +309,9 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 	if s.closed {
 		return nil, io.ErrClosedPipe
+	}
+	if s.groups != nil {
+		return s.recvGroups()
 	}
 	if s.orderByLimit > 0 {
 		return s.recvOrderBy()
@@ -411,6 +453,9 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 				return merr.Wrapf(merr.Error(chunk.GetStatus()), "Query child stream %d returned a failed Chunk", childIndex)
 			}
 			s.acceptMetadata(chunk)
+			if s.groups != nil {
+				return s.groups.accept(&s.childBuffers[childIndex], chunk)
+			}
 			if err := s.childBuffers[childIndex].accept(chunk); err != nil {
 				return merr.Wrapf(err, "Query child stream %d returned an invalid Chunk", childIndex)
 			}
@@ -446,7 +491,7 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 	for i := range s.childBuffers {
 		// EOF ends only this child's current result. Iterator reduction must
 		// stop if matching rows remain outside it, rather than skip those rows.
-		if len(s.orderByFields) == 0 && reduce.ShouldStopWhenDrained(s.reduceType) &&
+		if s.groups == nil && len(s.orderByFields) == 0 && reduce.ShouldStopWhenDrained(s.reduceType) &&
 			s.childStreams.IsDrained(i) && s.childBuffers[i].hasMoreResult {
 			return nil, nil
 		}
@@ -522,13 +567,13 @@ func buildRetrieveChunk(units []queryReduceUnit) (*internalpb.RetrieveResults, e
 	return chunk, nil
 }
 
-// UnOrderedReduceStream merges Query groups and aggregates without depending on child arrival order.
+// UnOrderedReduceStream merges aggregates without depending on child arrival order.
 type UnOrderedReduceStream struct {
 	recvMu       sync.Mutex                                        // Serializes Recv and cleanup after cancellation.
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults] // Receives and closes child streams.
 	childBuffers []*internalpb.RetrieveResults                     // Holds available partial results, one Chunk per child.
 	reducer      *agg.GroupAggReducer                              // Decodes, merges and encodes aggregate partials.
-	outputBuffer *agg.GroupAggBuffer                               // Query Group By: accumulates partials by group; nil for global aggregation.
+	outputBuffer *agg.GroupAggBuffer                               // Accumulates global or unordered grouped partials.
 	chunkBytes   int                                               // Reducible-payload byte threshold for output Chunks.
 
 	outputChunks []*internalpb.RetrieveResults // Partial aggregate Chunks prepared after all children drain.
@@ -553,9 +598,38 @@ func newUnOrderedReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
-	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), typeutil.Unlimited, schema)
+	groupByFieldIDs := request.GetGroupByFieldIds()
+	groupLimit := typeutil.Unlimited
+	var keyOrder []agg.GroupKeyOrder
+	if len(groupByFieldIDs) > 0 && request.GetLimit() > 0 {
+		explicitOrder, err := orderby.ConvertFromPlanOrderByFields(request.GetOrderByFields(), schema)
+		if err != nil {
+			return nil, err
+		}
+		fullOrder, err := orderby.GroupKeyOrder(explicitOrder, groupByFieldIDs, schema)
+		if err != nil {
+			return nil, err
+		}
+		groupLimit = request.GetLimit()
+		keyOrder = make([]agg.GroupKeyOrder, 0, len(fullOrder))
+		for _, field := range fullOrder {
+			col := slices.Index(groupByFieldIDs, field.FieldID)
+			if col < 0 {
+				keyOrder = nil
+				groupLimit = typeutil.Unlimited
+				break
+			}
+			keyOrder = append(keyOrder, agg.GroupKeyOrder{
+				ColIndex:   col,
+				DataType:   field.DataType,
+				Ascending:  field.Ascending,
+				NullsFirst: field.NullsFirst,
+			})
+		}
+	}
+	reducer := agg.NewOrderedGroupAggReducer(groupByFieldIDs, request.GetAggregates(), groupLimit, schema, keyOrder)
 	var outputBuffer *agg.GroupAggBuffer
-	if len(request.GetGroupByFieldIds()) > 0 {
+	if len(groupByFieldIDs) > 0 {
 		outputBuffer = reducer.NewBuffer()
 	}
 	return &UnOrderedReduceStream{
@@ -579,8 +653,11 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 
 	if s.outputChunks == nil {
-		// Global aggregation retains one mergeable partial, not a map of groups.
-		reduced := &agg.PartialAggregationResult{}
+		// Global aggregation retains one mergeable partial; grouped fallback uses GroupAggBuffer.
+		var reduced *agg.PartialAggregationResult
+		if s.outputBuffer == nil {
+			reduced = &agg.PartialAggregationResult{}
+		}
 		for {
 			readyBuffers, err := s.getReadyBuffers()
 			if err != nil {
@@ -599,16 +676,15 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 				partialResults[i] = partial
 			}
 			if s.outputBuffer != nil {
-				// Group By retains earlier contributions in outputBuffer's group map.
-				err = s.outputBuffer.Merge(partialResults)
+				if err := s.outputBuffer.Merge(partialResults); err != nil {
+					return nil, s.fail(err)
+				}
 			} else {
-				// Global aggregation has no group map. Merge is stateless, so include
-				// the partial accumulated from earlier Chunks.
 				partialResults = append(partialResults, reduced)
 				reduced, err = s.reducer.Merge(context.Background(), partialResults)
-			}
-			if err != nil {
-				return nil, s.fail(err)
+				if err != nil {
+					return nil, s.fail(err)
+				}
 			}
 			for i := range s.childBuffers {
 				s.childBuffers[i] = nil
@@ -632,8 +708,8 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		if err != nil {
 			return nil, s.fail(err)
 		}
-		s.reducer = nil
 		s.outputBuffer = nil
+		s.reducer = nil
 	}
 
 	if s.outputIndex < len(s.outputChunks) {
@@ -746,8 +822,8 @@ func (s *UnOrderedReduceStream) closeChildren() error {
 	for i := range s.outputChunks {
 		s.outputChunks[i] = nil
 	}
-	s.reducer = nil
 	s.outputBuffer = nil
+	s.reducer = nil
 	s.metadata = nil
 	return s.closeErr
 }
@@ -873,6 +949,7 @@ func (s *OrderedReduceStream) closeChildren() error {
 	s.outputBuffer = nil
 	s.outputChunks = nil
 	s.seenPKs = nil
+	s.groups = nil
 	s.metadata = nil
 	return s.closeErr
 }

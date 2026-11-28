@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -225,6 +226,35 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 	require.Equal(t, 1, leftStream.closeCount())
 	require.Equal(t, 1, rightStream.closeCount())
+}
+
+func TestShardQueryStreamForwardsOrderByFieldsUnchanged(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	for _, order := range [][]*planpb.OrderByField{nil, {{FieldId: 202, NullsFirst: true}}} {
+		req := &internalpb.RetrieveRequest{CollectionID: 100, GroupByFieldIds: []int64{201, 202}, Limit: 2, OrderByFields: order}
+		planClient := &fakeQueryPlanClient{plan: &viewpb.QueryPlan{
+			ShardId: shardID.IntoProto(), Version: &viewpb.QueryViewVersion{QueryVersion: 1}, Mvcc: &viewpb.QueryPlanMVCC{},
+			Request:   &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: req},
+			WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}}}},
+		}}
+		service := &fakeViewQueryServiceClient{queryOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
+			return &fakeQueryStream{}, nil
+		}}
+		client := newShardViewQueryClient(1, planClient, service)
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 201, DataType: schemapb.DataType_Int64}, {FieldID: 202, DataType: schemapb.DataType_Int64},
+		}}
+		stream, _, err := client.QueryStream(t.Context(), &ShardQueryRequest{Req: req, VChannel: shardID.VChannel, Schema: schema}, 64)
+		require.NoError(t, err)
+		require.NoError(t, stream.Close())
+		sent := service.queryReq.GetLegacyReq().GetOrderByFields()
+		require.Len(t, sent, len(order))
+		for i := range order {
+			require.True(t, proto.Equal(order[i], sent[i]))
+		}
+		require.Len(t, req.OrderByFields, len(order))
+	}
 }
 
 func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {

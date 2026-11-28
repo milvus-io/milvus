@@ -285,6 +285,28 @@ func (bucket *Bucket) Find(row *Row, keyCount int) int {
 	return NONE
 }
 
+func (bucket *Bucket) FindByAccessors(hashers []FieldAccessor, rowIdx int) int {
+	for idx, existingRow := range bucket.rows {
+		if accessorMatchesRow(hashers, rowIdx, existingRow) {
+			return idx
+		}
+	}
+	return NONE
+}
+
+func (bucket *Bucket) RemoveRow(target *Row) bool {
+	for idx, existingRow := range bucket.rows {
+		if existingRow == target {
+			last := len(bucket.rows) - 1
+			bucket.rows[idx] = bucket.rows[last]
+			bucket.rows[last] = nil
+			bucket.rows = bucket.rows[:last]
+			return true
+		}
+	}
+	return false
+}
+
 func NewBucket() *Bucket {
 	return &Bucket{rows: make([]*Row, 0, 1)}
 }

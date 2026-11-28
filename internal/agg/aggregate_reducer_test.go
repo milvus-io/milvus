@@ -437,3 +437,32 @@ func TestGroupAggReducer_MaxGroupByGroupsJustOverLimit(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "too many groups"))
 }
+
+func TestOrderedGroupAggReducer_BoundedTopKRespectsMaxGroups(t *testing.T) {
+	maxGroups := int64(2)
+	paramtable.Get().Save(paramtable.Get().CommonCfg.GroupByMaxGroups.Key, fmt.Sprintf("%d", maxGroups))
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.GroupByMaxGroups.Key)
+
+	schema := buildTestSchema()
+	aggs := []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}
+	order := []GroupKeyOrder{{ColIndex: 0, DataType: schemapb.DataType_Int64, Ascending: true, NullsFirst: false}}
+	reducer := NewOrderedGroupAggReducer([]int64{100}, aggs, 2, schema, order)
+
+	// 4 distinct keys across two partials (keys 5, 3, 1, 2) with maxGroups=2.
+	// Key 1 appears in both partials so aggregate updates on retained keys are verified.
+	p1 := buildAggResult(5, 1)
+	p2 := buildAggResult(3, 1)
+	p3 := buildAggResult(1, 2)
+	p4 := buildAggResult(1, 1)
+	merged, err := reducer.Merge(context.Background(), []*PartialAggregationResult{p1, p2, p3, p4})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, merged.GetFieldDatas()[0].GetScalars().GetLongData().GetData())
+	require.Equal(t, []int64{2, 1}, merged.GetFieldDatas()[1].GetScalars().GetLongData().GetData())
+
+	// Descending order keeps largest 2 keys (5 and 3) without tripping maxGroups=2.
+	descOrder := []GroupKeyOrder{{ColIndex: 0, DataType: schemapb.DataType_Int64, Ascending: false, NullsFirst: false}}
+	descReducer := NewOrderedGroupAggReducer([]int64{100}, aggs, 2, schema, descOrder)
+	descMerged, err := descReducer.Merge(context.Background(), []*PartialAggregationResult{p3, p2, p1})
+	require.NoError(t, err)
+	require.Equal(t, []int64{5, 3}, descMerged.GetFieldDatas()[0].GetScalars().GetLongData().GetData())
+}

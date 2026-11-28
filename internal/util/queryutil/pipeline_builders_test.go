@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func makeInt64Field(fieldID int64, name string, vals []int64) *schemapb.FieldData {
@@ -191,15 +192,13 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 
 	t.Run("group by", func(t *testing.T) {
 		aggs := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 500}}
-		// An intermediate reducer must keep every group so later reducers can
-		// assemble all partial aggregate values before the final limit.
 		pipeline, err := BuildQueryReducePipeline(
 			"groupby", schema, 2, reduce.IReduceNoOrder,
 			nil, []int64{200}, aggs, 0, nil, nil,
 		)
 		require.NoError(t, err)
 		assert.Contains(t, pipeline.String(), OpReduceByGroups)
-		assert.NotContains(t, pipeline.String(), OpOrderByLimit)
+		assert.Contains(t, pipeline.String(), OpOrderByLimit)
 
 		res1 := &internalpb.RetrieveResults{FieldsData: []*schemapb.FieldData{
 			makeStringField(200, "color", []string{"blue", "red"}),
@@ -215,15 +214,8 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		out := msg[PipelineOutput].(*internalpb.RetrieveResults)
 		colors := out.GetFieldsData()[0].GetScalars().GetStringData().GetData()
 		counts := out.GetFieldsData()[1].GetScalars().GetLongData().GetData()
-		require.Len(t, colors, 3)
-		require.Len(t, counts, 3)
-		actual := map[string]int64{}
-		for i := range colors {
-			actual[colors[i]] = counts[i]
-		}
-		assert.Equal(t, int64(4), actual["blue"])
-		assert.Equal(t, int64(2), actual["red"])
-		assert.Equal(t, int64(4), actual["green"])
+		assert.Equal(t, []string{"blue", "green"}, colors)
+		assert.Equal(t, []int64{4, 4}, counts)
 	})
 
 	t.Run("group by without aggregates", func(t *testing.T) {
@@ -243,11 +235,19 @@ func TestBuildQueryReducePipeline(t *testing.T) {
 		msg, err := pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
 		require.NoError(t, err)
 		colors := msg[PipelineOutput].(*internalpb.RetrieveResults).GetFieldsData()[0].GetScalars().GetStringData().GetData()
-		require.Len(t, colors, 2)
-		assert.NotEqual(t, colors[0], colors[1])
-		for _, color := range colors {
-			assert.Contains(t, []string{"blue", "red", "green"}, color)
-		}
+		assert.Equal(t, []string{"blue", "green"}, colors)
+
+		key := paramtable.Get().CommonCfg.GroupByMaxGroups.Key
+		paramtable.Get().Save(key, "2")
+		defer paramtable.Get().Reset(key)
+		msg, err = pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
+		require.NoError(t, err)
+		colors = msg[PipelineOutput].(*internalpb.RetrieveResults).GetFieldsData()[0].GetScalars().GetStringData().GetData()
+		assert.Equal(t, []string{"blue", "green"}, colors)
+
+		paramtable.Get().Save(key, "1")
+		_, err = pipeline.Run(ctx, nil, OpMsg{PipelineInput: []*internalpb.RetrieveResults{res1, res2}})
+		require.ErrorContains(t, err, "too many groups (2)")
 	})
 
 	t.Run("group by order by", func(t *testing.T) {

@@ -17,6 +17,7 @@
 package queryutil
 
 import (
+	"cmp"
 	"container/heap"
 	"context"
 	"sort"
@@ -232,35 +233,64 @@ func (op *OrderByLimitOperator) compareFieldValuesAt(fd *schemapb.FieldData, idx
 }
 
 func compareFieldDataRows(left *schemapb.FieldData, leftIndex int, right *schemapb.FieldData, rightIndex int, dataType schemapb.DataType, ascending, nullsFirst bool) int {
+	switch dataType {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return cmpOrdered(left, right, left.GetScalars().GetIntData().GetData(), right.GetScalars().GetIntData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	case schemapb.DataType_Int64:
+		return cmpOrdered(left, right, left.GetScalars().GetLongData().GetData(), right.GetScalars().GetLongData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	case schemapb.DataType_Timestamptz:
+		return cmpOrdered(left, right, left.GetScalars().GetTimestamptzData().GetData(), right.GetScalars().GetTimestamptzData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	case schemapb.DataType_Float:
+		return cmpOrdered(left, right, left.GetScalars().GetFloatData().GetData(), right.GetScalars().GetFloatData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	case schemapb.DataType_Double:
+		return cmpOrdered(left, right, left.GetScalars().GetDoubleData().GetData(), right.GetScalars().GetDoubleData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return cmpOrdered(left, right, left.GetScalars().GetStringData().GetData(), right.GetScalars().GetStringData().GetData(), leftIndex, rightIndex, ascending, nullsFirst)
+	}
+
 	leftValue, leftNull := getFieldValue(left, leftIndex)
 	rightValue, rightNull := getFieldValue(right, rightIndex)
+	if leftNull || rightNull {
+		return cmpNulls(leftNull, rightNull, nullsFirst)
+	}
+	res := compareValues(leftValue, rightValue, dataType)
+	if !ascending {
+		res = -res
+	}
+	return res
+}
 
-	// Handle nulls
+func isFieldNull(fd *schemapb.FieldData, rowIdx int) bool {
+	validData := typeutil.GetFieldDataValidData(fd)
+	return len(validData) > rowIdx && !validData[rowIdx]
+}
+
+func cmpNulls(leftNull, rightNull, nullsFirst bool) int {
 	if leftNull && rightNull {
 		return 0
 	}
-	if leftNull {
-		if nullsFirst {
-			return -1
-		}
+	if leftNull != nullsFirst {
 		return 1
 	}
-	if rightNull {
-		if nullsFirst {
-			return 1
-		}
-		return -1
+	return -1
+}
+
+func cmpOrdered[T cmp.Ordered](leftFd, rightFd *schemapb.FieldData, left, right []T, li, ri int, ascending, nullsFirst bool) int {
+	leftNull := isFieldNull(leftFd, li) || li >= len(left)
+	rightNull := isFieldNull(rightFd, ri) || ri >= len(right)
+	if leftNull || rightNull {
+		return cmpNulls(leftNull, rightNull, nullsFirst)
 	}
-
-	// Compare actual values
-	cmp := compareValues(leftValue, rightValue, dataType)
-
-	// Apply ascending/descending
+	res := 0
+	if left[li] < right[ri] {
+		res = -1
+	} else if left[li] > right[ri] {
+		res = 1
+	}
 	if !ascending {
-		cmp = -cmp
+		return -res
 	}
-
-	return cmp
+	return res
 }
 
 // reorderResult reorders result rows by given indices.

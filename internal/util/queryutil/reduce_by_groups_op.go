@@ -18,11 +18,13 @@ package queryutil
 
 import (
 	"context"
+	"slices"
 
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
@@ -49,10 +51,51 @@ func NewDeduplicateByGroupsOperator(
 	aggregates []*planpb.Aggregate,
 	groupLimit int64,
 ) Operator {
+	return newDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, groupLimit, nil)
+}
+
+// NewOrderedDeduplicateByGroupsOperator retains at most groupLimit distinct groups
+// ordered by orderByFields when groupLimit > 0 and orderByFields only reference
+// grouping keys; otherwise it falls back to unlimited group merging.
+func NewOrderedDeduplicateByGroupsOperator(
+	schema *schemapb.CollectionSchema,
+	groupByFieldIDs []int64,
+	aggregates []*planpb.Aggregate,
+	groupLimit int64,
+	orderByFields []*orderby.OrderByField,
+) Operator {
+	var keyOrder []agg.GroupKeyOrder
+	if groupLimit > 0 && len(orderByFields) > 0 {
+		keyOrder = make([]agg.GroupKeyOrder, 0, len(orderByFields))
+		for _, field := range orderByFields {
+			col := slices.Index(groupByFieldIDs, field.FieldID)
+			if col < 0 {
+				keyOrder = nil
+				groupLimit = -1
+				break
+			}
+			keyOrder = append(keyOrder, agg.GroupKeyOrder{
+				ColIndex:   col,
+				DataType:   field.DataType,
+				Ascending:  field.Ascending,
+				NullsFirst: field.NullsFirst,
+			})
+		}
+	}
+	return newDeduplicateByGroupsOperator(schema, groupByFieldIDs, aggregates, groupLimit, keyOrder)
+}
+
+func newDeduplicateByGroupsOperator(
+	schema *schemapb.CollectionSchema,
+	groupByFieldIDs []int64,
+	aggregates []*planpb.Aggregate,
+	groupLimit int64,
+	keyOrder []agg.GroupKeyOrder,
+) Operator {
 	return NewLambdaOperator(OpReduceByGroups, func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
-		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, groupLimit, schema)
+		reducer := agg.NewOrderedGroupAggReducer(groupByFieldIDs, aggregates, groupLimit, schema, keyOrder)
 		partials, err := reducer.DecodeInternalResults(results)
 		if err != nil {
 			return nil, err

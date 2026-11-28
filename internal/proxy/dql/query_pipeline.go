@@ -87,10 +87,13 @@ func NewQueryPipeline(
 	outputFieldIDs []int64,
 ) (*QueryPipeline, error) {
 	hasAggregation := len(groupByFieldIDs) > 0 || len(aggregates) > 0
+	orderByFields, err := orderby.GroupKeyOrder(orderByFields, groupByFieldIDs, schema)
+	if err != nil {
+		return nil, err
+	}
 	hasOrderBy := len(orderByFields) > 0
 
 	var p *queryutil.Pipeline
-	var err error
 	if hasAggregation && hasOrderBy {
 		p, err = buildGroupByOrderByPipeline(schema, limit, offset, orderByFields, groupByFieldIDs, aggregates, outputMap)
 	} else if hasAggregation {
@@ -132,7 +135,7 @@ func buildOrderByPipeline(
 ) *queryutil.Pipeline {
 	b := queryutil.NewPipelineBuilder("proxy-query-orderby")
 	b.Add(queryutil.OpConcatAndCheckPK, in(), ch(chanReduced), queryutil.NewConcatAndCheckPKOperator(schema))
-	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperator(orderByFields, offset+limit))
+	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperator(orderByFields, orderTopK(limit, offset)))
 	b.Add(queryutil.OpSlice, ch(chanSorted), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 
 	// Remap by FieldID: select and reorder fields to match user's output_fields.
@@ -174,10 +177,17 @@ func buildGroupByOrderByPipeline(
 
 	b := queryutil.NewPipelineBuilder("proxy-query-groupby-orderby")
 	b.Add(queryutil.OpReduceByGroups, in(), ch(chanReduced), newRawReduceByGroupsOperator(schema, groupByFieldIDs, aggregates))
-	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperatorWithPositions(orderByFields, positions, offset+limit))
+	b.Add(queryutil.OpOrderByLimit, ch(chanReduced), ch(chanSorted), queryutil.NewOrderByLimitOperatorWithPositions(orderByFields, positions, orderTopK(limit, offset)))
 	b.Add(queryutil.OpSlice, ch(chanSorted), ch(chanSliced), queryutil.NewSliceOperator(limit, offset))
 	b.Add(queryutil.OpRemap, ch(chanSliced), out(), newAggRemapOperator(outputMap))
 	return b.Build(), nil
+}
+
+func orderTopK(limit, offset int64) int64 {
+	if limit <= 0 {
+		return typeutil.Unlimited
+	}
+	return offset + limit
 }
 
 // Channel helper functions for readability.
@@ -266,7 +276,7 @@ func newComplementFieldOperator(schema *schemapb.CollectionSchema) queryutil.Ope
 
 // newReduceByGroupsOperator aggregates results and reorganizes output by
 // outputMap to match the user's output_fields order.
-// Used for GROUP BY queries without ORDER BY.
+// Used for global aggregation, where there are no group keys to sort.
 func newReduceByGroupsOperator(
 	schema *schemapb.CollectionSchema,
 	groupByFieldIDs []int64,
