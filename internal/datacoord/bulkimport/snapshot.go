@@ -267,6 +267,11 @@ func expandSnapshotImportFiles(
 	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, nil, err
 	}
+	// An empty map means the job cuts at its single end_ts.
+	pchannelEndTS, err := importutilv2.GetSnapshotPChannelEndTs(options)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if cm == nil {
 		return nil, nil, nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
 	}
@@ -363,6 +368,9 @@ func expandSnapshotImportFiles(
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].GetSegmentId() < segments[j].GetSegmentId()
 	})
+	if err := validateSnapshotPChannelEndTS(pchannelEndTS, segments); err != nil {
+		return nil, nil, nil, err
+	}
 	if len(segments) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
 		return nil, nil, nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(segments))
@@ -452,21 +460,25 @@ func expandSnapshotImportFiles(
 		// never choose delete semantics based on where the deletes are stored.
 		needsSourceContext = needsSourceContext || segment.GetCommitTimestamp() != 0
 	}
+	// Per-PChannel end bounds need each file's source channel even when the
+	// collection has no deletes to bind.
+	withSourceScope := len(pchannelEndTS) != 0
 	var l0Sources []*internalpb.SnapshotImportL0Source
-	if needsSourceContext {
-		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result)
+	if needsSourceContext || withSourceScope {
+		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result, withSourceScope)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
 	// Encode the complete job-wide capabilities once, after attaching source context.
 	external := importutilv2.HasExternalSource(options)
-	if needsSourceContext || external || partitionMapping != nil {
+	if needsSourceContext || external || partitionMapping != nil || withSourceScope {
 		version := importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{
 			ExternalStorage:  external,
 			PartitionMapping: partitionMapping != nil,
 			SharedL0:         len(l0Sources) != 0,
 			V2Reference:      hasV2,
+			Bounded:          withSourceScope,
 		})
 		for i, file := range result {
 			if file.SnapshotSource == nil {
@@ -558,6 +570,28 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 	return result, nil
 }
 
+// validateSnapshotPChannelEndTS refuses a cut that does not name the channel of
+// every data segment. A channel left out would import its bundle through the
+// freeze point, and the CDC would replay that tail again once replication
+// resumes; failing the job here is the loud version of that mistake.
+func validateSnapshotPChannelEndTS(bounds map[string]uint64, segments []*datapb.SegmentDescription) error {
+	if len(bounds) == 0 {
+		return nil
+	}
+	for _, segment := range segments {
+		channel := segment.GetChannelName()
+		if strings.TrimSpace(channel) == "" {
+			return merr.WrapErrImportFailedMsg(
+				"snapshot segment %d carries no source channel for the per-PChannel end bounds", segment.GetSegmentId())
+		}
+		if _, ok := importutilv2.SnapshotPChannelEnd(bounds, channel); !ok {
+			return merr.WrapErrImportFailedMsg(
+				"snapshot end bounds do not cover source channel %s of segment %d", channel, segment.GetSegmentId())
+		}
+	}
+	return nil
+}
+
 // Attach timestamp context per segment, but retain L0 paths once per source
 // scope. Channel-wide deletes stay separate in the durable job and are merged
 // with partition-local deletes only when constructing a worker task.
@@ -565,6 +599,7 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 // plan with real options after external/routing transforms and ID allocation.
 func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkManager, metadataPath string,
 	snapshot *storage.SnapshotData, data, deltas []*datapb.SegmentDescription, files []*internalpb.ImportFile,
+	withSourceScope bool,
 ) ([]*internalpb.SnapshotImportL0Source, error) {
 	type scope struct {
 		channel     string
@@ -590,9 +625,15 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 			source = &internalpb.SnapshotImportSource{ManifestPath: segment.GetManifestPath()}
 		}
 		source.SourceCommitTimestamp = segment.GetCommitTimestamp()
-		if len(deltas) != 0 {
+		// Deletes bind to a scope, and a per-PChannel end bound resolves through
+		// one. Only deletes need an inventory in that scope; the caller picks the
+		// version bits, because a bound without deletes must not read as a
+		// shared-L0 job.
+		if len(deltas) != 0 || withSourceScope {
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()
+		}
+		if len(deltas) != 0 {
 			groupFor(source.SourceChannel, source.SourcePartitionId)
 		}
 		files[i].SnapshotSource = source

@@ -111,7 +111,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if err := ValidateImportSourceOptions(f.options); err != nil {
 		return nil, err
 	}
-	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
+	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) || HasSnapshotPChannelEndTs(f.options) {
 		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
 			return nil, err
 		}
@@ -143,6 +143,10 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 		return nil, err
 	}
 	start, end, err := ParseTimeRange(f.options)
+	if err != nil {
+		return nil, err
+	}
+	end, err = snapshotReadEnd(f.options, end, source.GetSourceChannel())
 	if err != nil {
 		return nil, err
 	}
@@ -185,24 +189,34 @@ func NewReader(ctx context.Context,
 	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
+// readerSource adapts a validated descriptor to the 1-4 contract the data
+// reader implements. Only this view is narrowed: never mutate the persisted
+// descriptor, and never expand L0 paths back into a segment, because a shared
+// task borrows its prepared bitmap instead of opening L0 again.
+func readerSource(source *internalpb.SnapshotImportSource, shared bool) *internalpb.SnapshotImportSource {
+	if source == nil {
+		return nil
+	}
+	capabilities, _ := DecodeSnapshotSourceVersion(source.GetVersion())
+	if shared || capabilities.V2Reference || capabilities.Bounded {
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceContractVersion(source)
+		if shared {
+			// A non-shared bounded reader keeps SourceChannel so V2 Avro
+			// validation and diagnostics still know which file was cut.
+			source.SourceChannel = ""
+			source.SourcePartitionId = 0
+		}
+	}
+	return source
+}
+
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
 	encryption binlog.SourceEncryption,
 ) (Reader, error) {
-	source := importFile.GetSnapshotSource()
-	capabilities, _ := DecodeSnapshotSourceVersion(source.GetVersion())
-	if source != nil && (shared != nil || capabilities.V2Reference) {
-		// Adapt only the validated reader view. Never expand L0 paths back
-		// into a segment or mutate the persisted descriptor: the reader must
-		// borrow the task's prepared bitmap instead of opening L0 again.
-		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		source.Version = SnapshotSourceContractVersion(source)
-		if shared != nil {
-			source.SourceChannel = ""
-			source.SourcePartitionId = 0
-		}
-	}
+	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -215,6 +229,10 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
+				tsEnd, err = snapshotReadEnd(options, tsEnd, importFile.GetSnapshotSource().GetSourceChannel())
+				if err != nil {
+					return nil, err
+				}
 				if source.GetV2Reference() != nil {
 					var segment *datapb.SegmentDescription
 					if shared == nil {
