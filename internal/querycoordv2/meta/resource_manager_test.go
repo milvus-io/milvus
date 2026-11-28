@@ -1357,6 +1357,50 @@ func TestResourceManager_CheckNodesInResourceGroup_AllNodesHealthy(t *testing.T)
 	assert.Equal(t, 2, len(finalNodes), "Should have exactly 2 nodes")
 }
 
+func TestResourceManager_CheckNodesInResourceGroup_WithNodeFilter(t *testing.T) {
+	ctx := context.Background()
+	manager := createTestResourceManager(t)
+
+	_, err := manager.AddResourceGroup(ctx, "rg_filtered", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+		NodeFilter: &rgpb.ResourceGroupNodeFilter{
+			NodeLabels: []*commonpb.KeyValuePair{
+				{Key: "role", Value: "search"},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	// Add node 1001 with matching label into rg_filtered, then simulate it going offline (removed from nodeMgr).
+	manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "10.0.0.1:21123",
+		Hostname: "pod-0",
+		Labels:   map[string]string{"role": "search"},
+	}))
+	manager.HandleNodeUp(ctx, 1001)
+	assert.Equal(t, "rg_filtered", manager.GetResourceGroupByNodeID(1001))
+
+	manager.nodeMgr.Remove(1001)
+
+	// Add replacement node 1002 with matching label.
+	manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1002,
+		Address:  "10.0.0.1:21123",
+		Hostname: "pod-0",
+		Labels:   map[string]string{"role": "search"},
+	}))
+
+	manager.CheckNodesInResourceGroup(ctx)
+
+	rg := manager.GetResourceGroup(ctx, "rg_filtered")
+	assert.NotContains(t, rg.GetAllNodes(), int64(1001), "Offline node must be unassigned even when RG uses NodeFilter")
+	assert.Empty(t, manager.GetResourceGroupByNodeID(1001))
+	assert.ElementsMatch(t, []int64{1002}, rg.GetAllNodes())
+	assert.Equal(t, "rg_filtered", manager.GetResourceGroupByNodeID(1002))
+}
+
 func (suite *ResourceManagerSuite) TestTransferNodesOnRGSwap_ScaleUp() {
 	ctx := suite.ctx
 	// Setup: default(3,3) with 3 nodes.
