@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -177,7 +178,7 @@ func (p *preImportV3Task) setV3FileStats(fileStats []*datapb.ImportV3FileStats) 
 	p.task.Load().FileStats = fileStats
 }
 
-func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	mlog.Info(context.TODO(), "processing pending preimport v3 task...", WrapTaskLog(p)...)
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req, err := AssemblePreImportV3Request(p, job)
@@ -187,7 +188,7 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to mark preimport v3 job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
@@ -196,17 +197,17 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		// rejection fails the task.
 		if importcommon.IsTerminalImportV3Err(err) {
 			p.Fail(err.Error())
-			return
+			return globalTask.DispatchHandled
 		}
 		p.retryTimes++
-		return
+		return globalTask.DispatchHandled
 	}
 	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
 		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(p, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	pendingDuration := p.GetTR().RecordSpan()
 	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending, p.GetType().String()).Observe(float64(pendingDuration.Milliseconds()))
@@ -214,6 +215,7 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		context.TODO(),
 		"preimport v3 task start to execute",
 		WrapTaskLog(p, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+	return globalTask.DispatchHandled
 }
 
 func (p *preImportV3Task) QueryTaskOnWorker(cluster session.Cluster) {

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -158,25 +159,25 @@ func (t *importTaskV3) setOldSegmentIDs(segmentIDs []UniqueID) {
 	t.task.Load().OldSegmentIds = append([]int64(nil), segmentIDs...)
 }
 
-func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	p := t.task.Load()
 	if p.GetRunId() == 0 || p.GetLogRange() == nil {
 		t.Fail("import v3 task has no run resources")
-		return
+		return globalTask.DispatchHandled
 	}
 	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
 	if job == nil {
 		t.Fail("import v3 task job is missing")
-		return
+		return globalTask.DispatchHandled
 	}
 	if job.GetState() != internalpb.ImportJobState_Planning && job.GetState() != internalpb.ImportJobState_Importing {
 		t.Fail(fmt.Sprintf("import v3 task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
-		return
+		return globalTask.DispatchHandled
 	}
 	plan, slot, err := importPlan(job, p, getImportV3Config())
 	if err != nil {
 		t.Fail(err.Error())
-		return
+		return globalTask.DispatchHandled
 	}
 	// Drop the segments a superseded run used to own but this run no longer
 	// references. The list is cleared in the same write that binds this run, so a
@@ -186,7 +187,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		if err := t.meta.UpdateSegmentsInfo(context.TODO(), dropImportV3Segments(oldSegmentIDs)); err != nil {
 			mlog.Warn(context.TODO(), "drop superseded import v3 segments failed transiently, will retry",
 				WrapTaskLog(t, mlog.Int64s("segmentIDs", oldSegmentIDs), mlog.Err(err))...)
-			return
+			return globalTask.DispatchHandled
 		}
 	}
 	// The segment record is created here, at dispatch, not during Planning, so a
@@ -200,7 +201,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		if _, err := addImportSegment(context.TODO(), t.meta, p.GetSegmentId(), p.GetJobId(), p.GetTaskId(), p.GetCollectionId(), p.GetPartitionId(), p.GetVchannel(), datapb.SegmentLevel_L1, plan.GetWriter().GetStorageVersion(), job.GetSchema().GetVersion()); err != nil {
 			mlog.Warn(context.TODO(), "create import v3 task segment failed transiently, will retry",
 				WrapTaskLog(t, mlog.Err(err))...)
-			return
+			return globalTask.DispatchHandled
 		}
 	}
 	req := &datapb.ImportTaskV3Request{
@@ -212,7 +213,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare import v3 task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	// PrepareRun: persist Running/node before the uncertain Create RPC, so a crash
 	// after acceptance never causes the same run to be re-dispatched elsewhere.
@@ -220,7 +221,7 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 	// just above, and the list only re-appears on the next retry.
 	if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress), UpdateNodeID(nodeID), UpdateOldSegmentIDs(nil)); err != nil {
 		mlog.Warn(context.TODO(), "persist import v3 task running state failed", WrapTaskLog(t, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
@@ -232,10 +233,11 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		} else {
 			t.prepareRetry(cluster)
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 	pendingDuration := t.GetTR().RecordSpan()
 	t.metrics.observe(metrics.ImportStagePending, pendingDuration)
+	return globalTask.DispatchHandled
 }
 
 func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {

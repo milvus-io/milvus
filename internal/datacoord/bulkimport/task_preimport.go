@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -155,7 +156,7 @@ func (p *PreImportTask) setFileStats(fileStats []*datapb.ImportFileStats) {
 	p.Task.Load().FileStats = fileStats
 }
 
-func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	mlog.Info(context.TODO(), "processing pending preimport task...", WrapTaskLog(p)...)
 	job := p.ImportMeta.GetJob(context.TODO(), p.GetJobID())
 	req, err := AssemblePreImportRequest(p, job)
@@ -165,24 +166,25 @@ func (p *PreImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++
-		return
+		return globalTask.DispatchHandled
 	}
 	err = p.ImportMeta.UpdateTask(context.TODO(), p.GetTaskID(),
 		UpdateState(datapb.ImportTaskStateV2_InProgress),
 		UpdateNodeID(nodeID))
 	if err != nil {
 		mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(p, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	pendingDuration := p.GetTR().RecordSpan()
 	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending, p.GetType().String()).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(context.TODO(), "preimport task start to execute", WrapTaskLog(p, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+	return globalTask.DispatchHandled
 }
 
 func (p *PreImportTask) QueryTaskOnWorker(cluster session.Cluster) {

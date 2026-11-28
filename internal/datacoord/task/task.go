@@ -41,10 +41,22 @@ type Task interface {
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64
 
-	CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource)
+	CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) DispatchResult
 	QueryTaskOnWorker(cluster session.Cluster)
 	DropTaskOnWorker(cluster session.Cluster)
 }
+
+// DispatchResult distinguishes a changed input that needs preparation from a
+// completed dispatch attempt. TaskState remains authoritative for task progress.
+type DispatchResult int
+
+const (
+	// DispatchHandled processes the resulting task state, including retry backoff.
+	DispatchHandled DispatchResult = iota
+	// DispatchRequeue leaves the task Init because its input changed before any
+	// worker request. Requeue for preparation without changing accumulated failures.
+	DispatchRequeue
+)
 
 // CoordinatorResult determines how the scheduler handles a local completion attempt.
 type CoordinatorResult int

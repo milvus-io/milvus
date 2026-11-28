@@ -303,7 +303,7 @@ func (t *Task) GetTaskVersion() int64 {
 // - Snapshot data contains full binlog paths needed for copy
 // - The first task for a job reads it from storage to populate CopySegmentRequest
 // - Tasks in the same job share a cache to avoid redundant remote reads
-func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) task.DispatchResult {
 	ctx := t.Ctx
 	mlog.Info(ctx, "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.CopyMeta.GetJob(ctx, t.GetJobId())
@@ -314,7 +314,7 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 		if IsPermanentSnapshotError(err) {
 			t.markTaskAndJobFailed(merr.Wrap(err, "failed to assemble copy segment request").Error())
 		}
-		return
+		return task.DispatchHandled
 	}
 	err = cluster.CreateCopySegment(nodeID, req, t.GetCollectionId(), job.GetExternal(), resource)
 	if err != nil {
@@ -324,7 +324,7 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 			t.markTaskAndJobFailed(merr.Wrap(err,
 				"datanode does not support external copy segment tasks").Error())
 		}
-		return
+		return task.DispatchHandled
 	}
 	mlog.Info(ctx, "create copy segment task on datanode done",
 		WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID))...)
@@ -334,7 +334,7 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 	if err != nil {
 		mlog.Warn(ctx, "failed to update copy segment task state",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-		return
+		return task.DispatchHandled
 	}
 	// Record pending duration
 	pendingDuration := t.GetTR().RecordSpan()
@@ -342,6 +342,7 @@ func (t *Task) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resourc
 	mlog.Info(ctx, "copy segment task start to execute",
 		WrapCopySegmentTaskLog(t, mlog.Int64("scheduledNodeID", nodeID),
 			mlog.Duration("taskTimeCost/pending", pendingDuration))...)
+	return task.DispatchHandled
 }
 
 // markTaskAndJobFailed marks both task and job as failed with the given reason.

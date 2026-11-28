@@ -193,7 +193,7 @@ func TestGlobalScheduler_FinalizeWaitsForInFlightCreate(t *testing.T) {
 	task.EXPECT().GetTaskSlot().Return(int64(1))
 	createStarted := make(chan struct{})
 	releaseCreate := make(chan struct{})
-	task.EXPECT().CreateTaskOnWorker(int64(10), cluster, mock.Anything).Run(func(int64, session.Cluster, taskcommon.Resource) {
+	task.EXPECT().CreateTaskOnWorker(int64(10), cluster, mock.Anything).Return(DispatchHandled).Run(func(int64, session.Cluster, taskcommon.Resource) {
 		close(createStarted)
 		<-releaseCreate
 		state.Store(int32(taskcommon.InProgress))
@@ -580,7 +580,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			return taskcommon.Retry
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // Mark that CreateTaskOnWorker was called
 		}).Maybe()
 
@@ -614,7 +614,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			}
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // CreateTaskOnWorker called
 		}).Maybe()
 
@@ -650,7 +650,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		var dispatched atomic.Bool
 		task.EXPECT().CreateTaskOnWorker(mock.MatchedBy(func(nodeID int64) bool {
 			return nodeID == 10 || nodeID == 20
-		}), mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+		}), mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			dispatched.Store(true)
 		}).Once()
 
@@ -680,7 +680,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 			}
 		}).Maybe()
 
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			stateCounter.Store(1) // CreateTaskOnWorker called
 		}).Maybe()
 
@@ -766,7 +766,7 @@ func TestGlobalScheduler_FailedTaskBacksOffBeforeRedispatch(t *testing.T) {
 	// CreateTaskOnWorker never flips the state away from Init: every dispatch fails
 	task.EXPECT().GetTaskState().Return(taskcommon.Init).Maybe()
 	var createCalls atomic.Int32
-	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 		createCalls.Add(1)
 	}).Maybe()
 
@@ -810,7 +810,7 @@ func TestGlobalScheduler_TerminalTaskClearsBackoff(t *testing.T) {
 		}
 		return taskcommon.Init
 	}).Maybe()
-	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 		created.Store(true)
 	}).Maybe()
 
@@ -858,7 +858,7 @@ func TestGlobalScheduler_scheduleUnfitTask(t *testing.T) {
 			}
 			return taskcommon.Init
 		}).Maybe()
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).
 			Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 				dispatched.Store(true)
 			}).Maybe()
@@ -997,7 +997,7 @@ func TestGlobalScheduler_scheduleBackoffDoesNotStopRound(t *testing.T) {
 		}
 		return taskcommon.Init
 	}).Maybe()
-	healthy.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+	healthy.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).
 		Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) { dispatched.Store(true) }).Maybe()
 	scheduler.Enqueue(healthy)
 
@@ -1031,7 +1031,7 @@ func TestGlobalScheduler_scheduleBoundPrice(t *testing.T) {
 			}
 			return taskcommon.Init
 		}).Maybe()
-		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).
 			Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 				dispatched.Store(true)
 			}).Maybe()
@@ -1084,7 +1084,7 @@ func TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices(t *testing.T) {
 	}).Maybe()
 	// This is what CreateTaskOnWorker does for an unhealthy segment: it marks
 	// the task terminal without ever sending it to a worker.
-	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything, mock.Anything).Return(DispatchHandled).
 		Run(func(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
 			state.Store(taskcommon.None)
 		}).Once()
@@ -1128,7 +1128,7 @@ func TestGlobalScheduler_schedulePricedTasksUntilMemoryIsFull(t *testing.T) {
 		}).Maybe()
 		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
 		if id <= 4 {
-			task.EXPECT().CreateTaskOnWorker(int64(1), cluster, mock.Anything).Run(func(_ int64, _ session.Cluster, _ taskcommon.Resource) {
+			task.EXPECT().CreateTaskOnWorker(int64(1), cluster, mock.Anything).Return(DispatchHandled).Run(func(_ int64, _ session.Cluster, _ taskcommon.Resource) {
 				dispatched.Store(true)
 			}).Once()
 		}
@@ -1210,7 +1210,7 @@ func TestGlobalScheduler_LocalReclassificationDoesNotBackoff(t *testing.T) {
 	resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
 	local.EXPECT().GetTaskSlot().Return(int64(1)).Once()
 	local.EXPECT().GetTaskResource().Return(resource).Once()
-	local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) {
+	local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Return(DispatchHandled).Run(func(int64, session.Cluster, taskcommon.Resource) {
 		local.state.Store(int32(taskcommon.InProgress))
 	}).Once()
 	scheduler.Enqueue(local)
@@ -1221,6 +1221,115 @@ func TestGlobalScheduler_LocalReclassificationDoesNotBackoff(t *testing.T) {
 	scheduler.schedule()
 	assert.True(t, scheduler.runningTasks.Contain(1))
 	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+}
+
+func TestGlobalScheduler_DispatchRequeuePreservesBackoff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+	for _, previousFailures := range []int{0, 3} {
+		t.Run(fmt.Sprintf("previous_failures_%d", previousFailures), func(t *testing.T) {
+			cluster := session.NewMockCluster(t)
+			cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {AvailableSlots: 10}}).Times(3)
+			scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+			defer scheduler.Stop()
+			local := newCoordinatorTestTask(t, 1, func(context.Context, *atomic.Int32) {})
+			local.needsWorker = true
+			local.complete = func(context.Context) { local.needsWorker = true }
+			resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
+			local.EXPECT().GetTaskSlot().Return(int64(1)).Times(2)
+			local.EXPECT().GetTaskResource().Return(resource).Times(2)
+			local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) {
+				local.needsWorker = false
+			}).Return(DispatchRequeue).Once()
+			local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Return(DispatchHandled).Once()
+			var previous *taskBackoff
+			if previousFailures > 0 {
+				previous = &taskBackoff{failures: previousFailures, notBefore: time.Now().Add(-time.Second)}
+				scheduler.backoffs.Insert(1, previous)
+			}
+			scheduler.Enqueue(local)
+
+			scheduler.schedule()
+			require.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+			require.False(t, scheduler.taskInBackoff(local), "changed input must be prepared again without a failure delay")
+			current, exists := scheduler.backoffs.Get(1)
+			require.Equal(t, previousFailures > 0, exists)
+			require.Equal(t, previous, current, "requeue must neither increment nor clear previous failures")
+
+			scheduler.schedule()
+			scheduler.localWG.Wait()
+			require.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+			current, _ = scheduler.backoffs.Get(1)
+			require.Equal(t, previous, current, "successful preparation must preserve previous failures")
+
+			scheduler.schedule()
+			current, exists = scheduler.backoffs.Get(1)
+			require.True(t, exists)
+			assert.Equal(t, previousFailures+1, current.failures, "a subsequent real dispatch failure must still count")
+			assert.True(t, scheduler.taskInBackoff(local))
+		})
+	}
+}
+
+func TestGlobalScheduler_DispatchFailureStillBacksOffWhenCoordinatorEligible(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {AvailableSlots: 10}}).Once()
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	defer scheduler.Stop()
+	local := newCoordinatorTestTask(t, 1, func(context.Context, *atomic.Int32) {})
+	local.needsWorker = true
+	resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
+	local.EXPECT().GetTaskSlot().Return(int64(1)).Once()
+	local.EXPECT().GetTaskResource().Return(resource).Once()
+	local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) {
+		// For example, the target disappeared after placement, but persisting
+		// its terminal state failed. Local eligibility does not erase that failure.
+		local.needsWorker = false
+	}).Return(DispatchHandled).Once()
+	scheduler.backoffs.Insert(1, &taskBackoff{failures: 3, notBefore: time.Now().Add(-time.Second)})
+	scheduler.Enqueue(local)
+
+	scheduler.schedule()
+	current, exists := scheduler.backoffs.Get(1)
+	require.True(t, exists)
+	assert.Equal(t, 4, current.failures)
+	assert.True(t, scheduler.taskInBackoff(local))
+	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+}
+
+func TestGlobalScheduler_DispatchRequeuePreparationFailureBacksOff(t *testing.T) {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.TaskRetryBackoffInterval.Key, "1")
+	defer pt.Reset(pt.DataCoordCfg.TaskRetryBackoffInterval.Key)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{1: {AvailableSlots: 10}}).Times(2)
+	scheduler := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+	defer scheduler.Stop()
+	// Preparation leaves the task Init, as a manifest read failure does.
+	local := newCoordinatorTestTask(t, 1, func(context.Context, *atomic.Int32) {})
+	local.needsWorker = true
+	resource := taskcommon.Resource{CPU: 1, Memory: 64 << 20}
+	local.EXPECT().GetTaskSlot().Return(int64(1)).Once()
+	local.EXPECT().GetTaskResource().Return(resource).Once()
+	local.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) {
+		local.needsWorker = false
+	}).Return(DispatchRequeue).Once()
+	scheduler.backoffs.Insert(1, &taskBackoff{failures: 3, notBefore: time.Now().Add(-time.Second)})
+	scheduler.Enqueue(local)
+
+	scheduler.schedule()
+	require.False(t, scheduler.taskInBackoff(local))
+	scheduler.schedule()
+	scheduler.localWG.Wait()
+	current, exists := scheduler.backoffs.Get(1)
+	require.True(t, exists)
+	assert.Equal(t, 4, current.failures, "the failed preparation, not the input change, adds one failure")
+	assert.True(t, scheduler.taskInBackoff(local))
+	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
 }
 
 func TestGlobalScheduler_LocalCompletionDoesNotBlockScheduling(t *testing.T) {
@@ -1266,7 +1375,7 @@ func TestGlobalScheduler_LocalCompletionDoesNotBlockScheduling(t *testing.T) {
 		return taskcommon.Init
 	}).Maybe()
 	follower.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
-	follower.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Run(func(int64, session.Cluster, taskcommon.Resource) { dispatched.Store(true) }).Once()
+	follower.EXPECT().CreateTaskOnWorker(int64(1), cluster, resource).Return(DispatchHandled).Run(func(int64, session.Cluster, taskcommon.Resource) { dispatched.Store(true) }).Once()
 	scheduler.Enqueue(follower)
 	scheduler.schedule()
 	assert.True(t, dispatched.Load())

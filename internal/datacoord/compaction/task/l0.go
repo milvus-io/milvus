@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -125,7 +126,7 @@ func (t *L0CompactionTask) GetTaskVersion() int64 {
 	return int64(t.GetTaskProto().GetRetryTimes())
 }
 
-func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
@@ -134,7 +135,7 @@ func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		if err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Check if this is a fast finish case (no target segments to compact with)
@@ -150,17 +151,17 @@ func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 			if err != nil {
 				log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 			}
-			return
+			return globalTask.DispatchHandled
 		}
 
 		// Transition to meta_saved state
 		if err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved)); err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask fast finish failed to save task meta_saved state", mlog.Err(err))
-			return
+			return globalTask.DispatchHandled
 		}
 
 		log.Info(context.TODO(), "l0CompactionTask fast finish completed", mlog.Int64("planID", t.GetTaskProto().GetPlanID()))
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
@@ -172,17 +173,18 @@ func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_pipelining), SetNodeID(meta.NullNodeID))
 		if err != nil {
 			log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Err(err))
-			return
+			return globalTask.DispatchHandled
 		}
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", originNodeID), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", meta.NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Inc()
-		return
+		return globalTask.DispatchHandled
 	}
 
 	err = t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_executing), SetNodeID(nodeID))
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 	}
+	return globalTask.DispatchHandled
 }
 
 func (t *L0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {

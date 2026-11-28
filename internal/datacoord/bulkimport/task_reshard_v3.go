@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
@@ -188,16 +189,16 @@ func importV3PreReshardState(state internalpb.ImportJobState) bool {
 	return false
 }
 
-func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	p := t.task.Load()
 	if p.GetRunId() == 0 {
 		t.Fail("reshard task has no run")
-		return
+		return globalTask.DispatchHandled
 	}
 	job := t.importMeta.GetJob(context.TODO(), p.GetJobId())
 	if job == nil {
 		t.Fail("reshard task job is missing")
-		return
+		return globalTask.DispatchHandled
 	}
 	if !reshardDispatchable(job.GetState()) {
 		if importV3PreReshardState(job.GetState()) {
@@ -209,16 +210,16 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 			// failing the whole job.
 			mlog.Info(context.TODO(), "reshard task is waiting for the job to reach Resharding",
 				WrapTaskLog(t, mlog.String("jobState", job.GetState().String()))...)
-			return
+			return globalTask.DispatchHandled
 		}
 		t.Fail(fmt.Sprintf("reshard task cannot start: job %d is in state %s", p.GetJobId(), job.GetState()))
-		return
+		return globalTask.DispatchHandled
 	}
 	cfg := getImportV3Config()
 	plan, err := reshardPlan(job, p, cfg)
 	if err != nil {
 		t.Fail(err.Error())
-		return
+		return globalTask.DispatchHandled
 	}
 	req := &datapb.ReshardTaskRequest{
 		JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId(),
@@ -228,7 +229,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	}
 	if err := meta.WrapPluginContext(t.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare reshard task plugin context", WrapTaskLog(t, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	// PrepareRun: persist the intended run/node before the uncertain Create RPC.
 	// If we crash after the RPC was accepted but before this write, recovery can
@@ -236,7 +237,7 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 	// recovery query exactly this node/run or safely allocate a larger run.
 	if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress), UpdateNodeID(nodeID)); err != nil {
 		mlog.Warn(context.TODO(), "persist reshard task running state failed", WrapTaskLog(t, mlog.Err(err))...)
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
@@ -248,10 +249,11 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, 
 		} else {
 			t.prepareRetry(cluster)
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 	pendingDuration := t.GetTR().RecordSpan()
 	t.metrics.observe(metrics.ImportStagePending, pendingDuration)
+	return globalTask.DispatchHandled
 }
 
 func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {

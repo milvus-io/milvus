@@ -70,6 +70,10 @@ import (
 // Async manifest executor worker (wrapped):
 //   - runWorker               (C.milvusRunManifestTask)           manifest_async.go
 //
+// Coordinator TEXT input sizing (wrapped after the synchronous manifest read):
+//   - EstimateManifestTextInputSize (C.loon_get_chunk_reader +
+//     C.loon_get_chunk_metadatas)                               text_input_size.go
+//
 //   The caller's submitOpen/submitCommit only enqueue to the native async
 //   engine; the actual blocking manifest I/O runs on these workers, so bounding
 //   worker execution bounds the async path's threads process-wide. The worker

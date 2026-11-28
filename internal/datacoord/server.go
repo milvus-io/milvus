@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -286,6 +287,10 @@ func (s *Server) Init() error {
 	}
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
+	// Manifest footer readers need the native cipher plugin for encrypted data.
+	if err := initcore.InitPluginLoader(); err != nil {
+		return err
+	}
 	if err := s.initSession(); err != nil {
 		return err
 	}

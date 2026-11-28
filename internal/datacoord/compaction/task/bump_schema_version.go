@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -232,7 +233,7 @@ func (t *BumpSchemaVersionTask) ProcessFailed() bool {
 	return true
 }
 
-func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
 		mlog.Int64("PlanID", t.GetTaskProto().GetPlanID()),
 		mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
@@ -245,7 +246,7 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
@@ -257,7 +258,7 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		if err != nil {
 			log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 		}
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(context.TODO(), "bumpSchemaVersionTask created task on worker", mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
@@ -267,6 +268,7 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
 	}
+	return globalTask.DispatchHandled
 }
 
 func (t *BumpSchemaVersionTask) QueryTaskOnWorker(cluster session.Cluster) {

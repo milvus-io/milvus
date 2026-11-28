@@ -148,6 +148,29 @@ variable-width distributions are not a strict bound.
 | Copy segment | Memory floor for streaming copies |
 | External refresh | externalRefreshMemory |
 
+For a StorageV3 NGRAM build on Milvus-written TEXT, DataCoord reads the encoded
+column group's memory estimate from the native reader's chunk metadata, then
+adds the indexed field's manifest LOB payload bytes before applying
+`indexMemoryFactor`. The recorded segment `MemorySize` is not used for this
+calculation: raw TEXT writers count the original payload, while reference
+writers count encoded values, so adding LOB bytes to that statistic can count
+the payload twice. Reading file metadata also handles existing segments with
+either statistics convention without rewriting their metadata. The estimate
+can include other columns in the group and remains an estimate, not an RSS bound.
+If a field added after the segment was written has no stored column, the existing
+field estimate remains: the index reader still materializes its default/null rows.
+
+On 3.0, preparation uses the existing synchronous manifest reader. Waiting for
+the shared manifest/footer admission budget honors the task context; an admitted
+native read completes synchronously.
+
+The task caches the price for the manifest revision and retries failed manifest
+or chunk-metadata reads before worker placement. If the revision changes after
+placement, dispatch explicitly requests preparation again without recording a
+worker failure or clearing earlier failures. Placement and dispatch still use
+the same charged resource. Counting a whole reused LOB file can overestimate
+the text referenced by one segment.
+
 Field-width helpers live under internal/datacoord/fieldsize. Metadata size
 estimation reuses FixedFieldWidth, but legacy scalar-slot estimates remain in the
 index/stats inspectors and use meta.EstimateFieldsReadSize with

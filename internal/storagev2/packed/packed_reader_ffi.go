@@ -433,12 +433,23 @@ func GetManifestHandleWithExtfs(
 	extfs ExternalSpecContext,
 	talonStages ...uint32,
 ) (loonManifestHandle *C.LoonManifest, err error) {
+	return getManifestHandleWithContext(context.Background(), manifestPath, storageConfig, extfs)
+}
+
+// getManifestHandleWithContext allows cancellation while waiting for manifest
+// admission. An admitted synchronous native read completes before returning.
+func getManifestHandleWithContext(
+	ctx context.Context,
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) (loonManifestHandle *C.LoonManifest, err error) {
 	var cManifestHandle *C.LoonManifest
 	basePath, version, err := UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return cManifestHandle, err
 	}
-	mlog.Debug(context.TODO(), "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
+	mlog.Debug(ctx, "GetManifest", mlog.String("manifestPath", manifestPath), mlog.String("basePath", basePath), mlog.Int64("version", version))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil, talonStages...)
 	if err != nil {
@@ -455,7 +466,9 @@ func GetManifestHandleWithExtfs(
 	// The open reads the manifest revision from storage and blocks the calling
 	// goroutine's OS thread; bound it process-wide like every other blocking
 	// manifest FFI call so concurrent commits cannot explode thread count.
-	acquireManifestFFI(context.Background())
+	if err := acquireManifestFFI(ctx); err != nil {
+		return cManifestHandle, err
+	}
 	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	releaseManifestFFI()
 	err = HandleLoonFFIResult(result)

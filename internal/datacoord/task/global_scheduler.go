@@ -378,10 +378,12 @@ func (s *globalTaskScheduler) schedule() {
 			mlog.Info(s.ctx, "processing task...",
 				WrapTaskLog(task, mlog.Stringer("resource", chargedResource))...)
 			if task.GetTaskState() == taskcommon.Init {
-				task.CreateTaskOnWorker(nodeID, s.cluster, chargedResource)
+				result := task.CreateTaskOnWorker(nodeID, s.cluster, chargedResource)
 				switch task.GetTaskState() {
 				case taskcommon.Init, taskcommon.Retry:
-					s.recordTaskFailure(task)
+					if result != DispatchRequeue {
+						s.recordTaskFailure(task)
+					}
 					s.pendingTasks.Push(task)
 				case taskcommon.InProgress:
 					// The task was accepted by the worker and is now in flight.

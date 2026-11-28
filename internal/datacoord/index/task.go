@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -62,6 +64,9 @@ type indexBuildTask struct {
 	indexEngineVersionManager IndexEngineVersionManager
 
 	resource taskresource.Cache
+	// Each build targets one immutable field. The manifest path includes its revision.
+	lobManifest string
+	lobResource taskcommon.Resource
 }
 
 var (
@@ -116,31 +121,19 @@ func (it *indexBuildTask) GetTaskID() int64 {
 	return it.BuildID
 }
 
-// GetTaskResource prices the build by the bytes of the indexed field. It walks
-// meta once and caches the answer only when the answer is exact.
-//
-// The distinction that matters is transient-vs-permanent. A collection whose
-// schema is not cached yet, or an index whose params have not been read back
-// yet, are both states that resolve on their own, and both would otherwise be
-// cached as a wrong answer for the task's lifetime: without a schema
-// taskresource.EstimateFieldSize cannot tell the indexed field from any other and charges
-// the whole segment (10-50x for one field of a wide collection), and without an
-// index type a vector build would be frozen at the scalar CPU request. So those
-// two states answer with the whole segment, which bounds any one field of it,
-// and do not cache: the exact field size replaces the bound next round.
-//
-// The whole-segment bound is deliberately an over-estimate rather than the
-// floor. The task is placed on whatever this returns, so the fallback must err
-// towards refusing a worker, never towards a worker accepting more than it can
-// hold. Inputs gone for good answer with an uncached floor. Target liveness
-// is checked before the cache; CompleteOnCoordinator retires obsolete work
-// before admission, and dispatch repeats that check for concurrent drops.
+// GetTaskResource returns the price used for placement and dispatch. NGRAM on
+// LOB-backed TEXT is priced during coordinator preparation for a specific
+// manifest revision. Other builds cache a field estimate once their metadata
+// resolves. Until then they use the segment estimate and retry the lookup.
 func (it *indexBuildTask) GetTaskResource() taskcommon.Resource {
 	// Target liveness is not immutable: check before consulting the cached price.
 	segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
 	if segment == nil ||
 		!it.indexMeta.IsIndexExist(it.CollectionID, it.IndexID) {
 		return taskresource.Default()
+	}
+	if it.lobManifest != "" && it.lobManifest == segment.GetManifestPath() {
+		return it.lobResource
 	}
 	return it.resource.Get(func() (taskcommon.Resource, bool) {
 		// GetIndexType answers the invalidIndex sentinel, not "", when the params
@@ -251,6 +244,17 @@ type indexBuildPreparation struct {
 	segIndex    *model.SegmentIndex
 	indexParams []*commonpb.KeyValuePair
 	indexType   string
+	field       *schemapb.FieldSchema
+	schema      *schemapb.CollectionSchema
+}
+
+func isManifestNgram(segment *meta.SegmentInfo, indexType string) bool {
+	return indexType == indexparamcheck.IndexNGRAM && segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
+}
+
+// The native index reader resolves LOB references only for Milvus-written TEXT.
+func isLobText(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
+	return field.GetDataType() == schemapb.DataType_Text && !typeutil.NewStorageColumnResolver(schema).IsSourceDataField(field)
 }
 
 // CanCompleteOnCoordinator uses cached metadata only. Schema lookup, request
@@ -268,27 +272,42 @@ func (it *indexBuildTask) CanCompleteOnCoordinator() bool {
 	if isNoTrainIndex(indexType) {
 		return true
 	}
+	needsManifest := isManifestNgram(segment, indexType) && it.lobManifest != segment.GetManifestPath()
 	collection := it.meta.GetCollection(segIndex.CollectionID)
 	if collection == nil {
-		return false
+		return needsManifest
 	}
 	fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID)
-	for _, field := range typeutil.GetAllFieldSchemas(collection.Schema) {
-		if field.GetFieldID() != fieldID {
-			continue
-		}
-		// Array indexes use element counts; leave their preparation to dispatch.
-		if typeutil.IsVectorArrayType(field.GetDataType()) {
-			return false
-		}
-		rows := effectiveIndexRows(segment, segIndex.NumRows, field)
-		return rows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+	field := typeutil.GetFieldByID(collection.Schema, fieldID)
+	if field == nil {
+		// Preparation may already see a pending schema change.
+		return needsManifest
 	}
-	return false
+	if needsManifest && isLobText(collection.Schema, field) {
+		return true
+	}
+	// Array indexes use element counts; leave their preparation to dispatch.
+	if typeutil.IsVectorArrayType(field.GetDataType()) {
+		return false
+	}
+	return effectiveIndexRows(segment, segIndex.NumRows, field) < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
 }
 
 func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.CoordinatorResult {
-	if it.prepareForWorker(ctx) != nil {
+	if prepared := it.prepareForWorker(ctx); prepared != nil {
+		if isManifestNgram(prepared.segment, prepared.indexType) {
+			if prepared.field == nil {
+				return globalTask.LocalRetry
+			}
+			resource, err := prepared.ngramResource(ctx)
+			if err != nil {
+				mlog.Warn(ctx, "failed to price NGRAM input from manifest", mlog.FieldTaskID(it.BuildID),
+					mlog.String("manifest", prepared.segment.GetManifestPath()), mlog.Err(err))
+				return globalTask.LocalRetry
+			}
+			it.lobResource = resource
+			it.lobManifest = prepared.segment.GetManifestPath()
+		}
 		return globalTask.LocalNeedsWorker
 	}
 	switch it.GetTaskState() {
@@ -297,6 +316,26 @@ func (it *indexBuildTask) CompleteOnCoordinator(ctx context.Context) globalTask.
 	default:
 		return globalTask.LocalRetry
 	}
+}
+
+func (p *indexBuildPreparation) ngramResource(ctx context.Context) (taskcommon.Resource, error) {
+	fieldID := p.field.GetFieldID()
+	if isLobText(p.schema, p.field) {
+		pluginContext, err := hookutil.GetCollectionPluginContext(p.schema.GetProperties(), p.segment.GetCollectionID())
+		if err != nil {
+			return taskcommon.Resource{}, err
+		}
+		size, found, err := packed.EstimateManifestTextInputSize(ctx, p.segment.GetManifestPath(), fieldID, meta.CreateStorageConfig(), pluginContext)
+		if err != nil {
+			return taskcommon.Resource{}, err
+		}
+		if found {
+			return taskresource.Index(size, false), nil
+		}
+		// The native reader materializes historical rows as nulls when a
+		// nullable TEXT field is added later. Preserve their existing estimate.
+	}
+	return taskresource.Index(taskresource.EstimateFieldSize(p.segment, p.schema, fieldID), false), nil
 }
 
 // effectiveIndexRows applies the same nullable-vector rule during cached
@@ -341,6 +380,7 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 	estimatedVectorArrayVectors := int64(0)
 	isVectorArrayIndex := false
 	isEmbeddingListIndex := false
+	prepared := &indexBuildPreparation{segment: segment, segIndex: segIndex, indexParams: indexParams, indexType: indexType}
 	skipVectorArrayThreshold := false
 	if fieldID := it.indexMeta.GetFieldIDByIndexID(segIndex.CollectionID, segIndex.IndexID); fieldID > 0 && !isNoTrainIndex(indexType) {
 		collectionInfo, err := it.handler.GetCollection(ctx, segIndex.CollectionID)
@@ -350,6 +390,8 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 		}
 		for _, f := range typeutil.GetAllFieldSchemas(collectionInfo.Schema) {
 			if f.FieldID == fieldID {
+				prepared.field = f
+				prepared.schema = collectionInfo.Schema
 				effectiveRows = effectiveIndexRows(segment, segIndex.NumRows, f)
 				isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 				isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
@@ -433,30 +475,35 @@ func (it *indexBuildTask) prepareForWorker(ctx context.Context) *indexBuildPrepa
 		return nil
 	}
 
-	return &indexBuildPreparation{segment: segment, segIndex: segIndex, indexParams: indexParams, indexType: indexType}
+	return prepared
 }
 
-func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	ctx := context.TODO()
 	prepared := it.prepareForWorker(ctx)
 	if prepared == nil {
-		return
+		return globalTask.DispatchHandled
 	}
 	segment, segIndex := prepared.segment, prepared.segIndex
 	indexParams, indexType := prepared.indexParams, prepared.indexType
 	log := mlog.With(mlog.FieldTaskID(it.BuildID), mlog.FieldSegmentID(it.SegmentID))
 
+	// The segment can acquire a new revision between placement and dispatch.
+	if isManifestNgram(segment, indexType) && segment.GetManifestPath() != it.lobManifest && isLobText(prepared.schema, prepared.field) {
+		return globalTask.DispatchRequeue
+	}
+
 	// Create job request
 	req, err := it.prepareJobRequest(ctx, segment, segIndex, indexParams, indexType)
 	if err != nil {
 		log.Warn(ctx, "failed to prepare job request", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update task version
 	if err := it.UpdateTaskVersion(nodeID); err != nil {
 		log.Warn(ctx, "failed to update task version", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	defer func() {
@@ -468,16 +515,17 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	// Send request to worker
 	if err = cluster.CreateIndex(nodeID, req, resource); err != nil {
 		log.Warn(ctx, "failed to send job to worker", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update state to in progress
 	if err = it.UpdateStateWithMeta(indexpb.JobState_JobStateInProgress, ""); err != nil {
 		log.Warn(ctx, "failed to update task state", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(ctx, "index task assigned successfully")
+	return globalTask.DispatchHandled
 }
 
 func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {

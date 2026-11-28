@@ -176,7 +176,7 @@ func (at *analyzeTask) dropAndResetTaskOnWorker(cluster session.Cluster, reason 
 	at.resetTask(reason)
 }
 
-func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) {
+func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster, resource taskcommon.Resource) globalTask.DispatchResult {
 	ctx := context.TODO()
 	log := mlog.With(mlog.FieldTaskID(at.GetTaskID()))
 
@@ -185,13 +185,13 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 	if task == nil {
 		log.Info(context.TODO(), "analyze task has not exist in meta table, remove task")
 		at.SetState(indexpb.JobState_JobStateNone, "analyze task has not exist in meta table")
-		return
+		return globalTask.DispatchHandled
 	}
 
 	// Update task version
 	if err := at.UpdateVersion(nodeID); err != nil {
 		log.Warn(context.TODO(), "failed to update task version", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 	req := &workerpb.AnalyzeRequest{
 		ClusterID:     Params.CommonCfg.ClusterPrefix.GetValue(),
@@ -226,7 +226,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 				// State is left untouched, so the scheduler re-enqueues the task and retries.
 				log.Warn(context.TODO(), "failed to persist the failed state of the analyze task", mlog.Err(err))
 			}
-			return
+			return globalTask.DispatchHandled
 		}
 		totalSegmentsRows += info.GetNumOfRows()
 		stats := &indexpb.SegmentStats{
@@ -249,7 +249,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 				dim, err := storage.GetDimFromParams(f.TypeParams)
 				if err != nil {
 					at.SetState(indexpb.JobState_JobStateInit, err.Error())
-					return
+					return globalTask.DispatchHandled
 				}
 				req.Dim = int64(dim)
 
@@ -265,7 +265,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 						// State is left untouched, so the scheduler re-enqueues the task and retries.
 						log.Warn(context.TODO(), "failed to persist the finished state of the analyze task", mlog.Err(err))
 					}
-					return
+					return globalTask.DispatchHandled
 				}
 				if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
 					numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
@@ -284,7 +284,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 
 	if err := meta.WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req); err != nil {
 		mlog.Warn(context.TODO(), "failed to prepare analyze task plugin context", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	var err error
@@ -297,7 +297,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 	err = cluster.CreateAnalyze(nodeID, req, resource)
 	if err != nil {
 		log.Warn(context.TODO(), "assign analyze task to worker failed", mlog.Err(err))
-		return
+		return globalTask.DispatchHandled
 	}
 
 	log.Info(context.TODO(), "analyze task assigned successfully")
@@ -305,6 +305,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster,
 		log.Warn(context.TODO(), "failed to update task state to inProgress", mlog.Err(err))
 	}
 	log.Info(context.TODO(), "update task state to inProgress successfully")
+	return globalTask.DispatchHandled
 }
 
 func (at *analyzeTask) QueryTaskOnWorker(cluster session.Cluster) {
