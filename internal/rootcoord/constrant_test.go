@@ -36,6 +36,7 @@ func TestCheckGeneralCapacity(t *testing.T) {
 	ctx := context.Background()
 
 	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0), nil)
 	catalog.EXPECT().ListCollectionsForRecovery(mock.Anything, mock.Anything, mock.Anything).Return(map[int64][]*model.Collection{}, nil)

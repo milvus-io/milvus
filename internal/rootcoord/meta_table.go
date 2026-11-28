@@ -222,6 +222,7 @@ func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog, tsoAl
 	if err := mt.reload(); err != nil {
 		return nil, err
 	}
+	mt.refreshPrivilegeGroupCount(mt.ctx)
 	return mt, nil
 }
 
@@ -247,7 +248,6 @@ func (mt *MetaTable) reload() error {
 
 	metrics.RootCoordNumOfCollections.Reset()
 	metrics.RootCoordNumOfPartitions.Reset()
-	metrics.RootCoordNumOfDatabases.Set(0)
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -328,7 +328,6 @@ func (mt *MetaTable) reload() error {
 			}
 		}
 
-		metrics.RootCoordNumOfDatabases.Inc()
 		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 		mlog.Info(mt.ctx, "collections recovered from db", mlog.String("db_name", dbName),
@@ -373,6 +372,7 @@ func (mt *MetaTable) reload() error {
 	}
 	mt.fileResourceVersion = version
 
+	metrics.RootCoordNumOfDatabases.Set(float64(len(mt.dbName2Meta)))
 	mlog.Info(mt.ctx, "RootCoord meta table reload done", mlog.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -467,7 +467,7 @@ func (mt *MetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts 
 	if err := mt.createDatabasePrivate(ctx, db, ts); err != nil {
 		return err
 	}
-	metrics.RootCoordNumOfDatabases.Inc()
+	metrics.RootCoordNumOfDatabases.Set(float64(len(mt.dbName2Meta)))
 	return nil
 }
 
@@ -549,7 +549,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	mt.deleteDatabaseLocked(dbName)
 	delete(mt.availableCollectionCountByDB, db.ID)
 
-	metrics.RootCoordNumOfDatabases.Dec()
+	metrics.RootCoordNumOfDatabases.Set(float64(len(mt.dbName2Meta)))
 	mlog.Info(ctx, "drop database", mlog.String("db", dbName), mlog.Uint64("ts", ts))
 	return nil
 }
@@ -2533,6 +2533,10 @@ func (mt *MetaTable) RestoreRBAC(ctx context.Context, tenant string, meta *milvu
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
+	// Restore writes groups individually and can fail after some are persisted.
+	if len(meta.GetPrivilegeGroups()) > 0 {
+		defer mt.refreshPrivilegeGroupCount(ctx)
+	}
 	return mt.catalog.RestoreRBAC(ctx, tenant, meta)
 }
 
@@ -2578,7 +2582,11 @@ func (mt *MetaTable) CreatePrivilegeGroup(ctx context.Context, groupName string)
 		GroupName:  groupName,
 		Privileges: make([]*milvuspb.PrivilegeEntity, 0),
 	}
-	return mt.catalog.SavePrivilegeGroup(ctx, data)
+	if err := mt.catalog.SavePrivilegeGroup(ctx, data); err != nil {
+		return err
+	}
+	mt.refreshPrivilegeGroupCount(ctx)
+	return nil
 }
 
 func (mt *MetaTable) CheckIfPrivilegeGroupDropable(ctx context.Context, req *milvuspb.DropPrivilegeGroupRequest) error {
@@ -2625,14 +2633,33 @@ func (mt *MetaTable) DropPrivilegeGroup(ctx context.Context, groupName string) e
 	mt.permissionLock.Lock()
 	defer mt.permissionLock.Unlock()
 
-	return mt.catalog.DropPrivilegeGroup(ctx, groupName)
+	if err := mt.catalog.DropPrivilegeGroup(ctx, groupName); err != nil {
+		return err
+	}
+	mt.refreshPrivilegeGroupCount(ctx)
+	return nil
 }
 
 func (mt *MetaTable) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
 	mt.permissionLock.RLock()
 	defer mt.permissionLock.RUnlock()
 
-	return mt.catalog.ListPrivilegeGroups(ctx)
+	return mt.listPrivilegeGroups(ctx)
+}
+
+// Caller holds permissionLock or is initializing the meta table.
+func (mt *MetaTable) listPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) {
+	groups, err := mt.catalog.ListPrivilegeGroups(ctx)
+	if err == nil {
+		metrics.RootCoordNumOfPrivilegeGroups.Set(float64(len(groups)))
+	}
+	return groups, err
+}
+
+func (mt *MetaTable) refreshPrivilegeGroupCount(ctx context.Context) {
+	if _, err := mt.listPrivilegeGroups(ctx); err != nil {
+		mlog.Warn(ctx, "failed to refresh custom privilege group count", mlog.Err(err))
+	}
 }
 
 // CheckIfPrivilegeGroupAlterable checks if the privilege group can be altered.

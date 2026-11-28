@@ -83,13 +83,13 @@ var (
 			Help:      "timestamp saved in meta storage",
 		})
 
-	// RootCoordNumOfDatabases counts the number of database.
+	// RootCoordNumOfDatabases counts the number of databases, including the default database.
 	RootCoordNumOfDatabases = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "database_num",
-			Help:      "number of database",
+			Help:      "Number of databases, including the default database",
 		})
 
 	// RootCoordNumOfCollections counts the number of collections.
@@ -146,13 +146,13 @@ var (
 			Help:      "The number of roles",
 		})
 
-	// RootCoordNumOfPrivilegeGroups counts the number of credentials.
+	// RootCoordNumOfPrivilegeGroups counts persisted custom privilege groups.
 	RootCoordNumOfPrivilegeGroups = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_privilege_groups",
-			Help:      "The number of privilege groups",
+			Help:      "Number of custom privilege groups",
 		})
 
 	// RootCoordTtDelay records the max time tick delay of flow graphs in DataNodes and QueryNodes.
@@ -265,7 +265,8 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordTimestamp)
 	registry.MustRegister(RootCoordTimestampSaved)
 
-	// for collection
+	// for databases and collections
+	registry.MustRegister(RootCoordNumOfDatabases)
 	registry.MustRegister(RootCoordNumOfCollections)
 	registry.MustRegister(RootCoordNumOfPartitions)
 
@@ -276,6 +277,7 @@ func RegisterMixCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfCredentials)
 
 	registry.MustRegister(RootCoordNumOfRoles)
+	registry.MustRegister(RootCoordNumOfPrivilegeGroups)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
 	registry.MustRegister(RootCoordForceDenyWritingCounter)
