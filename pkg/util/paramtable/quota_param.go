@@ -142,6 +142,8 @@ type quotaConfig struct {
 	DataNodeMemoryHighWaterLevel          ParamItem `refreshable:"true"`
 	QueryNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
 	QueryNodeMemoryHighWaterLevel         ParamItem `refreshable:"true"`
+	QueryNodeMemoryAvgLowWaterLevel       ParamItem `refreshable:"true"`
+	QueryNodeMemoryAvgHighWaterLevel      ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeProtectionEnabled  ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeMinRateRatio       ParamItem `refreshable:"true"`
 	GrowingSegmentsSizeLowWaterLevel      ParamItem `refreshable:"true"`
@@ -1685,6 +1687,54 @@ When memory usage < memoryLowWaterLevel, no action.`,
 		Export: true,
 	}
 	p.QueryNodeMemoryHighWaterLevel.Init(base.mgr)
+
+	avgLowWaterLevel := fmt.Sprintf("%f", defaultLowWaterLevel)
+	avgHighWaterLevel := fmt.Sprintf("%f", defaultHighWaterLevel)
+
+	p.QueryNodeMemoryAvgLowWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.memProtection.queryNodeMemoryAvgLowWaterLevel",
+		Version:      "3.0.6",
+		DefaultValue: avgLowWaterLevel,
+		Formatter: func(v string) string {
+			if !p.MemProtectionEnabled.GetAsBool() {
+				return avgLowWaterLevel
+			}
+			level := getAsFloat(v)
+			// (0, 1]
+			if level <= 0 || level > 1 {
+				return avgLowWaterLevel
+			}
+			return v
+		},
+		Doc: `(0, 1], low water level of the average memory usage over the QueryNodes
+that serve a collection, weighted by node memory.
+queryNodeMemoryLowWaterLevel/HighWaterLevel still apply to each QueryNode.`,
+		Export: true,
+	}
+	p.QueryNodeMemoryAvgLowWaterLevel.Init(base.mgr)
+
+	p.QueryNodeMemoryAvgHighWaterLevel = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.memProtection.queryNodeMemoryAvgHighWaterLevel",
+		Version:      "3.0.6",
+		DefaultValue: avgHighWaterLevel,
+		Formatter: func(v string) string {
+			if !p.MemProtectionEnabled.GetAsBool() {
+				return avgHighWaterLevel
+			}
+			level := getAsFloat(v)
+			// (0, 1]
+			if level <= 0 || level > 1 {
+				return avgHighWaterLevel
+			}
+			if !p.checkMinMaxLegal(p.QueryNodeMemoryAvgLowWaterLevel.GetAsFloat(), getAsFloat(v)) {
+				return avgHighWaterLevel
+			}
+			return v
+		},
+		Doc:    "(0, 1], high water level of the average memory usage over the QueryNodes that serve a collection",
+		Export: true,
+	}
+	p.QueryNodeMemoryAvgHighWaterLevel.Init(base.mgr)
 
 	p.GrowingSegmentsSizeProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.growingSegmentsSizeProtection.enabled",

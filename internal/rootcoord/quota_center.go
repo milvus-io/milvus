@@ -1116,6 +1116,8 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 
 // getMemoryFactor checks whether any node has memory resource issue,
 // and return the factor according to max memory water level.
+// For QueryNodes it also checks the average memory water level over the
+// nodes that serve each collection, and returns the smaller factor.
 func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 	if !Params.QuotaConfig.MemProtectionEnabled.GetAsBool() {
 		return make(map[int64]float64)
@@ -1125,6 +1127,8 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel.GetAsFloat()
 	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.GetAsFloat()
 	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat()
+	queryNodeMemoryAvgLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryAvgLowWaterLevel.GetAsFloat()
+	queryNodeMemoryAvgHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryAvgHighWaterLevel.GetAsFloat()
 
 	collectionFactor := make(map[int64]float64)
 	updateCollectionFactor := func(factor float64, collections []int64) {
@@ -1135,6 +1139,46 @@ func (q *QuotaCenter) getMemoryFactor() map[int64]float64 {
 			}
 		}
 	}
+	// Memory usage summed over the QueryNodes that serve each collection,
+	// used for the average water level check.
+	type memoryUsage struct {
+		used  uint64
+		total uint64
+	}
+	collectionMemory := make(map[int64]memoryUsage)
+	for _, metric := range q.queryNodeMetrics {
+		for _, collection := range metric.Effect.CollectionIDs {
+			usage := collectionMemory[collection]
+			usage.used += metric.Hms.MemoryUsage
+			usage.total += metric.Hms.Memory
+			collectionMemory[collection] = usage
+		}
+	}
+	for collection, usage := range collectionMemory {
+		if usage.total == 0 {
+			continue
+		}
+		avgWaterLevel := float64(usage.used) / float64(usage.total)
+		if avgWaterLevel <= queryNodeMemoryAvgLowWaterLevel {
+			continue
+		}
+		factor := float64(0)
+		if avgWaterLevel < queryNodeMemoryAvgHighWaterLevel {
+			factor = (queryNodeMemoryAvgHighWaterLevel - avgWaterLevel) / (queryNodeMemoryAvgHighWaterLevel - queryNodeMemoryAvgLowWaterLevel)
+		}
+		if current, ok := collectionFactor[collection]; !ok || current > factor {
+			collectionFactor[collection] = factor
+		}
+		mlog.RatedWarn(q.ctx, rate.Limit(10), "QuotaCenter: QueryNode average memory exceeds water level, limit writing rate",
+			mlog.FieldCollectionID(collection),
+			mlog.Uint64("UsedMem", usage.used),
+			mlog.Uint64("TotalMem", usage.total),
+			mlog.Float64("avgWatermark", avgWaterLevel),
+			mlog.Float64("lowWatermark", queryNodeMemoryAvgLowWaterLevel),
+			mlog.Float64("highWatermark", queryNodeMemoryAvgHighWaterLevel),
+			mlog.Float64("factor", factor))
+	}
+
 	for nodeID, metric := range q.queryNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
 		if memoryWaterLevel <= queryNodeMemoryLowWaterLevel {

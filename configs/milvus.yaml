@@ -1691,6 +1691,11 @@ quotaAndLimits:
       dataNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in DataNodes
       queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
       queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
+      # (0, 1], low water level of the average memory usage over the QueryNodes
+      # that serve a collection, weighted by node memory.
+      # queryNodeMemoryLowWaterLevel/HighWaterLevel still apply to each QueryNode.
+      queryNodeMemoryAvgLowWaterLevel: 0.85
+      queryNodeMemoryAvgHighWaterLevel: 0.95 # (0, 1], high water level of the average memory usage over the QueryNodes that serve a collection
     growingSegmentsSizeProtection:
       # No action will be taken if the growing segments size is less than the low watermark.
       # When the growing segments size exceeds the low watermark, the dml rate will be reduced,
