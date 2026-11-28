@@ -64,6 +64,13 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		ExclusiveRequired: true,
 	},
 	MessageTypeBatchUpdateManifest: {},
+	// SplitShard fences the DML of its source vchannel and is the genesis of
+	// its target vchannels. It is appended exclusively, so that no DML on the
+	// source vchannel is in flight when the fence is installed, and so that
+	// every transaction on it is aborted.
+	MessageTypeSplitShard: {
+		ExclusiveRequired: true,
+	},
 	MessageTypeCreateSegment: {
 		SelfControlled: true,
 	},

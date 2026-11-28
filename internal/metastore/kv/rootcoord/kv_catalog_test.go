@@ -1087,6 +1087,58 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		assert.Equal(t, newSpec, got.ExternalSpec)
 	})
 
+	t.Run("modify persists the shard split routing", func(t *testing.T) {
+		snapshot := mocks.NewTxnKV(t)
+		kvs := map[string]string{}
+		snapshot.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, saveKvs map[string]string) error {
+			for k, v := range saveKvs {
+				kvs[k] = v
+			}
+			return nil
+		})
+		kc := NewCatalog(snapshot).(*Catalog)
+		ctx := context.Background()
+		var collectionID int64 = 1
+		oldC := &model.Collection{
+			CollectionID:         collectionID,
+			State:                pb.CollectionState_CollectionCreated,
+			VirtualChannelNames:  []string{"p0_1v0"},
+			PhysicalChannelNames: []string{"p0"},
+			ShardsNum:            1,
+			ShardInfos:           map[string]*model.ShardInfo{"p0_1v0": {VChannelName: "p0_1v0", PChannelName: "p0"}},
+		}
+		newC := oldC.Clone()
+		newC.VirtualChannelNames = []string{"p1_1v1", "p2_1v2"}
+		newC.PhysicalChannelNames = []string{"p1", "p2"}
+		newC.ShardsNum = 2
+		newC.RoutingModulus = 2
+		newC.ShardBy = "hash(pk)"
+		newC.ShardInfos = map[string]*model.ShardInfo{
+			"p1_1v1": {VChannelName: "p1_1v1", PChannelName: "p1", Buckets: []uint64{0}},
+			"p2_1v2": {VChannelName: "p2_1v2", PChannelName: "p2", Buckets: []uint64{1}},
+		}
+		newC.SplitLineages = []*model.ShardSplitLineage{{
+			SourceVChannel:  "p0_1v0",
+			SourcePChannel:  "p0",
+			TargetVChannels: []string{"p1_1v1", "p2_1v2"},
+			SwitchTimeTick:  100,
+			SplitTaskID:     7,
+		}}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, false)
+		assert.NoError(t, err)
+		var collPb pb.CollectionInfo
+		err = proto.Unmarshal([]byte(kvs[BuildCollectionKey(0, collectionID)]), &collPb)
+		assert.NoError(t, err)
+		got := model.UnmarshalCollectionModel(&collPb)
+		assert.Equal(t, newC.VirtualChannelNames, got.VirtualChannelNames)
+		assert.Equal(t, newC.PhysicalChannelNames, got.PhysicalChannelNames)
+		assert.Equal(t, int32(2), got.ShardsNum)
+		assert.Equal(t, uint64(2), got.RoutingModulus)
+		assert.Equal(t, "hash(pk)", got.ShardBy)
+		assert.Equal(t, newC.SplitLineages, got.SplitLineages)
+		assert.Equal(t, []uint64{1}, got.ShardInfos["p2_1v2"].Buckets)
+	})
+
 	t.Run("modify EnableDynamicField and SchemaVersion", func(t *testing.T) {
 		snapshot := mocks.NewTxnKV(t)
 		kvs := map[string]string{}

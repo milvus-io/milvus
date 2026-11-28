@@ -33,6 +33,48 @@ Each pass retries every blocked task: a held key fails `FastLock` with a plain
 sentinel error, and the pass logs one rate-limited summary of blocked tasks.
 Tombstone GC remains timer-driven.
 
+## Append-First Copy
+
+A broadcast can name one of its data VChannels as append-first
+(`message.OptBuildBroadcastAppendFirst`, stored in
+`BroadcastHeader.append_first_vchannels`). The broadcaster then changes step 3
+for that broadcast:
+
+1. It appends the append-first copy alone. If the append fails, no other copy
+   is appended; the task backs off and tries the same copy again.
+2. It acknowledges that copy at once and persists the task
+   (`broadcastTask.AckAppendFirst`). A coordinator that restarts after this
+   point does not append the copy again.
+3. It sets the TimeTick of that copy as the barrier TimeTick of every other
+   copy, then appends them. Each of them takes a TimeTick greater than the
+   barrier, on whichever StreamingNode it is appended. A recovered task reads
+   the barrier from the persisted acknowledgement.
+
+The option cannot be combined with `AckSyncUp`. `SplitShard` is the only
+message that uses it: its copy on the source VChannel must precede the genesis
+of the target VChannels.
+
+A secondary cluster receives the copies through independent per-PChannel
+replication streams, so its Proxy enforces the same order
+(`replicateService.waitAppendFirstCopies`). A copy that is not append-first
+and not on the CChannel is held until the append-first copies are appended
+on the secondary, and is then appended with their local TimeTick as its
+barrier. The replicate stream of an append-first copy reports its local
+TimeTick as soon as it is appended (`ReportVChannelAppended` RPC, kept in
+memory by `Broadcaster.ReportVChannelAppended`); the waiting copies ask
+through the `WaitVChannelsAcked` RPC (`Broadcaster.WaitVChannelsAcked`),
+which answers with the acknowledged TimeTick if the copy is acknowledged and
+otherwise with the reported one. Both are TimeTicks of a persisted copy, at
+or above the first one, so either is a valid barrier. Without a report (it
+failed, or StreamingCoord restarted) the wait ends at the acknowledgement,
+which for a shard split comes after the residual of the source has flushed.
+The call covers a task that does not exist yet. If the task was already collected, the broadcaster asks the
+resolver the message type registered
+(`registry.RegisterAppendFirstAppliedResolver`); for `SplitShard` RootCoord
+answers from the lineage record of the collection. A copy that the replicate
+checkpoint already covers does not wait. The wait ends with the replicate
+stream; the stream delivers the copy again after it reconnects.
+
 ## Idempotent Broadcast
 
 A broadcast message carrying the `_ik` idempotency key property is additionally indexed by that key. A later broadcast presenting the same key short-circuits: it creates no task, **waits for the original broadcast's ack callback to complete**, and returns the ORIGINAL broadcast's result, with the original message in `BroadcastAppendResult.Duplicated`. The lookup and the registration are one critical section on the manager's lock, so two concurrent same-key requests cannot both miss regardless of which resource keys they hold. The wait is what makes the duplicate answer equivalent to a fresh one: the original is not always serialized in front of the retry by a resource lock — a retry that raced a rename holds the stale name's lock, and a task recovered from a replicated WAL holds no lock at all — and without the wait such a retry would be answered with a broadcastID whose effects (for import, the job created in the ack callback) do not exist yet. After the wait, `AppendResults` is rebuilt from the original's persisted per-vchannel checkpoints and is never nil, so a caller that only reads append results cannot tell a duplicate from a fresh broadcast. The wait is bounded by the request context; a caller whose context expires gets its own timeout, not an unbacked ID.

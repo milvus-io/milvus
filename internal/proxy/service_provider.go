@@ -224,6 +224,9 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.ConsistencyLevel = c.ConsistencyLevel
 	resp.VirtualChannelNames = c.VChannels
 	resp.PhysicalChannelNames = c.PChannels
+	resp.ShardInfos = c.ShardInfos
+	resp.RoutingModulus = c.RoutingModulus
+	resp.ShardBy = c.ShardBy
 	resp.NumPartitions = c.NumPartitions
 	resp.ShardsNum = c.ShardsNum
 	resp.Aliases = c.Aliases

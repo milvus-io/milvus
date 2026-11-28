@@ -671,19 +671,30 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 			return nil
 		})
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
-		r.mu.Lock()
-		for id, segment := range r.growingStore.segments {
-			if segment.createTimeTick < msg.TimeTick() {
-				r.growingStore.markFlushed(id)
-			}
+		r.markFlushedBefore(msg.TimeTick())
+	case message.MessageTypeSplitShard:
+		// The fence of a shard split seals every growing segment of its
+		// vchannel, the way a manual flush does.
+		if messageutil.IsSplitShardFence(msg) {
+			r.markFlushedBefore(msg.TimeTick())
 		}
-		r.mu.Unlock()
 	case message.MessageTypeFlush:
 		r.mu.Lock()
 		r.growingStore.markFlushed(message.MustAsImmutableFlushMessageV2(msg).Header().GetSegmentId())
 		r.mu.Unlock()
 	}
 	return nil
+}
+
+// markFlushedBefore marks every growing segment created before timetick as flushed.
+func (r *oracleRuntime) markFlushedBefore(timetick uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, segment := range r.growingStore.segments {
+		if segment.createTimeTick < timetick {
+			r.growingStore.markFlushed(id)
+		}
+	}
 }
 
 func (r *oracleRuntime) applySegmentSealed(segmentID int64, sealedAt qviews.DataVersion) {

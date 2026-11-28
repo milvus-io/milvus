@@ -163,6 +163,12 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 				// transaction with stale merged fields.
 				return nil, err
 			}
+			if sErr.IsShardFenced() {
+				// The vchannel is the source of a shard split. Appending to it
+				// again never succeeds, so the error goes back to the caller,
+				// which refreshes its routing and retries on the new shards.
+				return nil, err
+			}
 			// if the error is txn unavailable or unrecoverable error,
 			// it cannot be retried forever.
 			// we should mark it and return.
